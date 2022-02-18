@@ -1,0 +1,50 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_insert_big1 s1_begin s1_count s1_delete_big s1_count s2_insert_big2 s1_count s2_count s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_bitmap_hist_scan_test
+		SELECT i, i * 11 FROM generate_series(1, 1500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_count: 
+	SET enable_seqscan = off;
+	SELECT count(*) FROM o_bitmap_hist_scan_test WHERE val < 2000;
+	RESET enable_seqscan;
+
+count
+-----
+  181
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_bitmap_hist_scan_test WHERE id BETWEEN 1 and 90;
+step s1_count: 
+	SET enable_seqscan = off;
+	SELECT count(*) FROM o_bitmap_hist_scan_test WHERE val < 2000;
+	RESET enable_seqscan;
+
+count
+-----
+   91
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_bitmap_hist_scan_test
+	SELECT i - 200, i * 33 FROM generate_series(1, 150) AS i;
+step s1_count: 
+	SET enable_seqscan = off;
+	SELECT count(*) FROM o_bitmap_hist_scan_test WHERE val < 2000;
+	RESET enable_seqscan;
+
+count
+-----
+   91
+(1 row)
+
+step s2_count: SELECT count(*) FROM o_bitmap_hist_scan_test;
+count
+-----
+ 1650
+(1 row)
+
+step s1_commit: COMMIT;

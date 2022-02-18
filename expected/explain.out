@@ -1,0 +1,597 @@
+CREATE EXTENSION orioledb;
+----
+-- EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) test
+----
+-- Generate pseudo-random string in deterministic way
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+	AS $$
+		SELECT substr(string_agg(
+						substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+				''), 1, length)
+		FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+-- Wrapper function, which converts result of SQL query to the text
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+	BEGIN
+		RETURN QUERY EXECUTE sql;
+	END $$
+LANGUAGE plpgsql;
+-- table: primary index + TOAST
+CREATE TABLE IF NOT EXISTS o_explain (
+	key integer NOT NULL,
+	val text,
+	PRIMARY KEY(key)
+) USING orioledb;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					INSERT INTO o_explain (
+						SELECT id, generate_string(1, 3000)
+						FROM generate_series(4501, 4700, 1) id
+					);') as t;
+                                          regexp_replace                                           
+---------------------------------------------------------------------------------------------------
+ Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Buffers: shared hit=x
+   ->  Function Scan on generate_series id  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Buffers: shared hit=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+-- just explain analyze without buffers
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE)
+					SELECT count(*)
+					FROM o_explain;') as t;
+                                   regexp_replace                                    
+-------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning Time: x ms
+ Execution Time: x ms
+(4 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN ANALYZE
+					SELECT count(*)
+					FROM o_explain;') as t;
+                                   regexp_replace                                    
+-------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning Time: x ms
+ Execution Time: x ms
+(4 rows)
+
+-- just explain buffers without analyze, fails
+EXPLAIN (BUFFERS TRUE) SELECT count(*) FROM o_explain;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Aggregate  (cost=21.64..21.65 rows=1 width=8)
+   ->  Seq Scan on o_explain  (cost=0.00..19.31 rows=931 width=0)
+ Planning:
+   Buffers: shared hit=1
+(4 rows)
+
+-- test lowecase letters
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('Explain (analyze TRUE, buffers TRUE)
+					SELECT count(*)
+					FROM o_explain;') as t;
+                                   regexp_replace                                    
+-------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(6 rows)
+
+-- does not use TOAST tree (does not fetch TOASTed values)
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT count(*)
+					FROM o_explain;') as t;
+                                   regexp_replace                                    
+-------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(6 rows)
+
+-- uses TOAST to fetch values
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT *
+					FROM o_explain ORDER BY val;') as t;
+                                   regexp_replace                                    
+-------------------------------------------------------------------------------------
+ Sort  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Sort Key: val
+   Sort Method: quicksort  Memory: xkB
+   Buffers: shared hit=x
+   ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- table: primary index + secondary index without TOAST
+DROP TABLE o_explain;
+CREATE TABLE o_explain (
+	key integer NOT NULL,
+	val integer NOT NULL,
+	PRIMARY KEY(key)
+) USING orioledb;
+CREATE INDEX o_explain_sec_non_val ON o_explain (val);
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					INSERT INTO o_explain (
+						SELECT id, id + 1
+						FROM generate_series(1, 5000, 1) id
+					);') as t;
+                                          regexp_replace                                           
+---------------------------------------------------------------------------------------------------
+ Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Buffers: shared hit=x
+   ->  Function Scan on generate_series id  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning Time: x ms
+ Execution Time: x ms
+(5 rows)
+
+-- use secondary index for scan
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT *
+					FROM o_explain ORDER BY val;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index only scan of: o_explain_sec_non_val
+   Secondary index (o_explain_sec_non_val) pages: read=x
+ Planning:
+   Buffers: shared hit=x read=x
+ Planning Time: x ms
+ Execution Time: x ms
+(7 rows)
+
+-- do not use secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT *
+					FROM o_explain;') as t;
+                                regexp_replace                                 
+-------------------------------------------------------------------------------
+ Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(5 rows)
+
+DROP TABLE o_explain;
+CREATE TABLE o_explain (
+	key integer NOT NULL,
+	val1 integer NOT NULL,
+	val2 integer NOT NULL
+) USING orioledb;
+CREATE INDEX o_explain_sec_non_val2 ON o_explain (val2);
+INSERT INTO o_explain (SELECT id, id + 1, id + 2 FROM generate_series(1, 1000, 1) id);
+ANALYZE o_explain;
+SELECT SUM(key)  FROM o_explain WHERE val2 > 0;
+  sum   
+--------
+ 500500
+(1 row)
+
+SELECT SUM(val1) FROM o_explain WHERE val2 > 0;
+  sum   
+--------
+ 501500
+(1 row)
+
+SELECT SUM(val2) FROM o_explain WHERE val2 > 0; -- check sum
+  sum   
+--------
+ 502500
+(1 row)
+
+-- uses only secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT SUM(val2) FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                         regexp_replace                                          
+-------------------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Forward index only scan of: o_explain_sec_non_valx
+         Conds: ((valx > x) AND (valx < x))
+         Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses only secondary index - primary index is ctid index stored in secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT ctid FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT key FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT key, val1 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT key, val2 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val1 FROM o_explain WHERE val2 > 0;') as t;
+                                              regexp_replace                                               
+-----------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Bitmap heap scan
+   Recheck Cond: (valx > x)
+   ->  Bitmap Index Scan on o_explain_sec_non_valx  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Index Cond: (valx > x)
+         Secondary index (o_explain_sec_non_valx) pages: read=x
+   Primary pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(11 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val1, val2 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses only secondary index for fetching values from secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val2 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index only scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
+ key | val1 | val2 
+-----+------+------
+   1 |    2 |    3
+   2 |    3 |    4
+   3 |    4 |    5
+   4 |    5 |    6
+   5 |    6 |    7
+   6 |    7 |    8
+   7 |    8 |    9
+   8 |    9 |   10
+(8 rows)
+
+DROP TABLE o_explain;
+CREATE TABLE o_explain (
+	key integer NOT NULL,
+	val1 integer NOT NULL,
+	val2 integer NOT NULL,
+	PRIMARY KEY(key)
+) USING orioledb;
+CREATE INDEX o_explain_sec_non_val2 ON o_explain (val2);
+INSERT INTO o_explain (SELECT id, id + 1, id + 2 FROM generate_series(1, 1000, 1) id);
+ANALYZE o_explain;
+SELECT SUM(key)  FROM o_explain WHERE val2 > 0;
+  sum   
+--------
+ 500500
+(1 row)
+
+SELECT SUM(val1) FROM o_explain WHERE val2 > 0;
+  sum   
+--------
+ 501500
+(1 row)
+
+SELECT SUM(val2) FROM o_explain WHERE val2 > 0; -- check sum
+  sum   
+--------
+ 502500
+(1 row)
+
+-- uses only secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT SUM(s.val2) FROM (
+						SELECT val2 FROM o_explain 
+							WHERE val2 > 0 AND val2 < 1000 
+							ORDER BY val2
+					) s;') as t;
+                                         regexp_replace                                          
+-------------------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Forward index only scan of: o_explain_sec_non_valx
+         Conds: ((valx > x) AND (valx < x))
+         Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses secondary index, primary key is stored in secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT key FROM o_explain WHERE val2 > 0
+					AND val2 < 1000 ORDER BY val2;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index only scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT key, val1 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000 ORDER BY val2;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses only secondary index for fetching secondary index value and primary key
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT key, val2 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000 ORDER BY val2;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index only scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val1 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000 ORDER BY val2;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses primary and secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val1, val2 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000 ORDER BY val2;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+-- uses only secondary index for fetching values from secondary index
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val2 FROM o_explain WHERE val2 > 0
+					AND val2 < 1000 ORDER BY val2;') as t;
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index only scan of: o_explain_sec_non_valx
+   Conds: ((valx > x) AND (valx < x))
+   Secondary index (o_explain_sec_non_valx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
+ key | val1 | val2 
+-----+------+------
+   1 |    2 |    3
+   2 |    3 |    4
+   3 |    4 |    5
+   4 |    5 |    6
+   5 |    6 |    7
+   6 |    7 |    8
+   7 |    8 |    9
+   8 |    9 |   10
+(8 rows)
+
+DROP TABLE o_explain;
+---
+-- Test for TOAST values update
+---
+CREATE TABLE o_explain (
+	key integer NOT NULL,
+	t text NOT NULL,
+	val integer NOT NULL,
+	PRIMARY KEY(key)
+) USING orioledb;
+INSERT INTO o_explain (SELECT id, generate_string(1, 3000), id FROM generate_series(1, 200, 1) id);
+-- do not use TOAST index for this queries (UPDATE TOAST with same values)
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					UPDATE o_explain SET val = val + 1;') as t;
+                                   regexp_replace                                    
+-------------------------------------------------------------------------------------
+ Update on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x read=x
+ Planning Time: x ms
+ Execution Time: x ms
+(6 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					INSERT INTO o_explain
+					(SELECT id, generate_string(1, 3000), id
+					 FROM generate_series(1, 100, 1) id)
+					ON CONFLICT (key) DO UPDATE
+					SET val = o_explain.val + 1;') as t;
+                                          regexp_replace                                           
+---------------------------------------------------------------------------------------------------
+ Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: o_explain_pkey
+   Tuples Inserted: x
+   Conflicting Tuples: x
+   ->  Function Scan on generate_series id  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+-- UPDATE TOAST with equal values (only TOAST reads for compare values)
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					INSERT INTO o_explain
+					(SELECT id, generate_string(1, 3000), id
+					 FROM generate_series(1, 100, 1) id)
+					ON CONFLICT (key) DO UPDATE
+					SET val = o_explain.val + 1, t = EXCLUDED.t;') as t;
+                                          regexp_replace                                           
+---------------------------------------------------------------------------------------------------
+ Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: o_explain_pkey
+   Tuples Inserted: x
+   Conflicting Tuples: x
+   ->  Function Scan on generate_series id  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+-- clean-up after EXPLAIN ANALYZE test
+DROP FUNCTION query_to_text;
+DROP TABLE o_explain;
+DROP EXTENSION orioledb CASCADE;

@@ -1,0 +1,3976 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_insert1 s1_begin s1_select s2_begin s2_select s1_delete s2_delete s1_select s1_commit s2_select s2_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s1_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10; <waiting ...>
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s1_commit: COMMIT;
+step s2_delete: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_select: SELECT * FROM o_iso_rr;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s2_begin s2_delete s1_select s1_delete11 s1_delete10 s2_commit s1_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s1_delete11: 
+	DELETE FROM o_iso_rr
+	WHERE id = 11;
+step s1_delete10: 
+	DELETE FROM o_iso_rr
+	WHERE id = 10; <waiting ...>
+step s2_commit: COMMIT;
+step s1_delete10: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s1_select s2_begin s2_delete s2_commit s1_delete11 s1_delete10 s1_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s2_commit: COMMIT;
+step s1_delete11: 
+	DELETE FROM o_iso_rr
+	WHERE id = 11;
+step s1_delete10: 
+	DELETE FROM o_iso_rr
+	WHERE id = 10;
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s2_begin s2_delete s2_commit s1_select s1_delete11 s1_delete10 s1_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s2_commit: COMMIT;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s1_delete11: 
+	DELETE FROM o_iso_rr
+	WHERE id = 11;
+step s1_delete10: 
+	DELETE FROM o_iso_rr
+	WHERE id = 10;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s1_select s1_insert2 s1_select s2_delete s1_select s2_select s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s1_insert2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 20, repeat('y', i)
+		FROM generate_series(1, 15) AS i;
+step s1_select: SELECT * FROM o_iso_rr;
+ id|t                                                 
+---+--------------------------------------------------
+-19|y                                                 
+-18|yy                                                
+-17|yyy                                               
+-16|yyyy                                              
+-15|yyyyy                                             
+-14|yyyyyy                                            
+-13|yyyyyyy                                           
+-12|yyyyyyyy                                          
+-11|yyyyyyyyy                                         
+-10|yyyyyyyyyy                                        
+ -9|yyyyyyyyyyy                                       
+ -8|yyyyyyyyyyyy                                      
+ -7|yyyyyyyyyyyyy                                     
+ -6|yyyyyyyyyyyyyy                                    
+ -5|yyyyyyyyyyyyyyy                                   
+  1|x                                                 
+  2|xx                                                
+  3|xxx                                               
+  4|xxxx                                              
+  5|xxxxx                                             
+  6|xxxxxx                                            
+  7|xxxxxxx                                           
+  8|xxxxxxxx                                          
+  9|xxxxxxxxx                                         
+ 10|xxxxxxxxxx                                        
+ 11|xxxxxxxxxxx                                       
+ 12|xxxxxxxxxxxx                                      
+ 13|xxxxxxxxxxxxx                                     
+ 14|xxxxxxxxxxxxxx                                    
+ 15|xxxxxxxxxxxxxxx                                   
+ 16|xxxxxxxxxxxxxxxx                                  
+ 17|xxxxxxxxxxxxxxxxx                                 
+ 18|xxxxxxxxxxxxxxxxxx                                
+ 19|xxxxxxxxxxxxxxxxxxx                               
+ 20|xxxxxxxxxxxxxxxxxxxx                              
+ 21|xxxxxxxxxxxxxxxxxxxxx                             
+ 22|xxxxxxxxxxxxxxxxxxxxxx                            
+ 23|xxxxxxxxxxxxxxxxxxxxxxx                           
+ 24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+ 25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+ 26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+ 27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+ 28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+ 29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+ 30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+ 31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+ 32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+ 33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+ 34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+ 35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+ 36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+ 37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+ 38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+ 39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+ 40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+ 41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+ 42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+ 43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+ 44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+ 45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+ 46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+ 47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+ 48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+ 49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+ 50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(65 rows)
+
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select: SELECT * FROM o_iso_rr;
+ id|t                                                 
+---+--------------------------------------------------
+-19|y                                                 
+-18|yy                                                
+-17|yyy                                               
+-16|yyyy                                              
+-15|yyyyy                                             
+-14|yyyyyy                                            
+-13|yyyyyyy                                           
+-12|yyyyyyyy                                          
+-11|yyyyyyyyy                                         
+-10|yyyyyyyyyy                                        
+ -9|yyyyyyyyyyy                                       
+ -8|yyyyyyyyyyyy                                      
+ -7|yyyyyyyyyyyyy                                     
+ -6|yyyyyyyyyyyyyy                                    
+ -5|yyyyyyyyyyyyyyy                                   
+  1|x                                                 
+  2|xx                                                
+  3|xxx                                               
+  4|xxxx                                              
+  5|xxxxx                                             
+  6|xxxxxx                                            
+  7|xxxxxxx                                           
+  8|xxxxxxxx                                          
+  9|xxxxxxxxx                                         
+ 10|xxxxxxxxxx                                        
+ 11|xxxxxxxxxxx                                       
+ 12|xxxxxxxxxxxx                                      
+ 13|xxxxxxxxxxxxx                                     
+ 14|xxxxxxxxxxxxxx                                    
+ 15|xxxxxxxxxxxxxxx                                   
+ 16|xxxxxxxxxxxxxxxx                                  
+ 17|xxxxxxxxxxxxxxxxx                                 
+ 18|xxxxxxxxxxxxxxxxxx                                
+ 19|xxxxxxxxxxxxxxxxxxx                               
+ 20|xxxxxxxxxxxxxxxxxxxx                              
+ 21|xxxxxxxxxxxxxxxxxxxxx                             
+ 22|xxxxxxxxxxxxxxxxxxxxxx                            
+ 23|xxxxxxxxxxxxxxxxxxxxxxx                           
+ 24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+ 25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+ 26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+ 27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+ 28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+ 29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+ 30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+ 31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+ 32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+ 33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+ 34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+ 35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+ 36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+ 37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+ 38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+ 39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+ 40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+ 41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+ 42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+ 43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+ 44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+ 45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+ 46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+ 47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+ 48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+ 49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+ 50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(65 rows)
+
+step s2_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select s2_insert2 s1_select s1_delete s1_select s2_select s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s2_insert2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 20, repeat('x', i) FROM generate_series(1, 15) AS i;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s1_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s2_select: SELECT * FROM o_iso_rr;
+ id|t                                                 
+---+--------------------------------------------------
+-19|x                                                 
+-18|xx                                                
+-17|xxx                                               
+-16|xxxx                                              
+-15|xxxxx                                             
+-14|xxxxxx                                            
+-13|xxxxxxx                                           
+-12|xxxxxxxx                                          
+-11|xxxxxxxxx                                         
+-10|xxxxxxxxxx                                        
+ -9|xxxxxxxxxxx                                       
+ -8|xxxxxxxxxxxx                                      
+ -7|xxxxxxxxxxxxx                                     
+ -6|xxxxxxxxxxxxxx                                    
+ -5|xxxxxxxxxxxxxxx                                   
+  1|x                                                 
+  2|xx                                                
+  3|xxx                                               
+  4|xxxx                                              
+  5|xxxxx                                             
+  6|xxxxxx                                            
+  7|xxxxxxx                                           
+  8|xxxxxxxx                                          
+  9|xxxxxxxxx                                         
+ 10|xxxxxxxxxx                                        
+ 11|xxxxxxxxxxx                                       
+ 12|xxxxxxxxxxxx                                      
+ 13|xxxxxxxxxxxxx                                     
+ 14|xxxxxxxxxxxxxx                                    
+ 15|xxxxxxxxxxxxxxx                                   
+ 16|xxxxxxxxxxxxxxxx                                  
+ 17|xxxxxxxxxxxxxxxxx                                 
+ 18|xxxxxxxxxxxxxxxxxx                                
+ 19|xxxxxxxxxxxxxxxxxxx                               
+ 20|xxxxxxxxxxxxxxxxxxxx                              
+ 21|xxxxxxxxxxxxxxxxxxxxx                             
+ 22|xxxxxxxxxxxxxxxxxxxxxx                            
+ 23|xxxxxxxxxxxxxxxxxxxxxxx                           
+ 24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+ 25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+ 26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+ 27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+ 28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+ 29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+ 30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+ 31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+ 32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+ 33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+ 34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+ 35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+ 36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+ 37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+ 38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+ 39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+ 40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+ 41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+ 42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+ 43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+ 44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+ 45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+ 46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+ 47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+ 48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+ 49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+ 50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(65 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select s1_delete s1_select s2_insert2 s1_select s2_select s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s1_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s2_insert2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 20, repeat('x', i) FROM generate_series(1, 15) AS i;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s2_select: SELECT * FROM o_iso_rr;
+ id|t                                                 
+---+--------------------------------------------------
+-19|x                                                 
+-18|xx                                                
+-17|xxx                                               
+-16|xxxx                                              
+-15|xxxxx                                             
+-14|xxxxxx                                            
+-13|xxxxxxx                                           
+-12|xxxxxxxx                                          
+-11|xxxxxxxxx                                         
+-10|xxxxxxxxxx                                        
+ -9|xxxxxxxxxxx                                       
+ -8|xxxxxxxxxxxx                                      
+ -7|xxxxxxxxxxxxx                                     
+ -6|xxxxxxxxxxxxxx                                    
+ -5|xxxxxxxxxxxxxxx                                   
+  1|x                                                 
+  2|xx                                                
+  3|xxx                                               
+  4|xxxx                                              
+  5|xxxxx                                             
+  6|xxxxxx                                            
+  7|xxxxxxx                                           
+  8|xxxxxxxx                                          
+  9|xxxxxxxxx                                         
+ 10|xxxxxxxxxx                                        
+ 11|xxxxxxxxxxx                                       
+ 12|xxxxxxxxxxxx                                      
+ 13|xxxxxxxxxxxxx                                     
+ 14|xxxxxxxxxxxxxx                                    
+ 15|xxxxxxxxxxxxxxx                                   
+ 16|xxxxxxxxxxxxxxxx                                  
+ 17|xxxxxxxxxxxxxxxxx                                 
+ 18|xxxxxxxxxxxxxxxxxx                                
+ 19|xxxxxxxxxxxxxxxxxxx                               
+ 20|xxxxxxxxxxxxxxxxxxxx                              
+ 21|xxxxxxxxxxxxxxxxxxxxx                             
+ 22|xxxxxxxxxxxxxxxxxxxxxx                            
+ 23|xxxxxxxxxxxxxxxxxxxxxxx                           
+ 24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+ 25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+ 26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+ 27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+ 28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+ 29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+ 30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+ 31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+ 32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+ 33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+ 34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+ 35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+ 36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+ 37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+ 38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+ 39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+ 40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+ 41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+ 42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+ 43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+ 44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+ 45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+ 46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+ 47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+ 48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+ 49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+ 50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(65 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select s2_delete s1_select s1_insert2 s1_select s2_select s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+ 1|x                                                 
+ 2|xx                                                
+ 3|xxx                                               
+ 4|xxxx                                              
+ 5|xxxxx                                             
+ 6|xxxxxx                                            
+ 7|xxxxxxx                                           
+ 8|xxxxxxxx                                          
+ 9|xxxxxxxxx                                         
+10|xxxxxxxxxx                                        
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(50 rows)
+
+step s1_insert2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 20, repeat('y', i)
+		FROM generate_series(1, 15) AS i;
+step s1_select: SELECT * FROM o_iso_rr;
+ id|t                                                 
+---+--------------------------------------------------
+-19|y                                                 
+-18|yy                                                
+-17|yyy                                               
+-16|yyyy                                              
+-15|yyyyy                                             
+-14|yyyyyy                                            
+-13|yyyyyyy                                           
+-12|yyyyyyyy                                          
+-11|yyyyyyyyy                                         
+-10|yyyyyyyyyy                                        
+ -9|yyyyyyyyyyy                                       
+ -8|yyyyyyyyyyyy                                      
+ -7|yyyyyyyyyyyyy                                     
+ -6|yyyyyyyyyyyyyy                                    
+ -5|yyyyyyyyyyyyyyy                                   
+  1|x                                                 
+  2|xx                                                
+  3|xxx                                               
+  4|xxxx                                              
+  5|xxxxx                                             
+  6|xxxxxx                                            
+  7|xxxxxxx                                           
+  8|xxxxxxxx                                          
+  9|xxxxxxxxx                                         
+ 10|xxxxxxxxxx                                        
+ 11|xxxxxxxxxxx                                       
+ 12|xxxxxxxxxxxx                                      
+ 13|xxxxxxxxxxxxx                                     
+ 14|xxxxxxxxxxxxxx                                    
+ 15|xxxxxxxxxxxxxxx                                   
+ 16|xxxxxxxxxxxxxxxx                                  
+ 17|xxxxxxxxxxxxxxxxx                                 
+ 18|xxxxxxxxxxxxxxxxxx                                
+ 19|xxxxxxxxxxxxxxxxxxx                               
+ 20|xxxxxxxxxxxxxxxxxxxx                              
+ 21|xxxxxxxxxxxxxxxxxxxxx                             
+ 22|xxxxxxxxxxxxxxxxxxxxxx                            
+ 23|xxxxxxxxxxxxxxxxxxxxxxx                           
+ 24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+ 25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+ 26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+ 27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+ 28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+ 29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+ 30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+ 31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+ 32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+ 33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+ 34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+ 35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+ 36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+ 37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+ 38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+ 39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+ 40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+ 41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+ 42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+ 43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+ 44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+ 45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+ 46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+ 47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+ 48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+ 49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+ 50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(65 rows)
+
+step s2_select: SELECT * FROM o_iso_rr;
+id|t                                                 
+--+--------------------------------------------------
+11|xxxxxxxxxxx                                       
+12|xxxxxxxxxxxx                                      
+13|xxxxxxxxxxxxx                                     
+14|xxxxxxxxxxxxxx                                    
+15|xxxxxxxxxxxxxxx                                   
+16|xxxxxxxxxxxxxxxx                                  
+17|xxxxxxxxxxxxxxxxx                                 
+18|xxxxxxxxxxxxxxxxxx                                
+19|xxxxxxxxxxxxxxxxxxx                               
+20|xxxxxxxxxxxxxxxxxxxx                              
+21|xxxxxxxxxxxxxxxxxxxxx                             
+22|xxxxxxxxxxxxxxxxxxxxxx                            
+23|xxxxxxxxxxxxxxxxxxxxxxx                           
+24|xxxxxxxxxxxxxxxxxxxxxxxx                          
+25|xxxxxxxxxxxxxxxxxxxxxxxxx                         
+26|xxxxxxxxxxxxxxxxxxxxxxxxxx                        
+27|xxxxxxxxxxxxxxxxxxxxxxxxxxx                       
+28|xxxxxxxxxxxxxxxxxxxxxxxxxxxx                      
+29|xxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     
+30|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    
+31|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   
+32|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  
+33|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 
+34|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                
+35|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               
+36|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              
+37|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             
+38|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            
+39|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           
+40|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          
+41|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         
+42|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        
+43|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       
+44|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      
+45|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     
+46|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    
+47|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   
+48|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+49|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+50|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+(40 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select20 s2_begin s2_select20 s1_delete s2_delete s1_select20 s1_commit s2_select20 s2_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s1_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10; <waiting ...>
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s1_commit: COMMIT;
+step s2_delete: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s2_begin s2_delete s1_select20 s1_delete11 s1_delete10 s2_commit s1_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s1_delete11: 
+	DELETE FROM o_iso_rr
+	WHERE id = 11;
+step s1_delete10: 
+	DELETE FROM o_iso_rr
+	WHERE id = 10; <waiting ...>
+step s2_commit: COMMIT;
+step s1_delete10: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s1_select20 s2_begin s2_delete s2_commit s1_delete11 s1_delete10 s1_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s2_commit: COMMIT;
+step s1_delete11: 
+	DELETE FROM o_iso_rr
+	WHERE id = 11;
+step s1_delete10: 
+	DELETE FROM o_iso_rr
+	WHERE id = 10;
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s2_begin s2_delete s2_commit s1_select20 s1_delete11 s1_delete10 s1_rollback
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s2_commit: COMMIT;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s1_delete11: 
+	DELETE FROM o_iso_rr
+	WHERE id = 11;
+step s1_delete10: 
+	DELETE FROM o_iso_rr
+	WHERE id = 10;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert1 s1_begin s1_select20 s1_insert2 s1_select20 s2_delete s1_select20 s2_select20 s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s1_insert2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 20, repeat('y', i)
+		FROM generate_series(1, 15) AS i;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|yyyyyyyyyyyyyyy
+ -6|yyyyyyyyyyyyyy 
+ -7|yyyyyyyyyyyyy  
+ -8|yyyyyyyyyyyy   
+ -9|yyyyyyyyyyy    
+-10|yyyyyyyyyy     
+(16 rows)
+
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|yyyyyyyyyyyyyyy
+ -6|yyyyyyyyyyyyyy 
+ -7|yyyyyyyyyyyyy  
+ -8|yyyyyyyyyyyy   
+ -9|yyyyyyyyyyy    
+-10|yyyyyyyyyy     
+(16 rows)
+
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|yyyyyyyyyyyyyyy
+ -6|yyyyyyyyyyyyyy 
+ -7|yyyyyyyyyyyyy  
+ -8|yyyyyyyyyyyy   
+ -9|yyyyyyyyyyy    
+-10|yyyyyyyyyy     
+(16 rows)
+
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|yyyyyyyyyyyyyyy
+ -6|yyyyyyyyyyyyyy 
+ -7|yyyyyyyyyyyyy  
+ -8|yyyyyyyyyyyy   
+ -9|yyyyyyyyyyy    
+-10|yyyyyyyyyy     
+(16 rows)
+
+step s2_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select20 s2_insert2 s1_select20 s1_delete s1_select20 s2_select20 s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s2_insert2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 20, repeat('x', i) FROM generate_series(1, 15) AS i;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s1_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s2_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|xxxxxxxxxxxxxxx
+ -6|xxxxxxxxxxxxxx 
+ -7|xxxxxxxxxxxxx  
+ -8|xxxxxxxxxxxx   
+ -9|xxxxxxxxxxx    
+-10|xxxxxxxxxx     
+(16 rows)
+
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|xxxxxxxxxxxxxxx
+ -6|xxxxxxxxxxxxxx 
+ -7|xxxxxxxxxxxxx  
+ -8|xxxxxxxxxxxx   
+ -9|xxxxxxxxxxx    
+-10|xxxxxxxxxx     
+(16 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select20 s1_delete s1_select20 s2_insert2 s1_select20 s2_select20 s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s1_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s2_insert2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 20, repeat('x', i) FROM generate_series(1, 15) AS i;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s2_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|xxxxxxxxxxxxxxx
+ -6|xxxxxxxxxxxxxx 
+ -7|xxxxxxxxxxxxx  
+ -8|xxxxxxxxxxxx   
+ -9|xxxxxxxxxxx    
+-10|xxxxxxxxxx     
+(16 rows)
+
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|xxxxxxxxxxxxxxx
+ -6|xxxxxxxxxxxxxx 
+ -7|xxxxxxxxxxxxx  
+ -8|xxxxxxxxxxxx   
+ -9|xxxxxxxxxxx    
+-10|xxxxxxxxxx     
+(16 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert1 s1_begin s1_select20 s2_delete s1_select20 s1_insert2 s1_select20 s2_select20 s1_commit
+step s1_insert1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('x', i)
+		FROM generate_series(1, 50) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s2_delete: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 10;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+id|t         
+--+----------
+10|xxxxxxxxxx
+ 9|xxxxxxxxx 
+ 8|xxxxxxxx  
+ 7|xxxxxxx   
+ 6|xxxxxx    
+ 5|xxxxx     
+ 4|xxxx      
+ 3|xxx       
+ 2|xx        
+ 1|x         
+(10 rows)
+
+step s1_insert2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 20, repeat('y', i)
+		FROM generate_series(1, 15) AS i;
+step s1_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|yyyyyyyyyyyyyyy
+ -6|yyyyyyyyyyyyyy 
+ -7|yyyyyyyyyyyyy  
+ -8|yyyyyyyyyyyy   
+ -9|yyyyyyyyyyy    
+-10|yyyyyyyyyy     
+(16 rows)
+
+ id|t              
+---+---------------
+ 10|xxxxxxxxxx     
+  9|xxxxxxxxx      
+  8|xxxxxxxx       
+  7|xxxxxxx        
+  6|xxxxxx         
+  5|xxxxx          
+  4|xxxx           
+  3|xxx            
+  2|xx             
+  1|x              
+ -5|yyyyyyyyyyyyyyy
+ -6|yyyyyyyyyyyyyy 
+ -7|yyyyyyyyyyyyy  
+ -8|yyyyyyyyyyyy   
+ -9|yyyyyyyyyyy    
+-10|yyyyyyyyyy     
+(16 rows)
+
+step s2_select20: 
+	SELECT * FROM o_iso_rr
+	WHERE id BETWEEN -10 and 10
+	ORDER BY id DESC;
+	SELECT * FROM o_iso_rr
+	WHERE id > -11 and id < 11
+	ORDER BY id DESC;
+id|t
+--+-
+(0 rows)
+
+id|t
+--+-
+(0 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s2_begin s2_count s1_delete_big s2_delete_big s1_count s1_commit s2_count s2_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100; <waiting ...>
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  410
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_delete_big: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big s1_count s1_delete150 s1_delete100 s2_commit s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140; <waiting ...>
+step s2_commit: COMMIT;
+step s1_delete100: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s2_begin s2_delete_big s2_commit s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s2_commit: COMMIT;
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big s2_commit s1_count s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s2_commit: COMMIT;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s1_delete_big s1_count s2_insert_big2 s1_count s2_count s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  410
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  410
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  650
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s2_delete_big s1_count s1_insert_big2 s1_count s2_count s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_insert_big2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 200, i
+		FROM generate_series(1, 150) AS i;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  650
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s1_insert_big2 s1_count s2_delete_big s1_count s2_count s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_insert_big2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 200, i
+		FROM generate_series(1, 150) AS i;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  650
+(1 row)
+
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  650
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s2_insert_big2 s1_count s1_delete_big s1_count s2_count s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  410
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  650
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s1_delete_big_end s1_count s2_insert_big2 s1_count s2_count s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  650
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s2_begin s2_count s1_delete_big s2_delete_big_end s1_count s1_commit s2_count s2_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  410
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big_end s1_count s1_delete150 s1_delete100 s2_commit s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s2_commit: COMMIT;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count s2_begin s2_delete_big_end s2_commit s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  500
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s2_commit: COMMIT;
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big_end s2_commit s1_count s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s2_commit: COMMIT;
+step s1_count: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		ORDER BY id DESC) t;
+count
+-----
+  400
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200 s2_delete_big s1_count200 s1_insert_big2 s1_count200 s2_count200 s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_insert_big2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 200, i
+		FROM generate_series(1, 150) AS i;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200 s1_insert_big2 s1_count200 s2_delete_big s1_count200 s2_count200 s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_insert_big2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 200, i
+		FROM generate_series(1, 150) AS i;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200 s2_insert_big2 s1_count200 s1_delete_big s1_count200 s2_count200 s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  110
+(1 row)
+
+count
+-----
+  110
+(1 row)
+
+step s2_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200 s1_delete_big s1_count200 s2_insert_big2 s1_count200 s2_count200 s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  110
+(1 row)
+
+count
+-----
+  110
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  110
+(1 row)
+
+count
+-----
+  110
+(1 row)
+
+step s2_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200 s2_begin s2_count200 s1_delete_big s2_delete_big s1_count200 s1_commit s2_count200 s2_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 90;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100; <waiting ...>
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  110
+(1 row)
+
+count
+-----
+  110
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_delete_big: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big s1_count200 s1_delete150 s1_delete100 s2_commit s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140; <waiting ...>
+step s2_commit: COMMIT;
+step s1_delete100: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200 s2_begin s2_delete_big s2_commit s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s2_commit: COMMIT;
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+ERROR:  could not serialize access due to concurrent update
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big s2_commit s1_count200 s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 1 and 100;
+step s2_commit: COMMIT;
+step s1_count200: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 0 and 200
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > -1 and id < 201
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200_end s2_delete_big_end s1_count200_end s1_insert_big2 s1_count200_end s2_count200_end s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_insert_big2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 200, i
+		FROM generate_series(1, 150) AS i;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200_end s1_insert_big2 s1_count200_end s2_delete_big_end s1_count200_end s2_count200_end s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_insert_big2: 
+	INSERT INTO o_iso_rr
+		SELECT i - 200, i
+		FROM generate_series(1, 150) AS i;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200_end s2_insert_big2 s1_count200_end s1_delete_big_end s1_count200_end s2_count200_end s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s2_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200_end s1_delete_big_end s1_count200_end s2_insert_big2 s1_count200_end s2_count200_end s1_commit
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s2_insert_big2: 
+	INSERT INTO o_iso_rr
+	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s2_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200_end s2_begin s2_count200_end s1_delete_big_end s2_delete_big_end s1_count200_end s1_commit s2_count200_end s2_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500; <waiting ...>
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_delete_big_end: <... completed>
+ERROR:  could not serialize access due to concurrent update
+step s2_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big_end s1_count200_end s1_delete150 s1_delete100 s2_commit s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s2_commit: COMMIT;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s1_count200_end s2_begin s2_delete_big_end s2_commit s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  200
+(1 row)
+
+count
+-----
+  200
+(1 row)
+
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s2_commit: COMMIT;
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s1_rollback: ROLLBACK;
+
+starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big_end s2_commit s1_count200_end s1_delete150 s1_delete100 s1_rollback
+step s1_insert_big1: 
+	INSERT INTO o_iso_rr
+		SELECT i, repeat('z', i % 50)
+		FROM generate_series(1, 500) AS i;
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s2_delete_big_end: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 401 AND 500;
+step s2_commit: COMMIT;
+step s1_count200_end: 
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id BETWEEN 301 and 500
+		ORDER BY id DESC) t;
+	SELECT count(*) FROM (
+		SELECT * FROM o_iso_rr
+		WHERE id > 300 and id < 501
+		ORDER BY id DESC) t;
+count
+-----
+  100
+(1 row)
+
+count
+-----
+  100
+(1 row)
+
+step s1_delete150: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 150 and 200;
+step s1_delete100: 
+	DELETE FROM o_iso_rr
+	WHERE id BETWEEN 100 and 140;
+step s1_rollback: ROLLBACK;

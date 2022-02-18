@@ -1,0 +1,3921 @@
+SET client_min_messages TO 'warning';
+CREATE EXTENSION orioledb;
+SELECT orioledb_version();
+    orioledb_version     
+-------------------------
+ OrioleDB public alpha 1
+(1 row)
+
+CREATE VIEW db_o_tables AS (SELECT c.relname, ot.description
+FROM orioledb_table ot JOIN
+     pg_database db ON db.oid = ot.datoid JOIN
+     pg_class c ON c.oid = ot.reloid
+WHERE db.datname = current_database());
+CREATE VIEW db_o_indices AS (SELECT regexp_replace(c.relname, 'pg_toast_\d+', 'pg_toast_NNN') relname, oi.name, oi.description
+FROM orioledb_index oi JOIN
+     pg_database db ON db.oid = oi.datoid JOIN
+     pg_class c ON c.oid = oi.index_reloid
+WHERE db.datname = current_database());
+-- index on empty table test
+CREATE TABLE o_tableam1
+(
+	key int8 NOT NULL,
+	value text
+) USING orioledb;
+-- not supported
+CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
+ERROR:  concurrent indexes are not supported.
+CREATE INDEX o_tableam1_ix_include ON o_tableam1 (key) INCLUDE (value);
+ERROR:  include indexes are not supported
+CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
+ERROR:  orioledb tables indices support only "compress" option.
+SELECT orioledb_tbl_indices('o_tableam1'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+-- supported
+CREATE UNIQUE INDEX o_tableam1_ix1 ON o_tableam1 (key);
+CREATE INDEX o_tableam1_ix2 on o_tableam1 (value);
+SELECT orioledb_tbl_indices('o_tableam1'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_tableam1_ix1                          +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, ctid          +
+     Leaf tuple fields: key, ctid              +
+ Index o_tableam1_ix2                          +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, ctid        +
+     Leaf tuple fields: value, ctid            +
+ 
+(1 row)
+
+INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
+ANALYZE o_tableam1;
+SELECT * FROM o_tableam1;
+ key | value  
+-----+--------
+   1 | 1text
+   2 | 2text
+   3 | 3text
+   4 | 4text
+   5 | 5text
+   6 | 6text
+   7 | 7text
+   8 | 8text
+   9 | 9text
+  10 | 10text
+  11 | 11text
+  12 | 12text
+  13 | 13text
+  14 | 14text
+  15 | 15text
+  16 | 16text
+  17 | 17text
+  18 | 18text
+  19 | 19text
+  20 | 20text
+(20 rows)
+
+SELECT * FROM o_tableam1 WHERE key = 5;
+ key | value 
+-----+-------
+   5 | 5text
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1;
+       QUERY PLAN       
+------------------------
+ Seq Scan on o_tableam1
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Forward index scan of: o_tableam1_ix1
+   Conds: (key = 5)
+(3 rows)
+
+SELECT * FROM o_tableam1 ORDER BY key DESC;
+ key | value  
+-----+--------
+  20 | 20text
+  19 | 19text
+  18 | 18text
+  17 | 17text
+  16 | 16text
+  15 | 15text
+  14 | 14text
+  13 | 13text
+  12 | 12text
+  11 | 11text
+  10 | 10text
+   9 | 9text
+   8 | 8text
+   7 | 7text
+   6 | 6text
+   5 | 5text
+   4 | 4text
+   3 | 3text
+   2 | 2text
+   1 | 1text
+(20 rows)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1 ORDER BY key DESC;
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Backward index scan of: o_tableam1_ix1
+(2 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Forward index scan of: o_tableam1_ix2
+   Conds: (value = '5text'::text)
+(3 rows)
+
+RESET enable_seqscan;
+SELECT * FROM o_tableam1 WHERE value = '5text';
+ key | value 
+-----+-------
+   5 | 5text
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Filter: (key = 5)
+   Forward index scan of: o_tableam1_ix2
+   Conds: (value = '5text'::text)
+(4 rows)
+
+SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
+ key | value 
+-----+-------
+   5 | 5text
+(1 row)
+
+TRUNCATE o_tableam1;
+INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(11, 20) as id);
+SELECT * FROM o_tableam1;
+ key | value  
+-----+--------
+  11 | 11text
+  12 | 12text
+  13 | 13text
+  14 | 14text
+  15 | 15text
+  16 | 16text
+  17 | 17text
+  18 | 18text
+  19 | 19text
+  20 | 20text
+(10 rows)
+
+DROP TABLE o_tableam1;
+-- partial index test
+CREATE TABLE o_test_partial
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text
+) USING orioledb;
+CREATE FUNCTION plpgsql_func_test(in bigint) RETURNS int AS $$
+BEGIN
+	RETURN ABS($1) * 100;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+CREATE OR REPLACE FUNCTION boolfunc_test(in bigint) RETURNS bool AS $$
+BEGIN
+	RETURN ABS($1) * 100 = 0;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+CREATE INDEX o_test_partial_ix1 ON o_test_partial (key) WHERE key > 10;
+CREATE INDEX o_test_partial_ix2 ON o_test_partial (key) WHERE ABS(key) > 10;
+CREATE INDEX o_test_partial_ix3 ON o_test_partial (key)
+	WHERE not ABS(key) = 0;
+CREATE INDEX o_test_partial_ix4 ON o_test_partial (key)
+	WHERE ((not ABS(key) = 0) OR (not ABS(key) = 1));
+CREATE INDEX o_test_partial_ix5 ON o_test_partial (key)
+	WHERE ABS(-ABS(key)) > 10;
+CREATE INDEX o_test_partial_ix6 ON o_test_partial (key)
+	WHERE boolfunc_test(key);
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+CREATE INDEX o_test_partial_ix6 ON o_test_partial (key)
+	WHERE plpgsql_func_test(key) = 0;
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
+	WHERE plpgsql_func_test(-key) * 2 = 0;
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
+	WHERE plpgsql_func_test(-key) * 2 = 0;
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
+	WHERE COALESCE(NULL, NULL, (plpgsql_func_test(-key) > 0)) != NULL;
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
+	WHERE GREATEST(NULL, NULL, (ABS(plpgsql_func_test(-key)) > 0)) != NULL;
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+CREATE INDEX o_test_partial_ix8 ON o_test_partial (value)
+	WHERE value > '5';
+CREATE INDEX o_test_partial_ix9 ON o_test_partial (value)
+	WHERE (value || 'WOW') > '5';
+SELECT orioledb_tbl_indices('o_test_partial'::regclass);
+                orioledb_tbl_indices                 
+-----------------------------------------------------
+ Index o_test_partial_pkey                          +
+     Index type: primary, unique                    +
+     Leaf tuple size: 2, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: key                     +
+ Index o_test_partial_ix1                           +
+     Index type: secondary                          +
+     Predicate: (key > 10)                          +
+     Leaf tuple size: 1, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: key                     +
+     Leaf tuple fields: key                         +
+ Index o_test_partial_ix2                           +
+     Index type: secondary                          +
+     Predicate: (abs(key) > 10)                     +
+     Leaf tuple size: 1, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: key                     +
+     Leaf tuple fields: key                         +
+ Index o_test_partial_ix3                           +
+     Index type: secondary                          +
+     Predicate: (abs(key) <> 0)                     +
+     Leaf tuple size: 1, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: key                     +
+     Leaf tuple fields: key                         +
+ Index o_test_partial_ix4                           +
+     Index type: secondary                          +
+     Predicate: ((abs(key) <> 0) OR (abs(key) <> 1))+
+     Leaf tuple size: 1, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: key                     +
+     Leaf tuple fields: key                         +
+ Index o_test_partial_ix5                           +
+     Index type: secondary                          +
+     Predicate: (abs((- abs(key))) > 10)            +
+     Leaf tuple size: 1, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: key                     +
+     Leaf tuple fields: key                         +
+ Index o_test_partial_ix8                           +
+     Index type: secondary                          +
+     Predicate: (value > '5'::text)                 +
+     Leaf tuple size: 2, non-leaf tuple size: 2     +
+     Non-leaf tuple fields: value, key              +
+     Leaf tuple fields: value, key                  +
+ Index o_test_partial_ix9                           +
+     Index type: secondary                          +
+     Predicate: ((value || 'WOW'::text) > '5'::text)+
+     Leaf tuple size: 2, non-leaf tuple size: 2     +
+     Non-leaf tuple fields: value, key              +
+     Leaf tuple fields: value, key                  +
+ 
+(1 row)
+
+INSERT INTO o_test_partial (SELECT id, id || 'text'
+								FROM generate_series(0, 20) as id);
+ANALYZE o_test_partial;
+EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index scan of: o_test_partial_ix1
+   Conds: ((key >= 15) AND (key <= 25))
+(3 rows)
+
+SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
+ key | value  
+-----+--------
+  15 | 15text
+  16 | 16text
+  17 | 17text
+  18 | 18text
+  19 | 19text
+  20 | 20text
+(6 rows)
+
+EXPLAIN (COSTS off) SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index only scan of: o_test_partial_ix1
+   Conds: ((key >= 15) AND (key <= 25))
+(3 rows)
+
+SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
+ key 
+-----
+  15
+  16
+  17
+  18
+  19
+  20
+(6 rows)
+
+SET enable_seqscan = OFF;
+EXPLAIN (COSTS off) SELECT value FROM o_test_partial
+	WHERE value BETWEEN '6' AND '9';
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index only scan of: o_test_partial_ix8
+   Conds: ((value >= '6'::text) AND (value <= '9'::text))
+(3 rows)
+
+SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
+ value 
+-------
+ 6text
+ 7text
+ 8text
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT value FROM o_test_partial
+	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Filter: (((value || 'WOW'::text) >= '6'::text) AND ((value || 'WOW'::text) <= '9'::text))
+   Forward index only scan of: o_test_partial_ix9
+(3 rows)
+
+RESET enable_seqscan;
+SELECT value FROM o_test_partial
+	WHERE (value || 'WOW') BETWEEN '6' AND '9';
+ value 
+-------
+ 6text
+ 7text
+ 8text
+(3 rows)
+
+SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
+                          orioledb_tbl_structure                           
+---------------------------------------------------------------------------
+ Index o_test_partial_pkey contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('8')+
+     Item 0: offset = 272, tuple = ('0', '0text')                         +
+     Item 1: offset = 312, tuple = ('1', '1text')                         +
+     Item 2: offset = 352, tuple = ('2', '2text')                         +
+     Item 3: offset = 392, tuple = ('3', '3text')                         +
+     Item 4: offset = 432, tuple = ('4', '4text')                         +
+     Item 5: offset = 472, tuple = ('5', '5text')                         +
+     Item 6: offset = 512, tuple = ('6', '6text')                         +
+     Item 7: offset = 552, tuple = ('7', '7text')                         +
+   Chunk 1: offset = 8, location = 592, hikey location = 72               +
+     Item 8: offset = 624, tuple = ('8', '8text')                         +
+     Item 9: offset = 664, tuple = ('9', '9text')                         +
+     Item 10: offset = 704, tuple = ('10', '10text')                      +
+     Item 11: offset = 744, tuple = ('11', '11text')                      +
+     Item 12: offset = 784, tuple = ('12', '12text')                      +
+     Item 13: offset = 824, tuple = ('13', '13text')                      +
+     Item 14: offset = 864, tuple = ('14', '14text')                      +
+     Item 15: offset = 904, tuple = ('15', '15text')                      +
+     Item 16: offset = 944, tuple = ('16', '16text')                      +
+     Item 17: offset = 984, tuple = ('17', '17text')                      +
+     Item 18: offset = 1024, tuple = ('18', '18text')                     +
+     Item 19: offset = 1064, tuple = ('19', '19text')                     +
+     Item 20: offset = 1104, tuple = ('20', '20text')                     +
+                                                                          +
+ Index o_test_partial_ix1 contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('11')                                 +
+     Item 1: offset = 304, tuple = ('12')                                 +
+     Item 2: offset = 328, tuple = ('13')                                 +
+     Item 3: offset = 352, tuple = ('14')                                 +
+     Item 4: offset = 376, tuple = ('15')                                 +
+     Item 5: offset = 400, tuple = ('16')                                 +
+     Item 6: offset = 424, tuple = ('17')                                 +
+     Item 7: offset = 448, tuple = ('18')                                 +
+     Item 8: offset = 472, tuple = ('19')                                 +
+     Item 9: offset = 496, tuple = ('20')                                 +
+                                                                          +
+ Index o_test_partial_ix2 contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('11')                                 +
+     Item 1: offset = 304, tuple = ('12')                                 +
+     Item 2: offset = 328, tuple = ('13')                                 +
+     Item 3: offset = 352, tuple = ('14')                                 +
+     Item 4: offset = 376, tuple = ('15')                                 +
+     Item 5: offset = 400, tuple = ('16')                                 +
+     Item 6: offset = 424, tuple = ('17')                                 +
+     Item 7: offset = 448, tuple = ('18')                                 +
+     Item 8: offset = 472, tuple = ('19')                                 +
+     Item 9: offset = 496, tuple = ('20')                                 +
+                                                                          +
+ Index o_test_partial_ix3 contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 296, tuple = ('1')                                  +
+     Item 1: offset = 320, tuple = ('2')                                  +
+     Item 2: offset = 344, tuple = ('3')                                  +
+     Item 3: offset = 368, tuple = ('4')                                  +
+     Item 4: offset = 392, tuple = ('5')                                  +
+     Item 5: offset = 416, tuple = ('6')                                  +
+     Item 6: offset = 440, tuple = ('7')                                  +
+     Item 7: offset = 464, tuple = ('8')                                  +
+     Item 8: offset = 488, tuple = ('9')                                  +
+     Item 9: offset = 512, tuple = ('10')                                 +
+     Item 10: offset = 536, tuple = ('11')                                +
+     Item 11: offset = 560, tuple = ('12')                                +
+     Item 12: offset = 584, tuple = ('13')                                +
+     Item 13: offset = 608, tuple = ('14')                                +
+     Item 14: offset = 632, tuple = ('15')                                +
+     Item 15: offset = 656, tuple = ('16')                                +
+     Item 16: offset = 680, tuple = ('17')                                +
+     Item 17: offset = 704, tuple = ('18')                                +
+     Item 18: offset = 728, tuple = ('19')                                +
+     Item 19: offset = 752, tuple = ('20')                                +
+                                                                          +
+ Index o_test_partial_ix4 contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 304, tuple = ('0')                                  +
+     Item 1: offset = 328, tuple = ('1')                                  +
+     Item 2: offset = 352, tuple = ('2')                                  +
+     Item 3: offset = 376, tuple = ('3')                                  +
+     Item 4: offset = 400, tuple = ('4')                                  +
+     Item 5: offset = 424, tuple = ('5')                                  +
+     Item 6: offset = 448, tuple = ('6')                                  +
+     Item 7: offset = 472, tuple = ('7')                                  +
+     Item 8: offset = 496, tuple = ('8')                                  +
+     Item 9: offset = 520, tuple = ('9')                                  +
+     Item 10: offset = 544, tuple = ('10')                                +
+     Item 11: offset = 568, tuple = ('11')                                +
+     Item 12: offset = 592, tuple = ('12')                                +
+     Item 13: offset = 616, tuple = ('13')                                +
+     Item 14: offset = 640, tuple = ('14')                                +
+     Item 15: offset = 664, tuple = ('15')                                +
+     Item 16: offset = 688, tuple = ('16')                                +
+     Item 17: offset = 712, tuple = ('17')                                +
+     Item 18: offset = 736, tuple = ('18')                                +
+     Item 19: offset = 760, tuple = ('19')                                +
+     Item 20: offset = 784, tuple = ('20')                                +
+                                                                          +
+ Index o_test_partial_ix5 contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('11')                                 +
+     Item 1: offset = 304, tuple = ('12')                                 +
+     Item 2: offset = 328, tuple = ('13')                                 +
+     Item 3: offset = 352, tuple = ('14')                                 +
+     Item 4: offset = 376, tuple = ('15')                                 +
+     Item 5: offset = 400, tuple = ('16')                                 +
+     Item 6: offset = 424, tuple = ('17')                                 +
+     Item 7: offset = 448, tuple = ('18')                                 +
+     Item 8: offset = 472, tuple = ('19')                                 +
+     Item 9: offset = 496, tuple = ('20')                                 +
+                                                                          +
+ Index o_test_partial_ix8 contents                                        +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 272, tuple = ('5text', '5')                         +
+     Item 1: offset = 312, tuple = ('6text', '6')                         +
+     Item 2: offset = 352, tuple = ('7text', '7')                         +
+     Item 3: offset = 392, tuple = ('8text', '8')                         +
+     Item 4: offset = 432, tuple = ('9text', '9')                         +
+                                                                          +
+ Index o_test_partial_ix9 contents                                        +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 272, tuple = ('5text', '5')                         +
+     Item 1: offset = 312, tuple = ('6text', '6')                         +
+     Item 2: offset = 352, tuple = ('7text', '7')                         +
+     Item 3: offset = 392, tuple = ('8text', '8')                         +
+     Item 4: offset = 432, tuple = ('9text', '9')                         +
+                                                                          +
+ Index toast: not loaded                                                  +
+ 
+(1 row)
+
+DELETE FROM o_test_partial WHERE key = 1;
+UPDATE o_test_partial SET key = key + 100 WHERE key BETWEEN 5 AND 15;
+SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
+                            orioledb_tbl_structure                            
+------------------------------------------------------------------------------
+ Index o_test_partial_pkey contents                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 480                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('8')   +
+     Item 0: offset = 272, tuple = ('0', '0text')                            +
+     Item 1: deleted, offset = 312, tuple = ('1', '1text')                   +
+     Item 2: offset = 352, tuple = ('2', '2text')                            +
+     Item 3: offset = 392, tuple = ('3', '3text')                            +
+     Item 4: offset = 432, tuple = ('4', '4text')                            +
+     Item 5: deleted, offset = 472, tuple = ('5', '5text')                   +
+     Item 6: deleted, offset = 512, tuple = ('6', '6text')                   +
+     Item 7: deleted, offset = 552, tuple = ('7', '7text')                   +
+   Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')  +
+     Item 8: deleted, offset = 608, tuple = ('8', '8text')                   +
+     Item 9: deleted, offset = 648, tuple = ('9', '9text')                   +
+     Item 10: deleted, offset = 688, tuple = ('10', '10text')                +
+     Item 11: deleted, offset = 728, tuple = ('11', '11text')                +
+     Item 12: deleted, offset = 768, tuple = ('12', '12text')                +
+     Item 13: deleted, offset = 808, tuple = ('13', '13text')                +
+     Item 14: deleted, offset = 848, tuple = ('14', '14text')                +
+     Item 15: deleted, offset = 888, tuple = ('15', '15text')                +
+   Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')+
+     Item 16: offset = 944, tuple = ('16', '16text')                         +
+     Item 17: offset = 984, tuple = ('17', '17text')                         +
+     Item 18: offset = 1024, tuple = ('18', '18text')                        +
+     Item 19: offset = 1064, tuple = ('19', '19text')                        +
+     Item 20: offset = 1104, tuple = ('20', '20text')                        +
+     Item 21: offset = 1144, tuple = ('105', '5text')                        +
+     Item 22: offset = 1184, tuple = ('106', '6text')                        +
+     Item 23: offset = 1224, tuple = ('107', '7text')                        +
+   Chunk 3: offset = 24, location = 1264, hikey location = 96                +
+     Item 24: offset = 1280, tuple = ('108', '8text')                        +
+     Item 25: offset = 1320, tuple = ('109', '9text')                        +
+     Item 26: offset = 1360, tuple = ('110', '10text')                       +
+     Item 27: offset = 1400, tuple = ('111', '11text')                       +
+     Item 28: offset = 1440, tuple = ('112', '12text')                       +
+     Item 29: offset = 1480, tuple = ('113', '13text')                       +
+     Item 30: offset = 1520, tuple = ('114', '14text')                       +
+     Item 31: offset = 1560, tuple = ('115', '15text')                       +
+                                                                             +
+ Index o_test_partial_ix1 contents                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 120                       +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: deleted, offset = 304, tuple = ('11')                           +
+     Item 1: deleted, offset = 328, tuple = ('12')                           +
+     Item 2: deleted, offset = 352, tuple = ('13')                           +
+     Item 3: deleted, offset = 376, tuple = ('14')                           +
+     Item 4: deleted, offset = 400, tuple = ('15')                           +
+     Item 5: offset = 424, tuple = ('16')                                    +
+     Item 6: offset = 448, tuple = ('17')                                    +
+     Item 7: offset = 472, tuple = ('18')                                    +
+     Item 8: offset = 496, tuple = ('19')                                    +
+     Item 9: offset = 520, tuple = ('20')                                    +
+     Item 10: offset = 544, tuple = ('105')                                  +
+     Item 11: offset = 568, tuple = ('106')                                  +
+     Item 12: offset = 592, tuple = ('107')                                  +
+     Item 13: offset = 616, tuple = ('108')                                  +
+     Item 14: offset = 640, tuple = ('109')                                  +
+     Item 15: offset = 664, tuple = ('110')                                  +
+     Item 16: offset = 688, tuple = ('111')                                  +
+     Item 17: offset = 712, tuple = ('112')                                  +
+     Item 18: offset = 736, tuple = ('113')                                  +
+     Item 19: offset = 760, tuple = ('114')                                  +
+     Item 20: offset = 784, tuple = ('115')                                  +
+                                                                             +
+ Index o_test_partial_ix2 contents                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 120                       +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: deleted, offset = 304, tuple = ('11')                           +
+     Item 1: deleted, offset = 328, tuple = ('12')                           +
+     Item 2: deleted, offset = 352, tuple = ('13')                           +
+     Item 3: deleted, offset = 376, tuple = ('14')                           +
+     Item 4: deleted, offset = 400, tuple = ('15')                           +
+     Item 5: offset = 424, tuple = ('16')                                    +
+     Item 6: offset = 448, tuple = ('17')                                    +
+     Item 7: offset = 472, tuple = ('18')                                    +
+     Item 8: offset = 496, tuple = ('19')                                    +
+     Item 9: offset = 520, tuple = ('20')                                    +
+     Item 10: offset = 544, tuple = ('105')                                  +
+     Item 11: offset = 568, tuple = ('106')                                  +
+     Item 12: offset = 592, tuple = ('107')                                  +
+     Item 13: offset = 616, tuple = ('108')                                  +
+     Item 14: offset = 640, tuple = ('109')                                  +
+     Item 15: offset = 664, tuple = ('110')                                  +
+     Item 16: offset = 688, tuple = ('111')                                  +
+     Item 17: offset = 712, tuple = ('112')                                  +
+     Item 18: offset = 736, tuple = ('113')                                  +
+     Item 19: offset = 760, tuple = ('114')                                  +
+     Item 20: offset = 784, tuple = ('115')                                  +
+                                                                             +
+ Index o_test_partial_ix3 contents                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 288                       +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('13')  +
+     Item 0: deleted, offset = 280, tuple = ('1')                            +
+     Item 1: offset = 304, tuple = ('2')                                     +
+     Item 2: offset = 328, tuple = ('3')                                     +
+     Item 3: offset = 352, tuple = ('4')                                     +
+     Item 4: deleted, offset = 376, tuple = ('5')                            +
+     Item 5: deleted, offset = 400, tuple = ('6')                            +
+     Item 6: deleted, offset = 424, tuple = ('7')                            +
+     Item 7: deleted, offset = 448, tuple = ('8')                            +
+     Item 8: deleted, offset = 472, tuple = ('9')                            +
+     Item 9: deleted, offset = 496, tuple = ('10')                           +
+     Item 10: deleted, offset = 520, tuple = ('11')                          +
+     Item 11: deleted, offset = 544, tuple = ('12')                          +
+   Chunk 1: offset = 12, location = 568, hikey location = 72                 +
+     Item 12: deleted, offset = 608, tuple = ('13')                          +
+     Item 13: deleted, offset = 632, tuple = ('14')                          +
+     Item 14: deleted, offset = 656, tuple = ('15')                          +
+     Item 15: offset = 680, tuple = ('16')                                   +
+     Item 16: offset = 704, tuple = ('17')                                   +
+     Item 17: offset = 728, tuple = ('18')                                   +
+     Item 18: offset = 752, tuple = ('19')                                   +
+     Item 19: offset = 776, tuple = ('20')                                   +
+     Item 20: offset = 800, tuple = ('105')                                  +
+     Item 21: offset = 824, tuple = ('106')                                  +
+     Item 22: offset = 848, tuple = ('107')                                  +
+     Item 23: offset = 872, tuple = ('108')                                  +
+     Item 24: offset = 896, tuple = ('109')                                  +
+     Item 25: offset = 920, tuple = ('110')                                  +
+     Item 26: offset = 944, tuple = ('111')                                  +
+     Item 27: offset = 968, tuple = ('112')                                  +
+     Item 28: offset = 992, tuple = ('113')                                  +
+     Item 29: offset = 1016, tuple = ('114')                                 +
+     Item 30: offset = 1040, tuple = ('115')                                 +
+                                                                             +
+ Index o_test_partial_ix4 contents                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 288                       +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('12')  +
+     Item 0: offset = 280, tuple = ('0')                                     +
+     Item 1: deleted, offset = 304, tuple = ('1')                            +
+     Item 2: offset = 328, tuple = ('2')                                     +
+     Item 3: offset = 352, tuple = ('3')                                     +
+     Item 4: offset = 376, tuple = ('4')                                     +
+     Item 5: deleted, offset = 400, tuple = ('5')                            +
+     Item 6: deleted, offset = 424, tuple = ('6')                            +
+     Item 7: deleted, offset = 448, tuple = ('7')                            +
+     Item 8: deleted, offset = 472, tuple = ('8')                            +
+     Item 9: deleted, offset = 496, tuple = ('9')                            +
+     Item 10: deleted, offset = 520, tuple = ('10')                          +
+     Item 11: deleted, offset = 544, tuple = ('11')                          +
+   Chunk 1: offset = 12, location = 568, hikey location = 72                 +
+     Item 12: deleted, offset = 608, tuple = ('12')                          +
+     Item 13: deleted, offset = 632, tuple = ('13')                          +
+     Item 14: deleted, offset = 656, tuple = ('14')                          +
+     Item 15: deleted, offset = 680, tuple = ('15')                          +
+     Item 16: offset = 704, tuple = ('16')                                   +
+     Item 17: offset = 728, tuple = ('17')                                   +
+     Item 18: offset = 752, tuple = ('18')                                   +
+     Item 19: offset = 776, tuple = ('19')                                   +
+     Item 20: offset = 800, tuple = ('20')                                   +
+     Item 21: offset = 824, tuple = ('105')                                  +
+     Item 22: offset = 848, tuple = ('106')                                  +
+     Item 23: offset = 872, tuple = ('107')                                  +
+     Item 24: offset = 896, tuple = ('108')                                  +
+     Item 25: offset = 920, tuple = ('109')                                  +
+     Item 26: offset = 944, tuple = ('110')                                  +
+     Item 27: offset = 968, tuple = ('111')                                  +
+     Item 28: offset = 992, tuple = ('112')                                  +
+     Item 29: offset = 1016, tuple = ('113')                                 +
+     Item 30: offset = 1040, tuple = ('114')                                 +
+     Item 31: offset = 1064, tuple = ('115')                                 +
+                                                                             +
+ Index o_test_partial_ix5 contents                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 120                       +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: deleted, offset = 304, tuple = ('11')                           +
+     Item 1: deleted, offset = 328, tuple = ('12')                           +
+     Item 2: deleted, offset = 352, tuple = ('13')                           +
+     Item 3: deleted, offset = 376, tuple = ('14')                           +
+     Item 4: deleted, offset = 400, tuple = ('15')                           +
+     Item 5: offset = 424, tuple = ('16')                                    +
+     Item 6: offset = 448, tuple = ('17')                                    +
+     Item 7: offset = 472, tuple = ('18')                                    +
+     Item 8: offset = 496, tuple = ('19')                                    +
+     Item 9: offset = 520, tuple = ('20')                                    +
+     Item 10: offset = 544, tuple = ('105')                                  +
+     Item 11: offset = 568, tuple = ('106')                                  +
+     Item 12: offset = 592, tuple = ('107')                                  +
+     Item 13: offset = 616, tuple = ('108')                                  +
+     Item 14: offset = 640, tuple = ('109')                                  +
+     Item 15: offset = 664, tuple = ('110')                                  +
+     Item 16: offset = 688, tuple = ('111')                                  +
+     Item 17: offset = 712, tuple = ('112')                                  +
+     Item 18: offset = 736, tuple = ('113')                                  +
+     Item 19: offset = 760, tuple = ('114')                                  +
+     Item 20: offset = 784, tuple = ('115')                                  +
+                                                                             +
+ Index o_test_partial_ix8 contents                                           +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 200                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: deleted, offset = 280, tuple = ('5text', '5')                   +
+     Item 1: offset = 320, tuple = ('5text', '105')                          +
+     Item 2: deleted, offset = 360, tuple = ('6text', '6')                   +
+     Item 3: offset = 400, tuple = ('6text', '106')                          +
+     Item 4: deleted, offset = 440, tuple = ('7text', '7')                   +
+     Item 5: offset = 480, tuple = ('7text', '107')                          +
+     Item 6: deleted, offset = 520, tuple = ('8text', '8')                   +
+     Item 7: offset = 560, tuple = ('8text', '108')                          +
+     Item 8: deleted, offset = 600, tuple = ('9text', '9')                   +
+     Item 9: offset = 640, tuple = ('9text', '109')                          +
+                                                                             +
+ Index o_test_partial_ix9 contents                                           +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 200                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: deleted, offset = 280, tuple = ('5text', '5')                   +
+     Item 1: offset = 320, tuple = ('5text', '105')                          +
+     Item 2: deleted, offset = 360, tuple = ('6text', '6')                   +
+     Item 3: offset = 400, tuple = ('6text', '106')                          +
+     Item 4: deleted, offset = 440, tuple = ('7text', '7')                   +
+     Item 5: offset = 480, tuple = ('7text', '107')                          +
+     Item 6: deleted, offset = 520, tuple = ('8text', '8')                   +
+     Item 7: offset = 560, tuple = ('8text', '108')                          +
+     Item 8: deleted, offset = 600, tuple = ('9text', '9')                   +
+     Item 9: offset = 640, tuple = ('9text', '109')                          +
+                                                                             +
+ Index toast: not loaded                                                     +
+ 
+(1 row)
+
+ALTER TABLE o_test_partial DROP CONSTRAINT o_test_partial_pkey;
+EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key > 15;
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index scan of: o_test_partial_ix1
+   Conds: (key > 15)
+(3 rows)
+
+SELECT * FROM o_test_partial WHERE key > 15;
+ key | value  
+-----+--------
+  16 | 16text
+  17 | 17text
+  18 | 18text
+  19 | 19text
+  20 | 20text
+ 105 | 5text
+ 106 | 6text
+ 107 | 7text
+ 108 | 8text
+ 109 | 9text
+ 110 | 10text
+ 111 | 11text
+ 112 | 12text
+ 113 | 13text
+ 114 | 14text
+ 115 | 15text
+(16 rows)
+
+SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
+                                 orioledb_tbl_structure                                  
+-----------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                            +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                    +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                    +
+     Leftmost, Rightmost                                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('(0,2)')          +
+     Item 0: offset = 264, tuple = ('(0,0)', '0', '0text')                              +
+     Item 1: offset = 312, tuple = ('(0,1)', '2', '2text')                              +
+   Chunk 1: offset = 2, location = 360, hikey location = 104, hikey = ('(0,4)')         +
+     Item 2: offset = 368, tuple = ('(0,2)', '3', '3text')                              +
+     Item 3: offset = 416, tuple = ('(0,3)', '4', '4text')                              +
+   Chunk 2: offset = 4, location = 464, hikey location = 112, hikey = ('(0,6)')         +
+     Item 4: offset = 472, tuple = ('(0,4)', '16', '16text')                            +
+     Item 5: offset = 520, tuple = ('(0,5)', '17', '17text')                            +
+   Chunk 3: offset = 6, location = 568, hikey location = 120, hikey = ('(0,8)')         +
+     Item 6: offset = 576, tuple = ('(0,6)', '18', '18text')                            +
+     Item 7: offset = 624, tuple = ('(0,7)', '19', '19text')                            +
+   Chunk 4: offset = 8, location = 672, hikey location = 128, hikey = ('(0,10)')        +
+     Item 8: offset = 680, tuple = ('(0,8)', '20', '20text')                            +
+     Item 9: offset = 728, tuple = ('(0,9)', '105', '5text')                            +
+   Chunk 5: offset = 10, location = 776, hikey location = 136, hikey = ('(0,12)')       +
+     Item 10: offset = 784, tuple = ('(0,10)', '106', '6text')                          +
+     Item 11: offset = 832, tuple = ('(0,11)', '107', '7text')                          +
+   Chunk 6: offset = 12, location = 880, hikey location = 144, hikey = ('(0,14)')       +
+     Item 12: offset = 888, tuple = ('(0,12)', '108', '8text')                          +
+     Item 13: offset = 936, tuple = ('(0,13)', '109', '9text')                          +
+   Chunk 7: offset = 14, location = 984, hikey location = 152, hikey = ('(0,16)')       +
+     Item 14: offset = 992, tuple = ('(0,14)', '110', '10text')                         +
+     Item 15: offset = 1040, tuple = ('(0,15)', '111', '11text')                        +
+   Chunk 8: offset = 16, location = 1088, hikey location = 160, hikey = ('(0,18)')      +
+     Item 16: offset = 1096, tuple = ('(0,16)', '112', '12text')                        +
+     Item 17: offset = 1144, tuple = ('(0,17)', '113', '13text')                        +
+   Chunk 9: offset = 18, location = 1192, hikey location = 168                          +
+     Item 18: offset = 1200, tuple = ('(0,18)', '114', '14text')                        +
+     Item 19: offset = 1248, tuple = ('(0,19)', '115', '15text')                        +
+                                                                                        +
+ Index o_test_partial_ix1 contents                                                      +
+ Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                   +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                    +
+     Leftmost, Rightmost                                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('18', '(0,6)')    +
+     Item 0: offset = 264, tuple = ('16', '(0,4)')                                      +
+     Item 1: offset = 296, tuple = ('17', '(0,5)')                                      +
+   Chunk 1: offset = 2, location = 328, hikey location = 104, hikey = ('20', '(0,8)')   +
+     Item 2: offset = 336, tuple = ('18', '(0,6)')                                      +
+     Item 3: offset = 368, tuple = ('19', '(0,7)')                                      +
+   Chunk 2: offset = 4, location = 400, hikey location = 120, hikey = ('106', '(0,10)') +
+     Item 4: offset = 408, tuple = ('20', '(0,8)')                                      +
+     Item 5: offset = 440, tuple = ('105', '(0,9)')                                     +
+   Chunk 3: offset = 6, location = 472, hikey location = 136, hikey = ('108', '(0,12)') +
+     Item 6: offset = 480, tuple = ('106', '(0,10)')                                    +
+     Item 7: offset = 512, tuple = ('107', '(0,11)')                                    +
+   Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('110', '(0,14)') +
+     Item 8: offset = 552, tuple = ('108', '(0,12)')                                    +
+     Item 9: offset = 584, tuple = ('109', '(0,13)')                                    +
+   Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('112', '(0,16)')+
+     Item 10: offset = 624, tuple = ('110', '(0,14)')                                   +
+     Item 11: offset = 656, tuple = ('111', '(0,15)')                                   +
+   Chunk 6: offset = 12, location = 688, hikey location = 184, hikey = ('114', '(0,18)')+
+     Item 12: offset = 696, tuple = ('112', '(0,16)')                                   +
+     Item 13: offset = 728, tuple = ('113', '(0,17)')                                   +
+   Chunk 7: offset = 14, location = 760, hikey location = 200                           +
+     Item 14: offset = 768, tuple = ('114', '(0,18)')                                   +
+     Item 15: offset = 800, tuple = ('115', '(0,19)')                                   +
+                                                                                        +
+ Index o_test_partial_ix2: not loaded                                                   +
+ Index o_test_partial_ix3: not loaded                                                   +
+ Index o_test_partial_ix4: not loaded                                                   +
+ Index o_test_partial_ix5: not loaded                                                   +
+ Index o_test_partial_ix8: not loaded                                                   +
+ Index o_test_partial_ix9: not loaded                                                   +
+ Index toast: not loaded                                                                +
+ 
+(1 row)
+
+DROP TABLE o_test_partial;
+-- expression index test
+CREATE TABLE o_test_expression
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text
+) USING orioledb;
+CREATE INDEX o_test_expression_ix1 ON o_test_expression ((key * 100));
+CREATE INDEX o_test_expression_ix2 ON o_test_expression (key, (key * 100));
+CREATE INDEX o_test_expression_ix3 ON o_test_expression ((value || 'WOW'));
+CREATE INDEX o_test_expression_ix4
+	ON o_test_expression (value, (value || 'WOW'));
+CREATE INDEX o_test_expression_ix5
+	ON o_test_expression ((key * 1000), value, key, (value || 'WOW2'), key);
+CREATE INDEX o_test_expression_ix6 ON o_test_expression (UPPER(value), key,
+														 LOWER(value));
+CREATE INDEX o_test_expression_ix7
+	ON o_test_expression ((TRUE), key,
+						  ((not ABS(key) = 0) OR (not ABS(key) = 1)));
+CREATE INDEX o_test_expression_ix8
+	ON o_test_expression (boolfunc_test(key));
+ERROR:  Only C and SQL functions are supported in orioledb indices.
+SELECT orioledb_tbl_indices('o_test_expression'::regclass);
+                             orioledb_tbl_indices                             
+------------------------------------------------------------------------------
+ Index o_test_expression_pkey                                                +
+     Index type: primary, unique                                             +
+     Leaf tuple size: 2, non-leaf tuple size: 1                              +
+     Non-leaf tuple fields: key                                              +
+ Index o_test_expression_ix1                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 2, non-leaf tuple size: 2                              +
+     Non-leaf tuple fields: (key * 100), key                                 +
+     Leaf tuple fields: (key * 100), key                                     +
+ Index o_test_expression_ix2                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 2, non-leaf tuple size: 2                              +
+     Non-leaf tuple fields: key, (key * 100)                                 +
+     Leaf tuple fields: key, (key * 100)                                     +
+ Index o_test_expression_ix3                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 2, non-leaf tuple size: 2                              +
+     Non-leaf tuple fields: (value || 'WOW'::text), key                      +
+     Leaf tuple fields: (value || 'WOW'::text), key                          +
+ Index o_test_expression_ix4                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 3, non-leaf tuple size: 3                              +
+     Non-leaf tuple fields: value, (value || 'WOW'::text), key               +
+     Leaf tuple fields: value, (value || 'WOW'::text), key                   +
+ Index o_test_expression_ix5                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 4, non-leaf tuple size: 4                              +
+     Non-leaf tuple fields: (key * 1000), value, key, (value || 'WOW2'::text)+
+     Leaf tuple fields: (key * 1000), value, key, (value || 'WOW2'::text)    +
+ Index o_test_expression_ix6                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 3, non-leaf tuple size: 3                              +
+     Non-leaf tuple fields: upper(value), key, lower(value)                  +
+     Leaf tuple fields: upper(value), key, lower(value)                      +
+ Index o_test_expression_ix7                                                 +
+     Index type: secondary                                                   +
+     Leaf tuple size: 3, non-leaf tuple size: 3                              +
+     Non-leaf tuple fields: true, key, ((abs(key) <> 0) OR (abs(key) <> 1))  +
+     Leaf tuple fields: true, key, ((abs(key) <> 0) OR (abs(key) <> 1))      +
+ 
+(1 row)
+
+INSERT INTO o_test_expression (SELECT id, id || 'text'
+								FROM generate_series(0, 20) as id);
+ANALYZE o_test_expression;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+	WHERE (key * 100) BETWEEN 100 AND 1000;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index only scan of: o_test_expression_ix1
+   Conds: ((((key * 100)) >= 100) AND (((key * 100)) <= 1000))
+(3 rows)
+
+SELECT (key * 100) FROM o_test_expression
+	WHERE (key * 100) BETWEEN 100 AND 1000;
+ ?column? 
+----------
+      100
+      200
+      300
+      400
+      500
+      600
+      700
+      800
+      900
+     1000
+(10 rows)
+
+EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
+	WHERE (value || 'WOW') BETWEEN '6' AND '9';
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index scan of: o_test_expression_ix3
+   Conds: (((value || 'WOW'::text) >= '6'::text) AND ((value || 'WOW'::text) <= '9'::text))
+(3 rows)
+
+SELECT (value || 'WOW') FROM o_test_expression
+	WHERE (value || 'WOW') BETWEEN '6' AND '9';
+ ?column? 
+----------
+ 6textWOW
+ 7textWOW
+ 8textWOW
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
+	WHERE UPPER(value) BETWEEN '6' AND '9';
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index scan of: o_test_expression_ix6
+   Conds: ((upper(value) >= '6'::text) AND (upper(value) <= '9'::text))
+(3 rows)
+
+SELECT (value || 'WOW') FROM o_test_expression
+	WHERE UPPER(value) BETWEEN '6' AND '9';
+ ?column? 
+----------
+ 6textWOW
+ 7textWOW
+ 8textWOW
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_test_expression
+	WHERE UPPER(value) BETWEEN '1' AND '9' AND
+		  LOWER(value) BETWEEN '4' AND '7';
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index scan of: o_test_expression_ix6
+   Conds: ((upper(value) >= '1'::text) AND (upper(value) <= '9'::text) AND (lower(value) >= '4'::text) AND (lower(value) <= '7'::text))
+(3 rows)
+
+SELECT * FROM o_test_expression
+	WHERE UPPER(value) BETWEEN '1' AND '9' AND
+		  LOWER(value) BETWEEN '4' AND '7';
+ key | value 
+-----+-------
+   4 | 4text
+   5 | 5text
+   6 | 6text
+(3 rows)
+
+RESET enable_seqscan;
+DELETE FROM o_test_expression WHERE key = 1;
+UPDATE o_test_expression SET key = key + 100 WHERE key BETWEEN 5 AND 15;
+SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
+                                orioledb_tbl_structure                                
+--------------------------------------------------------------------------------------
+ Index o_test_expression_pkey contents                                               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 480                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('8')           +
+     Item 0: offset = 272, tuple = ('0', '0text')                                    +
+     Item 1: deleted, offset = 312, tuple = ('1', '1text')                           +
+     Item 2: offset = 352, tuple = ('2', '2text')                                    +
+     Item 3: offset = 392, tuple = ('3', '3text')                                    +
+     Item 4: offset = 432, tuple = ('4', '4text')                                    +
+     Item 5: deleted, offset = 472, tuple = ('5', '5text')                           +
+     Item 6: deleted, offset = 512, tuple = ('6', '6text')                           +
+     Item 7: deleted, offset = 552, tuple = ('7', '7text')                           +
+   Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')          +
+     Item 8: deleted, offset = 608, tuple = ('8', '8text')                           +
+     Item 9: deleted, offset = 648, tuple = ('9', '9text')                           +
+     Item 10: deleted, offset = 688, tuple = ('10', '10text')                        +
+     Item 11: deleted, offset = 728, tuple = ('11', '11text')                        +
+     Item 12: deleted, offset = 768, tuple = ('12', '12text')                        +
+     Item 13: deleted, offset = 808, tuple = ('13', '13text')                        +
+     Item 14: deleted, offset = 848, tuple = ('14', '14text')                        +
+     Item 15: deleted, offset = 888, tuple = ('15', '15text')                        +
+   Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')        +
+     Item 16: offset = 944, tuple = ('16', '16text')                                 +
+     Item 17: offset = 984, tuple = ('17', '17text')                                 +
+     Item 18: offset = 1024, tuple = ('18', '18text')                                +
+     Item 19: offset = 1064, tuple = ('19', '19text')                                +
+     Item 20: offset = 1104, tuple = ('20', '20text')                                +
+     Item 21: offset = 1144, tuple = ('105', '5text')                                +
+     Item 22: offset = 1184, tuple = ('106', '6text')                                +
+     Item 23: offset = 1224, tuple = ('107', '7text')                                +
+   Chunk 3: offset = 24, location = 1264, hikey location = 96                        +
+     Item 24: offset = 1280, tuple = ('108', '8text')                                +
+     Item 25: offset = 1320, tuple = ('109', '9text')                                +
+     Item 26: offset = 1360, tuple = ('110', '10text')                               +
+     Item 27: offset = 1400, tuple = ('111', '11text')                               +
+     Item 28: offset = 1440, tuple = ('112', '12text')                               +
+     Item 29: offset = 1480, tuple = ('113', '13text')                               +
+     Item 30: offset = 1520, tuple = ('114', '14text')                               +
+     Item 31: offset = 1560, tuple = ('115', '15text')                               +
+                                                                                     +
+ Index o_test_expression_ix1 contents                                                +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 384                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('0', '0')                                        +
+     Item 1: deleted, offset = 352, tuple = ('100', '1')                             +
+     Item 2: offset = 384, tuple = ('200', '2')                                      +
+     Item 3: offset = 416, tuple = ('300', '3')                                      +
+     Item 4: offset = 448, tuple = ('400', '4')                                      +
+     Item 5: deleted, offset = 480, tuple = ('500', '5')                             +
+     Item 6: deleted, offset = 512, tuple = ('600', '6')                             +
+     Item 7: deleted, offset = 544, tuple = ('700', '7')                             +
+     Item 8: deleted, offset = 576, tuple = ('800', '8')                             +
+     Item 9: deleted, offset = 608, tuple = ('900', '9')                             +
+     Item 10: deleted, offset = 640, tuple = ('1000', '10')                          +
+     Item 11: deleted, offset = 672, tuple = ('1100', '11')                          +
+     Item 12: deleted, offset = 704, tuple = ('1200', '12')                          +
+     Item 13: deleted, offset = 736, tuple = ('1300', '13')                          +
+     Item 14: deleted, offset = 768, tuple = ('1400', '14')                          +
+     Item 15: deleted, offset = 800, tuple = ('1500', '15')                          +
+     Item 16: offset = 832, tuple = ('1600', '16')                                   +
+     Item 17: offset = 864, tuple = ('1700', '17')                                   +
+     Item 18: offset = 896, tuple = ('1800', '18')                                   +
+     Item 19: offset = 928, tuple = ('1900', '19')                                   +
+     Item 20: offset = 960, tuple = ('2000', '20')                                   +
+     Item 21: offset = 992, tuple = ('10500', '105')                                 +
+     Item 22: offset = 1024, tuple = ('10600', '106')                                +
+     Item 23: offset = 1056, tuple = ('10700', '107')                                +
+     Item 24: offset = 1088, tuple = ('10800', '108')                                +
+     Item 25: offset = 1120, tuple = ('10900', '109')                                +
+     Item 26: offset = 1152, tuple = ('11000', '110')                                +
+     Item 27: offset = 1184, tuple = ('11100', '111')                                +
+     Item 28: offset = 1216, tuple = ('11200', '112')                                +
+     Item 29: offset = 1248, tuple = ('11300', '113')                                +
+     Item 30: offset = 1280, tuple = ('11400', '114')                                +
+     Item 31: offset = 1312, tuple = ('11500', '115')                                +
+                                                                                     +
+ Index o_test_expression_ix2 contents                                                +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 384                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('0', '0')                                        +
+     Item 1: deleted, offset = 352, tuple = ('1', '100')                             +
+     Item 2: offset = 384, tuple = ('2', '200')                                      +
+     Item 3: offset = 416, tuple = ('3', '300')                                      +
+     Item 4: offset = 448, tuple = ('4', '400')                                      +
+     Item 5: deleted, offset = 480, tuple = ('5', '500')                             +
+     Item 6: deleted, offset = 512, tuple = ('6', '600')                             +
+     Item 7: deleted, offset = 544, tuple = ('7', '700')                             +
+     Item 8: deleted, offset = 576, tuple = ('8', '800')                             +
+     Item 9: deleted, offset = 608, tuple = ('9', '900')                             +
+     Item 10: deleted, offset = 640, tuple = ('10', '1000')                          +
+     Item 11: deleted, offset = 672, tuple = ('11', '1100')                          +
+     Item 12: deleted, offset = 704, tuple = ('12', '1200')                          +
+     Item 13: deleted, offset = 736, tuple = ('13', '1300')                          +
+     Item 14: deleted, offset = 768, tuple = ('14', '1400')                          +
+     Item 15: deleted, offset = 800, tuple = ('15', '1500')                          +
+     Item 16: offset = 832, tuple = ('16', '1600')                                   +
+     Item 17: offset = 864, tuple = ('17', '1700')                                   +
+     Item 18: offset = 896, tuple = ('18', '1800')                                   +
+     Item 19: offset = 928, tuple = ('19', '1900')                                   +
+     Item 20: offset = 960, tuple = ('20', '2000')                                   +
+     Item 21: offset = 992, tuple = ('105', '10500')                                 +
+     Item 22: offset = 1024, tuple = ('106', '10600')                                +
+     Item 23: offset = 1056, tuple = ('107', '10700')                                +
+     Item 24: offset = 1088, tuple = ('108', '10800')                                +
+     Item 25: offset = 1120, tuple = ('109', '10900')                                +
+     Item 26: offset = 1152, tuple = ('110', '11000')                                +
+     Item 27: offset = 1184, tuple = ('111', '11100')                                +
+     Item 28: offset = 1216, tuple = ('112', '11200')                                +
+     Item 29: offset = 1248, tuple = ('113', '11300')                                +
+     Item 30: offset = 1280, tuple = ('114', '11400')                                +
+     Item 31: offset = 1312, tuple = ('115', '11500')                                +
+                                                                                     +
+ Index o_test_expression_ix3 contents                                                +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 576                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('0textWOW', '0')                                 +
+     Item 1: deleted, offset = 368, tuple = ('10textWOW', '10')                      +
+     Item 2: offset = 416, tuple = ('10textWOW', '110')                              +
+     Item 3: deleted, offset = 464, tuple = ('11textWOW', '11')                      +
+     Item 4: offset = 512, tuple = ('11textWOW', '111')                              +
+     Item 5: deleted, offset = 560, tuple = ('12textWOW', '12')                      +
+     Item 6: offset = 608, tuple = ('12textWOW', '112')                              +
+     Item 7: deleted, offset = 656, tuple = ('13textWOW', '13')                      +
+     Item 8: offset = 704, tuple = ('13textWOW', '113')                              +
+     Item 9: deleted, offset = 752, tuple = ('14textWOW', '14')                      +
+     Item 10: offset = 800, tuple = ('14textWOW', '114')                             +
+     Item 11: deleted, offset = 848, tuple = ('15textWOW', '15')                     +
+     Item 12: offset = 896, tuple = ('15textWOW', '115')                             +
+     Item 13: offset = 944, tuple = ('16textWOW', '16')                              +
+     Item 14: offset = 992, tuple = ('17textWOW', '17')                              +
+     Item 15: offset = 1040, tuple = ('18textWOW', '18')                             +
+     Item 16: offset = 1088, tuple = ('19textWOW', '19')                             +
+     Item 17: deleted, offset = 1136, tuple = ('1textWOW', '1')                      +
+     Item 18: offset = 1184, tuple = ('20textWOW', '20')                             +
+     Item 19: offset = 1232, tuple = ('2textWOW', '2')                               +
+     Item 20: offset = 1280, tuple = ('3textWOW', '3')                               +
+     Item 21: offset = 1328, tuple = ('4textWOW', '4')                               +
+     Item 22: deleted, offset = 1376, tuple = ('5textWOW', '5')                      +
+     Item 23: offset = 1424, tuple = ('5textWOW', '105')                             +
+     Item 24: deleted, offset = 1472, tuple = ('6textWOW', '6')                      +
+     Item 25: offset = 1520, tuple = ('6textWOW', '106')                             +
+     Item 26: deleted, offset = 1568, tuple = ('7textWOW', '7')                      +
+     Item 27: offset = 1616, tuple = ('7textWOW', '107')                             +
+     Item 28: deleted, offset = 1664, tuple = ('8textWOW', '8')                      +
+     Item 29: offset = 1712, tuple = ('8textWOW', '108')                             +
+     Item 30: deleted, offset = 1760, tuple = ('9textWOW', '9')                      +
+     Item 31: offset = 1808, tuple = ('9textWOW', '109')                             +
+                                                                                     +
+ Index o_test_expression_ix4 contents                                                +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 624                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('0text', '0textWOW', '0')                        +
+     Item 1: deleted, offset = 368, tuple = ('10text', '10textWOW', '10')            +
+     Item 2: offset = 424, tuple = ('10text', '10textWOW', '110')                    +
+     Item 3: deleted, offset = 480, tuple = ('11text', '11textWOW', '11')            +
+     Item 4: offset = 536, tuple = ('11text', '11textWOW', '111')                    +
+     Item 5: deleted, offset = 592, tuple = ('12text', '12textWOW', '12')            +
+     Item 6: offset = 648, tuple = ('12text', '12textWOW', '112')                    +
+     Item 7: deleted, offset = 704, tuple = ('13text', '13textWOW', '13')            +
+     Item 8: offset = 760, tuple = ('13text', '13textWOW', '113')                    +
+     Item 9: deleted, offset = 816, tuple = ('14text', '14textWOW', '14')            +
+     Item 10: offset = 872, tuple = ('14text', '14textWOW', '114')                   +
+     Item 11: deleted, offset = 928, tuple = ('15text', '15textWOW', '15')           +
+     Item 12: offset = 984, tuple = ('15text', '15textWOW', '115')                   +
+     Item 13: offset = 1040, tuple = ('16text', '16textWOW', '16')                   +
+     Item 14: offset = 1096, tuple = ('17text', '17textWOW', '17')                   +
+     Item 15: offset = 1152, tuple = ('18text', '18textWOW', '18')                   +
+     Item 16: offset = 1208, tuple = ('19text', '19textWOW', '19')                   +
+     Item 17: deleted, offset = 1264, tuple = ('1text', '1textWOW', '1')             +
+     Item 18: offset = 1312, tuple = ('20text', '20textWOW', '20')                   +
+     Item 19: offset = 1368, tuple = ('2text', '2textWOW', '2')                      +
+     Item 20: offset = 1416, tuple = ('3text', '3textWOW', '3')                      +
+     Item 21: offset = 1464, tuple = ('4text', '4textWOW', '4')                      +
+     Item 22: deleted, offset = 1512, tuple = ('5text', '5textWOW', '5')             +
+     Item 23: offset = 1560, tuple = ('5text', '5textWOW', '105')                    +
+     Item 24: deleted, offset = 1608, tuple = ('6text', '6textWOW', '6')             +
+     Item 25: offset = 1656, tuple = ('6text', '6textWOW', '106')                    +
+     Item 26: deleted, offset = 1704, tuple = ('7text', '7textWOW', '7')             +
+     Item 27: offset = 1752, tuple = ('7text', '7textWOW', '107')                    +
+     Item 28: deleted, offset = 1800, tuple = ('8text', '8textWOW', '8')             +
+     Item 29: offset = 1848, tuple = ('8text', '8textWOW', '108')                    +
+     Item 30: deleted, offset = 1896, tuple = ('9text', '9textWOW', '9')             +
+     Item 31: offset = 1944, tuple = ('9text', '9textWOW', '109')                    +
+                                                                                     +
+ Index o_test_expression_ix5 contents                                                +
+ Page 0: level = 0, maxKeyLen = 48, nVacatedBytes = 768                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('0', '0text', '0', '0textWOW2')                  +
+     Item 1: deleted, offset = 384, tuple = ('1000', '1text', '1', '1textWOW2')      +
+     Item 2: offset = 448, tuple = ('2000', '2text', '2', '2textWOW2')               +
+     Item 3: offset = 512, tuple = ('3000', '3text', '3', '3textWOW2')               +
+     Item 4: offset = 576, tuple = ('4000', '4text', '4', '4textWOW2')               +
+     Item 5: deleted, offset = 640, tuple = ('5000', '5text', '5', '5textWOW2')      +
+     Item 6: deleted, offset = 704, tuple = ('6000', '6text', '6', '6textWOW2')      +
+     Item 7: deleted, offset = 768, tuple = ('7000', '7text', '7', '7textWOW2')      +
+     Item 8: deleted, offset = 832, tuple = ('8000', '8text', '8', '8textWOW2')      +
+     Item 9: deleted, offset = 896, tuple = ('9000', '9text', '9', '9textWOW2')      +
+     Item 10: deleted, offset = 960, tuple = ('10000', '10text', '10', '10textWOW2') +
+     Item 11: deleted, offset = 1024, tuple = ('11000', '11text', '11', '11textWOW2')+
+     Item 12: deleted, offset = 1088, tuple = ('12000', '12text', '12', '12textWOW2')+
+     Item 13: deleted, offset = 1152, tuple = ('13000', '13text', '13', '13textWOW2')+
+     Item 14: deleted, offset = 1216, tuple = ('14000', '14text', '14', '14textWOW2')+
+     Item 15: deleted, offset = 1280, tuple = ('15000', '15text', '15', '15textWOW2')+
+     Item 16: offset = 1344, tuple = ('16000', '16text', '16', '16textWOW2')         +
+     Item 17: offset = 1408, tuple = ('17000', '17text', '17', '17textWOW2')         +
+     Item 18: offset = 1472, tuple = ('18000', '18text', '18', '18textWOW2')         +
+     Item 19: offset = 1536, tuple = ('19000', '19text', '19', '19textWOW2')         +
+     Item 20: offset = 1600, tuple = ('20000', '20text', '20', '20textWOW2')         +
+     Item 21: offset = 1664, tuple = ('105000', '5text', '105', '5textWOW2')         +
+     Item 22: offset = 1728, tuple = ('106000', '6text', '106', '6textWOW2')         +
+     Item 23: offset = 1792, tuple = ('107000', '7text', '107', '7textWOW2')         +
+     Item 24: offset = 1856, tuple = ('108000', '8text', '108', '8textWOW2')         +
+     Item 25: offset = 1920, tuple = ('109000', '9text', '109', '9textWOW2')         +
+     Item 26: offset = 1984, tuple = ('110000', '10text', '110', '10textWOW2')       +
+     Item 27: offset = 2048, tuple = ('111000', '11text', '111', '11textWOW2')       +
+     Item 28: offset = 2112, tuple = ('112000', '12text', '112', '12textWOW2')       +
+     Item 29: offset = 2176, tuple = ('113000', '13text', '113', '13textWOW2')       +
+     Item 30: offset = 2240, tuple = ('114000', '14text', '114', '14textWOW2')       +
+     Item 31: offset = 2304, tuple = ('115000', '15text', '115', '15textWOW2')       +
+                                                                                     +
+ Index o_test_expression_ix6 contents                                                +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 576                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('0TEXT', '0', '0text')                           +
+     Item 1: deleted, offset = 368, tuple = ('10TEXT', '10', '10text')               +
+     Item 2: offset = 416, tuple = ('10TEXT', '110', '10text')                       +
+     Item 3: deleted, offset = 464, tuple = ('11TEXT', '11', '11text')               +
+     Item 4: offset = 512, tuple = ('11TEXT', '111', '11text')                       +
+     Item 5: deleted, offset = 560, tuple = ('12TEXT', '12', '12text')               +
+     Item 6: offset = 608, tuple = ('12TEXT', '112', '12text')                       +
+     Item 7: deleted, offset = 656, tuple = ('13TEXT', '13', '13text')               +
+     Item 8: offset = 704, tuple = ('13TEXT', '113', '13text')                       +
+     Item 9: deleted, offset = 752, tuple = ('14TEXT', '14', '14text')               +
+     Item 10: offset = 800, tuple = ('14TEXT', '114', '14text')                      +
+     Item 11: deleted, offset = 848, tuple = ('15TEXT', '15', '15text')              +
+     Item 12: offset = 896, tuple = ('15TEXT', '115', '15text')                      +
+     Item 13: offset = 944, tuple = ('16TEXT', '16', '16text')                       +
+     Item 14: offset = 992, tuple = ('17TEXT', '17', '17text')                       +
+     Item 15: offset = 1040, tuple = ('18TEXT', '18', '18text')                      +
+     Item 16: offset = 1088, tuple = ('19TEXT', '19', '19text')                      +
+     Item 17: deleted, offset = 1136, tuple = ('1TEXT', '1', '1text')                +
+     Item 18: offset = 1184, tuple = ('20TEXT', '20', '20text')                      +
+     Item 19: offset = 1232, tuple = ('2TEXT', '2', '2text')                         +
+     Item 20: offset = 1280, tuple = ('3TEXT', '3', '3text')                         +
+     Item 21: offset = 1328, tuple = ('4TEXT', '4', '4text')                         +
+     Item 22: deleted, offset = 1376, tuple = ('5TEXT', '5', '5text')                +
+     Item 23: offset = 1424, tuple = ('5TEXT', '105', '5text')                       +
+     Item 24: deleted, offset = 1472, tuple = ('6TEXT', '6', '6text')                +
+     Item 25: offset = 1520, tuple = ('6TEXT', '106', '6text')                       +
+     Item 26: deleted, offset = 1568, tuple = ('7TEXT', '7', '7text')                +
+     Item 27: offset = 1616, tuple = ('7TEXT', '107', '7text')                       +
+     Item 28: deleted, offset = 1664, tuple = ('8TEXT', '8', '8text')                +
+     Item 29: offset = 1712, tuple = ('8TEXT', '108', '8text')                       +
+     Item 30: deleted, offset = 1760, tuple = ('9TEXT', '9', '9text')                +
+     Item 31: offset = 1808, tuple = ('9TEXT', '109', '9text')                       +
+                                                                                     +
+ Index o_test_expression_ix7 contents                                                +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 480                              +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: offset = 320, tuple = ('t', '0', 't')                                   +
+     Item 1: deleted, offset = 360, tuple = ('t', '1', 't')                          +
+     Item 2: offset = 400, tuple = ('t', '2', 't')                                   +
+     Item 3: offset = 440, tuple = ('t', '3', 't')                                   +
+     Item 4: offset = 480, tuple = ('t', '4', 't')                                   +
+     Item 5: deleted, offset = 520, tuple = ('t', '5', 't')                          +
+     Item 6: deleted, offset = 560, tuple = ('t', '6', 't')                          +
+     Item 7: deleted, offset = 600, tuple = ('t', '7', 't')                          +
+     Item 8: deleted, offset = 640, tuple = ('t', '8', 't')                          +
+     Item 9: deleted, offset = 680, tuple = ('t', '9', 't')                          +
+     Item 10: deleted, offset = 720, tuple = ('t', '10', 't')                        +
+     Item 11: deleted, offset = 760, tuple = ('t', '11', 't')                        +
+     Item 12: deleted, offset = 800, tuple = ('t', '12', 't')                        +
+     Item 13: deleted, offset = 840, tuple = ('t', '13', 't')                        +
+     Item 14: deleted, offset = 880, tuple = ('t', '14', 't')                        +
+     Item 15: deleted, offset = 920, tuple = ('t', '15', 't')                        +
+     Item 16: offset = 960, tuple = ('t', '16', 't')                                 +
+     Item 17: offset = 1000, tuple = ('t', '17', 't')                                +
+     Item 18: offset = 1040, tuple = ('t', '18', 't')                                +
+     Item 19: offset = 1080, tuple = ('t', '19', 't')                                +
+     Item 20: offset = 1120, tuple = ('t', '20', 't')                                +
+     Item 21: offset = 1160, tuple = ('t', '105', 't')                               +
+     Item 22: offset = 1200, tuple = ('t', '106', 't')                               +
+     Item 23: offset = 1240, tuple = ('t', '107', 't')                               +
+     Item 24: offset = 1280, tuple = ('t', '108', 't')                               +
+     Item 25: offset = 1320, tuple = ('t', '109', 't')                               +
+     Item 26: offset = 1360, tuple = ('t', '110', 't')                               +
+     Item 27: offset = 1400, tuple = ('t', '111', 't')                               +
+     Item 28: offset = 1440, tuple = ('t', '112', 't')                               +
+     Item 29: offset = 1480, tuple = ('t', '113', 't')                               +
+     Item 30: offset = 1520, tuple = ('t', '114', 't')                               +
+     Item 31: offset = 1560, tuple = ('t', '115', 't')                               +
+                                                                                     +
+ Index toast: not loaded                                                             +
+ 
+(1 row)
+
+ALTER TABLE o_test_expression DROP CONSTRAINT o_test_expression_pkey;
+ANALYZE o_test_expression;
+SET enable_bitmapscan = off;
+EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+	WHERE (key * 100) BETWEEN 100 AND 1000;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index scan of: o_test_expression_ix1
+   Conds: (((key * 100) >= 100) AND ((key * 100) <= 1000))
+(3 rows)
+
+SELECT (key * 100) FROM o_test_expression
+	WHERE (key * 100) BETWEEN 100 AND 1000;
+ ?column? 
+----------
+      200
+      300
+      400
+(3 rows)
+
+RESET enable_bitmapscan;
+SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
+                                  orioledb_tbl_structure                                   
+-------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                              +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                      +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('(0,2)')            +
+     Item 0: offset = 264, tuple = ('(0,0)', '0', '0text')                                +
+     Item 1: offset = 312, tuple = ('(0,1)', '2', '2text')                                +
+   Chunk 1: offset = 2, location = 360, hikey location = 104, hikey = ('(0,4)')           +
+     Item 2: offset = 368, tuple = ('(0,2)', '3', '3text')                                +
+     Item 3: offset = 416, tuple = ('(0,3)', '4', '4text')                                +
+   Chunk 2: offset = 4, location = 464, hikey location = 112, hikey = ('(0,6)')           +
+     Item 4: offset = 472, tuple = ('(0,4)', '16', '16text')                              +
+     Item 5: offset = 520, tuple = ('(0,5)', '17', '17text')                              +
+   Chunk 3: offset = 6, location = 568, hikey location = 120, hikey = ('(0,8)')           +
+     Item 6: offset = 576, tuple = ('(0,6)', '18', '18text')                              +
+     Item 7: offset = 624, tuple = ('(0,7)', '19', '19text')                              +
+   Chunk 4: offset = 8, location = 672, hikey location = 128, hikey = ('(0,10)')          +
+     Item 8: offset = 680, tuple = ('(0,8)', '20', '20text')                              +
+     Item 9: offset = 728, tuple = ('(0,9)', '105', '5text')                              +
+   Chunk 5: offset = 10, location = 776, hikey location = 136, hikey = ('(0,12)')         +
+     Item 10: offset = 784, tuple = ('(0,10)', '106', '6text')                            +
+     Item 11: offset = 832, tuple = ('(0,11)', '107', '7text')                            +
+   Chunk 6: offset = 12, location = 880, hikey location = 144, hikey = ('(0,14)')         +
+     Item 12: offset = 888, tuple = ('(0,12)', '108', '8text')                            +
+     Item 13: offset = 936, tuple = ('(0,13)', '109', '9text')                            +
+   Chunk 7: offset = 14, location = 984, hikey location = 152, hikey = ('(0,16)')         +
+     Item 14: offset = 992, tuple = ('(0,14)', '110', '10text')                           +
+     Item 15: offset = 1040, tuple = ('(0,15)', '111', '11text')                          +
+   Chunk 8: offset = 16, location = 1088, hikey location = 160, hikey = ('(0,18)')        +
+     Item 16: offset = 1096, tuple = ('(0,16)', '112', '12text')                          +
+     Item 17: offset = 1144, tuple = ('(0,17)', '113', '13text')                          +
+   Chunk 9: offset = 18, location = 1192, hikey location = 168                            +
+     Item 18: offset = 1200, tuple = ('(0,18)', '114', '14text')                          +
+     Item 19: offset = 1248, tuple = ('(0,19)', '115', '15text')                          +
+                                                                                          +
+ Index o_test_expression_ix1 contents                                                     +
+ Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('400', '(0,3)')     +
+     Item 0: offset = 264, tuple = ('0', '(0,0)')                                         +
+     Item 1: offset = 296, tuple = ('200', '(0,1)')                                       +
+     Item 2: offset = 328, tuple = ('300', '(0,2)')                                       +
+   Chunk 1: offset = 3, location = 360, hikey location = 104, hikey = ('1800', '(0,6)')   +
+     Item 3: offset = 368, tuple = ('400', '(0,3)')                                       +
+     Item 4: offset = 400, tuple = ('1600', '(0,4)')                                      +
+     Item 5: offset = 432, tuple = ('1700', '(0,5)')                                      +
+   Chunk 2: offset = 6, location = 464, hikey location = 120, hikey = ('10500', '(0,9)')  +
+     Item 6: offset = 472, tuple = ('1800', '(0,6)')                                      +
+     Item 7: offset = 504, tuple = ('1900', '(0,7)')                                      +
+     Item 8: offset = 536, tuple = ('2000', '(0,8)')                                      +
+   Chunk 3: offset = 9, location = 568, hikey location = 136, hikey = ('10800', '(0,12)') +
+     Item 9: offset = 576, tuple = ('10500', '(0,9)')                                     +
+     Item 10: offset = 608, tuple = ('10600', '(0,10)')                                   +
+     Item 11: offset = 640, tuple = ('10700', '(0,11)')                                   +
+   Chunk 4: offset = 12, location = 672, hikey location = 152, hikey = ('11100', '(0,15)')+
+     Item 12: offset = 680, tuple = ('10800', '(0,12)')                                   +
+     Item 13: offset = 712, tuple = ('10900', '(0,13)')                                   +
+     Item 14: offset = 744, tuple = ('11000', '(0,14)')                                   +
+   Chunk 5: offset = 15, location = 776, hikey location = 168, hikey = ('11400', '(0,18)')+
+     Item 15: offset = 784, tuple = ('11100', '(0,15)')                                   +
+     Item 16: offset = 816, tuple = ('11200', '(0,16)')                                   +
+     Item 17: offset = 848, tuple = ('11300', '(0,17)')                                   +
+   Chunk 6: offset = 18, location = 880, hikey location = 184                             +
+     Item 18: offset = 888, tuple = ('11400', '(0,18)')                                   +
+     Item 19: offset = 920, tuple = ('11500', '(0,19)')                                   +
+                                                                                          +
+ Index o_test_expression_ix2: not loaded                                                  +
+ Index o_test_expression_ix3: not loaded                                                  +
+ Index o_test_expression_ix4: not loaded                                                  +
+ Index o_test_expression_ix5: not loaded                                                  +
+ Index o_test_expression_ix6: not loaded                                                  +
+ Index o_test_expression_ix7: not loaded                                                  +
+ Index toast: not loaded                                                                  +
+ 
+(1 row)
+
+DROP TABLE o_test_expression;
+-- create table with primary key
+CREATE TABLE o_tableam3
+(
+  id integer NOT NULL,
+  PRIMARY KEY (id)
+) USING orioledb;
+SELECT orioledb_tbl_indices('o_tableam3'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_tableam3_pkey                         +
+     Index type: primary, unique               +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: id                 +
+ 
+(1 row)
+
+INSERT INTO o_tableam3 (SELECT id FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam3;
+ id 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+(10 rows)
+
+DROP TABLE o_tableam3;
+CREATE TABLE o_tableam4
+(
+	key int8 NOT NULL,
+	value int8,
+	value2 int8
+) USING orioledb;
+CREATE UNIQUE INDEX o_tableam4_ix1 ON o_tableam4 (key);
+CREATE INDEX o_tableam4_ix2 on o_tableam4 (value);
+SELECT * FROM db_o_tables;
+  relname   |                    description                    
+------------+---------------------------------------------------
+ o_tableam4 |  Column |   Type | Collation | Nullable | Droped +
+            |     key | bigint |    (null) |    false |  false +
+            |   value | bigint |    (null) |     true |  false +
+            |  value2 | bigint |    (null) |     true |  false +
+            | 
+(1 row)
+
+SELECT * FROM db_o_indices;
+    relname     |      name      |                     description                     
+----------------+----------------+-----------------------------------------------------
+ pg_toast_NNN   | toast          |  Column |     Type | Collation | Nullable | Droped +
+                |                |    ctid |      tid |    (null) |    false |  false +
+                |                |  attnum | smallint |    (null) |    false |  false +
+                |                |  offset |  integer |    (null) |    false |  false +
+                |                |    data |    bytea |    (null) |    false |  false +
+                |                |                                                    +
+                |                | Key fields: (ctid, attnum, offset)                 +
+                |                | 
+ o_tableam4     | ctid_primary   |  Column |   Type | Collation | Nullable | Droped   +
+                |                |    ctid |    tid |    (null) |    false |  false   +
+                |                |     key | bigint |    (null) |    false |  false   +
+                |                |   value | bigint |    (null) |     true |  false   +
+                |                |  value2 | bigint |    (null) |     true |  false   +
+                |                |                                                    +
+                |                | Key fields: (ctid)                                 +
+                |                | 
+ o_tableam4_ix1 | o_tableam4_ix1 |  Column |   Type | Collation | Nullable | Droped   +
+                |                |     key | bigint |    (null) |    false |  false   +
+                |                |    ctid |    tid |    (null) |    false |  false   +
+                |                |                                                    +
+                |                | Key fields: (key), ctid                            +
+                |                | 
+ o_tableam4_ix2 | o_tableam4_ix2 |  Column |   Type | Collation | Nullable | Droped   +
+                |                |   value | bigint |    (null) |     true |  false   +
+                |                |    ctid |    tid |    (null) |    false |  false   +
+                |                |                                                    +
+                |                | Key fields: (value, ctid)                          +
+                |                | 
+(4 rows)
+
+SELECT orioledb_tbl_indices('o_tableam4'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_tableam4_ix1                          +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, ctid          +
+     Leaf tuple fields: key, ctid              +
+ Index o_tableam4_ix2                          +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, ctid        +
+     Leaf tuple fields: value, ctid            +
+ 
+(1 row)
+
+INSERT INTO o_tableam4 (SELECT id, id + 1, id + 4 FROM generate_series(1, 10) as id);
+ANALYZE o_tableam4;
+SELECT * FROM o_tableam4;
+ key | value | value2 
+-----+-------+--------
+   1 |     2 |      5
+   2 |     3 |      6
+   3 |     4 |      7
+   4 |     5 |      8
+   5 |     6 |      9
+   6 |     7 |     10
+   7 |     8 |     11
+   8 |     9 |     12
+   9 |    10 |     13
+  10 |    11 |     14
+(10 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam4;
+       QUERY PLAN       
+------------------------
+ Seq Scan on o_tableam4
+(1 row)
+
+SELECT * FROM o_tableam4 WHERE key = 5;
+ key | value | value2 
+-----+-------+--------
+   5 |     6 |      9
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE key = 5;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam4
+   Forward index scan of: o_tableam4_ix1
+   Conds: (key = 5)
+(3 rows)
+
+SET enable_seqscan = off;
+SELECT * FROM o_tableam4 WHERE value = 5;
+ key | value | value2 
+-----+-------+--------
+   4 |     5 |      8
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE value = 5;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam4
+   Forward index scan of: o_tableam4_ix2
+   Conds: (value = 5)
+(3 rows)
+
+RESET enable_seqscan;
+SELECT * FROM o_tableam4 WHERE value2 = 5;
+ key | value | value2 
+-----+-------+--------
+   1 |     2 |      5
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE value2 = 5;
+       QUERY PLAN       
+------------------------
+ Seq Scan on o_tableam4
+   Filter: (value2 = 5)
+(2 rows)
+
+DROP TABLE o_tableam4;
+CREATE TABLE o_tableam5
+(
+	id int8 NOT NULL,
+	val text,
+	val2 text
+) USING orioledb;
+CREATE UNIQUE INDEX o_tableam5_primary ON o_tableam5 (id DESC);
+CREATE INDEX o_tableam5_ix1 ON o_tableam5 (val ASC);
+SELECT orioledb_tbl_indices('o_tableam5'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_tableam5_primary                      +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: id, ctid           +
+     Leaf tuple fields: id, ctid               +
+ Index o_tableam5_ix1                          +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val, ctid          +
+     Leaf tuple fields: val, ctid              +
+ 
+(1 row)
+
+INSERT INTO o_tableam5 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
+ANALYZE o_tableam5;
+SELECT id FROM o_tableam5;
+ id 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+(10 rows)
+
+EXPLAIN (COSTS off) SELECT id FROM o_tableam5;
+       QUERY PLAN       
+------------------------
+ Seq Scan on o_tableam5
+(1 row)
+
+SELECT id FROM o_tableam5 ORDER BY id DESC;
+ id 
+----
+ 10
+  9
+  8
+  7
+  6
+  5
+  4
+  3
+  2
+  1
+(10 rows)
+
+EXPLAIN (COSTS off) SELECT id FROM o_tableam5
+	WHERE id > 0 ORDER BY id DESC;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_tableam5
+   Forward index only scan of: o_tableam5_primary
+   Conds: (id > 0)
+(3 rows)
+
+SELECT id FROM o_tableam5 ORDER BY val;
+ id 
+----
+ 10
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+(10 rows)
+
+SELECT val2 FROM o_tableam5 ORDER BY val;
+  val2   
+---------
+ 10text2
+ 1text2
+ 2text2
+ 3text2
+ 4text2
+ 5text2
+ 6text2
+ 7text2
+ 8text2
+ 9text2
+(10 rows)
+
+-- converts result of SQL query to text becase we can not
+-- get result of EXPLAIN ANALYZE as TEXT in SQL statements
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+	BEGIN
+		RETURN QUERY EXECUTE sql;
+	END $$
+LANGUAGE plpgsql;
+SET enable_seqscan = off;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val2 FROM o_tableam5
+					WHERE val > ''0'' AND val < ''a''
+					ORDER BY val;') as t;
+                                       regexp_replace                                       
+--------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_tableamx  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_tableamx_ixx
+   Conds: ((val > 'x'::text) AND (val < 'a'::text))
+   Primary pages: read=x
+   Secondary index (o_tableamx_ixx) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+DROP TABLE o_tableam5;
+CREATE TABLE o_tableam_delete1
+(
+	id int8 NOT NULL,
+	val text,
+	val2 text,
+	PRIMARY KEY(id)
+) USING orioledb;
+CREATE INDEX o_tableam_delete1_ix ON o_tableam_delete1 (val);
+INSERT INTO o_tableam_delete1 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
+ANALYZE o_tableam_delete1;
+SELECT * FROM db_o_tables;
+      relname      |                    description                    
+-------------------+---------------------------------------------------
+ o_tableam_delete1 |  Column |   Type | Collation | Nullable | Droped +
+                   |      id | bigint |    (null) |    false |  false +
+                   |     val |   text |   default |     true |  false +
+                   |    val2 |   text |   default |     true |  false +
+                   | 
+(1 row)
+
+SELECT * FROM db_o_indices;
+        relname         |          name          |                     description                     
+------------------------+------------------------+-----------------------------------------------------
+ pg_toast_NNN           | toast                  |  Column |     Type | Collation | Nullable | Droped +
+                        |                        |      id |   bigint |    (null) |    false |  false +
+                        |                        |  attnum | smallint |    (null) |    false |  false +
+                        |                        |  offset |  integer |    (null) |    false |  false +
+                        |                        |    data |    bytea |    (null) |    false |  false +
+                        |                        |                                                    +
+                        |                        | Key fields: (id, attnum, offset)                   +
+                        |                        | 
+ o_tableam_delete1_pkey | o_tableam_delete1_pkey |  Column |   Type | Collation | Nullable | Droped   +
+                        |                        |      id | bigint |    (null) |    false |  false   +
+                        |                        |     val |   text |   default |     true |  false   +
+                        |                        |    val2 |   text |   default |     true |  false   +
+                        |                        |                                                    +
+                        |                        | Key fields: (id)                                   +
+                        |                        | 
+ o_tableam_delete1_ix   | o_tableam_delete1_ix   |  Column |   Type | Collation | Nullable | Droped   +
+                        |                        |     val |   text |   default |     true |  false   +
+                        |                        |      id | bigint |    (null) |    false |  false   +
+                        |                        |                                                    +
+                        |                        | Key fields: (val, id)                              +
+                        |                        | 
+(3 rows)
+
+EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE id > 5;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Delete on o_tableam_delete1
+   ->  Custom Scan (o_scan) on o_tableam_delete1
+         Forward index scan of: o_tableam_delete1_pkey
+         Conds: (id > 5)
+(4 rows)
+
+EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE val = '1text' RETURNING *;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Delete on o_tableam_delete1
+   ->  Custom Scan (o_scan) on o_tableam_delete1
+         Forward index scan of: o_tableam_delete1_ix
+         Conds: (val = '1text'::text)
+(4 rows)
+
+EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE val = '2text' RETURNING val;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Delete on o_tableam_delete1
+   ->  Custom Scan (o_scan) on o_tableam_delete1
+         Forward index scan of: o_tableam_delete1_ix
+         Conds: (val = '2text'::text)
+(4 rows)
+
+DELETE FROM o_tableam_delete1 WHERE id > 5;
+DELETE FROM o_tableam_delete1 WHERE val = '1text' RETURNING *;
+ id |  val  |  val2  
+----+-------+--------
+  1 | 1text | 1text2
+(1 row)
+
+DELETE FROM o_tableam_delete1 WHERE val = '2text' RETURNING val;
+  val  
+-------
+ 2text
+(1 row)
+
+SELECT * FROM o_tableam_delete1;
+ id |  val  |  val2  
+----+-------+--------
+  3 | 3text | 3text2
+  4 | 4text | 4text2
+  5 | 5text | 5text2
+(3 rows)
+
+DROP TABLE o_tableam_delete1;
+CREATE TABLE o_tableam_update1
+(
+	id int8 NOT NULL,
+	val text,
+	val2 text,
+	PRIMARY KEY(id)
+) USING orioledb;
+CREATE INDEX o_tableam_update1_ix ON o_tableam_update1 (val);
+INSERT INTO o_tableam_update1 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
+ANALYZE o_tableam_update1;
+EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Update on o_tableam_update1
+   ->  Custom Scan (o_scan) on o_tableam_update1
+         Forward index scan of: o_tableam_update1_pkey
+         Conds: (id > 5)
+(4 rows)
+
+EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text' RETURNING *;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Update on o_tableam_update1
+   ->  Custom Scan (o_scan) on o_tableam_update1
+         Forward index scan of: o_tableam_update1_ix
+         Conds: (val = '1text'::text)
+(4 rows)
+
+EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '2text' RETURNING val;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Update on o_tableam_update1
+   ->  Custom Scan (o_scan) on o_tableam_update1
+         Forward index scan of: o_tableam_update1_ix
+         Conds: (val = '2text'::text)
+(4 rows)
+
+UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
+UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text' RETURNING *;
+ id  |  val  |  val2  
+-----+-------+--------
+ 101 | 1text | 1text2
+(1 row)
+
+UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '2text' RETURNING val;
+  val  
+-------
+ 2text
+(1 row)
+
+SELECT * FROM o_tableam_update1;
+ id  |  val   |  val2   
+-----+--------+---------
+   3 | 3text  | 3text2
+   4 | 4text  | 4text2
+   5 | 5text  | 5text2
+ 101 | 1text  | 1text2
+ 102 | 2text  | 2text2
+ 106 | 6text  | 6text2
+ 107 | 7text  | 7text2
+ 108 | 8text  | 8text2
+ 109 | 9text  | 9text2
+ 110 | 10text | 10text2
+(10 rows)
+
+DROP TABLE o_tableam_update1;
+RESET enable_seqscan;
+---
+-- Transaction check
+---
+CREATE TABLE o_tableam6
+(
+	id int8 NOT NULL,
+	val text
+) USING orioledb;
+INSERT INTO o_tableam6 (SELECT id, id || 'text' FROM generate_series(1, 10) as id);
+SELECT * FROM db_o_tables;
+  relname   |                    description                    
+------------+---------------------------------------------------
+ o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
+            |      id | bigint |    (null) |    false |  false +
+            |     val |   text |   default |     true |  false +
+            | 
+(1 row)
+
+SELECT * FROM db_o_indices;
+   relname    |     name     |                     description                     
+--------------+--------------+-----------------------------------------------------
+ pg_toast_NNN | toast        |  Column |     Type | Collation | Nullable | Droped +
+              |              |    ctid |      tid |    (null) |    false |  false +
+              |              |  attnum | smallint |    (null) |    false |  false +
+              |              |  offset |  integer |    (null) |    false |  false +
+              |              |    data |    bytea |    (null) |    false |  false +
+              |              |                                                    +
+              |              | Key fields: (ctid, attnum, offset)                 +
+              |              | 
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped   +
+              |              |    ctid |    tid |    (null) |    false |  false   +
+              |              |      id | bigint |    (null) |    false |  false   +
+              |              |     val |   text |   default |     true |  false   +
+              |              |                                                    +
+              |              | Key fields: (ctid)                                 +
+              |              | 
+(2 rows)
+
+SELECT index_type FROM orioledb_index_oids();
+ index_type 
+------------
+ toast
+ primary
+(2 rows)
+
+SELECT * FROM o_tableam6;
+ id |  val   
+----+--------
+  1 | 1text
+  2 | 2text
+  3 | 3text
+  4 | 4text
+  5 | 5text
+  6 | 6text
+  7 | 7text
+  8 | 8text
+  9 | 9text
+ 10 | 10text
+(10 rows)
+
+BEGIN;
+DROP TABLE o_tableam6;
+ROLLBACK;
+SELECT * FROM db_o_tables;
+  relname   |                    description                    
+------------+---------------------------------------------------
+ o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
+            |      id | bigint |    (null) |    false |  false +
+            |     val |   text |   default |     true |  false +
+            | 
+(1 row)
+
+SELECT * FROM db_o_indices;
+   relname    |     name     |                     description                     
+--------------+--------------+-----------------------------------------------------
+ pg_toast_NNN | toast        |  Column |     Type | Collation | Nullable | Droped +
+              |              |    ctid |      tid |    (null) |    false |  false +
+              |              |  attnum | smallint |    (null) |    false |  false +
+              |              |  offset |  integer |    (null) |    false |  false +
+              |              |    data |    bytea |    (null) |    false |  false +
+              |              |                                                    +
+              |              | Key fields: (ctid, attnum, offset)                 +
+              |              | 
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped   +
+              |              |    ctid |    tid |    (null) |    false |  false   +
+              |              |      id | bigint |    (null) |    false |  false   +
+              |              |     val |   text |   default |     true |  false   +
+              |              |                                                    +
+              |              | Key fields: (ctid)                                 +
+              |              | 
+(2 rows)
+
+SELECT index_type FROM orioledb_index_oids();
+ index_type 
+------------
+ toast
+ primary
+(2 rows)
+
+SELECT * FROM o_tableam6;
+ id |  val   
+----+--------
+  1 | 1text
+  2 | 2text
+  3 | 3text
+  4 | 4text
+  5 | 5text
+  6 | 6text
+  7 | 7text
+  8 | 8text
+  9 | 9text
+ 10 | 10text
+(10 rows)
+
+BEGIN;
+TRUNCATE o_tableam6;
+ROLLBACK;
+SELECT * FROM o_tableam6;
+ id |  val   
+----+--------
+  1 | 1text
+  2 | 2text
+  3 | 3text
+  4 | 4text
+  5 | 5text
+  6 | 6text
+  7 | 7text
+  8 | 8text
+  9 | 9text
+ 10 | 10text
+(10 rows)
+
+BEGIN;
+CREATE TABLE o_tableam6a
+(
+	id int8 NOT NULL,
+	val text
+) USING orioledb;
+ROLLBACK;
+SELECT * FROM db_o_tables;
+  relname   |                    description                    
+------------+---------------------------------------------------
+ o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
+            |      id | bigint |    (null) |    false |  false +
+            |     val |   text |   default |     true |  false +
+            | 
+(1 row)
+
+SELECT * FROM db_o_indices;
+   relname    |     name     |                     description                     
+--------------+--------------+-----------------------------------------------------
+ pg_toast_NNN | toast        |  Column |     Type | Collation | Nullable | Droped +
+              |              |    ctid |      tid |    (null) |    false |  false +
+              |              |  attnum | smallint |    (null) |    false |  false +
+              |              |  offset |  integer |    (null) |    false |  false +
+              |              |    data |    bytea |    (null) |    false |  false +
+              |              |                                                    +
+              |              | Key fields: (ctid, attnum, offset)                 +
+              |              | 
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped   +
+              |              |    ctid |    tid |    (null) |    false |  false   +
+              |              |      id | bigint |    (null) |    false |  false   +
+              |              |     val |   text |   default |     true |  false   +
+              |              |                                                    +
+              |              | Key fields: (ctid)                                 +
+              |              | 
+(2 rows)
+
+SELECT index_type FROM orioledb_index_oids();
+ index_type 
+------------
+ toast
+ primary
+(2 rows)
+
+BEGIN;
+CREATE TABLE o_tableam6a
+(
+	id int8 NOT NULL,
+	val text
+) USING orioledb;
+INSERT INTO o_tableam6a (SELECT id, id || 'text' FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam6a;
+ id |  val   
+----+--------
+  1 | 1text
+  2 | 2text
+  3 | 3text
+  4 | 4text
+  5 | 5text
+  6 | 6text
+  7 | 7text
+  8 | 8text
+  9 | 9text
+ 10 | 10text
+(10 rows)
+
+TRUNCATE TABLE o_tableam6a;
+SELECT * FROM o_tableam6a;
+ id | val 
+----+-----
+(0 rows)
+
+ROLLBACK;
+SELECT * FROM db_o_tables;
+  relname   |                    description                    
+------------+---------------------------------------------------
+ o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
+            |      id | bigint |    (null) |    false |  false +
+            |     val |   text |   default |     true |  false +
+            | 
+(1 row)
+
+SELECT * FROM db_o_indices;
+   relname    |     name     |                     description                     
+--------------+--------------+-----------------------------------------------------
+ pg_toast_NNN | toast        |  Column |     Type | Collation | Nullable | Droped +
+              |              |    ctid |      tid |    (null) |    false |  false +
+              |              |  attnum | smallint |    (null) |    false |  false +
+              |              |  offset |  integer |    (null) |    false |  false +
+              |              |    data |    bytea |    (null) |    false |  false +
+              |              |                                                    +
+              |              | Key fields: (ctid, attnum, offset)                 +
+              |              | 
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped   +
+              |              |    ctid |    tid |    (null) |    false |  false   +
+              |              |      id | bigint |    (null) |    false |  false   +
+              |              |     val |   text |   default |     true |  false   +
+              |              |                                                    +
+              |              | Key fields: (ctid)                                 +
+              |              | 
+(2 rows)
+
+SELECT index_type FROM orioledb_index_oids();
+ index_type 
+------------
+ toast
+ primary
+(2 rows)
+
+BEGIN;
+CREATE TABLE o_tableam6a
+(
+	id int8 NOT NULL,
+	val text
+) USING orioledb;
+INSERT INTO o_tableam6a (SELECT id, id || 'text' FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam6a;
+ id |  val   
+----+--------
+  1 | 1text
+  2 | 2text
+  3 | 3text
+  4 | 4text
+  5 | 5text
+  6 | 6text
+  7 | 7text
+  8 | 8text
+  9 | 9text
+ 10 | 10text
+(10 rows)
+
+TRUNCATE TABLE o_tableam6a;
+COMMIT;
+SELECT * FROM db_o_tables;
+   relname   |                    description                    
+-------------+---------------------------------------------------
+ o_tableam6  |  Column |   Type | Collation | Nullable | Droped +
+             |      id | bigint |    (null) |    false |  false +
+             |     val |   text |   default |     true |  false +
+             | 
+ o_tableam6a |  Column |   Type | Collation | Nullable | Droped +
+             |      id | bigint |    (null) |    false |  false +
+             |     val |   text |   default |     true |  false +
+             | 
+(2 rows)
+
+SELECT * FROM db_o_indices;
+   relname    |     name     |                     description                     
+--------------+--------------+-----------------------------------------------------
+ pg_toast_NNN | toast        |  Column |     Type | Collation | Nullable | Droped +
+              |              |    ctid |      tid |    (null) |    false |  false +
+              |              |  attnum | smallint |    (null) |    false |  false +
+              |              |  offset |  integer |    (null) |    false |  false +
+              |              |    data |    bytea |    (null) |    false |  false +
+              |              |                                                    +
+              |              | Key fields: (ctid, attnum, offset)                 +
+              |              | 
+ pg_toast_NNN | toast        |  Column |     Type | Collation | Nullable | Droped +
+              |              |    ctid |      tid |    (null) |    false |  false +
+              |              |  attnum | smallint |    (null) |    false |  false +
+              |              |  offset |  integer |    (null) |    false |  false +
+              |              |    data |    bytea |    (null) |    false |  false +
+              |              |                                                    +
+              |              | Key fields: (ctid, attnum, offset)                 +
+              |              | 
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped   +
+              |              |    ctid |    tid |    (null) |    false |  false   +
+              |              |      id | bigint |    (null) |    false |  false   +
+              |              |     val |   text |   default |     true |  false   +
+              |              |                                                    +
+              |              | Key fields: (ctid)                                 +
+              |              | 
+ o_tableam6a  | ctid_primary |  Column |   Type | Collation | Nullable | Droped   +
+              |              |    ctid |    tid |    (null) |    false |  false   +
+              |              |      id | bigint |    (null) |    false |  false   +
+              |              |     val |   text |   default |     true |  false   +
+              |              |                                                    +
+              |              | Key fields: (ctid)                                 +
+              |              | 
+(4 rows)
+
+SELECT index_type FROM orioledb_index_oids();
+ index_type 
+------------
+ toast
+ toast
+ primary
+ primary
+(4 rows)
+
+INSERT INTO o_tableam6a (SELECT id, id || 'text' FROM generate_series(11, 20) as id);
+SELECT * FROM o_tableam6a;
+ id |  val   
+----+--------
+ 11 | 11text
+ 12 | 12text
+ 13 | 13text
+ 14 | 14text
+ 15 | 15text
+ 16 | 16text
+ 17 | 17text
+ 18 | 18text
+ 19 | 19text
+ 20 | 20text
+(10 rows)
+
+DROP TABLE o_tableam6a;
+SET default_table_access_method = 'orioledb';
+CREATE TABLE o_tableam7
+(
+	id int8 not null,
+	value int8 not null,
+	PRIMARY KEY(id)
+);
+RESET default_table_access_method;
+INSERT INTO o_tableam7 SELECT i, 100 - i FROM generate_series(1, 100, 1) AS i;
+UPDATE o_tableam7 SET id = id - 5 WHERE value < 99;
+ERROR:  duplicate key value violates unique constraint "o_tableam7"
+DETAIL:  Key ('1') already exists
+SELECT * FROM o_tableam7 ORDER BY id;
+ id  | value 
+-----+-------
+   1 |    99
+   2 |    98
+   3 |    97
+   4 |    96
+   5 |    95
+   6 |    94
+   7 |    93
+   8 |    92
+   9 |    91
+  10 |    90
+  11 |    89
+  12 |    88
+  13 |    87
+  14 |    86
+  15 |    85
+  16 |    84
+  17 |    83
+  18 |    82
+  19 |    81
+  20 |    80
+  21 |    79
+  22 |    78
+  23 |    77
+  24 |    76
+  25 |    75
+  26 |    74
+  27 |    73
+  28 |    72
+  29 |    71
+  30 |    70
+  31 |    69
+  32 |    68
+  33 |    67
+  34 |    66
+  35 |    65
+  36 |    64
+  37 |    63
+  38 |    62
+  39 |    61
+  40 |    60
+  41 |    59
+  42 |    58
+  43 |    57
+  44 |    56
+  45 |    55
+  46 |    54
+  47 |    53
+  48 |    52
+  49 |    51
+  50 |    50
+  51 |    49
+  52 |    48
+  53 |    47
+  54 |    46
+  55 |    45
+  56 |    44
+  57 |    43
+  58 |    42
+  59 |    41
+  60 |    40
+  61 |    39
+  62 |    38
+  63 |    37
+  64 |    36
+  65 |    35
+  66 |    34
+  67 |    33
+  68 |    32
+  69 |    31
+  70 |    30
+  71 |    29
+  72 |    28
+  73 |    27
+  74 |    26
+  75 |    25
+  76 |    24
+  77 |    23
+  78 |    22
+  79 |    21
+  80 |    20
+  81 |    19
+  82 |    18
+  83 |    17
+  84 |    16
+  85 |    15
+  86 |    14
+  87 |    13
+  88 |    12
+  89 |    11
+  90 |    10
+  91 |     9
+  92 |     8
+  93 |     7
+  94 |     6
+  95 |     5
+  96 |     4
+  97 |     3
+  98 |     2
+  99 |     1
+ 100 |     0
+(100 rows)
+
+SELECT * FROM o_tableam7 ORDER BY id DESC;
+ id  | value 
+-----+-------
+ 100 |     0
+  99 |     1
+  98 |     2
+  97 |     3
+  96 |     4
+  95 |     5
+  94 |     6
+  93 |     7
+  92 |     8
+  91 |     9
+  90 |    10
+  89 |    11
+  88 |    12
+  87 |    13
+  86 |    14
+  85 |    15
+  84 |    16
+  83 |    17
+  82 |    18
+  81 |    19
+  80 |    20
+  79 |    21
+  78 |    22
+  77 |    23
+  76 |    24
+  75 |    25
+  74 |    26
+  73 |    27
+  72 |    28
+  71 |    29
+  70 |    30
+  69 |    31
+  68 |    32
+  67 |    33
+  66 |    34
+  65 |    35
+  64 |    36
+  63 |    37
+  62 |    38
+  61 |    39
+  60 |    40
+  59 |    41
+  58 |    42
+  57 |    43
+  56 |    44
+  55 |    45
+  54 |    46
+  53 |    47
+  52 |    48
+  51 |    49
+  50 |    50
+  49 |    51
+  48 |    52
+  47 |    53
+  46 |    54
+  45 |    55
+  44 |    56
+  43 |    57
+  42 |    58
+  41 |    59
+  40 |    60
+  39 |    61
+  38 |    62
+  37 |    63
+  36 |    64
+  35 |    65
+  34 |    66
+  33 |    67
+  32 |    68
+  31 |    69
+  30 |    70
+  29 |    71
+  28 |    72
+  27 |    73
+  26 |    74
+  25 |    75
+  24 |    76
+  23 |    77
+  22 |    78
+  21 |    79
+  20 |    80
+  19 |    81
+  18 |    82
+  17 |    83
+  16 |    84
+  15 |    85
+  14 |    86
+  13 |    87
+  12 |    88
+  11 |    89
+  10 |    90
+   9 |    91
+   8 |    92
+   7 |    93
+   6 |    94
+   5 |    95
+   4 |    96
+   3 |    97
+   2 |    98
+   1 |    99
+(100 rows)
+
+UPDATE o_tableam7 SET id = 150 WHERE id = 50;
+SELECT key, value FROM o_tableam7 WHERE id IN (50, 150);
+ERROR:  column "key" does not exist
+LINE 1: SELECT key, value FROM o_tableam7 WHERE id IN (50, 150);
+               ^
+SELECT value FROM o_tableam7 WHERE id = 10;
+ value 
+-------
+    90
+(1 row)
+
+BEGIN;
+UPDATE o_tableam7 SET value = value + 10 WHERE id = 10;
+ROLLBACK;
+SELECT value FROM o_tableam7 WHERE id = 10;
+ value 
+-------
+    90
+(1 row)
+
+BEGIN;
+UPDATE o_tableam7 SET value = value + 10 WHERE id = 10;
+UPDATE o_tableam7 SET value = value + 10 WHERE id = 10;
+ROLLBACK;
+SELECT value FROM o_tableam7 WHERE id = 10;
+ value 
+-------
+    90
+(1 row)
+
+-- Check for parallel scan
+SET min_parallel_table_scan_size = 0;
+TRUNCATE o_tableam7;
+RESET min_parallel_table_scan_size;
+DROP TABLE o_tableam7;
+CREATE TABLE o_tableam8
+(
+	id int4 not null,
+	t text not null,
+	PRIMARY KEY(id)
+) USING orioledb;
+-- Test page split
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(1, 1000, 10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(2, 1000, 10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(999, 1, -10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(998, 1, -10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(7, 1000, 10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(6, 1000, 10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(5, 1000, 10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(993, 1, -10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(994, 1, -10) AS id;
+INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(1000, 1, -10) AS id;
+SELECT (SELECT array_agg(id) FROM o_tableam8) =
+       (SELECT array_agg(id)::int4[] FROM generate_series(1, 1000) as id);
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT (SELECT array_agg(t) FROM o_tableam8) =
+       (SELECT array_agg(repeat('x', id)) FROM generate_series(1, 1000) as id);
+ ?column? 
+----------
+ t
+(1 row)
+
+DROP TABLE o_tableam8;
+CREATE TABLE o_tableam_join1
+(
+	id integer NOT NULL,
+	val text,
+	PRIMARY KEY (id)
+) USING orioledb;
+INSERT INTO o_tableam_join1 (id, val) SELECT i, i||'!' FROM generate_series(1,30,2) AS i;
+DROP TABLE IF EXISTS heap_table;
+CREATE TABLE heap_table (id integer PRIMARY KEY, ids integer[]);
+INSERT INTO heap_table (id, ids)
+SELECT i, ARRAY[ (i*3+1)%30, (i*7+3)%30, (i*11+7)%30 ]
+FROM generate_series(1,100) as i;
+SELECT * FROM o_tableam_join1;
+ id | val 
+----+-----
+  1 | 1!
+  3 | 3!
+  5 | 5!
+  7 | 7!
+  9 | 9!
+ 11 | 11!
+ 13 | 13!
+ 15 | 15!
+ 17 | 17!
+ 19 | 19!
+ 21 | 21!
+ 23 | 23!
+ 25 | 25!
+ 27 | 27!
+ 29 | 29!
+(15 rows)
+
+ANALYZE o_tableam_join1;
+ANALYZE heap_table;
+EXPLAIN (COSTS off) SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
+                    QUERY PLAN                     
+---------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_table.id = o_tableam_join1.id)
+   ->  Seq Scan on heap_table
+   ->  Hash
+         ->  Seq Scan on o_tableam_join1
+(5 rows)
+
+SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
+ id | val 
+----+-----
+  1 | 1!
+  3 | 3!
+  5 | 5!
+  7 | 7!
+  9 | 9!
+ 11 | 11!
+ 13 | 13!
+ 15 | 15!
+ 17 | 17!
+ 19 | 19!
+ 21 | 21!
+ 23 | 23!
+ 25 | 25!
+ 27 | 27!
+ 29 | 29!
+(15 rows)
+
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+EXPLAIN (COSTS off) SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_tableam_join1
+   ->  Index Only Scan using heap_table_pkey on heap_table
+         Index Cond: (id = o_tableam_join1.id)
+(4 rows)
+
+SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
+ id | val 
+----+-----
+  1 | 1!
+  3 | 3!
+  5 | 5!
+  7 | 7!
+  9 | 9!
+ 11 | 11!
+ 13 | 13!
+ 15 | 15!
+ 17 | 17!
+ 19 | 19!
+ 21 | 21!
+ 23 | 23!
+ 25 | 25!
+ 27 | 27!
+ 29 | 29!
+(15 rows)
+
+SET enable_nestloop = off;
+RESET enable_mergejoin;
+EXPLAIN (COSTS off) SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_table.id = o_tableam_join1.id)
+   ->  Index Only Scan using heap_table_pkey on heap_table
+   ->  Sort
+         Sort Key: o_tableam_join1.id
+         ->  Seq Scan on o_tableam_join1
+(6 rows)
+
+SELECT id, val FROM heap_table JOIN o_tableam_join1 USING (id);
+ id | val 
+----+-----
+  1 | 1!
+  3 | 3!
+  5 | 5!
+  7 | 7!
+  9 | 9!
+ 11 | 11!
+ 13 | 13!
+ 15 | 15!
+ 17 | 17!
+ 19 | 19!
+ 21 | 21!
+ 23 | 23!
+ 25 | 25!
+ 27 | 27!
+ 29 | 29!
+(15 rows)
+
+RESET enable_hashjoin;
+RESET enable_nestloop;
+-- Check full join
+EXPLAIN (COSTS off) SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id);
+                    QUERY PLAN                     
+---------------------------------------------------
+ Hash Full Join
+   Hash Cond: (heap_table.id = o_tableam_join1.id)
+   ->  Seq Scan on heap_table
+   ->  Hash
+         ->  Seq Scan on o_tableam_join1
+(5 rows)
+
+SELECT id, val FROM heap_table FULL JOIN o_tableam_join1 USING (id);
+ id  | val 
+-----+-----
+   1 | 1!
+   2 | 
+   3 | 3!
+   4 | 
+   5 | 5!
+   6 | 
+   7 | 7!
+   8 | 
+   9 | 9!
+  10 | 
+  11 | 11!
+  12 | 
+  13 | 13!
+  14 | 
+  15 | 15!
+  16 | 
+  17 | 17!
+  18 | 
+  19 | 19!
+  20 | 
+  21 | 21!
+  22 | 
+  23 | 23!
+  24 | 
+  25 | 25!
+  26 | 
+  27 | 27!
+  28 | 
+  29 | 29!
+  30 | 
+  31 | 
+  32 | 
+  33 | 
+  34 | 
+  35 | 
+  36 | 
+  37 | 
+  38 | 
+  39 | 
+  40 | 
+  41 | 
+  42 | 
+  43 | 
+  44 | 
+  45 | 
+  46 | 
+  47 | 
+  48 | 
+  49 | 
+  50 | 
+  51 | 
+  52 | 
+  53 | 
+  54 | 
+  55 | 
+  56 | 
+  57 | 
+  58 | 
+  59 | 
+  60 | 
+  61 | 
+  62 | 
+  63 | 
+  64 | 
+  65 | 
+  66 | 
+  67 | 
+  68 | 
+  69 | 
+  70 | 
+  71 | 
+  72 | 
+  73 | 
+  74 | 
+  75 | 
+  76 | 
+  77 | 
+  78 | 
+  79 | 
+  80 | 
+  81 | 
+  82 | 
+  83 | 
+  84 | 
+  85 | 
+  86 | 
+  87 | 
+  88 | 
+  89 | 
+  90 | 
+  91 | 
+  92 | 
+  93 | 
+  94 | 
+  95 | 
+  96 | 
+  97 | 
+  98 | 
+  99 | 
+ 100 | 
+(100 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM heap_table
+			     JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids);
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Nested Loop
+   Join Filter: (o_tableam_join1.id = ANY (heap_table.ids))
+   ->  Seq Scan on heap_table
+   ->  Materialize
+         ->  Seq Scan on o_tableam_join1
+(5 rows)
+
+SELECT * FROM heap_table JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids);
+ id  |    ids     | id | val 
+-----+------------+----+-----
+   2 | {7,17,29}  |  7 | 7!
+   2 | {7,17,29}  | 17 | 17!
+   2 | {7,17,29}  | 29 | 29!
+   4 | {13,1,21}  |  1 | 1!
+   4 | {13,1,21}  | 13 | 13!
+   4 | {13,1,21}  | 21 | 21!
+   6 | {19,15,13} | 13 | 13!
+   6 | {19,15,13} | 15 | 15!
+   6 | {19,15,13} | 19 | 19!
+   8 | {25,29,5}  |  5 | 5!
+   8 | {25,29,5}  | 25 | 25!
+   8 | {25,29,5}  | 29 | 29!
+  10 | {1,13,27}  |  1 | 1!
+  10 | {1,13,27}  | 13 | 13!
+  10 | {1,13,27}  | 27 | 27!
+  12 | {7,27,19}  |  7 | 7!
+  12 | {7,27,19}  | 19 | 19!
+  12 | {7,27,19}  | 27 | 27!
+  14 | {13,11,11} | 11 | 11!
+  14 | {13,11,11} | 13 | 13!
+  16 | {19,25,3}  |  3 | 3!
+  16 | {19,25,3}  | 19 | 19!
+  16 | {19,25,3}  | 25 | 25!
+  18 | {25,9,25}  |  9 | 9!
+  18 | {25,9,25}  | 25 | 25!
+  20 | {1,23,17}  |  1 | 1!
+  20 | {1,23,17}  | 17 | 17!
+  20 | {1,23,17}  | 23 | 23!
+  22 | {7,7,9}    |  7 | 7!
+  22 | {7,7,9}    |  9 | 9!
+  24 | {13,21,1}  |  1 | 1!
+  24 | {13,21,1}  | 13 | 13!
+  24 | {13,21,1}  | 21 | 21!
+  26 | {19,5,23}  |  5 | 5!
+  26 | {19,5,23}  | 19 | 19!
+  26 | {19,5,23}  | 23 | 23!
+  28 | {25,19,15} | 15 | 15!
+  28 | {25,19,15} | 19 | 19!
+  28 | {25,19,15} | 25 | 25!
+  30 | {1,3,7}    |  1 | 1!
+  30 | {1,3,7}    |  3 | 3!
+  30 | {1,3,7}    |  7 | 7!
+  32 | {7,17,29}  |  7 | 7!
+  32 | {7,17,29}  | 17 | 17!
+  32 | {7,17,29}  | 29 | 29!
+  34 | {13,1,21}  |  1 | 1!
+  34 | {13,1,21}  | 13 | 13!
+  34 | {13,1,21}  | 21 | 21!
+  36 | {19,15,13} | 13 | 13!
+  36 | {19,15,13} | 15 | 15!
+  36 | {19,15,13} | 19 | 19!
+  38 | {25,29,5}  |  5 | 5!
+  38 | {25,29,5}  | 25 | 25!
+  38 | {25,29,5}  | 29 | 29!
+  40 | {1,13,27}  |  1 | 1!
+  40 | {1,13,27}  | 13 | 13!
+  40 | {1,13,27}  | 27 | 27!
+  42 | {7,27,19}  |  7 | 7!
+  42 | {7,27,19}  | 19 | 19!
+  42 | {7,27,19}  | 27 | 27!
+  44 | {13,11,11} | 11 | 11!
+  44 | {13,11,11} | 13 | 13!
+  46 | {19,25,3}  |  3 | 3!
+  46 | {19,25,3}  | 19 | 19!
+  46 | {19,25,3}  | 25 | 25!
+  48 | {25,9,25}  |  9 | 9!
+  48 | {25,9,25}  | 25 | 25!
+  50 | {1,23,17}  |  1 | 1!
+  50 | {1,23,17}  | 17 | 17!
+  50 | {1,23,17}  | 23 | 23!
+  52 | {7,7,9}    |  7 | 7!
+  52 | {7,7,9}    |  9 | 9!
+  54 | {13,21,1}  |  1 | 1!
+  54 | {13,21,1}  | 13 | 13!
+  54 | {13,21,1}  | 21 | 21!
+  56 | {19,5,23}  |  5 | 5!
+  56 | {19,5,23}  | 19 | 19!
+  56 | {19,5,23}  | 23 | 23!
+  58 | {25,19,15} | 15 | 15!
+  58 | {25,19,15} | 19 | 19!
+  58 | {25,19,15} | 25 | 25!
+  60 | {1,3,7}    |  1 | 1!
+  60 | {1,3,7}    |  3 | 3!
+  60 | {1,3,7}    |  7 | 7!
+  62 | {7,17,29}  |  7 | 7!
+  62 | {7,17,29}  | 17 | 17!
+  62 | {7,17,29}  | 29 | 29!
+  64 | {13,1,21}  |  1 | 1!
+  64 | {13,1,21}  | 13 | 13!
+  64 | {13,1,21}  | 21 | 21!
+  66 | {19,15,13} | 13 | 13!
+  66 | {19,15,13} | 15 | 15!
+  66 | {19,15,13} | 19 | 19!
+  68 | {25,29,5}  |  5 | 5!
+  68 | {25,29,5}  | 25 | 25!
+  68 | {25,29,5}  | 29 | 29!
+  70 | {1,13,27}  |  1 | 1!
+  70 | {1,13,27}  | 13 | 13!
+  70 | {1,13,27}  | 27 | 27!
+  72 | {7,27,19}  |  7 | 7!
+  72 | {7,27,19}  | 19 | 19!
+  72 | {7,27,19}  | 27 | 27!
+  74 | {13,11,11} | 11 | 11!
+  74 | {13,11,11} | 13 | 13!
+  76 | {19,25,3}  |  3 | 3!
+  76 | {19,25,3}  | 19 | 19!
+  76 | {19,25,3}  | 25 | 25!
+  78 | {25,9,25}  |  9 | 9!
+  78 | {25,9,25}  | 25 | 25!
+  80 | {1,23,17}  |  1 | 1!
+  80 | {1,23,17}  | 17 | 17!
+  80 | {1,23,17}  | 23 | 23!
+  82 | {7,7,9}    |  7 | 7!
+  82 | {7,7,9}    |  9 | 9!
+  84 | {13,21,1}  |  1 | 1!
+  84 | {13,21,1}  | 13 | 13!
+  84 | {13,21,1}  | 21 | 21!
+  86 | {19,5,23}  |  5 | 5!
+  86 | {19,5,23}  | 19 | 19!
+  86 | {19,5,23}  | 23 | 23!
+  88 | {25,19,15} | 15 | 15!
+  88 | {25,19,15} | 19 | 19!
+  88 | {25,19,15} | 25 | 25!
+  90 | {1,3,7}    |  1 | 1!
+  90 | {1,3,7}    |  3 | 3!
+  90 | {1,3,7}    |  7 | 7!
+  92 | {7,17,29}  |  7 | 7!
+  92 | {7,17,29}  | 17 | 17!
+  92 | {7,17,29}  | 29 | 29!
+  94 | {13,1,21}  |  1 | 1!
+  94 | {13,1,21}  | 13 | 13!
+  94 | {13,1,21}  | 21 | 21!
+  96 | {19,15,13} | 13 | 13!
+  96 | {19,15,13} | 15 | 15!
+  96 | {19,15,13} | 19 | 19!
+  98 | {25,29,5}  |  5 | 5!
+  98 | {25,29,5}  | 25 | 25!
+  98 | {25,29,5}  | 29 | 29!
+ 100 | {1,13,27}  |  1 | 1!
+ 100 | {1,13,27}  | 13 | 13!
+ 100 | {1,13,27}  | 27 | 27!
+(141 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM heap_table
+                             JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids)
+			     WHERE o_tableam_join1.id < 20;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Nested Loop
+   Join Filter: (o_tableam_join1.id = ANY (heap_table.ids))
+   ->  Seq Scan on heap_table
+   ->  Materialize
+         ->  Custom Scan (o_scan) on o_tableam_join1
+               Forward index scan of: o_tableam_join1_pkey
+               Conds: (id < 20)
+(7 rows)
+
+SELECT * FROM heap_table
+	 JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids)
+	 WHERE o_tableam_join1.id < 23 AND o_tableam_join1.id > 5;
+ id  |    ids     | id | val 
+-----+------------+----+-----
+   2 | {7,17,29}  |  7 | 7!
+   2 | {7,17,29}  | 17 | 17!
+   4 | {13,1,21}  | 13 | 13!
+   4 | {13,1,21}  | 21 | 21!
+   6 | {19,15,13} | 13 | 13!
+   6 | {19,15,13} | 15 | 15!
+   6 | {19,15,13} | 19 | 19!
+  10 | {1,13,27}  | 13 | 13!
+  12 | {7,27,19}  |  7 | 7!
+  12 | {7,27,19}  | 19 | 19!
+  14 | {13,11,11} | 11 | 11!
+  14 | {13,11,11} | 13 | 13!
+  16 | {19,25,3}  | 19 | 19!
+  18 | {25,9,25}  |  9 | 9!
+  20 | {1,23,17}  | 17 | 17!
+  22 | {7,7,9}    |  7 | 7!
+  22 | {7,7,9}    |  9 | 9!
+  24 | {13,21,1}  | 13 | 13!
+  24 | {13,21,1}  | 21 | 21!
+  26 | {19,5,23}  | 19 | 19!
+  28 | {25,19,15} | 15 | 15!
+  28 | {25,19,15} | 19 | 19!
+  30 | {1,3,7}    |  7 | 7!
+  32 | {7,17,29}  |  7 | 7!
+  32 | {7,17,29}  | 17 | 17!
+  34 | {13,1,21}  | 13 | 13!
+  34 | {13,1,21}  | 21 | 21!
+  36 | {19,15,13} | 13 | 13!
+  36 | {19,15,13} | 15 | 15!
+  36 | {19,15,13} | 19 | 19!
+  40 | {1,13,27}  | 13 | 13!
+  42 | {7,27,19}  |  7 | 7!
+  42 | {7,27,19}  | 19 | 19!
+  44 | {13,11,11} | 11 | 11!
+  44 | {13,11,11} | 13 | 13!
+  46 | {19,25,3}  | 19 | 19!
+  48 | {25,9,25}  |  9 | 9!
+  50 | {1,23,17}  | 17 | 17!
+  52 | {7,7,9}    |  7 | 7!
+  52 | {7,7,9}    |  9 | 9!
+  54 | {13,21,1}  | 13 | 13!
+  54 | {13,21,1}  | 21 | 21!
+  56 | {19,5,23}  | 19 | 19!
+  58 | {25,19,15} | 15 | 15!
+  58 | {25,19,15} | 19 | 19!
+  60 | {1,3,7}    |  7 | 7!
+  62 | {7,17,29}  |  7 | 7!
+  62 | {7,17,29}  | 17 | 17!
+  64 | {13,1,21}  | 13 | 13!
+  64 | {13,1,21}  | 21 | 21!
+  66 | {19,15,13} | 13 | 13!
+  66 | {19,15,13} | 15 | 15!
+  66 | {19,15,13} | 19 | 19!
+  70 | {1,13,27}  | 13 | 13!
+  72 | {7,27,19}  |  7 | 7!
+  72 | {7,27,19}  | 19 | 19!
+  74 | {13,11,11} | 11 | 11!
+  74 | {13,11,11} | 13 | 13!
+  76 | {19,25,3}  | 19 | 19!
+  78 | {25,9,25}  |  9 | 9!
+  80 | {1,23,17}  | 17 | 17!
+  82 | {7,7,9}    |  7 | 7!
+  82 | {7,7,9}    |  9 | 9!
+  84 | {13,21,1}  | 13 | 13!
+  84 | {13,21,1}  | 21 | 21!
+  86 | {19,5,23}  | 19 | 19!
+  88 | {25,19,15} | 15 | 15!
+  88 | {25,19,15} | 19 | 19!
+  90 | {1,3,7}    |  7 | 7!
+  92 | {7,17,29}  |  7 | 7!
+  92 | {7,17,29}  | 17 | 17!
+  94 | {13,1,21}  | 13 | 13!
+  94 | {13,1,21}  | 21 | 21!
+  96 | {19,15,13} | 13 | 13!
+  96 | {19,15,13} | 15 | 15!
+  96 | {19,15,13} | 19 | 19!
+ 100 | {1,13,27}  | 13 | 13!
+(77 rows)
+
+CREATE TABLE o_tableam_cte_base
+(
+  id integer NOT NULL,
+  val integer,
+  val2 integer
+) USING orioledb;
+CREATE TABLE o_tableam_cte_primary_idx
+(
+  id integer NOT NULL,
+  val integer,
+  val2 integer,
+  PRIMARY KEY (id)
+) USING orioledb;
+INSERT INTO o_tableam_cte_base (SELECT id, id + 1, id + 4 FROM generate_series(1, 10) as id);
+INSERT INTO o_tableam_cte_primary_idx (SELECT id + 10, id * 2 + 1, id * 2 + 4 FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 |   2 |    5
+  2 |   3 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   6 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_cte_primary_idx;
+ id | val | val2 
+----+-----+------
+ 11 |   3 |    6
+ 12 |   5 |    8
+ 13 |   7 |   10
+ 14 |   9 |   12
+ 15 |  11 |   14
+ 16 |  13 |   16
+ 17 |  15 |   18
+ 18 |  17 |   20
+ 19 |  19 |   22
+ 20 |  21 |   24
+(10 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id
+	WHERE id in (1, 5, 2) RETURNING *
+) INSERT INTO o_tableam_cte_primary_idx (SELECT * FROM src) RETURNING *;
+ id | val | val2 
+----+-----+------
+  1 |   1 |    5
+  2 |   2 |    6
+  5 |   5 |    9
+(3 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 |   1 |    5
+  2 |   2 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   5 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_cte_primary_idx;
+ id | val | val2 
+----+-----+------
+  1 |   1 |    5
+  2 |   2 |    6
+  5 |   5 |    9
+ 11 |   3 |    6
+ 12 |   5 |    8
+ 13 |   7 |   10
+ 14 |   9 |   12
+ 15 |  11 |   14
+ 16 |  13 |   16
+ 17 |  15 |   18
+ 18 |  17 |   20
+ 19 |  19 |   22
+ 20 |  21 |   24
+(13 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id * 100
+	WHERE id in (1, 5, 2) RETURNING *
+) DELETE FROM o_tableam_cte_primary_idx dst
+  WHERE dst.id in (SELECT id FROM src) RETURNING *;
+ id | val | val2 
+----+-----+------
+  1 |   1 |    5
+  2 |   2 |    6
+  5 |   5 |    9
+(3 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 | 100 |    5
+  2 | 200 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 | 500 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_cte_primary_idx;
+ id | val | val2 
+----+-----+------
+ 11 |   3 |    6
+ 12 |   5 |    8
+ 13 |   7 |   10
+ 14 |   9 |   12
+ 15 |  11 |   14
+ 16 |  13 |   16
+ 17 |  15 |   18
+ 18 |  17 |   20
+ 19 |  19 |   22
+ 20 |  21 |   24
+(10 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id * 100
+	WHERE id in (1, 5, 2) RETURNING *
+) UPDATE o_tableam_cte_primary_idx dst
+  SET val = src.val
+  FROM src WHERE dst.id = src.id + 10 RETURNING *;
+ id | val | val2 | id | val | val2 
+----+-----+------+----+-----+------
+ 11 | 100 |    6 |  1 | 100 |    5
+ 12 | 200 |    8 |  2 | 200 |    6
+ 15 | 500 |   14 |  5 | 500 |    9
+(3 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 | 100 |    5
+  2 | 200 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 | 500 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_cte_primary_idx;
+ id | val | val2 
+----+-----+------
+ 11 | 100 |    6
+ 12 | 200 |    8
+ 13 |   7 |   10
+ 14 |   9 |   12
+ 15 | 500 |   14
+ 16 |  13 |   16
+ 17 |  15 |   18
+ 18 |  17 |   20
+ 19 |  19 |   22
+ 20 |  21 |   24
+(10 rows)
+
+CREATE TABLE o_tableam_ctid
+(
+  id integer NOT NULL,
+  val integer
+) USING orioledb;
+INSERT INTO o_tableam_ctid (SELECT id + 5, id * 2 + 1 FROM generate_series(1, 10) as id);
+UPDATE o_tableam_cte_base SET val = id + 1, val2 = id + 4;
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 |   2 |    5
+  2 |   3 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   6 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_ctid;
+ id | val 
+----+-----
+  6 |   3
+  7 |   5
+  8 |   7
+  9 |   9
+ 10 |  11
+ 11 |  13
+ 12 |  15
+ 13 |  17
+ 14 |  19
+ 15 |  21
+(10 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id * 100
+	WHERE id > 5 RETURNING *
+) DELETE FROM o_tableam_ctid dst
+  WHERE dst.id in (SELECT id FROM src) RETURNING *;
+ id | val 
+----+-----
+  6 |   3
+  7 |   5
+  8 |   7
+  9 |   9
+ 10 |  11
+(5 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val  | val2 
+----+------+------
+  1 |    2 |    5
+  2 |    3 |    6
+  3 |    4 |    7
+  4 |    5 |    8
+  5 |    6 |    9
+  6 |  600 |   10
+  7 |  700 |   11
+  8 |  800 |   12
+  9 |  900 |   13
+ 10 | 1000 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_ctid;
+ id | val 
+----+-----
+ 11 |  13
+ 12 |  15
+ 13 |  17
+ 14 |  19
+ 15 |  21
+(5 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id
+	WHERE id > 5 RETURNING *
+) UPDATE o_tableam_ctid dst
+  SET val = src.val
+  FROM src WHERE dst.id = src.id + 5 RETURNING *;
+ id | val | id | val | val2 
+----+-----+----+-----+------
+ 11 |   6 |  6 |   6 |   10
+ 12 |   7 |  7 |   7 |   11
+ 13 |   8 |  8 |   8 |   12
+ 14 |   9 |  9 |   9 |   13
+ 15 |  10 | 10 |  10 |   14
+(5 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 |   2 |    5
+  2 |   3 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   6 |    9
+  6 |   6 |   10
+  7 |   7 |   11
+  8 |   8 |   12
+  9 |   9 |   13
+ 10 |  10 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_ctid;
+ id | val 
+----+-----
+ 11 |   6
+ 12 |   7
+ 13 |   8
+ 14 |   9
+ 15 |  10
+(5 rows)
+
+CREATE TABLE o_tableam_multicolumn_idx
+(
+  id integer NOT NULL,
+  val integer,
+  val2 integer,
+  val3 integer
+) USING orioledb;
+CREATE UNIQUE INDEX o_tableam_multicolumn_idx_ix1 on o_tableam_multicolumn_idx (id, val, val2, val3);
+CREATE UNIQUE INDEX o_tableam_multicolumn_idx_ix2 on o_tableam_multicolumn_idx (val, val3);
+UPDATE o_tableam_cte_base SET val = id + 1, val2 = id + 4;
+INSERT INTO o_tableam_multicolumn_idx (SELECT id + 5, id + 1, id + 2, id + 3 FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 |   2 |    5
+  2 |   3 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   6 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_multicolumn_idx;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |   2 |    3 |    4
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+ 11 |   7 |    8 |    9
+ 12 |   8 |    9 |   10
+ 13 |   9 |   10 |   11
+ 14 |  10 |   11 |   12
+ 15 |  11 |   12 |   13
+(10 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id * 100 RETURNING *
+) DELETE FROM o_tableam_multicolumn_idx dst
+  WHERE dst.id in (SELECT id FROM src) RETURNING *;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |   2 |    3 |    4
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+(5 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val  | val2 
+----+------+------
+  1 |  100 |    5
+  2 |  200 |    6
+  3 |  300 |    7
+  4 |  400 |    8
+  5 |  500 |    9
+  6 |  600 |   10
+  7 |  700 |   11
+  8 |  800 |   12
+  9 |  900 |   13
+ 10 | 1000 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_multicolumn_idx;
+ id | val | val2 | val3 
+----+-----+------+------
+ 11 |   7 |    8 |    9
+ 12 |   8 |    9 |   10
+ 13 |   9 |   10 |   11
+ 14 |  10 |   11 |   12
+ 15 |  11 |   12 |   13
+(5 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id
+	WHERE id < 5 RETURNING *
+) UPDATE o_tableam_multicolumn_idx dst
+  SET val = src.val
+  FROM src
+  WHERE dst.id = src.id + 10 RETURNING dst.*;
+ id | val | val2 | val3 
+----+-----+------+------
+ 11 |   1 |    8 |    9
+ 12 |   2 |    9 |   10
+ 13 |   3 |   10 |   11
+ 14 |   4 |   11 |   12
+(4 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val  | val2 
+----+------+------
+  1 |    1 |    5
+  2 |    2 |    6
+  3 |    3 |    7
+  4 |    4 |    8
+  5 |  500 |    9
+  6 |  600 |   10
+  7 |  700 |   11
+  8 |  800 |   12
+  9 |  900 |   13
+ 10 | 1000 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_multicolumn_idx;
+ id | val | val2 | val3 
+----+-----+------+------
+ 11 |   1 |    8 |    9
+ 12 |   2 |    9 |   10
+ 13 |   3 |   10 |   11
+ 14 |   4 |   11 |   12
+ 15 |  11 |   12 |   13
+(5 rows)
+
+CREATE TABLE o_tableam_multicolumn_same_idx
+(
+  id integer NOT NULL,
+  val integer,
+  val2 integer,
+  val3 integer
+) USING orioledb;
+CREATE UNIQUE INDEX o_tableam_multicolumn_same_idx_ix1 on o_tableam_multicolumn_same_idx (val2, val, val2, val);
+UPDATE o_tableam_cte_base SET val = id + 1, val2 = id + 4;
+INSERT INTO o_tableam_multicolumn_same_idx (SELECT id + 5, id + 1, id + 2, id + 3 FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam_cte_base;
+ id | val | val2 
+----+-----+------
+  1 |   2 |    5
+  2 |   3 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   6 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_multicolumn_same_idx;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |   2 |    3 |    4
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+ 11 |   7 |    8 |    9
+ 12 |   8 |    9 |   10
+ 13 |   9 |   10 |   11
+ 14 |  10 |   11 |   12
+ 15 |  11 |   12 |   13
+(10 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET val = id * 100 RETURNING *
+) DELETE FROM o_tableam_multicolumn_same_idx dst
+  WHERE dst.id in (SELECT id FROM src) RETURNING *;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |   2 |    3 |    4
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+(5 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val  | val2 
+----+------+------
+  1 |  100 |    5
+  2 |  200 |    6
+  3 |  300 |    7
+  4 |  400 |    8
+  5 |  500 |    9
+  6 |  600 |   10
+  7 |  700 |   11
+  8 |  800 |   12
+  9 |  900 |   13
+ 10 | 1000 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_multicolumn_same_idx;
+ id | val | val2 | val3 
+----+-----+------+------
+ 11 |   7 |    8 |    9
+ 12 |   8 |    9 |   10
+ 13 |   9 |   10 |   11
+ 14 |  10 |   11 |   12
+ 15 |  11 |   12 |   13
+(5 rows)
+
+WITH src AS (
+	UPDATE o_tableam_cte_base SET
+		val = id,
+		val2 = id + 1
+	WHERE id < 5 RETURNING *
+) UPDATE o_tableam_multicolumn_same_idx dst
+  SET val = src.val,
+	  val2 = src.val2,
+	  val3 = src.val2
+  FROM src
+  WHERE dst.id = src.id + 10 RETURNING *;
+ id | val | val2 | val3 | id | val | val2 
+----+-----+------+------+----+-----+------
+ 11 |   1 |    2 |    2 |  1 |   1 |    2
+ 12 |   2 |    3 |    3 |  2 |   2 |    3
+ 13 |   3 |    4 |    4 |  3 |   3 |    4
+ 14 |   4 |    5 |    5 |  4 |   4 |    5
+(4 rows)
+
+SELECT * FROM o_tableam_cte_base;
+ id | val  | val2 
+----+------+------
+  1 |    1 |    2
+  2 |    2 |    3
+  3 |    3 |    4
+  4 |    4 |    5
+  5 |  500 |    9
+  6 |  600 |   10
+  7 |  700 |   11
+  8 |  800 |   12
+  9 |  900 |   13
+ 10 | 1000 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_multicolumn_same_idx;
+ id | val | val2 | val3 
+----+-----+------+------
+ 11 |   1 |    2 |    2
+ 12 |   2 |    3 |    3
+ 13 |   3 |    4 |    4
+ 14 |   4 |    5 |    5
+ 15 |  11 |   12 |   13
+(5 rows)
+
+CREATE TABLE o_tableam_ioc
+(
+	id integer NOT NULL,
+	val integer,
+	PRIMARY KEY(id)
+) USING orioledb;
+INSERT INTO o_tableam_ioc (SELECT id, id + 1 FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam_ioc;
+ id | val 
+----+-----
+  1 |   2
+  2 |   3
+  3 |   4
+  4 |   5
+  5 |   6
+  6 |   7
+  7 |   8
+  8 |   9
+  9 |  10
+ 10 |  11
+(10 rows)
+
+INSERT INTO o_tableam_ioc VALUES (1, 10) ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_tableam_ioc VALUES (1, 11) ON CONFLICT (id) DO NOTHING RETURNING *;
+ id | val 
+----+-----
+(0 rows)
+
+INSERT INTO o_tableam_ioc VALUES (11, 12) ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_tableam_ioc VALUES (12, 13) ON CONFLICT (id) DO NOTHING RETURNING *;
+ id | val 
+----+-----
+ 12 |  13
+(1 row)
+
+SELECT * FROM o_tableam_ioc;
+ id | val 
+----+-----
+  1 |   2
+  2 |   3
+  3 |   4
+  4 |   5
+  5 |   6
+  6 |   7
+  7 |   8
+  8 |   9
+  9 |  10
+ 10 |  11
+ 11 |  12
+ 12 |  13
+(12 rows)
+
+INSERT INTO o_tableam_ioc VALUES (1, 14) ON CONFLICT (id) DO UPDATE SET id = 13;
+INSERT INTO o_tableam_ioc VALUES (1, 15) ON CONFLICT (id) DO UPDATE SET id = 14 RETURNING *;
+ id | val 
+----+-----
+  1 |  15
+(1 row)
+
+INSERT INTO o_tableam_ioc VALUES (1, 16) ON CONFLICT (id) DO UPDATE SET id = 14 RETURNING *;
+ id | val 
+----+-----
+ 14 |  15
+(1 row)
+
+SELECT * FROM o_tableam_ioc;
+ id | val 
+----+-----
+  2 |   3
+  3 |   4
+  4 |   5
+  5 |   6
+  6 |   7
+  7 |   8
+  8 |   9
+  9 |  10
+ 10 |  11
+ 11 |  12
+ 12 |  13
+ 13 |   2
+ 14 |  15
+(13 rows)
+
+CREATE TABLE o_tableam_explain_1
+(
+  id integer NOT NULL,
+  val integer,
+  val2 integer
+) USING orioledb;
+CREATE TABLE o_tableam_explain_2
+(
+  id integer NOT NULL,
+  val integer,
+  val2 integer,
+  val3 integer,
+  PRIMARY KEY(id)
+) USING orioledb;
+INSERT INTO o_tableam_explain_1 (SELECT id, id + 1, id + 4 FROM generate_series(1, 10) as id);
+INSERT INTO o_tableam_explain_2 (SELECT id + 5, id + 1, id + 2, id + 3 FROM generate_series(1, 10) as id);
+SELECT * FROM o_tableam_explain_1;
+ id | val | val2 
+----+-----+------
+  1 |   2 |    5
+  2 |   3 |    6
+  3 |   4 |    7
+  4 |   5 |    8
+  5 |   6 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_explain_2;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |   2 |    3 |    4
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+ 11 |   7 |    8 |    9
+ 12 |   8 |    9 |   10
+ 13 |   9 |   10 |   11
+ 14 |  10 |   11 |   12
+ 15 |  11 |   12 |   13
+(10 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+	INSERT INTO o_tableam_explain_2 VALUES (6, 12, 13, 14)
+	ON CONFLICT (id) DO UPDATE
+	SET val = 14, val2 = 13, val3 = 12;') as t;
+                                    regexp_replace                                     
+---------------------------------------------------------------------------------------
+ Insert on o_tableam_explain_x  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: o_tableam_explain_x_pkey
+   Tuples Inserted: x
+   Conflicting Tuples: x
+   ->  Result  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+SELECT * FROM o_tableam_explain_2;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |  14 |   13 |   12
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+ 11 |   7 |    8 |    9
+ 12 |   8 |    9 |   10
+ 13 |   9 |   10 |   11
+ 14 |  10 |   11 |   12
+ 15 |  11 |   12 |   13
+(10 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) WITH src AS (
+	UPDATE o_tableam_explain_1 SET
+		val = id,
+		val2 = id + 1
+	WHERE id < 5 RETURNING *
+) UPDATE o_tableam_explain_2 dst
+  SET val = src.val,
+	  val2 = src.val2,
+	  val3 = src.val2
+  FROM src
+  WHERE dst.id = src.id + 10 RETURNING *;') as t;
+                                                regexp_replace                                                 
+---------------------------------------------------------------------------------------------------------------
+ Update on o_tableam_explain_x dst  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   CTE src
+     ->  Update on o_tableam_explain_x  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+           ->  Seq Scan on o_tableam_explain_x  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+                 Filter: (id < x)
+                 Rows Removed by Filter: x
+   ->  Hash Join  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Hash Cond: ((srcxid + x) = dstxid)
+         ->  CTE Scan on src  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         ->  Hash  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+               Buckets: x  Batches: x  Memory Usage: xkB
+               ->  Seq Scan on o_tableam_explain_x dst  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(16 rows)
+
+SELECT * FROM o_tableam_explain_1;
+ id | val | val2 
+----+-----+------
+  1 |   1 |    2
+  2 |   2 |    3
+  3 |   3 |    4
+  4 |   4 |    5
+  5 |   6 |    9
+  6 |   7 |   10
+  7 |   8 |   11
+  8 |   9 |   12
+  9 |  10 |   13
+ 10 |  11 |   14
+(10 rows)
+
+SELECT * FROM o_tableam_explain_2;
+ id | val | val2 | val3 
+----+-----+------+------
+  6 |  14 |   13 |   12
+  7 |   3 |    4 |    5
+  8 |   4 |    5 |    6
+  9 |   5 |    6 |    7
+ 10 |   6 |    7 |    8
+ 11 |   1 |    2 |    2
+ 12 |   2 |    3 |    3
+ 13 |   3 |    4 |    4
+ 14 |   4 |    5 |    5
+ 15 |  11 |   12 |   13
+(10 rows)
+
+-- Check snapshot deregistering
+CREATE TABLE o_tableam_snapshot_check (
+	t text PRIMARY KEY,
+	cnt int)
+USING orioledb;
+WITH inserted AS (
+	INSERT INTO o_tableam_snapshot_check (
+		SELECT t, COUNT(*)
+		FROM (
+			SELECT ID, 'abcdef' || (ID % 100) t
+			FROM generate_series(1,100) ID) tmp
+			GROUP BY t) returning *)
+SELECT substr(t, 6) FROM inserted; 
+ substr 
+--------
+ f36
+ f63
+ f87
+ f20
+ f62
+ f70
+ f61
+ f89
+ f22
+ f6
+ f67
+ f11
+ f76
+ f2
+ f35
+ f81
+ f9
+ f97
+ f27
+ f13
+ f18
+ f57
+ f74
+ f68
+ f58
+ f14
+ f21
+ f23
+ f85
+ f38
+ f54
+ f7
+ f83
+ f51
+ f19
+ f45
+ f99
+ f53
+ f31
+ f79
+ f44
+ f86
+ f17
+ f34
+ f3
+ f96
+ f82
+ f29
+ f66
+ f90
+ f52
+ f26
+ f16
+ f92
+ f60
+ f64
+ f94
+ f91
+ f71
+ f65
+ f33
+ f73
+ f98
+ f30
+ f28
+ f43
+ f42
+ f49
+ f15
+ f93
+ f32
+ f50
+ f84
+ f77
+ f59
+ f88
+ f72
+ f46
+ f12
+ f0
+ f47
+ f8
+ f80
+ f1
+ f69
+ f40
+ f41
+ f39
+ f5
+ f4
+ f37
+ f24
+ f95
+ f75
+ f48
+ f10
+ f56
+ f78
+ f55
+ f25
+(100 rows)
+
+WITH inserted AS (
+	INSERT INTO o_tableam_snapshot_check (
+		SELECT t, COUNT(*)
+		FROM (
+			SELECT ID, 'abcdef' || (ID % 100) t
+			FROM generate_series(1,100) ID) tmp
+			GROUP BY t) returning *)
+SELECT substr(t, 6) FROM inserted; 
+ERROR:  duplicate key value violates unique constraint "o_tableam_snapshot_check"
+DETAIL:  Key ('abcdef36') already exists
+DROP TABLE heap_table;
+DROP EXTENSION orioledb CASCADE;

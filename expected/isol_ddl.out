@@ -1,0 +1,371 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_begin s2_begin s1_drop_null_id1 s2_drop_null_id2 s1_drop_null_id3 s1_commit s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_null_id1: ALTER TABLE o_iso_ddl ALTER id1 DROP NOT NULL;
+step s2_drop_null_id2: ALTER TABLE o_iso_ddl ALTER id2 DROP NOT NULL; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_commit: COMMIT;
+step s2_drop_null_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |     true |  false 
+    id2 | bigint |    (null) |     true |  false 
+    id3 | bigint |    (null) |     true |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_id3 s1_commit s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_id3: ALTER TABLE o_iso_ddl DROP id3;
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+ERROR:  all attributes are dropped.
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |   true 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |   true 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_null_id3 s1_commit s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |   true 
+    id2 | bigint |    (null) |    false |   true 
+    id3 | bigint |    (null) |     true |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_table s2_drop_id2 s1_commit s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_table: DROP TABLE o_iso_ddl;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+ERROR:  relation "o_iso_ddl" does not exist
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+ERROR:  relation "o_iso_ddl" does not exist
+
+starting permutation: s1_begin s2_begin s1_drop_all s2_drop_id2 s1_commit s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+s1: NOTICE:  drop cascades to table o_iso_ddl
+step s1_drop_all: DROP EXTENSION orioledb CASCADE;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+ERROR:  relation "o_iso_ddl" does not exist
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+ERROR:  relation "o_iso_ddl" does not exist
+
+starting permutation: s1_begin s2_begin s1_drop_null_id1 s2_drop_null_id2 s1_drop_null_id3 s1_rollback s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_null_id1: ALTER TABLE o_iso_ddl ALTER id1 DROP NOT NULL;
+step s2_drop_null_id2: ALTER TABLE o_iso_ddl ALTER id2 DROP NOT NULL; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_rollback: ROLLBACK;
+step s2_drop_null_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |     true |  false 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_id3 s1_rollback s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_id3: ALTER TABLE o_iso_ddl DROP id3;
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |   true 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_null_id3 s1_rollback s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |   true 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_table s2_drop_id2 s1_rollback s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_table: DROP TABLE o_iso_ddl;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |   true 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_all s2_drop_id2 s1_rollback s2_commit s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+s1: NOTICE:  drop cascades to table o_iso_ddl
+step s1_drop_all: DROP EXTENSION orioledb CASCADE;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_commit: COMMIT;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |   true 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_null_id1 s2_drop_null_id2 s1_drop_null_id3 s1_commit s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_null_id1: ALTER TABLE o_iso_ddl ALTER id1 DROP NOT NULL;
+step s2_drop_null_id2: ALTER TABLE o_iso_ddl ALTER id2 DROP NOT NULL; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_commit: COMMIT;
+step s2_drop_null_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |     true |  false 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |     true |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_id3 s1_commit s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_id3: ALTER TABLE o_iso_ddl DROP id3;
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+ERROR:  all attributes are dropped.
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |   true 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |   true 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_null_id3 s1_commit s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |   true 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |     true |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_table s2_drop_id2 s1_commit s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_table: DROP TABLE o_iso_ddl;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+ERROR:  relation "o_iso_ddl" does not exist
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+ERROR:  relation "o_iso_ddl" does not exist
+
+starting permutation: s1_begin s2_begin s1_drop_all s2_drop_id2 s1_commit s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+s1: NOTICE:  drop cascades to table o_iso_ddl
+step s1_drop_all: DROP EXTENSION orioledb CASCADE;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_commit: COMMIT;
+step s2_drop_id2: <... completed>
+ERROR:  relation "o_iso_ddl" does not exist
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+ERROR:  relation "o_iso_ddl" does not exist
+
+starting permutation: s1_begin s2_begin s1_drop_null_id1 s2_drop_null_id2 s1_drop_null_id3 s1_rollback s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_null_id1: ALTER TABLE o_iso_ddl ALTER id1 DROP NOT NULL;
+step s2_drop_null_id2: ALTER TABLE o_iso_ddl ALTER id2 DROP NOT NULL; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_rollback: ROLLBACK;
+step s2_drop_null_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_id3 s1_rollback s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_id3: ALTER TABLE o_iso_ddl DROP id3;
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_id1 s2_drop_id2 s1_drop_null_id3 s1_rollback s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_id1: ALTER TABLE o_iso_ddl DROP id1;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_drop_null_id3: ALTER TABLE o_iso_ddl ALTER id3 DROP NOT NULL;
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_table s2_drop_id2 s1_rollback s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_drop_table: DROP TABLE o_iso_ddl;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+
+
+starting permutation: s1_begin s2_begin s1_drop_all s2_drop_id2 s1_rollback s2_rollback s3_descr
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+s1: NOTICE:  drop cascades to table o_iso_ddl
+step s1_drop_all: DROP EXTENSION orioledb CASCADE;
+step s2_drop_id2: ALTER TABLE o_iso_ddl DROP id2; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s2_drop_id2: <... completed>
+step s2_rollback: ROLLBACK;
+step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
+orioledb_table_description                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Column |   Type | Collation | Nullable | Droped 
+    id1 | bigint |    (null) |    false |  false 
+    id2 | bigint |    (null) |    false |  false 
+    id3 | bigint |    (null) |    false |  false 
+
+(1 row)
+

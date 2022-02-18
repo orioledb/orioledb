@@ -1,0 +1,654 @@
+CREATE EXTENSION orioledb;
+CREATE TABLE o_ddl_check
+(
+	f1 text,
+	f2 varchar,
+	f3 integer,
+	PRIMARY KEY(f1)
+) USING orioledb;
+SELECT * FROM o_ddl_check;
+ f1 | f2 | f3 
+----+----+----
+(0 rows)
+
+INSERT INTO o_ddl_check VALUES ('1', NULL, NULL);
+-- Fails because of NULL values
+ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
+ERROR:  column "f2" of relation "o_ddl_check" contains null values
+TRUNCATE o_ddl_check;
+INSERT INTO o_ddl_check VALUES ('1', '2', NULL);
+-- OK
+ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
+DROP TABLE o_ddl_check;
+CREATE TABLE o_ddl_check
+(
+	f1 text NOT NULL COLLATE "C",
+	f2 varchar NOT NULL,
+	f3 integer,
+	PRIMARY KEY (f1)
+) USING orioledb;
+INSERT INTO o_ddl_check VALUES ('1', '2', NULL);
+-- Fails, because of NOT NULL constraint
+INSERT INTO o_ddl_check VALUES ('2', NULL, '3');
+ERROR:  null value in column "f2" of relation "o_ddl_check" violates not-null constraint
+DETAIL:  Failing row contains (2, null, 3).
+-- Fails, because of unique constraint
+INSERT INTO o_ddl_check VALUES ('1', '2', '3');
+ERROR:  duplicate key value violates unique constraint "o_ddl_check"
+DETAIL:  Key ('1') already exists
+SELECT * FROM o_ddl_check;
+ f1 | f2 | f3 
+----+----+----
+ 1  | 2  |   
+(1 row)
+
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |   default |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+-- Fails because can't drop NOT NULL contraint on PK
+ALTER TABLE o_ddl_check ALTER f1 DROP NOT NULL;
+ERROR:  column "f1" is in a primary key
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |   default |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+ f1 | f2 | f3 
+----+----+----
+ 1  | 2  |   
+(1 row)
+
+-- Fails on unknown option
+ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
+ERROR:  "o_ddl_check" is not a foreign table
+ALTER TABLE o_ddl_check ALTER f2 TYPE text;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+             orioledb_table_description             
+----------------------------------------------------
+  Column |    Type | Collation | Nullable | Droped +
+      f1 |    text |         C |    false |  false +
+      f2 |    text |   default |    false |  false +
+      f3 | integer |    (null) |     true |  false +
+ 
+(1 row)
+
+-- OK, because 'f2' isn't indexed
+ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+-- Fails, because 'f2' is indexed with different collation
+ALTER TABLE o_ddl_check ALTER f1 TYPE text;
+ERROR:  could not change the column collation
+DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pkey" index definition.
+ALTER TABLE o_ddl_check ALTER f1 TYPE varchar COLLATE "POSIX";
+ERROR:  could not change the column collation
+DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pkey" index definition.
+-- OK, because binary compatible and collations match
+ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+ f1 | f2 | f3 
+----+----+----
+ 1  | 2  |   
+(1 row)
+
+-- Fails, because types aren't binary compatible
+ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
+ERROR:  could not change the column type
+DETAIL:  Column "f2" of OrioleDB table "o_ddl_check" has type "character varying". Can't change to "pg_catalog.timestamp", because it's not binary coersible.
+ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
+ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+ALTER TABLE o_ddl_check DROP f2;
+ALTER TABLE o_ddl_check DROP f1;
+ERROR:  could not drop the column
+DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pkey" index definition.
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |     POSIX |    false |   true +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+ f1 | f3 
+----+----
+ 1  |   
+(1 row)
+
+DROP TABLE o_ddl_check;
+CREATE TABLE o_ddl_check
+(
+	f1 varchar COLLATE "C",
+	f2 text NOT NULL,
+	PRIMARY KEY(f1)
+) USING orioledb;
+INSERT INTO o_ddl_check VALUES ('a', NULL);
+ERROR:  null value in column "f2" of relation "o_ddl_check" violates not-null constraint
+DETAIL:  Failing row contains (a, null).
+INSERT INTO o_ddl_check VALUES (NULL, 'b');
+ERROR:  null value in column "f1" of relation "o_ddl_check" violates not-null constraint
+DETAIL:  Failing row contains (null, b).
+INSERT INTO o_ddl_check VALUES ('a', 'b');
+UPDATE o_ddl_check SET f1 = NULL WHERE f1 = 'a';
+ERROR:  null value in column "f1" of relation "o_ddl_check" violates not-null constraint
+DETAIL:  Failing row contains (null, b).
+SELECT * FROM o_ddl_check;
+ f1 | f2 
+----+----
+ a  | b
+(1 row)
+
+ALTER TABLE o_ddl_check ADD CHECK (f2 < 'f');
+INSERT INTO o_ddl_check VALUES ('b', 'ddd');
+INSERT INTO o_ddl_check VALUES ('c', 'ffff');
+ERROR:  new row for relation "o_ddl_check" violates check constraint "o_ddl_check_f2_check"
+DETAIL:  Failing row contains (c, ffff).
+CREATE UNIQUE INDEX o_ddl_check_f2_idx ON o_ddl_check(f2);
+ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
+ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
+-- Check partition consraint.
+CREATE TABLE o_ddl_parted
+(
+	f1 varchar COLLATE "C",
+	f2 text NOT NULL
+) PARTITION BY RANGE (f1);
+ALTER TABLE o_ddl_parted ATTACH PARTITION o_ddl_check FOR VALUES FROM ('a') TO ('d');
+SELECT * FROM o_ddl_parted;
+ f1 | f2  
+----+-----
+ a  | b
+ b  | ddd
+(2 rows)
+
+INSERT INTO o_ddl_parted VALUES ('abc', 'def');
+-- OK
+UPDATE o_ddl_parted SET f1 = 'bcd' WHERE f1 = 'abc';
+-- Partition constraint failure
+UPDATE o_ddl_parted SET f1 = 'efg' WHERE f1 = 'bcd';
+ERROR:  no partition of relation "o_ddl_parted" found for row
+DETAIL:  Partition key of the failing row contains (f1) = (efg).
+SELECT * FROM o_ddl_parted;
+ f1  | f2  
+-----+-----
+ a   | b
+ b   | ddd
+ bcd | def
+(3 rows)
+
+CREATE TABLE o_ddl_check_2
+(
+	f1 varchar COLLATE "C",
+	f2 text NOT NULL,
+	PRIMARY KEY(f1)
+) USING orioledb;
+ALTER TABLE o_ddl_parted ATTACH PARTITION o_ddl_check_2 FOR VALUES FROM ('e') TO ('h');
+-- Move row between partitions
+UPDATE o_ddl_parted SET f1 = 'efg' WHERE f1 = 'bcd';
+SELECT * FROM o_ddl_parted;
+ f1  | f2  
+-----+-----
+ a   | b
+ b   | ddd
+ efg | def
+(3 rows)
+
+ALTER TABLE o_ddl_parted DETACH PARTITION o_ddl_check;
+ALTER TABLE o_ddl_parted DETACH PARTITION o_ddl_check_2;
+DROP TABLE o_ddl_parted;
+DROP TABLE o_ddl_check;
+DROP TABLE o_ddl_check_2;
+CREATE TABLE o_ddl_check
+(
+	f1 int NOT NULL,
+	f2 int,
+	f3 int,
+	f4 int,
+	PRIMARY KEY(f1)
+) USING orioledb;
+CREATE UNIQUE INDEX o_ddl_check_unique ON o_test24 (f2, f3, f4);
+ERROR:  relation "o_test24" does not exist
+CREATE INDEX o_ddl_check_regular ON o_test24 (f2, f3, f4);
+ERROR:  relation "o_test24" does not exist
+INSERT INTO o_ddl_check VALUES (1, 2, NULL, 5);
+INSERT INTO o_ddl_check VALUES (2, 2, NULL, 3);
+INSERT INTO o_ddl_check VALUES (3, 2, NULL, 2);
+INSERT INTO o_ddl_check VALUES (4, 1, NULL, 4);
+INSERT INTO o_ddl_check VALUES (5, 2, NULL, 3);
+INSERT INTO o_ddl_check VALUES (6, 2, NULL, NULL);
+INSERT INTO o_ddl_check VALUES (7, 2, NULL, NULL);
+SELECT * FROM o_ddl_check;
+ f1 | f2 | f3 | f4 
+----+----+----+----
+  1 |  2 |    |  5
+  2 |  2 |    |  3
+  3 |  2 |    |  2
+  4 |  1 |    |  4
+  5 |  2 |    |  3
+  6 |  2 |    |   
+  7 |  2 |    |   
+(7 rows)
+
+SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nuebc');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_ddl_check_pkey contents                                    +
+ Page 0: level = 0, maxKeyLen = 8, csn = FROZEN, nVacatedBytes = 0  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: csn = 0, offset = 272, tuple = ('1', '2', null, '5')   +
+     Item 1: csn = 1, offset = 320, tuple = ('2', '2', null, '3')   +
+     Item 2: csn = 2, offset = 368, tuple = ('3', '2', null, '2')   +
+     Item 3: csn = 3, offset = 416, tuple = ('4', '1', null, '4')   +
+     Item 4: csn = 4, offset = 464, tuple = ('5', '2', null, '3')   +
+     Item 5: csn = 5, offset = 512, tuple = ('6', '2', null, null)  +
+     Item 6: csn = 6, offset = 552, tuple = ('7', '2', null, null)  +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+DROP TABLE o_ddl_check;
+CREATE TABLE o_ddl_missing (
+	i int4 NOT NULL
+) USING orioledb;
+INSERT INTO o_ddl_missing SELECT * FROM generate_series(1, 10);
+ALTER TABLE o_ddl_missing ADD COLUMN l int4;
+SELECT * FROM o_ddl_missing;
+ i  | l 
+----+---
+  1 |  
+  2 |  
+  3 |  
+  4 |  
+  5 |  
+  6 |  
+  7 |  
+  8 |  
+  9 |  
+ 10 |  
+(10 rows)
+
+ALTER TABLE o_ddl_missing ADD COLUMN m int4 DEFAULT 2;
+SELECT * FROM o_ddl_missing;
+ i  | l | m 
+----+---+---
+  1 |   | 2
+  2 |   | 2
+  3 |   | 2
+  4 |   | 2
+  5 |   | 2
+  6 |   | 2
+  7 |   | 2
+  8 |   | 2
+  9 |   | 2
+ 10 |   | 2
+(10 rows)
+
+ALTER TABLE o_ddl_missing ADD COLUMN n int4, ADD COLUMN o int4[];
+SELECT * FROM o_ddl_missing;
+ i  | l | m | n | o 
+----+---+---+---+---
+  1 |   | 2 |   | 
+  2 |   | 2 |   | 
+  3 |   | 2 |   | 
+  4 |   | 2 |   | 
+  5 |   | 2 |   | 
+  6 |   | 2 |   | 
+  7 |   | 2 |   | 
+  8 |   | 2 |   | 
+  9 |   | 2 |   | 
+ 10 |   | 2 |   | 
+(10 rows)
+
+UPDATE o_ddl_missing SET l = 5, n = 6, o = '{1, 5, 2}' WHERE i BETWEEN 3 AND 7;
+SELECT * FROM o_ddl_missing;
+ i  | l | m | n |    o    
+----+---+---+---+---------
+  1 |   | 2 |   | 
+  2 |   | 2 |   | 
+  3 | 5 | 2 | 6 | {1,5,2}
+  4 | 5 | 2 | 6 | {1,5,2}
+  5 | 5 | 2 | 6 | {1,5,2}
+  6 | 5 | 2 | 6 | {1,5,2}
+  7 | 5 | 2 | 6 | {1,5,2}
+  8 |   | 2 |   | 
+  9 |   | 2 |   | 
+ 10 |   | 2 |   | 
+(10 rows)
+
+ALTER TABLE o_ddl_missing 
+	DROP COLUMN m, 
+	ADD COLUMN p int4[] DEFAULT '{2, 4, 8}', 
+	ADD COLUMN r int4[];
+SELECT * FROM o_ddl_missing;
+ i  | l | n |    o    |    p    | r 
+----+---+---+---------+---------+---
+  1 |   |   |         | {2,4,8} | 
+  2 |   |   |         | {2,4,8} | 
+  3 | 5 | 6 | {1,5,2} | {2,4,8} | 
+  4 | 5 | 6 | {1,5,2} | {2,4,8} | 
+  5 | 5 | 6 | {1,5,2} | {2,4,8} | 
+  6 | 5 | 6 | {1,5,2} | {2,4,8} | 
+  7 | 5 | 6 | {1,5,2} | {2,4,8} | 
+  8 |   |   |         | {2,4,8} | 
+  9 |   |   |         | {2,4,8} | 
+ 10 |   |   |         | {2,4,8} | 
+(10 rows)
+
+CREATE TABLE o_test_add_column
+(
+	id serial primary key,
+	i int4
+) USING orioledb;
+\d o_test_add_column
+                            Table "public.o_test_add_column"
+ Column |  Type   | Collation | Nullable |                    Default                    
+--------+---------+-----------+----------+-----------------------------------------------
+ id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
+ i      | integer |           |          | 
+Indexes:
+    "o_test_add_column_pkey" PRIMARY KEY, btree (id)
+
+SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_column_pkey                  +
+     Index type: primary, unique               +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: id                 +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
+          orioledb_tbl_structure          
+------------------------------------------
+ Index o_test_add_column_pkey: not loaded+
+ Index toast: not loaded                 +
+ 
+(1 row)
+
+SET SEED = 0.1;
+INSERT INTO o_test_add_column (i)
+	SELECT random() * 20000 FROM generate_series(1,10) v;
+-- test new null column
+ALTER TABLE o_test_add_column ADD COLUMN y int4;
+\d o_test_add_column
+                            Table "public.o_test_add_column"
+ Column |  Type   | Collation | Nullable |                    Default                    
+--------+---------+-----------+----------+-----------------------------------------------
+ id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
+ i      | integer |           |          | 
+ y      | integer |           |          | 
+Indexes:
+    "o_test_add_column_pkey" PRIMARY KEY, btree (id)
+
+SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_column_pkey                  +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: id                 +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '16999', null)             +
+     Item 1: offset = 304, tuple = ('2', '13324', null)             +
+     Item 2: offset = 328, tuple = ('3', '12545', null)             +
+     Item 3: offset = 352, tuple = ('4', '5350', null)              +
+     Item 4: offset = 376, tuple = ('5', '9417', null)              +
+     Item 5: offset = 400, tuple = ('6', '10462', null)             +
+     Item 6: offset = 424, tuple = ('7', '11362', null)             +
+     Item 7: offset = 448, tuple = ('8', '19414', null)             +
+     Item 8: offset = 472, tuple = ('9', '17458', null)             +
+     Item 9: offset = 496, tuple = ('10', '4956', null)             +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+-- test new column with volatile default
+ALTER TABLE o_test_add_column ADD COLUMN z int4 default 5;
+\d o_test_add_column
+                            Table "public.o_test_add_column"
+ Column |  Type   | Collation | Nullable |                    Default                    
+--------+---------+-----------+----------+-----------------------------------------------
+ id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
+ i      | integer |           |          | 
+ y      | integer |           |          | 
+ z      | integer |           |          | 5
+Indexes:
+    "o_test_add_column_pkey" PRIMARY KEY, btree (id)
+
+SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_column_pkey                  +
+     Index type: primary, unique               +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: id                 +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '16999', null, null)       +
+     Item 1: offset = 304, tuple = ('2', '13324', null, null)       +
+     Item 2: offset = 328, tuple = ('3', '12545', null, null)       +
+     Item 3: offset = 352, tuple = ('4', '5350', null, null)        +
+     Item 4: offset = 376, tuple = ('5', '9417', null, null)        +
+     Item 5: offset = 400, tuple = ('6', '10462', null, null)       +
+     Item 6: offset = 424, tuple = ('7', '11362', null, null)       +
+     Item 7: offset = 448, tuple = ('8', '19414', null, null)       +
+     Item 8: offset = 472, tuple = ('9', '17458', null, null)       +
+     Item 9: offset = 496, tuple = ('10', '4956', null, null)       +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+-- test new column with non-volatile default
+ALTER TABLE o_test_add_column
+	ADD COLUMN j int4 not null default random() * 20000;
+\d o_test_add_column
+                            Table "public.o_test_add_column"
+ Column |  Type   | Collation | Nullable |                    Default                    
+--------+---------+-----------+----------+-----------------------------------------------
+ id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
+ i      | integer |           |          | 
+ y      | integer |           |          | 
+ z      | integer |           |          | 5
+ j      | integer |           | not null | (random() * 20000::double precision)
+Indexes:
+    "o_test_add_column_pkey" PRIMARY KEY, btree (id)
+
+SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_column_pkey                  +
+     Index type: primary, unique               +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: id                 +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
+                           orioledb_tbl_structure                            
+-----------------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                                      +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                        +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean        +
+     Leftmost, Rightmost                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('2')  +
+     Item 0: offset = 264, tuple = ('1', '16999', null, '5', '8430')        +
+   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('3') +
+     Item 1: offset = 320, tuple = ('2', '13324', null, '5', '25')          +
+   Chunk 2: offset = 2, location = 368, hikey location = 112, hikey = ('4') +
+     Item 2: offset = 376, tuple = ('3', '12545', null, '5', '891')         +
+   Chunk 3: offset = 3, location = 424, hikey location = 120, hikey = ('5') +
+     Item 3: offset = 432, tuple = ('4', '5350', null, '5', '1106')         +
+   Chunk 4: offset = 4, location = 480, hikey location = 128, hikey = ('6') +
+     Item 4: offset = 488, tuple = ('5', '9417', null, '5', '3402')         +
+   Chunk 5: offset = 5, location = 536, hikey location = 136, hikey = ('7') +
+     Item 5: offset = 544, tuple = ('6', '10462', null, '5', '11157')       +
+   Chunk 6: offset = 6, location = 592, hikey location = 144, hikey = ('8') +
+     Item 6: offset = 600, tuple = ('7', '11362', null, '5', '13429')       +
+   Chunk 7: offset = 7, location = 648, hikey location = 152, hikey = ('9') +
+     Item 7: offset = 656, tuple = ('8', '19414', null, '5', '3584')        +
+   Chunk 8: offset = 8, location = 704, hikey location = 160, hikey = ('10')+
+     Item 8: offset = 712, tuple = ('9', '17458', null, '5', '9981')        +
+   Chunk 9: offset = 9, location = 760, hikey location = 168                +
+     Item 9: offset = 768, tuple = ('10', '4956', null, '5', '7942')        +
+                                                                            +
+ Index toast: not loaded                                                    +
+ 
+(1 row)
+
+INSERT INTO o_test_add_column (i)
+	SELECT random() * 20000 FROM generate_series(1,5) v;
+SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
+                           orioledb_tbl_structure                            
+-----------------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                        +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty        +
+     Leftmost, Rightmost                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('2')  +
+     Item 0: offset = 264, tuple = ('1', '16999', null, '5', '8430')        +
+   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('3') +
+     Item 1: offset = 320, tuple = ('2', '13324', null, '5', '25')          +
+   Chunk 2: offset = 2, location = 368, hikey location = 112, hikey = ('4') +
+     Item 2: offset = 376, tuple = ('3', '12545', null, '5', '891')         +
+   Chunk 3: offset = 3, location = 424, hikey location = 120, hikey = ('5') +
+     Item 3: offset = 432, tuple = ('4', '5350', null, '5', '1106')         +
+   Chunk 4: offset = 4, location = 480, hikey location = 128, hikey = ('6') +
+     Item 4: offset = 488, tuple = ('5', '9417', null, '5', '3402')         +
+   Chunk 5: offset = 5, location = 536, hikey location = 136, hikey = ('7') +
+     Item 5: offset = 544, tuple = ('6', '10462', null, '5', '11157')       +
+   Chunk 6: offset = 6, location = 592, hikey location = 144, hikey = ('8') +
+     Item 6: offset = 600, tuple = ('7', '11362', null, '5', '13429')       +
+   Chunk 7: offset = 7, location = 648, hikey location = 152, hikey = ('9') +
+     Item 7: offset = 656, tuple = ('8', '19414', null, '5', '3584')        +
+   Chunk 8: offset = 8, location = 704, hikey location = 160, hikey = ('10')+
+     Item 8: offset = 712, tuple = ('9', '17458', null, '5', '9981')        +
+   Chunk 9: offset = 9, location = 760, hikey location = 168                +
+     Item 9: offset = 776, tuple = ('10', '4956', null, '5', '7942')        +
+     Item 10: offset = 824, tuple = ('11', '16475', null, '5', '5248')      +
+     Item 11: offset = 872, tuple = ('12', '18903', null, '5', '7970')      +
+     Item 12: offset = 920, tuple = ('13', '19568', null, '5', '7390')      +
+     Item 13: offset = 968, tuple = ('14', '10458', null, '5', '2222')      +
+     Item 14: offset = 1016, tuple = ('15', '15643', null, '5', '17786')    +
+                                                                            +
+ Index toast: not loaded                                                    +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column;
+          QUERY PLAN           
+-------------------------------
+ Seq Scan on o_test_add_column
+(1 row)
+
+SELECT * FROM o_test_add_column;
+ id |   i   | y | z |   j   
+----+-------+---+---+-------
+  1 | 16999 |   | 5 |  8430
+  2 | 13324 |   | 5 |    25
+  3 | 12545 |   | 5 |   891
+  4 |  5350 |   | 5 |  1106
+  5 |  9417 |   | 5 |  3402
+  6 | 10462 |   | 5 | 11157
+  7 | 11362 |   | 5 | 13429
+  8 | 19414 |   | 5 |  3584
+  9 | 17458 |   | 5 |  9981
+ 10 |  4956 |   | 5 |  7942
+ 11 | 16475 |   | 5 |  5248
+ 12 | 18903 |   | 5 |  7970
+ 13 | 19568 |   | 5 |  7390
+ 14 | 10458 |   | 5 |  2222
+ 15 | 15643 |   | 5 | 17786
+(15 rows)
+
+-- Test that default fields not recalculated
+SELECT * FROM o_test_add_column;
+ id |   i   | y | z |   j   
+----+-------+---+---+-------
+  1 | 16999 |   | 5 |  8430
+  2 | 13324 |   | 5 |    25
+  3 | 12545 |   | 5 |   891
+  4 |  5350 |   | 5 |  1106
+  5 |  9417 |   | 5 |  3402
+  6 | 10462 |   | 5 | 11157
+  7 | 11362 |   | 5 | 13429
+  8 | 19414 |   | 5 |  3584
+  9 | 17458 |   | 5 |  9981
+ 10 |  4956 |   | 5 |  7942
+ 11 | 16475 |   | 5 |  5248
+ 12 | 18903 |   | 5 |  7970
+ 13 | 19568 |   | 5 |  7390
+ 14 | 10458 |   | 5 |  2222
+ 15 | 15643 |   | 5 | 17786
+(15 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table o_ddl_missing
+drop cascades to table o_test_add_column

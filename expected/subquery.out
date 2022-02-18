@@ -1,0 +1,254 @@
+CREATE EXTENSION orioledb;
+CREATE TABLE o_test_subquery
+(
+  key bigint NOT NULL,
+  val int,
+  val2 int NOT NULL,
+  PRIMARY KEY (key)
+) USING orioledb;
+CREATE INDEX o_test_subquery_idx1 ON o_test_subquery (val);
+INSERT INTO o_test_subquery SELECT 1000 + i, 2000 + i, 3000 + i FROM generate_series(1, 500) AS i;
+CREATE INDEX o_test_subquery_idx2 ON o_test_subquery (val2);
+analyze o_test_subquery;
+-- index subscan; index only qual
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT COUNT(*) FROM o_test_subquery_all;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (abs(val2) IS NOT NULL)
+         Forward index only scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+-- returns 500
+WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT COUNT(*) FROM o_test_subquery_all;
+ count 
+-------
+   500
+(1 row)
+
+-- index subscan; index only qual; query rows
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT * FROM o_test_subquery_all LIMIT 10;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Limit
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (abs(val2) IS NOT NULL)
+         Forward index scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT * FROM o_test_subquery_all LIMIT 10;
+ key  | val  | val2 
+------+------+------
+ 1001 | 2001 | 3001
+ 1002 | 2002 | 3002
+ 1003 | 2003 | 3003
+ 1004 | 2004 | 3004
+ 1005 | 2005 | 3005
+ 1006 | 2006 | 3006
+ 1007 | 2007 | 3007
+ 1008 | 2008 | 3008
+ 1009 | 2009 | 3009
+ 1010 | 2010 | 3010
+(10 rows)
+
+-- index subscan
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND val > 0
+    ORDER BY val2
+) SELECT COUNT(*) FROM o_test_subquery_all;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (val > 0)
+         Forward index scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+-- returns 500
+WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND val > 0
+    ORDER BY val2
+) SELECT COUNT(*) FROM o_test_subquery_all;
+ count 
+-------
+   500
+(1 row)
+
+-- index subscan; query rows
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND val > 0
+    ORDER BY val2
+) SELECT * FROM o_test_subquery_all LIMIT 10;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Limit
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (val > 0)
+         Forward index scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+WITH o_test_subquery_all AS (
+    SELECT * FROM o_test_subquery
+    WHERE val2 > 0 AND val > 0
+    ORDER BY val2
+) SELECT * FROM o_test_subquery_all LIMIT 10;
+ key  | val  | val2 
+------+------+------
+ 1001 | 2001 | 3001
+ 1002 | 2002 | 3002
+ 1003 | 2003 | 3003
+ 1004 | 2004 | 3004
+ 1005 | 2005 | 3005
+ 1006 | 2006 | 3006
+ 1007 | 2007 | 3007
+ 1008 | 2008 | 3008
+ 1009 | 2009 | 3009
+ 1010 | 2010 | 3010
+(10 rows)
+
+-- index only subscan; index only qual
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT COUNT(o_test_subquery_all.val2) FROM o_test_subquery_all;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (abs(val2) IS NOT NULL)
+         Forward index only scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+-- returns 500
+WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT COUNT(o_test_subquery_all.val2) FROM o_test_subquery_all;
+ count 
+-------
+   500
+(1 row)
+
+-- index only subscan; index only qual; query rows
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (abs(val2) IS NOT NULL)
+         Forward index only scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND ABS(val2) IS NOT NULL
+    ORDER BY val2
+) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
+ val2 
+------
+ 3001
+ 3002
+ 3003
+ 3004
+ 3005
+ 3006
+ 3007
+ 3008
+ 3009
+ 3010
+(10 rows)
+
+-- index only subscan
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND val > 4
+    ORDER BY val2
+) SELECT COUNT(o_test_subquery_all.val2) FROM o_test_subquery_all;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (val > 4)
+         Forward index scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+-- returns 500
+WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND val > 4
+    ORDER BY val2
+) SELECT COUNT(o_test_subquery_all.val2) FROM o_test_subquery_all;
+ count 
+-------
+   500
+(1 row)
+
+-- index only subscan; query rows
+EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND val > 4
+    ORDER BY val2
+) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Limit
+   ->  Custom Scan (o_scan) on o_test_subquery
+         Filter: (val > 4)
+         Forward index scan of: o_test_subquery_idx2
+         Conds: (val2 > 0)
+(5 rows)
+
+WITH o_test_subquery_all AS (
+    SELECT val2 FROM o_test_subquery
+    WHERE val2 > 0 AND val > 4
+    ORDER BY val2
+) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
+ val2 
+------
+ 3001
+ 3002
+ 3003
+ 3004
+ 3005
+ 3006
+ 3007
+ 3008
+ 3009
+ 3010
+(10 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to table o_test_subquery

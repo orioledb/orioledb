@@ -1,0 +1,36 @@
+Parsed test spec with 4 sessions
+
+starting permutation: s1_setup s2_setup s3_setup s1_split_prepare s4_bp s1_split s2_insert s3_insert s4_reset
+step s1_setup: SET orioledb.enable_stopevents = true;
+step s2_setup: SET orioledb.enable_stopevents = true;
+step s3_setup: SET orioledb.enable_stopevents = true;
+step s1_split_prepare: INSERT INTO o_split (SELECT repeat('x', 400) || id FROM generate_series(1, 20, 1) id);
+step s4_bp: 
+	SELECT pg_stopevent_set('page_split', 'true');
+	SELECT pg_stopevent_set('relock_page', 'true');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_split: INSERT INTO o_split (SELECT repeat('x', 400) || id FROM generate_series(131, 139, 1) id); <waiting ...>
+step s2_insert: INSERT INTO o_split (SELECT repeat('x', 400) || id  || repeat('x', 1200) FROM generate_series(110, 111, 1) id); <waiting ...>
+step s3_insert: INSERT INTO o_split (SELECT repeat('x', 400) || 123); <waiting ...>
+step s4_reset: 
+	SELECT
+		pg_stopevent_reset('page_split') a,
+		pg_stopevent_reset('relock_page') b;
+a|b
+-+-
+t|t
+(1 row)
+
+step s1_split: <... completed>
+step s2_insert: <... completed>
+step s3_insert: <... completed>

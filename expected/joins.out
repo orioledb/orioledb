@@ -1,0 +1,1533 @@
+CREATE EXTENSION orioledb;
+CREATE TABLE o_joins1
+(
+	id1 float8 NOT NULL,
+	id2 text NOT NULL,
+	PRIMARY KEY(id1, id2)
+) USING orioledb;
+CREATE TABLE o_joins2
+(
+	id1 float8 NOT NULL,
+	id2 text NOT NULL,
+	PRIMARY KEY(id1, id2)
+) USING orioledb;
+INSERT INTO o_joins1
+SELECT a, repeat('x', b) || repeat ('z', c)
+FROM
+	generate_series(1, 4) as a,
+	generate_series(1, 4) as b,
+	generate_series(1, 4) as c;
+INSERT INTO o_joins2
+SELECT a, repeat('x', b) || repeat ('y', c)
+FROM
+	generate_series(1, 4) as a,
+	generate_series(1, 4) as b,
+	generate_series(1, 4) as c;
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+         Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 | id2 
+-----+-----
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+      QUERY PLAN      
+----------------------
+ Seq Scan on o_joins2
+(1 row)
+
+SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+      QUERY PLAN      
+----------------------
+ Seq Scan on o_joins1
+(1 row)
+
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxz
+   1 | xxxxzz
+   1 | xxxxzzz
+   1 | xxxxzzzz
+   1 | xxxz
+   1 | xxxzz
+   1 | xxxzzz
+   1 | xxxzzzz
+   1 | xxz
+   1 | xxzz
+   1 | xxzzz
+   1 | xxzzzz
+   1 | xz
+   1 | xzz
+   1 | xzzz
+   1 | xzzzz
+   2 | xxxxz
+   2 | xxxxzz
+   2 | xxxxzzz
+   2 | xxxxzzzz
+   2 | xxxz
+   2 | xxxzz
+   2 | xxxzzz
+   2 | xxxzzzz
+   2 | xxz
+   2 | xxzz
+   2 | xxzzz
+   2 | xxzzzz
+   2 | xz
+   2 | xzz
+   2 | xzzz
+   2 | xzzzz
+   3 | xxxxz
+   3 | xxxxzz
+   3 | xxxxzzz
+   3 | xxxxzzzz
+   3 | xxxz
+   3 | xxxzz
+   3 | xxxzzz
+   3 | xxxzzzz
+   3 | xxz
+   3 | xxzz
+   3 | xxzzz
+   3 | xxzzzz
+   3 | xz
+   3 | xzz
+   3 | xzzz
+   3 | xzzzz
+   4 | xxxxz
+   4 | xxxxzz
+   4 | xxxxzzz
+   4 | xxxxzzzz
+   4 | xxxz
+   4 | xxxzz
+   4 | xxxzzz
+   4 | xxxzzzz
+   4 | xxz
+   4 | xxzz
+   4 | xxzzz
+   4 | xxzzzz
+   4 | xz
+   4 | xzz
+   4 | xzzz
+   4 | xzzzz
+(64 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Full Join
+   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Seq Scan on o_joins2
+   ->  Hash
+         ->  Seq Scan on o_joins1
+(5 rows)
+
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxz
+   1 | xxxxzz
+   1 | xxxxzzz
+   1 | xxxxzzzz
+   1 | xxxz
+   1 | xxxzz
+   1 | xxxzzz
+   1 | xxxzzzz
+   1 | xxz
+   1 | xxzz
+   1 | xxzzz
+   1 | xxzzzz
+   1 | xz
+   1 | xzz
+   1 | xzzz
+   1 | xzzzz
+   2 | xxxxz
+   2 | xxxxzz
+   2 | xxxxzzz
+   2 | xxxxzzzz
+   2 | xxxz
+   2 | xxxzz
+   2 | xxxzzz
+   2 | xxxzzzz
+   2 | xxz
+   2 | xxzz
+   2 | xxzzz
+   2 | xxzzzz
+   2 | xz
+   2 | xzz
+   2 | xzzz
+   2 | xzzzz
+   3 | xxxxz
+   3 | xxxxzz
+   3 | xxxxzzz
+   3 | xxxxzzzz
+   3 | xxxz
+   3 | xxxzz
+   3 | xxxzzz
+   3 | xxxzzzz
+   3 | xxz
+   3 | xxzz
+   3 | xxzzz
+   3 | xxzzzz
+   3 | xz
+   3 | xzz
+   3 | xzzz
+   3 | xzzzz
+   4 | xxxxz
+   4 | xxxxzz
+   4 | xxxxzzz
+   4 | xxxxzzzz
+   4 | xxxz
+   4 | xxxzz
+   4 | xxxzzz
+   4 | xxxzzzz
+   4 | xxz
+   4 | xxzz
+   4 | xxzzz
+   4 | xxzzzz
+   4 | xz
+   4 | xzz
+   4 | xzzz
+   4 | xzzzz
+(64 rows)
+
+SET enable_nestloop = off;
+RESET enable_hashjoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Seq Scan on o_joins2
+   ->  Hash
+         ->  Seq Scan on o_joins1
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 | id2 
+-----+-----
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+      QUERY PLAN      
+----------------------
+ Seq Scan on o_joins2
+(1 row)
+
+SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+      QUERY PLAN      
+----------------------
+ Seq Scan on o_joins1
+(1 row)
+
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxz
+   1 | xxxxzz
+   1 | xxxxzzz
+   1 | xxxxzzzz
+   1 | xxxz
+   1 | xxxzz
+   1 | xxxzzz
+   1 | xxxzzzz
+   1 | xxz
+   1 | xxzz
+   1 | xxzzz
+   1 | xxzzzz
+   1 | xz
+   1 | xzz
+   1 | xzzz
+   1 | xzzzz
+   2 | xxxxz
+   2 | xxxxzz
+   2 | xxxxzzz
+   2 | xxxxzzzz
+   2 | xxxz
+   2 | xxxzz
+   2 | xxxzzz
+   2 | xxxzzzz
+   2 | xxz
+   2 | xxzz
+   2 | xxzzz
+   2 | xxzzzz
+   2 | xz
+   2 | xzz
+   2 | xzzz
+   2 | xzzzz
+   3 | xxxxz
+   3 | xxxxzz
+   3 | xxxxzzz
+   3 | xxxxzzzz
+   3 | xxxz
+   3 | xxxzz
+   3 | xxxzzz
+   3 | xxxzzzz
+   3 | xxz
+   3 | xxzz
+   3 | xxzzz
+   3 | xxzzzz
+   3 | xz
+   3 | xzz
+   3 | xzzz
+   3 | xzzzz
+   4 | xxxxz
+   4 | xxxxzz
+   4 | xxxxzzz
+   4 | xxxxzzzz
+   4 | xxxz
+   4 | xxxzz
+   4 | xxxzzz
+   4 | xxxzzzz
+   4 | xxz
+   4 | xxzz
+   4 | xxzzz
+   4 | xxzzzz
+   4 | xz
+   4 | xzz
+   4 | xzzz
+   4 | xzzzz
+(64 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Full Join
+   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Seq Scan on o_joins2
+   ->  Hash
+         ->  Seq Scan on o_joins1
+(5 rows)
+
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxz
+   1 | xxxxzz
+   1 | xxxxzzz
+   1 | xxxxzzzz
+   1 | xxxz
+   1 | xxxzz
+   1 | xxxzzz
+   1 | xxxzzzz
+   1 | xxz
+   1 | xxzz
+   1 | xxzzz
+   1 | xxzzzz
+   1 | xz
+   1 | xzz
+   1 | xzzz
+   1 | xzzzz
+   2 | xxxxz
+   2 | xxxxzz
+   2 | xxxxzzz
+   2 | xxxxzzzz
+   2 | xxxz
+   2 | xxxzz
+   2 | xxxzzz
+   2 | xxxzzzz
+   2 | xxz
+   2 | xxzz
+   2 | xxzzz
+   2 | xxzzzz
+   2 | xz
+   2 | xzz
+   2 | xzzz
+   2 | xzzzz
+   3 | xxxxz
+   3 | xxxxzz
+   3 | xxxxzzz
+   3 | xxxxzzzz
+   3 | xxxz
+   3 | xxxzz
+   3 | xxxzzz
+   3 | xxxzzzz
+   3 | xxz
+   3 | xxzz
+   3 | xxzzz
+   3 | xxzzzz
+   3 | xz
+   3 | xzz
+   3 | xzzz
+   3 | xzzzz
+   4 | xxxxz
+   4 | xxxxzz
+   4 | xxxxzzz
+   4 | xxxxzzzz
+   4 | xxxz
+   4 | xxxzz
+   4 | xxxzzz
+   4 | xxxzzzz
+   4 | xxz
+   4 | xxzz
+   4 | xxzzz
+   4 | xxzzzz
+   4 | xz
+   4 | xzz
+   4 | xzzz
+   4 | xzzzz
+(64 rows)
+
+SET enable_hashjoin = off;
+RESET enable_mergejoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+(6 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 | id2 
+-----+-----
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+      QUERY PLAN      
+----------------------
+ Seq Scan on o_joins2
+(1 row)
+
+SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+      QUERY PLAN      
+----------------------
+ Seq Scan on o_joins1
+(1 row)
+
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxz
+   1 | xxxxzz
+   1 | xxxxzzz
+   1 | xxxxzzzz
+   1 | xxxz
+   1 | xxxzz
+   1 | xxxzzz
+   1 | xxxzzzz
+   1 | xxz
+   1 | xxzz
+   1 | xxzzz
+   1 | xxzzzz
+   1 | xz
+   1 | xzz
+   1 | xzzz
+   1 | xzzzz
+   2 | xxxxz
+   2 | xxxxzz
+   2 | xxxxzzz
+   2 | xxxxzzzz
+   2 | xxxz
+   2 | xxxzz
+   2 | xxxzzz
+   2 | xxxzzzz
+   2 | xxz
+   2 | xxzz
+   2 | xxzzz
+   2 | xxzzzz
+   2 | xz
+   2 | xzz
+   2 | xzzz
+   2 | xzzzz
+   3 | xxxxz
+   3 | xxxxzz
+   3 | xxxxzzz
+   3 | xxxxzzzz
+   3 | xxxz
+   3 | xxxzz
+   3 | xxxzzz
+   3 | xxxzzzz
+   3 | xxz
+   3 | xxzz
+   3 | xxzzz
+   3 | xxzzzz
+   3 | xz
+   3 | xzz
+   3 | xzzz
+   3 | xzzzz
+   4 | xxxxz
+   4 | xxxxzz
+   4 | xxxxzzz
+   4 | xxxxzzzz
+   4 | xxxz
+   4 | xxxzz
+   4 | xxxzzz
+   4 | xxxzzzz
+   4 | xxz
+   4 | xxzz
+   4 | xxzzz
+   4 | xxzzzz
+   4 | xz
+   4 | xzz
+   4 | xzzz
+   4 | xzzzz
+(64 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Full Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+(6 rows)
+
+SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxz
+   1 | xxxxzz
+   1 | xxxxzzz
+   1 | xxxxzzzz
+   1 | xxxz
+   1 | xxxzz
+   1 | xxxzzz
+   1 | xxxzzzz
+   1 | xxz
+   1 | xxzz
+   1 | xxzzz
+   1 | xxzzzz
+   1 | xz
+   1 | xzz
+   1 | xzzz
+   1 | xzzzz
+   2 | xxxxz
+   2 | xxxxzz
+   2 | xxxxzzz
+   2 | xxxxzzzz
+   2 | xxxz
+   2 | xxxzz
+   2 | xxxzzz
+   2 | xxxzzzz
+   2 | xxz
+   2 | xxzz
+   2 | xxzzz
+   2 | xxzzzz
+   2 | xz
+   2 | xzz
+   2 | xzzz
+   2 | xzzzz
+   3 | xxxxz
+   3 | xxxxzz
+   3 | xxxxzzz
+   3 | xxxxzzzz
+   3 | xxxz
+   3 | xxxzz
+   3 | xxxzzz
+   3 | xxxzzzz
+   3 | xxz
+   3 | xxzz
+   3 | xxzzz
+   3 | xxzzzz
+   3 | xz
+   3 | xzz
+   3 | xzzz
+   3 | xzzzz
+   4 | xxxxz
+   4 | xxxxzz
+   4 | xxxxzzz
+   4 | xxxxzzzz
+   4 | xxxz
+   4 | xxxzz
+   4 | xxxzzz
+   4 | xxxzzzz
+   4 | xxz
+   4 | xxzz
+   4 | xxzzz
+   4 | xxzzzz
+   4 | xz
+   4 | xzz
+   4 | xzzz
+   4 | xzzzz
+(64 rows)
+
+RESET enable_nestloop;
+RESET enable_hashjoin;
+DROP TABLE o_joins1;
+CREATE TABLE o_joins1
+(
+	id2 text NOT NULL,
+	id1 float8 NOT NULL,
+	PRIMARY KEY (id1, id2)
+) USING orioledb;
+INSERT INTO o_joins1 (SELECT id2, id1 FROM o_joins2);
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+         Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+SET enable_nestloop = off;
+RESET enable_hashjoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Seq Scan on o_joins2
+   ->  Hash
+         ->  Seq Scan on o_joins1
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+SET enable_hashjoin = off;
+RESET enable_mergejoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+(6 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+RESET enable_nestloop;
+RESET enable_hashjoin;
+DROP TABLE o_joins1;
+CREATE TABLE o_joins1
+(
+	id1 float8 NOT NULL,
+	id2 text NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX o_joins1_idx ON o_joins1 (id1, id2 DESC);
+INSERT INTO o_joins1 (SELECT id1, id2 FROM o_joins2);
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_idx
+         Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+SET enable_nestloop = off;
+RESET enable_hashjoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Seq Scan on o_joins2
+   ->  Hash
+         ->  Seq Scan on o_joins1
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+SET enable_hashjoin = off;
+RESET enable_mergejoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Sort
+         Sort Key: o_joins1.id1, o_joins1.id2
+         ->  Seq Scan on o_joins1
+(7 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+RESET enable_nestloop;
+RESET enable_hashjoin;
+DROP TABLE o_joins1;
+CREATE TABLE o_joins1
+(
+	id2 text NOT NULL,
+	id1 float8 NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX o_joins1_idx ON o_joins1 (id1 DESC, id2 DESC);
+INSERT INTO o_joins1 (SELECT id2, id1 FROM o_joins2);
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_idx
+         Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+SET enable_nestloop = off;
+RESET enable_hashjoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Seq Scan on o_joins2
+   ->  Hash
+         ->  Seq Scan on o_joins1
+(5 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+SET enable_hashjoin = off;
+RESET enable_mergejoin;
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Custom Scan (o_scan) on o_joins1
+         Backward index only scan of: o_joins1_idx
+(6 rows)
+
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+RESET enable_nestloop;
+RESET enable_hashjoin;
+DROP TABLE o_joins2;
+DROP TABLE o_joins1;
+DROP EXTENSION orioledb CASCADE;

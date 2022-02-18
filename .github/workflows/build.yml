@@ -1,0 +1,73 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on:
+     - ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+        check_type: [normal, debug, alignment, valgrind_1, valgrind_2]
+    env:
+      LLVM_VER: 12
+      CPU: ${{ matrix.cpu }}
+      CHECK_TYPE: ${{ matrix.check_type }}
+      COMPILER: ${{ matrix.compiler }}
+    steps:
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/postgres
+          ref: patches14
+          path: postgresql
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          path: orioledb
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+      - name: Check
+        run: bash ./orioledb/ci/check.sh
+      - name: Check output
+        run: bash ./orioledb/ci/check_output.sh
+        if: ${{ success() || failure() }}
+      - name: Codecov
+        run: bash ./orioledb/ci/codecov.sh
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  static:
+    runs-on:
+     - ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+    env:
+      LLVM_VER: 12
+      CPU: ${{ matrix.cpu }}
+      CHECK_TYPE: static
+      COMPILER: ${{ matrix.compiler }}
+    steps:
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/postgres
+          ref: patches14
+          path: postgresql
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          path: orioledb
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+      - name: Static analysis
+        run: bash ./orioledb/ci/static.sh

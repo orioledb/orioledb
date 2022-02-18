@@ -1,0 +1,934 @@
+CREATE EXTENSION orioledb;
+CREATE TYPE coordinates AS (
+	x int,
+	y int
+);
+-- Check support of custom types indices
+CREATE TABLE o_test_record_type
+(
+	location coordinates NOT NULL,
+	val int NOT NULL,
+	PRIMARY KEY(location)
+) USING orioledb;
+CREATE INDEX o_test_record_type_ix1 ON o_test_record_type(val);
+INSERT INTO o_test_record_type SELECT (id, id * 2)::coordinates,
+									  id * 10 val FROM
+										generate_series(1, 10) id;
+SELECT * FROM o_test_record_type;
+ location | val 
+----------+-----
+ (1,2)    |  10
+ (2,4)    |  20
+ (3,6)    |  30
+ (4,8)    |  40
+ (5,10)   |  50
+ (6,12)   |  60
+ (7,14)   |  70
+ (8,16)   |  80
+ (9,18)   |  90
+ (10,20)  | 100
+(10 rows)
+
+-- Check support of range indices
+CREATE TABLE o_test_range
+(
+	area int8range NOT NULL,
+	val int NOT NULL,
+	PRIMARY KEY(area)
+) USING orioledb;
+INSERT INTO o_test_range SELECT int8range(id * 5, id * 5 + 5),
+								id * 10 val FROM generate_series(1, 10) id;
+SELECT * FROM o_test_range;
+  area   | val 
+---------+-----
+ [5,10)  |  10
+ [10,15) |  20
+ [15,20) |  30
+ [20,25) |  40
+ [25,30) |  50
+ [30,35) |  60
+ [35,40) |  70
+ [40,45) |  80
+ [45,50) |  90
+ [50,55) | 100
+(10 rows)
+
+CREATE TYPE custom_range as range (subtype=int8);
+-- Custom range also
+CREATE TABLE o_test_custom_range
+(
+	area custom_range NOT NULL,
+	val int NOT NULL,
+	PRIMARY KEY(area)
+) USING orioledb;
+INSERT INTO o_test_custom_range SELECT custom_range(id * 5, id * 5 + 5),
+								id * 10 val FROM generate_series(1, 10) id;
+SELECT * FROM o_test_custom_range;
+  area   | val 
+---------+-----
+ [5,10)  |  10
+ [10,15) |  20
+ [15,20) |  30
+ [20,25) |  40
+ [25,30) |  50
+ [30,35) |  60
+ [35,40) |  70
+ [40,45) |  80
+ [45,50) |  90
+ [50,55) | 100
+(10 rows)
+
+-- Check support of array indices
+CREATE TABLE o_test_array
+(
+	locations coordinates[] NOT NULL,
+	id int NOT NULL,
+	PRIMARY KEY(locations)
+) USING orioledb;
+INSERT INTO o_test_array SELECT ARRAY[(id, id * 2)::coordinates,
+									  (id, id * 10)::coordinates],
+								id FROM generate_series(1, 10) id;
+SELECT * FROM o_test_array;
+       locations        | id 
+------------------------+----
+ {"(1,2)","(1,10)"}     |  1
+ {"(2,4)","(2,20)"}     |  2
+ {"(3,6)","(3,30)"}     |  3
+ {"(4,8)","(4,40)"}     |  4
+ {"(5,10)","(5,50)"}    |  5
+ {"(6,12)","(6,60)"}    |  6
+ {"(7,14)","(7,70)"}    |  7
+ {"(8,16)","(8,80)"}    |  8
+ {"(9,18)","(9,90)"}    |  9
+ {"(10,20)","(10,100)"} | 10
+(10 rows)
+
+CREATE TABLE o_test_int_array
+(
+	arr int2[] NOT NULL,
+	PRIMARY KEY(arr)
+) USING orioledb;
+BEGIN;
+INSERT INTO o_test_int_array VALUES ('{1, 2}');
+COMMIT;
+INSERT INTO o_test_int_array VALUES ('{2, 3, 4}');
+SELECT * FROM o_test_int_array;
+   arr   
+---------
+ {1,2}
+ {2,3,4}
+(2 rows)
+
+---
+-- PostgreSQL has no full support for arrays comparsion with CID and XIP elements.
+-- We forbit create indices with such arrays.
+-- Behavior differs from postgres tables, which illustrated by tests below
+---
+CREATE TABLE pg_test_cid_array
+(
+	arr cid[] NOT NULL,
+	PRIMARY KEY (arr)
+);
+BEGIN;
+INSERT INTO pg_test_cid_array VALUES (ARRAY['1'::cid, '2'::cid]);
+COMMIT;
+INSERT INTO pg_test_cid_array VALUES (ARRAY['1'::cid, '3'::cid]);
+ERROR:  could not identify a comparison function for type cid
+SELECT * FROM pg_test_cid_array;
+  arr  
+-------
+ {1,2}
+(1 row)
+
+CREATE TABLE o_test_cid_array
+(
+	arr cid[] NOT NULL,
+	PRIMARY KEY(arr)
+) USING orioledb;
+ERROR:  could not identify a comparison function for type cid
+BEGIN;
+INSERT INTO o_test_cid_array VALUES (ARRAY['1'::cid, '2'::cid]);
+ERROR:  relation "o_test_cid_array" does not exist
+LINE 1: INSERT INTO o_test_cid_array VALUES (ARRAY['1'::cid, '2'::ci...
+                    ^
+COMMIT;
+CREATE TABLE pg_test_xid_array
+(
+	arr xid[] NOT NULL,
+	PRIMARY KEY (arr)
+);
+BEGIN;
+INSERT INTO pg_test_xid_array VALUES (ARRAY['1'::xid, '2'::xid]);
+COMMIT;
+INSERT INTO pg_test_xid_array VALUES (ARRAY['1'::xid, '3'::xid]);
+ERROR:  could not identify a comparison function for type xid
+SELECT * FROM pg_test_xid_array;
+  arr  
+-------
+ {1,2}
+(1 row)
+
+CREATE TABLE o_test_xid_array
+(
+	arr xid[] NOT NULL,
+	PRIMARY KEY (arr)
+) USING orioledb;
+ERROR:  could not identify a comparison function for type xid
+BEGIN;
+INSERT INTO o_test_xid_array VALUES (ARRAY['1'::xid, '2'::xid]);
+ERROR:  relation "o_test_xid_array" does not exist
+LINE 1: INSERT INTO o_test_xid_array VALUES (ARRAY['1'::xid, '2'::xi...
+                    ^
+COMMIT;
+-- Check support of enum indices
+CREATE TYPE o_happiness AS ENUM ('happy', 'very happy', 'ecstatic');
+CREATE TABLE o_test_enum_index (
+	num_weeks integer NOT NULL,
+	happiness o_happiness NOT NULL,
+	PRIMARY KEY(happiness)
+) USING orioledb;
+CREATE INDEX o_test_enum_index_ix1 ON o_test_enum_index(happiness);
+CREATE UNIQUE INDEX o_test_enum_index_ix2 ON o_test_enum_index(happiness);
+INSERT INTO o_test_enum_index(num_weeks, happiness) VALUES (2, 'happy');
+INSERT INTO o_test_enum_index(num_weeks, happiness) VALUES (6, 'very happy');
+INSERT INTO o_test_enum_index(num_weeks, happiness) VALUES (8, 'ecstatic');
+ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
+INSERT INTO o_test_enum_index(num_weeks, happiness) VALUES (4, 'sad');
+SELECT * FROM o_test_enum_index;
+ num_weeks | happiness  
+-----------+------------
+         2 | happy
+         4 | sad
+         6 | very happy
+         8 | ecstatic
+(4 rows)
+
+SELECT * FROM o_test_enum_index WHERE happiness = 'very happy';
+ num_weeks | happiness  
+-----------+------------
+         6 | very happy
+(1 row)
+
+SELECT * FROM o_test_enum_index WHERE happiness > 'very happy';
+ num_weeks | happiness 
+-----------+-----------
+         8 | ecstatic
+(1 row)
+
+SELECT * FROM o_test_enum_index WHERE happiness < 'very happy';
+ num_weeks | happiness 
+-----------+-----------
+         2 | happy
+         4 | sad
+(2 rows)
+
+-- check that column and index drops
+SELECT orioledb_table_description('o_test_enum_index'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+     Column |        Type | Collation | Nullable | Droped +
+  num_weeks |     integer |    (null) |    false |  false +
+  happiness | o_happiness |    (null) |    false |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_enum_index'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_enum_index_pkey                  +
+     Index type: primary, unique               +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: happiness          +
+ Index o_test_enum_index_ix1                   +
+     Index type: secondary                     +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: happiness          +
+     Leaf tuple fields: happiness              +
+ Index o_test_enum_index_ix2                   +
+     Index type: secondary, unique             +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: happiness          +
+     Leaf tuple fields: happiness              +
+ 
+(1 row)
+
+DROP TYPE o_happiness;
+ERROR:  cannot drop type o_happiness because other objects depend on it
+DETAIL:  column happiness of table o_test_enum_index depends on type o_happiness
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP INDEX o_test_enum_index_ix1;
+BEGIN;
+ALTER TABLE o_test_enum_index DROP CONSTRAINT o_test_enum_index_pkey;
+ROLLBACK;
+DROP TYPE o_happiness CASCADE;
+NOTICE:  drop cascades to column happiness of table o_test_enum_index
+SELECT orioledb_table_description('o_test_enum_index'::regclass);
+              orioledb_table_description               
+-------------------------------------------------------
+     Column |    Type | Collation | Nullable | Droped +
+  num_weeks | integer |    (null) |    false |  false +
+  happiness |     ??? |    (null) |    false |   true +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_enum_index'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+SELECT * FROM o_test_enum_index;
+ num_weeks 
+-----------
+         2
+         4
+         6
+         8
+(4 rows)
+
+-- Check that domains also works
+CREATE DOMAIN myint AS integer CHECK (VALUE > 5);
+CREATE DOMAIN myint2 AS myint;
+CREATE DOMAIN mytime AS time CHECK (VALUE > '00:00:00');
+CREATE DOMAIN myarray AS myint[];
+CREATE DOMAIN mybool AS boolean;
+CREATE TABLE o_test_domain_index
+(
+	key myint NOT NULL,
+	key2 myint2,
+	t   mytime,
+	a   myarray,
+	b   mybool,
+	val int NOT NULL,
+	net inet,
+	PRIMARY KEY(key, key2, val, t, a, b, net)
+) USING orioledb;
+INSERT INTO o_test_domain_index VALUES
+	(10, 10, '00:00:10', '{10}', false, 10, '10.10.10.10'),
+	(20, 20, '00:00:20', '{20}', true, 20, '20.20.20.20');
+SELECT * FROM o_test_domain_index;
+ key | key2 |    t     |  a   | b | val |     net     
+-----+------+----------+------+---+-----+-------------
+  10 |   10 | 00:00:10 | {10} | f |  10 | 10.10.10.10
+  20 |   20 | 00:00:20 | {20} | t |  20 | 20.20.20.20
+(2 rows)
+
+CREATE TABLE o_test_domain_array_index
+(
+	key myint[] NOT NULL,
+	PRIMARY KEY(key)
+) USING orioledb;
+INSERT INTO o_test_domain_array_index VALUES (ARRAY[10::myint, 20::myint]);
+SELECT * FROM o_test_domain_array_index;
+   key   
+---------
+ {10,20}
+(1 row)
+
+SELECT orioledb_table_description('o_test_domain_index'::regclass);
+             orioledb_table_description             
+----------------------------------------------------
+  Column |    Type | Collation | Nullable | Droped +
+     key |   myint |    (null) |    false |  false +
+    key2 |  myint2 |    (null) |    false |  false +
+       t |  mytime |    (null) |    false |  false +
+       a | myarray |    (null) |    false |  false +
+       b |  mybool |    (null) |    false |  false +
+     val | integer |    (null) |    false |  false +
+     net |    inet |    (null) |    false |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_domain_index'::regclass);
+                  orioledb_tbl_indices                   
+---------------------------------------------------------
+ Index o_test_domain_index_pkey                         +
+     Index type: primary, unique                        +
+     Leaf tuple size: 7, non-leaf tuple size: 7         +
+     Non-leaf tuple fields: key, key2, val, t, a, b, net+
+ 
+(1 row)
+
+DROP DOMAIN myint CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to type myarray
+drop cascades to column a of table o_test_domain_index
+drop cascades to column key of table o_test_domain_array_index
+drop cascades to type myint2
+drop cascades to column key2 of table o_test_domain_index
+drop cascades to column key of table o_test_domain_index
+DROP DOMAIN mytime CASCADE;
+NOTICE:  drop cascades to column t of table o_test_domain_index
+DROP DOMAIN mybool CASCADE;
+NOTICE:  drop cascades to column b of table o_test_domain_index
+SELECT orioledb_table_description('o_test_domain_index'::regclass);
+             orioledb_table_description             
+----------------------------------------------------
+  Column |    Type | Collation | Nullable | Droped +
+     key |     ??? |    (null) |    false |   true +
+    key2 |     ??? |    (null) |    false |   true +
+       t |     ??? |    (null) |    false |   true +
+       a |     ??? |    (null) |    false |   true +
+       b |     ??? |    (null) |    false |   true +
+     val | integer |    (null) |    false |  false +
+     net |    inet |    (null) |    false |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_domain_index'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 8, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+SELECT * FROM o_test_domain_index;
+ val |     net     
+-----+-------------
+  10 | 10.10.10.10
+  20 | 20.20.20.20
+(2 rows)
+
+-- Check support of custom types indices and alters on that indices
+CREATE TYPE record_type_non_altered AS (
+	a int,
+	b int
+);
+CREATE TYPE record_type_altered AS (
+	a int,
+	b int
+);
+CREATE TABLE o_test_record_type_alter
+(
+	key record_type_non_altered NOT NULL,
+	val int NOT NULL DEFAULT 5
+) USING orioledb;
+INSERT INTO o_test_record_type_alter
+	SELECT (id, id * 2)::record_type_non_altered FROM generate_series(1, 10) id;
+SELECT * FROM o_test_record_type_alter;
+   key   | val 
+---------+-----
+ (1,2)   |   5
+ (2,4)   |   5
+ (3,6)   |   5
+ (4,8)   |   5
+ (5,10)  |   5
+ (6,12)  |   5
+ (7,14)  |   5
+ (8,16)  |   5
+ (9,18)  |   5
+ (10,20) |   5
+(10 rows)
+
+ALTER TABLE o_test_record_type_alter ADD COLUMN val3 int NOT NULL DEFAULT 18;
+ALTER TABLE o_test_record_type_alter ADD COLUMN val4 text DEFAULT 'abc';
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 
+---------+-----+------+------
+ (1,2)   |   5 |   18 | abc
+ (2,4)   |   5 |   18 | abc
+ (3,6)   |   5 |   18 | abc
+ (4,8)   |   5 |   18 | abc
+ (5,10)  |   5 |   18 | abc
+ (6,12)  |   5 |   18 | abc
+ (7,14)  |   5 |   18 | abc
+ (8,16)  |   5 |   18 | abc
+ (9,18)  |   5 |   18 | abc
+ (10,20) |   5 |   18 | abc
+(10 rows)
+
+ALTER TABLE o_test_record_type_alter ALTER COLUMN val3 DROP DEFAULT;
+ALTER TABLE o_test_record_type_alter ALTER COLUMN val4 SET DEFAULT 'b';
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 
+---------+-----+------+------
+ (1,2)   |   5 |   18 | abc
+ (2,4)   |   5 |   18 | abc
+ (3,6)   |   5 |   18 | abc
+ (4,8)   |   5 |   18 | abc
+ (5,10)  |   5 |   18 | abc
+ (6,12)  |   5 |   18 | abc
+ (7,14)  |   5 |   18 | abc
+ (8,16)  |   5 |   18 | abc
+ (9,18)  |   5 |   18 | abc
+ (10,20) |   5 |   18 | abc
+(10 rows)
+
+UPDATE o_test_record_type_alter tb SET val3 = 33 WHERE (key).a BETWEEN 5 AND 8;
+UPDATE o_test_record_type_alter tb SET val4 = 'c' WHERE (key).a BETWEEN 7 AND 9;
+INSERT INTO o_test_record_type_alter (key, val3)
+	SELECT (id, id * 2)::record_type_non_altered, id FROM generate_series(11, 15) id;
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 
+---------+-----+------+------
+ (1,2)   |   5 |   18 | abc
+ (2,4)   |   5 |   18 | abc
+ (3,6)   |   5 |   18 | abc
+ (4,8)   |   5 |   18 | abc
+ (5,10)  |   5 |   33 | abc
+ (6,12)  |   5 |   33 | abc
+ (7,14)  |   5 |   33 | c
+ (8,16)  |   5 |   33 | c
+ (9,18)  |   5 |   18 | c
+ (10,20) |   5 |   18 | abc
+ (11,22) |   5 |   11 | b
+ (12,24) |   5 |   12 | b
+ (13,26) |   5 |   13 | b
+ (14,28) |   5 |   14 | b
+ (15,30) |   5 |   15 | b
+(15 rows)
+
+CREATE INDEX o_test_record_type_alter_idx1 ON o_test_record_type_alter (val4);
+SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
+   key   | val | val3 | val4 
+---------+-----+------+------
+ (1,2)   |   5 |   18 | abc
+ (2,4)   |   5 |   18 | abc
+ (3,6)   |   5 |   18 | abc
+ (4,8)   |   5 |   18 | abc
+ (5,10)  |   5 |   33 | abc
+ (6,12)  |   5 |   33 | abc
+ (10,20) |   5 |   18 | abc
+(7 rows)
+
+SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
+                                 orioledb_tbl_structure                                 
+----------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,6)')         +
+     Item 0: offset = 272, tuple = ('(0,1)', '(1,2)', '5', '18', 'abc')                +
+     Item 1: offset = 336, tuple = ('(0,2)', '(2,4)', '5', '18', 'abc')                +
+     Item 2: offset = 400, tuple = ('(0,3)', '(3,6)', '5', '18', 'abc')                +
+     Item 3: offset = 464, tuple = ('(0,4)', '(4,8)', '5', '18', 'abc')                +
+     Item 4: offset = 528, tuple = ('(0,5)', '(5,10)', '5', '33', 'abc')               +
+   Chunk 1: offset = 5, location = 600, hikey location = 80, hikey = ('(0,10)')        +
+     Item 5: offset = 608, tuple = ('(0,6)', '(6,12)', '5', '33', 'abc')               +
+     Item 6: offset = 680, tuple = ('(0,7)', '(7,14)', '5', '33', 'c')                 +
+     Item 7: offset = 752, tuple = ('(0,8)', '(8,16)', '5', '33', 'c')                 +
+     Item 8: offset = 824, tuple = ('(0,9)', '(9,18)', '5', '18', 'c')                 +
+   Chunk 2: offset = 9, location = 896, hikey location = 88                            +
+     Item 9: offset = 912, tuple = ('(0,10)', '(10,20)', '5', '18', 'abc')             +
+     Item 10: offset = 976, tuple = ('(0,11)', '(11,22)', '5', '11', 'b')              +
+     Item 11: offset = 1048, tuple = ('(0,12)', '(12,24)', '5', '12', 'b')             +
+     Item 12: offset = 1120, tuple = ('(0,13)', '(13,26)', '5', '13', 'b')             +
+     Item 13: offset = 1192, tuple = ('(0,14)', '(14,28)', '5', '14', 'b')             +
+     Item 14: offset = 1264, tuple = ('(0,15)', '(15,30)', '5', '15', 'b')             +
+                                                                                       +
+ Index o_test_record_type_alter_idx1 contents                                          +
+ Page 0: level = 0, maxKeyLen = 18, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('abc', '(0,3)')  +
+     Item 0: offset = 264, tuple = ('abc', '(0,1)')                                    +
+     Item 1: offset = 304, tuple = ('abc', '(0,2)')                                    +
+   Chunk 1: offset = 2, location = 344, hikey location = 112, hikey = ('abc', '(0,5)') +
+     Item 2: offset = 352, tuple = ('abc', '(0,3)')                                    +
+     Item 3: offset = 392, tuple = ('abc', '(0,4)')                                    +
+   Chunk 2: offset = 4, location = 432, hikey location = 136, hikey = ('abc', '(0,10)')+
+     Item 4: offset = 440, tuple = ('abc', '(0,5)')                                    +
+     Item 5: offset = 480, tuple = ('abc', '(0,6)')                                    +
+   Chunk 3: offset = 6, location = 520, hikey location = 160, hikey = ('b', '(0,12)')  +
+     Item 6: offset = 528, tuple = ('abc', '(0,10)')                                   +
+     Item 7: offset = 568, tuple = ('b', '(0,11)')                                     +
+   Chunk 4: offset = 8, location = 600, hikey location = 176, hikey = ('b', '(0,14)')  +
+     Item 8: offset = 608, tuple = ('b', '(0,12)')                                     +
+     Item 9: offset = 640, tuple = ('b', '(0,13)')                                     +
+   Chunk 5: offset = 10, location = 672, hikey location = 192, hikey = ('c', '(0,7)')  +
+     Item 10: offset = 680, tuple = ('b', '(0,14)')                                    +
+     Item 11: offset = 712, tuple = ('b', '(0,15)')                                    +
+   Chunk 6: offset = 12, location = 744, hikey location = 208, hikey = ('c', '(0,9)')  +
+     Item 12: offset = 752, tuple = ('c', '(0,7)')                                     +
+     Item 13: offset = 784, tuple = ('c', '(0,8)')                                     +
+   Chunk 7: offset = 14, location = 816, hikey location = 224                          +
+     Item 14: offset = 824, tuple = ('c', '(0,9)')                                     +
+                                                                                       +
+ Index toast: not loaded                                                               +
+ 
+(1 row)
+
+ALTER TABLE o_test_record_type_alter ADD PRIMARY KEY (key);
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 
+---------+-----+------+------
+ (1,2)   |   5 |   18 | abc
+ (2,4)   |   5 |   18 | abc
+ (3,6)   |   5 |   18 | abc
+ (4,8)   |   5 |   18 | abc
+ (5,10)  |   5 |   33 | abc
+ (6,12)  |   5 |   33 | abc
+ (7,14)  |   5 |   33 | c
+ (8,16)  |   5 |   33 | c
+ (9,18)  |   5 |   18 | c
+ (10,20) |   5 |   18 | abc
+ (11,22) |   5 |   11 | b
+ (12,24) |   5 |   12 | b
+ (13,26) |   5 |   13 | b
+ (14,28) |   5 |   14 | b
+ (15,30) |   5 |   15 | b
+(15 rows)
+
+BEGIN;
+ALTER TABLE o_test_record_type_alter ADD COLUMN val5 int NOT NULL DEFAULT 12;
+ROLLBACK;
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 
+---------+-----+------+------
+ (1,2)   |   5 |   18 | abc
+ (2,4)   |   5 |   18 | abc
+ (3,6)   |   5 |   18 | abc
+ (4,8)   |   5 |   18 | abc
+ (5,10)  |   5 |   33 | abc
+ (6,12)  |   5 |   33 | abc
+ (7,14)  |   5 |   33 | c
+ (8,16)  |   5 |   33 | c
+ (9,18)  |   5 |   18 | c
+ (10,20) |   5 |   18 | abc
+ (11,22) |   5 |   11 | b
+ (12,24) |   5 |   12 | b
+ (13,26) |   5 |   13 | b
+ (14,28) |   5 |   14 | b
+ (15,30) |   5 |   15 | b
+(15 rows)
+
+ALTER TABLE o_test_record_type_alter
+	ADD COLUMN val5 record_type_altered NOT NULL
+		DEFAULT (1, 5)::record_type_altered;
+ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
+ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
+ALTER TYPE record_type_non_altered DROP ATTRIBUTE b;
+ALTER TYPE record_type_non_altered ADD ATTRIBUTE c int;
+ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
+ALTER TYPE record_type_altered RENAME TO record_type_renamed;
+CREATE INDEX o_test_record_type_alter_idx2 ON o_test_record_type_alter (val5);
+ALTER TYPE record_type_renamed ADD ATTRIBUTE c int;
+ERROR:  cannot alter type "record_type_renamed" because index "o_test_record_type_alter_idx2" uses it
+SELECT * FROM o_test_record_type_alter WHERE val5 = (1, 5);
+ key  | val | val3 | val4 | val5  
+------+-----+------+------+-------
+ (1)  |   5 |   18 | abc  | (1,5)
+ (2)  |   5 |   18 | abc  | (1,5)
+ (3)  |   5 |   18 | abc  | (1,5)
+ (4)  |   5 |   18 | abc  | (1,5)
+ (5)  |   5 |   33 | abc  | (1,5)
+ (6)  |   5 |   33 | abc  | (1,5)
+ (7)  |   5 |   33 | c    | (1,5)
+ (8)  |   5 |   33 | c    | (1,5)
+ (9)  |   5 |   18 | c    | (1,5)
+ (10) |   5 |   18 | abc  | (1,5)
+ (11) |   5 |   11 | b    | (1,5)
+ (12) |   5 |   12 | b    | (1,5)
+ (13) |   5 |   13 | b    | (1,5)
+ (14) |   5 |   14 | b    | (1,5)
+ (15) |   5 |   15 | b    | (1,5)
+(15 rows)
+
+SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
+ key  | val | val3 | val4 | val5  
+------+-----+------+------+-------
+ (1)  |   5 |   18 | abc  | (1,5)
+ (2)  |   5 |   18 | abc  | (1,5)
+ (3)  |   5 |   18 | abc  | (1,5)
+ (4)  |   5 |   18 | abc  | (1,5)
+ (5)  |   5 |   33 | abc  | (1,5)
+ (6)  |   5 |   33 | abc  | (1,5)
+ (10) |   5 |   18 | abc  | (1,5)
+(7 rows)
+
+SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
+                                 orioledb_tbl_structure                                 
+----------------------------------------------------------------------------------------
+ Index o_test_record_type_alter_pkey contents                                          +
+ Page 0: level = 0, maxKeyLen = 37, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(5)')           +
+     Item 0: offset = 264, tuple = ('(1)', '5', '18', 'abc', '(1,5)')                  +
+     Item 1: offset = 336, tuple = ('(2)', '5', '18', 'abc', '(1,5)')                  +
+     Item 2: offset = 408, tuple = ('(3)', '5', '18', 'abc', '(1,5)')                  +
+     Item 3: offset = 480, tuple = ('(4)', '5', '18', 'abc', '(1,5)')                  +
+   Chunk 1: offset = 4, location = 552, hikey location = 112, hikey = ('(9)')          +
+     Item 4: offset = 560, tuple = ('(5)', '5', '33', 'abc', '(1,5)')                  +
+     Item 5: offset = 632, tuple = ('(6)', '5', '33', 'abc', '(1,5)')                  +
+     Item 6: offset = 704, tuple = ('(7)', '5', '33', 'c', '(1,5)')                    +
+     Item 7: offset = 776, tuple = ('(8)', '5', '33', 'c', '(1,5)')                    +
+   Chunk 2: offset = 8, location = 848, hikey location = 152, hikey = ('(13)')         +
+     Item 8: offset = 856, tuple = ('(9)', '5', '18', 'c', '(1,5)')                    +
+     Item 9: offset = 928, tuple = ('(10)', '5', '18', 'abc', '(1,5)')                 +
+     Item 10: offset = 1000, tuple = ('(11)', '5', '11', 'b', '(1,5)')                 +
+     Item 11: offset = 1072, tuple = ('(12)', '5', '12', 'b', '(1,5)')                 +
+   Chunk 3: offset = 12, location = 1144, hikey location = 192                         +
+     Item 12: offset = 1152, tuple = ('(13)', '5', '13', 'b', '(1,5)')                 +
+     Item 13: offset = 1224, tuple = ('(14)', '5', '14', 'b', '(1,5)')                 +
+     Item 14: offset = 1296, tuple = ('(15)', '5', '15', 'b', '(1,5)')                 +
+                                                                                       +
+ Index o_test_record_type_alter_idx1 contents                                          +
+ Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('abc', '(5)')    +
+     Item 0: offset = 264, tuple = ('abc', '(1)')                                      +
+     Item 1: offset = 328, tuple = ('abc', '(2)')                                      +
+     Item 2: offset = 392, tuple = ('abc', '(3)')                                      +
+     Item 3: offset = 456, tuple = ('abc', '(4)')                                      +
+   Chunk 1: offset = 4, location = 520, hikey location = 120, hikey = ('b', '(12)')    +
+     Item 4: offset = 528, tuple = ('abc', '(5)')                                      +
+     Item 5: offset = 592, tuple = ('abc', '(6)')                                      +
+     Item 6: offset = 656, tuple = ('abc', '(10)')                                     +
+     Item 7: offset = 720, tuple = ('b', '(11)')                                       +
+   Chunk 2: offset = 8, location = 776, hikey location = 160, hikey = ('c', '(7)')     +
+     Item 8: offset = 784, tuple = ('b', '(12)')                                       +
+     Item 9: offset = 840, tuple = ('b', '(13)')                                       +
+     Item 10: offset = 896, tuple = ('b', '(14)')                                      +
+     Item 11: offset = 952, tuple = ('b', '(15)')                                      +
+   Chunk 3: offset = 12, location = 1008, hikey location = 200                         +
+     Item 12: offset = 1016, tuple = ('c', '(7)')                                      +
+     Item 13: offset = 1072, tuple = ('c', '(8)')                                      +
+     Item 14: offset = 1128, tuple = ('c', '(9)')                                      +
+                                                                                       +
+ Index o_test_record_type_alter_idx2 contents                                          +
+ Page 0: level = 0, maxKeyLen = 66, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(1,5)', '(7)')  +
+     Item 0: offset = 272, tuple = ('(1,5)', '(1)')                                    +
+     Item 1: offset = 360, tuple = ('(1,5)', '(2)')                                    +
+     Item 2: offset = 448, tuple = ('(1,5)', '(3)')                                    +
+     Item 3: offset = 536, tuple = ('(1,5)', '(4)')                                    +
+     Item 4: offset = 624, tuple = ('(1,5)', '(5)')                                    +
+     Item 5: offset = 712, tuple = ('(1,5)', '(6)')                                    +
+   Chunk 1: offset = 6, location = 800, hikey location = 144, hikey = ('(1,5)', '(13)')+
+     Item 6: offset = 816, tuple = ('(1,5)', '(7)')                                    +
+     Item 7: offset = 904, tuple = ('(1,5)', '(8)')                                    +
+     Item 8: offset = 992, tuple = ('(1,5)', '(9)')                                    +
+     Item 9: offset = 1080, tuple = ('(1,5)', '(10)')                                  +
+     Item 10: offset = 1168, tuple = ('(1,5)', '(11)')                                 +
+     Item 11: offset = 1256, tuple = ('(1,5)', '(12)')                                 +
+   Chunk 2: offset = 12, location = 1344, hikey location = 216                         +
+     Item 12: offset = 1352, tuple = ('(1,5)', '(13)')                                 +
+     Item 13: offset = 1440, tuple = ('(1,5)', '(14)')                                 +
+     Item 14: offset = 1528, tuple = ('(1,5)', '(15)')                                 +
+                                                                                       +
+ Index toast: not loaded                                                               +
+ 
+(1 row)
+
+-- Test missing with fixed format
+CREATE TABLE o_test_record_type_alter2
+(
+	key int NOT NULL,
+	val int NOT NULL DEFAULT 5
+) USING orioledb;
+INSERT INTO o_test_record_type_alter2
+	SELECT id FROM generate_series(1, 10) id;
+SELECT * FROM o_test_record_type_alter2;
+ key | val 
+-----+-----
+   1 |   5
+   2 |   5
+   3 |   5
+   4 |   5
+   5 |   5
+   6 |   5
+   7 |   5
+   8 |   5
+   9 |   5
+  10 |   5
+(10 rows)
+
+SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1', '5')              +
+     Item 1: offset = 312, tuple = ('(0,2)', '2', '5')              +
+     Item 2: offset = 344, tuple = ('(0,3)', '3', '5')              +
+     Item 3: offset = 376, tuple = ('(0,4)', '4', '5')              +
+     Item 4: offset = 408, tuple = ('(0,5)', '5', '5')              +
+     Item 5: offset = 440, tuple = ('(0,6)', '6', '5')              +
+     Item 6: offset = 472, tuple = ('(0,7)', '7', '5')              +
+     Item 7: offset = 504, tuple = ('(0,8)', '8', '5')              +
+     Item 8: offset = 536, tuple = ('(0,9)', '9', '5')              +
+     Item 9: offset = 568, tuple = ('(0,10)', '10', '5')            +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+ALTER TABLE o_test_record_type_alter2 ADD COLUMN val3 int NOT NULL DEFAULT 18;
+ALTER TABLE o_test_record_type_alter2 ADD COLUMN val4 text DEFAULT 'abc';
+SELECT * FROM o_test_record_type_alter2;
+ key | val | val3 | val4 
+-----+-----+------+------
+   1 |   5 |   18 | abc
+   2 |   5 |   18 | abc
+   3 |   5 |   18 | abc
+   4 |   5 |   18 | abc
+   5 |   5 |   18 | abc
+   6 |   5 |   18 | abc
+   7 |   5 |   18 | abc
+   8 |   5 |   18 | abc
+   9 |   5 |   18 | abc
+  10 |   5 |   18 | abc
+(10 rows)
+
+SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1', '5', null, null)  +
+     Item 1: offset = 312, tuple = ('(0,2)', '2', '5', null, null)  +
+     Item 2: offset = 344, tuple = ('(0,3)', '3', '5', null, null)  +
+     Item 3: offset = 376, tuple = ('(0,4)', '4', '5', null, null)  +
+     Item 4: offset = 408, tuple = ('(0,5)', '5', '5', null, null)  +
+     Item 5: offset = 440, tuple = ('(0,6)', '6', '5', null, null)  +
+     Item 6: offset = 472, tuple = ('(0,7)', '7', '5', null, null)  +
+     Item 7: offset = 504, tuple = ('(0,8)', '8', '5', null, null)  +
+     Item 8: offset = 536, tuple = ('(0,9)', '9', '5', null, null)  +
+     Item 9: offset = 568, tuple = ('(0,10)', '10', '5', null, null)+
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+ALTER TABLE o_test_record_type_alter2 ALTER COLUMN val3 DROP DEFAULT;
+ALTER TABLE o_test_record_type_alter2 ALTER COLUMN val4 SET DEFAULT 'b';
+SELECT * FROM o_test_record_type_alter2;
+ key | val | val3 | val4 
+-----+-----+------+------
+   1 |   5 |   18 | abc
+   2 |   5 |   18 | abc
+   3 |   5 |   18 | abc
+   4 |   5 |   18 | abc
+   5 |   5 |   18 | abc
+   6 |   5 |   18 | abc
+   7 |   5 |   18 | abc
+   8 |   5 |   18 | abc
+   9 |   5 |   18 | abc
+  10 |   5 |   18 | abc
+(10 rows)
+
+SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1', '5', null, null)  +
+     Item 1: offset = 312, tuple = ('(0,2)', '2', '5', null, null)  +
+     Item 2: offset = 344, tuple = ('(0,3)', '3', '5', null, null)  +
+     Item 3: offset = 376, tuple = ('(0,4)', '4', '5', null, null)  +
+     Item 4: offset = 408, tuple = ('(0,5)', '5', '5', null, null)  +
+     Item 5: offset = 440, tuple = ('(0,6)', '6', '5', null, null)  +
+     Item 6: offset = 472, tuple = ('(0,7)', '7', '5', null, null)  +
+     Item 7: offset = 504, tuple = ('(0,8)', '8', '5', null, null)  +
+     Item 8: offset = 536, tuple = ('(0,9)', '9', '5', null, null)  +
+     Item 9: offset = 568, tuple = ('(0,10)', '10', '5', null, null)+
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+UPDATE o_test_record_type_alter2 tb SET val3 = 33 WHERE key BETWEEN 6 AND 8;
+UPDATE o_test_record_type_alter2 tb SET val4 = 'c' WHERE key BETWEEN 7 AND 9;
+SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1', '5', null, null)  +
+     Item 1: offset = 312, tuple = ('(0,2)', '2', '5', null, null)  +
+     Item 2: offset = 344, tuple = ('(0,3)', '3', '5', null, null)  +
+     Item 3: offset = 376, tuple = ('(0,4)', '4', '5', null, null)  +
+     Item 4: offset = 408, tuple = ('(0,5)', '5', '5', null, null)  +
+     Item 5: offset = 440, tuple = ('(0,6)', '6', '5', '33', 'abc') +
+     Item 6: offset = 488, tuple = ('(0,7)', '7', '5', '33', 'c')   +
+     Item 7: offset = 536, tuple = ('(0,8)', '8', '5', '33', 'c')   +
+     Item 8: offset = 584, tuple = ('(0,9)', '9', '5', '18', 'c')   +
+     Item 9: offset = 632, tuple = ('(0,10)', '10', '5', null, null)+
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+SELECT * FROM o_test_record_type_alter2;
+ key | val | val3 | val4 
+-----+-----+------+------
+   1 |   5 |   18 | abc
+   2 |   5 |   18 | abc
+   3 |   5 |   18 | abc
+   4 |   5 |   18 | abc
+   5 |   5 |   18 | abc
+   6 |   5 |   33 | abc
+   7 |   5 |   33 | c
+   8 |   5 |   33 | c
+   9 |   5 |   18 | c
+  10 |   5 |   18 | abc
+(10 rows)
+
+INSERT INTO o_test_record_type_alter2 (key, val3)
+	SELECT id, id FROM generate_series(11, 15) id;
+SELECT * FROM o_test_record_type_alter2;
+ key | val | val3 | val4 
+-----+-----+------+------
+   1 |   5 |   18 | abc
+   2 |   5 |   18 | abc
+   3 |   5 |   18 | abc
+   4 |   5 |   18 | abc
+   5 |   5 |   18 | abc
+   6 |   5 |   33 | abc
+   7 |   5 |   33 | c
+   8 |   5 |   33 | c
+   9 |   5 |   18 | c
+  10 |   5 |   18 | abc
+  11 |   5 |   11 | b
+  12 |   5 |   12 | b
+  13 |   5 |   13 | b
+  14 |   5 |   14 | b
+  15 |   5 |   15 | b
+(15 rows)
+
+DROP TYPE record_type_non_altered CASCADE;
+NOTICE:  drop cascades to column key of table o_test_record_type_alter
+DROP TYPE record_type_renamed CASCADE;
+NOTICE:  drop cascades to column val5 of table o_test_record_type_alter
+DROP TYPE coordinates CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to column locations of table o_test_array
+drop cascades to column location of table o_test_record_type
+DROP TYPE custom_range CASCADE;
+NOTICE:  drop cascades to column area of table o_test_custom_range
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table o_test_record_type
+drop cascades to table o_test_range
+drop cascades to table o_test_custom_range
+drop cascades to table o_test_array
+drop cascades to table o_test_int_array
+drop cascades to table o_test_enum_index
+drop cascades to table o_test_domain_index
+drop cascades to table o_test_domain_array_index
+drop cascades to table o_test_record_type_alter
+drop cascades to table o_test_record_type_alter2

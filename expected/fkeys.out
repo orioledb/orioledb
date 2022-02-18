@@ -1,0 +1,177 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_insert0 s1_insert1 s1_update1 s2_update1 s1_update0 s2_update0 s2_select0 s2_select1
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1: INSERT INTO o_iso1 VALUES (1,1,'1');
+step s1_update1: UPDATE o_iso1 SET fkey = 5, ftext_val = '5' WHERE key = 1 RETURNING *;
+key|fkey|ftext_val
+---+----+---------
+  1|   5|        5
+(1 row)
+
+step s2_update1: UPDATE o_iso1 SET fkey = 6, ftext_val = '6'  WHERE key = 1 RETURNING *;
+key|fkey|ftext_val
+---+----+---------
+  1|   6|        6
+(1 row)
+
+step s1_update0: UPDATE o_iso0 SET key = 11, text_val = 'hi bro'  WHERE key = 5 RETURNING *;
+key|value|text_val
+---+-----+--------
+ 11|    6|hi bro  
+(1 row)
+
+step s2_update0: UPDATE o_iso0 SET key = 12, text_val = 'hi man' WHERE key = 6 RETURNING *;
+key|value|text_val
+---+-----+--------
+ 12|    7|hi man  
+(1 row)
+
+step s2_select0: SELECT * FROM o_iso0 WHERE key > 0 FOR UPDATE;
+key|value|text_val
+---+-----+--------
+  1|    2|1       
+  2|    3|2       
+  3|    4|3       
+  4|    5|4       
+ 11|    6|hi bro  
+ 12|    7|hi man  
+(6 rows)
+
+step s2_select1: SELECT * FROM o_iso1 WHERE key > 0 FOR UPDATE;
+key|fkey|ftext_val
+---+----+---------
+  1|  12|hi man   
+(1 row)
+
+
+starting permutation: s1_insert0 s1_insert1 s1_delete0 s2_delete0 s1_select0 s2_select0
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1: INSERT INTO o_iso1 VALUES (1,1,'1');
+step s1_delete0: DELETE FROM o_iso0 where key = 1;
+step s2_delete0: DELETE FROM o_iso0 where key = 1;
+step s1_select0: SELECT * FROM o_iso0 WHERE key > 0 FOR UPDATE;
+key|value|text_val
+---+-----+--------
+  2|    3|       2
+  3|    4|       3
+  4|    5|       4
+  5|    6|       5
+  6|    7|       6
+(5 rows)
+
+step s2_select0: SELECT * FROM o_iso0 WHERE key > 0 FOR UPDATE;
+key|value|text_val
+---+-----+--------
+  2|    3|       2
+  3|    4|       3
+  4|    5|       4
+  5|    6|       5
+  6|    7|       6
+(5 rows)
+
+
+starting permutation: s1_insert0 s1_insert1 s2_insert1 s2_select0 s2_select1 s1_delete0 s2_delete0
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1: INSERT INTO o_iso1 VALUES (1,1,'1');
+step s2_insert1: INSERT INTO o_iso1 VALUES (2,1,'1');
+step s2_select0: SELECT * FROM o_iso0 WHERE key > 0 FOR UPDATE;
+key|value|text_val
+---+-----+--------
+  1|    2|       1
+  2|    3|       2
+  3|    4|       3
+  4|    5|       4
+  5|    6|       5
+  6|    7|       6
+(6 rows)
+
+step s2_select1: SELECT * FROM o_iso1 WHERE key > 0 FOR UPDATE;
+key|fkey|ftext_val
+---+----+---------
+  1|   1|        1
+  2|   1|        1
+(2 rows)
+
+step s1_delete0: DELETE FROM o_iso0 where key = 1;
+step s2_delete0: DELETE FROM o_iso0 where key = 1;
+
+starting permutation: s1_insert0 s1_insert1 s1_select1 s2_select1 s1_begin s1_update1 s1_commit s2_begin s2_update1 s2_commit
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1: INSERT INTO o_iso1 VALUES (1,1,'1');
+step s1_select1: SELECT * FROM o_iso1 WHERE key > 0 FOR UPDATE;
+key|fkey|ftext_val
+---+----+---------
+  1|   1|        1
+(1 row)
+
+step s2_select1: SELECT * FROM o_iso1 WHERE key > 0 FOR UPDATE;
+key|fkey|ftext_val
+---+----+---------
+  1|   1|        1
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_update1: UPDATE o_iso1 SET fkey = 5, ftext_val = '5' WHERE key = 1 RETURNING *;
+key|fkey|ftext_val
+---+----+---------
+  1|   5|        5
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_begin: BEGIN;
+step s2_update1: UPDATE o_iso1 SET fkey = 6, ftext_val = '6'  WHERE key = 1 RETURNING *;
+key|fkey|ftext_val
+---+----+---------
+  1|   6|        6
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s1_insert0 s1_insert1 s1_select0 s2_select0 s1_begin s1_select1 s1_update1 s1_commit s2_begin s2_update1 s2_commit
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1: INSERT INTO o_iso1 VALUES (1,1,'1');
+step s1_select0: SELECT * FROM o_iso0 WHERE key > 0 FOR UPDATE;
+key|value|text_val
+---+-----+--------
+  1|    2|       1
+  2|    3|       2
+  3|    4|       3
+  4|    5|       4
+  5|    6|       5
+  6|    7|       6
+(6 rows)
+
+step s2_select0: SELECT * FROM o_iso0 WHERE key > 0 FOR UPDATE;
+key|value|text_val
+---+-----+--------
+  1|    2|       1
+  2|    3|       2
+  3|    4|       3
+  4|    5|       4
+  5|    6|       5
+  6|    7|       6
+(6 rows)
+
+step s1_begin: BEGIN;
+step s1_select1: SELECT * FROM o_iso1 WHERE key > 0 FOR UPDATE;
+key|fkey|ftext_val
+---+----+---------
+  1|   1|        1
+(1 row)
+
+step s1_update1: UPDATE o_iso1 SET fkey = 5, ftext_val = '5' WHERE key = 1 RETURNING *;
+key|fkey|ftext_val
+---+----+---------
+  1|   5|        5
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_begin: BEGIN;
+step s2_update1: UPDATE o_iso1 SET fkey = 6, ftext_val = '6'  WHERE key = 1 RETURNING *;
+key|fkey|ftext_val
+---+----+---------
+  1|   6|        6
+(1 row)
+
+step s2_commit: COMMIT;

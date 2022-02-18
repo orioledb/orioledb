@@ -1,0 +1,157 @@
+Parsed test spec with 4 sessions
+
+starting permutation: s1_begin s2_begin s3_begin s4_begin s1_insert s2_insert s3_insert s4_insert s2_rollback s1_rollback s3_commit s4_commit
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_insert: INSERT INTO o_ioc VALUES (1, 3, 1) RETURNING *;
+id1|id2|id3
+---+---+---
+  1|  3|  1
+(1 row)
+
+step s2_insert: INSERT INTO o_ioc VALUES (2, 4, 2) RETURNING *;
+id1|id2|id3
+---+---+---
+  2|  4|  2
+(1 row)
+
+step s3_insert: INSERT INTO o_ioc VALUES (3, 3, 3) RETURNING *; <waiting ...>
+step s4_insert: INSERT INTO o_ioc VALUES (3, 4, 3) ON CONFLICT (id3) DO NOTHING RETURNING *; <waiting ...>
+step s2_rollback: ROLLBACK;
+step s1_rollback: ROLLBACK;
+step s3_insert: <... completed>
+id1|id2|id3
+---+---+---
+  3|  3|  3
+(1 row)
+
+step s3_commit: COMMIT;
+step s4_insert: <... completed>
+id1|id2|id3
+---+---+---
+(0 rows)
+
+step s4_commit: COMMIT;
+
+starting permutation: s1_begin s2_begin s3_begin s4_begin s1_insert s2_insert s3_insert s4_insert s1_rollback s2_rollback s3_commit s4_commit
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s3_begin: BEGIN;
+step s4_begin: BEGIN;
+step s1_insert: INSERT INTO o_ioc VALUES (1, 3, 1) RETURNING *;
+id1|id2|id3
+---+---+---
+  1|  3|  1
+(1 row)
+
+step s2_insert: INSERT INTO o_ioc VALUES (2, 4, 2) RETURNING *;
+id1|id2|id3
+---+---+---
+  2|  4|  2
+(1 row)
+
+step s3_insert: INSERT INTO o_ioc VALUES (3, 3, 3) RETURNING *; <waiting ...>
+step s4_insert: INSERT INTO o_ioc VALUES (3, 4, 3) ON CONFLICT (id3) DO NOTHING RETURNING *; <waiting ...>
+step s1_rollback: ROLLBACK;
+step s3_insert: <... completed>
+id1|id2|id3
+---+---+---
+  3|  3|  3
+(1 row)
+
+step s2_rollback: ROLLBACK;
+step s3_commit: COMMIT;
+step s4_insert: <... completed>
+id1|id2|id3
+---+---+---
+(0 rows)
+
+step s4_commit: COMMIT;
+
+starting permutation: s3_begin s3_setup s4_begin s4_setup s1_setup s3_insert s4_insert s1_release_s3 s1_release s3_commit s4_commit
+step s3_begin: BEGIN;
+step s3_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's3';
+step s4_begin: BEGIN;
+step s4_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's4';
+step s1_setup: SELECT pg_stopevent_set('index_insert', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s3_insert: INSERT INTO o_ioc VALUES (3, 3, 3) RETURNING *; <waiting ...>
+step s4_insert: INSERT INTO o_ioc VALUES (3, 4, 3) ON CONFLICT (id3) DO NOTHING RETURNING *; <waiting ...>
+step s1_release_s3: SELECT pg_stopevent_set('index_insert', '$applicationName == "s4"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_release: SELECT pg_stopevent_reset('index_insert');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s3_insert: <... completed>
+id1|id2|id3
+---+---+---
+  3|  3|  3
+(1 row)
+
+step s3_commit: COMMIT;
+step s4_insert: <... completed>
+id1|id2|id3
+---+---+---
+(0 rows)
+
+step s4_commit: COMMIT;
+
+starting permutation: s3_begin s3_setup s4_begin s4_setup s1_setup s3_insert s4_insert s1_release_s4 s1_release s3_commit s4_commit
+step s3_begin: BEGIN;
+step s3_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's3';
+step s4_begin: BEGIN;
+step s4_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's4';
+step s1_setup: SELECT pg_stopevent_set('index_insert', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s3_insert: INSERT INTO o_ioc VALUES (3, 3, 3) RETURNING *; <waiting ...>
+step s4_insert: INSERT INTO o_ioc VALUES (3, 4, 3) ON CONFLICT (id3) DO NOTHING RETURNING *; <waiting ...>
+step s1_release_s4: SELECT pg_stopevent_set('index_insert', '$applicationName == "s3"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_release: SELECT pg_stopevent_reset('index_insert');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s3_insert: <... completed>
+id1|id2|id3
+---+---+---
+  3|  3|  3
+(1 row)
+
+step s3_commit: COMMIT;
+step s4_insert: <... completed>
+id1|id2|id3
+---+---+---
+(0 rows)
+
+step s4_commit: COMMIT;
