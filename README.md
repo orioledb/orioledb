@@ -2,7 +2,7 @@
 (... and solving some PostgreSQL wicked problems)
 
 [![build status](https://github.com/orioledb/orioledb/actions/workflows/build.yml/badge.svg)](https://github.com/orioledb/orioledb/actions)
-[![codecov](https://codecov.io/gh/orioledb/orioledb/branch/master/graph/badge.svg?token=shh4jn0DUK)](https://codecov.io/gh/orioledb/orioledb)
+[![codecov](https://codecov.io/gh/orioledb/orioledb/branch/main/graph/badge.svg?token=shh4jn0DUK)](https://codecov.io/gh/orioledb/orioledb)
 
 OrioleDB is a new storage engine for PostgreSQL, bringing a modern approach to
 database capacity, capabilities and performance to the world's most-loved
