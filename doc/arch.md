@@ -66,7 +66,7 @@ Checkpoint has written `7*` to the storage.  It has written to the free space ac
 
 ![Copy-on-write checkpoint 2](cow_2.svg)
 
-Once the checkpoint is completed, old storage page images `1`, `2`, and `3` are marked as free space.
+Once the checkpoint is completed, old storage page images `1`, `3`, and `7` are marked as free space.
 
 ![Copy-on-write checkpoint 3](cow_3.svg)
 
