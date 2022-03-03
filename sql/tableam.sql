@@ -30,6 +30,7 @@ CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on)
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
 -- supported
+ALTER TABLE o_tableam1 OWNER TO current_user;
 CREATE UNIQUE INDEX o_tableam1_ix1 ON o_tableam1 (key);
 CREATE INDEX o_tableam1_ix2 on o_tableam1 (value);
 

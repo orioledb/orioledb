@@ -169,7 +169,8 @@ validate_at_utility(PlannedStmt *pstmt,
 			   || cmd->subtype == AT_AddConstraint
 			   || cmd->subtype == AT_AddColumn
 			   || cmd->subtype == AT_AddIndex
-			   || cmd->subtype == AT_DropConstraint);
+			   || cmd->subtype == AT_DropConstraint
+			   || cmd->subtype == AT_ChangeOwner);
 
 		/* make checks */
 		switch (cmd->subtype)
@@ -263,6 +264,7 @@ validate_at_utility(PlannedStmt *pstmt,
 			case AT_DropConstraint:
 			case AT_GenericOptions:
 			case AT_SetNotNull:
+			case AT_ChangeOwner:
 				break;
 			default:
 				ereport(ERROR,
@@ -450,6 +452,7 @@ validate_at_utility(PlannedStmt *pstmt,
 			case AT_AddConstraint:
 			case AT_ColumnDefault:
 			case AT_GenericOptions:
+			case AT_ChangeOwner:
 				break;
 			default:
 				/* handled by check */
