@@ -699,15 +699,12 @@ make_btree_sampling_scan(BTreeDescr *desc, BlockSampler sampler)
 
 	scan->needSampling = true;
 	scan->sampler = sampler;
+	scan->samplingNumber = 0;
 
-	if (O_TUPLE_IS_NULL(scan->curHikey.tuple) &&
-		scan->status != BTreeSeqScanFinished)
-	{
-		if (BlockSampler_HasMore(scan->sampler))
-			scan->samplingNext = BlockSampler_Next(scan->sampler);
-		else
-			scan->samplingNext = InvalidBlockNumber;
-	}
+	if (BlockSampler_HasMore(scan->sampler))
+		scan->samplingNext = BlockSampler_Next(scan->sampler);
+	else
+		scan->samplingNext = InvalidBlockNumber;
 
 	return scan;
 }
