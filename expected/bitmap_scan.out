@@ -492,12 +492,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -580,12 +580,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -621,12 +621,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -709,12 +709,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -797,12 +797,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -838,12 +838,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -965,12 +965,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -1006,12 +1006,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -1047,12 +1047,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti OFFSET 200 LIMIT 10),
@@ -1182,12 +1182,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (26 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1276,12 +1276,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1321,12 +1321,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1366,12 +1366,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1411,12 +1411,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1456,12 +1456,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1501,12 +1501,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1681,12 +1681,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
                ->  Bitmap Index Scan on bitmap_test_ix1
                      Index Cond: (i = ANY ($0))
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j = ANY ($1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i OFFSET 79 LIMIT 10),
@@ -2268,12 +2268,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2356,12 +2356,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2397,12 +2397,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2485,12 +2485,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2573,12 +2573,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2614,12 +2614,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2741,12 +2741,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2782,12 +2782,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2823,12 +2823,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti OFFSET 200 LIMIT 10),
@@ -2958,12 +2958,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (26 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3052,12 +3052,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3097,12 +3097,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3142,12 +3142,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3187,12 +3187,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3232,12 +3232,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3277,12 +3277,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3457,12 +3457,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
          ->  BitmapAnd
-               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
                      Index Cond: (j = ANY ($1))
+               ->  Bitmap Index Scan on bitmap_test_ctid_ix1
+                     Index Cond: (i = ANY ($0))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i OFFSET 79 LIMIT 10),

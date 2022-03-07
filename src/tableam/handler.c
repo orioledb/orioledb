@@ -38,6 +38,7 @@
 #include "catalog/index.h"
 #include "catalog/pg_am_d.h"
 #include "catalog/storage.h"
+#include "commands/progress.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
@@ -45,7 +46,9 @@
 #include "optimizer/plancat.h"
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
+#include "utils/backend_progress.h"
 #include "utils/lsyscache.h"
+#include "utils/sampling.h"
 
 typedef struct OScanDescData
 {
@@ -1341,6 +1344,138 @@ orioledb_free_rd_amcache(Relation rel)
 	rel->rd_amcache = NULL;
 }
 
+static int
+orioledb_acquire_sample_rows(Relation relation, int elevel,
+							 HeapTuple *rows, int targrows,
+							 double *totalrows,
+							 double *totaldeadrows)
+{
+	OTableDescr *descr = relation_get_descr(relation);
+	OIndexDescr *pk = GET_PRIMARY(descr);
+	BTreeSeqScan *scan;
+	BlockNumber nblocks;
+	ReservoirStateData rstate;
+	bool		scanEnd;
+	OTuple		tuple;
+	TupleTableSlot *slot = descr->newTuple;
+	int			numrows = 0;	/* # rows now in reservoir */
+	double		samplerows = 0; /* total # rows collected */
+	double		liverows = 0;	/* # live rows seen */
+	double		deadrows = 0;	/* # dead rows seen */
+	double		rowstoskip = -1;	/* -1 means not set yet */
+	BlockSamplerData bs;
+	BlockNumber totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
+
+	nblocks = BlockSampler_Init(&bs, totalblocks,
+								targrows, random());
+
+	scan = make_btree_sampling_scan(&pk->desc, &bs);
+
+	/* Report sampling block numbers */
+	pgstat_progress_update_param(PROGRESS_ANALYZE_BLOCKS_TOTAL,
+								 nblocks);
+
+	/* Prepare for sampling rows */
+	reservoir_init_selection_state(&rstate, targrows);
+
+	tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
+									   &scanEnd, NULL);
+	while (!scanEnd)
+	{
+		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
+										   &scanEnd, NULL);
+
+		if (!O_TUPLE_IS_NULL(tuple))
+		{
+			tts_orioledb_store_tuple(slot, tuple, descr, COMMITSEQNO_INPROGRESS,
+									 PrimaryIndexNumber, false, NULL);
+
+			liverows += 1;
+
+			if (numrows < targrows)
+				rows[numrows++] = ExecCopySlotHeapTuple(slot);
+			else
+			{
+				/*
+				 * t in Vitter's paper is the number of records already
+				 * processed.  If we need to compute a new S value, we must
+				 * use the not-yet-incremented value of samplerows as t.
+				 */
+				if (rowstoskip < 0)
+					rowstoskip = reservoir_get_next_S(&rstate, samplerows, targrows);
+
+				if (rowstoskip <= 0)
+				{
+					/*
+					 * Found a suitable tuple, so save it, replacing one old
+					 * tuple at random
+					 */
+					int			k = (int) (targrows * sampler_random_fract(rstate.randstate));
+
+					Assert(k >= 0 && k < targrows);
+					heap_freetuple(rows[k]);
+					rows[k] = ExecCopySlotHeapTuple(slot);
+				}
+
+				rowstoskip -= 1;
+			}
+
+		}
+		else
+		{
+			deadrows += 1;
+		}
+	}
+	free_btree_seq_scan(scan);
+
+	/*
+	 * Estimate total numbers of live and dead rows in relation, extrapolating
+	 * on the assumption that the average tuple density in pages we didn't
+	 * scan is the same as in the pages we did scan.  Since what we scanned is
+	 * a random sample of the pages in the relation, this should be a good
+	 * assumption.
+	 */
+	if (bs.m > 0)
+	{
+		*totalrows = floor((liverows / bs.m) * totalblocks + 0.5);
+		*totaldeadrows = floor((deadrows / bs.m) * totalblocks + 0.5);
+	}
+	else
+	{
+		*totalrows = 0.0;
+		*totaldeadrows = 0.0;
+	}
+
+	/*
+	 * Emit some interesting relation info
+	 */
+	ereport(elevel,
+			(errmsg("\"%s\": scanned %d of %u pages, "
+					"containing %.0f live rows and %.0f dead rows; "
+					"%d rows in sample, %.0f estimated total rows",
+					RelationGetRelationName(relation),
+					bs.m, totalblocks,
+					liverows, deadrows,
+					numrows, *totalrows)));
+
+	return numrows;
+}
+
+static void
+orioledb_analyze_table(Relation relation,
+					   AcquireSampleRowsFunc *func,
+					   BlockNumber *totalpages)
+{
+	OTableDescr *descr = relation_get_descr(relation);
+	OIndexDescr *pk = GET_PRIMARY(descr);
+
+	o_btree_load_shmem(&pk->desc);
+
+	*func = orioledb_acquire_sample_rows;
+	*totalpages = TREE_NUM_LEAF_PAGES(&pk->desc);
+}
+
+
 /* ------------------------------------------------------------------------
  * Definition of the orioledb table access method.
  * ------------------------------------------------------------------------
@@ -1410,7 +1545,8 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.tuple_refetch_row_version = orioledb_refetch_row_version,
 	.init_modify = orioledb_init_modify,
 	.rewrite_table = orioledb_rewrite_table,
-	.free_rd_amcache = orioledb_free_rd_amcache
+	.free_rd_amcache = orioledb_free_rd_amcache,
+	.analyze_table = orioledb_analyze_table
 };
 
 bool

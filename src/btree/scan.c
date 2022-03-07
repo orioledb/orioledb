@@ -37,6 +37,7 @@
 #include "btree/scan.h"
 #include "btree/undo.h"
 #include "tuple/slot.h"
+#include "utils/sampling.h"
 #include "utils/stopevent.h"
 
 #include "miscadmin.h"
@@ -98,6 +99,11 @@ struct BTreeSeqScan
 
 	bool		firstNextKey;
 	OFixedKey	nextKey;
+
+	bool		needSampling;
+	BlockSampler sampler;
+	BlockNumber samplingNumber;
+	BlockNumber samplingNext;
 
 	BTreeSeqScanCallbacks *cb;
 	void	   *arg;
@@ -469,6 +475,21 @@ iterate_internal_page(BTreeSeqScan *scan)
 			valid_downlink = scan->cb->isRangeValid(start_tuple, end_tuple,
 													scan->arg);
 		}
+		else if (scan->needSampling)
+		{
+			if (scan->samplingNumber < scan->samplingNext)
+			{
+				valid_downlink = false;
+			}
+			else
+			{
+				if (BlockSampler_HasMore(scan->sampler))
+					scan->samplingNext = BlockSampler_Next(scan->sampler);
+				else
+					scan->samplingNext = InvalidBlockNumber;
+			}
+			scan->samplingNumber++;
+		}
 
 		if (valid_downlink)
 		{
@@ -616,6 +637,7 @@ make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
 	scan->cb = cb;
 	scan->arg = arg;
 	scan->firstNextKey = true;
+	scan->needSampling = false;
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 
 	START_CRIT_SECTION();
@@ -667,6 +689,29 @@ make_btree_seq_scan(BTreeDescr *desc, CommitSeqNo csn)
 {
 	return make_btree_seq_scan_cb(desc, csn, NULL, NULL);
 }
+
+BTreeSeqScan *
+make_btree_sampling_scan(BTreeDescr *desc, BlockSampler sampler)
+{
+	BTreeSeqScan *scan;
+
+	scan = make_btree_seq_scan_cb(desc, COMMITSEQNO_INPROGRESS, NULL, NULL);
+
+	scan->needSampling = true;
+	scan->sampler = sampler;
+
+	if (O_TUPLE_IS_NULL(scan->curHikey.tuple) &&
+		scan->status != BTreeSeqScanFinished)
+	{
+		if (BlockSampler_HasMore(scan->sampler))
+			scan->samplingNext = BlockSampler_Next(scan->sampler);
+		else
+			scan->samplingNext = InvalidBlockNumber;
+	}
+
+	return scan;
+}
+
 
 static OTuple
 btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,

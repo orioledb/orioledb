@@ -17,6 +17,7 @@
 #include "btree/page_contents.h"
 
 #include "executor/tuptable.h"
+#include "utils/sampling.h"
 
 typedef struct BTreeSeqScan BTreeSeqScan;
 
@@ -30,6 +31,8 @@ extern BTreeSeqScan *make_btree_seq_scan(BTreeDescr *desc, CommitSeqNo csn);
 extern BTreeSeqScan *make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
 											BTreeSeqScanCallbacks *cb,
 											void *arg);
+extern BTreeSeqScan *make_btree_sampling_scan(BTreeDescr *desc,
+											  BlockSampler sampler);
 extern OTuple btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 									 CommitSeqNo *tupleCsn,
 									 BTreeLocationHint *hint);

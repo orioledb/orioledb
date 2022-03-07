@@ -297,20 +297,18 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1 FROM o_explain WHERE val2 > 0;') as t;
-                                              regexp_replace                                               
------------------------------------------------------------------------------------------------------------
+                                      regexp_replace                                       
+-------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Bitmap heap scan
-   Recheck Cond: (valx > x)
-   ->  Bitmap Index Scan on o_explain_sec_non_valx  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-         Index Cond: (valx > x)
-         Secondary index (o_explain_sec_non_valx) pages: read=x
+   Forward index scan of: o_explain_sec_non_valx
+   Conds: (valx > x)
    Primary pages: read=x
+   Secondary index (o_explain_sec_non_valx) pages: read=x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(11 rows)
+(9 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
