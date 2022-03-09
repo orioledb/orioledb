@@ -202,7 +202,7 @@ class RecoveryTest(BaseTest):
 		con1.execute("INSERT INTO o_test (SELECT id, id + 1, id + 3 FROM generate_series(1, 100, 1) id);")
 		con1.commit()
 		con1.begin()
-		con1.execute("DELETE FROM o_test WHERE id %% 5 = 0;")
+		con1.execute("DELETE FROM o_test WHERE mod(id, 5) = 0;")
 
 		con1.execute("SELECT pg_stopevent_set('checkpoint_index_start', '$.treeName == \"o_test_ix1\"');")
 		t1 = ThreadQueryExecutor(con2, "CHECKPOINT;")
@@ -248,10 +248,10 @@ class RecoveryTest(BaseTest):
 		con1.execute("INSERT INTO o_test (SELECT id, id + 1, id + 3 FROM generate_series(1, 100, 1) id);")
 		con1.commit()
 		con1.begin()
-		con1.execute("UPDATE o_test SET id = id + 100 WHERE id %% 10 = 0;")
-		con1.execute("UPDATE o_test SET id2 = id2 + 100 WHERE id %% 3 = 0;")
-		con1.execute("UPDATE o_test SET id3 = id3 + 100 WHERE id %% 4 = 0;")
-		con1.execute("UPDATE o_test SET id = id + 100, id2 = id2 + 100, id3 = id3 + 100 WHERE id %% 7 = 0;")
+		con1.execute("UPDATE o_test SET id = id + 100 WHERE mod(id, 10) = 0;")
+		con1.execute("UPDATE o_test SET id2 = id2 + 100 WHERE mod(id, 3) = 0;")
+		con1.execute("UPDATE o_test SET id3 = id3 + 100 WHERE mod(id, 4) = 0;")
+		con1.execute("UPDATE o_test SET id = id + 100, id2 = id2 + 100, id3 = id3 + 100 WHERE mod(id, 7) = 0;")
 		con1.execute("SELECT pg_stopevent_set('checkpoint_index_start', '$.treeName == \"o_test_ix1\"');")
 
 		t1 = ThreadQueryExecutor(con2, "CHECKPOINT;")
