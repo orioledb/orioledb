@@ -27,7 +27,8 @@ extern void o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 										  OTuple tup, OBTreeKeyBound *bound);
 extern int	o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 								   OBTreeValueBound *bound2,
-								   OIndexField *field);
+								   OIndexField *field,
+								   bool *equal);
 extern int	o_idx_cmp(BTreeDescr *desc,
 					  void *p1, BTreeKeyType keyType1,
 					  void *p2, BTreeKeyType keyType2);

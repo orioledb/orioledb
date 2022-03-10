@@ -706,11 +706,15 @@ o_idx_cmp_key_bound_to_tuple(OIndexDescr *id,
 int
 o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 					   OBTreeValueBound *bound2,
-					   OIndexField *field)
+					   OIndexField *field,
+					   bool *equal)
 {
 	/* Keep clang analyzer quiet */
 #ifndef __clang_analyzer__
 	int			res;
+
+	if (equal)
+		*equal = false;
 
 	if ((bound1->flags & O_VALUE_BOUND_NO_VALUE) == 0 &&
 		(bound2->flags & O_VALUE_BOUND_NO_VALUE) == 0)
@@ -745,7 +749,14 @@ o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 			res = -res;
 
 		if (res == 0)
+		{
 			res = cmp_inclusive2(bound1->flags, bound2->flags);
+			if (equal &&
+				(bound1->flags & O_VALUE_BOUND_INCLUSIVE) &&
+				(bound2->flags & O_VALUE_BOUND_INCLUSIVE))
+				*equal = true;
+
+		}
 	}
 	else if ((bound1->flags & O_VALUE_BOUND_UNBOUNDED) ||
 			 (bound2->flags & O_VALUE_BOUND_UNBOUNDED))
@@ -843,7 +854,8 @@ o_idx_cmp(BTreeDescr *desc,
 	{
 		cmp = o_idx_cmp_value_bounds(&key1->keys[i],
 									 &key2->keys[i],
-									 &id->fields[i]);
+									 &id->fields[i],
+									 NULL);
 		if (cmp)
 			return cmp;
 	}

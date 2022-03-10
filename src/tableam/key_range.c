@@ -34,12 +34,13 @@ static void o_fill_key_bounds(Datum v, Oid type,
 							  OBTreeValueBound *low, OBTreeValueBound *high,
 							  OIndexField *field);
 
-void
+bool
 o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData, int numberOfKeys,
 						BTArrayKeyInfo *arrayKeys, int resultNKeys,
 						OIndexField *fields)
 {
 	int			i;
+	bool		exact = true;
 
 	res->empty = false;
 	res->low.nkeys = res->high.nkeys = resultNKeys;
@@ -135,24 +136,32 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData, int numberOfK
 							  setLow ? &low : NULL,
 							  setHigh ? &high : NULL,
 							  field);
-			if (o_idx_cmp_value_bounds(&low, &res->low.keys[attnum], field) >= 0)
+			if (o_idx_cmp_value_bounds(&low, &res->low.keys[attnum],
+									   field, NULL) >= 0)
 				res->low.keys[attnum] = low;
-			if (o_idx_cmp_value_bounds(&high, &res->high.keys[attnum], field) <= 0)
+			if (o_idx_cmp_value_bounds(&high, &res->high.keys[attnum],
+									   field, NULL) <= 0)
 				res->high.keys[attnum] = high;
 		}
 	}
 
 	for (i = 0; i < resultNKeys; i++)
 	{
+		bool		equals;
+
 		if (o_idx_cmp_value_bounds(&res->low.keys[i],
 								   &res->high.keys[i],
-								   &fields[i]) >= 0)
+								   &fields[i],
+								   &equals) >= 0)
 		{
 			res->empty = true;
-			return;
+			return false;
 		}
+
+		if (!equals)
+			exact = false;
 	}
-	return;
+	return exact;
 }
 
 static void

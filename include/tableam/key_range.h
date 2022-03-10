@@ -54,7 +54,7 @@ typedef struct
 	OBTreeKeyBound high;
 } OBTreeKeyRange;
 
-extern void o_key_data_to_key_range(OBTreeKeyRange *res,
+extern bool o_key_data_to_key_range(OBTreeKeyRange *res,
 									ScanKeyData *keyData,
 									int numberOfKeys,
 									BTArrayKeyInfo *arrayKeys,

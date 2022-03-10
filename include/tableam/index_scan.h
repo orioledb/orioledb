@@ -28,6 +28,7 @@ typedef struct OScanState
 	bool		onlyCurIx;
 	bool		returning;
 	bool		curKeyRangeIsLoaded;
+	bool		exact;
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
 	IndexScanDescData *scandesc;

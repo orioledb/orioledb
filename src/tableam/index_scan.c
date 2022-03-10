@@ -110,6 +110,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 										ForwardScanDirection);
 	ostate->curKeyRangeIsLoaded = true;
 
+	ostate->exact = result;
 	if (!result)
 		return false;
 
@@ -120,20 +121,23 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	}
 
 	oldcontext = MemoryContextSwitchTo(ostate->cxt);
-	o_key_data_to_key_range(&ostate->curKeyRange,
-							so->keyData,
-							so->numberOfKeys,
-							so->arrayKeys,
-							indexDescr->nonLeafTupdesc->natts,
-							indexDescr->fields);
+	ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
+											so->keyData,
+											so->numberOfKeys,
+											so->arrayKeys,
+											indexDescr->nonLeafTupdesc->natts,
+											indexDescr->fields);
 
-	bound = (ostate->scanDir == ForwardScanDirection
-			 ? &ostate->curKeyRange.low
-			 : &ostate->curKeyRange.high);
-	ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
-											   BTreeKeyBound, csn,
-											   ostate->scanDir);
-	o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+	if (!ostate->exact)
+	{
+		bound = (ostate->scanDir == ForwardScanDirection
+				 ? &ostate->curKeyRange.low
+				 : &ostate->curKeyRange.high);
+		ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
+												   BTreeKeyBound, csn,
+												   ostate->scanDir);
+		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+	}
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -148,7 +152,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 	OTuple		tup = {0};
 	bool		tup_fetched = false;
 
-	if (ostate->curKeyRange.empty)
+	if (ostate->exact || ostate->curKeyRange.empty)
 	{
 		if (!switch_to_next_range(indexDescr, ostate, csn, tupleCxt))
 		{
@@ -162,26 +166,46 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		OBTreeKeyBound *bound;
 		bool		tup_is_valid = true;
 
-		bound = (ostate->scanDir == ForwardScanDirection
-				 ? &ostate->curKeyRange.high : &ostate->curKeyRange.low);
-
-		do
+		if (ostate->exact)
 		{
-			tup = o_btree_iterator_fetch(ostate->iterator, tupleCsn,
-										 bound, BTreeKeyBound,
-										 true, hint);
+			if (hint)
+				hint->blkno = InvalidBlockNumber;
 
-			if (O_TUPLE_IS_NULL(tup))
-				tup_is_valid = true;
-			else
+			tup = o_btree_find_tuple_by_key(&indexDescr->desc,
+											&ostate->curKeyRange.low,
+											BTreeKeyBound, csn, tupleCsn,
+											tupleCxt, hint);
+			if (!O_TUPLE_IS_NULL(tup))
+				tup_fetched = true;
+		}
+		else if (ostate->iterator)
+		{
+			bound = (ostate->scanDir == ForwardScanDirection
+					 ? &ostate->curKeyRange.high : &ostate->curKeyRange.low);
+
+			do
 			{
-				tup_is_valid = is_tuple_valid(tup, indexDescr,
-											  ostate->scanDir,
-											  &ostate->curKeyRange);
-				if (tup_is_valid)
-					tup_fetched = true;
-			}
-		} while (!tup_is_valid);
+				tup = o_btree_iterator_fetch(ostate->iterator, tupleCsn,
+											 bound, BTreeKeyBound,
+											 true, hint);
+
+				if (O_TUPLE_IS_NULL(tup))
+					tup_is_valid = true;
+				else
+				{
+					tup_is_valid = is_tuple_valid(tup, indexDescr,
+												  ostate->scanDir,
+												  &ostate->curKeyRange);
+					if (tup_is_valid)
+						tup_fetched = true;
+				}
+			} while (!tup_is_valid);
+		}
+		else
+		{
+			O_TUPLE_SET_NULL(tup);
+			tup_fetched = true;
+		}
 
 		if (!tup_fetched &&
 			!switch_to_next_range(indexDescr, ostate, csn, tupleCxt))
