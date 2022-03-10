@@ -363,11 +363,17 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	BTreeIterator *it;
 	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
 
-	it = (BTreeIterator *) palloc0(sizeof(BTreeIterator));
+	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
 	it->combinedResult = !have_current_undo() && COMMITSEQNO_IS_NORMAL(csn);
 	it->csn = csn;
 	it->scanDir = scanDir;
 	it->tupleCxt = CurrentMemoryContext;
+	it->fetchCallback = NULL;
+	it->fetchCallbackArg = NULL;
+	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
+#ifdef USE_ASSERT_CHECKING
+	O_TUPLE_SET_NULL(it->prevTuple.tuple);
+#endif
 
 	undo_it_create(&it->undoIt, it);
 
