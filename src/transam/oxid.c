@@ -50,6 +50,8 @@ static OBuffersDesc buffersDesc = {
 	.bufferCtlTrancheName = "xidBuffersCtlTranche"
 };
 
+static void advance_global_xmin(OXid newXid);
+
 Size
 oxid_shmem_needs(void)
 {
@@ -228,6 +230,8 @@ write_xidsmap(OXid targetXmax)
 						lastWrittenXmin * sizeof(CommitSeqNo),
 						(oxid - lastWrittenXmin) * sizeof(CommitSeqNo));
 	pg_atomic_write_u64(&xid_meta->writtenXmin, xmax);
+
+	advance_global_xmin(InvalidOXid);
 }
 
 /*
@@ -362,7 +366,8 @@ advance_global_xmin(OXid newXid)
 
 	SpinLockAcquire(&xid_meta->xminMutex);
 
-	pg_atomic_write_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, newXid);
+	if (OXidIsValid(newXid))
+		pg_atomic_write_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, newXid);
 
 	globalXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 
