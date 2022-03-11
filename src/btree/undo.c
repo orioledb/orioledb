@@ -1074,7 +1074,9 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				 * transactions.
 				 */
 				csn = oxid_get_csn(oxid);
-				if (COMMITSEQNO_IS_ABORTED(csn) || COMMITSEQNO_IS_NORMAL(csn))
+				if (COMMITSEQNO_IS_ABORTED(csn) ||
+					COMMITSEQNO_IS_NORMAL(csn) ||
+					COMMITSEQNO_IS_FROZEN(csn))
 				{
 					delete_record = true;
 				}

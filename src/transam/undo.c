@@ -1089,6 +1089,7 @@ orioledb_reset_xmin_hook(void)
 	if (pairingheap_is_empty(&retainUndoLocHeap))
 	{
 		pg_atomic_write_u64(&curProcData->snapshotRetainUndoLocation, InvalidUndoLocation);
+		pg_atomic_write_u64(&curProcData->xmin, InvalidOXid);
 	}
 	else
 	{
@@ -1122,6 +1123,7 @@ undo_xact_callback(XactEvent event, void *arg)
 			case XACT_EVENT_COMMIT:
 			case XACT_EVENT_ABORT:
 				reset_cur_undo_locations();
+				orioledb_reset_xmin_hook();
 				oxid_needs_wal_flush = false;
 				break;
 			default:

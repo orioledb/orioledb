@@ -977,6 +977,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	CheckPointProgress = o_checkpoint_completion_ratio;
 
+	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
+
 	elog(LOG, "orioledb checkpoint %u complete",
 		 checkpoint_state->lastCheckpointNumber);
 

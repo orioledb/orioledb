@@ -643,6 +643,13 @@ orioledb_memsize(void)
 	return size;
 }
 
+static void
+orioledb_on_shmem_exit(int code, Datum arg)
+{
+	if (MyProc)
+		pg_atomic_write_u64(&oProcData[MyProc->pgprocno].xmin, InvalidOXid);
+}
+
 /*
  * Initialize OrioleDB's shared memory.  Called on database instanse start
  * or restart.
@@ -683,6 +690,8 @@ orioledb_shmem_startup(void)
 	o_compress_init();
 	o_typecaches_init();
 	o_opclass_init();
+
+	before_shmem_exit(orioledb_on_shmem_exit, (Datum) 0);
 
 	LWLockRelease(AddinShmemInitLock);
 

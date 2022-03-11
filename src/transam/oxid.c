@@ -399,8 +399,15 @@ advance_global_xmin(OXid newXid)
 	if (writtenXmin == writeInProgressXmin && writtenXmin < globalXmin &&
 		LWLockConditionalAcquire(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE))
 	{
+		OXid		oxid;
+
 		Assert(globalXmin >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
 		Assert(globalXmin >= pg_atomic_read_u64(&xid_meta->writtenXmin));
+
+		for (oxid = writtenXmin; oxid < globalXmin; oxid++)
+			pg_atomic_write_u64(&xidBuffer[oxid % xid_circular_buffer_size],
+								COMMITSEQNO_FROZEN);
+
 		pg_atomic_write_u64(&xid_meta->writeInProgressXmin, globalXmin);
 		pg_atomic_write_u64(&xid_meta->writtenXmin, globalXmin);
 		LWLockRelease(&xid_meta->xidMapWriteLock);
@@ -620,14 +627,17 @@ advance_run_xmin(OXid oxid)
 	OXid		run_xmin;
 	CommitSeqNo csn;
 
+	pg_read_barrier();
+
 	run_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	if (run_xmin == oxid)
 	{
 		while (pg_atomic_compare_exchange_u64(&xid_meta->runXmin,
 											  &run_xmin, run_xmin + 1))
 		{
+			run_xmin++;
 			csn = map_oxid_csn(run_xmin);
-			if (!COMMITSEQNO_IS_NORMAL(csn) && !COMMITSEQNO_IS_FROZEN(csn) && !COMMITSEQNO_IS_ABORTED(csn))
+			if (COMMITSEQNO_IS_SPECIAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
 				break;
 		}
 	}
