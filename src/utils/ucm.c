@@ -136,7 +136,7 @@ init_ucm(UsageCountMap *map, Pointer ptr, bool found)
 
 		pg_atomic_init_u32(&map->ucm[i],
 						   pagesCount << (UCM_FREE_PAGES_LEVEL * UCM_LEVEL_BITS));
-
+		blkno += UCM_BRANCH_FACTOR;
 	}
 
 	/* Recursively inin non-leaf variables */
