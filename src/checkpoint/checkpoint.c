@@ -162,9 +162,13 @@ static int	file_extents_writeback_cmp(const void *a, const void *b);
 static void sort_checkpoint_map_files(BTreeDescr *descr, int cur_chkp_index);
 static inline void checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr);
 static bool checkpoint_ix(int flags, BTreeDescr *descr);
-static uint64 checkpoint_btree(BTreeDescr *descr, CheckpointState *state,
+static uint64 checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 							   CheckpointWriteBack *writeback);
-static uint64 checkpoint_btree_loop(BTreeDescr *descr, CheckpointState *state,
+static Jsonb *prepare_checkpoint_step_params(BTreeDescr *descr,
+											 CheckpointState *chkpState,
+											 WalkMessage *message,
+											 int level);
+static uint64 checkpoint_btree_loop(BTreeDescr **descrPtr, CheckpointState *state,
 									CheckpointWriteBack *writeback,
 									MemoryContext tmp_context);
 static void checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
@@ -440,6 +444,43 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 							 (off_t) len * (off_t) blcksz);
 	checkpoint_state->pagesWritten += writeback->extentsNumber;
 	writeback->extentsNumber = 0;
+}
+
+static BTreeDescr *
+perform_writeback_and_relock(BTreeDescr *desc,
+							 CheckpointWriteBack *writeback,
+							 CheckpointState *state,
+							 WalkMessage *message,
+							 int level)
+{
+	ORelOids	treeOids = desc->oids;
+	OIndexType	type = desc->type;
+	OIndexDescr *indexDescr;
+	Jsonb	   *params;
+
+	if (!IS_SYS_TREE_OIDS(treeOids))
+	{
+		/* Unlock tree: give a chance for concurrent deletion */
+		o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+
+		if (STOPEVENTS_ENABLED())
+			params = prepare_checkpoint_step_params(desc, state,
+													message, level);
+		STOPEVENT(STOPEVENT_CHECKPOINT_WRITEBACK, params);
+
+		perform_writeback(desc, writeback);
+
+		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
+		if (!indexDescr)
+			return NULL;
+		desc = &indexDescr->desc;
+		o_btree_load_shmem(desc);
+	}
+	else
+	{
+		perform_writeback(desc, writeback);
+	}
+	return desc;
 }
 
 static void
@@ -1826,14 +1867,17 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 	/* Make checkpoint of the tree itself */
 	init_writeback(&writeback, flags, is_compressed);
-	root_downlink = checkpoint_btree(descr, checkpoint_state, &writeback);
+	root_downlink = checkpoint_btree(&descr, checkpoint_state, &writeback);
 	if (!DiskDownlinkIsValid(root_downlink))
 	{
 		free_writeback(&writeback);
 		return false;
 	}
-	perform_writeback(descr, &writeback);
+	descr = perform_writeback_and_relock(descr, &writeback,
+										 checkpoint_state, NULL, 0);
 	free_writeback(&writeback);
+	if (!descr)
+		return false;
 
 	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
 	Assert(DiskDownlinkIsValid(root_downlink));
@@ -2066,7 +2110,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
  * Checkpointer walk over particular B-tree. Returns rootPageBlkno page offset.
  */
 static uint64
-checkpoint_btree(BTreeDescr *descr, CheckpointState *state,
+checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 				 CheckpointWriteBack *writeback)
 {
 	uint64		root_downlink;
@@ -2080,7 +2124,7 @@ checkpoint_btree(BTreeDescr *descr, CheckpointState *state,
 
 	set_skip_ucm();
 	/* Walk the tree recursively starting from rootPageBlkno */
-	root_downlink = checkpoint_btree_loop(descr,
+	root_downlink = checkpoint_btree_loop(descrPtr,
 										  state,
 										  writeback,
 										  tmp_context);
@@ -2366,7 +2410,11 @@ prepare_checkpoint_step_params(BTreeDescr *descr,
 	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 	btree_desc_stopevent_params_internal(descr, &state);
 	jsonb_push_int8_key(&state, "level", level);
-	if (message->action == WalkDownwards)
+	if (!message)
+	{
+		jsonb_push_string_key(&state, "action", "none");
+	}
+	else if (message->action == WalkDownwards)
 	{
 		jsonb_push_string_key(&state, "action", "walkDownwards");
 		jsonb_push_int8_key(&state, "blkno", message->content.downwards.blkno);
@@ -2462,7 +2510,7 @@ prepare_checkpoint_tree_start_params(BTreeDescr *desc)
 }
 
 static uint64
-checkpoint_btree_loop(BTreeDescr *descr,
+checkpoint_btree_loop(BTreeDescr **descrPtr,
 					  CheckpointState *state,
 					  CheckpointWriteBack *writeback,
 					  MemoryContext tmp_context)
@@ -2472,9 +2520,11 @@ checkpoint_btree_loop(BTreeDescr *descr,
 	uint64		downlink;
 	int			level,
 				i;
+	BTreeDescr *descr = *descrPtr;
 	OInMemoryBlkno blkno = descr->rootInfo.rootPageBlkno;
 	uint32		page_chage_count = InvalidOPageChangeCount;
 	uint		blcksz = OCompressIsValid(descr->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
+	Jsonb	   *params;
 
 	memset(&message, 0, sizeof(WalkMessage));
 
@@ -2499,8 +2549,6 @@ checkpoint_btree_loop(BTreeDescr *descr,
 
 	while (true)
 	{
-		Jsonb	   *params;
-
 		Assert(!have_locked_pages());
 		Assert(!have_retained_undo_location());
 
@@ -2515,28 +2563,11 @@ checkpoint_btree_loop(BTreeDescr *descr,
 			level >= 4 &&
 			writeback->extentsNumber >= checkpoint_flush_after * (BLCKSZ / blcksz))
 		{
-			ORelOids	treeOids = descr->oids;
-			OIndexType	type = descr->type;
-			OIndexDescr *indexDescr;
-
-			perform_writeback(descr, writeback);
-
-			if (!IS_SYS_TREE_OIDS(treeOids))
-			{
-				/* Unlock tree: give a chance for concurrent deletion */
-				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
-
-				if (STOPEVENTS_ENABLED())
-					params = prepare_checkpoint_step_params(descr, state,
-															&message, level);
-				STOPEVENT(STOPEVENT_CHECKPOINT_WRITEBACK, params);
-
-				indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
-				if (!indexDescr)
-					return InvalidDiskDownlink;
-				descr = &indexDescr->desc;
-				o_btree_load_shmem(descr);
-			}
+			descr = perform_writeback_and_relock(descr, writeback, state,
+												 &message, level);
+			if (!descr)
+				return InvalidDiskDownlink;
+			*descrPtr = descr;
 		}
 
 		if (message.action == WalkDownwards)
