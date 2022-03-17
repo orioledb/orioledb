@@ -236,7 +236,6 @@ static bool need_flush_undo_pos(int worker_id);
 static void flush_current_undo_stack(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, int num_workers);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
-static inline void recovery_cleanup_old_files(uint32 max_chkp_num, bool before_recovery);
 
 static void replay_container(Pointer ptr, Pointer endPtr,
 							 bool single, XLogRecPtr xlogRecPtr);
@@ -1592,7 +1591,7 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 	}
 }
 
-static inline void
+void
 recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 {
 	DIR		   *dir;

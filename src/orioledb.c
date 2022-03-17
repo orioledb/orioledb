@@ -703,6 +703,10 @@ orioledb_shmem_startup(void)
 	btree_insert_context = AllocSetContextCreate(TopMemoryContext,
 												 "orioledb B-tree insert context",
 												 ALLOCSET_DEFAULT_SIZES);
+
+	if (remove_old_checkpoint_files)
+		recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
+								   false);
 }
 
 uint64

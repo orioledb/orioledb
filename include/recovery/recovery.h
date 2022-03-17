@@ -47,4 +47,7 @@ extern OTuple recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocate
 extern OTuple recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size);
 extern OTuple recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *allocated, int *size);
 
+extern void recovery_cleanup_old_files(uint32 max_chkp_num,
+									   bool before_recovery);
+
 #endif							/* __RECOVERY_H__ */

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+from itertools import chain, groupby
 import unittest
 import testgres
 import re
+from typing import Tuple
 import os
 import glob
 import sys
@@ -129,6 +131,35 @@ class FilesTest(BaseTest):
 		self.assertTrue(node.execute("SELECT orioledb_tbl_check('empty'::regclass, TRUE);")[0][0])
 		node.stop()
 
+	def get_file_lists(self, filter_sys_trees = False):
+		map_files = []
+		tmp_files = []
+		xid_files = []
+
+		orioledb_dir = self.node.data_dir + "/orioledb_data"
+		for f in os.listdir(orioledb_dir):
+			if re.match(".*\.map$", f):
+				map_files.append(f)
+			if re.match(".*\.tmp$", f):
+				tmp_files.append(f)
+			if re.match(".*\.xid$", f):
+				xid_files.append(f)
+
+		self.assertEqual(1, len(xid_files))
+		last_xid = int(xid_files[0].split('.')[0])
+		tmp_files = [re.split(r'\.|-|_', f) for f in tmp_files]
+		map_files = [re.split(r'\.|-|_', f) for f in map_files]
+		map_files = [[*[int(x) for x in f[:3]], f[3]] for f in map_files]
+		map_files = sorted(map_files, reverse=True)
+		if filter_sys_trees:
+			map_files = [f for f in map_files if f[0] != 1]
+		map_files = {k: [x[2] for x in v]
+						for k, v in groupby(map_files,
+											key=(lambda x:
+												'_'.join([str(x[0]),
+														  str(x[1])])))}
+		return (last_xid, map_files, tmp_files)
+
 	# checks orioledb.remove_old_checkpoint_files = true behavion (default)
 	def test_tmp_map_cleanup(self):
 		node = self.node
@@ -150,44 +181,75 @@ class FilesTest(BaseTest):
 		node.safe_psql('postgres', 'CHECKPOINT;')
 		node.stop(['-m', 'immediate'])
 
-		orioledb_dir = node.data_dir + "/orioledb_data"
-		map_files = ""
-		tmp_files = ""
-
-		for f in os.listdir(orioledb_dir):
-			if re.match(".*\.map$", f):
-				map_files = map_files + " " + f
-			if re.match(".*\.tmp$", f):
-				tmp_files = tmp_files + " " + f
-
-		# this files should be deleted
-		self.assertFalse(bool(re.match(".*-[1-3]\.map.*", map_files)))
-		# this files should exists
-		self.assertTrue(bool(re.match(".*-2\.tmp.*", tmp_files)))
-		self.assertTrue(bool(re.match(".*-4\.map.*", map_files)))
+		last_xid, map_files, tmp_files = self.get_file_lists()
+		old_map_files = [f for f in
+							list(chain.from_iterable(map_files.values()))
+								if f != last_xid]
+		self.assertEqual([0] * 9, old_map_files)
+		self.assertEqual(['2'], [f[2] for f in tmp_files])
 
 		node.start()
 		node.safe_psql('postgres', 'CHECKPOINT;')
 		node.safe_psql('postgres', 'CHECKPOINT;')
 		node.stop(['-m', 'immediate'])
 
-		orioledb_dir = node.data_dir + "/orioledb_data"
-		map_files = ""
-		tmp_files = ""
+		last_xid, map_files, tmp_files = self.get_file_lists()
+		old_map_files = [f for f in
+							list(chain.from_iterable(map_files.values()))
+								if f != last_xid]
+		self.assertEqual([4] * 10, old_map_files)
+		self.assertEqual([], [f[2] for f in tmp_files])
 
-		for f in os.listdir(orioledb_dir):
-			if re.match(".*\.map$", f):
-				map_files = map_files + " " + f
-			if re.match(".*\.tmp$", f):
-				tmp_files = tmp_files + " " + f
+	def test_multiple_checkpoint_tmp_map_cleanup(self):
+		node = self.node
+		node.start()
+		node.safe_psql('postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE IF NOT EXISTS o_test (
+				id serial NOT NULL PRIMARY KEY,
+				value int NOT NULL
+			) USING orioledb;
+			INSERT INTO o_test (value) (
+				SELECT id FROM generate_series(1, 1000, 1) id);
+		""")
+		toast_oid = node.execute("""
+			SELECT reltoastrelid FROM pg_class
+				WHERE oid = 'o_test'::regclass::oid
+		""")[0][0]
+		o_test_pkey_relnode = node.execute("""
+			SELECT relfilenode FROM pg_class
+				WHERE oid = 'o_test_pkey'::regclass::oid
+		""")[0][0]
+		o_test_toast_relnode = node.execute("""
+			SELECT relfilenode FROM pg_class WHERE oid = %u
+		""" % toast_oid)[0][0]
+		datoid = node.execute("""
+			SELECT oid FROM pg_database WHERE datname = current_database()
+		""")[0][0]
+		for _ in range(1, 4):
+			node.safe_psql("CHECKPOINT")
+			node.safe_psql("""
+				INSERT INTO o_test (value) (
+					SELECT id FROM generate_series(1, 1000, 1) id);
+			""")
+		node.restart()
+		for _ in range(1, 4):
+			node.safe_psql("CHECKPOINT")
+			node.safe_psql("""
+				INSERT INTO o_test (value) (
+					SELECT id FROM generate_series(1, 1000, 1) id);
+			""")
+		node.stop()
 
-		# this files should be deleted
-		self.assertFalse(bool(re.match(".*-[0-35]\.map.*", map_files)))
-		self.assertFalse(bool(re.match(".*-[0-4]\.tmp.*", tmp_files)))
+		last_xid, map_files, tmp_files = self.get_file_lists(
+											filter_sys_trees=True)
+		tmp_files = [f for f in tmp_files if int(f[2]) < last_xid - 1]
 
-		# this files should exists
-		self.assertTrue(bool(re.match(".*-4\.map.*", map_files)))
-		self.assertTrue(bool(re.match(".*-7\.map.*", map_files)))
+		self.assertEqual([], tmp_files)
+		map_file_key = "%s_%s" % (datoid, o_test_pkey_relnode)
+		self.assertEqual([8], map_files[map_file_key])
+		map_file_key = "%s_%s" % (datoid, o_test_toast_relnode)
+		self.assertEqual([8, 4], map_files[map_file_key])
 
 	def test_tmp_map_cleanup_no_error(self):
 		node = self.node
