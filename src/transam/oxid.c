@@ -193,6 +193,7 @@ write_xidsmap(OXid targetXmax)
 	/*
 	 * Get the xidmap range to write.
 	 */
+	SpinLockAcquire(&xid_meta->xminMutex);
 	xmin = pg_atomic_read_u64(&xid_meta->writtenXmin);
 	xmax = Max(pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size / 8,
 			   targetXmax);
@@ -206,7 +207,7 @@ write_xidsmap(OXid targetXmax)
 	xmax = oxid;
 
 	pg_atomic_write_u64(&xid_meta->writeInProgressXmin, xmax);
-	pg_write_barrier();
+	SpinLockRelease(&xid_meta->xminMutex);
 
 	lastWrittenXmin = xmin;
 	for (oxid = xmin; oxid < xmax; oxid++)
@@ -229,7 +230,10 @@ write_xidsmap(OXid targetXmax)
 						(Pointer) &buffer[lastWrittenXmin % bufferLength],
 						lastWrittenXmin * sizeof(CommitSeqNo),
 						(oxid - lastWrittenXmin) * sizeof(CommitSeqNo));
+
+	SpinLockAcquire(&xid_meta->xminMutex);
 	pg_atomic_write_u64(&xid_meta->writtenXmin, xmax);
+	SpinLockRelease(&xid_meta->xminMutex);
 
 	advance_global_xmin(InvalidOXid);
 }
