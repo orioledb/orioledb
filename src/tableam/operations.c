@@ -138,6 +138,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.waitCallback = NULL,
 		.insertToDeleted = o_insert_callback,
 		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = false,
 		.arg = slot
 	};
 
@@ -184,6 +185,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 		.waitCallback = o_lock_wait_callback,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_lock_modify_callback,
+		.needsUndoForSelfCreated = false,
 		.arg = larg
 	};
 
@@ -270,6 +272,7 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 			.waitCallback = o_insert_on_conflict_wait_callback,
 			.insertToDeleted = o_insert_on_conflict_insert_to_deleted_callback,
 			.modifyCallback = o_insert_on_conflict_modify_callback,
+			.needsUndoForSelfCreated = true,
 			.arg = &ioc_arg
 		};
 
@@ -599,7 +602,7 @@ o_update_secondary_indices(OTableDescr *descr,
 	bool		update;
 	OTuple		nullTup;
 	ExprContext *econtext;
-	BTreeModifyCallbackInfo callbackInfo = {NULL};
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 	slot_getallattrs(oldSlot);
 	res.success = true;
@@ -698,6 +701,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_update_callback,
+		.needsUndoForSelfCreated = false,
 		.arg = arg
 	};
 
@@ -768,12 +772,14 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_delete_callback,
+		.needsUndoForSelfCreated = false,
 		.arg = arg
 	};
 	BTreeModifyCallbackInfo insertCallbackInfo = {
 		.waitCallback = NULL,
 		.insertToDeleted = o_insert_callback,
 		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = false,
 		.arg = newSlot
 	};
 
@@ -848,6 +854,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key, EState *estate,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_delete_callback,
+		.needsUndoForSelfCreated = false,
 		.arg = arg
 	};
 

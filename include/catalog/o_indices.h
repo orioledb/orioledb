@@ -23,6 +23,7 @@ typedef struct
 	ORelOids	indexOids;
 	OIndexType	indexType;
 	ORelOids	tableOids;
+	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
 	OCompress	compress;

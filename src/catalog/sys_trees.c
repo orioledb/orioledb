@@ -573,6 +573,7 @@ sys_tree_init(int i, bool init_shmem)
 	descr->ppool = pool;
 	descr->undoType = meta->undoReserveType;
 	descr->storageType = meta->storageType;
+	descr->createOxid = InvalidOXid;
 
 	if (descr->storageType == BTreeStoragePersistence)
 	{

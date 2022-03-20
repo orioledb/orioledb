@@ -84,7 +84,7 @@ static BTreeOps primaryOps = {
 
 void
 index_btree_desc_init(BTreeDescr *desc, OCompress compress, ORelOids oids,
-					  OIndexType type, void *arg)
+					  OIndexType type, OXid createOxid, void *arg)
 {
 	if (type == oIndexPrimary)
 		desc->ops = &primaryOps;
@@ -110,6 +110,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, ORelOids oids,
 	desc->ppool = get_ppool(OPagePoolMain);
 	desc->storageType = BTreeStoragePersistence;
 	desc->undoType = UndoReserveTxn;
+	desc->createOxid = createOxid;
 }
 
 static inline OIndexDescr *

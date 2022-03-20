@@ -812,6 +812,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	int			len;
 
 	oIndex = make_o_index(table, ixNum);
+	oIndex->createOxid = oxid;
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
 	key.offset = 0;

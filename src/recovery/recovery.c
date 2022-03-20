@@ -1151,7 +1151,7 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 						  OXid oxid, CommitSeqNo csn)
 {
 	OBTreeModifyResult modifyResult;
-	BTreeModifyCallbackInfo callbackInfo = {NULL};
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 	bool		result;
 
 	callbackInfo.arg = &ptr;

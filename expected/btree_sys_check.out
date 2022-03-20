@@ -115,23 +115,23 @@ SELECT regexp_replace(
 		'g');
                                         regexp_replace                                         
 -----------------------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 5672                                      +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 5816                                      +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                          +
      Leftmost, Rightmost                                                                      +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = (1, (NNN, NNN, NNN), 0)  +
-     Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 0), 614)                    +
-   Chunk 1: offset = 1, location = 920, hikey location = 104, hikey = (1, (NNN, NNN, NNN), 0) +
-     Item 1: deleted, offset = 928, tuple = ((1, (NNN, NNN, NNN), 0), 614)                    +
-   Chunk 2: offset = 2, location = 1584, hikey location = 128, hikey = (2, (NNN, NNN, NNN), 0)+
-     Item 2: deleted, offset = 1592, tuple = ((1, (NNN, NNN, NNN), 0), 950)                   +
-     Item 3: deleted, offset = 2584, tuple = ((1, (NNN, NNN, NNN), 0), 614)                   +
-   Chunk 3: offset = 4, location = 3240, hikey location = 152, hikey = (2, (NNN, NNN, NNN), 0)+
-     Item 4: deleted, offset = 3248, tuple = ((2, (NNN, NNN, NNN), 0), 390)                   +
-     Item 5: deleted, offset = 3680, tuple = ((2, (NNN, NNN, NNN), 0), 390)                   +
-   Chunk 4: offset = 6, location = 4112, hikey location = 176                                 +
-     Item 6: deleted, offset = 4120, tuple = ((2, (NNN, NNN, NNN), 0), 634)                   +
-     Item 7: deleted, offset = 4800, tuple = ((2, (NNN, NNN, NNN), 0), 666)                   +
-     Item 8: deleted, offset = 5512, tuple = ((3, (NNN, NNN, NNN), 0), 410)                   +
+     Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 0), 630)                    +
+   Chunk 1: offset = 1, location = 936, hikey location = 104, hikey = (1, (NNN, NNN, NNN), 0) +
+     Item 1: deleted, offset = 944, tuple = ((1, (NNN, NNN, NNN), 0), 630)                    +
+   Chunk 2: offset = 2, location = 1616, hikey location = 128, hikey = (2, (NNN, NNN, NNN), 0)+
+     Item 2: deleted, offset = 1624, tuple = ((1, (NNN, NNN, NNN), 0), 966)                   +
+     Item 3: deleted, offset = 2632, tuple = ((1, (NNN, NNN, NNN), 0), 630)                   +
+   Chunk 3: offset = 4, location = 3304, hikey location = 152, hikey = (2, (NNN, NNN, NNN), 0)+
+     Item 4: deleted, offset = 3312, tuple = ((2, (NNN, NNN, NNN), 0), 406)                   +
+     Item 5: deleted, offset = 3760, tuple = ((2, (NNN, NNN, NNN), 0), 406)                   +
+   Chunk 4: offset = 6, location = 4208, hikey location = 176                                 +
+     Item 6: deleted, offset = 4216, tuple = ((2, (NNN, NNN, NNN), 0), 650)                   +
+     Item 7: deleted, offset = 4912, tuple = ((2, (NNN, NNN, NNN), 0), 682)                   +
+     Item 8: deleted, offset = 5640, tuple = ((3, (NNN, NNN, NNN), 0), 426)                   +
                                                                                               +
  
 (1 row)

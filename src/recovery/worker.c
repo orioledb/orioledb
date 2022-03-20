@@ -549,7 +549,7 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 	bool		result = true,
 				primary = NULL;
 	TupleTableSlot *slot = descr->newTuple;
-	BTreeModifyCallbackInfo callbackInfo = {NULL};
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 	O_TUPLE_SET_NULL(stuple);
 
@@ -646,6 +646,7 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 				.waitCallback = NULL,
 				.modifyCallback = o_delete_copy_callback,
 				.insertToDeleted = NULL,
+				.needsUndoForSelfCreated = false,
 				.arg = &tupCopy
 			};
 
@@ -675,6 +676,7 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 				.waitCallback = NULL,
 				.modifyCallback = recovery_delete_overwrite_callback,
 				.insertToDeleted = NULL,
+				.needsUndoForSelfCreated = false,
 				.arg = NULL
 			};
 
@@ -722,6 +724,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 				.waitCallback = NULL,
 				.modifyCallback = o_update_copy_callback,
 				.insertToDeleted = NULL,
+				.needsUndoForSelfCreated = false,
 				.arg = &tupCopy
 			};
 
@@ -759,7 +762,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 			if (cmp != 0)
 			{
 				OTuple		nullTup;
-				BTreeModifyCallbackInfo callbackInfo = {NULL};
+				BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 				O_TUPLE_SET_NULL(nullTup);
 

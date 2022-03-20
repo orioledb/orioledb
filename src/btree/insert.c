@@ -623,6 +623,11 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			OInMemoryBlkno root_split_left_blkno = OInvalidInMemoryBlkno;
 			CommitSeqNo csn;
 			UndoLocation undoLocation;
+			bool		needsUndo = O_PAGE_IS(p, LEAF) && desc->undoType != UndoReserveNone;
+
+			if (needsUndo && OXidIsValid(desc->createOxid) &&
+				desc->createOxid == get_current_oxid_if_any())
+				needsUndo = false;
 
 			if (STOPEVENTS_ENABLED())
 				params = btree_page_stopevent_params(desc, p);
@@ -630,7 +635,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
 			/* Get CSN for undo item if needed */
-			if (O_PAGE_IS(p, LEAF) && desc->undoType != UndoReserveNone)
+			if (needsUndo)
 				csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 			else
 				csn = COMMITSEQNO_INPROGRESS;
@@ -639,7 +644,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 													offset, insert_item->replace, &split_key, &split_key_len, csn);
 
 			/* Make page-level undo item if needed */
-			if (O_PAGE_IS(p, LEAF) && desc->undoType != UndoReserveNone)
+			if (needsUndo)
 				undoLocation = page_add_item_to_undo(desc, p, csn,
 													 &split_key, split_key_len);
 			else

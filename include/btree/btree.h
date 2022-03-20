@@ -139,6 +139,7 @@ struct BTreeDescr
 	SeqBufDescPrivate freeBuf;
 	SeqBufDescPrivate nextChkp[2];
 	SeqBufDescPrivate tmpBuf[2];
+	OXid		createOxid;
 	BTreeOps   *ops;
 };
 
@@ -301,35 +302,6 @@ typedef enum RowLockMode
 	(AssertMacro(((lockmode) & (XACT_INFO_LOCK_MODE_MASK >> XACT_INFO_LOCK_MODE_SHIFT)) == (lockmode)), \
 	 (OTupleXactInfo)(oxid) | ((OTupleXactInfo) (lockmode) << XACT_INFO_LOCK_MODE_SHIFT) | \
 	 ((lockonly) ? XACT_INFO_LOCK_ONLY_BIT : 0))
-
-typedef struct BTreeModifyCallbackInfo
-{
-	OBTreeWaitCallbackAction (*waitCallback) (BTreeDescr *desc,
-											  OTuple oldTup,
-											  OTuple *newTup,
-											  OXid oxid,
-											  OTupleXactInfo prevXactInfo,
-											  RowLockMode *lockMode,
-											  BTreeLocationHint *hint,
-											  void *arg);
-	OBTreeModifyCallbackAction (*modifyCallback) (BTreeDescr *desc,
-												  OTuple oldTup,
-												  OTuple *newTup,
-												  OXid oxid,
-												  OTupleXactInfo prevXactInfo,
-												  RowLockMode *lockMode,
-												  BTreeLocationHint *hint,
-												  void *arg);
-	OBTreeModifyCallbackAction (*insertToDeleted) (BTreeDescr *desc,
-												   OTuple oldTup,
-												   OTuple *newTup,
-												   OXid oxid,
-												   OTupleXactInfo prevXactInfo,
-												   RowLockMode *lockMode,
-												   BTreeLocationHint *hint,
-												   void *arg);
-	void	   *arg;
-} BTreeModifyCallbackInfo;
 
 /* btree/btree.c */
 extern LWLockPadded *unique_locks;

@@ -399,7 +399,7 @@ generic_toast_insert(ToastAPI *api, void *key, Pointer data, Size data_size,
 	uint32		max_length = api->getMaxChunkSize(key, arg);
 	uint32		offset = 0;
 	bool		inserted;
-	BTreeModifyCallbackInfo callbackInfo = {NULL};
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 	inserted = false;
 
@@ -511,6 +511,7 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 		.waitCallback = NULL,
 		.insertToDeleted = o_update_callback,
 		.modifyCallback = o_update_callback,
+		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
 
@@ -577,6 +578,7 @@ generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_delete_callback,
+		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
 

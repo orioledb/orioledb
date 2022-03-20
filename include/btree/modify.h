@@ -15,6 +15,38 @@
 
 #include "btree.h"
 
+typedef struct BTreeModifyCallbackInfo
+{
+	OBTreeWaitCallbackAction (*waitCallback) (BTreeDescr *desc,
+											  OTuple oldTup,
+											  OTuple *newTup,
+											  OXid oxid,
+											  OTupleXactInfo prevXactInfo,
+											  RowLockMode *lockMode,
+											  BTreeLocationHint *hint,
+											  void *arg);
+	OBTreeModifyCallbackAction (*modifyCallback) (BTreeDescr *desc,
+												  OTuple oldTup,
+												  OTuple *newTup,
+												  OXid oxid,
+												  OTupleXactInfo prevXactInfo,
+												  RowLockMode *lockMode,
+												  BTreeLocationHint *hint,
+												  void *arg);
+	OBTreeModifyCallbackAction (*insertToDeleted) (BTreeDescr *desc,
+												   OTuple oldTup,
+												   OTuple *newTup,
+												   OXid oxid,
+												   OTupleXactInfo prevXactInfo,
+												   RowLockMode *lockMode,
+												   BTreeLocationHint *hint,
+												   void *arg);
+	bool		needsUndoForSelfCreated;
+	void	   *arg;
+} BTreeModifyCallbackInfo;
+
+extern BTreeModifyCallbackInfo nullCallbackInfo;
+
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
 extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType tupleType,
 									  BTreeLocationHint *hint);

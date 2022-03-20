@@ -754,7 +754,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok)
 	o_index_fill_descr(result, oIndex);
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&result->desc, result->compress, result->oids,
-						  oIndex->indexType, result);
+						  oIndex->indexType, oIndex->createOxid, result);
 	free_o_index(oIndex);
 
 	return result;
@@ -779,7 +779,7 @@ recreate_index_descr(OIndexDescr *descr)
 	o_index_fill_descr(descr, oIndex);
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&descr->desc, descr->compress, descr->oids,
-						  oIndex->indexType, descr);
+						  oIndex->indexType, oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);
 }

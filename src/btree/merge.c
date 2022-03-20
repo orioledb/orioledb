@@ -64,6 +64,7 @@ try_merge_pages(BTreeDescr *desc,
 	UndoLocation undo_loc;
 	uint32		checkpoint_number;
 	bool		copy_blkno;
+	bool		needsUndo;
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)))
 	{
@@ -80,7 +81,16 @@ try_merge_pages(BTreeDescr *desc,
 		return false;
 	}
 
-	csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+	needsUndo = O_PAGE_IS(left, LEAF) && desc->undoType != UndoReserveNone;
+	if (needsUndo && OXidIsValid(desc->createOxid) &&
+		!XACT_INFO_IS_FINISHED(desc->createOxid))
+		needsUndo = false;
+
+	if (needsUndo)
+		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+	else
+		csn = COMMITSEQNO_INPROGRESS;
+
 	if (!can_be_merged(desc, left, right, csn))
 	{
 		return false;
@@ -125,7 +135,7 @@ try_merge_pages(BTreeDescr *desc,
 	}
 
 	/* Make a page-level undo item if needed */
-	if (O_PAGE_IS(left, LEAF) && desc->undoType != UndoReserveNone)
+	if (needsUndo)
 	{
 		undo_loc = make_merge_undo_image(desc, left, right, csn);
 		Assert(UndoLocationIsValid(undo_loc));
@@ -198,7 +208,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	BTreePageItemLocator target_loc,
 				left_loc,
 				right_loc;
-	Page		target,
+	Page		target = O_GET_IN_MEMORY_PAGE(blkno),
 				parent,
 				right,
 				left;
@@ -225,7 +235,6 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	}
 
 	/* Step 1: get all the information from the parent page */
-	target = O_GET_IN_MEMORY_PAGE(blkno);
 	level = PAGE_GET_LEVEL(target);
 
 	Assert(page_is_locked(blkno));

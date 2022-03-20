@@ -57,6 +57,7 @@ typedef struct
 	BTreeOperationType action;
 	Pointer		key;
 	BTreeKeyType keyType;
+	UndoLocation savepointUndoLocation;
 	BTreeModifyCallbackInfo *callbackInfo;
 } BTreeModifyInternalContext;
 
@@ -66,6 +67,15 @@ typedef enum ConflictResolution
 	ConflictResolutionRetry,
 	ConflictResolutionFound
 } ConflictResolution;
+
+BTreeModifyCallbackInfo nullCallbackInfo =
+{
+	.waitCallback = NULL,
+	.modifyCallback = NULL,
+	.insertToDeleted = NULL,
+	.needsUndoForSelfCreated = false,
+	.arg = NULL
+};
 
 static const LOCKMODE hwLockModes[] = {AccessShareLock, RowShareLock, ExclusiveLock, AccessExclusiveLock};
 
@@ -125,8 +135,10 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.key = key;
 	context.keyType = keyType;
 	context.isAlreadyLocked = false;
+	context.savepointUndoLocation = get_subxact_undo_location();
 	context.callbackInfo = callbackInfo;
 
+	Assert(callbackInfo);
 	Assert((action != BTreeOperationInsert) || (tupleType == BTreeKeyLeafTuple));
 	Assert((action == BTreeOperationLock) || (context.lockMode >= RowLockNoKeyUpdate));
 
@@ -144,6 +156,11 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 retry:
 
 	context.needsUndo = true;
+	if (!(callbackInfo && callbackInfo->needsUndoForSelfCreated) &&
+		OXidIsValid(desc->createOxid) &&
+		desc->createOxid == opOxid &&
+		!UndoLocationIsValid(context.savepointUndoLocation))
+		context.needsUndo = false;
 	context.leafTuphdr.deleted = false;
 	context.leafTuphdr.undoLocation = InvalidUndoLocation;
 	context.leafTuphdr.formatFlags = 0;
@@ -372,7 +389,6 @@ wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid, RowLockMode lockMode,
 static ConflictResolution
 o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 {
-	UndoLocation savepointUndoLocation = get_subxact_undo_location();
 	bool		haveRedundantRowLocks = false;
 	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
 	BTreeDescr *desc = pageFindContext->desc;
@@ -392,7 +408,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 						   &context->conflictTupHdr,
 						   &context->conflictUndoLocation,
 						   context->lockMode, context->opOxid,
-						   blkno, savepointUndoLocation,
+						   blkno, context->savepointUndoLocation,
 						   &haveRedundantRowLocks, &context->isAlreadyLocked))
 	{
 		OTupleXactInfo xactInfo = context->conflictTupHdr.xactInfo;
@@ -401,9 +417,9 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 		if (oxid == context->opOxid)
 		{
 			if (context->action == BTreeOperationLock ||
-				(UndoLocationIsValid(savepointUndoLocation) &&
+				(UndoLocationIsValid(context->savepointUndoLocation) &&
 				 (!UndoLocationIsValid(context->conflictTupHdr.undoLocation) ||
-				  context->conflictTupHdr.undoLocation < savepointUndoLocation)) ||
+				  context->conflictTupHdr.undoLocation < context->savepointUndoLocation)) ||
 				o_btree_needs_undo(desc, context->action, curTuple, xactInfo,
 								   tuphdr->deleted, context->tuple, context->opOxid))
 			{
@@ -552,7 +568,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 								   &context->conflictUndoLocation,
 								   context->lockMode,
 								   context->opOxid, blkno,
-								   savepointUndoLocation);
+								   context->savepointUndoLocation);
 	}
 
 	if (!context->needsUndo)
@@ -627,7 +643,7 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	BTreeDescr *desc = pageFindContext->desc;
 	int			tuplen;
 
-	if (context->undoIsReserved && (context->needsUndo || !context->replace))
+	if (context->undoIsReserved && context->needsUndo)
 		o_btree_modify_add_undo_record(context);
 
 	tuplen = o_btree_len(desc, context->tuple, OTupleLength);
@@ -729,7 +745,7 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		}
 	}
 
-	if (context->undoIsReserved)
+	if (context->undoIsReserved && context->needsUndo)
 	{
 		OTuple		key;
 		bool		key_is_tuple;
@@ -1185,14 +1201,6 @@ o_btree_modify(BTreeDescr *desc, BTreeOperationType action,
 
 	return result;
 }
-
-BTreeModifyCallbackInfo nullCallbackInfo =
-{
-	.waitCallback = NULL,
-	.modifyCallback = NULL,
-	.insertToDeleted = NULL,
-	.arg = NULL
-};
 
 bool
 o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)

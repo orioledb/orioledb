@@ -18,7 +18,8 @@
 #include "tableam/key_range.h"
 
 extern void index_btree_desc_init(BTreeDescr *desc, OCompress compress,
-								  ORelOids oids, OIndexType type, void *arg);
+								  ORelOids oids, OIndexType type,
+								  OXid createOxid, void *arg);
 extern void o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 							 BTreeKeyType keyType, OBTreeKeyBound *bound);
 extern void o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
