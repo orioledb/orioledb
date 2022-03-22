@@ -190,6 +190,9 @@ extern int	device_fd;
 extern char *device_filename;
 extern Pointer mmap_data;
 extern Size device_length;
+extern int	default_compress;
+extern int	default_primary_compress;
+extern int	default_toast_compress;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MyProc->pgprocno >= 0 && \

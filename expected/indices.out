@@ -5346,6 +5346,39 @@ SELECT orioledb_tbl_indices('o_test81'::regclass);
 (1 row)
 
 DROP TABLE o_test81;
+SET orioledb.default_compress = 5;
+SET orioledb.default_primary_compress = 6;
+SET orioledb.default_toast_compress = 7;
+CREATE TABLE o_test81
+(
+	key int8 NOT NULL,
+	value int8 NOT NULL,
+	PRIMARY KEY (value)
+) USING orioledb WITH (compress = -1);
+SELECT orioledb_table_description('o_test81'::regclass);
+               orioledb_table_description                
+---------------------------------------------------------
+ Compress = -1, Primary compress = 6, TOAST compress = 7+
+  Column |   Type | Collation | Nullable | Droped       +
+     key | bigint |    (null) |    false |  false       +
+   value | bigint |    (null) |    false |  false       +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test81'::regclass);
+               orioledb_tbl_indices               
+--------------------------------------------------
+ Index o_test81_pkey                             +
+     Index type: primary, unique, compression = 6+
+     Leaf tuple size: 2, non-leaf tuple size: 1  +
+     Non-leaf tuple fields: value                +
+ 
+(1 row)
+
+DROP TABLE o_test81;
+RESET orioledb.default_compress;
+RESET orioledb.default_primary_compress;
+RESET orioledb.default_toast_compress;
 -- Index rename
 CREATE TABLE o_test82
 (
@@ -5529,12 +5562,13 @@ ALTER TABLE o_test83
 RENAME COLUMN val TO vala;
 ROLLBACK;
 SELECT orioledb_table_description('o_test83'::regclass);
-             orioledb_table_description             
-----------------------------------------------------
-  Column |    Type | Collation | Nullable | Droped +
-     key |  bigint |    (null) |    false |  false +
-     val | integer |    (null) |     true |  false +
-    val2 | integer |    (null) |    false |  false +
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+     val | integer |    (null) |     true |  false        +
+    val2 | integer |    (null) |    false |  false        +
  
 (1 row)
 
@@ -5556,12 +5590,13 @@ SELECT orioledb_tbl_indices('o_test83'::regclass);
 ALTER TABLE o_test83
 RENAME COLUMN val TO vala;
 SELECT orioledb_table_description('o_test83'::regclass);
-             orioledb_table_description             
-----------------------------------------------------
-  Column |    Type | Collation | Nullable | Droped +
-     key |  bigint |    (null) |    false |  false +
-    vala | integer |    (null) |     true |  false +
-    val2 | integer |    (null) |    false |  false +
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+    vala | integer |    (null) |     true |  false        +
+    val2 | integer |    (null) |    false |  false        +
  
 (1 row)
 

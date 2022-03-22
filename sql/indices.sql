@@ -981,6 +981,25 @@ CREATE TABLE o_test81
 SELECT orioledb_tbl_indices('o_test81'::regclass);
 DROP TABLE o_test81;
 
+SET orioledb.default_compress = 5;
+SET orioledb.default_primary_compress = 6;
+SET orioledb.default_toast_compress = 7;
+
+CREATE TABLE o_test81
+(
+	key int8 NOT NULL,
+	value int8 NOT NULL,
+	PRIMARY KEY (value)
+) USING orioledb WITH (compress = -1);
+SELECT orioledb_table_description('o_test81'::regclass);
+SELECT orioledb_tbl_indices('o_test81'::regclass);
+DROP TABLE o_test81;
+
+RESET orioledb.default_compress;
+RESET orioledb.default_primary_compress;
+RESET orioledb.default_toast_compress;
+
+
 -- Index rename
 CREATE TABLE o_test82
 (

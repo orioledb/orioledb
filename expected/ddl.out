@@ -45,6 +45,7 @@ SELECT * FROM o_ddl_check;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
       f1 |              text |         C |    false |  false +
       f2 | character varying |   default |    false |  false +
@@ -58,6 +59,7 @@ ERROR:  column "f1" is in a primary key
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
       f1 |              text |         C |    false |  false +
       f2 | character varying |   default |    false |  false +
@@ -76,12 +78,13 @@ ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
 ERROR:  "o_ddl_check" is not a foreign table
 ALTER TABLE o_ddl_check ALTER f2 TYPE text;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-             orioledb_table_description             
-----------------------------------------------------
-  Column |    Type | Collation | Nullable | Droped +
-      f1 |    text |         C |    false |  false +
-      f2 |    text |   default |    false |  false +
-      f3 | integer |    (null) |     true |  false +
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+      f1 |    text |         C |    false |  false        +
+      f2 |    text |   default |    false |  false        +
+      f3 | integer |    (null) |     true |  false        +
  
 (1 row)
 
@@ -90,6 +93,7 @@ ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
       f1 |              text |         C |    false |  false +
       f2 | character varying |     POSIX |    false |  false +
@@ -109,6 +113,7 @@ ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
       f1 |              text |         C |    false |  false +
       f2 | character varying |     POSIX |    false |  false +
@@ -131,6 +136,7 @@ ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
       f1 |              text |         C |    false |  false +
       f2 | character varying |     POSIX |    false |  false +
@@ -145,6 +151,7 @@ DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pke
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
       f1 |              text |         C |    false |  false +
       f2 | character varying |     POSIX |    false |   true +

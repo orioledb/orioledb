@@ -1486,12 +1486,13 @@ CREATE TABLE o_tableam4
 CREATE UNIQUE INDEX o_tableam4_ix1 ON o_tableam4 (key);
 CREATE INDEX o_tableam4_ix2 on o_tableam4 (value);
 SELECT * FROM db_o_tables;
-  relname   |                    description                    
-------------+---------------------------------------------------
- o_tableam4 |  Column |   Type | Collation | Nullable | Droped +
-            |     key | bigint |    (null) |    false |  false +
-            |   value | bigint |    (null) |     true |  false +
-            |  value2 | bigint |    (null) |     true |  false +
+  relname   |                        description                        
+------------+-----------------------------------------------------------
+ o_tableam4 | Compress = -1, Primary compress = -1, TOAST compress = -1+
+            |  Column |   Type | Collation | Nullable | Droped         +
+            |     key | bigint |    (null) |    false |  false         +
+            |   value | bigint |    (null) |     true |  false         +
+            |  value2 | bigint |    (null) |     true |  false         +
             | 
 (1 row)
 
@@ -1758,12 +1759,13 @@ CREATE INDEX o_tableam_delete1_ix ON o_tableam_delete1 (val);
 INSERT INTO o_tableam_delete1 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
 ANALYZE o_tableam_delete1;
 SELECT * FROM db_o_tables;
-      relname      |                    description                    
--------------------+---------------------------------------------------
- o_tableam_delete1 |  Column |   Type | Collation | Nullable | Droped +
-                   |      id | bigint |    (null) |    false |  false +
-                   |     val |   text |   default |     true |  false +
-                   |    val2 |   text |   default |     true |  false +
+      relname      |                        description                        
+-------------------+-----------------------------------------------------------
+ o_tableam_delete1 | Compress = -1, Primary compress = -1, TOAST compress = -1+
+                   |  Column |   Type | Collation | Nullable | Droped         +
+                   |      id | bigint |    (null) |    false |  false         +
+                   |     val |   text |   default |     true |  false         +
+                   |    val2 |   text |   default |     true |  false         +
                    | 
 (1 row)
 
@@ -1919,11 +1921,12 @@ CREATE TABLE o_tableam6
 ) USING orioledb;
 INSERT INTO o_tableam6 (SELECT id, id || 'text' FROM generate_series(1, 10) as id);
 SELECT * FROM db_o_tables;
-  relname   |                    description                    
-------------+---------------------------------------------------
- o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
-            |      id | bigint |    (null) |    false |  false +
-            |     val |   text |   default |     true |  false +
+  relname   |                        description                        
+------------+-----------------------------------------------------------
+ o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
+            |  Column |   Type | Collation | Nullable | Droped         +
+            |      id | bigint |    (null) |    false |  false         +
+            |     val |   text |   default |     true |  false         +
             | 
 (1 row)
 
@@ -1973,11 +1976,12 @@ BEGIN;
 DROP TABLE o_tableam6;
 ROLLBACK;
 SELECT * FROM db_o_tables;
-  relname   |                    description                    
-------------+---------------------------------------------------
- o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
-            |      id | bigint |    (null) |    false |  false +
-            |     val |   text |   default |     true |  false +
+  relname   |                        description                        
+------------+-----------------------------------------------------------
+ o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
+            |  Column |   Type | Collation | Nullable | Droped         +
+            |      id | bigint |    (null) |    false |  false         +
+            |     val |   text |   default |     true |  false         +
             | 
 (1 row)
 
@@ -2049,11 +2053,12 @@ CREATE TABLE o_tableam6a
 ) USING orioledb;
 ROLLBACK;
 SELECT * FROM db_o_tables;
-  relname   |                    description                    
-------------+---------------------------------------------------
- o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
-            |      id | bigint |    (null) |    false |  false +
-            |     val |   text |   default |     true |  false +
+  relname   |                        description                        
+------------+-----------------------------------------------------------
+ o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
+            |  Column |   Type | Collation | Nullable | Droped         +
+            |      id | bigint |    (null) |    false |  false         +
+            |     val |   text |   default |     true |  false         +
             | 
 (1 row)
 
@@ -2114,11 +2119,12 @@ SELECT * FROM o_tableam6a;
 
 ROLLBACK;
 SELECT * FROM db_o_tables;
-  relname   |                    description                    
-------------+---------------------------------------------------
- o_tableam6 |  Column |   Type | Collation | Nullable | Droped +
-            |      id | bigint |    (null) |    false |  false +
-            |     val |   text |   default |     true |  false +
+  relname   |                        description                        
+------------+-----------------------------------------------------------
+ o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
+            |  Column |   Type | Collation | Nullable | Droped         +
+            |      id | bigint |    (null) |    false |  false         +
+            |     val |   text |   default |     true |  false         +
             | 
 (1 row)
 
@@ -2174,15 +2180,17 @@ SELECT * FROM o_tableam6a;
 TRUNCATE TABLE o_tableam6a;
 COMMIT;
 SELECT * FROM db_o_tables;
-   relname   |                    description                    
--------------+---------------------------------------------------
- o_tableam6  |  Column |   Type | Collation | Nullable | Droped +
-             |      id | bigint |    (null) |    false |  false +
-             |     val |   text |   default |     true |  false +
+   relname   |                        description                        
+-------------+-----------------------------------------------------------
+ o_tableam6  | Compress = -1, Primary compress = -1, TOAST compress = -1+
+             |  Column |   Type | Collation | Nullable | Droped         +
+             |      id | bigint |    (null) |    false |  false         +
+             |     val |   text |   default |     true |  false         +
              | 
- o_tableam6a |  Column |   Type | Collation | Nullable | Droped +
-             |      id | bigint |    (null) |    false |  false +
-             |     val |   text |   default |     true |  false +
+ o_tableam6a | Compress = -1, Primary compress = -1, TOAST compress = -1+
+             |  Column |   Type | Collation | Nullable | Droped         +
+             |      id | bigint |    (null) |    false |  false         +
+             |     val |   text |   default |     true |  false         +
              | 
 (2 rows)
 

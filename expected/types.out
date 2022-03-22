@@ -226,6 +226,7 @@ SELECT * FROM o_test_enum_index WHERE happiness < 'very happy';
 SELECT orioledb_table_description('o_test_enum_index'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
      Column |        Type | Collation | Nullable | Droped +
   num_weeks |     integer |    (null) |    false |  false +
   happiness | o_happiness |    (null) |    false |  false +
@@ -263,11 +264,12 @@ ROLLBACK;
 DROP TYPE o_happiness CASCADE;
 NOTICE:  drop cascades to column happiness of table o_test_enum_index
 SELECT orioledb_table_description('o_test_enum_index'::regclass);
-              orioledb_table_description               
--------------------------------------------------------
-     Column |    Type | Collation | Nullable | Droped +
-  num_weeks | integer |    (null) |    false |  false +
-  happiness |     ??? |    (null) |    false |   true +
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+     Column |    Type | Collation | Nullable | Droped     +
+  num_weeks | integer |    (null) |    false |  false     +
+  happiness |     ??? |    (null) |    false |   true     +
  
 (1 row)
 
@@ -330,16 +332,17 @@ SELECT * FROM o_test_domain_array_index;
 (1 row)
 
 SELECT orioledb_table_description('o_test_domain_index'::regclass);
-             orioledb_table_description             
-----------------------------------------------------
-  Column |    Type | Collation | Nullable | Droped +
-     key |   myint |    (null) |    false |  false +
-    key2 |  myint2 |    (null) |    false |  false +
-       t |  mytime |    (null) |    false |  false +
-       a | myarray |    (null) |    false |  false +
-       b |  mybool |    (null) |    false |  false +
-     val | integer |    (null) |    false |  false +
-     net |    inet |    (null) |    false |  false +
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+     key |   myint |    (null) |    false |  false        +
+    key2 |  myint2 |    (null) |    false |  false        +
+       t |  mytime |    (null) |    false |  false        +
+       a | myarray |    (null) |    false |  false        +
+       b |  mybool |    (null) |    false |  false        +
+     val | integer |    (null) |    false |  false        +
+     net |    inet |    (null) |    false |  false        +
  
 (1 row)
 
@@ -366,16 +369,17 @@ NOTICE:  drop cascades to column t of table o_test_domain_index
 DROP DOMAIN mybool CASCADE;
 NOTICE:  drop cascades to column b of table o_test_domain_index
 SELECT orioledb_table_description('o_test_domain_index'::regclass);
-             orioledb_table_description             
-----------------------------------------------------
-  Column |    Type | Collation | Nullable | Droped +
-     key |     ??? |    (null) |    false |   true +
-    key2 |     ??? |    (null) |    false |   true +
-       t |     ??? |    (null) |    false |   true +
-       a |     ??? |    (null) |    false |   true +
-       b |     ??? |    (null) |    false |   true +
-     val | integer |    (null) |    false |  false +
-     net |    inet |    (null) |    false |  false +
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+     key |     ??? |    (null) |    false |   true        +
+    key2 |     ??? |    (null) |    false |   true        +
+       t |     ??? |    (null) |    false |   true        +
+       a |     ??? |    (null) |    false |   true        +
+       b |     ??? |    (null) |    false |   true        +
+     val | integer |    (null) |    false |  false        +
+     net |    inet |    (null) |    false |  false        +
  
 (1 row)
 

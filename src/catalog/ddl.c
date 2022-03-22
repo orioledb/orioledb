@@ -658,9 +658,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (IsA(stmt, CreateStmt))
 			{
-				OCompress	compress = InvalidOCompress,
-							primary_compress = InvalidOCompress,
-							toast_compress = InvalidOCompress;
+				OCompress	compress = default_compress,
+							primary_compress = default_primary_compress,
+							toast_compress = default_toast_compress;
 				Datum		toast_options;
 				static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
 				CreateStmt *cstmt = (CreateStmt *) stmt;

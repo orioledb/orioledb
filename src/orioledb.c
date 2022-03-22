@@ -104,6 +104,9 @@ double		o_checkpoint_completion_ratio;
 int			bgwriter_num_workers = 1;
 int			max_io_concurrency = 1;
 ODBProcData *oProcData;
+int			default_compress = InvalidOCompress;
+int			default_primary_compress = InvalidOCompress;
+int			default_toast_compress = InvalidOCompress;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -404,6 +407,45 @@ _PG_init(void)
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.default_compress",
+							"Default compression level.",
+							NULL,
+							&default_compress,
+							-1,
+							-1,
+							o_compress_max_lvl(),
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.default_primary_compress",
+							"Default compression level of primary index.",
+							NULL,
+							&default_primary_compress,
+							-1,
+							-1,
+							o_compress_max_lvl(),
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.default_toast_compress",
+							"Default compression level of TOAST.",
+							NULL,
+							&default_toast_compress,
+							-1,
+							-1,
+							o_compress_max_lvl(),
+							PGC_USERSET,
+							0,
 							NULL,
 							NULL,
 							NULL);

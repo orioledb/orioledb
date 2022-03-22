@@ -10,8 +10,9 @@ step s1_commit: COMMIT;
 step s2_drop_null_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |     true |  false 
     id2 | bigint |    (null) |     true |  false 
@@ -31,8 +32,9 @@ step s2_drop_id2: <... completed>
 ERROR:  all attributes are dropped.
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |   true 
     id2 | bigint |    (null) |    false |  false 
@@ -51,8 +53,9 @@ step s1_commit: COMMIT;
 step s2_drop_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |   true 
     id2 | bigint |    (null) |    false |   true 
@@ -96,8 +99,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_null_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |     true |  false 
@@ -116,8 +120,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |   true 
@@ -136,8 +141,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |   true 
@@ -155,8 +161,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |   true 
@@ -175,8 +182,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_commit: COMMIT;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |   true 
@@ -195,8 +203,9 @@ step s1_commit: COMMIT;
 step s2_drop_null_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |     true |  false 
     id2 | bigint |    (null) |    false |  false 
@@ -216,8 +225,9 @@ step s2_drop_id2: <... completed>
 ERROR:  all attributes are dropped.
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |   true 
     id2 | bigint |    (null) |    false |  false 
@@ -236,8 +246,9 @@ step s1_commit: COMMIT;
 step s2_drop_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |   true 
     id2 | bigint |    (null) |    false |  false 
@@ -281,8 +292,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_null_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |  false 
@@ -301,8 +313,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |  false 
@@ -321,8 +334,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |  false 
@@ -340,8 +354,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |  false 
@@ -360,8 +375,9 @@ step s1_rollback: ROLLBACK;
 step s2_drop_id2: <... completed>
 step s2_rollback: ROLLBACK;
 step s3_descr: SELECT orioledb_table_description('o_iso_ddl'::regclass);
-orioledb_table_description                                                                                                                                                                              
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_table_description                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Compress = -1, Primary compress = -1, TOAST compress = -1
  Column |   Type | Collation | Nullable | Droped 
     id1 | bigint |    (null) |    false |  false 
     id2 | bigint |    (null) |    false |  false 
