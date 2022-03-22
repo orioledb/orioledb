@@ -408,11 +408,16 @@ advance_global_xmin(OXid newXid)
 		Assert(globalXmin >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
 		Assert(globalXmin >= pg_atomic_read_u64(&xid_meta->writtenXmin));
 
+		pg_atomic_write_u64(&xid_meta->writeInProgressXmin, globalXmin);
+
+		pg_write_barrier();
+
 		for (oxid = writtenXmin; oxid < globalXmin; oxid++)
 			pg_atomic_write_u64(&xidBuffer[oxid % xid_circular_buffer_size],
 								COMMITSEQNO_FROZEN);
 
-		pg_atomic_write_u64(&xid_meta->writeInProgressXmin, globalXmin);
+		pg_write_barrier();
+
 		pg_atomic_write_u64(&xid_meta->writtenXmin, globalXmin);
 		LWLockRelease(&xid_meta->xidMapWriteLock);
 	}
