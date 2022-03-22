@@ -388,6 +388,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read xid record from file %s", xidFilename)));
 
+		advance_oxids(xidRec.oxid);
 		state = (RecoveryXidState *) hash_search(recovery_xid_state_hash,
 												 &xidRec.oxid,
 												 HASH_ENTER,

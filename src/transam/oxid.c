@@ -112,7 +112,10 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	{
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size],
 										   &oldCsn, csn))
+		{
+			Assert(oldCsn != COMMITSEQNO_FROZEN);
 			return;
+		}
 
 		/*
 		 * We assume that nobody could change the csn value concurrently.
