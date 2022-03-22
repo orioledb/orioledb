@@ -88,8 +88,8 @@ step "s2_insert3" {
 step "s2_insert4" {
 	INSERT INTO o_btree_iterate
 	SELECT id, repeat('abcde', id % 10) FROM generate_series(2, 1500, 5) id; }
-step "s2_delete_even" { DELETE FROM o_btree_iterate WHERE id % 2 = 0; }
-step "s2_delete_uneven" { DELETE FROM o_btree_iterate WHERE id % 2 = 1; }
+step "s2_delete34" { DELETE FROM o_btree_iterate WHERE id % 5 IN (2, 3); }
+step "s2_delete12" { DELETE FROM o_btree_iterate WHERE id % 5 IN (1, 4) }
 step "s2_delete_mass" { DELETE FROM o_btree_iterate WHERE id % 9 > 0; }
 step "s2_continue" {
 	SELECT
@@ -222,23 +222,23 @@ permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2
 permutation "s1_setup_seq" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_evict" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_evict" "s2_continue" "s1_commit"
 
 # forward
-permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_right_750" "s1_count" "s2_insert3" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_continue" "s1_commit"
-permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_right_750" "s1_count" "s2_insert4" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_continue" "s1_commit"
-permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_right_750" "s1_count" "s2_insert2" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_continue" "s1_commit"
-permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_right_750" "s1_count" "s2_insert1" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_right_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_right_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_right_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_right_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" "s1_commit"
 
 # backward
-permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_left_750" "s1_bcount" "s2_insert3" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_continue" "s1_commit"
-permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_left_1200" "s1_bcount" "s2_insert4" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_continue" "s1_commit"
-permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_left_750" "s1_bcount" "s2_insert2" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_continue" "s1_commit"
-permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_left_1200" "s1_bcount" "s2_insert1" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_left_750" "s1_bcount" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_left_1200" "s1_bcount" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_left_750" "s1_bcount" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" "s1_commit"
+permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_left_1200" "s1_bcount" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" "s1_commit"
 
 # sequential
-permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_evict" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete_even" "s2_insert4" "s2_insert3" "s2_delete_even" "s2_evict" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_evict" "s2_continue" "s1_commit"
-permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete_uneven" "s2_insert1" "s2_insert2" "s2_delete_uneven" "s2_evict" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_evict" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_evict" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_evict" "s2_continue" "s1_commit"
+permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_evict" "s2_continue" "s1_commit"
