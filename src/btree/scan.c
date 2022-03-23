@@ -251,8 +251,8 @@ add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 	if (scan->downlinksCount >= scan->allocatedDownlinks)
 	{
 		scan->allocatedDownlinks *= 2;
-		scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) repalloc(scan->diskDownlinks,
-																	sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
+		scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) repalloc_huge(scan->diskDownlinks,
+																		 sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
 	}
 	scan->diskDownlinks[scan->downlinksCount].downlink = downlink;
 	scan->diskDownlinks[scan->downlinksCount].csn = csn;
