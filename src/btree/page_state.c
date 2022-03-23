@@ -38,9 +38,10 @@
 #define MAX_PAGES_PER_PROCESS 8
 
 /*
- * Enable this to recheck page stats on every unlock.
+ * Enable this to recheck page starts and struct on every unlock.
  */
 /* #define CHECK_PAGE_STATS */
+/* #define CHECK_PAGE_STRUCT */
 
 typedef struct
 {
@@ -53,6 +54,10 @@ static OInMemoryBlkno myInProgressSplitPages[ORIOLEDB_MAX_DEPTH * 2];
 static int	numberOfMyLockedPages = 0;
 static int	numberOfMyInProgressSplitPages = 0;
 
+
+#ifdef CHECK_PAGE_STRUCT
+static void o_check_page_struct(BTreeDescr *desc, Page p);
+#endif
 #ifdef CHECK_PAGE_STATS
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 #endif
@@ -586,6 +591,11 @@ unlock_page(OInMemoryBlkno blkno)
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	uint32		state;
 
+#ifdef CHECK_PAGE_STRUCT
+	if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
+		o_check_page_struct(NULL, p);
+#endif
+
 #ifdef CHECK_PAGE_STATS
 
 	/*
@@ -755,7 +765,112 @@ btree_split_mark_finished(OInMemoryBlkno left_blkno, bool use_lock, bool success
 		unlock_page(left_blkno);
 }
 
+#ifdef CHECK_PAGE_STRUCT
+/*
+ * Check if page has a consistent structure.
+ */
+void
+o_check_page_struct(BTreeDescr *desc, Page p)
+{
+	BTreePageHeader *header = (BTreePageHeader *) p;
+	int			i,
+				j,
+				itemsCount;
+	LocationIndex endLocation,
+				chunkSize;
+
+	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
+	Assert(header->hikeysEnd <= header->dataSize);
+
+	for (i = 0; i < header->chunksCount; i++)
+	{
+		BTreePageChunkDesc *chunk = &header->chunkDesc[i];
+		BTreePageChunk *chunkData;
+
+		if (i > 0)
+		{
+			BTreePageChunkDesc *prevChunk = &header->chunkDesc[i - 1];
+
+			Assert(chunk->shortLocation >= prevChunk->shortLocation);
+			Assert(chunk->offset >= prevChunk->offset);
+			Assert(chunk->hikeyShortLocation > prevChunk->hikeyShortLocation);
+			Assert(SHORT_GET_LOCATION(chunk->hikeyShortLocation) <= header->hikeysEnd);
+			Assert(SHORT_GET_LOCATION(chunk->shortLocation) <= header->dataSize);
+			Assert(chunk->offset <= header->itemsCount);
+		}
+		else
+		{
+			Assert(SHORT_GET_LOCATION(chunk->shortLocation) == header->hikeysEnd || SHORT_GET_LOCATION(chunk->shortLocation) == BTREE_PAGE_HIKEYS_END(NULL, p));
+			Assert(chunk->offset == 0);
+			Assert(SHORT_GET_LOCATION(chunk->hikeyShortLocation) == MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * header->chunksCount));
+		}
+
+		if (i == header->chunksCount - 1)
+		{
+			if (!O_PAGE_IS(p, RIGHTMOST))
+				Assert(SHORT_GET_LOCATION(chunk->hikeyShortLocation) < header->hikeysEnd);
+			itemsCount = header->itemsCount - chunk->offset;
+			endLocation = header->dataSize;
+		}
+		else
+		{
+			Assert(header->chunkDesc[i + 1].offset <= header->itemsCount);
+			Assert(header->chunkDesc[i + 1].offset >= chunk->offset);
+			itemsCount = header->chunkDesc[i + 1].offset - chunk->offset;
+			endLocation = SHORT_GET_LOCATION(header->chunkDesc[i + 1].shortLocation);
+			Assert(endLocation <= header->dataSize);
+		}
+
+		chunkData = (BTreePageChunk *) ((Pointer) p + SHORT_GET_LOCATION(chunk->shortLocation));
+		chunkSize = endLocation - SHORT_GET_LOCATION(chunk->shortLocation);
+		Assert(MAXALIGN(sizeof(LocationIndex) * itemsCount) <= chunkSize);
+
+		for (j = 0; j < itemsCount; j++)
+		{
+			Assert(ITEM_GET_OFFSET(chunkData->items[j]) >= MAXALIGN(sizeof(LocationIndex) * itemsCount));
+			Assert(ITEM_GET_OFFSET(chunkData->items[j]) <= chunkSize);
+			if (j > 0)
+				Assert(ITEM_GET_OFFSET(chunkData->items[j]) >= ITEM_GET_OFFSET(chunkData->items[j - 1]));
+			if (j < itemsCount - 1 && O_PAGE_IS(p, LEAF) && ITEM_GET_FLAGS(chunkData->items[j]) == 0)
+				Assert(ITEM_GET_OFFSET(chunkData->items[j]) < ITEM_GET_OFFSET(chunkData->items[j + 1]));
+			if (desc)
+			{
+				OTuple		tuple;
+				int			len;
+
+				tuple.formatFlags = ITEM_GET_FLAGS(chunkData->items[j]);
+				if (O_PAGE_IS(p, LEAF))
+				{
+					tuple.data = (Pointer) chunkData + ITEM_GET_OFFSET(chunkData->items[j]) + BTreeLeafTuphdrSize;
+					len = BTreeLeafTuphdrSize + o_btree_len(desc, tuple, OTupleLength);
+				}
+				else
+				{
+					if (i == 0 && j == 0)
+					{
+						len = BTreeNonLeafTuphdrSize;
+					}
+					else
+					{
+						tuple.data = (Pointer) chunkData + ITEM_GET_OFFSET(chunkData->items[j]) + BTreeNonLeafTuphdrSize;
+						len = BTreeNonLeafTuphdrSize + o_btree_len(desc, tuple, OKeyLength);
+					}
+				}
+
+				if (j < itemsCount - 1)
+					Assert(ITEM_GET_OFFSET(chunkData->items[j]) + len <= ITEM_GET_OFFSET(chunkData->items[j + 1]));
+				else
+					Assert(ITEM_GET_OFFSET(chunkData->items[j]) + len <= chunkSize);
+
+			}
+		}
+	}
+
+}
+#endif
+
 #ifdef CHECK_PAGE_STATS
+
 /*
  * Check if precalculated number of vacated bytes for leaf pages and number
  * of disk downlinks for non-leaf pages is correct.

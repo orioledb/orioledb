@@ -393,16 +393,16 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
 	BTreeDescr *desc = pageFindContext->desc;
 	OInMemoryBlkno blkno;
-	BTreePageItemLocator loc;
+	BTreePageItemLocator *loc;
 	Page		page;
 	OTuple		curTuple;
 	BTreeLeafTuphdr *tuphdr;
 
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
-	loc = pageFindContext->items[pageFindContext->index].locator;
+	loc = &pageFindContext->items[pageFindContext->index].locator;
 	page = O_GET_IN_MEMORY_PAGE(blkno);
 
-	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
+	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, loc);
 
 	if (row_lock_conflicts(tuphdr,
 						   &context->conflictTupHdr,
@@ -468,7 +468,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 */
 				START_CRIT_SECTION();
 				page_block_reads(blkno);
-				if (!page_item_rollback(desc, page, &loc, true,
+				if (!page_item_rollback(desc, page, loc, true,
 										&context->conflictTupHdr,
 										context->conflictUndoLocation))
 					context->cmp = -1;
@@ -539,7 +539,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 			}
 
 			/* Update tuple and header pointer after page_item_rollback() */
-			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
+			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, loc);
 		}
 	}
 	else if (IsolationUsesXactSnapshot() && IsRelationTree(desc))

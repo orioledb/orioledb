@@ -649,11 +649,11 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 
 	page_block_reads(left_blkno);
 
-	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey, NULL);
-
 	/* clear O_BTREE_FLAG_UNDER_MERGE for the left page */
 	left_header->flags &= ~O_BTREE_FLAG_UNDER_MERGE;
 	left_header->flags = left_header->flags | right_header->flags;
+
+	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey, NULL);
 
 	o_btree_page_calculate_statistics(desc, left);
 

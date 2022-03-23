@@ -245,6 +245,7 @@ reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
 			items[i].data = tuple.data;
 			items[i].flags = tuple.formatFlags;
 			items[i].size = tuplesize;
+			Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
 			items[i].newItem = true;
 			i++;
 			addedNewItem = true;
@@ -268,6 +269,7 @@ reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
 		items[i].size = finished ?
 			(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
 			BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
+		Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
 		items[i].newItem = false;
 
 		if (tupHdr->deleted)
@@ -284,6 +286,7 @@ reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
 		items[i].data = tuple.data;
 		items[i].flags = tuple.formatFlags;
 		items[i].size = tuplesize;
+		Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
 		items[i].newItem = true;
 		i++;
 	}
@@ -471,6 +474,7 @@ page_locator_insert_item(Page p, BTreePageItemLocator *locator,
 	Assert(endPtr + dataShift <= (Pointer) p + ORIOLEDB_BLCKSZ);
 
 	/* Shift the data after insert location */
+	Assert(itemPtr <= endPtr);
 	memmove(itemPtr + dataShift, itemPtr, endPtr - itemPtr);
 
 	/* Adjust chunks parameters */
@@ -605,6 +609,7 @@ page_merge_chunks(Page p, OffsetNumber index)
 {
 	LocationIndex tmpItems[BTREE_PAGE_MAX_CHUNK_ITEMS],
 				hikeyShift,
+				hikeyShift2,
 				shift1,
 				shift2;
 	OffsetNumber i,
@@ -669,23 +674,42 @@ page_merge_chunks(Page p, OffsetNumber index)
 		   tmpItems,
 		   sizeof(LocationIndex) * count2);
 
-	hikeyShift = SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation) -
+	hikeyShift = MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * header->chunksCount) -
+		MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * (header->chunksCount - 1));
+	hikeyShift2 = hikeyShift +
+		SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation) -
 		SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation);
 
-	memmove((Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation),
-			(Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation),
-			header->hikeysEnd - SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation));
-	header->chunkDesc[index].hikeyFlags = header->chunkDesc[index + 1].hikeyFlags;
+	Pointer		p1_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation) - hikeyShift;
+	Pointer		p1_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
+	int			len1 = SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) -
+	SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
 
+	Pointer		p2_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) - hikeyShift;
+	Pointer		p2_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
+	int			len2 = header->hikeysEnd - SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
+
+	header->chunkDesc[index].hikeyFlags = header->chunkDesc[index + 1].hikeyFlags;
 	for (i = index + 2; i < header->chunksCount; i++)
 	{
 		header->chunkDesc[i - 1].offset = header->chunkDesc[i].offset;
 		header->chunkDesc[i - 1].hikeyFlags = header->chunkDesc[i].hikeyFlags;
-		header->chunkDesc[i - 1].hikeyShortLocation = header->chunkDesc[i].hikeyShortLocation - LOCATION_GET_SHORT(hikeyShift);
+		header->chunkDesc[i - 1].hikeyShortLocation = header->chunkDesc[i].hikeyShortLocation - LOCATION_GET_SHORT(hikeyShift2);
 		header->chunkDesc[i - 1].shortLocation = header->chunkDesc[i].shortLocation - LOCATION_GET_SHORT(shift2);
 	}
 
-	header->hikeysEnd -= hikeyShift;
+	if (hikeyShift > 0)
+	{
+		for (i = 0; i <= index; i++)
+			header->chunkDesc[i].hikeyShortLocation = header->chunkDesc[i].hikeyShortLocation - LOCATION_GET_SHORT(hikeyShift);
+	}
+
+	if (hikeyShift > 0)
+		memmove(p1_1, p1_2, len1);
+
+	memmove(p2_1, p2_2, len2);
+
+	header->hikeysEnd -= hikeyShift2;
 	header->chunksCount--;
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 }
