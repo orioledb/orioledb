@@ -209,8 +209,17 @@ write_xidsmap(OXid targetXmax)
 	}
 	xmax = oxid;
 
+	if (xmin == xmax)
+	{
+		SpinLockRelease(&xid_meta->xminMutex);
+		return;
+	}
+
+	Assert(pg_atomic_read_u64(&xid_meta->writeInProgressXmin) < xmax);
 	pg_atomic_write_u64(&xid_meta->writeInProgressXmin, xmax);
 	SpinLockRelease(&xid_meta->xminMutex);
+
+	Assert(xmax > xmin);
 
 	lastWrittenXmin = xmin;
 	for (oxid = xmin; oxid < xmax; oxid++)
@@ -235,6 +244,7 @@ write_xidsmap(OXid targetXmax)
 						(oxid - lastWrittenXmin) * sizeof(CommitSeqNo));
 
 	SpinLockAcquire(&xid_meta->xminMutex);
+	Assert(pg_atomic_read_u64(&xid_meta->writtenXmin) < xmax);
 	pg_atomic_write_u64(&xid_meta->writtenXmin, xmax);
 	SpinLockRelease(&xid_meta->xminMutex);
 
@@ -403,6 +413,7 @@ advance_global_xmin(OXid newXid)
 	 */
 	writtenXmin = pg_atomic_read_u64(&xid_meta->writtenXmin);
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
+
 	if (writtenXmin == writeInProgressXmin && writtenXmin < globalXmin &&
 		LWLockConditionalAcquire(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE))
 	{
@@ -551,11 +562,16 @@ get_current_oxid(void)
 		if (newOxid > pg_atomic_read_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin) + xid_circular_buffer_size / 10)
 			advance_global_xmin(newOxid);
 
-		/* Write some xids out of circular buffer if needed. */
-		while (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size)
+		/*
+		 * Write some xids out of circular buffer if needed.  We always keep
+		 * one COMMITSEQNO_FROZEN in circular buffers as a delimited beween
+		 * the future and the past.  This helps protect runXmin from growing
+		 * bigger than nextXid.
+		 */
+		while (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size - 1)
 		{
 			advance_global_xmin(newOxid);
-			if (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size)
+			if (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size - 1)
 			{
 				if (LWLockAcquireOrWait(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE))
 				{
