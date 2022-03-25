@@ -3,7 +3,7 @@ CREATE EXTENSION orioledb;
 SELECT orioledb_version();
     orioledb_version     
 -------------------------
- OrioleDB public alpha 3
+ OrioleDB public alpha 4
 (1 row)
 
 CREATE VIEW db_o_tables AS (SELECT c.relname, ot.description
