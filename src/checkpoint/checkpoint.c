@@ -21,7 +21,9 @@
 
 #include "btree/insert.h"
 #include "btree/io.h"
+#include "btree/merge.h"
 #include "btree/page_chunks.h"
+#include "btree/undo.h"
 #include "catalog/free_extents.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
@@ -2346,6 +2348,87 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 }
 
+static bool
+checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
+						  OInMemoryBlkno blkno, int level)
+{
+	OInMemoryBlkno parentBlkno = state->stack[level + 1].blkno,
+				rightBlkno;
+	Page		parentPage = O_GET_IN_MEMORY_PAGE(parentBlkno),
+				rightPage,
+				page = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageItemLocator loc;
+	BTreeNonLeafTuphdr *tuphdr;
+	OTuple		key;
+	bool		mergeParent = false;
+
+	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(page)))
+		return false;
+
+	if (!try_lock_page(parentBlkno))
+		return false;
+
+	if (state->stack[level + 1].offset < 1 ||
+		state->stack[level + 1].offset >= BTREE_PAGE_ITEMS_COUNT(parentPage))
+	{
+		unlock_page(parentBlkno);
+		return false;
+	}
+
+	BTREE_PAGE_OFFSET_GET_LOCATOR(parentPage, state->stack[level + 1].offset - 1, &loc);
+	Assert(BTREE_PAGE_LOCATOR_IS_VALID(parentPage, &loc));
+	BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, key, parentPage, &loc);
+
+	if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink) ||
+		DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink) != blkno)
+	{
+		unlock_page(parentBlkno);
+		return false;
+	}
+
+	BTREE_PAGE_LOCATOR_NEXT(parentPage, &loc);
+	Assert(BTREE_PAGE_LOCATOR_IS_VALID(parentPage, &loc));
+	BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, key, parentPage, &loc);
+
+	if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+	{
+		unlock_page(parentBlkno);
+		return false;
+	}
+
+	rightBlkno = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+	rightPage = O_GET_IN_MEMORY_PAGE(rightBlkno);
+
+	if (!try_lock_page(rightBlkno))
+	{
+		unlock_page(parentBlkno);
+		return false;
+	}
+
+	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rightPage)))
+	{
+		unlock_page(parentBlkno);
+		unlock_page(rightBlkno);
+		return false;
+	}
+
+	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
+							  blkno, loc, rightBlkno))
+	{
+		release_undo_size(UndoReserveTxn);
+		free_retained_undo_location();
+
+		reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+		return true;
+	}
+	else
+	{
+		unlock_page(parentBlkno);
+		unlock_page(rightBlkno);
+		return false;
+	}
+}
+
 /*
  * Locks a given page for safely processing by the checkpointer.
  */
@@ -2354,6 +2437,8 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 								   OInMemoryBlkno *blkno, uint32 page_chage_count, int level)
 {
 	OInMemoryBlkno old_blkno;
+
+	reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
 	while (true)
 	{
@@ -2365,17 +2450,26 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 		if (old_blkno == *blkno && page_chage_count != InvalidOPageChangeCount &&
 			O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(*blkno) != page_chage_count)
-		{
-			return;
-		}
+			break;
 
 		if (o_btree_split_is_incomplete(*blkno, &relocked))
+		{
 			o_btree_split_fix_and_unlock(descr, *blkno);
+			reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+		}
+		else if (is_page_too_sparse(descr, O_GET_IN_MEMORY_PAGE(*blkno)))
+		{
+			if (!checkpoint_try_merge_page(descr, state, *blkno, level))
+				break;
+		}
 		else if (relocked)
 			unlock_page(*blkno);
 		else
-			return;
+			break;
 	}
+
+	release_undo_size(UndoReserveTxn);
+	free_retained_undo_location();
 }
 
 static void

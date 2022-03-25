@@ -47,12 +47,12 @@ static void merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
  *
  * On success, all pages are unlocked.  On failure, all locks are held.
  */
-static bool
-try_merge_pages(BTreeDescr *desc,
-				OInMemoryBlkno parent_blkno, OFixedKey *parent_hikey,
-				bool *merge_parent,
-				OInMemoryBlkno left_blkno,
-				BTreePageItemLocator right_loc, OInMemoryBlkno right_blkno)
+bool
+btree_try_merge_pages(BTreeDescr *desc,
+					  OInMemoryBlkno parent_blkno, OFixedKey *parent_hikey,
+					  bool *merge_parent,
+					  OInMemoryBlkno left_blkno,
+					  BTreePageItemLocator right_loc, OInMemoryBlkno right_blkno)
 {
 	Page		parent = O_GET_IN_MEMORY_PAGE(parent_blkno),
 				left = O_GET_IN_MEMORY_PAGE(left_blkno),
@@ -101,11 +101,6 @@ try_merge_pages(BTreeDescr *desc,
 
 	/* deletes downlink to right page from the parent node */
 	page_block_reads(parent_blkno);
-
-	/*
-	 * No need to call backend_set_autonomous_level() here.
-	 */
-	Assert(!page_is_under_checkpoint(desc, parent_blkno));
 
 	page_locator_delete_item(parent, &right_loc);
 	MARK_DIRTY(desc->ppool, parent_blkno);
@@ -391,9 +386,9 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				if (!O_PAGE_IS(right, PRE_CLEANUP) &&
 					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)))
 				{
-					merged = try_merge_pages(desc, parent_blkno, &key,
-											 &merge_parent, target_blkno,
-											 right_loc, right_blkno);
+					merged = btree_try_merge_pages(desc, parent_blkno, &key,
+												   &merge_parent, target_blkno,
+												   right_loc, right_blkno);
 					if (!merged)
 						unlock_page(right_blkno);
 				}
@@ -435,10 +430,10 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				if (!O_PAGE_IS(left, PRE_CLEANUP) &&
 					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(left)))
 				{
-					merged = try_merge_pages(desc, parent_blkno,
-											 &key, &merge_parent,
-											 left_blkno,
-											 target_loc, target_blkno);
+					merged = btree_try_merge_pages(desc, parent_blkno,
+												   &key, &merge_parent,
+												   left_blkno,
+												   target_loc, target_blkno);
 					if (!merged)
 						unlock_page(left_blkno);
 				}
