@@ -615,9 +615,10 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	return true;
 }
 
-BTreeSeqScan *
-make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
-					   BTreeSeqScanCallbacks *cb, void *arg)
+static BTreeSeqScan *
+make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
+							 BTreeSeqScanCallbacks *cb, void *arg,
+							 BlockSampler sampler)
 {
 	BTreeSeqScan *scan = (BTreeSeqScan *) palloc(sizeof(BTreeSeqScan));
 	uint32		checkpointNumberBefore,
@@ -637,7 +638,23 @@ make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
 	scan->cb = cb;
 	scan->arg = arg;
 	scan->firstNextKey = true;
-	scan->needSampling = false;
+
+	scan->samplingNumber = 0;
+	scan->sampler = sampler;
+	if (sampler)
+	{
+		scan->needSampling = true;
+		if (BlockSampler_HasMore(scan->sampler))
+			scan->samplingNext = BlockSampler_Next(scan->sampler);
+		else
+			scan->samplingNext = InvalidBlockNumber;
+	}
+	else
+	{
+		scan->needSampling = false;
+		scan->samplingNext = InvalidBlockNumber;
+	}
+
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 
 	START_CRIT_SECTION();
@@ -687,28 +704,22 @@ make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
 BTreeSeqScan *
 make_btree_seq_scan(BTreeDescr *desc, CommitSeqNo csn)
 {
-	return make_btree_seq_scan_cb(desc, csn, NULL, NULL);
+	return make_btree_seq_scan_internal(desc, csn, NULL, NULL, NULL);
+}
+
+BTreeSeqScan *
+make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
+					   BTreeSeqScanCallbacks *cb, void *arg)
+{
+	return make_btree_seq_scan_internal(desc, csn, cb, arg, NULL);
 }
 
 BTreeSeqScan *
 make_btree_sampling_scan(BTreeDescr *desc, BlockSampler sampler)
 {
-	BTreeSeqScan *scan;
-
-	scan = make_btree_seq_scan_cb(desc, COMMITSEQNO_INPROGRESS, NULL, NULL);
-
-	scan->needSampling = true;
-	scan->sampler = sampler;
-	scan->samplingNumber = 0;
-
-	if (BlockSampler_HasMore(scan->sampler))
-		scan->samplingNext = BlockSampler_Next(scan->sampler);
-	else
-		scan->samplingNext = InvalidBlockNumber;
-
-	return scan;
+	return make_btree_seq_scan_internal(desc, COMMITSEQNO_INPROGRESS,
+										NULL, NULL, sampler);
 }
-
 
 static OTuple
 btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
