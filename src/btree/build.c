@@ -264,6 +264,8 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[level].img, ORIOLEDB_BLCKSZ);
 
 		downlink = perform_page_io_build(desc, stack[level].img, &extent, metaPageBlkno);
+		if (level == 0)
+			pg_atomic_add_fetch_u32(&metaPageBlkno->leafPagesNum, 1);
 
 		copy_fixed_key(desc, &key, stack[level].key.tuple);
 		keysize = stack[level].keysize;
@@ -384,6 +386,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 
 		split_page_by_chunks(desc, stack[i].img);
 		downlink = perform_page_io_build(desc, stack[i].img, &extent, &metaPageBlkno);
+		if (i == 0)
+			pg_atomic_add_fetch_u32(&metaPageBlkno.leafPagesNum, 1);
 
 		put_downlink_to_stack(desc, stack, i + 1, downlink,
 							  stack[i].key.tuple, stack[i].keysize,
@@ -414,6 +418,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 
 	split_page_by_chunks(desc, root_page);
 	downlink = perform_page_io_build(desc, root_page, &extent, &metaPageBlkno);
+	if (root_level == 0)
+		pg_atomic_add_fetch_u32(&metaPageBlkno.leafPagesNum, 1);
 
 	btree_close_smgr(desc);
 	pfree(stack);

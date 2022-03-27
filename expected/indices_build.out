@@ -22837,9 +22837,9 @@ SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_indices8  (cost=0.15..47.30 rows=180 width=36)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_indices8  (cost=0.13..8.17 rows=2 width=36)
    Forward index scan of: o_indices8_idx1
    Conds: (val > 'a'::text)
 (3 rows)
@@ -23001,9 +23001,9 @@ ALTER TABLE o_indices8
   ADD CONSTRAINT o_indices8_pkey
     PRIMARY KEY (key);
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_indices8  (cost=0.15..47.30 rows=180 width=36)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_indices8  (cost=0.13..8.17 rows=2 width=36)
    Forward index only scan of: o_indices8_idx1
    Conds: (val > 'a'::text)
 (3 rows)
@@ -23117,9 +23117,9 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_indices8  (cost=0.15..47.30 rows=180 width=36)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_indices8  (cost=0.13..8.17 rows=2 width=36)
    Forward index scan of: o_indices8_idx1
    Conds: (val > 'a'::text)
 (3 rows)
