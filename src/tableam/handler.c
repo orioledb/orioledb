@@ -1419,7 +1419,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 
 				rowstoskip -= 1;
 			}
-
+			samplerows += 1;
 		}
 		else
 		{
