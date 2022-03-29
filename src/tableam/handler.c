@@ -1294,7 +1294,7 @@ orioledb_rewrite_table(Relation old_rel)
 	OTable	   *old_o_table,
 			   *o_table;
 	OTableDescr *old_descr,
-			   *descr;
+			   tmp_descr;
 
 	oids.datoid = MyDatabaseId;
 	oids.reloid = old_rel->rd_id;
@@ -1322,10 +1322,12 @@ orioledb_rewrite_table(Relation old_rel)
 
 	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 	old_descr = o_fetch_table_descr(old_o_table->oids);
-	recreate_o_table(old_o_table, o_table);
-	descr = o_fetch_table_descr(o_table->oids);
 
-	rebuild_indices(old_o_table, old_descr, o_table, descr);
+	o_fill_tmp_table_descr(&tmp_descr, o_table);
+	rebuild_indices(old_o_table, old_descr, o_table, &tmp_descr);
+	o_free_tmp_table_descr(&tmp_descr);
+
+	recreate_o_table(old_o_table, o_table);
 
 	o_table_free(old_o_table);
 	o_table_free(o_table);

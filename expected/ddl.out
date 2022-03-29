@@ -538,34 +538,10 @@ SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-                           orioledb_tbl_structure                            
------------------------------------------------------------------------------
- Index o_test_add_column_pkey contents                                      +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                        +
- state = free, datoid equal, relnode equal, ix_type = primary, clean        +
-     Leftmost, Rightmost                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('2')  +
-     Item 0: offset = 264, tuple = ('1', '16999', null, '5', '8430')        +
-   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('3') +
-     Item 1: offset = 320, tuple = ('2', '13324', null, '5', '25')          +
-   Chunk 2: offset = 2, location = 368, hikey location = 112, hikey = ('4') +
-     Item 2: offset = 376, tuple = ('3', '12545', null, '5', '891')         +
-   Chunk 3: offset = 3, location = 424, hikey location = 120, hikey = ('5') +
-     Item 3: offset = 432, tuple = ('4', '5350', null, '5', '1106')         +
-   Chunk 4: offset = 4, location = 480, hikey location = 128, hikey = ('6') +
-     Item 4: offset = 488, tuple = ('5', '9417', null, '5', '3402')         +
-   Chunk 5: offset = 5, location = 536, hikey location = 136, hikey = ('7') +
-     Item 5: offset = 544, tuple = ('6', '10462', null, '5', '11157')       +
-   Chunk 6: offset = 6, location = 592, hikey location = 144, hikey = ('8') +
-     Item 6: offset = 600, tuple = ('7', '11362', null, '5', '13429')       +
-   Chunk 7: offset = 7, location = 648, hikey location = 152, hikey = ('9') +
-     Item 7: offset = 656, tuple = ('8', '19414', null, '5', '3584')        +
-   Chunk 8: offset = 8, location = 704, hikey location = 160, hikey = ('10')+
-     Item 8: offset = 712, tuple = ('9', '17458', null, '5', '9981')        +
-   Chunk 9: offset = 9, location = 760, hikey location = 168                +
-     Item 9: offset = 768, tuple = ('10', '4956', null, '5', '7942')        +
-                                                                            +
- Index toast: not loaded                                                    +
+          orioledb_tbl_structure          
+------------------------------------------
+ Index o_test_add_column_pkey: not loaded+
+ Index toast: not loaded                 +
  
 (1 row)
 

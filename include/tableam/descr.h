@@ -216,6 +216,8 @@ extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
 										bool lock, bool *nested);
 
 extern void recreate_table_descr_by_oids(ORelOids oids);
+extern void o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table);
+extern void o_free_tmp_table_descr(OTableDescr *descr);
 
 static inline bool
 is_explain_analyze(PlanState *ps)

@@ -22,6 +22,7 @@
 #include "catalog/o_opclass.h"
 #include "catalog/o_type_cache.h"
 #include "recovery/recovery.h"
+#include "recovery/wal.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
 #include "transam/oxid.h"
@@ -119,7 +120,7 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 
 	o_tables_drop_by_oids(old_o_table->oids, oxid, csn);
 	o_tables_add(o_table, oxid, csn);
-	o_tables_update_on_rebuild(o_table, oxid, csn, old_o_table->oids.relnode);
+	add_invalidate_wal_record(o_table->oids, old_o_table->oids.relnode);
 
 	add_undo_truncate_relnode(oldOids, oldTreeOids, oldTreeOidsNum,
 							  newOids, newTreeOids, newTreeOidsNum);
@@ -281,7 +282,6 @@ o_index_create(Relation rel,
 	ObjectAddress address;
 	bool		is_build;
 	ORelOids	primary_oids;
-	OTableDescr *descr;
 	OTableDescr *old_descr = NULL;
 	List	   *index_expr_fields = NIL;
 	List	   *index_predicate = NIL;
@@ -512,6 +512,27 @@ o_index_create(Relation rel,
 	if (old_o_table)
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 
+	/* create orioledb index from exist data */
+	if (is_build)
+	{
+		OTableDescr tmpDescr;
+
+		if (ix_type == oIndexPrimary)
+		{
+			Assert(old_o_table);
+			o_fill_tmp_table_descr(&tmpDescr, o_table);
+			rebuild_indices(old_o_table, old_descr,
+							o_table, &tmpDescr);
+			o_free_tmp_table_descr(&tmpDescr);
+		}
+		else
+		{
+			o_fill_tmp_table_descr(&tmpDescr, o_table);
+			build_secondary_index(o_table, &tmpDescr, ix_num);
+			o_free_tmp_table_descr(&tmpDescr);
+		}
+	}
+
 	if (ix_type == oIndexPrimary)
 	{
 		CommitSeqNo csn;
@@ -532,23 +553,6 @@ o_index_create(Relation rel,
 								&o_table->indices[ix_num].oids,
 								1);
 		recreate_table_descr_by_oids(oids);
-	}
-
-	/* create orioledb index from exist data */
-	if (is_build)
-	{
-		if (ix_type == oIndexPrimary)
-		{
-			Assert(old_o_table);
-			descr = o_fetch_table_descr(o_table->oids);
-			rebuild_indices(old_o_table, old_descr,
-							o_table, descr);
-		}
-		else
-		{
-			descr = o_fetch_table_descr(o_table->oids);
-			build_secondary_index(o_table, descr, ix_num);
-		}
 	}
 
 	o_table_free(o_table);
@@ -954,7 +958,7 @@ static void
 drop_primary_index(Relation rel, OTable *o_table)
 {
 	OTable	   *old_o_table;
-	OTableDescr *descr;
+	OTableDescr tmp_descr;
 	OTableDescr *old_descr;
 
 	Assert(o_table->indices[PrimaryIndexNumber].type == oIndexPrimary);
@@ -971,10 +975,12 @@ drop_primary_index(Relation rel, OTable *o_table)
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 
 	old_descr = o_fetch_table_descr(old_o_table->oids);
-	recreate_o_table(old_o_table, o_table);
-	descr = o_fetch_table_descr(o_table->oids);
 
-	rebuild_indices(old_o_table, old_descr, o_table, descr);
+	o_fill_tmp_table_descr(&tmp_descr, o_table);
+	rebuild_indices(old_o_table, old_descr, o_table, &tmp_descr);
+	o_free_tmp_table_descr(&tmp_descr);
+
+	recreate_o_table(old_o_table, o_table);
 
 	LWLockRelease(&checkpoint_state->oTablesAddLock);
 

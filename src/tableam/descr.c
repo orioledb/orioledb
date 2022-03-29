@@ -415,6 +415,38 @@ table_descr_free(OTableDescr *descr)
 	FreeExecutorState(descr->estate);
 }
 
+
+void
+o_free_tmp_table_descr(OTableDescr *descr)
+{
+	int			i;
+
+	if (descr->toast)
+	{
+		index_descr_free(descr->toast);
+		pfree(descr->toast);
+	}
+
+	if (descr->indices)
+	{
+		for (i = 0; i < descr->nIndices; i++)
+		{
+			index_descr_free(descr->indices[i]);
+			pfree(descr->indices[i]);
+		}
+		pfree(descr->indices);
+	}
+
+	if (descr->oldTuple)
+		ExecDropSingleTupleTableSlot(descr->oldTuple);
+	if (descr->newTuple)
+		ExecDropSingleTupleTableSlot(descr->newTuple);
+	if (descr->tupdesc)
+		FreeTupleDesc(descr->tupdesc);
+	FreeExecutorState(descr->estate);
+}
+
+
 static void
 table_descr_delete_from_hash(OTableDescr *descr)
 {
@@ -427,17 +459,15 @@ table_descr_delete_from_hash(OTableDescr *descr)
 }
 
 static void
-fill_table_descr(OTableDescr *descr, OTable *o_table)
+fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 {
 	MemoryContext old_context;
 
 	memset(descr, 0, sizeof(OTableDescr));
-
 	old_context = MemoryContextSwitchTo(descrCxt);
 	descr->refcnt = 0;
 	descr->oids = o_table->oids;
 	descr->tupdesc = o_table_tupdesc(o_table);
-	o_table_descr_fill_indices(descr, o_table);
 	descr->oldTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
 	descr->newTuple = MakeSingleTupleTableSlot(descr->tupdesc,
@@ -458,8 +488,62 @@ fill_table_descr(OTableDescr *descr, OTable *o_table)
 	}
 	descr->estate = CreateExecutorState();
 	MemoryContextSwitchTo(old_context);
+}
+
+static void
+fill_table_descr(OTableDescr *descr, OTable *o_table)
+{
+	MemoryContext old_context;
+
+	fill_table_descr_common_fields(descr, o_table);
+
+	old_context = MemoryContextSwitchTo(descrCxt);
+	o_table_descr_fill_indices(descr, o_table);
+	MemoryContextSwitchTo(old_context);
 
 	o_table_free(o_table);
+}
+
+void
+o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
+{
+	MemoryContext old_context;
+	OIndexNumber cur_ix;
+	OIndex *index;
+	OIndexDescr *indexDescr;
+
+	fill_table_descr_common_fields(descr, o_table);
+
+	old_context = MemoryContextSwitchTo(descrCxt);
+
+	descr->nIndices = o_table->nindices;
+	if (!o_table->has_primary)
+		descr->nIndices++;
+
+	descr->indices = (OIndexDescr **) palloc0(sizeof(OIndexDescr *) * descr->nIndices);
+	for (cur_ix = 0; cur_ix < descr->nIndices; cur_ix++)
+	{
+		index = make_o_index(o_table, cur_ix);
+		indexDescr = palloc0(sizeof(OIndexDescr));
+		o_index_fill_descr(indexDescr, index);
+		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							  indexDescr->oids, index->indexType,
+							  index->createOxid, indexDescr);
+		free_o_index(index);
+		descr->indices[cur_ix] = indexDescr;
+	}
+
+	index = make_o_index(o_table, TOASTIndexNumber);
+	indexDescr = palloc0(sizeof(OIndexDescr));
+	o_index_fill_descr(indexDescr, index);
+	index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							indexDescr->oids, index->indexType,
+							index->createOxid, indexDescr);
+	free_o_index(index);
+	descr->toast = indexDescr;
+
+	o_find_toastable_attrs(descr);
+	MemoryContextSwitchTo(old_context);
 }
 
 static OTableDescr *

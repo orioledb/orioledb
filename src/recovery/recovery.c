@@ -1833,7 +1833,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			{
 				OTable	   *new_o_table = NULL;
 				OTable	   *old_o_table = NULL;
-				OTableDescr *descr;
 				OTableDescr *old_descr;
 				bool		drop;
 				OIndexNumber ix_num;
@@ -1869,27 +1868,35 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 				if (!drop)
 				{
-					descr = o_fetch_table_descr(new_o_table->oids);
+					OTableDescr tmp_descr;
+
+					o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 					if (new_o_table->indices[ix_num].type == oIndexPrimary)
 					{
 						if (tbl_data_exists(&old_o_table->oids))
 						{
 							old_descr = o_fetch_table_descr(old_o_table->oids);
 							rebuild_indices(old_o_table, old_descr,
-											new_o_table, descr);
+											new_o_table, &tmp_descr);
 						}
 					}
 					else
-						build_secondary_index(new_o_table, descr, ix_num);
+					{
+						build_secondary_index(new_o_table, &tmp_descr, ix_num);
+					}
+					o_free_tmp_table_descr(&tmp_descr);
 				}
 				else
 				{
 					if (old_o_table->indices[ix_num].type == oIndexPrimary)
 					{
-						descr = o_fetch_table_descr(new_o_table->oids);
+						OTableDescr tmp_descr;
+
+						o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 						old_descr = o_fetch_table_descr(old_o_table->oids);
 						rebuild_indices(old_o_table, old_descr,
-										new_o_table, descr);
+										new_o_table, &tmp_descr);
+						o_free_tmp_table_descr(&tmp_descr);
 					}
 				}
 
