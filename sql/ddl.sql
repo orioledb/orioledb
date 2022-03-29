@@ -206,4 +206,28 @@ SELECT * FROM o_test_add_column;
 -- Test that default fields not recalculated
 SELECT * FROM o_test_add_column;
 
+CREATE TABLE o_test_multiple_analyzes (
+    aid integer NOT NULL PRIMARY KEY
+) USING orioledb;
+
+
+-- Wrapper function, which converts result of SQL query to the text
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+	BEGIN
+		RETURN QUERY EXECUTE sql;
+	END $$
+LANGUAGE plpgsql;
+
+INSERT INTO o_test_multiple_analyzes
+	SELECT aid FROM generate_series(1, 10) aid;
+BEGIN;
+select count(1) from o_test_multiple_analyzes;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('explain (analyze, buffers) 
+	select * from o_test_multiple_analyzes ORDER BY aid DESC LIMIT 10;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('explain (analyze, buffers)
+	select count(1) from o_test_multiple_analyzes;') as t;
+ROLLBACK;
+
 DROP EXTENSION orioledb CASCADE;

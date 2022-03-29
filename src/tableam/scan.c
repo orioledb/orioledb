@@ -729,6 +729,7 @@ o_end_custom_scan(CustomScanState *node)
 		if (ocstate->useEaCounters)
 			pfree(bitmap_state->eaCounters);
 	}
+	ea_counters = NULL;
 }
 
 typedef struct OExplainContext

@@ -631,7 +631,55 @@ SELECT * FROM o_test_add_column;
  15 | 15643 |   | 5 | 17786
 (15 rows)
 
+CREATE TABLE o_test_multiple_analyzes (
+    aid integer NOT NULL PRIMARY KEY
+) USING orioledb;
+-- Wrapper function, which converts result of SQL query to the text
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+	BEGIN
+		RETURN QUERY EXECUTE sql;
+	END $$
+LANGUAGE plpgsql;
+INSERT INTO o_test_multiple_analyzes
+	SELECT aid FROM generate_series(1, 10) aid;
+BEGIN;
+select count(1) from o_test_multiple_analyzes;
+ count 
+-------
+    10
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('explain (analyze, buffers) 
+	select * from o_test_multiple_analyzes ORDER BY aid DESC LIMIT 10;') as t;
+                                                 regexp_replace                                                 
+----------------------------------------------------------------------------------------------------------------
+ Limit  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Custom Scan (o_scan) on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Backward index only scan of: o_test_multiple_analyzes_pkey
+         Primary pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('explain (analyze, buffers)
+	select count(1) from o_test_multiple_analyzes;') as t;
+                                           regexp_replace                                           
+----------------------------------------------------------------------------------------------------
+ Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   ->  Seq Scan on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(6 rows)
+
+ROLLBACK;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
+drop cascades to table o_test_multiple_analyzes
