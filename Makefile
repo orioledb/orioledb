@@ -110,6 +110,7 @@ TESTGRESCHECKS_PART_1 = t/checkpointer_test.py \
 						t/incomplete_split_test.py \
 						t/merge_test.py \
 						t/o_tables_test.py \
+						t/o_tables_2_test.py \
 						t/recovery_test.py \
 						t/recovery_worker_test.py \
 						t/replication_test.py \
