@@ -865,7 +865,7 @@ orioledb_relation_size(Relation rel, ForkNumber forkNumber)
 	if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 	{
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-		return TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
+		return (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
 			ORIOLEDB_BLCKSZ;
 	}
 	else
