@@ -276,7 +276,6 @@ TupleTableSlot *
 o_exec_fetch(OScanState *ostate, ScanState *ss, CommitSeqNo csn)
 {
 	OTableDescr *descr = relation_get_descr(ss->ss_currentRelation);
-	Instrumentation *instr = ss->ps.instrument;
 	TupleTableSlot *slot;
 	OTuple		tuple;
 	bool		scan_primary = ostate->ixNum == PrimaryIndexNumber ||
@@ -287,10 +286,6 @@ o_exec_fetch(OScanState *ostate, ScanState *ss, CommitSeqNo csn)
 	{
 		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 		CommitSeqNo tupleCsn;
-
-		/* Increment the tuple count for EXPLAIN ANALYZE if necessary. */
-		if (instr)
-			instr->tuplecount++;
 
 		if (!ostate->curKeyRangeIsLoaded)
 			ostate->curKeyRange.empty = true;
