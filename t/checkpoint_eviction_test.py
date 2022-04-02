@@ -8,6 +8,69 @@ from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
 
 class CheckpointEvictionTest(BaseTest):
+
+	def test_checkpoint_compressed_indices(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+					"""
+					orioledb.main_buffers = 1MB
+					orioledb.free_tree_buffers = 2MB
+					orioledb.debug_disable_bgwriter = true
+					""")
+		node.start()
+		node.safe_psql('postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE IF NOT EXISTS o_test (
+			key SERIAL NOT NULL,
+			val int NOT NULL,
+			PRIMARY KEY (key)
+			) USING orioledb
+			WITH (compress = 5, toast_compress = 10, primary_compress = -1);
+			CREATE UNIQUE INDEX o_test_ix2 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix3 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix4 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix5 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix6 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix7 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix8 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix9 ON o_test (key);
+		""")
+		n = 50000
+		m = 50
+		con1 = node.connect()
+		for i in range(1, m):
+			con1.execute("""
+			INSERT INTO o_test (val)
+			(SELECT val FROM generate_series(%s, %s, 1) val);
+			""" % (str(1), str(n)))
+			con1.commit()
+		node.safe_psql("CHECKPOINT;")
+
+		node.safe_psql("""
+			DELETE FROM o_test WHERE key % 600 = 0;
+		""")
+		node.safe_psql("CHECKPOINT;")
+
+		node.safe_psql("""
+			DELETE FROM o_test WHERE key % 300 = 0;
+		""")
+		node.safe_psql("CHECKPOINT;")
+
+		node.safe_psql("""
+			DELETE FROM o_test WHERE key % 100 = 0;
+		""")
+		node.safe_psql("CHECKPOINT;")
+
+		node.safe_psql("""
+			DELETE FROM o_test WHERE key % 50 = 0;
+		""")
+		node.safe_psql("CHECKPOINT;")
+
+		node.safe_psql("""
+			DELETE FROM o_test WHERE key % 10 = 0;
+		""")
+		node.safe_psql("CHECKPOINT;")
+
 	def concurrent_eviction_base(self, compressed, bp_value):
 		node = self.node
 		node.append_conf('postgresql.conf',

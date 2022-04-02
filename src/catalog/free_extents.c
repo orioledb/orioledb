@@ -37,6 +37,7 @@
 #include "utils/page_pool.h"
 
 #include "access/transam.h"
+#include "miscadmin.h"
 #include "utils/wait_event.h"
 
 #define EXTENTS_IX_EQ(ex1, ex2) ((ex1).ixType == (ex2).ixType && \
@@ -186,8 +187,14 @@ get_extent(BTreeDescr *desc, uint16 len)
 
 	/* delete the extent from the (len, off) B-tree in-place */
 	page_block_reads(context.items[context.index].blkno);
+
+	START_CRIT_SECTION();
+
 	header->deleted = true;
 	header->xactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, RowLockUpdate, false);
+	PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize + sizeof(FreeTreeTuple));
+
+	END_CRIT_SECTION();
 
 	deleted_tup = *cur_tup;
 
