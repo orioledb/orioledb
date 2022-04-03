@@ -11,6 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        pg_version: [13, 14, 15]
         compiler: [clang, gcc]
         check_type: [normal, debug, alignment, valgrind_1, valgrind_2]
     env:
@@ -23,7 +24,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: orioledb/postgres
-          ref: patches14
+          ref: patches${{ matrix.pg_version }}
           path: postgresql
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v2
@@ -48,6 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        pg_version: [13, 14, 15]
         compiler: [clang, gcc]
     env:
       LLVM_VER: 12
@@ -59,7 +61,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: orioledb/postgres
-          ref: patches14
+          ref: patches${{ matrix.pg_version }}
           path: postgresql
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v2

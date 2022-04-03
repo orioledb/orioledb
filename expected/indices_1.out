@@ -2223,16 +2223,14 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test66 USING(idi, idv);
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Nested Loop
-   ->  Seq Scan on o_test66
-   ->  Memoize
-         Cache Key: o_test66.idi, o_test66.idv
-         Cache Mode: logical
-         ->  Index Only Scan using test66_pkey on test66
-               Index Cond: ((idi = o_test66.idi) AND (idv = (o_test66.idv)::text))
-(7 rows)
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((test66.idi = o_test66.idi) AND ((test66.idv)::text = (o_test66.idv)::text))
+   ->  Seq Scan on test66
+   ->  Hash
+         ->  Seq Scan on o_test66
+(5 rows)
 
 SELECT * FROM test66 JOIN o_test66 USING(idi, idv);
  idi | idv | idp 
@@ -3090,16 +3088,14 @@ SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
 
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test67 USING(idi, idv);
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Nested Loop
-   ->  Seq Scan on o_test67
-   ->  Memoize
-         Cache Key: o_test67.idi, o_test67.idv
-         Cache Mode: logical
-         ->  Index Only Scan using test66_pkey on test66
-               Index Cond: ((idi = o_test67.idi) AND (idv = (o_test67.idv)::text))
-(7 rows)
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((test66.idi = o_test67.idi) AND ((test66.idv)::text = (o_test67.idv)::text))
+   ->  Seq Scan on test66
+   ->  Hash
+         ->  Seq Scan on o_test67
+(5 rows)
 
 SELECT * FROM test66 JOIN o_test67 USING(idi, idv);
  idi | idv | idp 
@@ -3957,16 +3953,14 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Nested Loop
-   ->  Seq Scan on o_test68
-   ->  Memoize
-         Cache Key: o_test68.idi, o_test68.idv
-         Cache Mode: logical
-         ->  Index Only Scan using test66_pkey on test66
-               Index Cond: ((idi = o_test68.idi) AND (idv = (o_test68.idv)::text))
-(7 rows)
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((test66.idi = o_test68.idi) AND ((test66.idv)::text = (o_test68.idv)::text))
+   ->  Seq Scan on test66
+   ->  Hash
+         ->  Seq Scan on o_test68
+(5 rows)
 
 SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
  idi | idv | idp 
@@ -4821,16 +4815,14 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
 
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test69 USING(idi, idv);
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Nested Loop
-   ->  Seq Scan on o_test69
-   ->  Memoize
-         Cache Key: o_test69.idi, o_test69.idv
-         Cache Mode: logical
-         ->  Index Only Scan using test66_pkey on test66
-               Index Cond: ((idi = o_test69.idi) AND (idv = (o_test69.idv)::text))
-(7 rows)
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((test66.idi = o_test69.idi) AND ((test66.idv)::text = (o_test69.idv)::text))
+   ->  Seq Scan on test66
+   ->  Hash
+         ->  Seq Scan on o_test69
+(5 rows)
 
 SELECT * FROM test66 JOIN o_test69 USING(idi, idv);
  idi | idv | idp 

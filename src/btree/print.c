@@ -118,7 +118,7 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 	ctl.keysize = sizeof(BackendIdHashKey);
 	ctl.entrysize = sizeof(BackendIdHashEntry);
 	ctl.hcxt = CurrentMemoryContext;
-	printData.backendIdHash = hash_create("backend id hash", MaxBackends, &ctl,
+	printData.backendIdHash = hash_create("backend id hash", GetMaxBackends(), &ctl,
 										  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
 	ctl.keysize = sizeof(PageHashKey);

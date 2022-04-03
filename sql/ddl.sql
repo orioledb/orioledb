@@ -174,10 +174,8 @@ CREATE TABLE o_test_add_column
 SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
 
-SET SEED = 0.1;
-
 INSERT INTO o_test_add_column (i)
-	SELECT random() * 20000 FROM generate_series(1,10) v;
+	SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
 
 -- test new null column
 ALTER TABLE o_test_add_column ADD COLUMN y int4;
@@ -191,15 +189,17 @@ ALTER TABLE o_test_add_column ADD COLUMN z int4 default 5;
 SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
 
+CREATE SEQUENCE o_test_j_seq;
+
 -- test new column with non-volatile default
 ALTER TABLE o_test_add_column
-	ADD COLUMN j int4 not null default random() * 20000;
+	ADD COLUMN j int4 not null default pseudo_random(2, nextval('o_test_j_seq')) * 20000;
 \d o_test_add_column
 SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
 
 INSERT INTO o_test_add_column (i)
-	SELECT random() * 20000 FROM generate_series(1,5) v;
+	SELECT pseudo_random(3, v) * 20000 FROM generate_series(1,5) v;
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column;
 SELECT * FROM o_test_add_column;

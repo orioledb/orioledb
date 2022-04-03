@@ -333,7 +333,12 @@ oxid_notify(OXid oxid)
 	/* ensure that it is waiting for us */
 	SET_LOCKTAG_VIRTUALTRANSACTION(tag, vxid);
 
-	if (proc->waitStatus == PROC_WAIT_STATUS_WAITING &&
+	if (
+#if PG_VERSION_NUM >= 140000
+		proc->waitStatus == PROC_WAIT_STATUS_WAITING &&
+#else
+		proc->waitStatus == STATUS_WAITING &&
+#endif
 		proc->waitLock->tag.locktag_field1 == tag.locktag_field1 &&
 		proc->waitLock->tag.locktag_field2 == tag.locktag_field2 &&
 		proc->waitLock->tag.locktag_field3 == tag.locktag_field3 &&

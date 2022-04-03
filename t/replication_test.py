@@ -402,8 +402,10 @@ class ReplicationTest(BaseTest):
 
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
-		oid_list = [re.match(r'(\d{2,}_\d{2,}).*', x).group(1) for x
+		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x
 					in orioledb_files]
+		if len(list(set(oid_list))) != 1:
+			print(oid_list)
 		return len(list(set(oid_list))) == 1
 
 	def get_tbl_count(self, node):
@@ -414,7 +416,8 @@ class ReplicationTest(BaseTest):
 		orioledb_dir = node.data_dir + "/orioledb_data"
 		all_files = []
 		for f in os.listdir(orioledb_dir):
-			if re.match("[0-9]*_[0-9]*.*", f) and not re.match("[0-9]_[0-9].*", f):
+			m = re.match(r'(\d)+_(\d)+.*', f)
+			if m and int(m.group(1)) > 1:
 				# do not check o_tables BTree files
 				all_files.append(f)
 		return all_files

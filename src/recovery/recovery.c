@@ -31,6 +31,9 @@
 
 #include "access/hash.h"
 #include "access/xlog_internal.h"
+#if PG_VERSION_NUM >= 150000
+#include "access/xlogrecovery.h"
+#endif
 #include "lib/ilist.h"
 #include "lib/pairingheap.h"
 #include "miscadmin.h"
@@ -524,6 +527,11 @@ o_recovery_start_hook(void)
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
+		}
+		for (i = 0; i < num_workers; i++)
+		{
+			if (shm_mq_wait_for_attach(workers_pool[i].queue) != SHM_MQ_SUCCESS)
+				elog(ERROR, "unable to attach recovery workers to shm queue");
 		}
 	}
 
@@ -2276,6 +2284,7 @@ static void
 workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 {
 	int			i;
+	int			j = 0;
 
 	if (send_synchronize)
 	{
@@ -2293,8 +2302,25 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 
 	for (i = 0; i < recovery_pool_size_guc && !unexpected_worker_detach; i++)
 	{
-		while (pg_atomic_read_u64(&worker_ptrs[i].commitPtr) < ptr)
+		while (pg_atomic_read_u64(&worker_ptrs[i].commitPtr) < ptr &&
+			workers_pool[i].queue)
+		{
+			BgwHandleStatus status;
+			pid_t	pid;
+
 			pg_usleep(10);
+
+			if (j % 100 == 0)
+			{
+				status = GetBackgroundWorkerPid(workers_pool[i].handle, &pid);
+				if (status != BGWH_STARTED && status != BGWH_NOT_YET_STARTED)
+				{
+					unexpected_worker_detach = true;
+					break;
+				}
+			}
+		}
+		j++;
 	}
 }
 
@@ -2326,7 +2352,11 @@ worker_queue_flush(int worker_id)
 	RecoveryWorkerState *state = &workers_pool[worker_id];
 	shm_mq_result result;
 
+#if PG_VERSION_NUM >= 150000
+	result = shm_mq_send(state->queue, state->queue_buf_len, state->queue_buf, false, true);
+#else
 	result = shm_mq_send(state->queue, state->queue_buf_len, state->queue_buf, false);
+#endif
 	state->queue_buf_len = 0;
 	Assert(result != SHM_MQ_WOULD_BLOCK);
 	if (result == SHM_MQ_DETACHED)

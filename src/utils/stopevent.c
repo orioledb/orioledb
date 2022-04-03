@@ -267,10 +267,17 @@ make_process_params(void)
 
 	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
 
+#if PG_VERSION_NUM >= 140000
 	if (MyBEEntry->st_backendType == B_BG_WORKER)
 		beType = GetBackgroundWorkerTypeByPid(MyBEEntry->st_procpid);
 	else
 		beType = GetBackendTypeDesc(MyBEEntry->st_backendType);
+#else
+	if (MyBackendType == B_BG_WORKER)
+		beType = GetBackgroundWorkerTypeByPid(MyProcPid);
+	else
+		beType = GetBackendTypeDesc(MyBackendType);
+#endif
 
 	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 	jsonb_push_int8_key(&state, "pid", MyProcPid);

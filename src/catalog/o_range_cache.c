@@ -22,6 +22,9 @@
 #include "recovery/recovery.h"
 
 #include "access/htup_details.h"
+#if PG_VERSION_NUM >= 150000
+#include "access/xlogrecovery.h"
+#endif
 #include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"

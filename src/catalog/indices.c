@@ -65,8 +65,9 @@ assign_new_oids(OTable *oTable, Relation rel)
 {
 	Oid			heap_relid,
 				toast_relid;
+#if PG_VERSION_NUM >= 140000
 	ReindexParams params;
-
+#endif
 	CheckTableForSerializableConflictIn(rel);
 
 	toast_relid = rel->rd_rel->reltoastrelid;
@@ -81,9 +82,13 @@ assign_new_oids(OTable *oTable, Relation rel)
 	}
 
 	heap_relid = RelationGetRelid(rel);
+#if PG_VERSION_NUM >= 140000
 	params.options = 0;
 	params.tablespaceOid = InvalidOid;
 	reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, &params);
+#else
+	reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, 0);
+#endif
 
 	PG_TRY();
 	{
@@ -851,8 +856,10 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 					for (attnum = 0; attnum < pkey_natts; attnum++)
 					{
 						FormData_pg_attribute attribute;
+#if PG_VERSION_NUM >= 140000
 						FormData_pg_attribute *aattr[] = {&attribute};
 						TupleDesc	tupdesc;
+#endif
 						OIndexField *idx_field = &idx_descr->fields[idx_descr->nPrimaryFields + attnum];
 						OTableField *table_field = &o_table->fields[idx_field->tableAttnum - 1];
 
@@ -867,7 +874,9 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 						attribute.attbyval = table_field->byval;
 						attribute.attalign = table_field->align;
 						attribute.attstorage = table_field->storage;
+#if PG_VERSION_NUM >= 140000
 						attribute.attcompression = '\0';
+#endif
 						attribute.attnotnull = table_field->notnull;
 						attribute.atthasdef = false;
 						attribute.atthasmissing = false;
@@ -877,9 +886,13 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 						attribute.attislocal = true;
 						attribute.attinhcount = 0;
 						attribute.attcollation = table_field->collation;
-						tupdesc = CreateTupleDesc(lengthof(aattr), (FormData_pg_attribute **) &aattr);
 
+#if PG_VERSION_NUM >= 140000
+						tupdesc = CreateTupleDesc(lengthof(aattr), (FormData_pg_attribute **) &aattr);
 						InsertPgAttributeTuples(pg_attribute, tupdesc, reloid, NULL, NULL);
+#else
+						InsertPgAttributeTuple(pg_attribute, &attribute, (Datum) 0, NULL);
+#endif
 					}
 
 					class_form->relnatts += pkey_natts;

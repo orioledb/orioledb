@@ -38,7 +38,11 @@
 
 #include "access/transam.h"
 #include "miscadmin.h"
+#if PG_VERSION_NUM >= 140000
 #include "utils/wait_event.h"
+#else
+#include "pgstat.h"
+#endif
 
 #define EXTENTS_IX_EQ(ex1, ex2) ((ex1).ixType == (ex2).ixType && \
 								 (ex1).datoid == (ex2).datoid && \

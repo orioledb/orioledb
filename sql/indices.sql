@@ -175,8 +175,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo = 301;
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo > 300 and foo < 400 and
 												 bar = 300;
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE bar = 200;
-EXPLAIN (COSTS off) UPDATE o_test58 SET foo = 100 WHERE foo > 102 AND
-														foo < 400;
+SELECT smart_explain(
+'EXPLAIN (COSTS off) UPDATE o_test58 SET foo = 100 WHERE foo > 102 AND
+														 foo < 400;');
 
 UPDATE o_test58 SET foo = 100 WHERE foo > 102;
 --SELECT orioledb_tbl_structure('o_test58'::regclass);
@@ -207,18 +208,21 @@ INSERT INTO o_test59 SELECT 100 + i, 200 + i, 300 + i, 400 + i, 500 + i FROM gen
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 
 -- update not index field
-EXPLAIN (COSTS off) UPDATE o_test59 SET foo = 0 WHERE sec1 > 105 AND
-													  sec1 < 200;
+SELECT smart_explain(
+'EXPLAIN (COSTS off) UPDATE o_test59 SET foo = 0 WHERE sec1 > 105 AND
+													   sec1 < 200;');
 UPDATE o_test59 SET foo = 0 WHERE sec1 > 105;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 
 -- update only sec1 index field
-EXPLAIN (COSTS off) UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;
+SELECT smart_explain(
+'EXPLAIN (COSTS off) UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;');
 UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 
 -- update primary index field
-EXPLAIN (COSTS off) UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;
+SELECT smart_explain(
+'EXPLAIN (COSTS off) UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;');
 UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 
@@ -1018,11 +1022,12 @@ SELECT orioledb_tbl_indices('o_test82'::regclass);
 SET enable_seqscan = off;
 SET enable_bitmapscan = off;
 
-EXPLAIN (COSTS off) WITH o_test82_all AS (
+SELECT smart_explain(
+'EXPLAIN (COSTS off) WITH o_test82_all AS (
     SELECT * FROM o_test82
 		WHERE val2 > 0 AND val > 0
 		ORDER BY val2
-) SELECT COUNT(*) FROM o_test82_all;
+) SELECT COUNT(*) FROM o_test82_all;');
 
 WITH o_test82_all AS (
     SELECT * FROM o_test82
@@ -1036,11 +1041,12 @@ ROLLBACK;
 
 SELECT orioledb_tbl_indices('o_test82'::regclass);
 
-EXPLAIN (COSTS off) WITH o_test82_all AS (
+SELECT smart_explain(
+'EXPLAIN (COSTS off) WITH o_test82_all AS (
     SELECT * FROM o_test82
 		WHERE val2 > 0 AND val > 0
 		ORDER BY val2
-) SELECT COUNT(*) FROM o_test82_all;
+) SELECT COUNT(*) FROM o_test82_all;');
 
 WITH o_test82_all AS (
     SELECT * FROM o_test82
@@ -1052,11 +1058,12 @@ ALTER INDEX o_test82_idx2 RENAME TO o_test82_idx2_renamed;
 
 SELECT orioledb_tbl_indices('o_test82'::regclass);
 
-EXPLAIN (COSTS off) WITH o_test82_all AS (
+SELECT smart_explain(
+'EXPLAIN (COSTS off) WITH o_test82_all AS (
     SELECT * FROM o_test82
 		WHERE val2 > 0 AND val > 0
 		ORDER BY val2
-) SELECT COUNT(*) FROM o_test82_all;
+) SELECT COUNT(*) FROM o_test82_all;');
 
 WITH o_test82_all AS (
     SELECT * FROM o_test82

@@ -146,7 +146,7 @@ isolationcheck: | install
 
 $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
 	$(with_temp_install) \
-	python3 -m unittest -v $@
+	python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 installcheck: regresscheck isolationcheck testgrescheck
 

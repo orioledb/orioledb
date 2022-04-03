@@ -64,7 +64,9 @@ static object_access_hook_type old_objectaccess_hook = NULL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
+#if PG_VERSION_NUM >= 140000
 									 bool readOnlyTree,
+#endif
 									 ProcessUtilityContext context,
 									 ParamListInfo params,
 									 QueryEnvironment *env,
@@ -495,10 +497,16 @@ is_alter_table_partition(PlannedStmt *pstmt)
 	return false;
 }
 
+#if PG_VERSION_NUM < 140000
+#define objtype relkind
+#endif
+
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
+#if PG_VERSION_NUM >= 140000
 						 bool readOnlyTree,
+#endif
 						 ProcessUtilityContext context,
 						 ParamListInfo params,
 						 QueryEnvironment *env,
@@ -609,7 +617,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					wrapper->stmt_len = pstmt->stmt_len;
 					ProcessUtility(wrapper,
 								   queryString,
+#if PG_VERSION_NUM >= 140000
 								   readOnlyTree,
+#endif
 								   PROCESS_UTILITY_SUBCOMMAND,
 								   params,
 								   NULL,
@@ -788,7 +798,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 				ProcessUtility(wrapper,
 							   queryString,
+#if PG_VERSION_NUM >= 140000
 							   readOnlyTree,
+#endif
 							   PROCESS_UTILITY_SUBCOMMAND,
 							   params,
 							   NULL,
@@ -942,11 +954,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (call_next)
 	{
 		if (next_ProcessUtility_hook)
-			(*next_ProcessUtility_hook) (pstmt, queryString, readOnlyTree,
+			(*next_ProcessUtility_hook) (pstmt, queryString,
+#if PG_VERSION_NUM >= 140000
+										 readOnlyTree,
+#endif
 										 context, params, env,
 										 dest, qc);
 		else
-			standard_ProcessUtility(pstmt, queryString, readOnlyTree,
+			standard_ProcessUtility(pstmt, queryString,
+#if PG_VERSION_NUM >= 140000
+									readOnlyTree,
+#endif
 									context, params, env,
 									dest, qc);
 	}

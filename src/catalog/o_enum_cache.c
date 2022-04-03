@@ -23,6 +23,9 @@
 #include "catalog/o_type_cache.h"
 #include "recovery/recovery.h"
 
+#if PG_VERSION_NUM >= 150000
+#include "access/xlogrecovery.h"
+#endif
 #include "catalog/pg_enum.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"

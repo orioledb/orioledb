@@ -1089,8 +1089,11 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		}
 
 		oldMctx = MemoryContextSwitchTo(slot->tts_mcxt);
-		tmp = toast_compress_datum(slot->tts_values[max_attn],
-								   TOAST_PGLZ_COMPRESSION);
+		tmp = toast_compress_datum(slot->tts_values[max_attn]
+#if PG_VERSION_NUM >= 140000
+								   , TOAST_PGLZ_COMPRESSION
+#endif
+								  );
 		MemoryContextSwitchTo(oldMctx);
 
 		if (DatumGetPointer(tmp) == NULL)

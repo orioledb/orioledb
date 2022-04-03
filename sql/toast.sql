@@ -319,7 +319,6 @@ CREATE TABLE o_test1 (
        val text NOT NULL
 )USING orioledb;
 
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (1, (SELECT generate_string(1, 2000)));
 INSERT INTO o_test1 VALUES (2, (SELECT generate_string(2, 10000)));
 INSERT INTO o_test1 VALUES (3, (SELECT generate_string(3, 15000)));
@@ -328,12 +327,10 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
 TRUNCATE o_test1;
 -- INSERT
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (1, generate_string(4, 10000));
 SELECT id, length(val) FROM o_test1;
 
 -- DELETE with TOAST values
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (2, generate_string(5, 10000));
 DELETE FROM o_test1 WHERE id = 2;
 INSERT INTO o_test1 VALUES (2, generate_string(6, 15000));
@@ -341,14 +338,12 @@ SELECT id, length(val) FROM o_test1;
 
 -- test UPDATE without change primary index values
 -- update not TOAST value with new TOAST
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (3, repeat('x', 10));
 SELECT id, length(val) FROM o_test1 WHERE id = 3;
 UPDATE o_test1 SET val = generate_string(7, 13000) WHERE id = 3;
 SELECT id, length(val) FROM o_test1 WHERE id = 3;
 
 -- update TOAST value with new non TOAST
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (4, generate_string(8, 3100));
 SELECT id, length(val) FROM o_test1 WHERE id = 4;
 UPDATE o_test1 SET val = repeat('y', 10) WHERE id = 4;
@@ -357,7 +352,6 @@ UPDATE o_test1 SET val = generate_string(9, 4000) WHERE id = 4;
 SELECT id, length(val) FROM o_test1 WHERE id = 4;
 
 -- update TOAST value to a new one
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (5, generate_string(10, 3000));
 SELECT id, length(val) FROM o_test1 WHERE id = 5;
 UPDATE o_test1 SET val = generate_string(11, 4000) WHERE id = 5;
@@ -366,7 +360,6 @@ UPDATE o_test1 SET val = generate_string(12, 6000) WHERE id = 5;
 SELECT id, length(val) FROM o_test1 WHERE id = 5;
 
 -- update pk, delete all old toasted values and insert new
-SELECT setseed(0);
 INSERT INTO o_test1 VALUES (6, generate_string(13, 4000));
 UPDATE o_test1 SET id = 7 WHERE id = 6;
 SELECT id, length(val) FROM o_test1 WHERE id = 7;
@@ -379,7 +372,6 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
 -- value after TOASTed value
 DROP TABLE o_test1;
-SELECT setseed(0);
 CREATE TABLE o_test1 (
        id integer NOT NULL,
        t text NOT NULL,
@@ -401,14 +393,11 @@ CREATE TABLE o_test1 (
        t text NOT NULL,
        PRIMARY KEY(id)
 ) USING orioledb;
-SELECT setseed(0);
 INSERT INTO o_test1 (SELECT id, id || generate_string(id, 3000) FROM generate_series(1, 200, 1) id);
-SELECT setseed(0);
 SELECT id, length(t) FROM o_test1 WHERE t = 1 || generate_string(15, 3000);
 
 -- page splits do not fails
 TRUNCATE o_test1;
-SELECT setseed(0);
 INSERT INTO o_test1 (SELECT id, id || generate_string(16, 3000) FROM generate_series(1, 200, 1) id);
 DELETE FROM o_test1 WHERE id > 10 and id < 100;
 INSERT INTO o_test1 (SELECT id, id || generate_string(17, 6000) FROM generate_series(11, 99, 1) id);

@@ -68,10 +68,17 @@ ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
 
 	init_ucm(&pool->ucm, ptr, found);
 
+#if PG_VERSION_NUM >= 150000
+	pg_prng_seed(&pool->prngSeed, MyBackendId);
+	pool->location = pg_prng_uint64_range(&pool->prngSeed,
+										  pool->offset,
+										  pool->offset + pool->size - 1);
+#else
 	pool->xseed[0] = MyBackendId;
 	pool->xseed[1] = MyBackendId >> 16;
 	pool->xseed[2] = 0;
 	pool->location = pool->offset + (uint64) pg_jrand48(pool->xseed) % pool->size;
+#endif
 }
 
 /*
@@ -242,9 +249,17 @@ void
 ppool_run_clock(OPagePool *pool, bool evict,
 				volatile sig_atomic_t *shutdown_requested)
 {
-	uint64		blkno = pool->offset + (uint64) pg_jrand48(pool->xseed) % pool->size;
+	uint64		blkno;
 	Size		undoSize = get_reserved_undo_size(UndoReserveTxn);
 	bool		haveRetainLoc = have_retained_undo_location();
+
+#if PG_VERSION_NUM >= 150000
+	blkno = pg_prng_uint64_range(&pool->prngSeed,
+								 pool->offset,
+								 pool->offset + pool->size - 1);
+#else
+	blkno = pool->offset + (uint64) pg_jrand48(pool->xseed) % pool->size;
+#endif
 
 	/*
 	 * Shouldn't be called while holding a page lock: one should reserve the

@@ -46,7 +46,11 @@
 #include "optimizer/plancat.h"
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
+#if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
+#else
+#include "pgstat.h"
+#endif
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
 
@@ -537,9 +541,14 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 			/* Tuple not passing quals anymore, exiting... */
 			return TM_Deleted;
 
+#if PG_VERSION_NUM >= 140000
 		(void) ExecGetUpdateNewTuple(rinfo,
 									 epqslot,
 									 mres.oldTuple);
+#else
+		slot = ExecFilterJunk(mstate->ps.state->es_result_relation_info->ri_junkFilter,
+							  epqslot);
+#endif
 
 		partition_constraint_failed =
 			rel->rd_rel->relispartition &&
@@ -704,7 +713,11 @@ orioledb_relation_set_new_filenode(Relation rel,
 	*freezeXid = InvalidTransactionId;
 	*minmulti = InvalidMultiXactId;
 
+#if PG_VERSION_NUM >= 150000
+	srel = RelationCreateStorage(*newrnode, persistence, false);
+#else
 	srel = RelationCreateStorage(*newrnode, persistence);
+#endif
 	smgrclose(srel);
 }
 
@@ -1235,11 +1248,22 @@ orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 	/* nothing to do */
 }
 
+#if PG_VERSION_NUM >= 140000
 static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
 	elog(ERROR, "Not implemented");
 }
+#else
+static TransactionId
+orioledb_compute_xid_horizon_for_tuples(Relation rel,
+										ItemPointerData *tids,
+										int nitems)
+{
+	elog(ERROR, "Not implemented");
+	return 0;
+}
+#endif
 
 static void
 orioledb_init_modify(ModifyTableState *mstate, ResultRelInfo *rinfo)
@@ -1412,8 +1436,11 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 					 * Found a suitable tuple, so save it, replacing one old
 					 * tuple at random
 					 */
+#if PG_VERSION_NUM >= 150000
+					int			k = (int) (targrows * sampler_random_fract(&rstate.randstate));
+#else
 					int			k = (int) (targrows * sampler_random_fract(rstate.randstate));
-
+#endif
 					Assert(k >= 0 && k < targrows);
 					heap_freetuple(rows[k]);
 					rows[k] = ExecCopySlotHeapTuple(slot);
@@ -1500,7 +1527,9 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 		.index_fetch_reset = orioledb_index_fetch_reset,
 		.index_fetch_end = orioledb_index_fetch_end,
 		.index_fetch_tuple = orioledb_index_fetch_tuple,
+#if PG_VERSION_NUM >= 140000
 		.index_delete_tuples = orioledb_index_delete_tuples,
+#endif
 
 		.tuple_insert = orioledb_tableam_tuple_insert,
 		.tuple_insert_speculative = orioledb_tuple_insert_speculative,
@@ -1515,6 +1544,9 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 		.tuple_get_latest_tid = orioledb_get_latest_tid,
 		.tuple_tid_valid = orioledb_tuple_tid_valid,
 		.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
+#if PG_VERSION_NUM < 140000
+		.compute_xid_horizon_for_tuples = orioledb_compute_xid_horizon_for_tuples,
+#endif
 
 		.relation_set_new_filenode = orioledb_relation_set_new_filenode,
 		.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,

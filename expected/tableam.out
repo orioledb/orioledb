@@ -949,9 +949,10 @@ INSERT INTO o_test_expression (SELECT id, id || 'text'
 								FROM generate_series(0, 20) as id);
 ANALYZE o_test_expression;
 SET enable_seqscan = off;
-EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
-	WHERE (key * 100) BETWEEN 100 AND 1000;
-                          QUERY PLAN                           
+SELECT smart_explain(
+'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+	WHERE (key * 100) BETWEEN 100 AND 1000;');
+                         smart_explain                         
 ---------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
    Forward index only scan of: o_test_expression_ix1
@@ -974,9 +975,10 @@ SELECT (key * 100) FROM o_test_expression
      1000
 (10 rows)
 
-EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
-	WHERE (value || 'WOW') BETWEEN '6' AND '9';
-                                         QUERY PLAN                                         
+SELECT smart_explain(
+E'EXPLAIN (COSTS off) SELECT (value || \'WOW\') FROM o_test_expression
+	WHERE (value || \'WOW\') BETWEEN \'6\' AND \'9\';');
+                                       smart_explain                                        
 --------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
    Forward index scan of: o_test_expression_ix3
@@ -992,9 +994,10 @@ SELECT (value || 'WOW') FROM o_test_expression
  8textWOW
 (3 rows)
 
-EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
-	WHERE UPPER(value) BETWEEN '6' AND '9';
-                               QUERY PLAN                               
+SELECT smart_explain(
+E'EXPLAIN (COSTS off) SELECT (value || \'WOW\') FROM o_test_expression
+	WHERE UPPER(value) BETWEEN \'6\' AND \'9\';');
+                             smart_explain                              
 ------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
    Forward index scan of: o_test_expression_ix6
@@ -1350,9 +1353,10 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
 ALTER TABLE o_test_expression DROP CONSTRAINT o_test_expression_pkey;
 ANALYZE o_test_expression;
 SET enable_bitmapscan = off;
-EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
-	WHERE (key * 100) BETWEEN 100 AND 1000;
-                        QUERY PLAN                         
+SELECT smart_explain(
+'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+	WHERE (key * 100) BETWEEN 100 AND 1000;');
+                       smart_explain                       
 -----------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
    Forward index scan of: o_test_expression_ix1
@@ -1860,8 +1864,9 @@ CREATE TABLE o_tableam_update1
 CREATE INDEX o_tableam_update1_ix ON o_tableam_update1 (val);
 INSERT INTO o_tableam_update1 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
 ANALYZE o_tableam_update1;
-EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
-                      QUERY PLAN                       
+SELECT smart_explain(
+'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;');
+                     smart_explain                     
 -------------------------------------------------------
  Update on o_tableam_update1
    ->  Custom Scan (o_scan) on o_tableam_update1
@@ -1869,8 +1874,9 @@ EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
          Conds: (id > 5)
 (4 rows)
 
-EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text' RETURNING *;
-                     QUERY PLAN                      
+SELECT smart_explain(
+E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'1text\' RETURNING *;');
+                    smart_explain                    
 -----------------------------------------------------
  Update on o_tableam_update1
    ->  Custom Scan (o_scan) on o_tableam_update1
@@ -1878,8 +1884,9 @@ EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1tex
          Conds: (val = '1text'::text)
 (4 rows)
 
-EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '2text' RETURNING val;
-                     QUERY PLAN                      
+SELECT smart_explain(
+E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'2text\' RETURNING val;');
+                    smart_explain                    
 -----------------------------------------------------
  Update on o_tableam_update1
    ->  Custom Scan (o_scan) on o_tableam_update1

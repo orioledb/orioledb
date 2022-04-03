@@ -47,6 +47,10 @@
 /* size of data file segment */
 #define ORIOLEDB_SEGMENT_SIZE	(1024 * 1024 * 1024)
 
+#if PG_VERSION_NUM < 150000
+#define GetMaxBackends() MaxBackends
+#endif
+
 /* Number of orioledb page */
 typedef uint32 OInMemoryBlkno;
 #define OInvalidInMemoryBlkno		((OInMemoryBlkno) 0xFFFFFFFF)

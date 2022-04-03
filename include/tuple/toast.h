@@ -171,7 +171,11 @@ o_get_raw_size(Datum value)
 	else if (VARATT_IS_EXTERNAL(value))
 		return toast_raw_datum_size(value) - VARHDRSZ;
 	else if (VARATT_IS_COMPRESSED(attr))
+#if PG_VERSION_NUM >= 140000
 		return VARDATA_COMPRESSED_GET_EXTSIZE(attr);
+#else
+		return VARRAWSIZE_4B_C(attr);
+#endif
 	else
 		return VARSIZE_ANY_EXHDR(value);
 }

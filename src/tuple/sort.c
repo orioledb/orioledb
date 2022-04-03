@@ -208,8 +208,22 @@ copytup_orioledb_index(Tuplesortstate *state, SortTuple *stup, void *tup)
 	}
 }
 
+#if PG_VERSION_NUM >= 150000
+#define TAPEDECL LogicalTape *tape
+#define TAPEREAD(ptr, len) \
+	LogicalTapeReadExact(tape, (ptr), (len))
+#define TAPEWRITE(ptr, len) \
+	LogicalTapeWrite(tape, (ptr), (len))
+#else
+#define TAPEDECL int tapenum
+#define TAPEREAD(ptr, len) \
+	LogicalTapeReadExact(state->tapeset, tapenum, (ptr), (len))
+#define TAPEWRITE(ptr, len) \
+	LogicalTapeWrite(state->tapeset, tapenum, (ptr), (len))
+#endif
+
 static void
-writetup_orioledb_index(Tuplesortstate *state, int tapenum, SortTuple *stup)
+writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
 {
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) state->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
@@ -220,15 +234,11 @@ writetup_orioledb_index(Tuplesortstate *state, int tapenum, SortTuple *stup)
 	tuple.formatFlags = stup->flags;
 	tuplen = o_tuple_size(tuple, spec) + sizeof(int) + 1;
 
-	LogicalTapeWrite(state->tapeset, tapenum,
-					 (void *) &tuplen, sizeof(tuplen));
-	LogicalTapeWrite(state->tapeset, tapenum,
-					 (void *) tuple.data, o_tuple_size(tuple, spec));
-	LogicalTapeWrite(state->tapeset, tapenum,
-					 (void *) &tuple.formatFlags, 1);
+	TAPEWRITE((void *) &tuplen, sizeof(tuplen));
+	TAPEWRITE((void *) tuple.data, o_tuple_size(tuple, spec));
+	TAPEWRITE((void *) &tuple.formatFlags, 1);
 	if (state->randomAccess)	/* need trailing length word? */
-		LogicalTapeWrite(state->tapeset, tapenum,
-						 (void *) &tuplen, sizeof(tuplen));
+		TAPEWRITE((void *) &tuplen, sizeof(tuplen));
 
 	if (!state->slabAllocatorUsed)
 	{
@@ -239,7 +249,7 @@ writetup_orioledb_index(Tuplesortstate *state, int tapenum, SortTuple *stup)
 
 static void
 readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
-					   int tapenum, unsigned int len)
+					   TAPEDECL, unsigned int len)
 {
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) state->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
@@ -248,11 +258,10 @@ readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
 	OTuple		tuple;
 
 	/* read in the tuple proper */
-	LogicalTapeReadExact(state->tapeset, tapenum, tup, tuplen);
-	LogicalTapeReadExact(state->tapeset, tapenum, &stup->flags, 1);
+	TAPEREAD(tup, tuplen);
+	TAPEREAD(&stup->flags, 1);
 	if (state->randomAccess)	/* need trailing length word? */
-		LogicalTapeReadExact(state->tapeset, tapenum,
-							 &tuplen, sizeof(tuplen));
+		TAPEREAD(&tuplen, sizeof(tuplen));
 	stup->tuple = (void *) tup;
 	tuple.data = tup;
 	tuple.formatFlags = stup->flags;
