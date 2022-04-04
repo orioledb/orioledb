@@ -216,13 +216,15 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				left_blkno;
 	uint32		parent_change_count;
 	bool		success = false;
+	bool		needsUndo = desc->undoType != UndoReserveNone;
 
 	/*
 	 * Reserve the required undo size.  We are holding the page lock, so we
 	 * can only do this with 'wait == false'.
 	 */
-	if (!reserve_undo_size_extended(desc->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE,
-									false, false))
+	if (needsUndo && !reserve_undo_size_extended(desc->undoType,
+												 2 * O_MERGE_UNDO_IMAGE_SIZE,
+												 false, false))
 	{
 		/* unable to reserve undo location, no opportunity to resume */
 		unlock_page(blkno);
@@ -473,7 +475,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		/* else we will try to merge the parent page in the loop */
 	}
 
-	release_undo_size(desc->undoType);
+	if (needsUndo)
+		release_undo_size(desc->undoType);
 
 	return success;
 }

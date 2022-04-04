@@ -35,7 +35,7 @@ class CheckpointEvictionTest(BaseTest):
 			CREATE UNIQUE INDEX o_test_ix8 ON o_test (key);
 			CREATE UNIQUE INDEX o_test_ix9 ON o_test (key);
 		""")
-		n = 50000
+		n = 80000
 		m = 50
 		con1 = node.connect()
 		for i in range(1, m):
@@ -46,30 +46,17 @@ class CheckpointEvictionTest(BaseTest):
 			con1.commit()
 		node.safe_psql("CHECKPOINT;")
 
-		node.safe_psql("""
-			DELETE FROM o_test WHERE key % 600 = 0;
-		""")
-		node.safe_psql("CHECKPOINT;")
-
-		node.safe_psql("""
-			DELETE FROM o_test WHERE key % 300 = 0;
-		""")
-		node.safe_psql("CHECKPOINT;")
-
-		node.safe_psql("""
-			DELETE FROM o_test WHERE key % 100 = 0;
-		""")
-		node.safe_psql("CHECKPOINT;")
-
-		node.safe_psql("""
-			DELETE FROM o_test WHERE key % 50 = 0;
-		""")
-		node.safe_psql("CHECKPOINT;")
-
-		node.safe_psql("""
-			DELETE FROM o_test WHERE key % 10 = 0;
-		""")
-		node.safe_psql("CHECKPOINT;")
+		n = 600
+		m = 8
+		for i in range(1, m):
+			node.safe_psql("""
+				DELETE FROM o_test WHERE mod(key, %d) = 0;
+			""" % n)
+			if n > 100:
+				n = n - 100
+			else:
+				n = n / 2
+			node.safe_psql("CHECKPOINT;")
 
 	def concurrent_eviction_base(self, compressed, bp_value):
 		node = self.node

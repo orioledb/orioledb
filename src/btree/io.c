@@ -492,19 +492,6 @@ get_free_disk_offset(BTreeDescr *desc)
 	uint32		free_buf_num;
 	bool		gotBlock;
 
-	if (desc->storageType == BTreeStorageTemporary)
-	{
-		if (use_device)
-		{
-			/* XXX: never returned */
-			return orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
-		}
-		else
-		{
-			return pg_atomic_fetch_add_u64(&metaPageBlkno->datafileLength, 1);
-		}
-	}
-
 	/*
 	 * Switch to the next sequential buffer with free blocks numbers in
 	 * needed.

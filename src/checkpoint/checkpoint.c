@@ -882,12 +882,14 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 			continue;
 
 		desc = get_sys_tree(sys_tree_num);
+
 		success = checkpoint_ix(flags, desc);
 		/* System trees can't be concurrently deleted */
 		Assert(success);
 		sort_checkpoint_map_files(desc, cur_chkp_num % 2);
+
 		chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
-													   desc);
+														desc);
 	}
 
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
@@ -1370,13 +1372,16 @@ checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr)
 void
 free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num)
 {
-	SeqBufDescPrivate *bufs[2] = {&desc->nextChkp[chkp_num % 2],
-	&desc->tmpBuf[chkp_num % 2]};
+	SeqBufDescPrivate *bufs[2] = {&desc->nextChkp[chkp_num % 2], &desc->tmpBuf[chkp_num % 2]};
 	int			i;
 	bool		success;
 
 	for (i = 0; i < 2; i++)
 	{
+		/* Don't have *.map files for BTreeStorageTemporary */
+		if (i == 0 && desc->storageType == BTreeStorageTemporary)
+			continue;
+
 		if (OCompressIsValid(desc->compress) || use_device)
 		{
 			success = seq_buf_write_file_extent(bufs[i], *extent);
@@ -3968,7 +3973,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		if (success)
 		{
 			sort_checkpoint_map_files(td, cur_chkp_index);
-
 			if (OCompressIsValid(td->compress))
 				tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
 			tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
@@ -4361,10 +4365,68 @@ tbl_data_exists(ORelOids *oids)
 void
 evictable_tree_init(BTreeDescr *desc, bool init_shmem)
 {
+	uint32		chkp_num;
+	int			chkp_index;
+	SeqBufTag	tmp_tag = {0};
+	bool		checkpoint_concurrent;
+	BTreeMetaPage *meta_page;
+
 	btree_open_smgr(desc);
 
 	if (init_shmem)
 		evictable_tree_init_meta(desc, NULL, 0, true);
+
+	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
+										 &checkpoint_concurrent);
+	chkp_index = (chkp_num + 1) % 2;
+	tmp_tag.datoid = desc->oids.datoid;
+	tmp_tag.relnode = desc->oids.relnode;
+	tmp_tag.num = chkp_num + 1;
+	tmp_tag.type = 't';
+	meta_page = BTREE_GET_META(desc);
+
+	if (init_shmem)
+	{
+		if (!init_seq_buf_pages(desc,
+								&meta_page->freeBuf))
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg(
+								   "could not init sequence buffer pages.")));
+
+		if (!init_seq_buf_pages(desc, &meta_page->tmpBuf[chkp_index]))
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg(
+								   "could not init sequence buffer pages.")));
+
+		if (!init_seq_buf_pages(desc, &meta_page->tmpBuf[1 - chkp_index]))
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg(
+								   "could not init sequence buffer pages.")));
+	}
+
+	if (!init_seq_buf(&desc->freeBuf,
+					  &meta_page->freeBuf,
+					  &tmp_tag, false, init_shmem, 0, NULL))
+	{
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not fill sequence buffers.")));
+	}
+
+	if (!init_seq_buf(&desc->tmpBuf[chkp_index],
+					  &meta_page->tmpBuf[chkp_index],
+					  &tmp_tag, true, init_shmem, 0, NULL))
+	{
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not fill sequence buffers.")));
+	}
+
+	if (!init_seq_buf(&desc->tmpBuf[1 - chkp_index],
+					  &meta_page->tmpBuf[1 - chkp_index],
+					  &tmp_tag, true, init_shmem, 0, NULL))
+	{
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not fill sequence buffers.")));
+	}
 }
 
 /*
