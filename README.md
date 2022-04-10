@@ -68,6 +68,18 @@ If you are interested in OrioleDB's benefits in production, please
 
 ## Installation
 
+### Use docker container
+
+We provide docker images for `amd64` and `arm64v8` architectures under Alpine Linux.
+
+```
+docker pull orioledb/orioledb
+```
+
+See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
+
+### Build from source
+
 Before building and installing OrioleDB, one should ensure to have the following:
 
  * [PostgreSQL 14 with extensibility patches](https://github.com/orioledb/postgres),
@@ -92,7 +104,10 @@ the PostgreSQL database server.
 shared_preload_libraries = 'orioledb.so'
 ```
 
-And also run the following SQL-query on the database.
+## Setup
+
+Run the following SQL query on the database to enable the OrioleDB engine.
+
 
 ```sql
 CREATE EXTENSION orioledb;
