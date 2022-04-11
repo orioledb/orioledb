@@ -22,6 +22,11 @@ RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
+CREATE FUNCTION orioledb_commit_hash()
+RETURNS text
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
 CREATE FUNCTION orioledb_tbl_structure(relid oid,
                                        options varchar default '',
                                        depth int default 32)

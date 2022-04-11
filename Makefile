@@ -175,6 +175,10 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | submake-orioledb temp-insta
 check: regresscheck isolationcheck testgrescheck
 endif
 
+COMMIT_HASH = $(shell git rev-parse HEAD)
+override CFLAGS += -DCOMMIT_HASH=$(COMMIT_HASH)
+override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH)
+
 ifdef VALGRIND
 override with_temp_install += PGCTLTIMEOUT=1200 \
 	valgrind --leak-check=no --gen-suppressions=all \

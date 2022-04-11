@@ -163,6 +163,7 @@ static void orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 
 PG_FUNCTION_INFO_V1(orioledb_page_stats);
 PG_FUNCTION_INFO_V1(orioledb_version);
+PG_FUNCTION_INFO_V1(orioledb_commit_hash);
 PG_FUNCTION_INFO_V1(ucm_check);
 
 void
@@ -1110,6 +1111,17 @@ Datum
 orioledb_version(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_TEXT_P(cstring_to_text(ORIOLEDB_VERSION));
+}
+
+#define COMMIT_HASH_STRING #COMMIT_HASH
+
+#define STRINGIZE2(s) #s
+#define STRINGIZE(s) STRINGIZE2(s)
+
+Datum
+orioledb_commit_hash(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TEXT_P(cstring_to_text(STRINGIZE(COMMIT_HASH)));
 }
 
 /*
