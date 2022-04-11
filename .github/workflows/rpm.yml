@@ -1,0 +1,64 @@
+name: rpm
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target to build'
+        required: true
+        default: 'nosignbuild14'
+
+jobs:
+  build_rpms:
+    runs-on: [self-hosted, X64, CentOS]
+    strategy:
+      fail-fast: true
+    steps:
+      - name: Checkout code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/pgrpms
+          ref: orioledb-14
+      - name: Setup prerequisites
+        run: |
+          sudo yum install -y llvm llvm-devel clang clang-devel python3-devel \
+                              libxml2-devel libxslt-devel libuuid-devel \
+                              zlib-devel flex bison curl git rpmdevtools \
+                              glibc-devel perl readline-devel pgdg-srpm-macros \
+                              libicu-devel llvm-toolset-7-clang \
+                              krb5-devel e2fsprogs-devel openldap-devel \
+                              pam-devel perl-ExtUtils-Embed tcl-devel \
+                              systemtap-sdt-devel libselinux-devel \
+                              openssl-devel systemd-devel llvm-toolset-7-clang \
+                              llvm5.0-devel gcc gcc-c++ libzstd-devel lz4-devel
+      - name: Download sources
+        run: |
+          cd rpm/redhat/14/postgresql-14/EL-7
+          curl -o pgsql.tar.gz \
+            --header "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            --header "Accept: application/vnd.github.v3.raw" \
+            --remote-name \
+            --location https://api.github.com/repos/orioledb/postgres/tarball/patches14
+          curl -o orioledb.tar.gz \
+            --header "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            --header "Accept: application/vnd.github.v3.raw" \
+            --remote-name \
+            --location https://api.github.com/repos/orioledb/orioledb/tarball/${{ github.sha }}
+          mkdir -p pgsrc
+          tar -xzf pgsql.tar.gz -C pgsrc --strip-components 1
+          mkdir -p pgsrc/contrib/orioledb
+          tar -xzf orioledb.tar.gz -C pgsrc/contrib/orioledb --strip-components 1
+          rm -f pgsql.tar.gz
+          rm -f orioledb.tar.gz
+          tar -czf orioledb.tar.gz -C pgsrc .
+          rm -rf pgsrc
+      - name: Build
+        run: |
+          rm -rf ~/rpm14 ~/rpmbuild
+          cd rpm/redhat/14/postgresql-14/EL-7
+          CC=/opt/rh/llvm-toolset-7/root/usr/bin/clang make ${{ github.event.inputs.target }}
+      - name: Upload image
+        uses: actions/upload-artifact@v2
+        with:
+          name: rpms
+          path: ~/rpm14/RPMS/x86_64/*.rpm
