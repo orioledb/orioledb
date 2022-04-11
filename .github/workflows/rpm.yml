@@ -14,11 +14,6 @@ jobs:
     strategy:
       fail-fast: true
     steps:
-      - name: Checkout code into workspace directory
-        uses: actions/checkout@v2
-        with:
-          repository: orioledb/pgrpms
-          ref: orioledb-14
       - name: Setup prerequisites
         run: |
           sudo yum install -y llvm llvm-devel clang clang-devel python3-devel \
@@ -31,25 +26,24 @@ jobs:
                               systemtap-sdt-devel libselinux-devel \
                               openssl-devel systemd-devel llvm-toolset-7-clang \
                               llvm5.0-devel gcc gcc-c++ libzstd-devel lz4-devel
-      - name: Download sources
+      - name: Checkout PGRPMs into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/pgrpms
+          ref: orioledb-14
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/postgres
+          ref: patches14
+          path: rpm/redhat/14/postgresql-14/EL-7/pgsrc
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          path: rpm/redhat/14/postgresql-14/EL-7/pgsrc/contrib/orioledb
+      - name: Archive sources
         run: |
           cd rpm/redhat/14/postgresql-14/EL-7
-          curl -o pgsql.tar.gz \
-            --header "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            --header "Accept: application/vnd.github.v3.raw" \
-            --remote-name \
-            --location https://api.github.com/repos/orioledb/postgres/tarball/patches14
-          curl -o orioledb.tar.gz \
-            --header "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            --header "Accept: application/vnd.github.v3.raw" \
-            --remote-name \
-            --location https://api.github.com/repos/orioledb/orioledb/tarball/${{ github.sha }}
-          mkdir -p pgsrc
-          tar -xzf pgsql.tar.gz -C pgsrc --strip-components 1
-          mkdir -p pgsrc/contrib/orioledb
-          tar -xzf orioledb.tar.gz -C pgsrc/contrib/orioledb --strip-components 1
-          rm -f pgsql.tar.gz
-          rm -f orioledb.tar.gz
           tar -czf orioledb.tar.gz -C pgsrc .
           rm -rf pgsrc
       - name: Build
