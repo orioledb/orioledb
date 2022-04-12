@@ -54,7 +54,7 @@ struct OPagePool
 	unsigned short xseed[3];
 };
 
-extern Size ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size);
+extern Size ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
 extern void ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 extern OInMemoryBlkno ppool_free_pages_count(OPagePool *pool);
 extern OInMemoryBlkno ppool_dirty_pages_count(OPagePool *pool);

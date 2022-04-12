@@ -28,11 +28,12 @@
  * it prepares local memory structures to initialize.
  */
 Size
-ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size)
+ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug)
 {
 	Size		result = 0;
 
-	Assert(size >= PPOOL_MIN_SIZE);
+	if (!debug)
+		Assert(size >= PPOOL_MIN_SIZE);
 
 	pool->offset = offset;
 	pool->size = size;

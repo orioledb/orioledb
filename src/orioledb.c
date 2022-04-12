@@ -67,6 +67,7 @@ PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 
+static bool debug_disable_pools_limit = false;
 static Pointer shared_segment = NULL;
 static bool shared_segment_initialized = false;
 static int	free_tree_buffers_guc;
@@ -182,12 +183,23 @@ _PG_init(void)
 	max_procs = MaxConnections + autovacuum_max_workers + 2 +
 		max_worker_processes + max_wal_senders + NUM_AUXILIARY_PROCS;
 
+	DefineCustomBoolVariable("orioledb.debug_disable_pools_limit",
+							 "Disables pools minimal limit for debug.",
+							 NULL,
+							 &debug_disable_pools_limit,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
 	DefineCustomIntVariable("orioledb.main_buffers",
 							"Size of orioledb engine shared buffers for main data.",
 							NULL,
 							&main_buffers_guc,
 							8192,
-							PPOOL_MIN_SIZE_BLCKS,
+							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE_BLCKS,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -200,7 +212,7 @@ _PG_init(void)
 							NULL,
 							&free_tree_buffers_guc,
 							PPOOL_MIN_SIZE_BLCKS,
-							PPOOL_MIN_SIZE_BLCKS,
+							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE_BLCKS,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -213,7 +225,7 @@ _PG_init(void)
 							NULL,
 							&catalog_buffers_guc,
 							PPOOL_MIN_SIZE_BLCKS,
-							PPOOL_MIN_SIZE_BLCKS,
+							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE_BLCKS,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -479,15 +491,18 @@ _PG_init(void)
 	memset(page_pools, 0, OPagePoolTypesCount * sizeof(OPagePool));
 	page_pools_size[OPagePoolFreeTree] = ppool_estimate_space(&page_pools[OPagePoolFreeTree],
 															  0,
-															  free_tree_buffers_count);
+															  free_tree_buffers_count,
+															  debug_disable_pools_limit);
 
 	page_pools_size[OPagePoolCatalog] = ppool_estimate_space(&page_pools[OPagePoolCatalog],
 															 free_tree_buffers_count,
-															 catalog_buffers_count);
+															 catalog_buffers_count,
+															 debug_disable_pools_limit);
 
 	page_pools_size[OPagePoolMain] = ppool_estimate_space(&page_pools[OPagePoolMain],
 														  main_buffers_offset,
-														  main_buffers_count);
+														  main_buffers_count,
+														  debug_disable_pools_limit);
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);

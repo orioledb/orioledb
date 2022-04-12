@@ -7,15 +7,18 @@ from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
 
+import time
+import os
 class CheckpointEvictionTest(BaseTest):
 
 	def test_checkpoint_compressed_indices(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
 					"""
-					orioledb.main_buffers = 1MB
-					orioledb.free_tree_buffers = 2MB
-					orioledb.debug_disable_bgwriter = true
+						orioledb.debug_disable_pools_limit = true
+						orioledb.main_buffers = 10MB
+						orioledb.free_tree_buffers = 512kB
+						orioledb.debug_disable_bgwriter = true
 					""")
 		node.start()
 		node.safe_psql('postgres', """
@@ -35,8 +38,8 @@ class CheckpointEvictionTest(BaseTest):
 			CREATE UNIQUE INDEX o_test_ix8 ON o_test (key);
 			CREATE UNIQUE INDEX o_test_ix9 ON o_test (key);
 		""")
-		n = 80000
-		m = 50
+		n = 35000
+		m = 6
 		con1 = node.connect()
 		for i in range(1, m):
 			con1.execute("""
@@ -44,10 +47,11 @@ class CheckpointEvictionTest(BaseTest):
 			(SELECT val FROM generate_series(%s, %s, 1) val);
 			""" % (str(1), str(n)))
 			con1.commit()
+		con1.close()
 		node.safe_psql("CHECKPOINT;")
 
 		n = 600
-		m = 8
+		m = 10
 		for i in range(1, m):
 			node.safe_psql("""
 				DELETE FROM o_test WHERE mod(key, %d) = 0;
