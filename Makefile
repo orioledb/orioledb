@@ -176,7 +176,6 @@ check: regresscheck isolationcheck testgrescheck
 endif
 
 COMMIT_HASH = $(shell git rev-parse HEAD)
-override CFLAGS += -DCOMMIT_HASH=$(COMMIT_HASH)
 override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH)
 
 ifdef VALGRIND
