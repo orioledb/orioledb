@@ -3,6 +3,10 @@ name: rpm
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Version to build'
+        required: true
+        default: '14'
       target:
         description: 'Target to build'
         required: true
@@ -35,24 +39,24 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: orioledb/postgres
-          ref: patches14
-          path: rpm/redhat/14/postgresql-14/EL-7/pgsrc
+          ref: patches${{ github.event.inputs.version }}
+          path: rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7/pgsrc
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v2
         with:
-          path: rpm/redhat/14/postgresql-14/EL-7/pgsrc/contrib/orioledb
+          path: rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7/pgsrc/contrib/orioledb
       - name: Archive sources
         run: |
-          cd rpm/redhat/14/postgresql-14/EL-7
+          cd rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7
           tar -czf orioledb.tar.gz -C pgsrc .
           rm -rf pgsrc
       - name: Build
         run: |
-          rm -rf ~/rpm14 ~/rpmbuild
-          cd rpm/redhat/14/postgresql-14/EL-7
+          rm -rf ~/rpm${{ github.event.inputs.version }} ~/rpmbuild
+          cd rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7
           CC=/opt/rh/llvm-toolset-7/root/usr/bin/clang make ${{ github.event.inputs.target }}
       - name: Upload image
         uses: actions/upload-artifact@v2
         with:
           name: rpms
-          path: ~/rpm14/RPMS/x86_64/*.rpm
+          path: ~/rpm${{ github.event.inputs.version }}/RPMS/x86_64/*.rpm
