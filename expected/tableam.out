@@ -196,6 +196,36 @@ SELECT * FROM o_tableam1;
   20 | 20text
 (10 rows)
 
+CREATE TABLE IF NOT EXISTS o_tableam1_like
+(LIKE o_tableam1 INCLUDING INDEXES INCLUDING CONSTRAINTS) USING orioledb;
+INSERT INTO o_tableam1_like (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
+ANALYZE o_tableam1_like;
+SELECT * FROM o_tableam1_like;
+ key | value  
+-----+--------
+   1 | 1text
+   2 | 2text
+   3 | 3text
+   4 | 4text
+   5 | 5text
+   6 | 6text
+   7 | 7text
+   8 | 8text
+   9 | 9text
+  10 | 10text
+  11 | 11text
+  12 | 12text
+  13 | 13text
+  14 | 14text
+  15 | 15text
+  16 | 16text
+  17 | 17text
+  18 | 18text
+  19 | 19text
+  20 | 20text
+(20 rows)
+
+DROP TABLE o_tableam1_like;
 DROP TABLE o_tableam1;
 -- partial index test
 CREATE TABLE o_test_partial

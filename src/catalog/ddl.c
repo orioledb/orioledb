@@ -652,7 +652,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		 * utility.c
 		 */
 		List	   *stmts;
-		ListCell   *l;
+		RangeVar   *table_rv = NULL;
 		CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
 		OXid		oxid = InvalidOXid;
 		bool		isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
@@ -660,9 +660,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		stmts = transformCreateStmt((CreateStmt *) pstmt->utilityStmt, queryString);
 
-		foreach(l, stmts)
+		/*
+		 * ... and do it.  We can't use foreach() because we may
+			* modify the list midway through, so pick off the
+			* elements one at a time, the hard way.
+			*/
+		while (stmts != NIL)
 		{
-			Node	   *stmt = (Node *) lfirst(l);
+			Node	   *stmt = (Node *) linitial(stmts);
+
+			stmts = list_delete_first(stmts);
+
 			ObjectAddress address;
 			ObjectAddress secondaryObject = InvalidObjectAddress;
 
@@ -675,6 +683,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
 				CreateStmt *cstmt = (CreateStmt *) stmt;
 				bool		orioledb;
+
+				/* Remember transformed RangeVar for LIKE */
+				table_rv = cstmt->relation;
 
 				if (cstmt->accessMethod)
 					orioledb = (strcmp(cstmt->accessMethod, "orioledb") == 0);
@@ -780,6 +791,22 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					table_close(toastRel, AccessShareLock);
 				}
 			}
+			else if (IsA(stmt, TableLikeClause))
+			{
+				/*
+				 * Do delayed processing of LIKE options.  This
+				 * will result in additional sub-statements for us
+				 * to process.  Those should get done before any
+				 * remaining actions, so prepend them to "stmts".
+				 */
+				TableLikeClause *like = (TableLikeClause *) stmt;
+				List	   *morestmts;
+
+				Assert(table_rv != NULL);
+
+				morestmts = expandTableLikeClause(table_rv, like);
+				stmts = list_concat(morestmts, stmts);
+			}
 			else
 			{
 				/*
@@ -808,7 +835,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							   NULL);
 			}
 
-			if (lnext(stmts, l) != NULL)
+			if (stmts != NIL)
 				CommandCounterIncrement();
 		}
 

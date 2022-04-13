@@ -58,6 +58,14 @@ TRUNCATE o_tableam1;
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(11, 20) as id);
 SELECT * FROM o_tableam1;
 
+CREATE TABLE IF NOT EXISTS o_tableam1_like
+(LIKE o_tableam1 INCLUDING INDEXES INCLUDING CONSTRAINTS) USING orioledb;
+
+INSERT INTO o_tableam1_like (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
+ANALYZE o_tableam1_like;
+SELECT * FROM o_tableam1_like;
+DROP TABLE o_tableam1_like;
+
 DROP TABLE o_tableam1;
 
 -- partial index test
