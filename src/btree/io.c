@@ -1038,9 +1038,12 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 			/*
 			 * Shared seq_bufs should be initialized by checkpointer.
 			 */
-			SpinLockAcquire(&desc->nextChkp[chkp_index].shared->lock);
-			Assert(desc->nextChkp[chkp_index].shared->tag.num == checkpoint_number);
-			SpinLockRelease(&desc->nextChkp[chkp_index].shared->lock);
+			if (desc->storageType != BTreeStorageTemporary)
+			{
+				SpinLockAcquire(&desc->nextChkp[chkp_index].shared->lock);
+				Assert(desc->nextChkp[chkp_index].shared->tag.num == checkpoint_number);
+				SpinLockRelease(&desc->nextChkp[chkp_index].shared->lock);
+			}
 			SpinLockAcquire(&desc->tmpBuf[chkp_index].shared->lock);
 			Assert(desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number);
 			SpinLockRelease(&desc->tmpBuf[chkp_index].shared->lock);

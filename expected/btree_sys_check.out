@@ -60,6 +60,7 @@ NOTICE:  drop cascades to column key2 of table o_test_typecaches
 DROP TABLE o_test_typecaches;
 DROP TYPE o_enum;
 DROP TYPE custom_type;
+CHECKPOINT;
 -- SYS_TREES_SHARED_ROOT_INFO
 SELECT regexp_replace(
 		orioledb_sys_tree_structure(1, 'ne'),
@@ -89,7 +90,7 @@ SELECT regexp_replace(
                                         regexp_replace                                         
 -----------------------------------------------------------------------------------------------
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 5520                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                          +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                          +
      Leftmost, Rightmost                                                                      +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ((NNN, NNN, NNN), 0, 1)  +
      Item 0: deleted, offset = 264, tuple = (((NNN, NNN, NNN), 0, 0), 232)                    +
@@ -116,7 +117,7 @@ SELECT regexp_replace(
                                         regexp_replace                                         
 -----------------------------------------------------------------------------------------------
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 5816                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                          +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                          +
      Leftmost, Rightmost                                                                      +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = (1, (NNN, NNN, NNN), 0)  +
      Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 0), 630)                    +
@@ -145,7 +146,7 @@ SELECT regexp_replace(
                                                                            regexp_replace                                                                            
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Page 0: level = 1, maxKeyLen = 8                                                                                                                                   +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                                                                +
      Leftmost, Rightmost                                                                                                                                            +
    Chunk 0: offset = 0, location = 512, hikey location = 64                                                                                                         +
      Item 0: offset = 520, downlink = 1                                                                                                                             +
@@ -154,7 +155,7 @@ SELECT regexp_replace(
      Item 3: offset = 560, downlink = 4, key = (NNN, NNN)                                                                                                           +
                                                                                                                                                                     +
  Page 1: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                                                                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                                                                +
      Leftmost, Rightlink is invalid                                                                                                                                 +
      Hikey: offset = 72, key = (NNN, NNN)                                                                                                                           +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (NNN, NNN)                                                                                     +
@@ -163,7 +164,7 @@ SELECT regexp_replace(
      Item 1: offset = 2368, tuple = ((NNN, NNN), opfamily: 1976, has_ssup: Y, inputtype: 21, cmpproc: ('btint2cmp', ''), sortsupportproc: ('btint2sortsupport', ''))+
                                                                                                                                                                     +
  Page 2: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                                                                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                                                                +
      Rightlink is invalid                                                                                                                                           +
      Hikey: offset = 88, key = (NNN, NNN)                                                                                                                           +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (NNN, NNN)                                                                                     +
@@ -174,7 +175,7 @@ SELECT regexp_replace(
      Item 2: offset = 4472, tuple = ((NNN, NNN), opfamily: 397, has_ssup: N, inputtype: 2277, cmpproc: ('btarraycmp', ''), sortsupportproc: ('', ''))               +
                                                                                                                                                                     +
  Page 3: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                                                                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                                                                +
      Rightlink is invalid                                                                                                                                           +
      Hikey: offset = 72, key = (NNN, NNN)                                                                                                                           +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (NNN, NNN)                                                                                     +
@@ -183,7 +184,7 @@ SELECT regexp_replace(
      Item 1: offset = 2368, tuple = ((NNN, NNN), opfamily: 3522, has_ssup: N, inputtype: 3500, cmpproc: ('enum_cmp', ''), sortsupportproc: ('', ''))                +
                                                                                                                                                                     +
  Page 4: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                                                                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                                                                +
      Rightmost                                                                                                                                                      +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                                                                                         +
      Item 0: offset = 264, tuple = ((NNN, NNN), opfamily: 3901, has_ssup: N, inputtype: 3831, cmpproc: ('range_cmp', ''), sortsupportproc: ('', ''))                +
@@ -197,14 +198,14 @@ SELECT regexp_replace(
 		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
 		'NNN, NNN, X/X, ',
 		'g');
-                           regexp_replace                            
----------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0               +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (((NNN, NNN, X/X, Y), 0), 84)    +
-                                                                    +
+                              regexp_replace                              
+--------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 136                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty     +
+     Leftmost, Rightmost                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64              +
+     Item 0: deleted, offset = 264, tuple = (((NNN, NNN, X/X, Y), 0), 84)+
+                                                                         +
  
 (1 row)
 
@@ -214,17 +215,17 @@ SELECT regexp_replace(
 		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ([YN])\), \d+',
 		'NNN, NNN, X/X, \1), NNN',
 		'g');
-                           regexp_replace                            
----------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0               +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ((NNN, NNN, X/X, Y), NNN)        +
-     Item 1: offset = 312, tuple = ((NNN, NNN, X/X, Y), NNN)        +
-     Item 2: offset = 360, tuple = ((NNN, NNN, X/X, Y), NNN)        +
-     Item 3: offset = 408, tuple = ((NNN, NNN, X/X, Y), NNN)        +
-                                                                    +
+                            regexp_replace                            
+----------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 192              +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: deleted, offset = 264, tuple = ((NNN, NNN, X/X, Y), NNN)+
+     Item 1: deleted, offset = 312, tuple = ((NNN, NNN, X/X, Y), NNN)+
+     Item 2: deleted, offset = 360, tuple = ((NNN, NNN, X/X, Y), NNN)+
+     Item 3: deleted, offset = 408, tuple = ((NNN, NNN, X/X, Y), NNN)+
+                                                                     +
  
 (1 row)
 
@@ -234,14 +235,14 @@ SELECT regexp_replace(
 		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
 		'NNN, NNN, X/X, ',
 		'g');
-                                                                         regexp_replace                                                                         
-----------------------------------------------------------------------------------------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                                                                          +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                           +
-     Leftmost, Rightmost                                                                                                                                       +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                                                                    +
-     Item 0: offset = 264, tuple = ((NNN, NNN, X/X, Y), elem_typlen: 8, elem_typbyval: Y, elem_typalign: 100,rng_collation: 0, rng_cmp_proc: ('btint8cmp', ''))+
-                                                                                                                                                               +
+                                                                             regexp_replace                                                                              
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 1080                                                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                    +
+     Leftmost, Rightmost                                                                                                                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                                                                             +
+     Item 0: deleted, offset = 264, tuple = ((NNN, NNN, X/X, Y), elem_typlen: 8, elem_typbyval: Y, elem_typalign: 100,rng_collation: 0, rng_cmp_proc: ('btint8cmp', ''))+
+                                                                                                                                                                        +
  
 (1 row)
 
@@ -251,14 +252,14 @@ SELECT regexp_replace(
 		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
 		'NNN, NNN, X/X, ',
 		'g');
-                           regexp_replace                            
----------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0               +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (((NNN, NNN, X/X, Y), 0), 256)   +
-                                                                    +
+                              regexp_replace                               
+---------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 312                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: deleted, offset = 264, tuple = (((NNN, NNN, X/X, Y), 0), 256)+
+                                                                          +
  
 (1 row)
 
@@ -271,7 +272,7 @@ SELECT regexp_replace(
                                                          regexp_replace                                                          
 ---------------------------------------------------------------------------------------------------------------------------------
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                                           +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                            +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                            +
      Leftmost, Rightmost                                                                                                        +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (NNN, NNN, X/X, N)                                         +
      Item 0: offset = 264, tuple = ((NNN, NNN, X/X, N), typlen: 4, typbyval: Y, typalign: 105, cmp_proc: ('btint4cmp', ''))     +
@@ -288,7 +289,7 @@ SELECT orioledb_sys_tree_structure(10, 'ne');
                      orioledb_sys_tree_structure                     
 ---------------------------------------------------------------------
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
                                                                     +
@@ -300,7 +301,7 @@ SELECT orioledb_sys_tree_structure(11, 'ne');
                      orioledb_sys_tree_structure                     
 ---------------------------------------------------------------------
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
                                                                     +

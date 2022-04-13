@@ -161,8 +161,10 @@ static int	file_extents_len_off_cmp(const void *a, const void *b);
 static int	file_extents_off_len_cmp(const void *a, const void *b);
 static int	file_extents_writeback_cmp(const void *a, const void *b);
 
-static void sort_checkpoint_map_files(BTreeDescr *descr, int cur_chkp_index);
+static void sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index);
+static void sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index);
 static inline void checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr);
+static void checkpoint_temporary_tree(int flags, BTreeDescr *descr);
 static bool checkpoint_ix(int flags, BTreeDescr *descr);
 static uint64 checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 							   CheckpointWriteBack *writeback);
@@ -878,18 +880,26 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		BTreeDescr *desc;
 		bool		success PG_USED_FOR_ASSERTS_ONLY;
 
-		if (sys_tree_get_storage_type(sys_tree_num) != BTreeStoragePersistence)
+		if (sys_tree_get_storage_type(sys_tree_num) == BTreeStorageInMemory)
 			continue;
 
 		desc = get_sys_tree(sys_tree_num);
 
-		success = checkpoint_ix(flags, desc);
-		/* System trees can't be concurrently deleted */
-		Assert(success);
-		sort_checkpoint_map_files(desc, cur_chkp_num % 2);
-
-		chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
-														desc);
+		if (desc->storageType == BTreeStoragePersistence)
+		{
+			success = checkpoint_ix(flags, desc);
+			/* System trees can't be concurrently deleted */
+			Assert(success);
+			sort_checkpoint_map_file(desc, cur_chkp_num % 2);
+			sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+			chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
+															desc);
+		}
+		else
+		{
+			checkpoint_temporary_tree(flags, desc);
+			sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+		}
 	}
 
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
@@ -1030,6 +1040,88 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	if (next_CheckPoint_hook)
 		next_CheckPoint_hook(redo_pos, flags);
 }
+
+/*
+ * Make checkpoint of an index.
+ */
+static void
+checkpoint_temporary_tree(int flags, BTreeDescr *descr)
+{
+	BTreeMetaPage *meta_page;
+	SeqBufTag	next_tmp_tag = {0};
+	int			cur_chkp_index,
+				next_chkp_index;
+	Oid			datoid = descr->oids.datoid;
+	Oid			relnode = descr->oids.relnode;
+	bool		success;
+	CheckpointWriteBack writeback;
+
+	Assert(!OCompressIsValid(descr->compress));
+
+	/*
+	 * TODO: can we make checkpoint on evicted or unloaded tree?
+	 */
+	checkpoint_ix_init_state(checkpoint_state, descr);
+
+	cur_chkp_index = (checkpoint_state->lastCheckpointNumber + 1) % 2;
+	next_chkp_index = (checkpoint_state->lastCheckpointNumber + 2) % 2;
+	meta_page = BTREE_GET_META(descr);
+
+	Assert(ORootPageIsValid(descr) && OMetaPageIsValid(descr));
+
+	/* Initialize next tmp file */
+	if (!init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]))
+	{
+		free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
+		elog(FATAL, "Unable to get pages for sequence buffers.");
+	}
+
+	memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
+	next_tmp_tag.datoid = datoid;
+	next_tmp_tag.relnode = relnode;
+	next_tmp_tag.num = checkpoint_state->lastCheckpointNumber + 2;
+	next_tmp_tag.type = 't';
+
+	success = init_seq_buf(&descr->tmpBuf[next_chkp_index],
+						   &meta_page->tmpBuf[next_chkp_index],
+						   &next_tmp_tag, true, true, 0, NULL);
+	if (!success)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not init a new sequence buffer file %s",
+						get_seq_buf_filename(&next_tmp_tag))));
+
+	/* Make checkpoint of the tree itself */
+	init_writeback(&writeback, flags, false);
+	(void) checkpoint_btree(&descr, checkpoint_state, &writeback);
+	(void) perform_writeback_and_relock(descr, &writeback,
+										checkpoint_state, NULL, 0);
+	free_writeback(&writeback);
+
+	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
+
+	STOPEVENT(STOPEVENT_BEFORE_BLKNO_LOCK, NULL);
+
+	/*
+	 * Need a lock to be sure, that nobody is concurrently copying block
+	 * number from previous checkpoint to current.  See write_page() for
+	 * details.
+	 */
+	LWLockAcquire(&meta_page->copyBlknoLock, LW_EXCLUSIVE);
+	chkp_inc_changecount_before(checkpoint_state);
+	checkpoint_state->curKeyType = CurKeyFinished;
+	chkp_inc_changecount_after(checkpoint_state);
+	LWLockRelease(&meta_page->copyBlknoLock);
+
+	/* finalizes *.tmp file */
+	seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
+	free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);
+
+	chkp_inc_changecount_before(checkpoint_state);
+	checkpoint_state->completed = true;
+	chkp_inc_changecount_after(checkpoint_state);
+}
+
 
 void
 o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
@@ -1208,11 +1300,10 @@ file_extents_writeback_cmp(const void *a, const void *b)
 }
 
 /*
- * Sorts lists of free blocks in .map and .tmp files
- * to optimize disk access
-*/
+ * Sort lists of free blocks in .map file to optimize disk access.
+ */
 static void
-sort_checkpoint_map_files(BTreeDescr *descr, int cur_chkp_index)
+sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index)
 {
 	Pointer		free_blocks;
 	uint64		free_blocks_size;
@@ -1221,7 +1312,6 @@ sort_checkpoint_map_files(BTreeDescr *descr, int cur_chkp_index)
 	CheckpointFileHeader header = {0};
 	bool		ferror = false,
 				is_compressed = OCompressIsValid(descr->compress);
-	off_t		len;
 	int			read_size;
 
 	filename = get_seq_buf_filename(&descr->nextChkp[cur_chkp_index].tag);
@@ -1283,6 +1373,21 @@ sort_checkpoint_map_files(BTreeDescr *descr, int cur_chkp_index)
 	}
 	FileClose(file);
 	pfree(filename);
+	pfree(free_blocks);
+}
+
+/*
+ * Sort lists of free blocks in .map file to optimize disk access.
+ */
+static void
+sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index)
+{
+	Pointer		free_blocks;
+	uint64		free_blocks_size;
+	File		file;
+	char	   *filename;
+	bool		is_compressed = OCompressIsValid(descr->compress);
+	int			read_size;
 
 	filename = get_seq_buf_filename(&descr->tmpBuf[cur_chkp_index].tag);
 	file = PathNameOpenFile(filename, O_RDWR | PG_BINARY);
@@ -1294,23 +1399,8 @@ sort_checkpoint_map_files(BTreeDescr *descr, int cur_chkp_index)
 		return;
 	}
 
-	len = FileSize(file);
-
-	if (is_compressed)
-	{
-		/*
-		 * a *.map file may contain less extents, because some of them can be
-		 * merged on the file finalize
-		 */
-		if (free_blocks_size < len)
-		{
-			pfree(free_blocks);
-			free_blocks_size = len;
-			free_blocks = palloc(free_blocks_size);
-		}
-	}
-	Assert(len <= free_blocks_size);	/* we can hold free blocks from *.tmp */
-	free_blocks_size = (uint64) len;
+	free_blocks_size = FileSize(file);
+	free_blocks = palloc(free_blocks_size);
 
 	if (free_blocks_size > 0)
 	{
@@ -3972,7 +4062,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		success = checkpoint_ix(tbl_arg->flags, td);
 		if (success)
 		{
-			sort_checkpoint_map_files(td, cur_chkp_index);
+			sort_checkpoint_map_file(td, cur_chkp_index);
+			sort_checkpoint_tmp_file(td, cur_chkp_index);
 			if (OCompressIsValid(td->compress))
 				tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
 			tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
@@ -4397,11 +4488,6 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg(
 								   "could not init sequence buffer pages.")));
-
-		if (!init_seq_buf_pages(desc, &meta_page->tmpBuf[1 - chkp_index]))
-			ereport(FATAL, (errcode_for_file_access(),
-							errmsg(
-								   "could not init sequence buffer pages.")));
 	}
 
 	if (!init_seq_buf(&desc->freeBuf,
@@ -4414,14 +4500,6 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem)
 
 	if (!init_seq_buf(&desc->tmpBuf[chkp_index],
 					  &meta_page->tmpBuf[chkp_index],
-					  &tmp_tag, true, init_shmem, 0, NULL))
-	{
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not fill sequence buffers.")));
-	}
-
-	if (!init_seq_buf(&desc->tmpBuf[1 - chkp_index],
-					  &meta_page->tmpBuf[1 - chkp_index],
 					  &tmp_tag, true, init_shmem, 0, NULL))
 	{
 		ereport(FATAL, (errcode_for_file_access(),

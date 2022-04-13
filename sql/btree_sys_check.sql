@@ -55,6 +55,8 @@ DROP TABLE o_test_typecaches;
 DROP TYPE o_enum;
 DROP TYPE custom_type;
 
+CHECKPOINT;
+
 -- SYS_TREES_SHARED_ROOT_INFO
 SELECT regexp_replace(
 		orioledb_sys_tree_structure(1, 'ne'),
