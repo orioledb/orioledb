@@ -678,6 +678,18 @@ FROM query_to_text('explain (analyze, buffers)
 (6 rows)
 
 ROLLBACK;
+CREATE FOREIGN DATA WRAPPER dummy;
+CREATE SERVER s0 FOREIGN DATA WRAPPER dummy;
+CREATE FOREIGN TABLE ft1 (
+	c1 integer OPTIONS ("param 1" 'val1') NOT NULL,
+	c2 text OPTIONS (param2 'val2', param3 'val3') CHECK (c2 <> ''),
+	c3 date,
+	CHECK (c3 BETWEEN '1994-01-01'::date AND '1994-01-31'::date)
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value');
+DROP FOREIGN DATA WRAPPER dummy CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to server s0
+drop cascades to foreign table ft1
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table o_ddl_missing
