@@ -19,6 +19,7 @@
 #include "catalog/o_tables.h"
 #include "catalog/o_indices.h"
 #include "checkpoint/checkpoint.h"
+#include "commands/defrem.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
 #include "tuple/toast.h"
@@ -195,7 +196,7 @@ make_ctid_o_index(OTable *table)
 
 	make_builtin_field(&result->leafFields[0], &result->nonLeafFields[0],
 					   TIDOID, "ctid", SelfItemPointerAttributeNumber,
-					   TID_BTREE_OPS_OID);
+					   table->tid_btree_ops_oid);
 
 	for (i = 0; i < table->nfields; i++)
 		result->leafFields[i + 1] = table->fields[i];
@@ -327,7 +328,7 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 	{
 		make_builtin_field(&index->leafFields[*j], &index->nonLeafFields[*j],
 						   TIDOID, "ctid", SelfItemPointerAttributeNumber,
-						   TID_BTREE_OPS_OID);
+						   table->tid_btree_ops_oid);
 		if (fillPrimary)
 			index->primaryFieldsAttnums[index->nPrimaryFields++] = *j + 1;
 		(*j)++;

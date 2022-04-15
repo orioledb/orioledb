@@ -735,6 +735,7 @@ o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
 	o_table->oids = oids;
 	o_table->toast_oids = toastOids;
 	o_table->has_missing = false;
+	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
 
 	if (OCompressIsValid(default_compress))
 	{

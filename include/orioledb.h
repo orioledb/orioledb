@@ -26,7 +26,7 @@
 #include "utils/relcache.h"
 
 #define ORIOLEDB_VERSION "OrioleDB public alpha 6"
-#define ORIOLEDB_BINARY_VERSION 2
+#define ORIOLEDB_BINARY_VERSION 3
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_EVT_EXTENSION "evt"
