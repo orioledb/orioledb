@@ -38,6 +38,7 @@
 #include "lib/pairingheap.h"
 #include "miscadmin.h"
 #include "postmaster/postmaster.h"
+#include "postmaster/startup.h"
 #include "pgstat.h"
 #include "replication/message.h"
 #include "storage/ipc.h"
@@ -237,6 +238,7 @@ static void update_run_xmin(void);
 static void free_run_xmin(void);
 static bool need_flush_undo_pos(int worker_id);
 static void flush_current_undo_stack(void);
+static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, int num_workers);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -772,6 +774,8 @@ recovery_init(int worker_id)
 		read_xids(checkpoint_state->lastCheckpointNumber,
 				  *recovery_single_process,
 				  worker_id);
+
+	HandleStartupProcInterrupts_hook = o_handle_startup_proc_interrupts_hook;
 }
 
 static void
@@ -849,6 +853,7 @@ recovery_finish(int worker_id)
 		if (cur_state->used_by)
 			pfree(cur_state->used_by);
 	}
+	HandleStartupProcInterrupts_hook = NULL;
 	hash_destroy(recovery_xid_state_hash);
 	recovery_xid_state_hash = NULL;
 	release_undo_size(UndoReserveTxn);
@@ -1543,7 +1548,7 @@ recovery_on_proc_exit(int code, Datum arg)
 	SpinLockRelease(&recovery_undo_loc_flush->exitLock);
 }
 
-void
+static void
 o_handle_startup_proc_interrupts_hook(void)
 {
 	if (is_recovery_in_progress())

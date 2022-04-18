@@ -27,8 +27,6 @@ extern CommitSeqNo recovery_map_oxid_csn(OXid oxid, bool *found);
 
 extern void update_proc_retain_undo_location(int worker_id);
 
-extern void o_handle_startup_proc_interrupts_hook(void);
-
 static inline bool
 is_recovery_in_progress(void)
 {

@@ -578,7 +578,6 @@ _PG_init(void)
 	snapshot_deregister_hook = undo_snapshot_deregister_hook;
 	reset_xmin_hook = orioledb_reset_xmin_hook;
 	ExecInitFuncHook = OExecInitFuncHook;
-	HandleStartupProcInterrupts_hook = o_handle_startup_proc_interrupts_hook;
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
 	xact_redo_hook = o_xact_redo_hook;
