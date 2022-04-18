@@ -338,6 +338,7 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 				tts_orioledb_fill_key_bound(scan_slot,
 											primary_td,
 											&key);
+				o_btree_load_shmem(&primary_td->desc);
 				primary_tup = o_btree_find_tuple_by_key(&primary_td->desc,
 														(Pointer) &key, BTreeKeyBound,
 														csn, &primaryTupleCsn,
