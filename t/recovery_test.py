@@ -1011,6 +1011,46 @@ class RecoveryTest(BaseTest):
 		node.start()
 		node.stop()
 
+	def test_wal_overflow_on_invalidate(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		"""
+			orioledb.debug_disable_bgwriter = true
+		""")
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+		node.safe_psql("""
+			CREATE TABLE IF NOT EXISTS o_test (
+				key integer NOT NULL,
+				val integer NOT NULL,
+				PRIMARY KEY(key)
+			) USING orioledb;
+		""")
+
+		with node.connect() as con1:
+			with node.connect() as con2:
+				con1.begin()
+				con1.execute("""
+					ALTER TABLE o_test ADD COLUMN val_2 integer NOT NULL;
+					INSERT INTO o_test (key, val, val_2)
+						(SELECT val, val * 100, val + 100
+							FROM generate_series(1, 223) val);
+					ALTER TABLE o_test DROP COLUMN val_2;
+				""")
+
+				con2.execute("""
+					CHECKPOINT;
+				""")
+				con1.commit()
+				con2.commit()
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		node.stop()
+
 	def test_tup_key_hash_with_nulls(self):
 		node = self.node
 		node.append_conf('postgresql.conf',

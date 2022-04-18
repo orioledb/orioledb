@@ -31,7 +31,6 @@
 
 static char local_wal_buffer[LOCAL_WAL_BUFFER_SIZE];
 static int	local_wal_buffer_offset;
-static bool local_wal_buffer_overflowed;
 static ORelOids local_oids;
 static OIndexType local_type;
 
@@ -160,7 +159,7 @@ wal_rollback(OXid oxid)
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(WALRec));
-	if (local_wal_buffer_overflowed)
+	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
 	add_wal_record(WAL_REC_ROLLBACK);
 	wait_pos = flush_local_wal(false);
@@ -261,6 +260,14 @@ add_invalidate_wal_record(ORelOids oids, Oid old_relnode)
 	flush_local_wal_if_needed(sizeof(*rec));
 	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
+	if (local_wal_buffer_offset == 0)
+	{
+		OXid		oxid = get_current_oxid_if_any();
+
+		Assert(oxid != InvalidOXid);
+		add_xid_wal_record(oxid);
+	}
+
 	rec = (WALRecInvalidate *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	rec->recType = WAL_REC_INVALIDATE;
@@ -347,7 +354,6 @@ flush_local_wal(bool commit)
 	}
 
 	local_wal_buffer_offset = 0;
-	local_wal_buffer_overflowed = false;
 	local_type = oIndexInvalid;
 	local_oids.datoid = InvalidOid;
 	local_oids.reloid = InvalidOid;
@@ -365,7 +371,6 @@ flush_local_wal_if_needed(int required_length)
 		log_logical_wal_container(local_wal_buffer, local_wal_buffer_offset);
 
 		local_wal_buffer_offset = 0;
-		local_wal_buffer_overflowed = true;
 		local_type = oIndexInvalid;
 		local_oids.datoid = InvalidOid;
 		local_oids.reloid = InvalidOid;
