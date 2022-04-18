@@ -16,8 +16,8 @@ class CheckpointEvictionTest(BaseTest):
 		node.append_conf('postgresql.conf',
 					"""
 						orioledb.debug_disable_pools_limit = true
-						orioledb.main_buffers = 10MB
-						orioledb.free_tree_buffers = 512kB
+						orioledb.main_buffers = 1MB
+						orioledb.free_tree_buffers = 256kB
 						orioledb.debug_disable_bgwriter = true
 					""")
 		node.start()
@@ -28,7 +28,7 @@ class CheckpointEvictionTest(BaseTest):
 			val int NOT NULL,
 			PRIMARY KEY (key)
 			) USING orioledb
-			WITH (compress = 5, toast_compress = 10, primary_compress = -1);
+			WITH (compress = 5, toast_compress = 10, primary_compress = 5);
 			CREATE UNIQUE INDEX o_test_ix2 ON o_test (key);
 			CREATE UNIQUE INDEX o_test_ix3 ON o_test (key);
 			CREATE UNIQUE INDEX o_test_ix4 ON o_test (key);
@@ -39,7 +39,7 @@ class CheckpointEvictionTest(BaseTest):
 			CREATE UNIQUE INDEX o_test_ix9 ON o_test (key);
 		""")
 		n = 35000
-		m = 6
+		m = 5
 		con1 = node.connect()
 		for i in range(1, m):
 			con1.execute("""
@@ -50,16 +50,16 @@ class CheckpointEvictionTest(BaseTest):
 		con1.close()
 		node.safe_psql("CHECKPOINT;")
 
-		n = 600
-		m = 10
+		n = 2000
+		m = 5
 		for i in range(1, m):
 			node.safe_psql("""
 				DELETE FROM o_test WHERE mod(key, %d) = 0;
 			""" % n)
 			if n > 100:
-				n = n - 100
-			else:
 				n = n / 2
+			else:
+				n = n - 10
 			node.safe_psql("CHECKPOINT;")
 
 	def concurrent_eviction_base(self, compressed, bp_value):

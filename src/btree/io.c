@@ -1840,12 +1840,7 @@ retry:
 		return OWalkPageSkipped;
 	}
 
-	if (desc->storageType == BTreeStorageTemporary)
-	{
-		checkpoint_number = 1;
-		copy_blkno = false;
-	}
-	else if (!get_checkpoint_number(desc, blkno, &checkpoint_number, &copy_blkno))
+	if (!get_checkpoint_number(desc, blkno, &checkpoint_number, &copy_blkno))
 	{
 		unlock_page(blkno);
 
