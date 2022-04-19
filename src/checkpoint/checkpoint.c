@@ -4505,6 +4505,14 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not fill sequence buffers.")));
 	}
+
+	if (!init_seq_buf(&desc->tmpBuf[1 - chkp_index],
+					  &meta_page->tmpBuf[1 - chkp_index],
+					  NULL, true, false, 0, NULL))
+	{
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not fill sequence buffers.")));
+	}
 }
 
 /*
