@@ -115,6 +115,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	 * See description of the function.
 	 */
 	Assert((imageFlag && (targetLevel == 0 || targetLevel == 1) && !fetchFlag && !modifyFlag)
+		   || (imageFlag && targetLevel == 0 && !fetchFlag && modifyFlag)
 		   || (!imageFlag && fetchFlag && !modifyFlag && !keepLokeyFlag)
 		   || (!imageFlag && !fetchFlag && modifyFlag && !keepLokeyFlag));
 	Assert(!(COMMITSEQNO_IS_NORMAL(context->csn) && modifyFlag));

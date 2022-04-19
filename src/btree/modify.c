@@ -1030,7 +1030,9 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_INSERT, 2);
 
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
-						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+						   BTREE_PAGE_FIND_MODIFY |
+						   BTREE_PAGE_FIND_IMAGE |
+						   BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
 
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
 		refind_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0,
