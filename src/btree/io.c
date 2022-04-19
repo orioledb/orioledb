@@ -90,7 +90,8 @@ static void write_page(OBTreeFindPageContext *context,
 					   uint32 checkpoint_number,
 					   bool evict, bool copy_blkno);
 static int	tree_offsets_cmp(const void *a, const void *b);
-static void writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc, FileExtent extent);
+static void writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
+								 uint64 downlink);
 static void perform_writeback(IOWriteBack *writeback);
 
 Size
@@ -1371,7 +1372,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 
 			if (DiskDownlinkIsValid(new_downlink))
-				writeback_put_extent(&io_writeback, desc, page_desc->fileExtent);
+				writeback_put_extent(&io_writeback, desc, new_downlink);
 
 			/* Page is not dirty anymore */
 			CLEAN_DIRTY(desc->ppool, blkno);
@@ -1388,9 +1389,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 
 			if (DiskDownlinkIsValid(new_downlink))
-			{
-				writeback_put_extent(&io_writeback, desc, page_desc->fileExtent);
-			}
+				writeback_put_extent(&io_writeback, desc, new_downlink);
 
 			/* Clean dirty only if there are no concurrent writes */
 			lock_page(blkno);
@@ -1564,7 +1563,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 			elog(FATAL, "Can not evict rootPageBlkno page on disk.");
 		}
 
-		writeback_put_extent(&io_writeback, desc, root_desc->fileExtent);
+		writeback_put_extent(&io_writeback, desc, new_downlink);
 		unlock_io(root_desc->ionum);
 		root_desc->ionum = -1;
 	}
@@ -2060,11 +2059,17 @@ tree_offsets_cmp(const void *a, const void *b)
 }
 
 static void
-writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc, FileExtent extent)
+writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
+					 uint64 downlink)
 {
 	TreeOffset	offset;
 	off_t		blcksz = 0;
 	int			last_segno;
+	FileExtent	extent;
+
+	Assert(DOWNLINK_IS_ON_DISK(downlink));
+	extent.len = DOWNLINK_GET_DISK_LEN(downlink);
+	extent.off = DOWNLINK_GET_DISK_OFF(downlink);
 
 	if (!ORelOidsIsValid(desc->oids) || desc->type == oIndexInvalid)
 		return;
