@@ -17,6 +17,7 @@
 #include "btree/find.h"
 #include "btree/insert.h"
 #include "btree/io.h"
+#include "btree/merge.h"
 #include "btree/modify.h"
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
@@ -789,7 +790,16 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 	MARK_DIRTY(desc->ppool, blkno);
 
 	END_CRIT_SECTION();
-	unlock_release(context, true);
+
+	if (!OXidIsValid(context->opOxid) && is_page_too_sparse(desc, page))
+	{
+		(void) btree_try_merge_and_unlock(desc, blkno, false, false);
+		unlock_release(context, false);
+	}
+	else
+	{
+		unlock_release(context, true);
+	}
 
 	return OBTreeModifyResultDeleted;
 }

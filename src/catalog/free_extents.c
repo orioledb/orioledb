@@ -29,6 +29,7 @@
 #include "btree/find.h"
 #include "btree/io.h"
 #include "btree/iterator.h"
+#include "btree/merge.h"
 #include "btree/modify.h"
 #include "btree/page_chunks.h"
 #include "catalog/free_extents.h"
@@ -203,7 +204,13 @@ get_extent(BTreeDescr *desc, uint16 len)
 	deleted_tup = *cur_tup;
 
 	MARK_DIRTY(len_off_tree->ppool, context.items[context.index].blkno);
-	unlock_page(context.items[context.index].blkno);
+
+	if (is_page_too_sparse(len_off_tree, p))
+		(void) btree_try_merge_and_unlock(len_off_tree,
+										  context.items[context.index].blkno,
+										  false, false);
+	else
+		unlock_page(context.items[context.index].blkno);
 
 	Assert(deleted_tup.extent.length >= len);
 	tup = deleted_tup;
