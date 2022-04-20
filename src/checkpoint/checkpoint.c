@@ -2868,13 +2868,10 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 					 * forbidden by get_checkpoint_number() in walk_page()
 					 */
 					CLEAN_DIRTY(descr->ppool, blkno);
-				}
 
-				/* prepare_leaf_page() unlocks page */
-				prepare_leaf_page(descr, state);
+					/* prepare_leaf_page() unlocks page */
+					prepare_leaf_page(descr, state);
 
-				if (was_dirty)
-				{
 					downlink = perform_page_io(descr,
 											   blkno,
 											   state->stack[level].image,
@@ -2899,6 +2896,9 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 					Assert(state->stack[level].autonomous == false);
 					parent_dirty = false;
 					downlink = MAKE_ON_DISK_DOWNLINK(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent);
+
+					/* prepare_leaf_page() unlocks page */
+					prepare_leaf_page(descr, state);
 				}
 
 				/* Indicate that we've finished that page image */
@@ -3765,12 +3765,12 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 									page, &loc);
 			}
 
+			message->action = WalkContinue;
+			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
+
 			unlock_page(blkno);
 			/* IO is in-progress.  So, wait for completeness and retry. */
 			wait_for_io_completion(DOWNLINK_GET_IO_LOCKNUM(downlink));
-
-			message->action = WalkContinue;
-			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
 			return;
 		}
 	}
@@ -3837,10 +3837,9 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		ionum = page_desc->ionum;
 		if (ionum >= 0)
 		{
+			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
 			unlock_page(blkno);
 			wait_for_io_completion(ionum);
-			message->action = WalkContinue;
-			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
 			return;
 		}
 	}
