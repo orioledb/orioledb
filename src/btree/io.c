@@ -1702,7 +1702,7 @@ retry:
 		return OWalkPageSkipped;
 	}
 
-	if (O_PAGE_IS(p, UNDER_MERGE) || O_PAGE_IS(p, PRE_CLEANUP))
+	if (O_PAGE_IS(p, PRE_CLEANUP))
 	{
 		unlock_page(blkno);
 		return OWalkPageSkipped;

@@ -381,7 +381,7 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 	char		newItem[Max(BTreeLeafTuphdrSize, BTreeNonLeafTuphdrSize) + O_BTREE_MAX_TUPLE_SIZE];
 
 	init_new_btree_page(desc, new_blkno,
-						left_header->flags & ~(O_BTREE_FLAG_LEFTMOST | O_BTREE_FLAG_UNDER_MERGE),
+						left_header->flags & ~(O_BTREE_FLAG_LEFTMOST),
 						PAGE_GET_LEVEL(left_page), false);
 
 	/* Fill the array of items for btree_page_reorg() function */
@@ -506,7 +506,7 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 	right_header->csn = csn;
 	left_header->rightLink = MAKE_IN_MEMORY_RIGHTLINK(new_blkno,
 													  O_PAGE_GET_CHANGE_COUNT(right_page));
-	left_header->flags &= ~(O_BTREE_FLAG_RIGHTMOST | O_BTREE_FLAG_UNDER_MERGE);
+	left_header->flags &= ~(O_BTREE_FLAG_RIGHTMOST);
 
 	btree_page_reorg(desc, left_page, &items[0], left_count,
 					 splitkey_len, splitkey, NULL);

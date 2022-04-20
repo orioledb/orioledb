@@ -112,9 +112,6 @@ btree_try_merge_pages(BTreeDescr *desc,
 		 * We can try to merge thr parent page in the loop.  No undo is
 		 * required for non-leaf pages.
 		 */
-		BTreePageHeader *parent_header = (BTreePageHeader *) parent;
-
-		parent_header->flags |= O_BTREE_FLAG_UNDER_MERGE;
 		if (!O_PAGE_IS(parent, RIGHTMOST))
 			copy_fixed_hikey(desc, parent_hikey, parent);
 		else
@@ -199,7 +196,6 @@ bool
 btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 						   bool nested, bool wait_io)
 {
-	BTreePageHeader *target_header;
 	BTreePageItemLocator target_loc,
 				left_loc,
 				right_loc;
@@ -238,13 +234,9 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	Assert(desc->rootInfo.rootPageBlkno != blkno);
 	Assert(is_page_too_sparse(desc, target));
 	Assert(!O_PAGE_IS(target, LEFTMOST) || !O_PAGE_IS(target, RIGHTMOST));
-	Assert(!O_PAGE_IS(target, UNDER_MERGE));
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(target)));
 
 	page_block_reads(blkno);
-	target_header = (BTreePageHeader *) target;
-	/* TODO: cleanup O_BTREE_FLAG_UNDER_MERGE on error */
-	target_header->flags |= O_BTREE_FLAG_UNDER_MERGE;
 
 	/* copy hikey of current page */
 	if (!O_PAGE_IS(target, RIGHTMOST))
@@ -314,19 +306,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		/* all ok, lock target page */
 		lock_page(target_blkno);
 		target = O_GET_IN_MEMORY_PAGE(target_blkno);
-		target_header = (BTreePageHeader *) target;
 		Assert((level == 0) == O_PAGE_IS(target, LEAF));
-
-		if (!O_PAGE_IS(target, UNDER_MERGE))
-		{
-			/*
-			 * Concurrent split or merge happens, O_BTREE_FLAG_UNDER_MERGE
-			 * already cleaned.
-			 */
-			unlock_page(parent_blkno);
-			unlock_page(target_blkno);
-			break;
-		}
 
 		if (BTREE_PAGE_ITEMS_COUNT(parent) == 1 ||
 			RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(target)))
@@ -336,9 +316,6 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 			 * split in progress.
 			 */
 			unlock_page(parent_blkno);
-
-			page_block_reads(target_blkno);
-			target_header->flags &= ~O_BTREE_FLAG_UNDER_MERGE;
 			unlock_page(target_blkno);
 			break;
 		}
@@ -348,9 +325,6 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		{
 			/* pages merge is concurrent to in progress checkpoint */
 			unlock_page(parent_blkno);
-
-			page_block_reads(target_blkno);
-			target_header->flags &= ~O_BTREE_FLAG_UNDER_MERGE;
 			unlock_page(target_blkno);
 			break;
 		}
@@ -478,8 +452,6 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		if (!merged)
 		{
 			unlock_page(parent_blkno);
-			page_block_reads(target_blkno);
-			target_header->flags &= ~O_BTREE_FLAG_UNDER_MERGE;
 			unlock_page(target_blkno);
 			break;
 		}
@@ -675,8 +647,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 
 	page_block_reads(left_blkno);
 
-	/* clear O_BTREE_FLAG_UNDER_MERGE for the left page */
-	left_header->flags &= ~O_BTREE_FLAG_UNDER_MERGE;
 	left_header->flags = left_header->flags | right_header->flags;
 
 	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey, NULL);
@@ -697,10 +667,6 @@ is_page_too_sparse(BTreeDescr *desc, Page p)
 
 	/* we can not merge rootPageBlkno page */
 	if (O_PAGE_IS(p, RIGHTMOST) && O_PAGE_IS(p, LEFTMOST))
-		return false;
-
-	/* page is already under merge */
-	if (O_PAGE_IS(p, UNDER_MERGE))
 		return false;
 
 	/* page should not be under split */
