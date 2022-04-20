@@ -380,13 +380,27 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 			}
 			else if (DOWNLINK_IS_IN_MEMORY(right_tuph->downlink))
 			{
+				int io_num;
+
 				Assert(DOWNLINK_IS_IN_MEMORY(right_tuph->downlink));
 				right_blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(right_tuph->downlink);
 				lock_page(right_blkno);
 				right = O_GET_IN_MEMORY_PAGE(right_blkno);
 
+				io_num = O_GET_IN_MEMORY_PAGEDESC(right_blkno)->ionum;
+				if (io_num >= 0 && wait_io)
+				{
+					unlock_page(parent_blkno);
+					unlock_page(target_blkno);
+					unlock_page(right_blkno);
+					target_blkno = OInvalidInMemoryBlkno;
+					wait_for_io_completion(io_num);
+					continue;
+				}
+
 				if (!O_PAGE_IS(right, PRE_CLEANUP) &&
-					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)))
+					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)) &&
+					io_num < 0)
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno, &key,
 												   &merge_parent, target_blkno,
@@ -424,13 +438,27 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 			}
 			else if (DOWNLINK_IS_IN_MEMORY(left_tuph->downlink))
 			{
+				int		io_num;
+
 				Assert(DOWNLINK_IS_IN_MEMORY(left_tuph->downlink));
 				left_blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(left_tuph->downlink);
 				lock_page(left_blkno);
 				left = O_GET_IN_MEMORY_PAGE(left_blkno);
 
+				io_num = O_GET_IN_MEMORY_PAGEDESC(target_blkno)->ionum;
+				if (io_num >= 0 && wait_io)
+				{
+					unlock_page(parent_blkno);
+					unlock_page(left_blkno);
+					unlock_page(target_blkno);
+					target_blkno = OInvalidInMemoryBlkno;
+					wait_for_io_completion(io_num);
+					continue;
+				}
+
 				if (!O_PAGE_IS(left, PRE_CLEANUP) &&
-					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(left)))
+					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(left)) &&
+					io_num < 0)
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno,
 												   &key, &merge_parent,
