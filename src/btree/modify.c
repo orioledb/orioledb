@@ -974,7 +974,6 @@ slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
 	Page		p;
 	OFixedKey	hikey_buf;
 
-	btree_find_context_from_modify_to_read(pageFindContext);
 	p = pageFindContext->img;
 
 	while (true)
@@ -1013,8 +1012,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	Page		p;
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
-	uint32		lock_hash;
-	bool		hold_unique_lock = false;
+	LWLock	   *uniqueLock;
 	OBTreeModifyResult result;
 	Jsonb	   *params = NULL;
 
@@ -1059,7 +1057,27 @@ retry:
 								key, BTreeKeyUniqueUpperBound) >= 0);
 	}
 
-	if (fastpath)
+	uniqueLock = &unique_locks[o_btree_unique_hash(desc, tuple) % num_unique_locks].lock;
+
+	/*---
+	 * We can do fast path unique check if we know that the required key range
+	 * resides the single page, and we managed to take a unique lwlock
+	 * simultaneusly.
+	 *
+	 * It might seem that we don't need unique lwlock as soon as we see all the
+	 * key range in the locked page.  However, consider the following example.
+	 *
+	 * s1: Unique lwlock acquire
+	 * s1: Slow path check
+	 * Page merge
+	 * s2: Fast patch check
+	 * s2: Insert
+	 * s1: Insert
+	 *
+	 * Due to page merge, we might end up with double insert.  This even fast
+	 * path check requires unique lwlock.
+	 */
+	if (fastpath && LWLockConditionalAcquire(uniqueLock, LW_EXCLUSIVE))
 	{
 		OTupleXactInfo xactInfo;
 
@@ -1088,6 +1106,7 @@ retry:
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
 				unlock_page(blkno);
+				LWLockRelease(uniqueLock);
 				return OBTreeModifyResultFound;
 			}
 			else
@@ -1107,6 +1126,7 @@ retry:
 					}
 				}
 				unlock_page(blkno);
+				LWLockRelease(uniqueLock);
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
 				refind_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0,
 							blkno, pageChangeCount);
@@ -1128,9 +1148,13 @@ retry:
 	{
 		OTupleXactInfo xactInfo;
 
-		lock_hash = o_btree_unique_hash(desc, tuple);
-		LWLockAcquire(&unique_locks[lock_hash % num_unique_locks].lock, LW_EXCLUSIVE);
-		hold_unique_lock = true;
+		/*
+		 * Evade deadlock: switch context to read mode to release page lock,
+		 * before taking an unique lwlock.
+		 */
+		btree_find_context_from_modify_to_read(&pageFindContext);
+
+		LWLockAcquire(uniqueLock, LW_EXCLUSIVE);
 
 		if (slowpath_unique_check(desc, &pageFindContext, key,
 								  opOxid, &xactInfo))
@@ -1191,8 +1215,8 @@ retry:
 									 tuple, tupleType, key,
 									 keyType, opOxid, opCsn, lockMode,
 									 callbackInfo);
-	if (hold_unique_lock)
-		LWLockRelease(&unique_locks[lock_hash % num_unique_locks].lock);
+
+	LWLockRelease(uniqueLock);
 	return result;
 }
 
