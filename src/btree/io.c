@@ -625,7 +625,8 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 		return false;
 	}
 
-	if (checkpoint_state->treeType == desc->type &&
+	if (desc->storageType == BTreeStoragePersistence &&
+		checkpoint_state->treeType == desc->type &&
 		checkpoint_state->datoid == desc->oids.datoid &&
 		checkpoint_state->relnode == desc->oids.relnode &&
 		checkpoint_state->curKeyType != CurKeyFinished)
