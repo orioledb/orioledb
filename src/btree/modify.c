@@ -1113,6 +1113,7 @@ retry:
 			{
 				OBTreeWaitCallbackAction cbAction;
 
+				LWLockRelease(uniqueLock);
 				if (callbackInfo->waitCallback)
 				{
 					cbAction = callbackInfo->waitCallback(desc,
@@ -1126,7 +1127,6 @@ retry:
 					}
 				}
 				unlock_page(blkno);
-				LWLockRelease(uniqueLock);
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
 				refind_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0,
 							blkno, pageChangeCount);
@@ -1182,11 +1182,14 @@ retry:
 					 */
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
+				LWLockRelease(uniqueLock);
 				return OBTreeModifyResultFound;
 			}
 			else
 			{
 				OBTreeWaitCallbackAction cbAction;
+
+				LWLockRelease(uniqueLock);
 
 				if (callbackInfo->waitCallback)
 				{
