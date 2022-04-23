@@ -1114,16 +1114,54 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 }
 
 void
-btree_find_context_from_modify_to_read(OBTreeFindPageContext *context)
+btree_find_context_from_modify_to_read(OBTreeFindPageContext *context,
+									   Pointer key,
+									   BTreeKeyType keyType,
+									   uint16 level)
 {
-	OInMemoryBlkno blkno = context->items[context->index].blkno;
+	BTreePageItemLocator loc;
+	bool		success;
 
+	Assert(!BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION));
 	Assert(BTREE_PAGE_FIND_IS(context, MODIFY));
-
-	memcpy(context->img, O_GET_IN_MEMORY_PAGE(blkno), ORIOLEDB_BLCKSZ);
-	unlock_page(blkno);
-
+	Assert(BTREE_PAGE_FIND_IS(context, IMAGE));
 	BTREE_PAGE_FIND_UNSET(context, MODIFY);
+
+	success = btree_find_read_page(context,
+								   context->items[context->index].blkno,
+								   context->items[context->index].pageChangeCount,
+								   context->img, key,
+								   keyType,
+								   NULL);
+
+	if (!success)
+	{
+		(void) find_page(context, key, keyType, level);
+		return;
+	}
+
+	if (keyType == BTreeKeyRightmost)
+	{
+		/* We're looking for the rightmost page, so go the rightmost downlink */
+		BTREE_PAGE_LOCATOR_LAST(context->img, &loc);
+	}
+	else if (keyType == BTreeKeyNone)
+	{
+		/* We're looking for the leftmost page, so go the leftmost downlink */
+		BTREE_PAGE_LOCATOR_FIRST(context->img, &loc);
+	}
+	else
+	{
+		/* Locate the correct downlink within the non-leaf page */
+		(void) btree_page_search(context->desc, context->img,
+								 key, keyType,
+								 NULL, &loc);
+		(void) page_locator_find_real_item(context->img,
+										   NULL,
+										   &loc);
+	}
+
+	context->items[context->index].locator = loc;
 }
 
 /*

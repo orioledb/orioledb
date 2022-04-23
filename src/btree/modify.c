@@ -974,6 +974,9 @@ slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
 	Page		p;
 	OFixedKey	hikey_buf;
 
+	btree_find_context_from_modify_to_read(pageFindContext,
+										   key, BTreeKeyUniqueLowerBound, 0);
+
 	p = pageFindContext->img;
 
 	while (true)
@@ -1149,10 +1152,9 @@ retry:
 		OTupleXactInfo xactInfo;
 
 		/*
-		 * Evade deadlock: switch context to read mode to release page lock,
-		 * before taking an unique lwlock.
+		 * Evade deadlock: unlock the page before taking an unique lwlock.
 		 */
-		btree_find_context_from_modify_to_read(&pageFindContext);
+		unlock_page(blkno);
 
 		LWLockAcquire(uniqueLock, LW_EXCLUSIVE);
 
