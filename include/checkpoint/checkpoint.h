@@ -187,6 +187,7 @@ typedef struct
 	int			oXidQueueFlushTrancheId;
 	LWLock		oXidQueueFlushLock;
 	int			copyBlknoTrancheId;
+	int			oMetaTrancheId;
 	pg_atomic_uint64 xidRecLastPos;
 	pg_atomic_uint64 xidRecFlushPos;
 	XidFileRec	xidRecQueue[FLEXIBLE_ARRAY_MEMBER];

@@ -277,6 +277,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->oXidQueueTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oXidQueueFlushTrancheId = LWLockNewTrancheId();
 		checkpoint_state->copyBlknoTrancheId = LWLockNewTrancheId();
+		checkpoint_state->oMetaTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&checkpoint_state->oTablesAddLock,
 						 checkpoint_state->oTablesAddTrancheId);
 		LWLockInitialize(&checkpoint_state->oSysTreesLock,
@@ -362,6 +363,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 						  "OSysTreesTranche");
 	LWLockRegisterTranche(checkpoint_state->copyBlknoTrancheId,
 						  "CopyBlknoTranche");
+	LWLockRegisterTranche(checkpoint_state->oMetaTrancheId,
+						  "orioledb_meta");
 }
 
 static void

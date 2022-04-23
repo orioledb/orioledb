@@ -381,6 +381,8 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 
 	LWLockInitialize(&metaPageBlkno->copyBlknoLock,
 					 checkpoint_state->copyBlknoTrancheId);
+	LWLockInitialize(&metaPageBlkno->metaLock,
+					 checkpoint_state->oMetaTrancheId);
 
 	page_desc->type = oIndexInvalid;
 	page_desc->oids.datoid = InvalidOid;

@@ -26,6 +26,7 @@ typedef struct
 	SeqBufDescShared tmpBuf[2];
 	pg_atomic_uint64 numFreeBlocks;
 	pg_atomic_uint64 datafileLength;
+	LWLock		metaLock;
 	LWLock		copyBlknoLock;
 
 	/*

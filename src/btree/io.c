@@ -72,7 +72,6 @@ static IOWriteBack io_writeback =
 	0, 0, NULL
 };
 static LWLockPadded *io_locks;
-static LWLockPadded *meta_locks;
 static IOShmem *ioShmem = NULL;
 static int	num_io_lwlocks;
 static bool io_in_progress = false;
@@ -416,14 +415,12 @@ request_btree_io_lwlocks(void)
 {
 	num_io_lwlocks = max_procs * 4;
 	RequestNamedLWLockTranche("orioledb_btree_io", num_io_lwlocks);
-	RequestNamedLWLockTranche("orioledb_meta", BTREE_NUM_META_LWLOCKS);
 }
 
 void
 init_btree_io_lwlocks(void)
 {
 	io_locks = GetNamedLWLockTranche("orioledb_btree_io");
-	meta_locks = GetNamedLWLockTranche("orioledb_meta");
 }
 
 /*
@@ -473,12 +470,6 @@ unlock_io(int ionum)
 	LWLockRelease(&io_locks[ionum].lock);
 }
 
-LWLock *
-get_meta_lwlock(BTreeDescr *desc)
-{
-	return &meta_locks[desc->rootInfo.metaPageBlkno % BTREE_NUM_META_LWLOCKS].lock;
-}
-
 /*
  * Get next disk free offset for uncompressed on disk B-tree.
  * Returns InvalidFileExtentOff if fails.
@@ -486,8 +477,8 @@ get_meta_lwlock(BTreeDescr *desc)
 static uint64
 get_free_disk_offset(BTreeDescr *desc)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
-	LWLock	   *meta_lock = get_meta_lwlock(desc);
+	BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+	LWLock	   *metaLock = &metaPage->metaLock;
 	uint64		result,
 				numFreeBlocks;
 	uint32		free_buf_num;
@@ -497,8 +488,8 @@ get_free_disk_offset(BTreeDescr *desc)
 	 * Switch to the next sequential buffer with free blocks numbers in
 	 * needed.
 	 */
-	numFreeBlocks = pg_atomic_read_u64(&metaPageBlkno->numFreeBlocks);
-	free_buf_num = metaPageBlkno->freeBuf.tag.num;
+	numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
+	free_buf_num = metaPage->freeBuf.tag.num;
 	while (numFreeBlocks == 0 &&
 		   can_use_checkpoint_extents(desc, free_buf_num + 1))
 	{
@@ -511,35 +502,35 @@ get_free_disk_offset(BTreeDescr *desc)
 		tag.num = free_buf_num + 1;
 		tag.type = 't';
 
-		LWLockAcquire(meta_lock, LW_EXCLUSIVE);
+		LWLockAcquire(metaLock, LW_EXCLUSIVE);
 		replaceResult = seq_buf_try_replace(&desc->freeBuf,
 											&tag,
-											&metaPageBlkno->numFreeBlocks,
+											&metaPage->numFreeBlocks,
 											use_device ? sizeof(FileExtent) : sizeof(uint32));
 		if (replaceResult == SeqBufReplaceSuccess)
 		{
 			seq_buf_remove_file(&old_tag);
 		}
-		LWLockRelease(meta_lock);
+		LWLockRelease(metaLock);
 		if (replaceResult == SeqBufReplaceError)
 		{
 			return InvalidFileExtentOff;
 		}
 		/* SeqBufReplaceAlready requires no action, just retry if needed */
 
-		numFreeBlocks = pg_atomic_read_u64(&metaPageBlkno->numFreeBlocks);
-		free_buf_num = metaPageBlkno->freeBuf.tag.num;
+		numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
+		free_buf_num = metaPage->freeBuf.tag.num;
 	}
 
 	/*
 	 * Try to get free block number from the buffer.  If not success, then
 	 * extend the file.
 	 */
-	LWLockAcquire(meta_lock, LW_SHARED);
+	LWLockAcquire(metaLock, LW_SHARED);
 	gotBlock = false;
 	while (numFreeBlocks > 0)
 	{
-		if (pg_atomic_compare_exchange_u64(&metaPageBlkno->numFreeBlocks,
+		if (pg_atomic_compare_exchange_u64(&metaPage->numFreeBlocks,
 										   &numFreeBlocks,
 										   numFreeBlocks - 1))
 		{
@@ -575,9 +566,9 @@ get_free_disk_offset(BTreeDescr *desc)
 		if (use_device)
 			result = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			result = pg_atomic_fetch_add_u64(&metaPageBlkno->datafileLength, 1);
+			result = pg_atomic_fetch_add_u64(&metaPage->datafileLength, 1);
 	}
-	LWLockRelease(meta_lock);
+	LWLockRelease(metaLock);
 	return result;
 }
 
@@ -615,13 +606,13 @@ static bool
 get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 								FileExtent *extent, uint32 checkpoint_number)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	BTreeMetaPage *metaPage = BTREE_GET_META(desc);
 
-	LWLockAcquire(&metaPageBlkno->copyBlknoLock, LW_SHARED);
+	LWLockAcquire(&metaPage->copyBlknoLock, LW_SHARED);
 
 	if (!get_free_disk_extent(desc, page_size, extent))
 	{
-		LWLockRelease(&metaPageBlkno->copyBlknoLock);
+		LWLockRelease(&metaPage->copyBlknoLock);
 		return false;
 	}
 
@@ -655,12 +646,12 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 
 		if (!success)
 		{
-			LWLockRelease(&metaPageBlkno->copyBlknoLock);
+			LWLockRelease(&metaPage->copyBlknoLock);
 			return false;
 		}
 	}
 
-	LWLockRelease(&metaPageBlkno->copyBlknoLock);
+	LWLockRelease(&metaPage->copyBlknoLock);
 
 	return FileExtentIsValid(*extent);
 }
@@ -833,7 +824,7 @@ load_page(OBTreeFindPageContext *context)
 	PAGE_DEC_N_ONDISK(parent_page);
 	unlock_page(parent_blkno);
 
-	/* Prepare new page metaPageBlkno-data */
+	/* Prepare new page metaPage-data */
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
 	blkno = ppool_get_page(desc->ppool, PPOOL_RESERVE_FIND);
 	lock_page(blkno);
@@ -1197,7 +1188,7 @@ perform_page_io_autonomous(BTreeDescr *desc, Page img, FileExtent *extent)
  */
 uint64
 perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
-					  BTreeMetaPage *metaPageBlkno)
+					  BTreeMetaPage *metaPage)
 {
 	Pointer		write_img;
 	size_t		write_size;
@@ -1218,7 +1209,7 @@ perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
 		if (use_device)
 			extent->off = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			extent->off = pg_atomic_fetch_add_u64(&metaPageBlkno->datafileLength, 1);
+			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, 1);
 	}
 	else
 	{
@@ -1226,7 +1217,7 @@ perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
 		if (use_device)
 			extent->off = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			extent->off = pg_atomic_fetch_add_u64(&metaPageBlkno->datafileLength, extent->len);
+			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, extent->len);
 	}
 
 	Assert(FileExtentIsValid(*extent));
@@ -1528,7 +1519,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	OInMemoryBlkno root_blkno = desc->rootInfo.rootPageBlkno;
 	Page		rootPageBlkno = O_GET_IN_MEMORY_PAGE(root_blkno);
 	OrioleDBPageDesc *root_desc = O_GET_IN_MEMORY_PAGEDESC(root_blkno);
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	BTreeMetaPage *metaPage = BTREE_GET_META(desc);
 	CheckpointFileHeader file_header = {0};
 	EvictedTreeData evicted_tree_data = {{0}};
 	uint64		new_downlink;
@@ -1578,13 +1569,13 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	ppool_free_page(desc->ppool, root_blkno, NULL);
 
-	file_header.datafileLength = pg_atomic_read_u64(&metaPageBlkno->datafileLength);
-	file_header.leafPagesNum = pg_atomic_read_u32(&metaPageBlkno->leafPagesNum);
-	file_header.ctid = pg_atomic_read_u64(&metaPageBlkno->ctid);
-	file_header.numFreeBlocks = pg_atomic_read_u64(&metaPageBlkno->numFreeBlocks);
+	file_header.datafileLength = pg_atomic_read_u64(&metaPage->datafileLength);
+	file_header.leafPagesNum = pg_atomic_read_u32(&metaPage->leafPagesNum);
+	file_header.ctid = pg_atomic_read_u64(&metaPage->ctid);
+	file_header.numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
 #ifdef USE_ASSERT_CHECKING
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
-		Assert(pg_atomic_read_u32(&metaPageBlkno->numSeqScans[i]) == 0);
+		Assert(pg_atomic_read_u32(&metaPage->numSeqScans[i]) == 0);
 #endif
 
 	evicted_tree_data.file_header = file_header;

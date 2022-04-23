@@ -74,7 +74,7 @@
 FileExtent
 get_extent(BTreeDescr *desc, uint16 len)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	BTreeMetaPage *metaPage = BTREE_GET_META(desc);
 	BTreeLeafTuphdr *header;
 	FreeTreeTuple tup,
 				deleted_tup,
@@ -92,14 +92,14 @@ get_extent(BTreeDescr *desc, uint16 len)
 	OTuple		tmpTup;
 
 	/* a fast check */
-	if (pg_atomic_read_u64(&metaPageBlkno->numFreeBlocks) < len)
+	if (pg_atomic_read_u64(&metaPage->numFreeBlocks) < len)
 	{
 		/* free extent can not be founded, increase file length */
 		result.len = len;
 		if (use_device)
 			result.off = orioledb_device_alloc(desc, len * ORIOLEDB_COMP_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			result.off = pg_atomic_fetch_add_u64(&metaPageBlkno->datafileLength, len);
+			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, len);
 		return result;
 	}
 
@@ -180,7 +180,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 		if (use_device)
 			result.off = orioledb_device_alloc(desc, len * ORIOLEDB_COMP_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			result.off = pg_atomic_fetch_add_u64(&metaPageBlkno->datafileLength, len);
+			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, len);
 		enable_stopevents = old_enable_stopevents;
 		return result;
 	}
@@ -188,7 +188,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 	Assert(p != NULL);
 	Assert(header != NULL);
 	Assert(cur_tup != NULL);
-	pg_atomic_fetch_sub_u64(&metaPageBlkno->numFreeBlocks, (uint64) len);
+	pg_atomic_fetch_sub_u64(&metaPage->numFreeBlocks, (uint64) len);
 
 	/* delete the extent from the (len, off) B-tree in-place */
 	page_block_reads(context.items[context.index].blkno);
@@ -549,7 +549,7 @@ foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback, void *arg)
 void
 add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 {
-	BTreeMetaPage *metaPageBlkno;
+	BTreeMetaPage *metaPage;
 	File		file;
 	char	   *filename,
 				buf[ORIOLEDB_BLCKSZ];
@@ -557,22 +557,23 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 				i,
 				buf_len;
 	uint32		chkp_num;
-	LWLock	   *meta_lock = get_meta_lwlock(desc);
+	LWLock	   *metaLock;
 
 	o_btree_load_shmem(desc);
-	metaPageBlkno = BTREE_GET_META(desc);
+	metaPage = BTREE_GET_META(desc);
+	metaLock = &metaPage->metaLock;
 
-	chkp_num = metaPageBlkno->freeBuf.tag.num + 1;
-	if (!can_use_checkpoint_extents(desc, metaPageBlkno->freeBuf.tag.num + 1))
+	chkp_num = metaPage->freeBuf.tag.num + 1;
+	if (!can_use_checkpoint_extents(desc, metaPage->freeBuf.tag.num + 1))
 		return;
 
-	LWLockAcquire(meta_lock, LW_EXCLUSIVE);
-	chkp_num = metaPageBlkno->freeBuf.tag.num + 1;
+	LWLockAcquire(metaLock, LW_EXCLUSIVE);
+	chkp_num = metaPage->freeBuf.tag.num + 1;
 	while (can_use_checkpoint_extents(desc, chkp_num))
 	{
-		metaPageBlkno->freeBuf.tag.num = chkp_num;
-		metaPageBlkno->freeBuf.tag.type = 't';
-		if (!seq_buf_file_exist(&metaPageBlkno->freeBuf.tag))
+		metaPage->freeBuf.tag.num = chkp_num;
+		metaPage->freeBuf.tag.type = 't';
+		if (!seq_buf_file_exist(&metaPage->freeBuf.tag))
 		{
 			/* table may be deleted or *.tmp file not created */
 			chkp_num++;
@@ -580,7 +581,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		}
 
 		/* free extents from *.tmp file */
-		filename = get_seq_buf_filename(&metaPageBlkno->freeBuf.tag);
+		filename = get_seq_buf_filename(&metaPage->freeBuf.tag);
 		file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 		if (file < 0)
 			ereport(FATAL, (errcode_for_file_access(),
@@ -594,7 +595,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 			cur_off = (FileExtent *) buf;
 			for (i = 0; i < buf_len; i += sizeof(FileExtent))
 			{
-				pg_atomic_fetch_add_u64(&metaPageBlkno->numFreeBlocks,
+				pg_atomic_fetch_add_u64(&metaPage->numFreeBlocks,
 										(uint64) cur_off->len);
 				free_extent(desc, *cur_off);
 				cur_off++;
@@ -607,7 +608,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		FileClose(file);
 
 		if (remove_old_checkpoint_files)
-			seq_buf_remove_file(&metaPageBlkno->freeBuf.tag);
+			seq_buf_remove_file(&metaPage->freeBuf.tag);
 	}
-	LWLockRelease(meta_lock);
+	LWLockRelease(metaLock);
 }

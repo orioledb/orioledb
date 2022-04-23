@@ -49,7 +49,6 @@ extern void btree_smgr_writeback(BTreeDescr *desc, off_t offset, int amount);
 extern void btree_smgr_sync(BTreeDescr *desc, off_t length);
 
 extern void init_btree_io_lwlocks(void);
-extern LWLock *get_meta_lwlock(BTreeDescr *desc);
 extern bool read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent);
 extern void load_page(OBTreeFindPageContext *context);
 extern uint64 perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
