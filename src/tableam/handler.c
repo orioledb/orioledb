@@ -1318,7 +1318,7 @@ orioledb_rewrite_table(Relation old_rel)
 	OTable	   *old_o_table,
 			   *o_table;
 	OTableDescr *old_descr,
-			   tmp_descr;
+				tmp_descr;
 
 	oids.datoid = MyDatabaseId;
 	oids.reloid = old_rel->rd_id;

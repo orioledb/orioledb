@@ -99,7 +99,7 @@ typedef struct
 	uint16		nfields;
 	uint16		primary_init_nfields;
 	uint16		nindices;
-	Oid			tid_btree_ops_oid; /* have to store it here */
+	Oid			tid_btree_ops_oid;	/* have to store it here */
 	bool		has_primary;
 	bool		has_missing;
 	bool		has_default;

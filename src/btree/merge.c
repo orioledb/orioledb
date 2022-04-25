@@ -354,7 +354,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 			}
 			else if (DOWNLINK_IS_IN_MEMORY(right_tuph->downlink))
 			{
-				int io_num;
+				int			io_num;
 
 				Assert(DOWNLINK_IS_IN_MEMORY(right_tuph->downlink));
 				right_blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(right_tuph->downlink);
@@ -412,7 +412,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 			}
 			else if (DOWNLINK_IS_IN_MEMORY(left_tuph->downlink))
 			{
-				int		io_num;
+				int			io_num;
 
 				Assert(DOWNLINK_IS_IN_MEMORY(left_tuph->downlink));
 				left_blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(left_tuph->downlink);

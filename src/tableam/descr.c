@@ -509,7 +509,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 {
 	MemoryContext old_context;
 	OIndexNumber cur_ix;
-	OIndex *index;
+	OIndex	   *index;
 	OIndexDescr *indexDescr;
 
 	fill_table_descr_common_fields(descr, o_table);
@@ -537,8 +537,8 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	indexDescr = palloc0(sizeof(OIndexDescr));
 	o_index_fill_descr(indexDescr, index);
 	index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
-							indexDescr->oids, index->indexType,
-							index->createOxid, indexDescr);
+						  indexDescr->oids, index->indexType,
+						  index->createOxid, indexDescr);
 	free_o_index(index);
 	descr->toast = indexDescr;
 

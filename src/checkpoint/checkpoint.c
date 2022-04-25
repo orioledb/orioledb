@@ -896,7 +896,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 			sort_checkpoint_map_file(desc, cur_chkp_num % 2);
 			sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
 			chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
-															desc);
+														   desc);
 		}
 		else
 		{

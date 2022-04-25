@@ -661,10 +661,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		stmts = transformCreateStmt((CreateStmt *) pstmt->utilityStmt, queryString);
 
 		/*
-		 * ... and do it.  We can't use foreach() because we may
-			* modify the list midway through, so pick off the
-			* elements one at a time, the hard way.
-			*/
+		 * ... and do it.  We can't use foreach() because we may modify the
+		 * list midway through, so pick off the elements one at a time, the
+		 * hard way.
+		 */
 		while (stmts != NIL)
 		{
 			Node	   *stmt = (Node *) linitial(stmts);
@@ -794,10 +794,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			else if (IsA(stmt, TableLikeClause))
 			{
 				/*
-				 * Do delayed processing of LIKE options.  This
-				 * will result in additional sub-statements for us
-				 * to process.  Those should get done before any
-				 * remaining actions, so prepend them to "stmts".
+				 * Do delayed processing of LIKE options.  This will result in
+				 * additional sub-statements for us to process.  Those should
+				 * get done before any remaining actions, so prepend them to
+				 * "stmts".
 				 */
 				TableLikeClause *like = (TableLikeClause *) stmt;
 				List	   *morestmts;

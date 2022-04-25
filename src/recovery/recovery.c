@@ -2308,10 +2308,10 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 	for (i = 0; i < recovery_pool_size_guc && !unexpected_worker_detach; i++)
 	{
 		while (pg_atomic_read_u64(&worker_ptrs[i].commitPtr) < ptr &&
-			workers_pool[i].queue)
+			   workers_pool[i].queue)
 		{
 			BgwHandleStatus status;
-			pid_t	pid;
+			pid_t		pid;
 
 			pg_usleep(10);
 
