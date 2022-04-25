@@ -240,4 +240,26 @@ CREATE FOREIGN TABLE ft1 (
 ) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value');
 
 DROP FOREIGN DATA WRAPPER dummy CASCADE;
+
+CREATE TABLE o_unexisting_column
+(
+	key int4,
+	PRIMARY KEY(key)
+) USING orioledb;
+
+ALTER TABLE o_unexisting_column ALTER COLUMN key_2 SET DEFAULT 5;
+ALTER TABLE o_unexisting_column ALTER COLUMN key_2 DROP DEFAULT;
+ALTER TABLE o_unexisting_column RENAME COLUMN key_2 TO key_3;
+ALTER TABLE o_unexisting_column DROP COLUMN key_2;
+ALTER TABLE o_unexisting_column ALTER COLUMN key_2 SET NOT NULL;
+ALTER TABLE o_unexisting_column ALTER COLUMN key_2 DROP NOT NULL;
+ALTER TABLE o_unexisting_column ALTER key_2 TYPE int;
+ALTER TABLE o_unexisting_column ALTER key_2 TYPE int USING key_2::integer;
+ALTER TABLE o_unexisting_column ALTER COLUMN key_2
+	ADD GENERATED ALWAYS AS IDENTITY;
+ALTER TABLE o_unexisting_column ALTER COLUMN key
+	ADD GENERATED ALWAYS AS IDENTITY;
+
+UPDATE o_unexisting_column SET key_2 = 4 WHERE key = 2;
+
 DROP EXTENSION orioledb CASCADE;
