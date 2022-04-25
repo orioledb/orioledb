@@ -1119,6 +1119,34 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 	return true;
 }
 
+/*
+ * "Owns" undo size reserved by another process.  That process is intended to
+ * call giveup_reserved_undo_size().
+ */
+void
+steal_reserved_undo_size(UndoLogType undoType, Size size)
+{
+	Assert(undoType != UndoLogNone);
+
+	reserved_undo_sizes[(int) undoType] += size;
+}
+
+/*
+ * "Forgets" reserved by this process, because another process calls
+ * steal_reserved_undo_size().
+ */
+void
+giveup_reserved_undo_size(UndoLogType undoType)
+{
+	ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+	Assert(undoType != UndoLogNone);
+
+	reserved_undo_sizes[(int) undoType] = 0;
+	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation,
+						InvalidUndoLocation);
+}
+
 void
 fsync_undo_range(UndoLogType undoType,
 				 UndoLocation fromLoc, UndoLocation toLoc,
@@ -1249,6 +1277,22 @@ add_new_undo_stack_item(UndoLogType undoType, UndoLocation location)
 		fItem->onCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 		pg_atomic_write_u64(&sharedLocations->onCommitLocation, location);
 	}
+}
+
+void
+add_new_undo_stack_item_to_process(UndoLogType undoType,
+								   UndoLocation location,
+								   int pgprocno, LocalTransactionId localXid)
+{
+	UndoStackItem *item = (UndoStackItem *) GET_UNDO_REC(undoType, location);
+	UndoStackSharedLocations *sharedLocations;
+	UndoItemTypeDescr *descr = item_type_get_descr(item->type);
+
+	Assert(!descr->callOnCommit);
+
+	sharedLocations = &oProcData[pgprocno].undoStackLocations[localXid % PROC_XID_ARRAY_SIZE][undoType];
+	item->prev = pg_atomic_read_u64(&sharedLocations->location);
+	pg_atomic_write_u64(&sharedLocations->location, location);
 }
 
 UndoLocation

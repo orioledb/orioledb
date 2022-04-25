@@ -48,6 +48,8 @@ typedef struct
 	UndoLocation imgUndoLoc;
 	int			index;
 	OBtreePageFindItem items[ORIOLEDB_MAX_DEPTH];
+	OTupleXactInfo insertXactInfo;
+	OTuple		insertTuple;
 
 	/*
 	 * When BTREE_PAGE_FIND_LOKEY_SIBLING is not set, then lokey contains

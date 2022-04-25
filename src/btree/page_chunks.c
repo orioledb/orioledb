@@ -29,11 +29,6 @@
 #include "miscadmin.h"
 #include "utils/memdebug.h"
 
-static void reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
-							   BTreePageItemLocator *location,
-							   OTuple tuple, LocationIndex tuplesize,
-							   bool replace);
-
 /*
  * Load chunk to the partial page.
  */
@@ -247,151 +242,6 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	{
 		return BTreeItemPageFitSplitRequired;
 	}
-}
-
-void
-perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
-						BTreePageItemLocator *loc, OTuple tuple,
-						LocationIndex tuplesize, bool replace)
-{
-	CommitSeqNo csn;
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageHeader *header = (BTreePageHeader *) p;
-	UndoLocation undoLocation;
-
-	START_CRIT_SECTION();
-
-	Assert(O_PAGE_IS(p, LEAF));
-
-	/* Make a page-level undo item if needed */
-	if (desc->undoType != UndoLogNone)
-	{
-		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-		undoLocation = page_add_image_to_undo(desc, p, csn, NULL, 0);
-
-		/*
-		 * Start page modification.  It contains the required memory barrier
-		 * between making undo image and setting the undo location.
-		 */
-		page_block_reads(blkno);
-
-		/* Update the old page meta-data */
-
-		header->undoLocation = undoLocation;
-		header->prevInsertOffset = MaxOffsetNumber;
-
-		/*
-		 * Memory barrier between write undo location and csn.  See comment in
-		 * the o_btree_read_page() for details.
-		 */
-		pg_write_barrier();
-
-		header->csn = csn;
-	}
-	else
-	{
-		csn = COMMITSEQNO_INPROGRESS;
-	}
-
-	reclaim_page_space(desc, p, csn, loc, tuple, tuplesize, replace);
-	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
-
-	END_CRIT_SECTION();
-}
-
-/*
- * Reclaim page space occupied by deleted and/or resized items.
- */
-static void
-reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
-				   BTreePageItemLocator *location,
-				   OTuple tuple, LocationIndex tuplesize,
-				   bool replace)
-{
-	BTreePageItemLocator loc;
-	BTreePageItem items[BTREE_PAGE_MAX_CHUNK_ITEMS];
-	int			i = 0;
-	OFixedKey	hikey;
-	LocationIndex hikeySize,
-				nVacated = 0;
-	bool		addedNewItem = false;
-
-	Assert(O_PAGE_IS(p, LEAF));
-
-	/*
-	 * Iterate page items and check if they can be erased or truncated.
-	 */
-	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
-	{
-		BTreeLeafTuphdr *tupHdr;
-		OTuple		tup;
-		bool		finished;
-
-		if (!addedNewItem &&
-			((loc.chunkOffset == location->chunkOffset &&
-			  loc.itemOffset == location->itemOffset) || loc.chunkOffset > location->chunkOffset))
-		{
-			items[i].data = tuple.data;
-			items[i].flags = tuple.formatFlags;
-			items[i].size = tuplesize;
-			Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
-			items[i].newItem = true;
-			i++;
-			addedNewItem = true;
-			if (replace)
-			{
-				Assert(loc.chunkOffset == location->chunkOffset && loc.itemOffset == location->itemOffset);
-				continue;
-			}
-		}
-
-		BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, p, &loc);
-		finished = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
-		if (finished && tupHdr->deleted &&
-			(COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn))
-		{
-			continue;
-		}
-
-		items[i].data = (Pointer) tupHdr;
-		items[i].flags = tup.formatFlags;
-		items[i].size = finished ?
-			(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
-			BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-		Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
-		items[i].newItem = false;
-
-		if (tupHdr->deleted)
-			nVacated += BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-		else if (!finished)
-			nVacated += BTREE_PAGE_GET_ITEM_SIZE(p, &loc) -
-				(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength)));
-
-		i++;
-	}
-
-	if (!addedNewItem)
-	{
-		items[i].data = tuple.data;
-		items[i].flags = tuple.formatFlags;
-		items[i].size = tuplesize;
-		Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
-		items[i].newItem = true;
-		i++;
-	}
-
-	if (O_PAGE_IS(p, RIGHTMOST))
-	{
-		O_TUPLE_SET_NULL(hikey.tuple);
-		hikeySize = 0;
-	}
-	else
-	{
-		copy_fixed_hikey(desc, &hikey, p);
-		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
-	}
-	btree_page_reorg(desc, p, items, i, hikeySize, hikey.tuple, location);
-	PAGE_SET_N_VACATED(p, nVacated);
 }
 
 void
@@ -1258,14 +1108,16 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	OffsetNumber chunkOffsets[BTREE_PAGE_MAX_CHUNKS + 1];
 	LocationIndex itemsArray[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			i,
-				j;
+				j,
+				chunkItemsCount;
 	LocationIndex hikeysFreeSpace,
 				hikeysFreeSpaceLeft;
 	LocationIndex dataFreeSpace,
 				dataFreeSpaceLeft,
 				hikeysEnd;
 	bool		isRightmost = O_PAGE_IS(p, RIGHTMOST);
-	LocationIndex chunkDataSize;
+	LocationIndex chunkDataSize,
+				targetDataSize;
 	LocationIndex maxKeyLen;
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
@@ -1279,6 +1131,8 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 	hikeysFreeSpaceLeft = hikeysFreeSpace = hikeysEnd - (MAXALIGN(sizeof(BTreePageHeader)) + MAXALIGN(hikeySize));
 	dataFreeSpaceLeft = dataFreeSpace = (ORIOLEDB_BLCKSZ - hikeysEnd) - totalDataSize - MAXALIGN(sizeof(LocationIndex) * count);
+	targetDataSize = totalDataSize + MAXALIGN(sizeof(LocationIndex) * count);
+	targetDataSize = Max(targetDataSize, (ORIOLEDB_BLCKSZ - hikeysEnd) * 3 / 4);
 
 	/*
 	 * Calculate the chunks count to fit both chunks area and data area.
@@ -1289,9 +1143,11 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	chunkOffsets[0] = 0;
 	j = 1;
 	chunkDataSize = 0;
+	chunkItemsCount = 0;
 	if (count >= 1)
 	{
 		chunkDataSize += items[0].size;
+		chunkItemsCount = 1;
 		if (O_PAGE_IS(p, LEAF) && !(items[0].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
 			fixedKeys = false;
 	}
@@ -1321,9 +1177,10 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			continue;
 		}
 
-		dataSizeRatio = (float4) chunkDataSize / (float4) totalDataSize;
+		dataSizeRatio = (float4) (chunkDataSize + MAXALIGN(sizeof(LocationIndex) * chunkItemsCount)) / (float4) targetDataSize;
 		if (dataSizeRatio >= (float4) (nextKeySize + sizeof(BTreePageChunkDesc)) / (float4) hikeysFreeSpace &&
-			dataSizeRatio >= (float4) dataSpaceDiff / (float4) dataFreeSpace)
+			(float4) chunkDataSize / (float4) totalDataSize >=
+			(float4) dataSpaceDiff / (float4) dataFreeSpace)
 		{
 			hikeysFreeSpaceLeft -= hikeySizeDiff;
 			dataFreeSpaceLeft -= dataSpaceDiff;
@@ -1331,6 +1188,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			chunkFixedKeys[j - 1] = fixedKeys;
 			fixedKeys = true;
 			chunkDataSize = 0;
+			chunkItemsCount = 0;
 			j++;
 		}
 
@@ -1364,6 +1222,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 	header->maxKeyLen = maxKeyLen;
 	header->dataSize = ptr - (Pointer) p;
+	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
 	header->chunksCount = chunksCount;
 
 	/*

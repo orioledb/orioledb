@@ -27,146 +27,156 @@
 #include "miscadmin.h"
 #include "utils/memutils.h"
 
-typedef struct
+void
+make_split_items(BTreeDescr *desc, Page page,
+				 BTreeSplitItems *items,
+				 OffsetNumber *offset, Pointer tupleheader, OTuple tuple,
+				 LocationIndex tuplesize, bool replace, CommitSeqNo csn)
 {
-	BTreeDescr *desc;
-	Page		page;
 	BTreePageItemLocator loc;
-	OTuple		newitem;
-	OffsetNumber newoffset;
-	LocationIndex newitemSize;
-	bool		replace;
-	bool		newitemIsCur;
-	CommitSeqNo csn;
-} SplitItemIterator;
+	bool		leaf = O_PAGE_IS(page, LEAF);
+	LocationIndex tuple_header_size = leaf ? BTreeLeafTuphdrSize : BTreeNonLeafTuphdrSize;
+	int			i;
+	static char newItem[Max(BTreeLeafTuphdrSize, BTreeNonLeafTuphdrSize) + O_BTREE_MAX_TUPLE_SIZE];
+	int			maxKeyLen = MAXALIGN(((BTreePageHeader *) page)->maxKeyLen);
 
-static void
-init_split_item_interator(BTreeDescr *desc, SplitItemIterator *it, Page page,
-						  OTuple newitem, LocationIndex newitemSize,
-						  OffsetNumber newoffset, bool replace, bool last,
-						  CommitSeqNo csn)
-{
-	it->desc = desc;
-	it->page = page;
-	it->newitem = newitem;
-	it->newoffset = newoffset;
-	it->newitemSize = newitemSize;
-	it->replace = replace;
-	if (!last)
+	i = 0;
+	BTREE_PAGE_LOCATOR_FIRST(page, &loc);
+	while (BTREE_PAGE_LOCATOR_IS_VALID(page, &loc) || i == *offset)
 	{
-		BTREE_PAGE_LOCATOR_FIRST(it->page, &it->loc);
-		it->newitemIsCur = (it->newoffset == 0);
-	}
-	else
-	{
-		OffsetNumber count = BTREE_PAGE_ITEMS_COUNT(page);
-
-		BTREE_PAGE_LOCATOR_LAST(it->page, &it->loc);
-
-		if (it->newoffset == count || (replace && it->newoffset == count - 1))
-			it->newitemIsCur = true;
-		else
-			it->newitemIsCur = false;
-	}
-	it->csn = csn;
-}
-
-static void
-split_item_interator_next(SplitItemIterator *it)
-{
-	if (it->newitemIsCur)
-	{
-		it->newitemIsCur = false;
-		if (it->replace)
-			BTREE_PAGE_LOCATOR_NEXT(it->page, &it->loc);
-	}
-	else
-	{
-		BTREE_PAGE_LOCATOR_NEXT(it->page, &it->loc);
-		if (BTREE_PAGE_LOCATOR_GET_OFFSET(it->page, &it->loc) == it->newoffset)
-			it->newitemIsCur = true;
-	}
-}
-
-static void
-split_item_interator_prev(SplitItemIterator *it)
-{
-	if (it->newitemIsCur)
-	{
-		it->newitemIsCur = false;
-		BTREE_PAGE_LOCATOR_PREV(it->page, &it->loc);
-	}
-	else
-	{
-		if (!it->replace && BTREE_PAGE_LOCATOR_GET_OFFSET(it->page, &it->loc) == it->newoffset)
+		if (i == *offset)
 		{
-			it->newitemIsCur = true;
-			return;
+			int			newKeyLen;
+
+			memcpy(newItem, tupleheader, tuple_header_size);
+			memcpy(&newItem[tuple_header_size], tuple.data, tuplesize);
+			if (tuplesize != MAXALIGN(tuplesize))
+				memset(&newItem[tuple_header_size + tuplesize], 0, MAXALIGN(tuplesize) - tuplesize);
+			items->items[i].data = newItem;
+			items->items[i].flags = tuple.formatFlags;
+			items->items[i].size = tuple_header_size + MAXALIGN(tuplesize);
+			items->items[i].newItem = false;
+			newKeyLen = o_btree_len(desc, tuple, leaf ? OTupleKeyLengthNoVersion : OKeyLength);
+			maxKeyLen = Max(maxKeyLen, newKeyLen);
+			i++;
+			if (replace)
+			{
+				BTREE_PAGE_LOCATOR_NEXT(page, &loc);
+				continue;
+			}
 		}
 
-		BTREE_PAGE_LOCATOR_PREV(it->page, &it->loc);
+		if (!BTREE_PAGE_LOCATOR_IS_VALID(page, &loc))
+			break;
 
-		if (it->replace && BTREE_PAGE_LOCATOR_GET_OFFSET(it->page, &it->loc) == it->newoffset)
-			it->newitemIsCur = true;
-	}
-}
-
-static int
-split_item_interator_size(SplitItemIterator *it)
-{
-	if (it->newitemIsCur)
-	{
-		return it->newitemSize + sizeof(LocationIndex);
-	}
-	else
-	{
 		/*
-		 * Take into account that split will remove the tuples deleted by
-		 * finished transactions, and resize tuples to minimal size.
+		 * In leaf pages, get rid of tuples deleted by finished transactions.
+		 * Also, resize tuples to minimal size.  In non-leaf pages, copy
+		 * tuples as-is.
 		 */
-		if (O_PAGE_IS(it->page, LEAF))
+		if (leaf)
 		{
 			BTreeLeafTuphdr *tupHdr;
 			OTuple		tup;
 			bool		finished;
 
-			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, it->page, &it->loc);
-			finished = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
+			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, page, &loc);
+			finished = COMMITSEQNO_IS_FROZEN(csn) ? false : XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
 			if (finished && tupHdr->deleted &&
-				(COMMITSEQNO_IS_INPROGRESS(it->csn) || XACT_INFO_MAP_CSN(tupHdr->xactInfo) < it->csn))
+				(COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn))
 			{
-				return 0;
+				if (i < *offset)
+					(*offset)--;
+				BTREE_PAGE_LOCATOR_NEXT(page, &loc);
+				continue;
 			}
 
-			if (finished)
-				return BTreeLeafTuphdrSize +
-					MAXALIGN(o_btree_len(it->desc, tup, OTupleLength)) +
-					sizeof(LocationIndex);
-			else
-				return BTREE_PAGE_GET_ITEM_SIZE(it->page, &it->loc) +
-					sizeof(LocationIndex);
+			items->items[i].data = (Pointer) tupHdr;
+			items->items[i].flags = tup.formatFlags;
+			items->items[i].size = finished ?
+				(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
+				BTREE_PAGE_GET_ITEM_SIZE(page, &loc);
+			items->items[i].newItem = false;
 		}
 		else
 		{
-			return BTREE_PAGE_GET_ITEM_SIZE(it->page, &it->loc) + sizeof(LocationIndex);
+			items->items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
+			items->items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(page, &loc);
+			items->items[i].size = BTREE_PAGE_GET_ITEM_SIZE(page, &loc);
+			items->items[i].newItem = false;
 		}
+
+		i++;
+		BTREE_PAGE_LOCATOR_NEXT(page, &loc);
 	}
+	items->itemsCount = i;
+	items->maxKeyLen = maxKeyLen;
+	items->hikeySize = O_PAGE_IS(page, RIGHTMOST) ? 0 : BTREE_PAGE_GET_HIKEY_SIZE(page);
+	items->hikeysEnd = BTREE_PAGE_HIKEYS_END(desc, page);
+	items->leaf = O_PAGE_IS(page, LEAF);
 }
 
-/*
- * Get current item from split iterator.
- */
-static OTuple
-split_item_interator_get(SplitItemIterator *it)
+void
+perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
+						BTreeSplitItems *items, bool needsUndo,
+						CommitSeqNo csn)
 {
-	OTuple		result;
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageHeader *header = (BTreePageHeader *) p;
+	UndoLocation undoLocation;
+	OFixedKey	hikey;
+	LocationIndex hikeySize;
 
-	if (it->newitemIsCur)
-		result = it->newitem;
+	START_CRIT_SECTION();
+
+	Assert(O_PAGE_IS(p, LEAF));
+
+	/* Make a page-level undo item if needed */
+	if (needsUndo)
+	{
+		undoLocation = page_add_image_to_undo(desc, p, csn, NULL, 0);
+
+		/*
+		 * Start page modification.  It contains the required memory barrier
+		 * between making undo image and setting the undo location.
+		 */
+		page_block_reads(blkno);
+
+		/* Update the old page meta-data */
+
+		header->undoLocation = undoLocation;
+		header->prevInsertOffset = MaxOffsetNumber;
+
+		/*
+		 * Memory barrier between write undo location and csn.  See comment in
+		 * the o_btree_read_page() for details.
+		 */
+		pg_write_barrier();
+
+		header->csn = csn;
+	}
 	else
-		BTREE_PAGE_READ_TUPLE(result, it->page, &it->loc);
+	{
+		page_block_reads(blkno);
+	}
 
-	return result;
+	if (O_PAGE_IS(p, RIGHTMOST))
+	{
+		O_TUPLE_SET_NULL(hikey.tuple);
+		hikeySize = 0;
+	}
+	else
+	{
+		copy_fixed_hikey(desc, &hikey, p);
+		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
+	}
+
+	btree_page_reorg(desc, p, items->items,
+					 items->itemsCount, hikeySize, hikey.tuple, NULL);
+	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
+	o_btree_page_calculate_statistics(desc, p);
+
+	END_CRIT_SECTION();
 }
 
 /*
@@ -178,59 +188,29 @@ split_item_interator_get(SplitItemIterator *it)
  * sets the first tuple of right page to `*split_item`.
  */
 OffsetNumber
-btree_page_split_location(BTreeDescr *desc, Page page, OffsetNumber offset,
-						  LocationIndex tuplesize, OTuple tuple, bool replace,
+btree_page_split_location(BTreeDescr *desc,
+						  BTreeSplitItems *items,
 						  OffsetNumber targetLocation, float4 spaceRatio,
-						  OTuple *split_item, CommitSeqNo csn)
+						  OTuple *split_item)
 {
 	int			leftPageSpaceLeft,
 				rightPageSpaceLeft,
 				minLeftPageItemsCount,
-				maxLeftPageItemsCount,
-				totalCount,
-				maxKeyLen;
-	LocationIndex newitem_size,
-				hikeys_end;
-	SplitItemIterator left_it,
-				right_it;
-	LocationIndex keyLen;
+				maxLeftPageItemsCount;
 
 	Assert(spaceRatio >= 0.0f && spaceRatio <= 1.0f);
 
-	if (O_PAGE_IS(page, LEAF))
-		newitem_size = BTreeLeafTuphdrSize + MAXALIGN(tuplesize);
-	else
-		newitem_size = BTreeNonLeafTuphdrSize + MAXALIGN(tuplesize);
-
-	maxKeyLen = MAXALIGN(((BTreePageHeader *) page)->maxKeyLen);
-	if (!O_PAGE_IS(page, LEAF))
-		keyLen = MAXALIGN(tuplesize);
-	else
-		keyLen = MAXALIGN(o_btree_len(desc, tuple, OTupleKeyLengthNoVersion));
-	maxKeyLen = Max(maxKeyLen, keyLen);
-
-	totalCount = BTREE_PAGE_ITEMS_COUNT(page) + (replace ? 0 : 1);
-	hikeys_end = BTREE_PAGE_HIKEYS_END(desc, page);
-	leftPageSpaceLeft = ORIOLEDB_BLCKSZ - Max(hikeys_end, MAXALIGN(sizeof(BTreePageHeader)) + maxKeyLen);
-	if (!O_PAGE_IS(page, RIGHTMOST))
-		rightPageSpaceLeft = ORIOLEDB_BLCKSZ - Max(hikeys_end, MAXALIGN(sizeof(BTreePageHeader)) + BTREE_PAGE_GET_HIKEY_SIZE(page));
-	else
-		rightPageSpaceLeft = ORIOLEDB_BLCKSZ - hikeys_end;
+	leftPageSpaceLeft = ORIOLEDB_BLCKSZ - Max(items->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + items->maxKeyLen);
+	rightPageSpaceLeft = ORIOLEDB_BLCKSZ - Max(items->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + items->hikeySize);
 
 	/*
 	 * Left page should contain at least one item, and leaves at lest one item
 	 * for the right page.
 	 */
 	minLeftPageItemsCount = 1;
-	maxLeftPageItemsCount = totalCount - 1;
-	init_split_item_interator(desc, &left_it, page, tuple, newitem_size, offset,
-							  replace, false, csn);
-	init_split_item_interator(desc, &right_it, page, tuple, newitem_size, offset,
-							  replace, true, csn);
-	leftPageSpaceLeft -= split_item_interator_size(&left_it);
-	rightPageSpaceLeft -= split_item_interator_size(&right_it);
-	split_item_interator_next(&left_it);
-	split_item_interator_prev(&right_it);
+	maxLeftPageItemsCount = items->itemsCount - 1;
+	leftPageSpaceLeft -= items->items[0].size + MAXALIGN(sizeof(LocationIndex));
+	rightPageSpaceLeft -= items->items[items->itemsCount - 1].size + MAXALIGN(sizeof(LocationIndex));
 
 	Assert(leftPageSpaceLeft >= 0 && rightPageSpaceLeft >= 0);
 
@@ -254,40 +234,44 @@ btree_page_split_location(BTreeDescr *desc, Page page, OffsetNumber offset,
 		{
 			/* Try place item to the left page */
 			Assert(leftPageSpaceLeft > 0);
-			leftPageSpaceLeft -= split_item_interator_size(&left_it);
+			leftPageSpaceLeft -= items->items[minLeftPageItemsCount].size +
+				MAXALIGN(sizeof(LocationIndex) * (minLeftPageItemsCount + 1)) -
+				MAXALIGN(sizeof(LocationIndex) * minLeftPageItemsCount);
 			if (leftPageSpaceLeft < 0)
 				continue;
-			split_item_interator_next(&left_it);
 			minLeftPageItemsCount++;
 		}
 		else
 		{
 			/* Try place item to the right page */
 			Assert(rightPageSpaceLeft > 0);
-			rightPageSpaceLeft -= split_item_interator_size(&right_it);
+			rightPageSpaceLeft -= items->items[maxLeftPageItemsCount - 1].size +
+				MAXALIGN(sizeof(LocationIndex) * (items->itemsCount - maxLeftPageItemsCount + 1)) -
+				MAXALIGN(sizeof(LocationIndex) * (items->itemsCount - maxLeftPageItemsCount));
 			if (rightPageSpaceLeft < 0)
 			{
 				continue;
 			}
-			split_item_interator_prev(&right_it);
 			maxLeftPageItemsCount--;
 		}
 	}
 
 	if (split_item)
-		*split_item = split_item_interator_get(&left_it);
+	{
+		split_item->formatFlags = items->items[minLeftPageItemsCount].flags;
+		split_item->data = items->items[minLeftPageItemsCount].data +
+			(items->leaf ? BTreeLeafTuphdrSize : BTreeNonLeafTuphdrSize);
+	}
 
 	return minLeftPageItemsCount;
 }
 
 OffsetNumber
-btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
-						   OTuple tuple, LocationIndex tuplesize,
+btree_get_split_left_count(BTreeDescr *desc, Page page,
 						   OffsetNumber offset, bool replace,
-						   OTuple *split_key, LocationIndex *split_key_len,
-						   CommitSeqNo csn)
+						   BTreeSplitItems *items,
+						   OTuple *split_key, LocationIndex *split_key_len)
 {
-	Page		page = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) page;
 	OffsetNumber targetCount;
 	OffsetNumber result;
@@ -334,8 +318,8 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 	else if ((desc->type == oIndexToast && O_PAGE_IS(page, LEAF)) || O_PAGE_IS(page, RIGHTMOST))
 		spaceRatio = fillfactorRatio;
 
-	result = btree_page_split_location(desc, page, offset, tuplesize, tuple, replace,
-									   targetCount, spaceRatio, &split_item, csn);
+	result = btree_page_split_location(desc, items, targetCount, spaceRatio,
+									   &split_item);
 
 	/*
 	 * Fill the split key.  Convert tuple to key if needed.
@@ -371,11 +355,12 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
  * it is under processing by the checkpointer worker.
  */
 void
-perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_blkno,
-				   OffsetNumber left_count, OTuple splitkey,
-				   LocationIndex splitkey_len, OffsetNumber *offset, bool *place_right,
-				   Pointer tupleheader, OTuple tuple, LocationIndex tuplesize,
-				   bool replace, CommitSeqNo csn, UndoLocation undoLoc)
+perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
+				   OInMemoryBlkno new_blkno,
+				   BTreeSplitItems *items,
+				   OffsetNumber left_count,
+				   OTuple splitkey, LocationIndex splitkey_len,
+				   CommitSeqNo csn, UndoLocation undoLoc)
 {
 	Page		left_page = O_GET_IN_MEMORY_PAGE(blkno),
 				right_page = O_GET_IN_MEMORY_PAGE(new_blkno);
@@ -383,105 +368,18 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 			   *right_header = (BTreePageHeader *) right_page;
 	bool		leaf = O_PAGE_IS(left_page, LEAF);
 	OTuple		hikey;
+	uint64		rightlink;
 	LocationIndex hikeySize;
-	int			i,
-				count;
-	LocationIndex tuple_header_size = leaf ? BTreeLeafTuphdrSize : BTreeNonLeafTuphdrSize;
-	BTreePageItemLocator loc;
-	BTreePageItem items[BTREE_PAGE_MAX_CHUNK_ITEMS + 1];
-	char		newItem[Max(BTreeLeafTuphdrSize, BTreeNonLeafTuphdrSize) + O_BTREE_MAX_TUPLE_SIZE];
 
+	rightlink = left_header->rightLink;
 	init_new_btree_page(desc, new_blkno,
 						left_header->flags & ~(O_BTREE_FLAG_LEFTMOST),
 						PAGE_GET_LEVEL(left_page), false);
 
-	/* Fill the array of items for btree_page_reorg() function */
-	i = 0;
-	BTREE_PAGE_LOCATOR_FIRST(left_page, &loc);
-	while (BTREE_PAGE_LOCATOR_IS_VALID(left_page, &loc) || i == *offset)
-	{
-		if (i == *offset)
-		{
-			memcpy(newItem, tupleheader, tuple_header_size);
-			memcpy(&newItem[tuple_header_size], tuple.data, tuplesize);
-			if (tuplesize != MAXALIGN(tuplesize))
-				memset(&newItem[tuple_header_size + tuplesize], 0, MAXALIGN(tuplesize) - tuplesize);
-			items[i].data = newItem;
-			items[i].flags = tuple.formatFlags;
-			items[i].size = tuple_header_size + MAXALIGN(tuplesize);
-			items[i].newItem = false;
 #ifdef ORIOLEDB_CUT_FIRST_KEY
-			if (!leaf && i == left_count)
-				items[i].size = BTreeNonLeafTuphdrSize;
+	if (!leaf)
+		items->items[left_count].size = BTreeNonLeafTuphdrSize;
 #endif
-			i++;
-			if (replace)
-			{
-				BTREE_PAGE_LOCATOR_NEXT(left_page, &loc);
-				continue;
-			}
-		}
-
-		if (!BTREE_PAGE_LOCATOR_IS_VALID(left_page, &loc))
-			break;
-
-		/*
-		 * In leaf pages, get rid of tuples deleted by finished transactions.
-		 * Also, resize tuples to minimal size.  In non-leaf pages and bridge
-		 * indexes, copy tuples as-is.
-		 */
-		if (leaf && desc->type != oIndexBridge)
-		{
-			BTreeLeafTuphdr *tupHdr;
-			OTuple		tup;
-			bool		finished;
-
-			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, left_page, &loc);
-			finished = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
-			if (finished && tupHdr->deleted && i != left_count &&
-				(COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn))
-			{
-				if (i < left_count)
-					left_count--;
-				if (i < *offset)
-					(*offset)--;
-				BTREE_PAGE_LOCATOR_NEXT(left_page, &loc);
-				continue;
-			}
-
-			items[i].data = (Pointer) tupHdr;
-			items[i].flags = tup.formatFlags;
-			items[i].size = finished ?
-				(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
-				BTREE_PAGE_GET_ITEM_SIZE(left_page, &loc);
-			items[i].newItem = false;
-		}
-		else
-		{
-			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(left_page, &loc);
-			items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(left_page, &loc);
-			items[i].size = BTREE_PAGE_GET_ITEM_SIZE(left_page, &loc);
-			items[i].newItem = false;
-		}
-
-#ifdef ORIOLEDB_CUT_FIRST_KEY
-		if (!leaf && i == left_count)
-			items[i].size = BTreeNonLeafTuphdrSize;
-#endif
-		i++;
-		BTREE_PAGE_LOCATOR_NEXT(left_page, &loc);
-	}
-	count = i;
-
-	if (*offset < left_count)
-	{
-		*place_right = false;
-	}
-	else
-	{
-		*offset -= left_count;
-		*place_right = true;
-	}
 
 	if (O_PAGE_IS(left_page, RIGHTMOST))
 	{
@@ -494,7 +392,8 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 		BTREE_PAGE_GET_HIKEY(hikey, left_page);
 	}
 
-	btree_page_reorg(desc, right_page, &items[left_count], count - left_count,
+	btree_page_reorg(desc, right_page, &items->items[left_count],
+					 items->itemsCount - left_count,
 					 hikeySize, hikey, NULL);
 
 	/*
@@ -515,11 +414,15 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 
 	left_header->csn = csn;
 	right_header->csn = csn;
+	right_header->rightLink = rightlink;
 	left_header->rightLink = MAKE_IN_MEMORY_RIGHTLINK(new_blkno,
 													  O_PAGE_GET_CHANGE_COUNT(right_page));
 	left_header->flags &= ~(O_BTREE_FLAG_RIGHTMOST);
+	if (RightLinkIsValid(rightlink))
+		O_GET_IN_MEMORY_PAGEDESC(RIGHTLINK_GET_BLKNO(rightlink))->leftBlkno = new_blkno;
+	O_GET_IN_MEMORY_PAGEDESC(new_blkno)->leftBlkno = blkno;
 
-	btree_page_reorg(desc, left_page, &items[0], left_count,
+	btree_page_reorg(desc, left_page, &items->items[0], left_count,
 					 splitkey_len, splitkey, NULL);
 
 	o_btree_page_calculate_statistics(desc, left_page);

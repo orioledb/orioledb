@@ -189,6 +189,7 @@ typedef struct
  */
 static ShmemItem shmemItems[] = {
 	{btree_io_shmem_needs, btree_io_shmem_init},
+	{page_state_shmem_needs, page_state_shmem_init},
 	{oxid_shmem_needs, oxid_init_shmem},
 	{sys_trees_shmem_needs, sys_trees_shmem_init},
 	{StopEventShmemSize, StopEventShmemInit},
@@ -1128,7 +1129,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 			Page		p = O_GET_IN_MEMORY_PAGE(i);
 			OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 
-			pg_atomic_init_u32(&(O_PAGE_HEADER(p)->state), 0);
+			pg_atomic_init_u32(&(O_PAGE_HEADER(p)->state), PAGE_STATE_INVALID_PROCNO);
 			pg_atomic_init_u32(&(O_PAGE_HEADER(p)->usageCount), UCM_FREE_PAGES_LEVEL);
 			header->pageChangeCount = 0;
 		}
@@ -1143,7 +1144,6 @@ ppools_shmem_init(Pointer ptr, bool found)
 			page_descs[i].ionum = -1;
 			page_descs[i].type = 0;
 			page_descs[i].flags = 0;
-			proclist_init(&page_descs[i].waitersList);
 		}
 	}
 }

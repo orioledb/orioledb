@@ -358,6 +358,46 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	return &item->tuphdr;
 }
 
+void
+make_waiter_undo_record(BTreeDescr *desc, int pgprocno,
+						LockerShmemState *lockerState)
+{
+	LocationIndex tuplelen;
+	UndoLocation undoLocation;
+	BTreeModifyUndoStackItem *item;
+	LocationIndex size;
+	OTuple		tuple;
+	bool		key_palloc = false;
+	OTuple		key;
+
+	tuple.formatFlags = lockerState->tupleFlags;
+	tuple.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+
+	tuplelen = o_btree_len(desc, tuple, OTupleKeyLength);
+
+	size = sizeof(BTreeModifyUndoStackItem) + tuplelen;
+	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
+														&undoLocation,
+														MAXALIGN(size));
+	item->header.itemSize = size;
+	item->header.type = ModifyUndoItemType;
+	item->header.indexType = desc->type;
+	item->action = BTreeOperationInsert;
+	item->blkno = lockerState->blkno;
+	item->pageChangeCount = lockerState->pageChangeCount;
+	item->oids = desc->oids;
+
+	memset((Pointer) item + sizeof(BTreeModifyUndoStackItem), 0, tuplelen);
+	key = o_btree_tuple_make_key(desc, tuple,
+								 (Pointer) item + sizeof(BTreeModifyUndoStackItem),
+								 true, &key_palloc);
+	item->tuphdr.formatFlags = key.formatFlags;
+	Assert(!key_palloc);
+
+	add_new_undo_stack_item_to_process(desc->undoType, undoLocation, pgprocno,
+									   lockerState->localXid);
+}
+
 static BTreeDescr *
 get_tree_descr(ORelOids oids, OIndexType type)
 {

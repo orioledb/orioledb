@@ -79,10 +79,6 @@ typedef struct
 	LocationIndex items[1];
 } BTreePageChunk;
 
-#define BTREE_PAGE_MAX_CHUNK_ITEMS \
-	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
-		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
-
 #define BTREE_PAGE_MAX_ITEMS \
 	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
 		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
@@ -399,5 +395,29 @@ extern void page_set_hikey_flags(Page p, uint8 flags);
 extern bool page_fits_hikey(Page p, LocationIndex newHikeySize);
 extern void page_resize_hikey(Page p, LocationIndex newHikeySize);
 extern void btree_page_update_max_key_len(BTreeDescr *desc, Page p);
+
+
+/* This should be in page_state.h but depends on O_BTREE_MAX_KEY_SIZE */
+typedef struct
+{
+	ORelOids	reloids;
+	OInMemoryBlkno blkno;
+	uint32		pageChangeCount;
+	LocalTransactionId localXid;
+	uint8		tupleFlags;
+	bool		inserted;
+	bool		pageWaiting;
+	bool		waitExclusive;
+	bool		split;
+	Size		reservedUndoSize;
+	uint32		next;
+	union
+	{
+		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];
+		Datum		datum;		/* keep here for alignment */
+	}			tupleData;
+} LockerShmemState;
+
+extern LockerShmemState *lockerStates;
 
 #endif							/* __BTREE_PAGE_CONTENTS_H__ */

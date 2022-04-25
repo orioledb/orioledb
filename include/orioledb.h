@@ -265,7 +265,7 @@ typedef struct
 	FileExtent	fileExtent;
 	uint32		flags:4,
 				type:28;
-	proclist_head waitersList;
+	OInMemoryBlkno leftBlkno;
 } OrioleDBPageDesc;
 
 /*

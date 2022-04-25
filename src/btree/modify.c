@@ -995,6 +995,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	OBTreeFindPageContext pageFindContext;
 	int			pageReserveKind;
 	Jsonb	   *params = NULL;
+	bool		findResult;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1018,12 +1019,31 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		ppool_reserve_pages(desc->ppool, pageReserveKind, 2);
 
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
-						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+						   BTREE_PAGE_FIND_MODIFY);
+
+	if (action == BTreeOperationInsert && tupleType == BTreeKeyLeafTuple)
+	{
+		pageFindContext.insertTuple = tuple;
+		if (OXidIsValid(opOxid))
+			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(opOxid, lockMode, false);
+		else
+			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, lockMode, false);
+	}
 
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
-		refind_page(&pageFindContext, key, keyType, 0, hint->blkno, hint->pageChangeCount);
+		findResult = refind_page(&pageFindContext, key, keyType, 0, hint->blkno, hint->pageChangeCount);
 	else
-		(void) find_page(&pageFindContext, key, keyType, 0);
+		findResult = find_page(&pageFindContext, key, keyType, 0);
+
+	if (!findResult &&
+		action == BTreeOperationInsert && tupleType == BTreeKeyLeafTuple)
+	{
+		if (desc->undoType != UndoLogNone)
+			release_undo_size(desc->undoType);
+		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
+		return OBTreeModifyResultInserted;
+	}
+	Assert(findResult);
 
 	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
 								   key, keyType, opOxid, opCsn,

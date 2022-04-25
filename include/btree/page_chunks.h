@@ -40,9 +40,6 @@ extern BTreeItemPageFitType page_locator_fits_item(BTreeDescr *desc,
 												   LocationIndex size,
 												   bool replace,
 												   CommitSeqNo csn);
-extern void perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
-									BTreePageItemLocator *loc,
-									OTuple tuple, LocationIndex tuplesize, bool replace);
 extern void o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p);
 extern void init_page_first_chunk(BTreeDescr *desc, Page p,
 								  LocationIndex hikeySize);

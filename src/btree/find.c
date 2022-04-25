@@ -35,6 +35,7 @@ typedef struct
 	uint32		pageChangeCount;
 	PartialPageState *partial;
 	bool		haveLock;
+	bool		inserted;
 } OBTreeFindPageInternalContext;
 
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
@@ -76,6 +77,7 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->imgEntry = NULL;
 	context->parentImg = NULL;
 	context->parentImgEntry = NULL;
+	O_TUPLE_SET_NULL(context->insertTuple);
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
@@ -122,6 +124,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (follow_rightlink(intCxt))
 		{
+			if (intCxt->inserted)
+				return OBTreeFastPathFindFailure;
 			Assert(context->index > 0);
 			Assert(!intCxt->haveLock);
 			step_upward_level(intCxt);
@@ -386,6 +390,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.key = key;
 	intCxt.keyType = keyType;
 	intCxt.targetLevel = targetLevel;
+	intCxt.inserted = false;
 
 
 	ASAN_UNPOISON_MEMORY_REGION(&fastpathMeta, sizeof(fastpathMeta));
@@ -451,13 +456,41 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				intCxt.haveLock = true;
 				needLock = false;
 			}
+			else if (!O_TUPLE_IS_NULL(context->insertTuple))
+			{
+				bool		upwards = false;
+
+				if (!lock_page_with_tuple(desc,
+										  &intCxt.blkno,
+										  &intCxt.pageChangeCount,
+										  context->insertXactInfo,
+										  context->insertTuple,
+										  &upwards))
+				{
+					if (upwards)
+					{
+						wrongChangeCount = true;
+					}
+					else
+					{
+						return false;
+					}
+				}
+				else
+				{
+					p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
+					intCxt.pagePtr = p;
+					intCxt.haveLock = true;
+					needLock = false;
+				}
+			}
 			else
 			{
 				lock_page(intCxt.blkno);
+				intCxt.pagePtr = p;
+				intCxt.haveLock = true;
+				needLock = false;
 			}
-			intCxt.pagePtr = p;
-			intCxt.haveLock = true;
-			needLock = false;
 		}
 		else
 		{
@@ -728,6 +761,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 			}
 
+			O_TUPLE_SET_NULL(context->insertTuple);
 			return true;
 		}
 		else if (!nonLeafHdr)
@@ -867,7 +901,33 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 
 		if (intCxt->haveLock)
 		{
-			lock_page(intCxt->blkno);
+			if (!O_TUPLE_IS_NULL(context->insertTuple))
+			{
+				bool		upwards = false;
+
+				if (!lock_page_with_tuple(desc,
+										  &intCxt->blkno,
+										  &intCxt->pageChangeCount,
+										  context->insertXactInfo,
+										  context->insertTuple,
+										  &upwards))
+				{
+					intCxt->haveLock = false;
+					if (upwards)
+					{
+						return true;
+					}
+					else
+					{
+						intCxt->inserted = true;
+						return true;
+					}
+				}
+			}
+			else
+			{
+				lock_page(intCxt->blkno);
+			}
 			intCxt->pagePtr = O_GET_IN_MEMORY_PAGE(intCxt->blkno);
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
 			if (intCxt->pageChangeCount !=
@@ -932,7 +992,6 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	OBTreeFindPageInternalContext intCxt;
 	BTreePageItemLocator loc;
 	bool		item_found = true;
-	Pointer		p;
 
 	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
 	intCxt.context = context;
@@ -942,16 +1001,39 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.targetLevel = level;
 	intCxt.pageChangeCount = _pageChangeCount;
 	intCxt.partial = NULL;
+	intCxt.inserted = false;
 
 retry:
 
-	p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 	if (BTREE_PAGE_FIND_IS(context, MODIFY))
 	{
+		Pointer		p;
+
 		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
 			return find_page(context, key, keyType, level);
 
-		lock_page(intCxt.blkno);
+		if (!O_TUPLE_IS_NULL(context->insertTuple))
+		{
+			bool	upwards = false;
+
+			if (!lock_page_with_tuple(desc,
+									  &intCxt.blkno,
+									  &intCxt.pageChangeCount,
+									  context->insertXactInfo,
+									  context->insertTuple,
+									  &upwards))
+			{
+				if (upwards)
+					return find_page(context, key, keyType, level);
+				else
+					return false;
+			}
+		}
+		else
+		{
+			lock_page(intCxt.blkno);
+		}
+		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		intCxt.haveLock = true;
 		intCxt.pagePtr = p;
 		if (PAGE_GET_LEVEL(p) != level ||
@@ -1027,6 +1109,8 @@ retry:
 	{
 		if (follow_rightlink(&intCxt))
 		{
+			if (intCxt.inserted)
+				return false;
 			Assert(!intCxt.haveLock);
 			return find_page(context, key, keyType, level);
 		}
