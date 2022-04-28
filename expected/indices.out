@@ -5780,8 +5780,115 @@ SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
 
 DROP INDEX o_test_nulls_value_idx;
 DROP TABLE o_test_nulls CASCADE;
+-- Check that build of index with same fields as pkey succeeds
+SET enable_seqscan = off;
+CREATE TABLE IF NOT EXISTS o_test_unique_as_pkey (
+	key integer NOT NULL,
+	val integer NOT NULL,
+	val2 integer NOT NULL,
+	PRIMARY KEY(key, val)
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_unique_as_pkey_ix1
+	ON o_test_unique_as_pkey (val, key);
+INSERT INTO o_test_unique_as_pkey (key, val, val2)
+	(SELECT val, val * 100, val * 1000  FROM generate_series(1, 5) val);
+\d+ o_test_unique_as_pkey
+                           Table "public.o_test_unique_as_pkey"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ key    | integer |           | not null |         | plain   |              | 
+ val    | integer |           | not null |         | plain   |              | 
+ val2   | integer |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
+    "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key) INCLUDE (key, val)
+
+SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_unique_as_pkey_pkey              +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, val           +
+ Index o_test_unique_as_pkey_ix1               +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val, key           +
+     Leaf tuple fields: val, key               +
+ 
+(1 row)
+
+EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_unique_as_pkey  (cost=0.15..74.87 rows=2048 width=12)
+   Forward index scan of: o_test_unique_as_pkey_ix1
+(2 rows)
+
+SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+ key | val | val2 
+-----+-----+------
+   1 | 100 | 1000
+   2 | 200 | 2000
+   3 | 300 | 3000
+   4 | 400 | 4000
+   5 | 500 | 5000
+(5 rows)
+
+CREATE UNIQUE INDEX o_test_unique_as_pkey_ix2
+	ON o_test_unique_as_pkey (val, key);
+\d+ o_test_unique_as_pkey
+                           Table "public.o_test_unique_as_pkey"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ key    | integer |           | not null |         | plain   |              | 
+ val    | integer |           | not null |         | plain   |              | 
+ val2   | integer |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
+    "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key) INCLUDE (key, val)
+    "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key) INCLUDE (key, val)
+
+SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_unique_as_pkey_pkey              +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, val           +
+ Index o_test_unique_as_pkey_ix1               +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val, key           +
+     Leaf tuple fields: val, key               +
+ Index o_test_unique_as_pkey_ix2               +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val, key           +
+     Leaf tuple fields: val, key               +
+ 
+(1 row)
+
+EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_unique_as_pkey  (cost=0.13..8.21 rows=5 width=12)
+   Forward index scan of: o_test_unique_as_pkey_ix2
+(2 rows)
+
+SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+ key | val | val2 
+-----+-----+------
+   1 | 100 | 1000
+   2 | 200 | 2000
+   3 | 300 | 3000
+   4 | 400 | 4000
+   5 | 500 | 5000
+(5 rows)
+
+RESET enable_seqscan;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 29 other objects
+NOTICE:  drop cascades to 30 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -5811,3 +5918,4 @@ drop cascades to table o_test79
 drop cascades to table o_test82
 drop cascades to table o_test83
 drop cascades to table o_test_partial_idx_update
+drop cascades to table o_test_unique_as_pkey

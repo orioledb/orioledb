@@ -286,10 +286,9 @@ tuplesort_begin_orioledb_index(OIndexDescr *idx,
 
 	SortSupport sortKeys;
 
-	if (idx->unique)
-		key_fields = idx->nFields - idx->nPrimaryFields;
-	else
-		key_fields = idx->nFields;
+	key_fields = idx->nFields;
+	if (idx->unique && ((key_fields - idx->nPrimaryFields) > 0))
+		key_fields -= idx->nPrimaryFields;
 
 	sortKeys = (SortSupport) palloc0(key_fields * sizeof(SortSupportData));
 	arg = (OIndexBuildSortArg *) palloc0(sizeof(OIndexBuildSortArg));

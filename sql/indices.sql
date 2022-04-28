@@ -1175,4 +1175,28 @@ DROP INDEX o_test_nulls_value_idx;
 
 DROP TABLE o_test_nulls CASCADE;
 
+-- Check that build of index with same fields as pkey succeeds
+SET enable_seqscan = off;
+CREATE TABLE IF NOT EXISTS o_test_unique_as_pkey (
+	key integer NOT NULL,
+	val integer NOT NULL,
+	val2 integer NOT NULL,
+	PRIMARY KEY(key, val)
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_unique_as_pkey_ix1
+	ON o_test_unique_as_pkey (val, key);
+INSERT INTO o_test_unique_as_pkey (key, val, val2)
+	(SELECT val, val * 100, val * 1000  FROM generate_series(1, 5) val);
+\d+ o_test_unique_as_pkey
+SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
+EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+CREATE UNIQUE INDEX o_test_unique_as_pkey_ix2
+	ON o_test_unique_as_pkey (val, key);
+\d+ o_test_unique_as_pkey
+SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
+EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+SELECT * FROM o_test_unique_as_pkey ORDER BY val;
+RESET enable_seqscan;
+
 DROP EXTENSION orioledb CASCADE;
