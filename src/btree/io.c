@@ -803,6 +803,7 @@ load_page(OBTreeFindPageContext *context)
 	bool		was_downlink_location;
 	bool		was_fetch = false;
 	bool		was_image = false;
+	bool		was_keep_lokey = false;
 
 	context_index = context->index;
 	parent_blkno = context->items[context_index].blkno;
@@ -864,15 +865,18 @@ load_page(OBTreeFindPageContext *context)
 	/* re-find parent page (it might be changed due to concurrent operations) */
 	csn = context->csn;
 	was_modify = BTREE_PAGE_FIND_IS(context, MODIFY);
+	was_image = BTREE_PAGE_FIND_IS(context, IMAGE);
+	BTREE_PAGE_FIND_UNSET(context, IMAGE);
 	if (!was_modify)
 	{
 		was_fetch = BTREE_PAGE_FIND_IS(context, FETCH);
-		was_image = BTREE_PAGE_FIND_IS(context, IMAGE);
 		Assert(was_fetch || was_image);
-		BTREE_PAGE_FIND_UNSET(context, IMAGE);
 		BTREE_PAGE_FIND_UNSET(context, FETCH);
 		BTREE_PAGE_FIND_SET(context, MODIFY);
 	}
+	was_keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
+	if (was_keep_lokey)
+		BTREE_PAGE_FIND_UNSET(context, KEEP_LOKEY);
 	was_downlink_location = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
@@ -896,12 +900,14 @@ load_page(OBTreeFindPageContext *context)
 	context->csn = csn;
 	if (!was_modify)
 	{
-		if (was_image)
-			BTREE_PAGE_FIND_SET(context, IMAGE);
 		if (was_fetch)
 			BTREE_PAGE_FIND_SET(context, FETCH);
 		BTREE_PAGE_FIND_UNSET(context, MODIFY);
 	}
+	if (was_image)
+		BTREE_PAGE_FIND_SET(context, IMAGE);
+	if (was_keep_lokey)
+		BTREE_PAGE_FIND_SET(context, KEEP_LOKEY);
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_UNSET(context, DOWNLINK_LOCATION);
 

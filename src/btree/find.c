@@ -374,7 +374,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				continue;
 			}
 
-			if (imageFlag && level == 1 && keepLokeyFlag)
+			if (imageFlag && level == targetLevel + 1 && keepLokeyFlag)
 			{
 				/*
 				 * We may need to load another one tuple for a backward
@@ -483,7 +483,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				intCxt.pagePtr = p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 				noneLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
 
-				if (imageFlag && level == 1)
+				if (imageFlag && level == targetLevel + 1)
 				{
 					/*
 					 * Especial case, we load a leaf for image search. Now we
