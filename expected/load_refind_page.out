@@ -1,0 +1,373 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_setup s2_setup s1_insert3 s1_evict s1_se_refind0 s2_bselect s1_insert1 s1_insert2 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert3: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(18, 21, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind0: SELECT pg_stopevent_set('load_page_refind', '$.level == 0 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
+step s1_insert1: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 13, 1) id);
+step s1_insert2: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(14, 17, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_bselect: <... completed>
+substr
+------
+    21
+    20
+    19
+    18
+(4 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert2 s1_insert3 s1_evict s1_se_refind0 s2_bselect s1_insert1 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert2: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(14, 17, 1) id);
+step s1_insert3: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(18, 21, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind0: SELECT pg_stopevent_set('load_page_refind', '$.level == 0 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
+step s1_insert1: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 13, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_bselect: <... completed>
+substr
+------
+    21
+    20
+    19
+    18
+    17
+    16
+    15
+    14
+(8 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert6 s1_evict s1_se_refind1 s2_bselect s1_insert4 s1_insert5 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert6: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(30, 39, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind1: SELECT pg_stopevent_set('load_page_refind', '$.level == 1 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
+step s1_insert4: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 19, 1) id);
+step s1_insert5: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(20, 29, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_bselect: <... completed>
+substr
+------
+    39
+    38
+    37
+    36
+    35
+    34
+    33
+    32
+    31
+    30
+(10 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert5 s1_insert6 s1_evict s1_se_refind1 s2_bselect s1_insert4 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert5: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(20, 29, 1) id);
+step s1_insert6: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(30, 39, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind1: SELECT pg_stopevent_set('load_page_refind', '$.level == 1 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
+step s1_insert4: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 19, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_bselect: <... completed>
+substr
+------
+    39
+    38
+    37
+    36
+    35
+    34
+    33
+    32
+    31
+    30
+    29
+    28
+    27
+    26
+    25
+    24
+    23
+    22
+    21
+    20
+(20 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert1 s1_evict s1_se_refind0 s2_select s1_insert2 s1_insert3 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert1: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 13, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind0: SELECT pg_stopevent_set('load_page_refind', '$.level == 0 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
+step s1_insert2: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(14, 17, 1) id);
+step s1_insert3: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(18, 21, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_select: <... completed>
+substr
+------
+    10
+    11
+    12
+    13
+(4 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert1 s1_insert2 s1_evict s1_se_refind0 s2_select s1_insert3 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert1: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 13, 1) id);
+step s1_insert2: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(14, 17, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind0: SELECT pg_stopevent_set('load_page_refind', '$.level == 0 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
+step s1_insert3: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(18, 21, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_select: <... completed>
+substr
+------
+    10
+    11
+    12
+    13
+    14
+    15
+    16
+    17
+(8 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert4 s1_evict s1_se_refind1 s2_select s1_insert5 s1_insert6 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert4: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 19, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind1: SELECT pg_stopevent_set('load_page_refind', '$.level == 1 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
+step s1_insert5: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(20, 29, 1) id);
+step s1_insert6: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(30, 39, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_select: <... completed>
+substr
+------
+    10
+    11
+    12
+    13
+    14
+    15
+    16
+    17
+    18
+    19
+(10 rows)
+
+
+starting permutation: s1_setup s2_setup s1_insert4 s1_insert5 s1_evict s1_se_refind1 s2_select s1_insert6 s1_continue
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+step s1_insert4: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 19, 1) id);
+step s1_insert5: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(20, 29, 1) id);
+step s1_evict: SELECT orioledb_evict_pages('o_loadpage'::regclass, 1);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_se_refind1: SELECT pg_stopevent_set('load_page_refind', '$.level == 1 && $applicationName == "s2"');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
+step s1_insert6: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(30, 39, 1) id);
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_select: <... completed>
+substr
+------
+    10
+    11
+    12
+    13
+    14
+    15
+    16
+    17
+    18
+    19
+    20
+    21
+    22
+    23
+    24
+    25
+    26
+    27
+    28
+    29
+(20 rows)
+

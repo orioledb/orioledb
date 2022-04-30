@@ -96,6 +96,7 @@ ISOLATIONCHECKS = btree_print_backend_id \
 				  isol_rr \
 				  isol_rr_bscan \
 				  isol_rr_seqscan \
+				  load_refind_page \
 				  merge \
 				  rightlink \
 				  rll \

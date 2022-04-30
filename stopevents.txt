@@ -20,3 +20,4 @@ step_down
 relock_page
 before_apply_undo
 scan_disk_page
+load_page_refind

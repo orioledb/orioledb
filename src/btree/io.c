@@ -862,6 +862,13 @@ load_page(OBTreeFindPageContext *context)
 
 	EA_LOAD_INC(blkno);
 
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+		params = btree_page_stopevent_params(desc, page);
+		STOPEVENT(STOPEVENT_LOAD_PAGE_REFIND, params);
+	}
+
 	/* re-find parent page (it might be changed due to concurrent operations) */
 	csn = context->csn;
 	was_modify = BTREE_PAGE_FIND_IS(context, MODIFY);
