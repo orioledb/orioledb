@@ -432,6 +432,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 				if (!O_PAGE_IS(left, PRE_CLEANUP) &&
 					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(left)) &&
+					!page_is_under_checkpoint(desc, left_blkno) &&
 					io_num < 0)
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno,
