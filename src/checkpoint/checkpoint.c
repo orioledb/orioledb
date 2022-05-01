@@ -2555,8 +2555,14 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 			o_btree_split_fix_and_unlock(descr, *blkno);
 			reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 		}
-		else if (is_page_too_sparse(descr, O_GET_IN_MEMORY_PAGE(*blkno)))
+		else if (is_page_too_sparse(descr, O_GET_IN_MEMORY_PAGE(*blkno)) &&
+				 !state->stack[level].autonomous)
 		{
+			/*
+			 * Try merge page to the right.  Skip merge for autonomous pages,
+			 * because we could miss the expected hikey then.
+			 */
+
 			if (!checkpoint_try_merge_page(descr, state, *blkno, level))
 				break;
 		}
