@@ -70,6 +70,7 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 		required_length += sizeof(WALRecRelation);
 
 	flush_local_wal_if_needed(required_length);
+	Assert(local_wal_buffer_offset + required_length <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
 	{
@@ -115,6 +116,7 @@ wal_commit(OXid oxid)
 		return;
 
 	flush_local_wal_if_needed(sizeof(WALRec));
+	Assert(local_wal_buffer_offset + sizeof(WALRec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
@@ -132,6 +134,7 @@ wal_joint_commit(OXid oxid, TransactionId xid)
 	Assert(!is_recovery_process());
 
 	flush_local_wal_if_needed(sizeof(WALRec));
+	Assert(local_wal_buffer_offset + sizeof(WALRec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
@@ -159,6 +162,7 @@ wal_rollback(OXid oxid)
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(WALRec));
+	Assert(local_wal_buffer_offset + sizeof(WALRec) <= LOCAL_WAL_BUFFER_SIZE);
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
 	add_wal_record(WAL_REC_ROLLBACK);
@@ -174,7 +178,6 @@ add_wal_record(uint8 rec_type)
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || WAL_REC_ROLLBACK);
-
 
 	if (local_wal_buffer_offset == 0)
 	{
@@ -196,6 +199,7 @@ add_joint_commit_wal_record(TransactionId xid)
 	WALRecJointCommit *rec;
 
 	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
 
 	if (local_wal_buffer_offset == 0)
 	{

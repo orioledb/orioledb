@@ -622,6 +622,31 @@ class RecoveryTest(BaseTest):
 			"[(992, 993), (1010, 994), (-994, 995), (-995, 996), (-996, 997), (-997, 998), (-998, 999), (-999, 1000), (-1000, 1001), (1001, 1002)]")
 		node.stop()
 
+	def test_wal_joint_commit_flush(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 int UNIQUE,
+				filler char(110)
+			) USING orioledb;
+
+			CREATE TABLE o_test_2(
+				val_1 int UNIQUE
+			) USING orioledb;
+
+			BEGIN;
+			INSERT INTO o_test_1(val_1, filler)
+				(SELECT val_1, '' FROM generate_series (1, 128) val_1);
+			INSERT INTO o_test_2(val_1)
+				(SELECT * FROM generate_series (1, 13));
+			ALTER TABLE o_test_1 DROP COLUMN filler;
+			COMMIT;
+		""")
+
 	def test_subtrans(self):
 		node = self.node
 		node.start() # start PostgreSQL
