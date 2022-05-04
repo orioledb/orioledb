@@ -135,6 +135,10 @@ PGXS := $(shell $(PG_CONFIG) --pgxs)
 override PG_CPPFLAGS += -I$(CURDIR)/include
 include $(PGXS)
 
+ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
+  TESTGRESCHECKS_PART_2 += t/merge_into_test.py
+endif
+
 regresscheck: | install
 	$(pg_regress_check) \
 		--temp-config orioledb_regression.conf \
