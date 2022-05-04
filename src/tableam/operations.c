@@ -1411,20 +1411,30 @@ get_keys_from_ps(TupleTableSlot *planSlot, OIndexDescr *id,
 
 	key->nkeys = id->nonLeafTupdesc->natts;
 
-	for (i = 0; i < key->nkeys; i++)
+	if (id->primaryIsCtid)
 	{
-		AttrNumber	attnum;
+		key->keys[0].value = PointerGetDatum(&planSlot->tts_tid);
+		key->keys[0].type = TIDOID;
+		key->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+		key->keys[0].comparator = NULL;
+	}
+	else
+	{
+		for (i = 0; i < key->nkeys; i++)
+		{
+			AttrNumber	attnum;
 
-		attnum = id->fields[i].tableAttnum;
+			attnum = id->fields[i].tableAttnum;
 
-		pkDatum = ExecGetJunkAttribute(planSlot, attnum, &pkNull);
-		if (pkNull)
-			elog(ERROR, "key %d is null", i);
+			pkDatum = ExecGetJunkAttribute(planSlot, attnum, &pkNull);
+			if (pkNull)
+				elog(ERROR, "key %d is null", i);
 
-		key->keys[i].value = pkDatum;
-		key->keys[i].type = id->nonLeafTupdesc->attrs[i].atttypid;
-		key->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
-		key->keys[i].comparator = NULL;
+			key->keys[i].value = pkDatum;
+			key->keys[i].type = id->nonLeafTupdesc->attrs[i].atttypid;
+			key->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
+			key->keys[i].comparator = NULL;
+		}
 	}
 }
 

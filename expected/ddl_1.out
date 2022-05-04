@@ -726,9 +726,26 @@ UPDATE o_unexisting_column SET key_2 = 4 WHERE key = 2;
 ERROR:  column "key_2" of relation "o_unexisting_column" does not exist
 LINE 1: UPDATE o_unexisting_column SET key_2 = 4 WHERE key = 2;
                                        ^
+CREATE TABLE o_test_unique_on_conflict (
+	key int
+) USING orioledb;
+CREATE UNIQUE INDEX ON o_test_unique_on_conflict(key);
+INSERT INTO o_test_unique_on_conflict(key)
+	(SELECT key FROM generate_series (1, 1) key);
+INSERT INTO o_test_unique_on_conflict (key) 
+	SELECT * FROM generate_series(1, 1)
+	ON CONFLICT (key) DO UPDATE 
+		SET key = o_test_unique_on_conflict.key + 100;
+SELECT * FROM o_test_unique_on_conflict;
+ key 
+-----
+ 101
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
 drop cascades to table o_unexisting_column
+drop cascades to table o_test_unique_on_conflict

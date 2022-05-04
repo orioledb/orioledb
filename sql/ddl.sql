@@ -262,4 +262,18 @@ ALTER TABLE o_unexisting_column ALTER COLUMN key
 
 UPDATE o_unexisting_column SET key_2 = 4 WHERE key = 2;
 
+CREATE TABLE o_test_unique_on_conflict (
+	key int
+) USING orioledb;
+
+CREATE UNIQUE INDEX ON o_test_unique_on_conflict(key);
+
+INSERT INTO o_test_unique_on_conflict(key)
+	(SELECT key FROM generate_series (1, 1) key);
+INSERT INTO o_test_unique_on_conflict (key) 
+	SELECT * FROM generate_series(1, 1)
+	ON CONFLICT (key) DO UPDATE 
+		SET key = o_test_unique_on_conflict.key + 100;
+SELECT * FROM o_test_unique_on_conflict;
+
 DROP EXTENSION orioledb CASCADE;
