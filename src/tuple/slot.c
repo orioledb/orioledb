@@ -204,16 +204,10 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	{
 		natts = Min(__natts, slot->tts_tupleDescriptor->natts);
 	}
-	else if (slot->tts_tupleDescriptor->tdtypeid == RECORDOID)
-	{
-		natts = slot->tts_tupleDescriptor->natts;
-	}
 	else
 	{
 		natts = oslot->state.desc->natts;
 	}
-
-	attnum = oslot->state.attnum - ctid_off;
 
 	for (attnum = slot->tts_nvalid; attnum < natts; attnum++)
 	{

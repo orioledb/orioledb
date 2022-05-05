@@ -1190,8 +1190,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							for (field_num = 0; field_num < index->nfields;
 								 field_num++)
 							{
-								if (index->fields[field_num].attnum ==
-									renamed_num)
+								if ((index->type == oIndexPrimary) ||
+									(index->fields[field_num].attnum ==
+									renamed_num))
 								{
 									o_indices_update(o_table, ix_num,
 													 oxid, csn);

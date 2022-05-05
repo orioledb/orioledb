@@ -276,4 +276,19 @@ INSERT INTO o_test_unique_on_conflict (key)
 		SET key = o_test_unique_on_conflict.key + 100;
 SELECT * FROM o_test_unique_on_conflict;
 
+CREATE TABLE o_test_update_set_renamed_column(
+	val_1 int PRIMARY KEY,
+	val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_update_set_renamed_column(val_1, val_2)
+	(SELECT val_1, val_1 FROM generate_series (1, 1) val_1);
+SELECT * FROM o_test_update_set_renamed_column;
+
+ALTER TABLE o_test_update_set_renamed_column RENAME COLUMN val_2 to val_3;
+
+UPDATE o_test_update_set_renamed_column SET val_3 = 5;
+
+SELECT * FROM o_test_update_set_renamed_column;
+
 DROP EXTENSION orioledb CASCADE;

@@ -741,10 +741,31 @@ SELECT * FROM o_test_unique_on_conflict;
  101
 (1 row)
 
+CREATE TABLE o_test_update_set_renamed_column(
+	val_1 int PRIMARY KEY,
+	val_2 int
+) USING orioledb;
+INSERT INTO o_test_update_set_renamed_column(val_1, val_2)
+	(SELECT val_1, val_1 FROM generate_series (1, 1) val_1);
+SELECT * FROM o_test_update_set_renamed_column;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+(1 row)
+
+ALTER TABLE o_test_update_set_renamed_column RENAME COLUMN val_2 to val_3;
+UPDATE o_test_update_set_renamed_column SET val_3 = 5;
+SELECT * FROM o_test_update_set_renamed_column;
+ val_1 | val_3 
+-------+-------
+     1 |     5
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
 drop cascades to table o_unexisting_column
 drop cascades to table o_test_unique_on_conflict
+drop cascades to table o_test_update_set_renamed_column
