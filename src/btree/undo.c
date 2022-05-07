@@ -241,7 +241,6 @@ retry:
 						   (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, prev_tuple, OTupleLength))));
 
 		page_locator_delete_item(p, locator);
-		page_locator_find_real_item(p, NULL, locator);
 		return false;
 	}
 	return true;
