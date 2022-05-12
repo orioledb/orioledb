@@ -448,6 +448,33 @@ class OTablesTest(BaseTest):
 		self.assertTblCount(0)
 		node.stop()
 
+	def test_null_o_table(self):
+		node = self.node
+		node.start()
+		con_control = node.connect()
+		con_control.execute("""
+		CREATE EXTENSION IF NOT EXISTS orioledb;
+
+		CREATE TABLE o_test_1(
+			val_1 int,
+			val_2 int
+		)USING orioledb;
+
+		INSERT INTO o_test_1(val_1, val_2)
+			(SELECT val_1, val_1 * 100 FROM generate_series (1, 11) val_1);
+		""")
+		con_control.commit()
+		con1 = node.connect()
+		con2 = node.connect()
+		con1.begin()
+		con2.begin()
+		con1.execute("DROP TABLE o_test_1;")
+		con2.commit()
+		con1.commit()
+		con_control.execute("""
+		DROP TABLE o_test_1;
+		""")
+		con_control.commit()
 
 
 
