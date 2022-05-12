@@ -137,6 +137,7 @@ include $(PGXS)
 
 ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
   TESTGRESCHECKS_PART_2 += t/merge_into_test.py
+  ISOLATIONCHECKS += isol_merge
 endif
 
 regresscheck: | install
