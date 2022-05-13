@@ -114,6 +114,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 							 BTreeKeyType kind, CommitSeqNo readCsn,
 							 CommitSeqNo *outCsn, MemoryContext mcxt,
 							 BTreeLocationHint *hint,
+							 bool	*deleted,
 							 TupleFetchCallback cb,
 							 void *arg)
 {
@@ -163,6 +164,9 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 				if (outCsn)
 					*outCsn = COMMITSEQNO_INPROGRESS;
 
+				if (deleted)
+					*deleted = tupHdr->deleted;
+
 				if (!tupHdr->deleted)
 				{
 					result_size = o_btree_len(desc, curTuple, OTupleLength);
@@ -186,11 +190,15 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 
 	if (BTREE_PAGE_LOCATOR_IS_VALID(img, &loc))
 	{
+		BTreeLeafTuphdr *tupHdr;
 		OTuple		curTuple;
 		int			cmp;
 
-		BTREE_PAGE_READ_TUPLE(curTuple, img, &loc);
+		BTREE_PAGE_READ_LEAF_ITEM(tupHdr, curTuple, img, &loc);
 		cmp = o_btree_cmp(desc, key, kind, &curTuple, BTreeKeyLeafTuple);
+
+		if (deleted)
+			*deleted = tupHdr->deleted;
 
 		if (cmp == 0)
 			return o_find_tuple_version(desc, img, &loc, readCsn, outCsn,
@@ -208,7 +216,7 @@ o_btree_find_tuple_by_key(BTreeDescr *desc, void *key, BTreeKeyType kind,
 						  MemoryContext mcxt, BTreeLocationHint *hint)
 {
 	return o_btree_find_tuple_by_key_cb(desc, key, kind, readCsn, outCsn,
-										mcxt, hint, NULL, NULL);
+										mcxt, hint, NULL, NULL, NULL);
 }
 
 

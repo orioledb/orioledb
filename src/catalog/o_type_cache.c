@@ -488,7 +488,7 @@ o_type_cache_add(OTypeCache *type_cache, Oid datoid, Oid oid,
 
 static OBTreeWaitCallbackAction
 o_type_cache_wait_callback(BTreeDescr *descr,
-						   OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo,
+						   OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
 						   RowLockMode *lock_mode, BTreeLocationHint *hint,
 						   void *arg)
 {
@@ -497,7 +497,7 @@ o_type_cache_wait_callback(BTreeDescr *descr,
 
 static OBTreeModifyCallbackAction
 o_type_cache_update_callback(BTreeDescr *descr,
-							 OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo,
+							 OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
 							 RowLockMode *lock_mode, BTreeLocationHint *hint,
 							 void *arg)
 {

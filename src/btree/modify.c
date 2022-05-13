@@ -214,6 +214,7 @@ retry:
 			cbHint.pageChangeCount = pageFindContext->items[pageFindContext->index].pageChangeCount;
 			cbAction = callbackInfo->modifyCallback(desc, curTuple,
 													&context.tuple, opOxid, context.conflictTupHdr.xactInfo,
+													context.conflictTupHdr.undoLocation,
 													&context.lockMode, &cbHint, callbackInfo->arg);
 		}
 
@@ -289,6 +290,7 @@ retry:
 			cbHint.pageChangeCount = pageFindContext->items[pageFindContext->index].pageChangeCount;
 			cbAction = callbackInfo->insertToDeleted(desc, curTuple,
 													 &context.tuple, opOxid, context.conflictTupHdr.xactInfo,
+													 context.conflictTupHdr.undoLocation,
 													 &context.lockMode, &cbHint, callbackInfo->arg);
 
 			if (cbAction == OBTreeCallbackActionUndo)
@@ -334,6 +336,12 @@ retry:
 		else
 		{
 			unlock_release(&context, true);
+			if (callbackInfo->deleteDeleted)
+				callbackInfo->deleteDeleted(desc, curTuple,
+											&context.tuple, opOxid, context.conflictTupHdr.xactInfo,
+											context.conflictTupHdr.undoLocation,
+											&context.lockMode, NULL,
+											callbackInfo->arg);
 			return OBTreeModifyResultNotFound;
 		}
 	}
@@ -510,6 +518,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 					cbAction = context->callbackInfo->waitCallback(desc,
 																   curTuple, &context->tuple, oxid,
 																   context->conflictTupHdr.xactInfo,
+																   context->conflictTupHdr.undoLocation,
 																   &context->lockMode, &cbHint,
 																   context->callbackInfo->arg);
 				}
@@ -702,6 +711,14 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								O_PAGE_GET_CHANGE_COUNT(page),
 								&undoLocation);
 	}
+
+#if PG_VERSION_NUM >= 150000
+	if (is_merge && first_saved_undo_location)
+	{
+		saved_undo_location = undoLocation;
+		first_saved_undo_location = false;
+	}
+#endif
 }
 
 static OBTreeModifyResult
@@ -775,6 +792,14 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 	{
 		undoLocation = InvalidUndoLocation;
 	}
+
+#if PG_VERSION_NUM >= 150000
+	if (is_merge && first_saved_undo_location)
+	{
+		saved_undo_location = undoLocation;
+		first_saved_undo_location = false;
+	}
+#endif
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);
@@ -1097,8 +1122,9 @@ retry:
 		{
 			OTuple		curTuple;
 			BTreeLocationHint cbHint = {pageFindContext.items[pageFindContext.index].blkno, pageFindContext.items[pageFindContext.index].pageChangeCount};
+			BTreeLeafTuphdr *tuphdr;
 
-			BTREE_PAGE_READ_LEAF_TUPLE(curTuple, p, &pageFindContext.items[pageFindContext.index].locator);
+			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, &pageFindContext.items[pageFindContext.index].locator);
 
 			if (XACT_INFO_OXID_EQ(xactInfo, opOxid) || XACT_INFO_IS_FINISHED(xactInfo))
 			{
@@ -1108,7 +1134,8 @@ retry:
 				{
 					cbAction = callbackInfo->modifyCallback(desc,
 															curTuple, &tuple, opOxid,
-															xactInfo, &lockMode, &cbHint, callbackInfo->arg);
+															xactInfo, tuphdr->undoLocation,
+															&lockMode, &cbHint, callbackInfo->arg);
 
 					/*
 					 * We could support other callback actions, but it's not
@@ -1129,7 +1156,8 @@ retry:
 				{
 					cbAction = callbackInfo->waitCallback(desc,
 														  curTuple, &tuple, XACT_INFO_GET_OXID(xactInfo),
-														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
+														  xactInfo, tuphdr->undoLocation,
+														  &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
@@ -1173,9 +1201,10 @@ retry:
 			BTreePageItemLocator *loc = &pageFindContext.items[pageFindContext.index].locator;
 			OTuple		curTuple;
 			BTreeLocationHint cbHint = {pageFindContext.items[pageFindContext.index].blkno, pageFindContext.items[pageFindContext.index].pageChangeCount};
+			BTreeLeafTuphdr *tuphdr;
 
 			p = O_GET_IN_MEMORY_PAGE(pageFindContext.items[pageFindContext.index].blkno);
-			BTREE_PAGE_READ_LEAF_TUPLE(curTuple, p, loc);
+			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, loc);
 			if (XACT_INFO_OXID_EQ(xactInfo, opOxid) || XACT_INFO_IS_FINISHED(xactInfo))
 			{
 				OBTreeModifyCallbackAction cbAction;
@@ -1184,7 +1213,8 @@ retry:
 				{
 					cbAction = callbackInfo->modifyCallback(desc,
 															curTuple, &tuple, opOxid,
-															xactInfo, &lockMode, &cbHint, callbackInfo->arg);
+															xactInfo, tuphdr->undoLocation,
+															&lockMode, &cbHint, callbackInfo->arg);
 
 					/*
 					 * We could support other callback actions, but it's not
@@ -1205,6 +1235,7 @@ retry:
 				{
 					cbAction = callbackInfo->waitCallback(desc,
 														  curTuple, &tuple, XACT_INFO_GET_OXID(xactInfo),
+														  tuphdr->undoLocation,
 														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)

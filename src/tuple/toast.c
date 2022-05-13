@@ -483,7 +483,8 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 
 static OBTreeModifyCallbackAction
 o_update_callback(BTreeDescr *descr,
-				  OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo,
+				  OTuple tup, OTuple *newtup, OXid oxid,
+				  OTupleXactInfo xactInfo, UndoLocation location,
 				  RowLockMode *lock_mode, BTreeLocationHint *hint, void *arg)
 {
 	return OBTreeCallbackActionUpdate;
@@ -491,7 +492,8 @@ o_update_callback(BTreeDescr *descr,
 
 static OBTreeModifyCallbackAction
 o_delete_callback(BTreeDescr *descr,
-				  OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo,
+				  OTuple tup, OTuple *newtup, OXid oxid,
+				  OTupleXactInfo xactInfo, UndoLocation location,
 				  RowLockMode *lock_mode, BTreeLocationHint *hint, void *arg)
 {
 	return OBTreeCallbackActionDelete;
@@ -511,6 +513,7 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 		.waitCallback = NULL,
 		.insertToDeleted = o_update_callback,
 		.modifyCallback = o_update_callback,
+		.deleteDeleted = NULL,
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
@@ -578,6 +581,7 @@ generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_delete_callback,
+		.deleteDeleted = NULL,
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};

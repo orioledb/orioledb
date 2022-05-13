@@ -1100,7 +1100,8 @@ recovery_rollback_to_savepoint(SubTransactionId parentSubid, int worker_id)
 OBTreeModifyCallbackAction
 recovery_insert_primary_callback(BTreeDescr *descr,
 								 OTuple tup, OTuple *newtup, OXid oxid,
-								 OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+								 OTupleXactInfo xactInfo,
+								 UndoLocation location, RowLockMode *lock_mode,
 								 BTreeLocationHint *hint, void *arg)
 {
 	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
@@ -1112,7 +1113,9 @@ recovery_insert_primary_callback(BTreeDescr *descr,
 OBTreeModifyCallbackAction
 recovery_delete_primary_callback(BTreeDescr *descr,
 								 OTuple tup, OTuple *newtup, OXid oxid,
-								 OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+								 OTupleXactInfo xactInfo,
+								 UndoLocation location,
+								 RowLockMode *lock_mode,
 								 BTreeLocationHint *hint, void *arg)
 {
 	OTuple	   *key = (OTuple *) arg;
@@ -1127,7 +1130,9 @@ recovery_delete_primary_callback(BTreeDescr *descr,
 OBTreeModifyCallbackAction
 recovery_insert_overwrite_callback(BTreeDescr *descr,
 								   OTuple tup, OTuple *newtup, OXid oxid,
-								   OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+								   OTupleXactInfo xactInfo,
+								   UndoLocation location,
+								   RowLockMode *lock_mode,
 								   BTreeLocationHint *hint, void *arg)
 {
 	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
@@ -1139,7 +1144,9 @@ recovery_insert_overwrite_callback(BTreeDescr *descr,
 OBTreeModifyCallbackAction
 recovery_delete_overwrite_callback(BTreeDescr *descr,
 								   OTuple tup, OTuple *newtup, OXid oxid,
-								   OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+								   OTupleXactInfo xactInfo,
+								   UndoLocation location,
+								   RowLockMode *lock_mode,
 								   BTreeLocationHint *hint, void *arg)
 {
 	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
@@ -1151,7 +1158,8 @@ recovery_delete_overwrite_callback(BTreeDescr *descr,
 static OBTreeModifyCallbackAction
 recovery_insert_systree_callback(BTreeDescr *descr,
 								 OTuple tup, OTuple *newtup, OXid oxid,
-								 OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+								 OTupleXactInfo xactInfo,
+								 UndoLocation location, RowLockMode *lock_mode,
 								 BTreeLocationHint *hint, void *arg)
 {
 	return OBTreeCallbackActionUpdate;

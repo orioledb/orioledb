@@ -36,6 +36,7 @@ typedef struct OTableModifyResult
 	OIndexNumber failedIxNum;
 	/* the modified tuple */
 	TupleTableSlot *oldTuple;
+	bool		self_modified;
 } OTableModifyResult;
 
 typedef struct
@@ -60,6 +61,8 @@ typedef struct
 	OTableSlot *newSlot;
 	OXid		oxid;
 	CommitSeqNo csn;
+	UndoLocation tup_undo_location;
+	bool		deleted;
 	bool		modified;
 	RowLockMode rowLockMode;
 } OModifyCallbackArg;

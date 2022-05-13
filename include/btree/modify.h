@@ -22,6 +22,7 @@ typedef struct BTreeModifyCallbackInfo
 											  OTuple *newTup,
 											  OXid oxid,
 											  OTupleXactInfo prevXactInfo,
+											  UndoLocation location,
 											  RowLockMode *lockMode,
 											  BTreeLocationHint *hint,
 											  void *arg);
@@ -30,6 +31,7 @@ typedef struct BTreeModifyCallbackInfo
 												  OTuple *newTup,
 												  OXid oxid,
 												  OTupleXactInfo prevXactInfo,
+												  UndoLocation location,
 												  RowLockMode *lockMode,
 												  BTreeLocationHint *hint,
 												  void *arg);
@@ -38,9 +40,19 @@ typedef struct BTreeModifyCallbackInfo
 												   OTuple *newTup,
 												   OXid oxid,
 												   OTupleXactInfo prevXactInfo,
+												   UndoLocation location,
 												   RowLockMode *lockMode,
 												   BTreeLocationHint *hint,
 												   void *arg);
+	OBTreeModifyCallbackAction (*deleteDeleted)(BTreeDescr *desc,
+												OTuple oldTup,
+												OTuple *newTup,
+												OXid oxid,
+												OTupleXactInfo prevXactInfo,
+												UndoLocation location,
+												RowLockMode *lockMode,
+												BTreeLocationHint *hint,
+												void *arg);
 	bool		needsUndoForSelfCreated;
 	void	   *arg;
 } BTreeModifyCallbackInfo;

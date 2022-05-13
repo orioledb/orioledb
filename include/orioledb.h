@@ -264,5 +264,10 @@ typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
 extern void orioledb_setup_ddl_hooks(void);
+#if PG_VERSION_NUM >= 150000
+extern bool is_merge;
+extern bool first_saved_undo_location;
+extern UndoLocation saved_undo_location;
+#endif
 
 #endif							/* __ORIOLEDB_H__ */

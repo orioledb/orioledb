@@ -179,6 +179,7 @@ orioledb_fetch_row_version(Relation relation,
 	CommitSeqNo tupleCsn;
 	CommitSeqNo csn;
 	uint32		version;
+	bool		deleted;
 
 	descr = relation_get_descr(relation);
 
@@ -194,8 +195,15 @@ orioledb_fetch_row_version(Relation relation,
 										 BTreeKeyBound,
 										 csn, &tupleCsn,
 										 slot->tts_mcxt,
-										 &hint, fetch_row_version_callback,
+										 &hint,
+										 &deleted,
+										 fetch_row_version_callback,
 										 &version);
+
+#if PG_VERSION_NUM >= 150000
+	if (is_merge && deleted && COMMITSEQNO_IS_INPROGRESS(tupleCsn))
+		return true;
+#endif
 
 	if (O_TUPLE_IS_NULL(tuple))
 		return false;
@@ -406,6 +414,8 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	OXid		oxid;
 	BTreeLocationHint hint;
 
+	tmfd->xmax = GetCurrentTransactionId();
+
 	descr = relation_get_descr(rinfo->ri_RelationDesc);
 
 	Assert(descr != NULL);
@@ -450,10 +460,11 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 		Assert(mres.oldTuple != NULL);
 		if (returningSlot && mres.oldTuple != returningSlot)
 			ExecCopySlot(returningSlot, mres.oldTuple);
-		return TM_Ok;
+
+		return mres.self_modified ? TM_SelfModified : TM_Ok;
 	}
 
-	return TM_Deleted;
+	return mres.self_modified ? TM_SelfModified : TM_Deleted;
 }
 
 static TM_Result
@@ -484,6 +495,8 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
+
+	tmfd->xmax = GetCurrentTransactionId();
 
 	rel = rinfo->ri_RelationDesc;
 
@@ -582,7 +595,7 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	Assert(mres.success);
 
 	if (mres.oldTuple)
-		return TM_Ok;
+		return mres.self_modified ? TM_SelfModified : TM_Ok;
 	return TM_Deleted;
 }
 

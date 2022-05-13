@@ -44,6 +44,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/optimizer.h"
+#include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
@@ -61,6 +62,13 @@
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
+static planner_hook_type prev_planner_hook = NULL;
+
+#if PG_VERSION_NUM >= 150000
+bool			is_merge = false;
+bool			first_saved_undo_location = true;
+UndoLocation	saved_undo_location;
+#endif
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -75,6 +83,11 @@ static void orioledb_utility_command(PlannedStmt *pstmt,
 static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 										Oid objectId, int subId, void *arg);
 
+static PlannedStmt *orioledb_planner_hook(Query *parse,
+										  const char *query_string,
+										  int cursorOptions,
+										  ParamListInfo boundParams);
+
 void
 orioledb_setup_ddl_hooks(void)
 {
@@ -82,6 +95,8 @@ orioledb_setup_ddl_hooks(void)
 	ProcessUtility_hook = orioledb_utility_command;
 	old_objectaccess_hook = object_access_hook;
 	object_access_hook = orioledb_object_access_hook;
+	prev_planner_hook = planner_hook;
+	planner_hook = orioledb_planner_hook;
 }
 
 List *
@@ -345,6 +360,25 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 	}
 
 	return strtype;
+}
+
+static PlannedStmt *
+orioledb_planner_hook(Query *parse, const char *query_string,
+					  int cursorOptions, ParamListInfo boundParams)
+{
+#if PG_VERSION_NUM >= 150000
+	is_merge = parse->commandType == CMD_MERGE;
+
+	if (is_merge)
+		first_saved_undo_location = true;
+#endif
+
+	if (prev_planner_hook)
+		return prev_planner_hook(parse, query_string, cursorOptions,
+								 boundParams);
+	else
+		return standard_planner(parse, query_string, cursorOptions,
+								boundParams);
 }
 
 static bool

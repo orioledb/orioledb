@@ -62,6 +62,7 @@ extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   CommitSeqNo *outCsn,
 										   MemoryContext mcxt,
 										   BTreeLocationHint *hint,
+										   bool *deleted,
 										   TupleFetchCallback cb,
 										   void *arg);
 

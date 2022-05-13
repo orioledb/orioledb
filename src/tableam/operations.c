@@ -78,45 +78,62 @@ static inline bool o_callback_is_modified(OXid oxid, CommitSeqNo csn, OTupleXact
 static OBTreeModifyCallbackAction o_insert_callback(BTreeDescr *descr,
 													OTuple tup, OTuple *newtup,
 													OXid oxid, OTupleXactInfo xactInfo,
+													UndoLocation location,
 													RowLockMode *lock_mode,
 													BTreeLocationHint *hint,
 													void *arg);
 static OBTreeWaitCallbackAction o_insert_on_conflict_wait_callback(BTreeDescr *descr,
 																   OTuple tup, OTuple *newtup,
 																   OXid oxid, OTupleXactInfo xactInfo,
+																   UndoLocation location,
 																   RowLockMode *lock_mode,
 																   BTreeLocationHint *hint,
 																   void *arg);
 static OBTreeModifyCallbackAction o_insert_on_conflict_insert_to_deleted_callback(BTreeDescr *descr,
 																				  OTuple tup, OTuple *newtup,
 																				  OXid oxid, OTupleXactInfo xactInfo,
+																				  UndoLocation location,
 																				  RowLockMode *lock_mode,
 																				  BTreeLocationHint *hint,
 																				  void *arg);
 static OBTreeModifyCallbackAction o_insert_on_conflict_modify_callback(BTreeDescr *descr,
 																	   OTuple tup, OTuple *newtup,
 																	   OXid oxid, OTupleXactInfo xactInfo,
+																	   UndoLocation location,
 																	   RowLockMode *lock_mode,
 																	   BTreeLocationHint *hint,
 																	   void *arg);
 static OBTreeModifyCallbackAction o_delete_callback(BTreeDescr *descr,
 													OTuple tup, OTuple *newtup,
 													OXid oxid, OTupleXactInfo xactInfo,
+													UndoLocation location,
 													RowLockMode *lock_mode,
 													BTreeLocationHint *hint,
 													void *arg);
+static OBTreeModifyCallbackAction o_delete_deleted_callback(BTreeDescr *desc,
+															OTuple oldTup,
+															OTuple *newTup,
+															OXid oxid,
+															OTupleXactInfo prevXactInfo,
+															UndoLocation location,
+															RowLockMode *lockMode,
+															BTreeLocationHint *hint,
+															void *arg);
 static OBTreeModifyCallbackAction o_update_callback(BTreeDescr *descr,
 													OTuple tup, OTuple *newtup,
 													OXid oxid, OTupleXactInfo xactInfo,
+													UndoLocation location,
 													RowLockMode *lock_mode,
 													BTreeLocationHint *hint,
 													void *arg);
 static OBTreeWaitCallbackAction o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 													 OXid oxid, OTupleXactInfo xactInfo,
+													 UndoLocation location,
 													 RowLockMode *lock_mode, BTreeLocationHint *hint,
 													 void *arg);
 static OBTreeModifyCallbackAction o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 														 OXid oxid, OTupleXactInfo xactInfo,
+														 UndoLocation location,
 														 RowLockMode *lock_mode, BTreeLocationHint *hint,
 														 void *arg);
 static void get_keys_from_ps(TupleTableSlot *planSlot, OIndexDescr *id,
@@ -185,6 +202,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 		.waitCallback = o_lock_wait_callback,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_lock_modify_callback,
+		.deleteDeleted = NULL,
 		.needsUndoForSelfCreated = false,
 		.arg = larg
 	};
@@ -272,6 +290,7 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 			.waitCallback = o_insert_on_conflict_wait_callback,
 			.insertToDeleted = o_insert_on_conflict_insert_to_deleted_callback,
 			.modifyCallback = o_insert_on_conflict_modify_callback,
+			.deleteDeleted = NULL,
 			.needsUndoForSelfCreated = true,
 			.arg = &ioc_arg
 		};
@@ -478,6 +497,16 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot, EState *estate,
 	}
 	csn = arg->csn;
 
+#if PG_VERSION_NUM >= 150000
+	mres.self_modified = is_merge && mres.success &&
+						 COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
+						 (arg->oxid == get_current_oxid_if_any()) &&
+						 UndoLocationIsValid(arg->tup_undo_location) &&
+						 (arg->tup_undo_location >= saved_undo_location);
+#else
+	mres.self_modified = false;
+#endif
+
 	if (mres.success && mres.oldTuple != NULL)
 	{
 		if (mres.action == BTreeOperationUpdate)
@@ -539,6 +568,15 @@ o_tbl_delete(OTableDescr *descr, EState *estate, OBTreeKeyBound *primary_key,
 
 	result = o_tbl_indices_delete(descr, primary_key, estate, oxid,
 								  csn, hint, arg);
+
+#if PG_VERSION_NUM >= 150000
+	result.self_modified = is_merge && COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
+						   (arg->oxid == get_current_oxid_if_any()) &&
+						   UndoLocationIsValid(arg->tup_undo_location) &&
+						   (arg->tup_undo_location >= saved_undo_location);
+#else
+	result.self_modified = false;
+#endif
 
 	if (result.success && result.oldTuple != NULL)
 	{
@@ -702,6 +740,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_update_callback,
+		.deleteDeleted = NULL,
 		.needsUndoForSelfCreated = false,
 		.arg = arg
 	};
@@ -855,6 +894,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key, EState *estate,
 		.waitCallback = NULL,
 		.insertToDeleted = NULL,
 		.modifyCallback = o_delete_callback,
+		.deleteDeleted = o_delete_deleted_callback,
 		.needsUndoForSelfCreated = false,
 		.arg = arg
 	};
@@ -1150,7 +1190,7 @@ copy_tuple_to_slot(OTuple tup, TupleTableSlot *slot, OTableDescr *descr,
 
 static OBTreeModifyCallbackAction
 o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
-				  OXid oxid, OTupleXactInfo xactInfo,
+				  OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
 				  RowLockMode *lock_mode,
 				  BTreeLocationHint *hint,
 				  void *arg)
@@ -1173,6 +1213,7 @@ static OBTreeWaitCallbackAction
 o_insert_on_conflict_wait_callback(BTreeDescr *descr,
 								   OTuple tup, OTuple *newtup,
 								   OXid oxid, OTupleXactInfo xactInfo,
+								   UndoLocation location,
 								   RowLockMode *lock_mode,
 								   BTreeLocationHint *hint,
 								   void *arg)
@@ -1201,7 +1242,9 @@ o_insert_on_conflict_wait_callback(BTreeDescr *descr,
 static OBTreeModifyCallbackAction
 o_insert_on_conflict_insert_to_deleted_callback(BTreeDescr *descr,
 												OTuple tup, OTuple *newtup,
-												OXid oxid, OTupleXactInfo xactInfo,
+												OXid oxid,
+												OTupleXactInfo xactInfo,
+												UndoLocation location,
 												RowLockMode *lock_mode,
 												BTreeLocationHint *hint,
 												void *arg)
@@ -1224,6 +1267,7 @@ static OBTreeModifyCallbackAction
 o_insert_on_conflict_modify_callback(BTreeDescr *descr,
 									 OTuple tup, OTuple *newtup,
 									 OXid oxid, OTupleXactInfo xactInfo,
+									 UndoLocation location,
 									 RowLockMode *lock_mode,
 									 BTreeLocationHint *hint,
 									 void *arg)
@@ -1251,7 +1295,8 @@ o_insert_on_conflict_modify_callback(BTreeDescr *descr,
 static OBTreeModifyCallbackAction
 o_delete_callback(BTreeDescr *descr,
 				  OTuple tup, OTuple *newtup,
-				  OXid oxid, OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+				  OXid oxid, OTupleXactInfo xactInfo,
+				  UndoLocation location, RowLockMode *lock_mode,
 				  BTreeLocationHint *hint, void *arg)
 {
 	OModifyCallbackArg *o_arg = (OModifyCallbackArg *) arg;
@@ -1266,7 +1311,11 @@ o_delete_callback(BTreeDescr *descr,
 	if (XACT_INFO_IS_FINISHED(xactInfo))
 		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
 	else
+	{
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
+		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+		o_arg->tup_undo_location = location;
+	}
 
 	if (!o_arg->epqstate || !modified)
 	{
@@ -1296,9 +1345,43 @@ o_delete_callback(BTreeDescr *descr,
 }
 
 static OBTreeModifyCallbackAction
+o_delete_deleted_callback(BTreeDescr *desc,
+						  OTuple oldTup,
+						  OTuple *newTup,
+						  OXid oxid,
+						  OTupleXactInfo xactInfo,
+						  UndoLocation location,
+						  RowLockMode *lockMode,
+						  BTreeLocationHint *hint,
+						  void *arg)
+{
+	OModifyCallbackArg *o_arg = (OModifyCallbackArg *) arg;
+	bool		modified;
+
+	o_arg->deleted = true;
+
+	if (desc->type != oIndexPrimary)
+		return OBTreeCallbackActionDelete;
+
+	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
+
+	if (XACT_INFO_IS_FINISHED(xactInfo))
+		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
+	else
+	{
+		o_arg->csn = COMMITSEQNO_INPROGRESS;
+		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+		o_arg->tup_undo_location = location;
+	}
+	return OBTreeCallbackActionDoNothing;
+}
+
+static OBTreeModifyCallbackAction
 o_update_callback(BTreeDescr *descr,
 				  OTuple tup, OTuple *newtup,
-				  OXid oxid, OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+				  OXid oxid, OTupleXactInfo xactInfo,
+				  UndoLocation location,
+				  RowLockMode *lock_mode,
 				  BTreeLocationHint *hint, void *arg)
 {
 	OModifyCallbackArg *o_arg = (OModifyCallbackArg *) arg;
@@ -1324,7 +1407,11 @@ o_update_callback(BTreeDescr *descr,
 	if (XACT_INFO_IS_FINISHED(xactInfo))
 		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
 	else
+	{
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
+		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+		o_arg->tup_undo_location = location;
+	}
 
 	if (!o_arg->epqstate || !modified)
 	{
@@ -1354,7 +1441,7 @@ o_update_callback(BTreeDescr *descr,
 
 static OBTreeWaitCallbackAction
 o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
-					 OXid oxid, OTupleXactInfo xactInfo,
+					 OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
 					 RowLockMode *lock_mode, BTreeLocationHint *hint,
 					 void *arg)
 {
@@ -1382,6 +1469,7 @@ o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 static OBTreeModifyCallbackAction
 o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 					   OXid oxid, OTupleXactInfo xactInfo,
+					   UndoLocation location,
 					   RowLockMode *lock_mode, BTreeLocationHint *hint,
 					   void *arg)
 {

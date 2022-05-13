@@ -136,22 +136,26 @@ extern bool apply_btree_modify_record(BTreeDescr *tree, uint16 type,
 
 extern OBTreeModifyCallbackAction recovery_insert_primary_callback(BTreeDescr *descr,
 																   OTuple tup, OTuple *newtup,
-																   OXid oxid, OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+																   OXid oxid, OTupleXactInfo xactInfo,
+																   UndoLocation location, RowLockMode *lock_mode,
 																   BTreeLocationHint *hint,
 																   void *arg);
 extern OBTreeModifyCallbackAction recovery_delete_primary_callback(BTreeDescr *descr,
 																   OTuple tup, OTuple *newtup,
-																   OXid oxid, OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+																   OXid oxid, OTupleXactInfo xactInfo,
+																   UndoLocation location, RowLockMode *lock_mode,
 																   BTreeLocationHint *hint,
 																   void *arg);
 extern OBTreeModifyCallbackAction recovery_insert_overwrite_callback(BTreeDescr *descr,
 																	 OTuple tup, OTuple *newtup,
-																	 OXid oxid, OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+																	 OXid oxid, OTupleXactInfo xactInfo,
+																	 UndoLocation location, RowLockMode *lock_mode,
 																	 BTreeLocationHint *hint,
 																	 void *arg);
 extern OBTreeModifyCallbackAction recovery_delete_overwrite_callback(BTreeDescr *descr,
 																	 OTuple tup, OTuple *newtup,
-																	 OXid oxid, OTupleXactInfo xactInfo, RowLockMode *lock_mode,
+																	 OXid oxid, OTupleXactInfo xactInfo,
+																	 UndoLocation location, RowLockMode *lock_mode,
 																	 BTreeLocationHint *hint,
 																	 void *arg);
 

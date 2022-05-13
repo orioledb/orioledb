@@ -67,7 +67,8 @@ typedef struct
  */
 static OBTreeModifyCallbackAction
 o_delete_copy_callback(BTreeDescr *descr,
-					   OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo,
+					   OTuple tup, OTuple *newtup, OXid oxid,
+					   OTupleXactInfo xactInfo, UndoLocation location,
 					   RowLockMode *lock_mode, BTreeLocationHint *hint, void *arg)
 {
 	CallbackTupleCopy *copyArg = (CallbackTupleCopy *) arg;
@@ -97,7 +98,8 @@ o_delete_copy_callback(BTreeDescr *descr,
 
 static OBTreeModifyCallbackAction
 o_update_copy_callback(BTreeDescr *descr,
-					   OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo,
+					   OTuple tup, OTuple *newtup, OXid oxid,
+					   OTupleXactInfo xactInfo, UndoLocation location,
 					   RowLockMode *lock_mode, BTreeLocationHint *hint, void *arg)
 {
 	CallbackTupleCopy *copyArg = (CallbackTupleCopy *) arg;
@@ -646,6 +648,7 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 				.waitCallback = NULL,
 				.modifyCallback = o_delete_copy_callback,
 				.insertToDeleted = NULL,
+				.deleteDeleted = NULL,
 				.needsUndoForSelfCreated = false,
 				.arg = &tupCopy
 			};
@@ -676,6 +679,7 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 				.waitCallback = NULL,
 				.modifyCallback = recovery_delete_overwrite_callback,
 				.insertToDeleted = NULL,
+				.deleteDeleted = NULL,
 				.needsUndoForSelfCreated = false,
 				.arg = NULL
 			};
@@ -724,6 +728,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 				.waitCallback = NULL,
 				.modifyCallback = o_update_copy_callback,
 				.insertToDeleted = NULL,
+				.deleteDeleted = NULL,
 				.needsUndoForSelfCreated = false,
 				.arg = &tupCopy
 			};
