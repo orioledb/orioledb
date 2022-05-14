@@ -90,6 +90,25 @@ class BaseTest(unittest.TestCase):
 			i = i + 1
 		return result[0:length].decode('ascii')
 
+	def assertErrorMessageEquals(self, e: Exception, err_msg: str,
+								 hint_msg: str = None):
+		if (hasattr(e, 'exception')):
+			e = e.exception
+
+		if (hasattr(e, 'pgerror')):
+			exp_msg = "ERROR:  %s\n" % (err_msg)
+			if (hint_msg != None):
+				exp_msg += "HINT:  %s\n" % (hint_msg)
+			self.assertEqual(e.pgerror,
+							 exp_msg)
+		elif (hasattr(e, 'message')):
+			exp_msg = "ERROR:  %s\n" % (err_msg)
+			if (hint_msg != None):
+				exp_msg += "HINT:  %s\n" % (hint_msg)
+			self.assertEqual(e.message, exp_msg)
+		else:
+			self.assertEqual(e.args[0]['M'], err_msg)
+
 # execute SQL query Thread for PostgreSql node's connection
 class ThreadQueryExecutor(Thread):
 	def __init__(self, connection, sql_query):

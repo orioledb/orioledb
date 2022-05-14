@@ -1,5 +1,3 @@
-import imp
-from sqlite3 import DatabaseError
 from .base_test import BaseTest, ThreadQueryExecutor
 from testgres.exceptions import QueryException
 from testgres.connection import ProgrammingError
@@ -274,28 +272,14 @@ class MergeIntoTest(BaseTest):
 				WHEN MATCHED THEN
 					UPDATE SET val_2 = val_1 + val_2;
 				""")
-		self.assertEqual(e.exception.message,
-						 "ERROR:  MERGE command cannot affect row a second time\n" +
-						 "HINT:  Ensure that not more than one source row matches any one target row.\n")
+		self.assertErrorMessageEquals(e, "MERGE command cannot affect " +
+										 "row a second time",
+									  "Ensure that not more than one source " + "row matches any one target row.")
 
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 		node.stop()
-
-	def _assertErrorMessageEquals(self, e: Exception, err_msg: str,
-								  hint_msg: str):
-		if (hasattr(e, 'exception')):
-			e = e.exception
-
-		if (hasattr(e, 'pgerror')):
-			self.assertEqual(e.pgerror,
-							 "ERROR:  %s\nHINT:  %s\n" % (err_msg, hint_msg))
-		elif (hasattr(e, 'message')):
-			self.assertEqual(e.message,
-							 "ERROR:  %s\nHINT:  %s\n" % (err_msg, hint_msg))
-		else:
-			self.assertEqual(e.args[0]['M'], err_msg)
 
 	def test_merge_errors(self):
 		node = self.node
@@ -328,7 +312,7 @@ class MergeIntoTest(BaseTest):
 				WHEN MATCHED THEN
 					UPDATE SET val_2 = s.val_2;
 			""")
-		self._assertErrorMessageEquals(e, MERGE_ERROR_MSG, MERGE_HINT_MSG)
+		self.assertErrorMessageEquals(e, MERGE_ERROR_MSG, MERGE_HINT_MSG)
 
 		self.assertEqual(node.execute("SELECT * FROM o_test_1 ORDER BY val_1"),
 						 [(1, 1), (2, 1)])
@@ -379,7 +363,7 @@ class MergeIntoTest(BaseTest):
 					WHEN MATCHED THEN
 						DELETE;
 				""")
-			self._assertErrorMessageEquals(e, MERGE_ERROR_MSG, MERGE_HINT_MSG)
+			self.assertErrorMessageEquals(e, MERGE_ERROR_MSG, MERGE_HINT_MSG)
 			con1.rollback()
 			self.assertEqual(con1.execute("""
 								SELECT * FROM o_test_1 ORDER BY val_1, val_2

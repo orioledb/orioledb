@@ -56,7 +56,7 @@ static bool o_tree_init_free_extents(BTreeDescr *desc);
 static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation);
 static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
 static inline OComparator *o_add_comparator_to_cache(OComparator *comparator);
-static void recreate_table_descr(OTableDescr *descr);
+static bool recreate_table_descr(OTableDescr *descr);
 static void recreate_index_descr(OIndexDescr *descr);
 
 PG_FUNCTION_INFO_V1(orioledb_get_table_descrs);
@@ -717,10 +717,12 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 		hash_seq_init(&scan_status, oTableDescrHash);
 		while ((tableDescr = (OTableDescr *) hash_seq_search(&scan_status)) != NULL)
 		{
-			if (tableDescr->refcnt == 0)
+			bool delete = tableDescr->refcnt == 0;
+			if (!delete)
+				delete = !recreate_table_descr(tableDescr);
+
+			if (delete)
 				table_descr_delete_from_hash(tableDescr);
-			else
-				recreate_table_descr(tableDescr);
 		}
 
 		hash_seq_init(&scan_status, oIndexDescrHash);
@@ -740,10 +742,12 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 		tableDescr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
 		if (found)
 		{
-			if (tableDescr->refcnt == 0)
+			bool delete = tableDescr->refcnt == 0;
+			if (!delete)
+				delete = !recreate_table_descr(tableDescr);
+
+			if (delete)
 				table_descr_delete_from_hash(tableDescr);
-			else
-				recreate_table_descr(tableDescr);
 		}
 
 		indexDescr = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
@@ -1259,7 +1263,7 @@ o_tableam_descr_init(void)
 								  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 }
 
-static void
+static bool
 recreate_table_descr(OTableDescr *descr)
 {
 	OTable	   *o_table;
@@ -1270,7 +1274,8 @@ recreate_table_descr(OTableDescr *descr)
 	enable_stopevents = false;
 
 	o_table = o_tables_get(descr->oids);
-	Assert(o_table);
+	if (!o_table)
+		return false;
 
 	refcnt = descr->refcnt;
 	table_descr_free(descr);
@@ -1278,6 +1283,7 @@ recreate_table_descr(OTableDescr *descr)
 	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;
+	return true;
 }
 
 void

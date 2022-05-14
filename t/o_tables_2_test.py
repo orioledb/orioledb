@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import unittest
-from unittest.util import safe_repr
-from pkg_resources import safe_extra
-import testgres
-import os
-import re
-
 from .base_test import BaseTest
-from .base_test import ThreadQueryExecutor
-
-from testgres.enums import NodeStatus
+from testgres.connection import ProgrammingError
 
 class OTablesTest(BaseTest):
 	def assertTblCount(self, size):
 		self.assertEqual(size,
 						 self.node.execute('postgres',
 										   'SELECT count(*) FROM orioledb_table_oids();')[0][0])
-	
+
 	def test_o_tables_wal_commit_1(self):
 		node = self.node
 		node.start()
@@ -30,7 +21,7 @@ class OTablesTest(BaseTest):
 				num_2 varchar(50) NOT NULL,
 				PRIMARY KEY(num_1)
 			) USING orioledb;
-			
+
 			INSERT INTO table_name VALUES(55, 'num');
 		""")
 		self.assertTblCount(1)
@@ -113,7 +104,7 @@ class OTablesTest(BaseTest):
 		""")
 
 		self.assertTblCount(1)
-		
+
 		node.safe_psql('postgres', """
 			DROP TYPE type_name CASCADE;
 		""")
@@ -342,7 +333,7 @@ class OTablesTest(BaseTest):
 				VALUES (55,66);
 			INSERT INTO table_name (num_1, num_2)
 				VALUES (77,88);
-		""")		
+		""")
 		con1.commit()
 		con1.close()
 		self.assertTblCount(1)
@@ -453,29 +444,26 @@ class OTablesTest(BaseTest):
 		node.start()
 		con_control = node.connect()
 		con_control.execute("""
-		CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE EXTENSION IF NOT EXISTS orioledb;
 
-		CREATE TABLE o_test_1(
-			val_1 int,
-			val_2 int
-		)USING orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int,
+				val_2 int
+			) USING orioledb;
 
-		INSERT INTO o_test_1(val_1, val_2)
-			(SELECT val_1, val_1 * 100 FROM generate_series (1, 11) val_1);
+			INSERT INTO o_test_1(val_1, val_2)
+				(SELECT val_1, val_1 * 100 FROM generate_series (1, 11) val_1);
 		""")
 		con_control.commit()
 		con1 = node.connect()
-		con2 = node.connect()
 		con1.begin()
-		con2.begin()
 		con1.execute("DROP TABLE o_test_1;")
-		con2.commit()
 		con1.commit()
-		con_control.execute("""
-		DROP TABLE o_test_1;
-		""")
-		con_control.commit()
-
-
-
-
+		with self.assertRaises(ProgrammingError) as e:
+			con_control.execute("""
+				DROP TABLE o_test_1;
+			""")
+		self.assertErrorMessageEquals(e, 'table "o_test_1" does not exist')
+		con_control.rollback()
+		con1.close()
+		con_control.close()
