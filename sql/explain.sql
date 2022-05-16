@@ -242,4 +242,15 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 -- clean-up after EXPLAIN ANALYZE test
 DROP FUNCTION query_to_text;
 DROP TABLE o_explain;
+
+CREATE TABLE o_test_explain_verbose_rowid (
+  val_1 int,
+  val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_explain_verbose_rowid VALUES (1, 1);
+
+EXPLAIN (VERBOSE, COSTS OFF)
+	UPDATE o_test_explain_verbose_rowid SET val_2 = 10;
+
 DROP EXTENSION orioledb CASCADE;
