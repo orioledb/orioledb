@@ -430,6 +430,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				 * concurrent rootPageBlkno split or page location using hint.
 				 * Then just find appropriate page from the rootPageBlkno.
 				 */
+				BTREE_PAGE_FIND_UNSET(curContext, IMAGE);
 				if (curContext->index >= 0)
 					refind_page(curContext, &insert_item->tuple, kind,
 								insert_item->level,
