@@ -284,8 +284,10 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
 		if (walk_page(blkno, evict) != OWalkPageSkipped)
 		{
+			Assert(!have_locked_pages());
 			break;
 		}
+		Assert(!have_locked_pages());
 		blkno++;
 		if (blkno >= pool->offset + pool->size)
 			blkno = pool->offset;

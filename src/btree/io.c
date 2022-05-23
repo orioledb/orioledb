@@ -1817,6 +1817,7 @@ retry:
 		if (!found)
 		{
 			unlock_page(blkno);
+			Assert(!have_locked_pages());
 			return OWalkPageSkipped;
 		}
 

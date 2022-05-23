@@ -224,6 +224,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	{
 		/* unable to reserve undo location, no opportunity to resume */
 		unlock_page(blkno);
+		Assert(!have_locked_pages());
 		return false;
 	}
 
@@ -479,6 +480,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (needsUndo)
 		release_undo_size(desc->undoType);
 
+	Assert(!have_locked_pages());
 	return success;
 }
 
