@@ -1026,9 +1026,9 @@ slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
 		(void) find_right_page(pageFindContext, &hikey_buf);
 
 		/*
-		 * Due to concurrent merges, some tuples might be lower than the unique
-		 * key.  So, we can't just start from the beginning, but have to find
-		 * the right position on the page.
+		 * Due to concurrent merges, some tuples might be lower than the
+		 * unique key.  So, we can't just start from the beginning, but have
+		 * to find the right position on the page.
 		 */
 		btree_page_search(desc, p, key, BTreeKeyUniqueLowerBound,
 						  NULL, &pageFindContext->items[pageFindContext->index].locator);

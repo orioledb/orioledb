@@ -865,6 +865,7 @@ load_page(OBTreeFindPageContext *context)
 	if (STOPEVENTS_ENABLED())
 	{
 		Jsonb	   *params;
+
 		params = btree_page_stopevent_params(desc, page);
 		STOPEVENT(STOPEVENT_LOAD_PAGE_REFIND, params);
 	}

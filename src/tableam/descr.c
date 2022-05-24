@@ -717,7 +717,8 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 		hash_seq_init(&scan_status, oTableDescrHash);
 		while ((tableDescr = (OTableDescr *) hash_seq_search(&scan_status)) != NULL)
 		{
-			bool delete = tableDescr->refcnt == 0;
+			bool		delete = tableDescr->refcnt == 0;
+
 			if (!delete)
 				delete = !recreate_table_descr(tableDescr);
 
@@ -742,7 +743,8 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 		tableDescr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
 		if (found)
 		{
-			bool delete = tableDescr->refcnt == 0;
+			bool		delete = tableDescr->refcnt == 0;
+
 			if (!delete)
 				delete = !recreate_table_descr(tableDescr);
 
