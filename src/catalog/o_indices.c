@@ -16,8 +16,9 @@
 
 #include "btree/btree.h"
 #include "catalog/indices.h"
-#include "catalog/o_tables.h"
 #include "catalog/o_indices.h"
+#include "catalog/o_sys_cache.h"
+#include "catalog/o_tables.h"
 #include "checkpoint/checkpoint.h"
 #include "commands/defrem.h"
 #include "recovery/recovery.h"
@@ -280,25 +281,11 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 		{
 			MemoryContext mcxt = OGetIndexContext(index);
 			MemoryContext old_mcxt = MemoryContextSwitchTo(mcxt);
-			ListCell   *lc;
 
 			index->predicate = list_copy_deep(tableIndex->predicate);
 			if (index->predicate)
 				index->predicate_str = pstrdup(tableIndex->predicate_str);
 			index->expressions = list_copy_deep(tableIndex->expressions);
-			index->func_list = NIL;
-			foreach(lc, tableIndex->func_list)
-			{
-				OFuncExpr  *src_func = lfirst(lc),
-						   *dst_func = palloc0(sizeof(OFuncExpr));
-
-				memcpy(dst_func, src_func, offsetof(OFuncExpr, prosrc));
-				if (src_func->prosrc)
-					dst_func->prosrc = pstrdup(src_func->prosrc);
-				if (src_func->probin)
-					dst_func->probin = pstrdup(src_func->probin);
-				index->func_list = lappend(index->func_list, dst_func);
-			}
 			MemoryContextSwitchTo(old_mcxt);
 		}
 		for (i = 0; i < tableIndex->nfields; i++)
@@ -458,8 +445,7 @@ free_o_index(OIndex *o_index)
 void
 o_serialize_string(char *serialized, StringInfo str)
 {
-	size_t		str_len = serialized ? strlen(serialized) + 1 :
-	0;
+	size_t		str_len = serialized ? strlen(serialized) + 1 : 0;
 
 	appendBinaryStringInfo(str, (Pointer) &str_len, sizeof(size_t));
 	if (serialized)
@@ -535,7 +521,6 @@ serialize_o_index(OIndex *o_index, int *size)
 	if (o_index->predicate)
 		o_serialize_string(o_index->predicate_str, &str);
 	o_serialize_node((Node *) o_index->expressions, &str);
-	o_serialize_func_list(o_index->func_list, &str);
 
 	*size = str.len;
 	return str.data;
@@ -577,7 +562,6 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	if (oIndex->predicate)
 		oIndex->predicate_str = o_deserialize_string(&ptr);
 	oIndex->expressions = (List *) o_deserialize_node(&ptr);
-	oIndex->func_list = o_deserialize_func_list(&ptr);
 	MemoryContextSwitchTo(old_mcxt);
 
 	Assert((ptr - data) == length);
@@ -640,12 +624,12 @@ fillFixedFormatSpec(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 void
 o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 {
-	int			i;
-	int			maxTableAttnum = 0;
-	uint16	   *primary_init_nfields = NULL;
-	ListCell   *lc;
-	MemoryContext mcxt,
-				old_mcxt;
+	int				i;
+	int				maxTableAttnum = 0;
+	uint16		   *primary_init_nfields = NULL;
+	ListCell	   *lc;
+	MemoryContext	mcxt,
+					old_mcxt;
 
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
@@ -760,29 +744,18 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 		descr->predicate_str = pstrdup(oIndex->predicate_str);
 	descr->expressions = list_copy_deep(oIndex->expressions);
 
-	PG_TRY();
+	descr->predicate_state = ExecInitQual(descr->predicate, NULL);
+	descr->expressions_state = NIL;
+	foreach(lc, descr->expressions)
 	{
-		o_func_list = oIndex->func_list;
-		descr->predicate_state = ExecInitQual(descr->predicate, NULL);
-		descr->expressions_state = NIL;
-		foreach(lc, descr->expressions)
-		{
-			Expr	   *node = (Expr *) lfirst(lc);
-			ExprState  *expr_state;
+		Expr	   *node = (Expr *) lfirst(lc);
+		ExprState  *expr_state;
 
-			expr_state = ExecInitExpr(node, NULL);
+		expr_state = ExecInitExpr(node, NULL);
 
-			descr->expressions_state = lappend(descr->expressions_state,
-											   expr_state);
-		}
+		descr->expressions_state = lappend(descr->expressions_state,
+											expr_state);
 	}
-	PG_CATCH();
-	{
-		o_func_list = NIL;
-		PG_RE_THROW();
-	}
-	PG_END_TRY();
-	o_func_list = NIL;
 	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();
 

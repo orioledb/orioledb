@@ -1,7 +1,9 @@
 /*-------------------------------------------------------------------------
  *
- * o_type_cache.c
- *		Generic interface for type cache duplicate trees.
+ *  o_type_cache.c
+ *		Routines for orioledb type cache.
+ *
+ * type_cache is tree that contains cached metadata from pg_type.
  *
  * Copyright (c) 2021-2022, OrioleDB Inc.
  *
@@ -15,953 +17,284 @@
 
 #include "orioledb.h"
 
-#include "btree/btree.h"
-#include "btree/modify.h"
-#include "catalog/o_type_cache.h"
-#include "catalog/sys_trees.h"
-#include "recovery/wal.h"
-#include "transam/oxid.h"
-#include "tuple/toast.h"
+#include "catalog/o_sys_cache.h"
+#include "recovery/recovery.h"
 
-#include "catalog/pg_proc.h"
+#if PG_VERSION_NUM < 140000
+#include "catalog/indexing.h"
+#endif
+#include "catalog/pg_am.h"
 #include "catalog/pg_type.h"
-#include "common/hashfn.h"
+#include "commands/defrem.h"
 #include "miscadmin.h"
-#include "pgstat.h"
 #include "utils/builtins.h"
-#include "utils/fmgrtab.h"
-#include "utils/memutils.h"
+#include "utils/catcache.h"
 #include "utils/syscache.h"
 
-Oid			o_type_cmp_datoid = InvalidOid;
+static OSysCache *type_cache = NULL;
 
-static Pointer o_type_cache_get_from_tree(OTypeCache *type_cache, Oid datoid,
-										  Oid enumoid, XLogRecPtr cur_lsn);
-static Pointer o_type_cache_get_from_toast_tree(OTypeCache *type_cache,
-												Oid datoid, Oid oid,
-												XLogRecPtr cur_lsn);
-static bool o_type_cache_add(OTypeCache *type_cache, Oid datoid, Oid oid,
-							 XLogRecPtr insert_lsn, Pointer entry);
-static bool o_type_cache_update(OTypeCache *type_cache, Pointer updated_entry);
+static void o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
+									Pointer arg);
+static void o_type_cache_free_entry(Pointer entry);
 
-static BTreeDescr *oTypeCacheToastGetBTreeDesc(void *arg);
-static uint32 oTypeCacheToastGetMaxChunkSize(void *key, void *arg);
-static void oTypeCacheToastUpdateKey(void *key, uint32 offset, void *arg);
-static void *oTypeCacheToastGetNextKey(void *key, void *arg);
-static OTuple oTypeCacheToastCreateTuple(void *key, Pointer data,
-										 uint32 offset, int length,
-										 void *arg);
-static OTuple oTypeCacheToastCreateKey(void *key, uint32 offset, void *arg);
-static Pointer oTypeCacheToastGetTupleData(OTuple tuple, void *arg);
-static uint32 oTypeCacheToastGetTupleOffset(OTuple tuple, void *arg);
-static uint32 oTypeCacheToastGetTupleDataSize(OTuple tuple, void *arg);
+O_SYS_CACHE_FUNCS(type_cache, OType, 1);
 
-
-ToastAPI	oTypeCacheToastAPI = {
-	.getBTreeDesc = oTypeCacheToastGetBTreeDesc,
-	.getMaxChunkSize = oTypeCacheToastGetMaxChunkSize,
-	.updateKey = oTypeCacheToastUpdateKey,
-	.getNextKey = oTypeCacheToastGetNextKey,
-	.createTuple = oTypeCacheToastCreateTuple,
-	.createKey = oTypeCacheToastCreateKey,
-	.getTupleData = oTypeCacheToastGetTupleData,
-	.getTupleOffset = oTypeCacheToastGetTupleOffset,
-	.getTupleDataSize = oTypeCacheToastGetTupleDataSize,
-	.deleteLogFullTuple = true,
-	.versionCallback = NULL
+static OSysCacheFuncs type_cache_funcs =
+{
+	.free_entry = o_type_cache_free_entry,
+	.fill_entry = o_type_cache_fill_entry
 };
 
-static MemoryContext typecacheCxt = NULL;
-static HTAB *typecache_fastcache;
-
 /*
- * Initializes the enum B-tree memory.
+ * Initializes the type sys cache memory.
  */
-void
-o_typecaches_init(void)
+O_SYS_CACHE_INIT_FUNC(type_cache)
 {
-	HASHCTL		ctl;
-
-	typecacheCxt = AllocSetContextCreate(TopMemoryContext,
-										 "OrioleDB typecaches fastcache context",
-										 ALLOCSET_DEFAULT_SIZES);
-
-	MemSet(&ctl, 0, sizeof(ctl));
-	ctl.keysize = sizeof(OTypeHashKey);
-	ctl.entrysize = sizeof(OTypeHashEntry);
-	ctl.hcxt = typecacheCxt;
-	typecache_fastcache = hash_create("OrioleDB typecaches fastcache", 8,
-									  &ctl,
-									  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-	o_enum_cache_init(typecacheCxt, typecache_fastcache);
-	o_enumoid_cache_init(typecacheCxt, typecache_fastcache);
-	o_range_cache_init(typecacheCxt, typecache_fastcache);
-	o_type_element_cache_init(typecacheCxt, typecache_fastcache);
-	o_record_cache_init(typecacheCxt, typecache_fastcache);
-}
-
-/*
- * Initializes the enum B-tree memory.
- */
-OTypeCache *
-o_create_type_cache(int sys_tree_num, bool is_toast,
-					Oid classoid, HTAB *fast_cache,
-					MemoryContext mcxt, OTypeCacheFuncs *funcs)
-{
-	OTypeCache *type_cache;
-
-	Assert(fast_cache);
-	Assert(funcs);
-
-	type_cache = MemoryContextAllocZero(mcxt, sizeof(OTypeCache));
-	type_cache->sys_tree_num = sys_tree_num;
-	type_cache->is_toast = is_toast;
-	type_cache->classoid = classoid;
-	type_cache->fast_cache = fast_cache;
-	type_cache->mcxt = mcxt;
-	type_cache->funcs = funcs;
-
-#ifdef USE_ASSERT_CHECKING
-	Assert(type_cache->funcs->free_entry);
-	Assert(type_cache->funcs->fill_entry);
-	if (type_cache->is_toast)
-	{
-		Assert(type_cache->funcs->toast_serialize_entry);
-		Assert(type_cache->funcs->toast_deserialize_entry);
-	}
-#endif
-
-	return type_cache;
-}
-
-/*
- * GetSysCacheHashValue for OID without SysCache usage
- */
-static inline OTypeHashKey
-o_type_cache_GetSysCacheHashValue(Oid oid)
-{
-	uint32		hashValue = 0;
-	uint32		oneHash;
-
-	oneHash = murmurhash32(oid);
-
-	hashValue ^= oneHash;
-
-	return hashValue;
-}
-
-static void
-invalidate_fastcache_entry(int cacheid, uint32 hashvalue)
-{
-	bool		found;
-	OTypeHashEntry *fast_cache_entry;
-
-	fast_cache_entry = (OTypeHashEntry *) hash_search(typecache_fastcache,
-													  &hashvalue,
-													  HASH_REMOVE,
-													  &found);
-
-	if (found)
-	{
-		ListCell   *lc;
-
-		foreach(lc, fast_cache_entry->tree_entries)
-		{
-			OTypeHashTreeEntry *tree_entry =
-			(OTypeHashTreeEntry *) lfirst(lc);
-
-			if (tree_entry->type_cache)
-			{
-				OTypeCache *type_cache = tree_entry->type_cache;
-
-				if (!memcmp(&type_cache->last_fast_cache_key,
-							&fast_cache_entry->key,
-							sizeof(OTypeHashKey)))
-				{
-					memset(&type_cache->last_fast_cache_key, 0,
-						   sizeof(OTypeHashKey));
-					type_cache->last_fast_cache_entry = NULL;
-				}
-				tree_entry->type_cache->funcs->free_entry(tree_entry->entry);
-			}
-			if (tree_entry->link != 0)
-			{
-				invalidate_fastcache_entry(cacheid, tree_entry->link);
-			}
-		}
-		list_free_deep(fast_cache_entry->tree_entries);
-	}
+	Oid keytypes[] = {OIDOID};
+	type_cache = o_create_sys_cache(SYS_TREES_TYPE_CACHE,
+									false, false,
+									TypeOidIndexId, TYPEOID, 1,
+									keytypes, fastcache,
+									mcxt,
+									&type_cache_funcs);
 }
 
 void
-orioledb_syscache_type_hook(Datum arg, int cacheid, uint32 hashvalue)
+o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	if (typecache_fastcache)
-		invalidate_fastcache_entry(cacheid, hashvalue);
+	HeapTuple		typetup;
+	Form_pg_type	typeform;
+	OType		   *o_type = (OType *) *entry_ptr;
+	Oid				typeoid = DatumGetObjectId(key->keys[0]);
+
+	typetup = SearchSysCache1(TYPEOID, key->keys[0]);
+	if (!HeapTupleIsValid(typetup))
+		elog(ERROR, "cache lookup failed for type %u", typeoid);
+	typeform = (Form_pg_type) GETSTRUCT(typetup);
+
+	if (o_type != NULL)		/* Existed o_type updated */
+	{
+		Assert(false);
+	}
+	else
+	{
+		o_type = palloc0(sizeof(OType));
+		*entry_ptr = (Pointer) o_type;
+	}
+
+	o_type->typname = typeform->typname;
+	o_type->typlen = typeform->typlen;
+	o_type->typbyval = typeform->typbyval;
+	o_type->typalign = typeform->typalign;
+	o_type->typstorage = typeform->typstorage;
+	o_type->typcollation = typeform->typcollation;
+	o_type->typrelid = typeform->typrelid;
+	o_type->typtype = typeform->typtype;
+	o_type->typcategory = typeform->typcategory;
+	o_type->typispreferred = typeform->typispreferred;
+	o_type->typisdefined = typeform->typisdefined;
+	o_type->typinput = typeform->typinput;
+	o_type->typoutput = typeform->typoutput;
+	o_type->typreceive = typeform->typreceive;
+	o_type->typsend = typeform->typsend;
+	o_type->typelem = typeform->typelem;
+	o_type->typdelim = typeform->typdelim;
+
+	o_type->default_opclass = GetDefaultOpClass(typeoid, BTREE_AM_OID);
+	if (!OidIsValid(o_type->default_opclass) &&
+		typeform->typtype != TYPTYPE_PSEUDO)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("could not identify a comparison function for type %s",
+						format_type_be(typeoid))));
+
+	if (OidIsValid(o_type->typelem))
+		o_type_cache_add_if_needed(key->common.datoid, o_type->typelem,
+								   key->common.lsn, NULL);
+
+	ReleaseSysCache(typetup);
 }
 
-Pointer
-o_type_cache_search(OTypeCache *type_cache, Oid datoid,
-					Oid oid, XLogRecPtr cur_lsn)
+void
+o_type_cache_free_entry(Pointer entry)
 {
-	bool		found;
-	OTypeHashKey cur_fast_cache_key;
-	OTypeHashEntry *fast_cache_entry;
-	Pointer		tree_entry;
-	MemoryContext prev_context;
-	OTypeHashTreeEntry *new_entry;
+	OType	   *o_type = (OType *) entry;
 
-	cur_fast_cache_key = o_type_cache_GetSysCacheHashValue(oid);
+	pfree(o_type);
+}
 
-	/* fast search */
-	if (!memcmp(&cur_fast_cache_key, &type_cache->last_fast_cache_key,
-				sizeof(OTypeHashKey)) &&
-		type_cache->last_fast_cache_entry)
+HeapTuple
+o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid)
+{
+	XLogRecPtr		cur_lsn;
+	Oid				datoid;
+	HeapTuple		typetup = NULL;
+	Datum			values[Natts_pg_type] = {0};
+	bool			nulls[Natts_pg_type] = {0};
+	OType		   *o_type;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
+	if (o_type)
 	{
-		OTypeKey   *entry_type_key =
-		(OTypeKey *) type_cache->last_fast_cache_entry;
+		values[Anum_pg_type_oid - 1] = o_type->key.keys[0];
+		values[Anum_pg_type_typname - 1] = NameGetDatum(&o_type->typname);
+		values[Anum_pg_type_typlen - 1] = Int16GetDatum(o_type->typlen);
+		values[Anum_pg_type_typbyval - 1] = BoolGetDatum(o_type->typbyval);
+		values[Anum_pg_type_typalign - 1] = CharGetDatum(o_type->typalign);
+		values[Anum_pg_type_typstorage - 1] = CharGetDatum(o_type->typstorage);
+		values[Anum_pg_type_typcollation - 1] =
+			ObjectIdGetDatum(o_type->typcollation);
+		values[Anum_pg_type_typrelid - 1] = ObjectIdGetDatum(o_type->typrelid);
+		values[Anum_pg_type_typtype - 1] = CharGetDatum(o_type->typtype);
+		values[Anum_pg_type_typcategory - 1] =
+			CharGetDatum(o_type->typcategory);
+		values[Anum_pg_type_typispreferred - 1] =
+			BoolGetDatum(o_type->typispreferred);
+		values[Anum_pg_type_typisdefined - 1] =
+			BoolGetDatum(o_type->typisdefined);
+		values[Anum_pg_type_typinput - 1] =
+			ObjectIdGetDatum(o_type->typinput);
+		values[Anum_pg_type_typoutput - 1] =
+			ObjectIdGetDatum(o_type->typoutput);
+		values[Anum_pg_type_typreceive - 1] =
+			ObjectIdGetDatum(o_type->typreceive);
+		values[Anum_pg_type_typsend - 1] =
+			ObjectIdGetDatum(o_type->typsend);
+		values[Anum_pg_type_typelem - 1] =
+			ObjectIdGetDatum(o_type->typelem);
+		values[Anum_pg_type_typdelim - 1] =
+			CharGetDatum(o_type->typdelim);
 
-		if (entry_type_key->datoid == datoid && entry_type_key->oid == oid)
-			return type_cache->last_fast_cache_entry;
+		nulls[Anum_pg_type_typdefault - 1] = true;
+		nulls[Anum_pg_type_typdefaultbin - 1] = true;
+		nulls[Anum_pg_type_typacl - 1] = true;
+		typetup = heap_form_tuple(tupdesc, values, nulls);
 	}
+	return typetup;
+}
 
-	/* cache search */
-	fast_cache_entry = (OTypeHashEntry *) hash_search(type_cache->fast_cache,
-													  &cur_fast_cache_key, HASH_ENTER, &found);
-	if (found)
-	{
-		ListCell   *lc;
+Oid
+o_type_cache_get_typrelid(Oid typeoid)
+{
+	XLogRecPtr		cur_lsn;
+	Oid				datoid;
+	OType		   *o_type;
 
-		foreach(lc, fast_cache_entry->tree_entries)
-		{
-			OTypeHashTreeEntry *tree_entry =
-			(OTypeHashTreeEntry *) lfirst(lc);
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
+	Assert(o_type);
+	return o_type->typrelid;
+}
 
-			if (tree_entry->type_cache == type_cache)
-			{
-				OTypeKey   *entry_type_key = (OTypeKey *) tree_entry->entry;
+Oid
+o_type_cache_default_opclass(Oid typeoid)
+{
+	XLogRecPtr		cur_lsn;
+	Oid				datoid;
+	OType		   *o_type;
 
-				if (entry_type_key->datoid == datoid &&
-					entry_type_key->oid == oid)
-				{
-					memcpy(&type_cache->last_fast_cache_key,
-						   &cur_fast_cache_key,
-						   sizeof(OTypeHashKey));
-					type_cache->last_fast_cache_entry = tree_entry->entry;
-					return type_cache->last_fast_cache_entry;
-				}
-			}
-		}
-	}
-	else
-		fast_cache_entry->tree_entries = NIL;
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
+	Assert(o_type);
+	return o_type->default_opclass;
+}
 
-	prev_context = MemoryContextSwitchTo(type_cache->mcxt);
-	if (type_cache->is_toast)
-		tree_entry = o_type_cache_get_from_toast_tree(type_cache, datoid,
-													  oid, cur_lsn);
-	else
-		tree_entry = o_type_cache_get_from_tree(type_cache, datoid,
-												oid, cur_lsn);
-	if (tree_entry == NULL)
-	{
-		MemoryContextSwitchTo(prev_context);
-		return NULL;
-	}
-	new_entry = palloc0(sizeof(OTypeHashTreeEntry));
-	new_entry->type_cache = type_cache;
-	new_entry->entry = tree_entry;
-	if (type_cache->funcs->fastcache_get_link_oid)
-	{
-		Oid			link_oid = type_cache->funcs->fastcache_get_link_oid(tree_entry);
-		OTypeHashKey link_key = o_type_cache_GetSysCacheHashValue(link_oid);
-		OTypeHashTreeEntry *link_entry;
-		OTypeHashEntry *link_cache_entry;
+void
+o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
+					   char *typalign, char *typstorage, Oid *typcollation)
+{
+	XLogRecPtr		cur_lsn;
+	Oid				datoid;
+	OType		   *o_type;
 
-		link_entry = palloc0(sizeof(OTypeHashTreeEntry));
-		link_entry->type_cache = NULL;
-		link_entry->link = cur_fast_cache_key;
-		new_entry->link = link_key;
-		memcpy(&new_entry->link,
-			   &link_key,
-			   sizeof(OTypeHashKey));
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
 
-		link_cache_entry = (OTypeHashEntry *)
-			hash_search(type_cache->fast_cache, &link_key, HASH_ENTER, &found);
-		if (!found)
-			link_cache_entry->tree_entries = NIL;
-		link_cache_entry->tree_entries = lappend(link_cache_entry->tree_entries,
-												 link_entry);
-	}
+	Assert(o_type);
+	if (typlen)
+		*typlen = o_type->typlen;
+	if (typbyval)
+		*typbyval = o_type->typbyval;
+	if (typalign)
+		*typalign = o_type->typalign;
+	if (typstorage)
+		*typstorage = o_type->typstorage;
+	if (typcollation)
+		*typcollation = o_type->typcollation;
+}
 
-	fast_cache_entry->tree_entries = lappend(fast_cache_entry->tree_entries,
-											 new_entry);
+TypeCacheEntry *
+o_type_elements_cmp_hook(Oid elemtype, MemoryContext mcxt)
+{
+	TypeCacheEntry *typcache = NULL;
+	MemoryContext	prev_context;
+	Oid				datoid;
+	Oid				opclassoid;
+	OOpclass	   *o_opclass;
 
+	opclassoid = o_type_cache_default_opclass(elemtype);
+
+	o_sys_cache_set_datoid_lsn(NULL, &datoid);
+	o_opclass = o_opclass_get(opclassoid);
+
+	prev_context = MemoryContextSwitchTo(mcxt);
+	typcache = palloc0(sizeof(TypeCacheEntry));
+	typcache->type_id = elemtype;
+	o_type_cache_fill_info(elemtype, &typcache->typlen, &typcache->typbyval,
+						   &typcache->typalign, NULL, NULL);
+	o_proc_cache_fill_finfo(&typcache->cmp_proc_finfo, o_opclass->cmpOid);
 	MemoryContextSwitchTo(prev_context);
 
-	memcpy(&type_cache->last_fast_cache_key,
-		   &cur_fast_cache_key,
-		   sizeof(OTypeHashKey));
-	type_cache->last_fast_cache_entry = new_entry->entry;
-	return type_cache->last_fast_cache_entry;
-}
-
-static TupleFetchCallbackResult
-o_type_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid, CommitSeqNo csn,
-								 void *arg,
-								 TupleFetchCallbackCheckType check_type)
-{
-	OTypeToastChunkKey *tuple_key = (OTypeToastChunkKey *) tuple.data;
-	XLogRecPtr *cur_lsn = (XLogRecPtr *) arg;
-
-	if (check_type != OTupleFetchCallbackKeyCheck)
-		return OTupleFetchNext;
-
-	if (tuple_key->type_key.insert_lsn < *cur_lsn)
-		return OTupleFetchMatch;
-	else
-		return OTupleFetchNext;
-}
-
-Pointer
-o_type_cache_get_from_toast_tree(OTypeCache *type_cache, Oid datoid,
-								 Oid oid, XLogRecPtr cur_lsn)
-{
-	Pointer		data;
-	Size		dataLength;
-	Pointer		result = NULL;
-	BTreeDescr *td = get_sys_tree(type_cache->sys_tree_num);
-	OTypeToastKeyBound toast_key = {
-		.chunk_key = {.type_key = {.datoid = datoid,
-				.oid = oid,
-		.insert_lsn = cur_lsn},
-		.offset = 0},
-		.lsn_cmp = false
-	};
-
-	data = generic_toast_get_any_with_callback(&oTypeCacheToastAPI,
-											   (Pointer) &toast_key,
-											   &dataLength,
-											   COMMITSEQNO_NON_DELETED,
-											   td,
-											   o_type_cache_get_by_lsn_callback,
-											   &cur_lsn);
-	if (data == NULL)
-		return NULL;
-	result = type_cache->funcs->toast_deserialize_entry(type_cache->mcxt,
-														data, dataLength);
-	pfree(data);
-
-	return result;
-}
-
-Pointer
-o_type_cache_get_from_tree(OTypeCache *type_cache, Oid datoid,
-						   Oid oid, XLogRecPtr cur_lsn)
-{
-	BTreeDescr *td = get_sys_tree(type_cache->sys_tree_num);
-	BTreeIterator *it;
-	OTuple		last_tup;
-	OTypeKeyBound key;
-
-	key.datoid = datoid;
-	key.oid = oid;
-
-	it = o_btree_iterator_create(td, (Pointer) &key, BTreeKeyBound,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
-
-	O_TUPLE_SET_NULL(last_tup);
-	do
-	{
-		OTuple		tup = o_btree_iterator_fetch(it, NULL, (Pointer) &key,
-												 BTreeKeyBound, true, NULL);
-		OTypeKey   *type_key;
-
-		if (O_TUPLE_IS_NULL(tup))
-			break;
-
-		if (!O_TUPLE_IS_NULL(last_tup))
-			pfree(last_tup.data);
-
-		type_key = (OTypeKey *) tup.data;
-		if (type_key->insert_lsn > cur_lsn)
-			break;
-		last_tup = tup;
-	} while (true);
-
-	btree_iterator_free(it);
-
-	return last_tup.data;
-}
-
-static inline void
-o_type_cache_fill_locktag(LOCKTAG *tag, Oid datoid, Oid oid, Oid classoid,
-						  int lockmode)
-{
-	Assert(lockmode == AccessShareLock || lockmode == AccessExclusiveLock);
-	memset(tag, 0, sizeof(LOCKTAG));
-	SET_LOCKTAG_OBJECT(*tag, datoid, classoid, oid, 0);
-}
-
-static void
-o_type_cache_lock(Oid datoid, Oid oid, Oid classoid, int lockmode)
-{
-	LOCKTAG		locktag;
-
-	o_type_cache_fill_locktag(&locktag, datoid, oid, classoid, lockmode);
-
-	LockAcquire(&locktag, lockmode, false, false);
-}
-
-static void
-o_type_cache_unlock(Oid datoid, Oid oid, Oid classoid, int lockmode)
-{
-	LOCKTAG		locktag;
-
-	o_type_cache_fill_locktag(&locktag, datoid, oid, classoid, lockmode);
-
-	if (!LockRelease(&locktag, lockmode, false))
-	{
-		elog(ERROR, "Can not release %s typecache lock on datoid = %d, "
-			 "oid = %d",
-			 lockmode == AccessShareLock ? "share" : "exclusive",
-			 datoid, oid);
-	}
-}
-
-/* Non-key fields of entry should be filled before call */
-bool
-o_type_cache_add(OTypeCache *type_cache, Oid datoid, Oid oid,
-				 XLogRecPtr insert_lsn, Pointer entry)
-{
-	bool		inserted;
-	OTypeKey   *type_key = (OTypeKey *) entry;
-	BTreeDescr *desc = get_sys_tree(type_cache->sys_tree_num);
-
-	type_key->datoid = datoid;
-	type_key->oid = oid;
-	type_key->insert_lsn = insert_lsn;
-	type_key->deleted = false;
-
-	if (!type_cache->is_toast)
-	{
-		OTuple		tup;
-
-		tup.formatFlags = 0;
-		tup.data = entry;
-		inserted = o_btree_autonomous_insert(desc, tup);
-	}
-	else
-	{
-		Pointer		data;
-		int			len;
-		OTypeToastKeyBound toast_key = {0};
-		OAutonomousTxState state;
-
-		toast_key.chunk_key.type_key = *type_key;
-		toast_key.chunk_key.offset = 0;
-		toast_key.lsn_cmp = true;
-
-		data = type_cache->funcs->toast_serialize_entry(entry, &len);
-
-		start_autonomous_transaction(&state);
-		PG_TRY();
-		{
-			inserted = generic_toast_insert(&oTypeCacheToastAPI,
-											(Pointer) &toast_key,
-											data, len,
-											get_current_oxid(),
-											COMMITSEQNO_INPROGRESS,
-											desc);
-		}
-		PG_CATCH();
-		{
-			abort_autonomous_transaction(&state);
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
-		finish_autonomous_transaction(&state);
-		pfree(data);
-	}
-	return inserted;
-}
-
-static OBTreeWaitCallbackAction
-o_type_cache_wait_callback(BTreeDescr *descr,
-						   OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
-						   RowLockMode *lock_mode, BTreeLocationHint *hint,
-						   void *arg)
-{
-	return OBTreeCallbackActionXidWait;
-}
-
-static OBTreeModifyCallbackAction
-o_type_cache_update_callback(BTreeDescr *descr,
-							 OTuple tup, OTuple *newtup, OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
-							 RowLockMode *lock_mode, BTreeLocationHint *hint,
-							 void *arg)
-{
-	return OBTreeCallbackActionUpdate;
-}
-
-
-static BTreeModifyCallbackInfo callbackInfo =
-{
-	.waitCallback = o_type_cache_wait_callback,
-	.modifyCallback = o_type_cache_update_callback,
-	.modifyDeletedCallback = o_type_cache_update_callback,
-	.arg = NULL
-};
-
-bool
-o_type_cache_update(OTypeCache *type_cache, Pointer updated_entry)
-{
-	bool		result;
-	OTypeKeyBound key;
-	OTypeKey   *type_key;
-	BTreeDescr *desc = get_sys_tree(type_cache->sys_tree_num);
-
-	type_key = (OTypeKey *) updated_entry;
-
-	key.datoid = type_key->datoid;
-	key.oid = type_key->oid;
-
-	if (!type_cache->is_toast)
-	{
-		OAutonomousTxState state;
-		OTuple		tup;
-
-		tup.formatFlags = 0;
-		tup.data = updated_entry;
-
-		start_autonomous_transaction(&state);
-		PG_TRY();
-		{
-			result = o_btree_modify(desc, BTreeOperationUpdate,
-									tup, BTreeKeyLeafTuple,
-									(Pointer) &key, BTreeKeyBound,
-									get_current_oxid(), COMMITSEQNO_INPROGRESS,
-									RowLockNoKeyUpdate, NULL,
-									&callbackInfo) == OBTreeModifyResultUpdated;
-			if (result)
-				o_wal_update(desc, tup);
-		}
-		PG_CATCH();
-		{
-			abort_autonomous_transaction(&state);
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
-		finish_autonomous_transaction(&state);
-	}
-	else
-	{
-		Pointer		data;
-		int			len;
-		OTypeToastKeyBound toast_key = {0};
-		OAutonomousTxState state;
-
-		toast_key.chunk_key.type_key = *type_key;
-		toast_key.chunk_key.offset = 0;
-		toast_key.lsn_cmp = true;
-
-		data = type_cache->funcs->toast_serialize_entry(updated_entry, &len);
-
-		start_autonomous_transaction(&state);
-		PG_TRY();
-		{
-			result = generic_toast_update(&oTypeCacheToastAPI,
-										  (Pointer) &toast_key,
-										  data, len,
-										  get_current_oxid(),
-										  COMMITSEQNO_INPROGRESS,
-										  desc);
-		}
-		PG_CATCH();
-		{
-			abort_autonomous_transaction(&state);
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
-		finish_autonomous_transaction(&state);
-	}
-	return result;
-}
-
-void
-o_type_cache_add_if_needed(OTypeCache *type_cache, Oid datoid,
-						   Oid oid, XLogRecPtr insert_lsn, Pointer arg)
-{
-	Pointer		entry = NULL;
-	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
-
-	o_type_cache_lock(datoid, oid, type_cache->classoid,
-					  AccessExclusiveLock);
-
-	entry = o_type_cache_search(type_cache, datoid, oid, insert_lsn);
-	if (entry != NULL)
-	{
-		/* it's already exist in B-tree */
-		return;
-	}
-
-	type_cache->funcs->fill_entry(&entry, datoid, oid, insert_lsn, arg);
-
-	Assert(entry);
-
-	/*
-	 * All done, now try to insert into B-tree.
-	 */
-	inserted = o_type_cache_add(type_cache, datoid, oid,
-								insert_lsn, entry);
-	Assert(inserted);
-	o_type_cache_unlock(datoid, oid, type_cache->classoid,
-						AccessExclusiveLock);
-	type_cache->funcs->free_entry(entry);
-}
-
-void
-o_type_cache_update_if_needed(OTypeCache *type_cache,
-							  Oid datoid, Oid oid, Pointer arg)
-{
-	Pointer		entry = NULL;
-	XLogRecPtr	cur_lsn = GetXLogWriteRecPtr();
-	OTypeKey   *type_key;
-	bool		updated PG_USED_FOR_ASSERTS_ONLY;
-
-	o_type_cache_lock(datoid, oid, type_cache->classoid,
-					  AccessExclusiveLock);
-
-	entry = o_type_cache_search(type_cache, datoid, oid, cur_lsn);
-	if (entry == NULL)
-	{
-		/* it's not exist in B-tree */
-		return;
-	}
-
-	type_key = (OTypeKey *) entry;
-	type_cache->funcs->fill_entry(&entry, datoid, oid,
-								  type_key->insert_lsn, arg);
-
-	updated = o_type_cache_update(type_cache, entry);
-	Assert(updated);
-	o_type_cache_unlock(datoid, oid, type_cache->classoid,
-						AccessExclusiveLock);
-}
-
-bool
-o_type_cache_delete(OTypeCache *type_cache, Oid datoid, Oid oid)
-{
-	Pointer		entry;
-	OTypeKey   *type_key;
-
-
-	entry = o_type_cache_search(type_cache, datoid, oid,
-								GetXLogWriteRecPtr());
-
-	if (entry == NULL)
-		return false;
-
-	if (type_cache->funcs->delete_hook)
-		type_cache->funcs->delete_hook(entry);
-
-	type_key = (OTypeKey *) entry;
-	type_key->deleted = true;
-
-	return o_type_cache_update(type_cache, entry);
-}
-
-void
-o_type_cache_delete_by_lsn(OTypeCache *type_cache, XLogRecPtr lsn)
-{
-	BTreeIterator *it;
-	BTreeDescr *td = get_sys_tree(type_cache->sys_tree_num);
-
-	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
-								 COMMITSEQNO_NON_DELETED, ForwardScanDirection);
-
-	do
-	{
-		bool		end;
-		BTreeLocationHint hint;
-		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
-											false, &end, &hint);
-		OTypeKey   *type_key;
-		OTuple		key_tup;
-
-		if (O_TUPLE_IS_NULL(tup))
-		{
-			if (end)
-				break;
-			else
-				continue;
-		}
-
-		type_key = (OTypeKey *) tup.data;
-		key_tup.formatFlags = 0;
-		key_tup.data = (Pointer) type_key;
-
-		if (type_key->insert_lsn < lsn && type_key->deleted)
-		{
-			bool		result PG_USED_FOR_ASSERTS_ONLY;
-
-			if (!type_cache->is_toast)
-			{
-				result = o_btree_autonomous_delete(td, key_tup, BTreeKeyNonLeafKey, &hint);
-			}
-			else
-			{
-				OTypeToastKeyBound toast_key = {0};
-				OAutonomousTxState state;
-
-				toast_key.chunk_key.type_key = *type_key;
-				toast_key.chunk_key.offset = 0;
-				toast_key.lsn_cmp = true;
-
-				start_autonomous_transaction(&state);
-				PG_TRY();
-				{
-					result = generic_toast_delete(&oTypeCacheToastAPI,
-												  (Pointer) &toast_key,
-												  get_current_oxid(),
-												  COMMITSEQNO_NON_DELETED,
-												  td);
-				}
-				PG_CATCH();
-				{
-					abort_autonomous_transaction(&state);
-					PG_RE_THROW();
-				}
-				PG_END_TRY();
-				finish_autonomous_transaction(&state);
-			}
-
-			Assert(result);
-		}
-	} while (true);
-
-	btree_iterator_free(it);
-}
-
-
-static BTreeDescr *
-oTypeCacheToastGetBTreeDesc(void *arg)
-{
-	BTreeDescr *desc = (BTreeDescr *) arg;
-
-	return desc;
-}
-
-static uint32
-oTypeCacheToastGetMaxChunkSize(void *key, void *arg)
-{
-	uint32		max_chunk_size;
-
-	max_chunk_size =
-		MAXALIGN_DOWN((O_BTREE_MAX_TUPLE_SIZE * 3 -
-					   MAXALIGN(sizeof(OTypeToastChunkKey))) / 3) -
-		offsetof(OTypeToastChunk, data);
-
-	return max_chunk_size;
-}
-
-static void
-oTypeCacheToastUpdateKey(void *key, uint32 offset, void *arg)
-{
-	OTypeToastKeyBound *ckey = (OTypeToastKeyBound *) key;
-
-	ckey->chunk_key.offset = offset;
-}
-
-static void *
-oTypeCacheToastGetNextKey(void *key, void *arg)
-{
-	OTypeToastKeyBound *ckey = (OTypeToastKeyBound *) key;
-	static OTypeToastKeyBound nextKey;
-
-	nextKey = *ckey;
-	nextKey.chunk_key.type_key.oid++;
-	nextKey.chunk_key.offset = 0;
-
-	return (Pointer) &nextKey;
-}
-
-static OTuple
-oTypeCacheToastCreateTuple(void *key, Pointer data, uint32 offset,
-						   int length, void *arg)
-{
-	OTypeToastKeyBound *bound = (OTypeToastKeyBound *) key;
-	OTypeToastChunk *chunk;
-	OTuple		result;
-
-	bound->chunk_key.offset = offset;
-
-	chunk = (OTypeToastChunk *) palloc0(offsetof(OTypeToastChunk, data) +
-										length);
-	chunk->key = bound->chunk_key;
-	chunk->dataLength = length;
-	memcpy(chunk->data, data + offset, length);
-
-	result.data = (Pointer) chunk;
-	result.formatFlags = 0;
-
-	return result;
-}
-
-static OTuple
-oTypeCacheToastCreateKey(void *key, uint32 offset, void *arg)
-{
-	OTypeToastChunkKey *ckey = (OTypeToastChunkKey *) key;
-	OTypeToastChunkKey *ckey_copy;
-	OTuple		result;
-
-	ckey_copy = (OTypeToastChunkKey *) palloc(sizeof(OTypeToastChunkKey));
-	*ckey_copy = *ckey;
-
-	result.data = (Pointer) ckey_copy;
-	result.formatFlags = 0;
-
-	return result;
-}
-
-static Pointer
-oTypeCacheToastGetTupleData(OTuple tuple, void *arg)
-{
-	OTypeToastChunk *chunk = (OTypeToastChunk *) tuple.data;
-
-	return chunk->data;
-}
-
-static uint32
-oTypeCacheToastGetTupleOffset(OTuple tuple, void *arg)
-{
-	OTypeToastChunk *chunk = (OTypeToastChunk *) tuple.data;
-
-	return chunk->key.offset;
-}
-
-static uint32
-oTypeCacheToastGetTupleDataSize(OTuple tuple, void *arg)
-{
-	OTypeToastChunk *chunk = (OTypeToastChunk *) tuple.data;
-
-	return chunk->dataLength;
+	return typcache;
 }
 
 /*
- * Gets prosrc and probin strings for the procedure from cache and stores
- * it to the procedure.
+ * A tuple print function for o_print_btree_pages()
  */
 void
-o_type_procedure_fill(Oid procoid, OProcedure *proc)
+o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
+					   OTuple tup, Pointer arg)
 {
-	char	   *prosrc = NULL,
-			   *probin = NULL;
+	OType *o_type = (OType *) tup.data;
 
-	fmgr_symbol(procoid, &probin, &prosrc);
-
-	if (!prosrc && !probin)
-		elog(ERROR, "function %u not found", procoid);
-
-	if (prosrc != NULL)
-	{
-		strlcpy(proc->prosrc, prosrc, O_OPCLASS_PROSRC_MAXLEN);
-		pfree(prosrc);
-	}
-
-	if (probin != NULL)
-	{
-		strlcpy(proc->probin, probin, O_OPCLASS_PROSRC_MAXLEN);
-		pfree(probin);
-	}
-}
-
-void
-o_type_procedure_fill_finfo(FmgrInfo *finfo, OProcedure *cmp_proc,
-							Oid cmp_oid, short fn_args)
-{
-	memset(finfo, 0, sizeof(FmgrInfo));
-
-	if (strlen(cmp_proc->probin) == 0)
-	{
-		Oid			cmpoid;
-
-		cmpoid = fmgr_internal_function(cmp_proc->prosrc);
-		finfo->fn_oid = cmpoid;
-		finfo->fn_addr = fmgr_builtins[fmgr_builtin_oid_index[cmpoid]].func;
-		finfo->fn_stats = TRACK_FUNC_ALL;
-	}
-	else
-	{
-		finfo->fn_oid = cmp_oid;
-		finfo->fn_addr = load_external_function(cmp_proc->probin,
-												cmp_proc->prosrc,
-												false,
-												NULL);
-		finfo->fn_stats = TRACK_FUNC_OFF;
-	}
-	finfo->fn_nargs = fn_args;
-	finfo->fn_strict = true;
-	finfo->fn_retset = false;
-	finfo->fn_mcxt = CurrentMemoryContext;
-}
-
-void
-custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
-{
-	Form_pg_type typeform;
-	HeapTuple	tuple = NULL;
-
-	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
-	Assert(tuple);
-	typeform = (Form_pg_type) GETSTRUCT(tuple);
-
-	switch (typeform->typtype)
-	{
-		case TYPTYPE_COMPOSITE:
-			if (typeform->typtypmod == -1)
-			{
-				o_record_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-											 NULL);
-			}
-			break;
-		case TYPTYPE_RANGE:
-			o_range_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-										NULL);
-			break;
-		case TYPTYPE_ENUM:
-			o_enum_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-									   NULL);
-			break;
-		case TYPTYPE_DOMAIN:
-			custom_type_add_if_needed(datoid, typeform->typbasetype,
-									  insert_lsn);
-			break;
-		default:
-			if (typeform->typcategory == TYPCATEGORY_ARRAY)
-			{
-				o_type_element_cache_add_if_needed(datoid, typeform->typelem,
-												   insert_lsn, NULL);
-				custom_type_add_if_needed(datoid, typeform->typelem,
-										  insert_lsn);
-			}
-			break;
-	}
-	if (tuple != NULL)
-		ReleaseSysCache(tuple);
-}
-
-/*
- * Inserts type elements for all fields of the o_table to the typecache.
- */
-void
-custom_types_add_all(OTable *o_table)
-{
-	int			cur_field;
-	XLogRecPtr	cur_lsn = GetXLogWriteRecPtr();
-
-	for (cur_field = 0; cur_field < o_table->nfields; cur_field++)
-		custom_type_add_if_needed(o_table->oids.datoid,
-								  o_table->fields[cur_field].typid,
-								  cur_lsn);
+	appendStringInfo(buf, "(");
+	o_sys_cache_key_print(desc, buf, tup, arg);
+	appendStringInfo(buf, ", typname: %s"
+						  ", typlen: %d"
+						  ", typbyval: %c"
+						  ", typalign: '%c'"
+						  ", typstorage: '%c'"
+						  ", typcollation: %u"
+						  ", typrelid: %u"
+						  ", typtype: '%c'"
+						  ", typcategory: '%c'"
+						  ", typispreferred: %c"
+						  ", typisdefined: %c"
+						  ", typinput: %u"
+						  ", typoutput: %u"
+						  ", typreceive: %u"
+						  ", typsend: %u"
+						  ", typelem: %u"
+						  ", typdelim: '%c'"
+						  ", default_opclass: %u"
+						  ")",
+					 o_type->typname.data,
+					 o_type->typlen,
+					 o_type->typbyval ? 'Y' : 'N',
+					 o_type->typalign,
+					 o_type->typstorage,
+					 o_type->typcollation,
+					 o_type->typrelid,
+					 o_type->typtype,
+					 o_type->typcategory,
+					 o_type->typispreferred ? 'Y' : 'N',
+					 o_type->typisdefined ? 'Y' : 'N',
+					 o_type->typinput,
+					 o_type->typoutput,
+					 o_type->typreceive,
+					 o_type->typsend,
+					 o_type->typelem,
+					 o_type->typdelim,
+					 o_type->default_opclass);
 }

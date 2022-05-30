@@ -42,7 +42,7 @@ CREATE TYPE custom_range as range (subtype=int8);
 
 CREATE TYPE custom_type AS (x timestamp, y float);
 
-CREATE TABLE o_test_typecaches (
+CREATE TABLE o_test_sys_caches (
 	key o_enum,
 	key2 custom_range,
 	key3 custom_type,
@@ -51,7 +51,7 @@ CREATE TABLE o_test_typecaches (
 ) USING orioledb;
 
 DROP TYPE custom_range CASCADE;
-DROP TABLE o_test_typecaches;
+DROP TABLE o_test_sys_caches;
 DROP TYPE o_enum;
 DROP TYPE custom_type;
 
@@ -78,53 +78,112 @@ SELECT regexp_replace(
 		'(NNN, NNN, NNN)',
 		'g');
 
--- SYS_TREES_OPCLASSES
+-- SYS_TREES_OPCLASS_CACHE
 SELECT regexp_replace(
 		orioledb_sys_tree_structure(4, 'ne'),
-		'\(\d+, \d+\)',
-		'(NNN, NNN)',
+		'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+		'NNN, (NNN), X/X, ',
 		'g');
 
 -- SYS_TREES_ENUM_CACHE
 SELECT regexp_replace(
 		orioledb_sys_tree_structure(5, 'ne'),
-		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
-		'NNN, NNN, X/X, ',
+		'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+		'NNN, (NNN), X/X, ',
 		'g');
 
 -- SYS_TREES_ENUMOID_CACHE
 SELECT regexp_replace(
 		orioledb_sys_tree_structure(6, 'ne'),
-		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ([YN])\), \d+',
-		'NNN, NNN, X/X, \1), NNN',
+		'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ([YN])\), \d+',
+		'NNN, (NNN), X/X, \1), NNN',
 		'g');
 
 -- SYS_TREES_RANGE_CACHE
-SELECT regexp_replace(
-		orioledb_sys_tree_structure(7, 'ne'),
-		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
-		'NNN, NNN, X/X, ',
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(7, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
 		'g');
 
--- SYS_TREES_RECORD_CACHE
-SELECT regexp_replace(
-		orioledb_sys_tree_structure(8, 'ne'),
-		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
-		'NNN, NNN, X/X, ',
-		'g');
-
--- SYS_TREES_TYPE_ELEMENT_CACHE
-SELECT regexp_replace(
-		orioledb_sys_tree_structure(9, 'ne'),
-		'\d+, \d+, [A-F0-9]+/[A-F0-9]+, ',
-		'NNN, NNN, X/X, ',
+-- SYS_TREES_CLASS_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(8, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
 		'g');
 
 -- SYS_TREES_EXTENTS_OFF_LEN
-SELECT orioledb_sys_tree_structure(10, 'ne');
+SELECT orioledb_sys_tree_structure(9, 'ne');
 
 -- SYS_TREES_EXTENTS_LEN_OFF
-SELECT orioledb_sys_tree_structure(11, 'ne');
+SELECT orioledb_sys_tree_structure(10, 'ne');
+
+-- SYS_TREES_PROC_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(11, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_TYPE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(12, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_AGG_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(13, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_OPER_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(14, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_AMOP_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(15, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_AMPROC_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(16, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
 
 -- fail
 SELECT orioledb_sys_tree_structure(9999);

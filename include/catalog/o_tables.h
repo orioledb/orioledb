@@ -54,18 +54,6 @@ typedef struct
 	SortByNulls nullsOrdering;
 } OTableIndexField;
 
-typedef struct OFuncExpr
-{
-	Oid			funcid;			/* PG_PROC OID of underlying function */
-	Oid			inputcollid;
-	bool		strict;			/* T if function is "strict" */
-	bool		retset;			/* T if function returns a set */
-	Oid			prolang;
-	short		nargs;
-	char	   *prosrc;
-	char	   *probin;
-} OFuncExpr;
-
 /*
  * Describes an index of an orioledb table.
  */
@@ -82,7 +70,6 @@ typedef struct
 	List	   *expressions;	/* list of Expr */
 	char	   *predicate_str;
 	List	   *predicate;		/* list of Expr */
-	List	   *func_list;		/* list of OFuncExpr */
 	MemoryContext index_mctx;
 } OTableIndex;
 
@@ -244,12 +231,5 @@ o_table_fieldnum(OTable *table, const char *name)
 	}
 	return i;
 }
-
-extern bool OExecInitFuncHook(ExprEvalStep *scratch, Expr *node, List *args,
-							  Oid funcid, Oid inputcollid, ExprState *state);
-extern void o_serialize_func_list(List *func_list, StringInfo str);
-extern List *o_deserialize_func_list(Pointer *ptr);
-
-extern List *o_func_list;
 
 #endif							/* __O_TABLES_H__ */

@@ -21,13 +21,14 @@
 #include "btree/undo.h"
 #include "catalog/free_extents.h"
 #include "catalog/indices.h"
-#include "catalog/o_opclass.h"
+#include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
 #include "tableam/descr.h"
 #include "transam/undo.h"
 #include "utils/stopevent.h"
+#include "utils/syscache.h"
 
 #include "access/hash.h"
 #include "access/xlog_internal.h"
@@ -45,6 +46,7 @@
 #include "storage/shm_mq.h"
 #include "storage/standby.h"
 #include "utils/memutils.h"
+#include "utils/typcache.h"
 
 /*
  * Recovery transaction state.
@@ -774,6 +776,9 @@ recovery_init(int worker_id)
 												  "orioledb recovery top transaction context",
 												  ALLOCSET_DEFAULT_SIZES);
 	RelationCacheInitialize();	/* needed for OTableDescr invalidation */
+	InitCatalogCache();
+
+	o_set_syscache_hooks();
 
 	if (checkpoint_state->lastCheckpointNumber > 0)
 		read_xids(checkpoint_state->lastCheckpointNumber,
@@ -887,6 +892,8 @@ recovery_finish(int worker_id)
 	TopTransactionContext = NULL;
 	CurTransactionContext = NULL;
 	iam_recovery = false;
+
+	o_reset_syscache_hooks();
 }
 
 /*

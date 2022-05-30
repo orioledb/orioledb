@@ -21,7 +21,7 @@
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
 #include "catalog/o_indices.h"
-#include "catalog/o_opclass.h"
+#include "catalog/o_sys_cache.h"
 #include "catalog/o_tables.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
@@ -72,26 +72,22 @@ struct OComparatorKey
 
 struct OComparator
 {
-	OComparatorKey key;
-	bool		haveSortSupport;
+	OComparatorKey	key;
+	bool			haveSortSupport;
 
 	/* Filled when haveSortSupport == false */
-	FmgrInfo	finfo;
+	FmgrInfo		finfo;
 
 	/* Filled when haveSortSupport == true */
-	MemoryContext ssup_cxt;
-	Oid			ssup_collation;
-	void	   *ssup_extra;
-	int			(*ssup_comparator) (Datum x, Datum y, SortSupport ssup);
+	MemoryContext	ssup_cxt;
+	void		   *ssup_extra;
+	int			   (*ssup_comparator) (Datum x, Datum y, SortSupport ssup);
 };
 
 static HTAB *oTableDescrHash;
 static HTAB *oIndexDescrHash;
 static HTAB *comparatorCache;
-static OComparatorKey lastkey =
-{
-	0, 0, 0, 0
-};
+static OComparatorKey lastkey = {0};
 static OComparator *lastcmp = NULL;
 static MemoryContext descrCxt = NULL;
 
@@ -972,8 +968,10 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
 void
 oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid)
 {
-	OOpclass   *opclass = o_opclass_get(datoid, opclassoid);
+	OOpclass   *opclass;
 
+	o_sys_cache_search_datoid = datoid;
+	opclass = o_opclass_get(opclassoid);
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
 	field->opfamily = opclass->opfamily;
@@ -993,7 +991,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 		.opfamily = opfamily,
 		.lefttype = lefttype,
 		.righttype = righttype,
-	.collation = collation};
+		.collation = collation
+	};
 	OComparator *result;
 	OComparator comparator;
 	Oid			procOid;
@@ -1028,7 +1027,6 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 		{
 			comparator.haveSortSupport = true;
 			comparator.ssup_cxt = ssup.ssup_cxt;
-			comparator.ssup_collation = ssup.ssup_collation;
 			comparator.ssup_extra = ssup.ssup_extra;
 			comparator.ssup_comparator = ssup.comparator;
 		}
@@ -1072,7 +1070,8 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 		.opfamily = opclass->opfamily,
 		.lefttype = opclass->inputtype,
 		.righttype = opclass->inputtype,
-	.collation = collation};
+		.collation = collation
+	};
 	OComparator *result;
 	OComparator comparator;
 
@@ -1089,8 +1088,9 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * If comparator isn't cached, then look for comparator with sort support
 	 * function.
 	 */
-	Assert(OidIsValid(opclass->key.datoid));	/* ssup may use SysCache */
-	if (MyDatabaseId == opclass->key.datoid && opclass->hasSsup)
+	Assert(OidIsValid(opclass->key.common.datoid));	/* ssup may use SysCache */
+	if (MyDatabaseId == opclass->key.common.datoid &&
+		OidIsValid(opclass->ssupOid))
 	{
 		SortSupportData ssup;
 		FmgrInfo	finfo;
@@ -1101,10 +1101,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 		ssup.ssup_collation = collation;
 		ssup.abbreviate = false;
 
-		o_type_procedure_fill_finfo(&finfo,
-									&opclass->ssupProc,
-									opclass->ssupOid,
-									1);
+		o_proc_cache_fill_finfo(&finfo, opclass->ssupOid);
 
 		FunctionCall1(&finfo, PointerGetDatum(&ssup));
 
@@ -1112,7 +1109,6 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 		{
 			comparator.haveSortSupport = true;
 			comparator.ssup_cxt = ssup.ssup_cxt;
-			comparator.ssup_collation = ssup.ssup_collation;
 			comparator.ssup_extra = ssup.ssup_extra;
 			comparator.ssup_comparator = ssup.comparator;
 		}
@@ -1122,12 +1118,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * Finally, look for plain comparison function.
 	 */
 	if (!comparator.haveSortSupport)
-	{
-		o_type_procedure_fill_finfo(&comparator.finfo,
-									&opclass->cmpProc,
-									opclass->cmpOid,
-									2);
-	}
+		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid);
 
 	return o_add_comparator_to_cache(&comparator);
 }
@@ -1174,6 +1165,38 @@ o_add_comparator_to_cache(OComparator *comparator)
 	return cached;
 }
 
+void
+o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
+{
+	OComparator	   *comparator;
+	HASH_SEQ_STATUS	scan_status;
+	OComparatorKey	key = {
+		.opfamily = opfamily,
+		.lefttype = lefttype,
+		.righttype = righttype
+	};
+
+	if (key.opfamily == lastkey.opfamily &&
+		key.lefttype == lastkey.lefttype &&
+		key.righttype == lastkey.righttype)
+		lastcmp = NULL;
+
+	hash_seq_init(&scan_status, comparatorCache);
+	while ((comparator = (OComparator *) hash_seq_search(&scan_status)) != NULL)
+	{
+		if (key.opfamily == comparator->key.opfamily &&
+			key.lefttype == comparator->key.lefttype &&
+			key.righttype == comparator->key.righttype)
+		{
+			Oid collation = comparator->key.collation;
+			if (comparator->ssup_extra)
+				pfree(comparator->ssup_extra);
+			key.collation = collation;
+			(void) hash_search(comparatorCache, &key, HASH_REMOVE, NULL);
+		}
+	}
+}
+
 int
 o_call_comparator(OComparator *comparator, Datum left, Datum right)
 {
@@ -1185,7 +1208,7 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 
 		memset(&ssup, 0, sizeof(ssup));
 		ssup.ssup_cxt = comparator->ssup_cxt;
-		ssup.ssup_collation = comparator->ssup_collation;
+		ssup.ssup_collation = comparator->key.collation;
 		ssup.ssup_extra = comparator->ssup_extra;
 		ssup.abbreviate = false;
 		ret = comparator->ssup_comparator(left, right, &ssup);
@@ -1195,8 +1218,8 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 	{
 		Datum		cmp;
 
-		cmp = FunctionCall2Coll(&comparator->finfo,
-								comparator->key.collation, left, right);
+		cmp = FunctionCall2Coll(&comparator->finfo, comparator->key.collation,
+								left, right);
 		ret = DatumGetInt32(cmp);
 	}
 

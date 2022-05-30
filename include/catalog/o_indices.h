@@ -38,7 +38,6 @@ typedef struct
 	List	   *predicate;		/* list of Expr */
 	char	   *predicate_str;
 	List	   *expressions;	/* list of Expr */
-	List	   *func_list;		/* list of OFuncExpr */
 	MemoryContext index_mctx;
 } OIndex;
 

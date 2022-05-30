@@ -17,7 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
-#include "catalog/o_type_cache.h"
+#include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
 #include "tableam/toast.h"
@@ -819,7 +819,7 @@ o_idx_cmp(BTreeDescr *desc,
 				n;
 	int			cmp;
 
-	o_type_cmp_datoid = desc->oids.datoid;
+	o_sys_cache_search_datoid = desc->oids.datoid;
 
 	if (!IS_BOUND_KEY_TYPE(keyType1) || !IS_BOUND_KEY_TYPE(keyType2))
 	{

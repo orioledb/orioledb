@@ -27,7 +27,7 @@
 #include "catalog/free_extents.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
-#include "catalog/o_type_cache.h"
+#include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/internal.h"
@@ -835,6 +835,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	elog(LOG, "orioledb checkpoint %u started",
 		 checkpoint_state->lastCheckpointNumber + 1);
 
+	o_set_syscache_hooks();
+
 	memset(&control, 0, sizeof(control));
 
 	chkp_tbl_arg.cleanupMap = NULL;
@@ -1038,6 +1040,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
+	o_reset_syscache_hooks();
+
 	elog(LOG, "orioledb checkpoint %u complete",
 		 checkpoint_state->lastCheckpointNumber);
 
@@ -1132,11 +1136,7 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 {
 	if (!(flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY)))
 	{
-		o_enumoid_cache_delete_by_lsn(checkPointRedo);
-		o_range_cache_delete_by_lsn(checkPointRedo);
-		o_type_element_cache_delete_by_lsn(checkPointRedo);
-		o_enum_cache_delete_by_lsn(checkPointRedo);
-		o_record_cache_delete_by_lsn(checkPointRedo);
+		o_sys_caches_delete_by_lsn(checkPointRedo);
 	}
 }
 

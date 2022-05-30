@@ -89,6 +89,7 @@ INSERT INTO pg_test_cid_array VALUES (ARRAY['1'::cid, '2'::cid]);
 COMMIT;
 INSERT INTO pg_test_cid_array VALUES (ARRAY['1'::cid, '3'::cid]);
 SELECT * FROM pg_test_cid_array;
+DROP TABLE pg_test_cid_array;
 
 CREATE TABLE o_test_cid_array
 (
@@ -98,6 +99,29 @@ CREATE TABLE o_test_cid_array
 BEGIN;
 INSERT INTO o_test_cid_array VALUES (ARRAY['1'::cid, '2'::cid]);
 COMMIT;
+
+CREATE TYPE pg_rec AS (br cid);
+CREATE TABLE pg_test_cid_record
+(
+	a pg_rec,
+	PRIMARY KEY(a)
+);
+BEGIN;
+INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+COMMIT;
+DROP TABLE pg_test_cid_record;
+DROP TYPE pg_rec;
+
+CREATE TYPE o_rec AS (br cid);
+CREATE TABLE o_test_cid_record
+(
+	a o_rec,
+	PRIMARY KEY(a)
+) USING orioledb;
+BEGIN;
+INSERT INTO o_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+COMMIT;
+DROP TYPE o_rec;
 
 CREATE TABLE pg_test_xid_array
 (
@@ -109,6 +133,7 @@ INSERT INTO pg_test_xid_array VALUES (ARRAY['1'::xid, '2'::xid]);
 COMMIT;
 INSERT INTO pg_test_xid_array VALUES (ARRAY['1'::xid, '3'::xid]);
 SELECT * FROM pg_test_xid_array;
+DROP TABLE pg_test_xid_array;
 
 CREATE TABLE o_test_xid_array
 (
@@ -258,12 +283,18 @@ ALTER TABLE o_test_record_type_alter
 ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
 ALTER TYPE record_type_non_altered DROP ATTRIBUTE b;
 ALTER TYPE record_type_non_altered ADD ATTRIBUTE c int;
+ALTER TYPE record_type_non_altered ALTER ATTRIBUTE b TYPE text;
 
 ALTER TYPE record_type_altered RENAME TO record_type_renamed;
-CREATE INDEX o_test_record_type_alter_idx2 ON o_test_record_type_alter (val5);
 ALTER TYPE record_type_renamed ADD ATTRIBUTE c int;
+ALTER TYPE record_type_renamed DROP ATTRIBUTE b;
+ALTER TYPE record_type_renamed ALTER ATTRIBUTE c TYPE text;
 
-SELECT * FROM o_test_record_type_alter WHERE val5 = (1, 5);
+SELECT * FROM o_test_record_type_alter;
+UPDATE o_test_record_type_alter SET val5.b = 4;
+UPDATE o_test_record_type_alter t SET val5.c = (t.key).a * 2;
+SELECT * FROM o_test_record_type_alter;
+SELECT * FROM o_test_record_type_alter WHERE (val5).c % 6 = 0;
 SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
 SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
 

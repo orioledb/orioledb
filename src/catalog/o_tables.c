@@ -19,10 +19,12 @@
 #include "checkpoint/checkpoint.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
+#include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "transam/oxid.h"
 #include "tuple/toast.h"
+#include "utils/planner.h"
 
 #include "access/heapam.h"
 #include "access/transam.h"
@@ -96,8 +98,6 @@ static void o_table_oids_array_callback(ORelOids oids, void *arg);
 static inline void o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool checkpoint);
 static Pointer serialize_o_table(OTable *o_table, int *size);
 static OTable *deserialize_o_table(Pointer data, Size length);
-
-List	   *o_func_list = NIL;
 
 static BTreeDescr *
 oTablesGetBTreeDesc(void *arg)
@@ -306,245 +306,6 @@ o_tables_foreach(OTablesCallback callback,
 	o_tables_foreach_oids(o_tables_foreach_callback, csn, &foreach_arg);
 }
 
-bool
-OExecInitFuncHook(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
-				  Oid inputcollid, ExprState *state)
-{
-	int			nargs = list_length(args);
-	FmgrInfo   *flinfo;
-	FunctionCallInfo fcinfo;
-	int			argno;
-	ListCell   *lc;
-	const FmgrBuiltin *fbp;
-	OFuncExpr  *op = NULL;
-
-	if (o_func_list == NIL)
-		return false;
-
-	/*
-	 * Safety check on nargs.  Under normal circumstances this should never
-	 * fail, as parser should check sooner.  But possibly it might fail if
-	 * server has been compiled with FUNC_MAX_ARGS smaller than some functions
-	 * declared in pg_proc?
-	 */
-	if (nargs > FUNC_MAX_ARGS)
-		ereport(ERROR,
-				(errcode(ERRCODE_TOO_MANY_ARGUMENTS),
-				 errmsg_plural("cannot pass more than %d argument to a function",
-							   "cannot pass more than %d arguments to a function",
-							   FUNC_MAX_ARGS,
-							   FUNC_MAX_ARGS)));
-
-	foreach(lc, o_func_list)
-	{
-		OFuncExpr  *o_func = lfirst(lc);
-
-		if (o_func->funcid == funcid &&
-			o_func->inputcollid == inputcollid)
-			op = o_func;
-	}
-
-	Assert(op);
-	Assert(op->nargs == nargs);
-
-	/* Allocate function lookup data and parameter workspace for this call */
-	scratch->d.func.finfo = palloc0(sizeof(FmgrInfo));
-	scratch->d.func.fcinfo_data = palloc0(SizeForFunctionCallInfo(nargs));
-	flinfo = scratch->d.func.finfo;
-	fcinfo = scratch->d.func.fcinfo_data;
-
-	flinfo->fn_extra = NULL;
-	flinfo->fn_mcxt = CurrentMemoryContext;
-	flinfo->fn_expr = NULL;
-	flinfo->fn_oid = op->funcid;
-	flinfo->fn_nargs = op->nargs;
-	flinfo->fn_strict = op->strict;
-	flinfo->fn_retset = op->retset;
-	if ((fbp = fmgr_isbuiltin(funcid)) != NULL)
-	{
-		/*
-		 * Fast path for builtin functions: don't bother consulting pg_proc
-		 */
-		flinfo->fn_stats = TRACK_FUNC_ALL;	/* ie, never track */
-		flinfo->fn_addr = fbp->func;
-	}
-	else if (op->prolang == INTERNALlanguageId)
-	{
-		fbp = fmgr_lookupByName(op->prosrc);
-		if (fbp == NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_UNDEFINED_FUNCTION),
-					 errmsg("internal function \"%s\" is not in internal lookup table",
-							op->prosrc)));
-		flinfo->fn_stats = TRACK_FUNC_ALL;	/* ie, never track */
-		flinfo->fn_addr = fbp->func;
-	}
-	else if (op->prolang == ClanguageId)
-	{
-		flinfo->fn_stats = TRACK_FUNC_PL;
-		flinfo->fn_addr = load_external_function(op->probin,
-												 op->prosrc,
-												 false,
-												 NULL);
-	}
-	else if (op->prolang == SQLlanguageId)
-	{
-		flinfo->fn_addr = fmgr_sql;
-		flinfo->fn_stats = TRACK_FUNC_PL;	/* ie, track if ALL */
-	}
-	else
-	{
-		/* TODO: Add another language support */
-		elog(ERROR, "Function language is not supported");
-	}
-
-
-	fmgr_info_set_expr((Node *) node, flinfo);
-
-	/* Initialize function call parameter structure too */
-	InitFunctionCallInfoData(*fcinfo, flinfo,
-							 nargs, inputcollid, NULL, NULL);
-
-	/* Keep extra copies of this info to save an indirection at runtime */
-	scratch->d.func.fn_addr = flinfo->fn_addr;
-	scratch->d.func.nargs = nargs;
-
-	/* We only support non-set functions here */
-	if (flinfo->fn_retset)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("set-valued function called in context that cannot accept a set"),
-				 state->parent ?
-				 executor_errposition(state->parent->state,
-									  exprLocation((Node *) node)) : 0));
-
-	/* Build code to evaluate arguments directly into the fcinfo struct */
-	argno = 0;
-	foreach(lc, args)
-	{
-		Expr	   *arg = (Expr *) lfirst(lc);
-
-		if (IsA(arg, Const))
-		{
-			/*
-			 * Don't evaluate const arguments every round; especially
-			 * interesting for constants in comparisons.
-			 */
-			Const	   *con = (Const *) arg;
-
-			fcinfo->args[argno].value = con->constvalue;
-			fcinfo->args[argno].isnull = con->constisnull;
-		}
-		else
-		{
-			ExecInitExprRec(arg, state,
-							&fcinfo->args[argno].value,
-							&fcinfo->args[argno].isnull);
-		}
-		argno++;
-	}
-
-	/* Insert appropriate opcode depending on strictness and stats level */
-	if (pgstat_track_functions <= flinfo->fn_stats)
-	{
-		if (flinfo->fn_strict && nargs > 0)
-			scratch->opcode = EEOP_FUNCEXPR_STRICT;
-		else
-			scratch->opcode = EEOP_FUNCEXPR;
-	}
-	else
-	{
-		if (flinfo->fn_strict && nargs > 0)
-			scratch->opcode = EEOP_FUNCEXPR_STRICT_FUSAGE;
-		else
-			scratch->opcode = EEOP_FUNCEXPR_FUSAGE;
-	}
-	return true;
-}
-
-static void
-add_func(List **func_list, Oid funcid, Oid inputcollid)
-{
-	OFuncExpr  *func_expr = palloc0(sizeof(OFuncExpr));
-	HeapTuple	procedureTuple;
-	Form_pg_proc procedureStruct;
-	ListCell   *lc;
-
-	foreach(lc, *func_list)
-	{
-		OFuncExpr  *o_func = lfirst(lc);
-
-		if (o_func->funcid == funcid &&
-			o_func->inputcollid == inputcollid)
-			return;
-	}
-
-	func_expr->funcid = funcid;
-	procedureTuple = SearchSysCache1(PROCOID,
-									 ObjectIdGetDatum(func_expr->funcid));
-	if (!HeapTupleIsValid(procedureTuple))
-		elog(ERROR, "cache lookup failed for function %u",
-			 func_expr->funcid);
-	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
-	func_expr->inputcollid = inputcollid;
-	func_expr->nargs = procedureStruct->pronargs;
-	func_expr->prolang = procedureStruct->prolang;
-	func_expr->retset = procedureStruct->proretset;
-	func_expr->strict = procedureStruct->proisstrict;
-	ReleaseSysCache(procedureTuple);
-	fmgr_symbol(func_expr->funcid, &func_expr->prosrc, &func_expr->probin);
-
-	*func_list = lappend(*func_list, func_expr);
-}
-
-static bool
-o_collect_functions(Node *node, void *context)
-{
-	Oid			functionId = InvalidOid;
-	Oid			inputcollid;
-	List	  **func_list = (List **) context;
-
-	if (node == NULL)
-		return false;
-
-	switch (node->type)
-	{
-		case T_OpExpr:
-		case T_DistinctExpr:	/* struct-equivalent to OpExpr */
-		case T_NullIfExpr:		/* struct-equivalent to OpExpr */
-			{
-				OpExpr	   *expr = (OpExpr *) node;
-
-				functionId = expr->opfuncid;
-				inputcollid = expr->inputcollid;
-				break;
-			}
-		case T_FuncExpr:
-			{
-				FuncExpr   *expr = (FuncExpr *) node;
-
-				functionId = expr->funcid;
-				inputcollid = expr->inputcollid;
-				break;
-			}
-		case T_ScalarArrayOpExpr:
-			{
-				ScalarArrayOpExpr *expr = (ScalarArrayOpExpr *) node;
-
-				functionId = expr->opfuncid;
-				inputcollid = expr->inputcollid;
-				break;
-			}
-		default:
-			break;
-	}
-
-	if (OidIsValid(functionId))
-		add_func(func_list, functionId, inputcollid);
-
-	return expression_tree_walker(node, o_collect_functions, context);
-}
-
 static char *
 o_deparse_expression(char *expr_str, Oid relid)
 {
@@ -587,9 +348,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 			o_deparse_expression(nodeToString(index->predicate),
 								 o_table->oids.reloid);
 	}
-	index->func_list = NIL;
-	expression_tree_walker((Node *) index->predicate,
-						   o_collect_functions, &index->func_list);
+	o_collect_funcexpr((Node *) index->predicate);
 	index->expressions = NIL;
 	foreach(lc, index_expr_elems)
 	{
@@ -599,8 +358,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 		node = expression_planner(e);
 		index->expressions = lappend(index->expressions, node);
 	}
-	expression_tree_walker((Node *) index->expressions,
-						   o_collect_functions, &index->func_list);
+	o_collect_funcexpr((Node *) index->expressions);
 	MemoryContextSwitchTo(old_mcxt);
 
 	ixfield_num = 0;
@@ -1619,24 +1377,6 @@ o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool check
 		tag->locktag_type = LOCKTAG_USERLOCK;
 }
 
-void
-o_serialize_func_list(List *func_list, StringInfo str)
-{
-	int			list_len = list_length(func_list);
-	ListCell   *lc;
-
-	appendBinaryStringInfo(str, (Pointer) &list_len, sizeof(int));
-	foreach(lc, func_list)
-	{
-		OFuncExpr  *o_func = lfirst(lc);
-
-		appendBinaryStringInfo(str, (Pointer) o_func,
-							   offsetof(OFuncExpr, prosrc));
-		o_serialize_string(o_func->prosrc, str);
-		o_serialize_string(o_func->probin, str);
-	}
-}
-
 static void
 serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 {
@@ -1648,7 +1388,6 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	if (o_table_index->predicate)
 		o_serialize_string(o_table_index->predicate_str, str);
 	o_serialize_node((Node *) o_table_index->expressions, str);
-	o_serialize_func_list(o_table_index->func_list, str);
 }
 
 static Pointer
@@ -1706,35 +1445,6 @@ serialize_o_table(OTable *o_table, int *size)
 	return str.data;
 }
 
-List *
-o_deserialize_func_list(Pointer *ptr)
-{
-	List	   *result = NIL;
-	int			list_len;
-	int			len,
-				i;
-
-	len = sizeof(int);
-	memcpy(&list_len, *ptr, len);
-	*ptr += len;
-
-	for (i = 0; i < list_len; i++)
-	{
-		OFuncExpr  *o_func;
-
-		len = offsetof(OFuncExpr, prosrc);
-		o_func = (OFuncExpr *) palloc(sizeof(OFuncExpr));
-		memcpy(o_func, *ptr, len);
-		*ptr += len;
-
-		o_func->prosrc = o_deserialize_string(ptr);
-		o_func->probin = o_deserialize_string(ptr);
-		result = lappend(result, o_func);
-	}
-
-	return result;
-}
-
 static void
 deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 {
@@ -1758,7 +1468,6 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 	if (o_table_index->predicate)
 		o_table_index->predicate_str = o_deserialize_string(ptr);
 	o_table_index->expressions = (List *) o_deserialize_node(ptr);
-	o_table_index->func_list = o_deserialize_func_list(ptr);
 	MemoryContextSwitchTo(old_mcxt);
 }
 
@@ -1786,6 +1495,10 @@ deserialize_o_table(Pointer data, Size length)
 
 	len = o_table->nfields * sizeof(OTableField);
 	o_table->fields = (OTableField *) palloc(len);
+	if (o_table->has_missing || o_table->has_default)
+		Assert((ptr - data) + len <= length);
+	else
+		Assert((ptr - data) + len == length);
 	memcpy(o_table->fields, ptr, len);
 	ptr += len;
 	Assert(ptr - data <= length);

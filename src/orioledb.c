@@ -18,9 +18,8 @@
 #include "btree/find.h"
 #include "btree/io.h"
 #include "btree/scan.h"
-#include "catalog/o_opclass.h"
 #include "catalog/o_tables.h"
-#include "catalog/o_type_cache.h"
+#include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
@@ -57,7 +56,6 @@
 #include "utils/rangetypes.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/typcache.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -571,27 +569,20 @@ _PG_init(void)
 	RegisterXactCallback(undo_xact_callback, NULL);
 	RegisterSubXactCallback(undo_subxact_callback, NULL);
 	CacheRegisterUsercacheCallback(orioledb_usercache_hook, PointerGetDatum(NULL));
-	CacheRegisterSyscacheCallback(TYPEOID, orioledb_syscache_type_hook, PointerGetDatum(NULL));
-	CacheRegisterSyscacheCallback(RELOID, orioledb_syscache_type_hook, PointerGetDatum(NULL));
-	CacheRegisterSyscacheCallback(ENUMOID, orioledb_syscache_type_hook, PointerGetDatum(NULL));
 	CheckPoint_hook = o_perform_checkpoint;
 	after_checkpoint_cleanup_hook = o_after_checkpoint_cleanup_hook;
 	logicalmsg_redo_hook = o_recovery_logicalmsg_redo_hook;
 	RedoStartHook = o_recovery_start_hook;
 	RedoFinishHook = o_recovery_finish_hook;
 	snapshot_hook = orioledb_snapshot_hook;
-	enum_cmp_internal_hook = o_enum_cmp_internal_hook;
-	range_cmp_hook = o_range_cmp_hook;
-	type_elements_cmp_hook = o_type_elements_cmp_hook;
-	record_cmp_hook = o_record_cmp_hook;
 	CustomErrorCleanupHook = orioledb_error_cleanup_hook;
 	snapshot_register_hook = undo_snapshot_register_hook;
 	snapshot_deregister_hook = undo_snapshot_deregister_hook;
 	reset_xmin_hook = orioledb_reset_xmin_hook;
-	ExecInitFuncHook = OExecInitFuncHook;
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
 	xact_redo_hook = o_xact_redo_hook;
+	orioledb_setup_syscache_hooks();
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }
@@ -770,8 +761,7 @@ orioledb_shmem_startup(void)
 
 	o_tableam_descr_init();
 	o_compress_init();
-	o_typecaches_init();
-	o_opclass_init();
+	o_sys_caches_init();
 
 	before_shmem_exit(orioledb_on_shmem_exit, (Datum) 0);
 

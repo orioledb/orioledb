@@ -1218,6 +1218,64 @@ class RecoveryTest(BaseTest):
 											ORDER BY key""")[0][0])
 		node.stop()
 
+
+	def test_recovery_deep_sql_function_predicate(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.start()
+		node.safe_psql('postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE FUNCTION my_cmp_sql(a int, b int) RETURNS int AS $$
+				SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
+								(b::bit(5) & X'A8'::bit(5))::int);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_cmp_sql_sql(a int, b int) RETURNS int
+			AS $$
+				SELECT my_cmp_sql(a, b);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_cmp_sql_sql_sql(a int, b int) RETURNS int
+			AS $$
+				SELECT my_cmp_sql_sql(a, b);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_eq_sql_sql_sql_sql(a int, b int)
+				RETURNS bool
+			AS $$
+				SELECT my_cmp_sql_sql_sql(a, b) = 0;
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE TABLE IF NOT EXISTS o_test (
+				val integer
+			) USING orioledb;
+
+			CREATE INDEX o_test_ix1 ON o_test (val)
+					WHERE (my_eq_sql_sql_sql_sql(val, val * 11));
+		""")
+		node.safe_psql("""
+			INSERT INTO o_test VALUES (1);
+			INSERT INTO o_test VALUES (2);
+			INSERT INTO o_test VALUES (3);
+			INSERT INTO o_test VALUES (4);
+			INSERT INTO o_test VALUES (5);
+		""")
+
+		self.assertEqual(node.execute("""
+			SELECT * FROM o_test
+				WHERE my_eq_sql_sql_sql_sql(val, val * 11);
+		"""), [(1,),(3,),(4,)])
+
+		node.stop(['-m','immediate'])
+
+		node.start()
+
+		self.assertEqual(node.execute("""
+			SELECT * FROM o_test
+				WHERE my_eq_sql_sql_sql_sql(val, val * 11);
+		"""), [(1,),(3,),(4,)])
+
 	def test_recovery_expression_index(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
@@ -1247,6 +1305,86 @@ class RecoveryTest(BaseTest):
 							) SELECT COUNT(*) FROM o_test_cte;
 						""")[0][0])
 		node.stop()
+
+	def test_recovery_deep_sql_function_opclass_cmp(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.start()
+		node.safe_psql('postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE OR REPLACE FUNCTION my_cmp_sql(a int, b int) RETURNS int
+			AS $$
+				SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
+								(b::bit(5) & X'A8'::bit(5))::int);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_cmp_s_s(a int, b int) RETURNS int
+			AS $$
+ 				SELECT my_cmp_sql(a, b);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_cmp_s_s_s(a int, b int) RETURNS int
+			AS $$
+				SELECT my_cmp_s_s(a, b);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_cmp_s_s_s_s(a int, b int) RETURNS int
+			AS $$
+				SELECT my_cmp_s_s_s(a, b);
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE FUNCTION my_eq(a int, b int) RETURNS bool AS $$
+				SELECT my_cmp_sql(a, b) = 0;
+			$$ LANGUAGE SQL IMMUTABLE;
+
+			CREATE OPERATOR =^ (
+				LEFTARG = int4,
+				RIGHTARG = int4,
+				PROCEDURE = my_eq,
+				COMMUTATOR = =^
+			);
+			CREATE OPERATOR <^ (
+				LEFTARG = int4,
+				RIGHTARG = int4,
+				PROCEDURE = int4lt
+			);
+			CREATE OPERATOR >^ (
+				LEFTARG = int4,
+				RIGHTARG = int4,
+				PROCEDURE = int4gt
+			);
+
+			CREATE OPERATOR CLASS my_op_class FOR TYPE int
+				USING btree
+				AS OPERATOR 1 <^, OPERATOR 3 =^, OPERATOR 5 >^,
+				FUNCTION 1 my_cmp_s_s_s_s(int, int);
+
+			CREATE TABLE IF NOT EXISTS o_test (
+				val integer
+			) USING orioledb;
+
+			CREATE INDEX o_test_ix1 ON o_test(val my_op_class);
+		""")
+		node.safe_psql("""
+			INSERT INTO o_test VALUES (1);
+			INSERT INTO o_test VALUES (2);
+			INSERT INTO o_test VALUES (3);
+			INSERT INTO o_test VALUES (4);
+			INSERT INTO o_test VALUES (5);
+		""")
+
+		self.assertEqual(node.execute("""
+			SELECT * FROM o_test WHERE my_eq(val, val * 11);
+		"""), [(1,),(3,),(4,)])
+
+		node.stop(['-m','immediate'])
+
+		node.start()
+
+		self.assertEqual(node.execute("""
+			SELECT * FROM o_test WHERE my_eq(val, val * 11);
+		"""), [(1,),(3,),(4,)])
 
 	def test_checkpoint_concurrent_no_wal_undo(self):
 		node = self.node

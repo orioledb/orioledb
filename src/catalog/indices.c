@@ -19,8 +19,7 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/indices.h"
-#include "catalog/o_opclass.h"
-#include "catalog/o_type_cache.h"
+#include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "tableam/descr.h"
@@ -29,6 +28,7 @@
 #include "tuple/slot.h"
 #include "tuple/sort.h"
 #include "tuple/toast.h"
+#include "utils/planner.h"
 
 #include "access/genam.h"
 #include "access/relation.h"
@@ -36,7 +36,6 @@
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
-#include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -133,83 +132,6 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 	pfree(newTreeOids);
 }
 
-static bool
-o_validate_function(Node *node, void *context)
-{
-	Oid			functionId = InvalidOid;
-
-	if (node == NULL)
-		return false;
-
-	switch (node->type)
-	{
-		case T_OpExpr:
-		case T_DistinctExpr:	/* struct-equivalent to OpExpr */
-		case T_NullIfExpr:		/* struct-equivalent to OpExpr */
-			{
-				OpExpr	   *expr = (OpExpr *) node;
-
-				functionId = expr->opfuncid;
-				break;
-			}
-		case T_FuncExpr:
-			{
-				FuncExpr   *expr = (FuncExpr *) node;
-
-				functionId = expr->funcid;
-				break;
-			}
-		case T_ScalarArrayOpExpr:
-			{
-				ScalarArrayOpExpr *expr = (ScalarArrayOpExpr *) node;
-
-				functionId = expr->opfuncid;
-				break;
-			}
-		default:
-			break;
-	}
-
-	if (OidIsValid(functionId))
-	{
-		HeapTuple	procedureTuple;
-		Form_pg_proc procedureStruct;
-
-		procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
-		if (!HeapTupleIsValid(procedureTuple))
-			elog(ERROR, "cache lookup failed for function %u", functionId);
-		procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
-		if (procedureStruct->prolang > SQLlanguageId)
-			ereport(ERROR,
-					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					 errmsg("Only C and SQL functions are supported in "
-							"orioledb indices.")));
-		if (procedureStruct->provolatile == PROVOLATILE_VOLATILE)
-			ereport(ERROR,
-					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					 errmsg("Only immutable and stable functions are supported "
-							"in orioledb indices.")));
-		ReleaseSysCache(procedureTuple);
-	}
-
-	return expression_tree_walker(node, o_validate_function, (void *) context);
-}
-
-static Node *
-wrap_top_funcexpr(Node *node)
-{
-	static NamedArgExpr named_arg = {.xpr = {.type = T_NamedArgExpr}};
-
-	switch (node->type)
-	{
-		case T_FuncExpr:
-			named_arg.arg = (Expr *) node;
-			return (Node *) &named_arg;
-		default:
-			return node;
-	}
-}
-
 static void
 o_validate_index_elements(OTable *o_table, OIndexNumber ix_num,
 						  OIndexType type, List *index_elems,
@@ -218,8 +140,8 @@ o_validate_index_elements(OTable *o_table, OIndexNumber ix_num,
 	ListCell   *field_cell;
 
 	if (whereClause)
-		expression_tree_walker(wrap_top_funcexpr(whereClause),
-							   o_validate_function, NULL);
+		o_validate_funcexpr(whereClause, " are supported in "
+										 "orioledb index predicate");
 
 	foreach(field_cell, index_elems)
 	{
@@ -262,8 +184,8 @@ o_validate_index_elements(OTable *o_table, OIndexNumber ix_num,
 		}
 		else
 		{
-			expression_tree_walker(wrap_top_funcexpr(ielem->expr),
-								   o_validate_function, NULL);
+			o_validate_funcexpr(ielem->expr, " are supported in "
+											 "orioledb index expressions");
 		}
 	}
 }
@@ -291,10 +213,11 @@ o_index_create(Relation rel,
 	List	   *index_expr_fields = NIL;
 	List	   *index_predicate = NIL;
 
-	/*
-	 * TODO: ? if (strcmp(stmt->accessMethod, "orioledb") != 0) elog(ERROR,
-	 * "Index should have 'orioledb' access method.");
-	 */
+	if (strcmp(stmt->accessMethod, "btree") != 0)
+		ereport(ERROR, errmsg("'%s' access method is not supported",
+							  stmt->accessMethod),
+				errhint("Only 'btree' access method supported now "
+						"for indices on orioledb tables."));
 
 	if (stmt->concurrent)
 		elog(ERROR, "concurrent indexes are not supported.");
@@ -510,8 +433,8 @@ o_index_create(Relation rel,
 	o_table->indices[ix_num].oids.datoid = MyDatabaseId;
 	o_table->indices[ix_num].oids.reloid = address.objectId;
 
-	o_opclass_add_all(o_table);
-	custom_types_add_all(o_table);
+	o_opclass_cache_add_table(o_table);
+	custom_types_add_all(o_table, &o_table->indices[ix_num]);
 
 	/* update o_table */
 	if (old_o_table)

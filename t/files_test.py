@@ -17,7 +17,7 @@ from .base_test import wait_stopevent
 from testgres.enums import NodeStatus
 
 class FilesTest(BaseTest):
-	IGNORED_FILES_PATTERN = "(1_[2-9].*)"
+	IGNORED_FILES_PATTERN = "(1_(?!9|10).*)"
 	def setUp(self):
 		super().setUp()
 		self.node.append_conf('postgresql.conf',
@@ -185,7 +185,7 @@ class FilesTest(BaseTest):
 		old_map_files = [f for f in
 							list(chain.from_iterable(map_files.values()))
 								if f != last_xid]
-		self.assertEqual([0] * 9, old_map_files)
+		self.assertEqual([0] * 14, old_map_files)
 		self.assertEqual(['2'], [f[2] for f in tmp_files])
 
 		node.start()
@@ -197,7 +197,7 @@ class FilesTest(BaseTest):
 		old_map_files = [f for f in
 							list(chain.from_iterable(map_files.values()))
 								if f != last_xid]
-		self.assertEqual([4] * 10, old_map_files)
+		self.assertEqual([4] * 15, old_map_files)
 		self.assertEqual([], [f[2] for f in tmp_files])
 
 	def test_multiple_checkpoint_tmp_map_cleanup(self):

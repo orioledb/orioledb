@@ -5,6 +5,7 @@ import re, os
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
+from testgres.exceptions import QueryException
 
 class TypesTest(BaseTest):
 	sys_tree_nums = {}
@@ -91,7 +92,7 @@ class TypesTest(BaseTest):
 				PRIMARY KEY (arr)
 			) USING orioledb;
 		""")
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		node.execute("INSERT INTO o_test VALUES ('{1, 2}');")
 		node.execute("INSERT INTO o_test VALUES ('{2, 3, 4}');")
@@ -99,7 +100,7 @@ class TypesTest(BaseTest):
 
 		node.start()
 
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 		self.assertEqual(2, node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
 		node.stop()
 
@@ -141,7 +142,7 @@ class TypesTest(BaseTest):
 			10)
 		node.stop()
 
-	def test_parallel_typecache_insert(self):
+	def test_parallel_sys_cache_insert(self):
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -158,6 +159,7 @@ class TypesTest(BaseTest):
 			with node.connect() as con2:
 				with node.connect() as con3:
 					connection1_pid = con1.pid
+					con1.execute("SET orioledb.trace_stopevents = true;")
 					con1.execute("SET orioledb.enable_stopevents = true;")
 					con3.execute("""
 							SELECT pg_stopevent_set('modify_start',
@@ -210,7 +212,10 @@ class TypesTest(BaseTest):
 				val2 coordinates2,
 				PRIMARY KEY(location)
 			) USING orioledb;
-
+		""")
+		self.check_total_deleted(node, 'CLASS_CACHE', 2, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 6, 0)
+		node.safe_psql('postgres', """
 			ALTER TYPE coordinates2 RENAME TO coordinates_renamed;
 			CREATE TYPE custom_type AS (a int, b float);
 			ALTER TYPE coordinates_renamed ADD ATTRIBUTE z custom_type;
@@ -231,13 +236,24 @@ class TypesTest(BaseTest):
 				PRIMARY KEY(key)
 			) USING orioledb;
 		""")
+		self.check_total_deleted(node, 'CLASS_CACHE', 3, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 7, 0)
 
 		node.safe_psql('postgres', """
-			DROP TABLE o_test_record_type_removed;
-
 			CREATE TYPE custom_type_removed AS (a char, b text);
+		""")
+		with self.assertRaises(QueryException):
+			node.safe_psql('postgres', """
+				ALTER TYPE coordinates_removed
+					ALTER ATTRIBUTE y TYPE custom_type_removed;
+			""")
+		node.safe_psql('postgres', """
+			DROP TABLE o_test_record_type_removed;
 			ALTER TYPE coordinates_removed
 				ALTER ATTRIBUTE y TYPE custom_type_removed;
+		""")
+
+		node.safe_psql('postgres', """
 			CREATE TABLE o_test_record_type_removed2
 			(
 				key coordinates_removed NOT NULL,
@@ -251,17 +267,25 @@ class TypesTest(BaseTest):
 					 )::coordinates_removed
 					FROM generate_series(1, 10) id;
 		""")
+		self.check_total_deleted(node, 'CLASS_CACHE', 4, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 10, 0)
 
+		with self.assertRaises(QueryException):
+			node.safe_psql('postgres', """
+				DROP TYPE custom_type_removed CASCADE;
+			""")
 		node.safe_psql('postgres', """
+			ALTER TABLE o_test_record_type_removed2
+				DROP CONSTRAINT o_test_record_type_removed2_pkey;
 			DROP TYPE custom_type_removed CASCADE;
 		""")
-		self.check_total_deleted(node, 'RECORD_CACHE', 5, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 6, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 4, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 10, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'RECORD_CACHE', 5, 1)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 6, 1)
+		self.check_total_deleted(node, 'CLASS_CACHE', 4, 1)
+		self.check_total_deleted(node, 'TYPE_CACHE', 10, 1)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM o_test_record_type;")[0][0],
 			10)
@@ -300,13 +324,13 @@ class TypesTest(BaseTest):
 		node.safe_psql('postgres', """
 			DROP TYPE coordinates_removed CASCADE;
 		""")
-		self.check_total_deleted(node, 'RECORD_CACHE', 2, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 3, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 3, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 8, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'RECORD_CACHE', 2, 1)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 3, 1)
+		self.check_total_deleted(node, 'CLASS_CACHE', 3, 1)
+		self.check_total_deleted(node, 'TYPE_CACHE', 8, 1)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM o_test_array;")[0][0],
 			10)

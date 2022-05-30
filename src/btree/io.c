@@ -26,7 +26,6 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
-#include "catalog/o_opclass.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"

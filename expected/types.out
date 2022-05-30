@@ -140,6 +140,7 @@ SELECT * FROM pg_test_cid_array;
  {1,2}
 (1 row)
 
+DROP TABLE pg_test_cid_array;
 CREATE TABLE o_test_cid_array
 (
 	arr cid[] NOT NULL,
@@ -152,6 +153,32 @@ ERROR:  relation "o_test_cid_array" does not exist
 LINE 1: INSERT INTO o_test_cid_array VALUES (ARRAY['1'::cid, '2'::ci...
                     ^
 COMMIT;
+CREATE TYPE pg_rec AS (br cid);
+CREATE TABLE pg_test_cid_record
+(
+	a pg_rec,
+	PRIMARY KEY(a)
+);
+BEGIN;
+INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+ERROR:  could not identify a comparison function for type cid
+COMMIT;
+DROP TABLE pg_test_cid_record;
+DROP TYPE pg_rec;
+CREATE TYPE o_rec AS (br cid);
+CREATE TABLE o_test_cid_record
+(
+	a o_rec,
+	PRIMARY KEY(a)
+) USING orioledb;
+ERROR:  could not identify a comparison function for type cid
+BEGIN;
+INSERT INTO o_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+ERROR:  relation "o_test_cid_record" does not exist
+LINE 1: INSERT INTO o_test_cid_record VALUES (ROW('1'::cid)), (ROW('...
+                    ^
+COMMIT;
+DROP TYPE o_rec;
 CREATE TABLE pg_test_xid_array
 (
 	arr xid[] NOT NULL,
@@ -168,6 +195,7 @@ SELECT * FROM pg_test_xid_array;
  {1,2}
 (1 row)
 
+DROP TABLE pg_test_xid_array;
 CREATE TABLE o_test_xid_array
 (
 	arr xid[] NOT NULL,
@@ -610,97 +638,135 @@ ALTER TABLE o_test_record_type_alter
 ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
 ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
 ALTER TYPE record_type_non_altered DROP ATTRIBUTE b;
+ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
 ALTER TYPE record_type_non_altered ADD ATTRIBUTE c int;
 ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
+ALTER TYPE record_type_non_altered ALTER ATTRIBUTE b TYPE text;
+ERROR:  cannot alter type "record_type_non_altered" because column "o_test_record_type_alter.key" uses it
 ALTER TYPE record_type_altered RENAME TO record_type_renamed;
-CREATE INDEX o_test_record_type_alter_idx2 ON o_test_record_type_alter (val5);
 ALTER TYPE record_type_renamed ADD ATTRIBUTE c int;
-ERROR:  cannot alter type "record_type_renamed" because index "o_test_record_type_alter_idx2" uses it
-SELECT * FROM o_test_record_type_alter WHERE val5 = (1, 5);
- key  | val | val3 | val4 | val5  
-------+-----+------+------+-------
- (1)  |   5 |   18 | abc  | (1,5)
- (2)  |   5 |   18 | abc  | (1,5)
- (3)  |   5 |   18 | abc  | (1,5)
- (4)  |   5 |   18 | abc  | (1,5)
- (5)  |   5 |   33 | abc  | (1,5)
- (6)  |   5 |   33 | abc  | (1,5)
- (7)  |   5 |   33 | c    | (1,5)
- (8)  |   5 |   33 | c    | (1,5)
- (9)  |   5 |   18 | c    | (1,5)
- (10) |   5 |   18 | abc  | (1,5)
- (11) |   5 |   11 | b    | (1,5)
- (12) |   5 |   12 | b    | (1,5)
- (13) |   5 |   13 | b    | (1,5)
- (14) |   5 |   14 | b    | (1,5)
- (15) |   5 |   15 | b    | (1,5)
+ALTER TYPE record_type_renamed DROP ATTRIBUTE b;
+ALTER TYPE record_type_renamed ALTER ATTRIBUTE c TYPE text;
+ERROR:  cannot alter type "record_type_renamed" because column "o_test_record_type_alter.val5" uses it
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 | val5 
+---------+-----+------+------+------
+ (1,2)   |   5 |   18 | abc  | (1,)
+ (2,4)   |   5 |   18 | abc  | (1,)
+ (3,6)   |   5 |   18 | abc  | (1,)
+ (4,8)   |   5 |   18 | abc  | (1,)
+ (5,10)  |   5 |   33 | abc  | (1,)
+ (6,12)  |   5 |   33 | abc  | (1,)
+ (7,14)  |   5 |   33 | c    | (1,)
+ (8,16)  |   5 |   33 | c    | (1,)
+ (9,18)  |   5 |   18 | c    | (1,)
+ (10,20) |   5 |   18 | abc  | (1,)
+ (11,22) |   5 |   11 | b    | (1,)
+ (12,24) |   5 |   12 | b    | (1,)
+ (13,26) |   5 |   13 | b    | (1,)
+ (14,28) |   5 |   14 | b    | (1,)
+ (15,30) |   5 |   15 | b    | (1,)
 (15 rows)
 
+UPDATE o_test_record_type_alter SET val5.b = 4;
+ERROR:  cannot assign to field "b" of column "val5" because there is no such column in data type record_type_renamed
+LINE 1: UPDATE o_test_record_type_alter SET val5.b = 4;
+                                            ^
+UPDATE o_test_record_type_alter t SET val5.c = (t.key).a * 2;
+SELECT * FROM o_test_record_type_alter;
+   key   | val | val3 | val4 |  val5  
+---------+-----+------+------+--------
+ (1,2)   |   5 |   18 | abc  | (1,2)
+ (2,4)   |   5 |   18 | abc  | (1,4)
+ (3,6)   |   5 |   18 | abc  | (1,6)
+ (4,8)   |   5 |   18 | abc  | (1,8)
+ (5,10)  |   5 |   33 | abc  | (1,10)
+ (6,12)  |   5 |   33 | abc  | (1,12)
+ (7,14)  |   5 |   33 | c    | (1,14)
+ (8,16)  |   5 |   33 | c    | (1,16)
+ (9,18)  |   5 |   18 | c    | (1,18)
+ (10,20) |   5 |   18 | abc  | (1,20)
+ (11,22) |   5 |   11 | b    | (1,22)
+ (12,24) |   5 |   12 | b    | (1,24)
+ (13,26) |   5 |   13 | b    | (1,26)
+ (14,28) |   5 |   14 | b    | (1,28)
+ (15,30) |   5 |   15 | b    | (1,30)
+(15 rows)
+
+SELECT * FROM o_test_record_type_alter WHERE (val5).c % 6 = 0;
+   key   | val | val3 | val4 |  val5  
+---------+-----+------+------+--------
+ (3,6)   |   5 |   18 | abc  | (1,6)
+ (6,12)  |   5 |   33 | abc  | (1,12)
+ (9,18)  |   5 |   18 | c    | (1,18)
+ (12,24) |   5 |   12 | b    | (1,24)
+ (15,30) |   5 |   15 | b    | (1,30)
+(5 rows)
+
 SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
- key  | val | val3 | val4 | val5  
-------+-----+------+------+-------
- (1)  |   5 |   18 | abc  | (1,5)
- (2)  |   5 |   18 | abc  | (1,5)
- (3)  |   5 |   18 | abc  | (1,5)
- (4)  |   5 |   18 | abc  | (1,5)
- (5)  |   5 |   33 | abc  | (1,5)
- (6)  |   5 |   33 | abc  | (1,5)
- (10) |   5 |   18 | abc  | (1,5)
+   key   | val | val3 | val4 |  val5  
+---------+-----+------+------+--------
+ (1,2)   |   5 |   18 | abc  | (1,2)
+ (2,4)   |   5 |   18 | abc  | (1,4)
+ (3,6)   |   5 |   18 | abc  | (1,6)
+ (4,8)   |   5 |   18 | abc  | (1,8)
+ (5,10)  |   5 |   33 | abc  | (1,10)
+ (6,12)  |   5 |   33 | abc  | (1,12)
+ (10,20) |   5 |   18 | abc  | (1,20)
 (7 rows)
 
 SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
-                               orioledb_tbl_structure                               
-------------------------------------------------------------------------------------
- Index o_test_record_type_alter_pkey contents                                      +
- Page 0: level = 0, maxKeyLen = 37, nVacatedBytes = 0                              +
- state = free, datoid equal, relnode equal, ix_type = primary, clean               +
-     Leftmost, Rightmost                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(5)')       +
-     Item 0: offset = 264, tuple = ('(1)', '5', '18', 'abc', '(1,5)')              +
-     Item 1: offset = 336, tuple = ('(2)', '5', '18', 'abc', '(1,5)')              +
-     Item 2: offset = 408, tuple = ('(3)', '5', '18', 'abc', '(1,5)')              +
-     Item 3: offset = 480, tuple = ('(4)', '5', '18', 'abc', '(1,5)')              +
-   Chunk 1: offset = 4, location = 552, hikey location = 112, hikey = ('(9)')      +
-     Item 4: offset = 560, tuple = ('(5)', '5', '33', 'abc', '(1,5)')              +
-     Item 5: offset = 632, tuple = ('(6)', '5', '33', 'abc', '(1,5)')              +
-     Item 6: offset = 704, tuple = ('(7)', '5', '33', 'c', '(1,5)')                +
-     Item 7: offset = 776, tuple = ('(8)', '5', '33', 'c', '(1,5)')                +
-   Chunk 2: offset = 8, location = 848, hikey location = 152, hikey = ('(13)')     +
-     Item 8: offset = 856, tuple = ('(9)', '5', '18', 'c', '(1,5)')                +
-     Item 9: offset = 928, tuple = ('(10)', '5', '18', 'abc', '(1,5)')             +
-     Item 10: offset = 1000, tuple = ('(11)', '5', '11', 'b', '(1,5)')             +
-     Item 11: offset = 1072, tuple = ('(12)', '5', '12', 'b', '(1,5)')             +
-   Chunk 3: offset = 12, location = 1144, hikey location = 192                     +
-     Item 12: offset = 1152, tuple = ('(13)', '5', '13', 'b', '(1,5)')             +
-     Item 13: offset = 1224, tuple = ('(14)', '5', '14', 'b', '(1,5)')             +
-     Item 14: offset = 1296, tuple = ('(15)', '5', '15', 'b', '(1,5)')             +
-                                                                                   +
- Index o_test_record_type_alter_idx1 contents                                      +
- Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                              +
- state = free, datoid equal, relnode equal, ix_type = regular, clean               +
-     Leftmost, Rightmost                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('abc', '(5)')+
-     Item 0: offset = 264, tuple = ('abc', '(1)')                                  +
-     Item 1: offset = 328, tuple = ('abc', '(2)')                                  +
-     Item 2: offset = 392, tuple = ('abc', '(3)')                                  +
-     Item 3: offset = 456, tuple = ('abc', '(4)')                                  +
-   Chunk 1: offset = 4, location = 520, hikey location = 120, hikey = ('b', '(12)')+
-     Item 4: offset = 528, tuple = ('abc', '(5)')                                  +
-     Item 5: offset = 592, tuple = ('abc', '(6)')                                  +
-     Item 6: offset = 656, tuple = ('abc', '(10)')                                 +
-     Item 7: offset = 720, tuple = ('b', '(11)')                                   +
-   Chunk 2: offset = 8, location = 776, hikey location = 160, hikey = ('c', '(7)') +
-     Item 8: offset = 784, tuple = ('b', '(12)')                                   +
-     Item 9: offset = 840, tuple = ('b', '(13)')                                   +
-     Item 10: offset = 896, tuple = ('b', '(14)')                                  +
-     Item 11: offset = 952, tuple = ('b', '(15)')                                  +
-   Chunk 3: offset = 12, location = 1008, hikey location = 200                     +
-     Item 12: offset = 1016, tuple = ('c', '(7)')                                  +
-     Item 13: offset = 1072, tuple = ('c', '(8)')                                  +
-     Item 14: offset = 1128, tuple = ('c', '(9)')                                  +
-                                                                                   +
- Index o_test_record_type_alter_idx2: not loaded                                   +
- Index toast: not loaded                                                           +
+                                orioledb_tbl_structure                                 
+---------------------------------------------------------------------------------------
+ Index o_test_record_type_alter_pkey contents                                         +
+ Page 0: level = 0, maxKeyLen = 37, nVacatedBytes = 0                                 +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(5,10)')       +
+     Item 0: offset = 264, tuple = ('(1,2)', '5', '18', 'abc', '(1,2)')               +
+     Item 1: offset = 368, tuple = ('(2,4)', '5', '18', 'abc', '(1,4)')               +
+     Item 2: offset = 472, tuple = ('(3,6)', '5', '18', 'abc', '(1,6)')               +
+     Item 3: offset = 576, tuple = ('(4,8)', '5', '18', 'abc', '(1,8)')               +
+   Chunk 1: offset = 4, location = 680, hikey location = 112, hikey = ('(9,18)')      +
+     Item 4: offset = 688, tuple = ('(5,10)', '5', '33', 'abc', '(1,10)')             +
+     Item 5: offset = 792, tuple = ('(6,12)', '5', '33', 'abc', '(1,12)')             +
+     Item 6: offset = 896, tuple = ('(7,14)', '5', '33', 'c', '(1,14)')               +
+     Item 7: offset = 1000, tuple = ('(8,16)', '5', '33', 'c', '(1,16)')              +
+   Chunk 2: offset = 8, location = 1104, hikey location = 152, hikey = ('(13,26)')    +
+     Item 8: offset = 1112, tuple = ('(9,18)', '5', '18', 'c', '(1,18)')              +
+     Item 9: offset = 1216, tuple = ('(10,20)', '5', '18', 'abc', '(1,20)')           +
+     Item 10: offset = 1320, tuple = ('(11,22)', '5', '11', 'b', '(1,22)')            +
+     Item 11: offset = 1424, tuple = ('(12,24)', '5', '12', 'b', '(1,24)')            +
+   Chunk 3: offset = 12, location = 1528, hikey location = 192                        +
+     Item 12: offset = 1536, tuple = ('(13,26)', '5', '13', 'b', '(1,26)')            +
+     Item 13: offset = 1640, tuple = ('(14,28)', '5', '14', 'b', '(1,28)')            +
+     Item 14: offset = 1744, tuple = ('(15,30)', '5', '15', 'b', '(1,30)')            +
+                                                                                      +
+ Index o_test_record_type_alter_idx1 contents                                         +
+ Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                                 +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                  +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('abc', '(5,10)')+
+     Item 0: offset = 264, tuple = ('abc', '(1,2)')                                   +
+     Item 1: offset = 328, tuple = ('abc', '(2,4)')                                   +
+     Item 2: offset = 392, tuple = ('abc', '(3,6)')                                   +
+     Item 3: offset = 456, tuple = ('abc', '(4,8)')                                   +
+   Chunk 1: offset = 4, location = 520, hikey location = 120, hikey = ('b', '(12,24)')+
+     Item 4: offset = 528, tuple = ('abc', '(5,10)')                                  +
+     Item 5: offset = 592, tuple = ('abc', '(6,12)')                                  +
+     Item 6: offset = 656, tuple = ('abc', '(10,20)')                                 +
+     Item 7: offset = 720, tuple = ('b', '(11,22)')                                   +
+   Chunk 2: offset = 8, location = 776, hikey location = 160, hikey = ('c', '(7,14)') +
+     Item 8: offset = 784, tuple = ('b', '(12,24)')                                   +
+     Item 9: offset = 840, tuple = ('b', '(13,26)')                                   +
+     Item 10: offset = 896, tuple = ('b', '(14,28)')                                  +
+     Item 11: offset = 952, tuple = ('b', '(15,30)')                                  +
+   Chunk 3: offset = 12, location = 1008, hikey location = 200                        +
+     Item 12: offset = 1016, tuple = ('c', '(7,14)')                                  +
+     Item 13: offset = 1072, tuple = ('c', '(8,16)')                                  +
+     Item 14: offset = 1128, tuple = ('c', '(9,18)')                                  +
+                                                                                      +
+ Index toast: not loaded                                                              +
  
 (1 row)
 

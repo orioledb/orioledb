@@ -44,14 +44,13 @@ class TypesTest(BaseTest):
 		node.start()
 		node.safe_psql('postgres',"""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
-			CREATE TYPE type_numbers AS ENUM ('zero', 'one', 
-											'two', 'three');
+			CREATE TYPE type_numbers AS ENUM ('zero', 'one', 'two', 'three');
 			CREATE TABLE table_numbers (
 				number type_numbers NOT NULL,
 				num INT NOT NULL,
 				PRIMARY KEY (number)
 			) USING orioledb;
-			
+
 			ALTER TYPE type_numbers ADD VALUE 'five';
 		""")
 
@@ -111,30 +110,30 @@ class TypesTest(BaseTest):
 			INSERT INTO num_table(num_1, num_2, num_3)
 				VALUES(3, '333', '666');
 		""")
-		self.check_total_deleted(node, 'ENUM_CACHE', 2, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 6, 0)
+		self.check_total_deleted(node, 'ENUM_CACHE', 0, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', 0, 0)
 
 		node.safe_psql('postgres', "ALTER TABLE num_table DROP COLUMN num_3;")
 		node.safe_psql('postgres', "DROP TYPE two;")
 
-		self.check_total_deleted(node, 'ENUM_CACHE', 2, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 6, 0)
+		self.check_total_deleted(node, 'ENUM_CACHE', 0, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', 0, 0)
 
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 
-		self.check_total_deleted(node, 'ENUM_CACHE', 2, 1)
-		self.check_total_deleted(node, "ENUMOID_CACHE", 6, 3)
+		self.check_total_deleted(node, 'ENUM_CACHE', 0, 0)
+		self.check_total_deleted(node, "ENUMOID_CACHE", 0, 0)
 
 		node.stop()
-	
+
 	def test_enum_index_recovery_3(self):
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
 		CREATE EXTENSION IF NOT EXISTS orioledb;
-		
+
 		CREATE TYPE num_1 AS ENUM ('11','12','13');
 		CREATE TYPE num_2 AS ENUM ('21','22','23');
 		CREATE TYPE num_3 AS ENUM ('31','32','33');
@@ -164,25 +163,25 @@ class TypesTest(BaseTest):
 		INSERT INTO table_2 (key_2, value_3, value_4)
 			VALUES(4,7,'31');
 		INSERT INTO table_2 (key_2, value_3, value_4)
-			VALUES(5,8,'32');	
+			VALUES(5,8,'32');
 		INSERT INTO table_2 (key_2, value_3, value_4)
-			VALUES(6,9,'33');		
+			VALUES(6,9,'33');
 		""")
-		self.check_total_deleted(node, 'ENUM_CACHE', 3, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 9, 0)
+		self.check_total_deleted(node, 'ENUM_CACHE', 0, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', 0, 0)
 
 		node.safe_psql('postgres', """
 			DROP TYPE num_2 CASCADE;
 		""")
-		self.check_total_deleted(node, 'ENUM_CACHE', 3, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 9, 0)
+		self.check_total_deleted(node, 'ENUM_CACHE', 0, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', 0, 0)
 
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 
-		self.check_total_deleted(node, 'ENUM_CACHE', 3, 1)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 9, 3)
+		self.check_total_deleted(node, 'ENUM_CACHE', 0, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', 0, 0)
 
 		node.stop()
 
@@ -192,13 +191,13 @@ class TypesTest(BaseTest):
 		node.safe_psql('postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE IF NOT EXISTS name_table (
-			num_arr integer[] NOT NULL,
-			num_arr_1 integer[] NOT NULL,
-			num_arr_2 integer[] NOT NULL,
-			PRIMARY KEY (num_arr)
+				num_arr integer[] NOT NULL,
+				num_arr_1 integer[] NOT NULL,
+				num_arr_2 integer[] NOT NULL,
+				PRIMARY KEY (num_arr)
 			) USING orioledb;
 		""")
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		node.execute("INSERT INTO name_table VALUES ('{1,3,5,7,9}','{2,3}','{4,5}');")
 		node.execute("INSERT INTO name_table VALUES ('{3,3,3,3,3}','{2,3}','{4,5}');")
@@ -209,7 +208,7 @@ class TypesTest(BaseTest):
 
 		node.start()
 
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 		self.assertEqual(4, node.execute("SELECT COUNT(*) FROM name_table")[0][0])
 		node.stop()
 
@@ -231,9 +230,9 @@ class TypesTest(BaseTest):
 
 		node.start()
 
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 2, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 		self.assertEqual(2, node.execute("SELECT COUNT(*) FROM table_num;")[0][0])
-		
+
 		node.stop()
 
 	def test_record_index_recovery_1(self):
@@ -252,21 +251,21 @@ class TypesTest(BaseTest):
 				PRIMARY KEY(val_1)
 			)USING orioledb;
 
-			INSERT INTO num_table(val_1, val_2, val_3) 
+			INSERT INTO num_table(val_1, val_2, val_3)
 				VALUES(1, '(5)'::num_1, '(2)');
-			INSERT INTO num_table(val_1, val_2, val_3) 
+			INSERT INTO num_table(val_1, val_2, val_3)
 				VALUES(2, '(2)', '(5)');
-			INSERT INTO num_table(val_1, val_2, val_3) 
+			INSERT INTO num_table(val_1, val_2, val_3)
 				VALUES(3, '(2)', '(4)');
 		""")
 		node.safe_psql('postgres', """
 			DROP TYPE num_1 CASCADE;
 		""")
-		self.check_total_deleted(node, 'RECORD_CACHE', 2, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'RECORD_CACHE', 2, 1)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM num_table;")[0][0],
 			3)
@@ -327,7 +326,7 @@ class TypesTest(BaseTest):
 				SELECT ARRAY[(id, id * 3)::coordinates,
 							(id, id * 33)::coordinates], id
 					FROM generate_series(1, 10) id;
-			
+
 			CREATE TYPE coord_1 AS (x int, y int);
 			CREATE TABLE test_coord
 			(
@@ -338,13 +337,13 @@ class TypesTest(BaseTest):
 		node.safe_psql('postgres', """
 			DROP TYPE coord_1 CASCADE;
 		""")
-		self.check_total_deleted(node, 'RECORD_CACHE', 2, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 3, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 3, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 8, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'RECORD_CACHE', 2, 1)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE',3, 1)
+		self.check_total_deleted(node, 'CLASS_CACHE', 3, 1)
+		self.check_total_deleted(node, 'TYPE_CACHE', 8, 1)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM coordinates_table;")[0][0],
 			10)
@@ -375,27 +374,27 @@ class TypesTest(BaseTest):
 		""")
 
 		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'RECORD_CACHE', 1, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM table_name;")[0][0],
 			3)
-	
+
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 
 		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'RECORD_CACHE', 1, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM table_name;")[0][0],
 			3)
 
 		node.stop()
-		
+
 	def test_complex_index_recovery_2(self):
 		node = self.node
 		node.start()
@@ -421,40 +420,40 @@ class TypesTest(BaseTest):
 		""")
 
 		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'RECORD_CACHE', 1, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM table_name;")[0][0],
 			3)
-	
+
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		
+
 		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'RECORD_CACHE', 1, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM table_name;")[0][0],
 			3)
-		
+
 		node.safe_psql('postgres', """
 			DROP TABLE table_name;
 		""")
 
 		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'RECORD_CACHE', 1, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 
 		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'RECORD_CACHE', 1, 0)
-		self.check_total_deleted(node, 'TYPE_ELEMENT_CACHE', 1, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', 1, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
 
 		node.stop()
 
