@@ -177,6 +177,10 @@ map_oxid_csn(OXid oxid)
 	o_buffers_read(&buffersDesc, (Pointer) &csn,
 				   oxid * sizeof(CommitSeqNo), sizeof(CommitSeqNo));
 
+	/* Recheck if globalXmin was advanced concurrently */
+	if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
+		return COMMITSEQNO_FROZEN;
+
 	return csn;
 }
 
