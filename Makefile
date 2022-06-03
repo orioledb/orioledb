@@ -71,6 +71,7 @@ REGRESSCHECKS = btree_sys_check \
 				btree_print \
 				bitmap_scan \
 				collate \
+				createas \
 				ddl \
 				explain \
 				foreign_keys \
