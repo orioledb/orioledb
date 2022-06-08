@@ -509,7 +509,7 @@ static BTreeModifyCallbackInfo callbackInfo =
 {
 	.waitCallback = o_type_cache_wait_callback,
 	.modifyCallback = o_type_cache_update_callback,
-	.insertToDeleted = o_type_cache_update_callback,
+	.modifyDeletedCallback = o_type_cache_update_callback,
 	.arg = NULL
 };
 

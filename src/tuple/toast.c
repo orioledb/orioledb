@@ -511,9 +511,8 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 	bool		success = true;
 	BTreeModifyCallbackInfo callbackInfo = {
 		.waitCallback = NULL,
-		.insertToDeleted = o_update_callback,
+		.modifyDeletedCallback = o_update_callback,
 		.modifyCallback = o_update_callback,
-		.deleteDeleted = NULL,
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
@@ -579,9 +578,8 @@ generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
 	bool		deleted = false;
 	BTreeModifyCallbackInfo callbackInfo = {
 		.waitCallback = NULL,
-		.insertToDeleted = NULL,
+		.modifyDeletedCallback = NULL,
 		.modifyCallback = o_delete_callback,
-		.deleteDeleted = NULL,
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};

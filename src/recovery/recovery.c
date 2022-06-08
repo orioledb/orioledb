@@ -1188,21 +1188,21 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 	if (IS_SYS_TREE_OIDS(tree->oids))
 	{
 		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
-			callbackInfo.modifyCallback = callbackInfo.insertToDeleted = recovery_insert_systree_callback;
+			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_insert_systree_callback;
 	}
 	else if (tree->type == oIndexPrimary || tree->type == oIndexToast)
 	{
 		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
-			callbackInfo.modifyCallback = callbackInfo.insertToDeleted = recovery_insert_primary_callback;
+			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_insert_primary_callback;
 		else if (type == RECOVERY_DELETE)
-			callbackInfo.modifyCallback = callbackInfo.insertToDeleted = recovery_delete_primary_callback;
+			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_delete_primary_callback;
 	}
 	else
 	{
 		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
-			callbackInfo.modifyCallback = callbackInfo.insertToDeleted = recovery_insert_overwrite_callback;
+			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_insert_overwrite_callback;
 		else if (type == RECOVERY_DELETE)
-			callbackInfo.modifyCallback = callbackInfo.insertToDeleted = recovery_delete_overwrite_callback;
+			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_delete_overwrite_callback;
 	}
 
 	switch (type)

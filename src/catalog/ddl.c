@@ -46,6 +46,7 @@
 #include "commands/tablespace.h"
 #include "commands/view.h"
 #include "commands/tablecmds.h"
+#include "fmgr.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/makefuncs.h"
@@ -70,15 +71,15 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 
+/* commands/trigger.c */
+extern Datum pg_trigger_depth(PG_FUNCTION_ARGS);
+
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 static planner_hook_type prev_planner_hook = NULL;
 
-#if PG_VERSION_NUM >= 150000
-bool		is_merge = false;
 bool		first_saved_undo_location = true;
 UndoLocation saved_undo_location;
-#endif
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -393,12 +394,10 @@ static PlannedStmt *
 orioledb_planner_hook(Query *parse, const char *query_string,
 					  int cursorOptions, ParamListInfo boundParams)
 {
-#if PG_VERSION_NUM >= 150000
-	is_merge = parse->commandType == CMD_MERGE;
+	uint32	depth;
 
-	if (is_merge)
-		first_saved_undo_location = true;
-#endif
+	depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth, (Datum) 0));
+	first_saved_undo_location = first_saved_undo_location || (depth == 0);
 
 	if (prev_planner_hook)
 		return prev_planner_hook(parse, query_string, cursorOptions,
@@ -804,6 +803,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						 struct QueryCompletion *qc)
 {
 	bool		call_next = true;
+
+	first_saved_undo_location = true;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))

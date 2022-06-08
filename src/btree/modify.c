@@ -73,7 +73,7 @@ BTreeModifyCallbackInfo nullCallbackInfo =
 {
 	.waitCallback = NULL,
 	.modifyCallback = NULL,
-	.insertToDeleted = NULL,
+	.modifyDeletedCallback = NULL,
 	.needsUndoForSelfCreated = false,
 	.arg = NULL
 };
@@ -281,17 +281,17 @@ retry:
 		 * We should have set conflictTupHdr in the (cmp == 0) branch above.
 		 */
 
-		if (action == BTreeOperationInsert && callbackInfo->insertToDeleted)
+		if (action == BTreeOperationInsert && callbackInfo->modifyDeletedCallback)
 		{
 			OBTreeModifyCallbackAction cbAction = OBTreeCallbackActionDoNothing;
 			BTreeLocationHint cbHint;
 
 			cbHint.blkno = pageFindContext->items[pageFindContext->index].blkno;
 			cbHint.pageChangeCount = pageFindContext->items[pageFindContext->index].pageChangeCount;
-			cbAction = callbackInfo->insertToDeleted(desc, curTuple,
-													 &context.tuple, opOxid, context.conflictTupHdr.xactInfo,
-													 context.conflictTupHdr.undoLocation,
-													 &context.lockMode, &cbHint, callbackInfo->arg);
+			cbAction = callbackInfo->modifyDeletedCallback(desc, curTuple,
+														   &context.tuple, opOxid, context.conflictTupHdr.xactInfo,
+														   context.conflictTupHdr.undoLocation,
+														   &context.lockMode, &cbHint, callbackInfo->arg);
 
 			if (cbAction == OBTreeCallbackActionUndo)
 			{
@@ -336,12 +336,12 @@ retry:
 		else
 		{
 			unlock_release(&context, true);
-			if (callbackInfo->deleteDeleted)
-				callbackInfo->deleteDeleted(desc, curTuple,
-											&context.tuple, opOxid, context.conflictTupHdr.xactInfo,
-											context.conflictTupHdr.undoLocation,
-											&context.lockMode, NULL,
-											callbackInfo->arg);
+			if (callbackInfo->modifyDeletedCallback)
+				callbackInfo->modifyDeletedCallback(desc, curTuple,
+													&context.tuple, opOxid, context.conflictTupHdr.xactInfo,
+													context.conflictTupHdr.undoLocation,
+													&context.lockMode, NULL,
+													callbackInfo->arg);
 			return OBTreeModifyResultNotFound;
 		}
 	}
@@ -712,13 +712,11 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								&undoLocation);
 	}
 
-#if PG_VERSION_NUM >= 150000
-	if (is_merge && first_saved_undo_location)
+	if (first_saved_undo_location)
 	{
 		saved_undo_location = undoLocation;
 		first_saved_undo_location = false;
 	}
-#endif
 }
 
 static OBTreeModifyResult
@@ -801,13 +799,11 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		undoLocation = InvalidUndoLocation;
 	}
 
-#if PG_VERSION_NUM >= 150000
-	if (is_merge && first_saved_undo_location)
+	if (first_saved_undo_location)
 	{
 		saved_undo_location = undoLocation;
 		first_saved_undo_location = false;
 	}
-#endif
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);

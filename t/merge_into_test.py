@@ -10,7 +10,6 @@ class MergeIntoTest(BaseTest):
 										   'SELECT count(*) FROM orioledb_table_oids();')[0][0])
 
 	def test_1(self):
-
 		node = self.node
 		node.start()
 
@@ -906,8 +905,53 @@ class MergeIntoTest(BaseTest):
 
 		node.stop()
 
-
-
-
-
-
+	def test_self_modified_trigger_merge(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int,
+				val_2 int
+			) USING orioledb;
+			INSERT INTO o_test_1 (val_1, val_2)
+					(SELECT val_1, 1 FROM generate_series (1, 2) val_1);
+			CREATE OR REPLACE FUNCTION func_trig_o_test_1()
+			RETURNS TRIGGER AS
+			$$
+			BEGIN
+				DELETE FROM o_test_1 WHERE val_1 = NEW.val_1;
+				RETURN NEW;
+			END;
+			$$
+			LANGUAGE 'plpgsql';
+		""")
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(1, 1), (2, 1)])
+		node.safe_psql("""
+			CREATE TRIGGER trig_o_test_1 BEFORE UPDATE
+				ON o_test_1 FOR EACH ROW
+				EXECUTE PROCEDURE func_trig_o_test_1();
+		""")
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(1, 1), (2, 1)])
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				MERGE INTO o_test_1 t
+				USING (VALUES (2, 2), (3, 2)) as s (val_3, val_4)
+				ON t.val_1 = s.val_3
+				WHEN MATCHED THEN
+					UPDATE SET val_2 = val_1 + val_2;
+			""")
+		self.assertErrorMessageEquals(e, "MERGE command cannot affect row a "
+										 "second time",
+									   "Ensure that not more than one source "
+									   "row matches any one target row.")
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(1, 1), (2, 1)])

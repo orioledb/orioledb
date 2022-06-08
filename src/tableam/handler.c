@@ -199,10 +199,8 @@ orioledb_fetch_row_version(Relation relation,
 										 fetch_row_version_callback,
 										 &version);
 
-#if PG_VERSION_NUM >= 150000
-	if (is_merge && deleted && COMMITSEQNO_IS_INPROGRESS(tupleCsn))
+	if (deleted && COMMITSEQNO_IS_INPROGRESS(tupleCsn))
 		return true;
-#endif
 
 	if (O_TUPLE_IS_NULL(tuple))
 		return false;
@@ -453,9 +451,15 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	o_check_tbl_delete_mres(mres, descr, rinfo->ri_RelationDesc);
 
 	if (mres.self_modified)
+	{
 		tmfd->xmax = GetCurrentTransactionId();
+		tmfd->cmax = GetCurrentCommandId(true);
+	}
 	else
+	{
 		tmfd->xmax = InvalidTransactionId;
+		tmfd->cmax = InvalidCommandId;
+	}
 
 	if (mres.success)
 	{
@@ -590,14 +594,23 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 		/* ExecClearTuple(mres.oldTuple); */
 	}
 
+	if (mres.self_modified)
+		return TM_SelfModified;
+
 	o_check_tbl_update_mres(mres, descr, rel, slot);
 
 	Assert(mres.success);
 
 	if (mres.self_modified)
+	{
 		tmfd->xmax = GetCurrentTransactionId();
+		tmfd->cmax = GetCurrentCommandId(true);
+	}
 	else
+	{
 		tmfd->xmax = InvalidTransactionId;
+		tmfd->cmax = InvalidCommandId;
+	}
 
 	if (mres.oldTuple)
 		return mres.self_modified ? TM_SelfModified : TM_Ok;
