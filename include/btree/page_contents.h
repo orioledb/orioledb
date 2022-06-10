@@ -302,6 +302,16 @@ typedef struct
 	char		fixedData[O_BTREE_MAX_KEY_SIZE];
 } OFixedKey;
 
+/*
+ * Fixed structure for storage of B-tree key.  Separate key length field,
+ * saves us from getting length of inconsistent key.
+ */
+typedef struct
+{
+	OFixedKey	fixed;
+	int			len;
+} OFixedShmemKey;
+
 typedef enum ReadPageResult
 {
 	ReadPageResultOK,
@@ -346,6 +356,14 @@ extern void copy_fixed_page_key(BTreeDescr *desc, OFixedKey *dst,
 extern void copy_fixed_hikey(BTreeDescr *desc, OFixedKey *dst, Page p);
 extern void clear_fixed_tuple(OFixedTuple *dst);
 extern void clear_fixed_key(OFixedKey *dst);
+
+extern void copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst,
+								 OTuple src);
+extern void copy_fixed_shmem_page_key(BTreeDescr *desc, OFixedShmemKey *dst,
+									  Page p, BTreePageItemLocator *loc);
+extern void copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst,
+								   Page p);
+extern void copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src);
 
 extern OTuple page_get_hikey(Page p);
 extern int	page_get_hikey_size(Page p);

@@ -81,11 +81,11 @@ typedef struct
 	 * Hikey of current page. It helps to determine checkpoint number for
 	 * eviction and filling bound for autonomous pages.
 	 */
-	OFixedKey	hikey;
+	OFixedShmemKey hikey;
 	/* Next key which can be added to current node. */
-	OFixedKey	nextkey;
+	OFixedShmemKey nextkey;
 	/* Lokey of current BTree page */
-	OFixedKey	lokey;
+	OFixedShmemKey lokey;
 
 	/*
 	 * Current the BTree page number. OInvalidInMemoryBlkno if no page
@@ -155,7 +155,7 @@ typedef struct
 	Oid			relnode;
 	bool		completed;
 	CurKeyType	curKeyType;
-	OFixedKey	curKeyValue;
+	OFixedShmemKey curKeyValue;
 	CheckpointPageInfo stack[ORIOLEDB_MAX_DEPTH];
 	/* pid of the worker */
 	pid_t		pid;

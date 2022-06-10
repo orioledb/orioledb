@@ -542,6 +542,22 @@ copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src)
 		memset(&dst->fixedData[tuplen], 0, MAXALIGN(tuplen) - tuplen);
 }
 
+static void
+copy_fixed_key_with_len(OFixedKey *dst, OTuple src, int tuplen)
+{
+	if (O_TUPLE_IS_NULL(src))
+	{
+		clear_fixed_key(dst);
+		return;
+	}
+
+	dst->tuple.formatFlags = src.formatFlags;
+	dst->tuple.data = dst->fixedData;
+	memcpy(dst->fixedData, src.data, tuplen);
+	if (tuplen != MAXALIGN(tuplen))
+		memset(&dst->fixedData[tuplen], 0, MAXALIGN(tuplen) - tuplen);
+}
+
 void
 copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src)
 {
@@ -555,11 +571,7 @@ copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src)
 
 	tuplen = o_btree_len(desc, src, OKeyLength);
 	Assert(tuplen <= sizeof(dst->fixedData));
-	dst->tuple.formatFlags = src.formatFlags;
-	dst->tuple.data = dst->fixedData;
-	memcpy(dst->fixedData, src.data, tuplen);
-	if (tuplen != MAXALIGN(tuplen))
-		memset(&dst->fixedData[tuplen], 0, MAXALIGN(tuplen) - tuplen);
+	copy_fixed_key_with_len(dst, src, tuplen);
 }
 
 void
@@ -593,6 +605,51 @@ clear_fixed_key(OFixedKey *dst)
 {
 	dst->tuple.formatFlags = 0;
 	dst->tuple.data = NULL;
+}
+
+void
+copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src)
+{
+	if (O_TUPLE_IS_NULL(src->fixed.tuple))
+	{
+		clear_fixed_key(dst);
+		return;
+	}
+
+	copy_fixed_key_with_len(dst, src->fixed.tuple, src->len);
+}
+
+void
+copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst, OTuple src)
+{
+	if (O_TUPLE_IS_NULL(src))
+	{
+		clear_fixed_key(&dst->fixed);
+		return;
+	}
+
+	dst->len = o_btree_len(desc, src, OKeyLength);
+	Assert(dst->len <= sizeof(dst->fixed.fixedData));
+	copy_fixed_key_with_len(&dst->fixed, src, dst->len);
+}
+
+void
+copy_fixed_shmem_page_key(BTreeDescr *desc, OFixedShmemKey *dst,
+						  Page p, BTreePageItemLocator *loc)
+{
+	OTuple		src;
+
+	BTREE_PAGE_READ_TUPLE(src, p, loc);
+	copy_fixed_shmem_key(desc, dst, src);
+}
+
+void
+copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst, Page p)
+{
+	OTuple		src;
+
+	BTREE_PAGE_GET_HIKEY(src, p);
+	copy_fixed_shmem_key(desc, dst, src);
 }
 
 OTuple
