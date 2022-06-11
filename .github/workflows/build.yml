@@ -13,7 +13,7 @@ jobs:
       matrix:
         pg_version: [13, 14, 15]
         compiler: [clang, gcc]
-        check_type: [normal, debug, alignment, valgrind_1, valgrind_2]
+        check_type: [normal, debug, alignment, check_page, valgrind_1, valgrind_2]
     env:
       LLVM_VER: 12
       CPU: ${{ matrix.cpu }}
