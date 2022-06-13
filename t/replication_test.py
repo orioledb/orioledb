@@ -6,6 +6,7 @@ import testgres
 import time
 import os
 import re
+import subprocess
 
 from .base_test import BaseTest
 
@@ -399,6 +400,43 @@ class ReplicationTest(BaseTest):
 										 expected = False)
 				count = replica.execute("""SELECT COUNT(*) FROM o_test;""")[0][0]
 				self.assertEqual(count, 20000)
+
+	def test_remote_apply(self):
+		with self.node as master:
+			master.append_conf(filename='postgresql.conf',
+						synchronous_commit = 'remote_apply',
+						default_table_access_method = 'orioledb')
+			master.start()
+			master.safe_psql("""CREATE EXTENSION orioledb;""")
+			pgbench = master.pgbench(options=["-i", "-s", "1"],
+									 stdout=subprocess.DEVNULL,
+									 stderr=subprocess.DEVNULL)
+			self.assertEqual(pgbench.wait(), 0)
+
+			# create a backup
+			with self.getReplica() as replica:
+				replica.start()
+				master.stop()
+				master.append_conf(filename='postgresql.conf',
+						synchronous_standby_names = 'FIRST 1 (replica)')
+				master.start()
+				pgbench = master.pgbench(options=["--client", "16",
+												  "--jobs", "4",
+												  "--protocol", "prepared",
+												  "--progress", "10",
+												  "--time", "20"],
+										 stdout=subprocess.DEVNULL,
+										 stderr=subprocess.DEVNULL)
+				self.assertEqual(pgbench.wait(), 0)
+
+				pgbench = master.pgbench(options=["--client", "16",
+												  "--jobs", "4",
+												  "--protocol", "prepared",
+												  "--progress", "10",
+												  "--time", "20"],
+										 stdout=subprocess.DEVNULL,
+										 stderr=subprocess.DEVNULL)
+				self.assertEqual(pgbench.wait(), 0)
 
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
