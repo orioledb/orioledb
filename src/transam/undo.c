@@ -1135,7 +1135,6 @@ undo_xact_callback(XactEvent event, void *arg)
 		switch (event)
 		{
 			case XACT_EVENT_PRE_COMMIT:
-				current_oxid_precommit();
 				if (!RecoveryInProgress())
 				{
 					TransactionId xid = GetTopTransactionIdIfAny();
@@ -1145,10 +1144,6 @@ undo_xact_callback(XactEvent event, void *arg)
 				}
 				break;
 			case XACT_EVENT_COMMIT:
-				csn = GetCurrentCSN();
-				if (csn == COMMITSEQNO_INPROGRESS)
-					csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
-
 				if (!RecoveryInProgress())
 				{
 					TransactionId xid = GetTopTransactionIdIfAny();
@@ -1156,7 +1151,13 @@ undo_xact_callback(XactEvent event, void *arg)
 					if (!TransactionIdIsValid(xid))
 						wal_commit(oxid);
 				}
+
+				current_oxid_precommit();
+				csn = GetCurrentCSN();
+				if (csn == COMMITSEQNO_INPROGRESS)
+					csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 				current_oxid_commit(csn);
+
 				on_commit_undo_stack(oxid, true);
 				wal_after_commit();
 				reset_cur_undo_locations();
