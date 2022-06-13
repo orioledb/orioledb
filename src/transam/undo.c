@@ -1432,8 +1432,10 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	{
 		CommitSeqNo csn;
 
-		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 		wal_commit(oxid);
+
+		current_oxid_precommit();
+		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 		current_oxid_commit(csn);
 		on_commit_undo_stack(oxid, true);
 		wal_after_commit();
