@@ -111,6 +111,7 @@ int			default_toast_compress = InvalidOCompress;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+static void (*prev_shmem_request_hook) (void) = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 
@@ -153,6 +154,7 @@ static ShmemItem shmemItems[] = {
 
 
 static Size orioledb_memsize(void);
+static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
 static bool verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
@@ -507,10 +509,9 @@ _PG_init(void)
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
 
-	/* Request for shared memory and lwlocks */
-	RequestAddinShmemSpace(orioledb_memsize());
-	request_btree_io_lwlocks();
-	RequestNamedLWLockTranche("orioledb_unique_locks", max_procs * 4);
+#if PG_VERSION_NUM < 150000
+	orioledb_shmem_request();
+#endif
 
 	if (device_filename)
 	{
@@ -551,6 +552,10 @@ _PG_init(void)
 	register_o_detoast_func(o_detoast);
 
 	/* Setup the required hooks. */
+#if PG_VERSION_NUM >= 150000
+	prev_shmem_request_hook = shmem_request_hook;
+	shmem_request_hook = orioledb_shmem_request;
+#endif
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = orioledb_shmem_startup;
 	next_CheckPoint_hook = CheckPoint_hook;
@@ -705,6 +710,20 @@ orioledb_on_shmem_exit(int code, Datum arg)
 {
 	if (MyProc)
 		pg_atomic_write_u64(&oProcData[MyProc->pgprocno].xmin, InvalidOXid);
+}
+
+/*
+ * Request for shared memory and lwlocks
+ */
+static void
+orioledb_shmem_request(void)
+{
+	if (prev_shmem_request_hook)
+		prev_shmem_request_hook();
+
+	RequestAddinShmemSpace(orioledb_memsize());
+	request_btree_io_lwlocks();
+	RequestNamedLWLockTranche("orioledb_unique_locks", max_procs * 4);
 }
 
 /*

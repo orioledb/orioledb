@@ -29,6 +29,12 @@ typedef struct
 
 #define COPYTUP(state,stup,tup) ((*(state)->copytup) (state, stup, tup))
 
+#if PG_VERSION_NUM < 150000
+#define SortHaveRandomAccess(state) ((state)->randomAccess)
+#else
+#define SortHaveRandomAccess(state) ((state)->sortopt & TUPLESORT_RANDOMACCESS)
+#endif
+
 static int
 comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate *state)
 {
@@ -237,7 +243,7 @@ writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
 	TAPEWRITE((void *) &tuplen, sizeof(tuplen));
 	TAPEWRITE((void *) tuple.data, o_tuple_size(tuple, spec));
 	TAPEWRITE((void *) &tuple.formatFlags, 1);
-	if (state->randomAccess)	/* need trailing length word? */
+	if (SortHaveRandomAccess(state))	/* need trailing length word? */
 		TAPEWRITE((void *) &tuplen, sizeof(tuplen));
 
 	if (!state->slabAllocatorUsed)
@@ -260,7 +266,7 @@ readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
 	/* read in the tuple proper */
 	TAPEREAD(tup, tuplen);
 	TAPEREAD(&stup->flags, 1);
-	if (state->randomAccess)	/* need trailing length word? */
+	if (SortHaveRandomAccess(state))	/* need trailing length word? */
 		TAPEREAD(&tuplen, sizeof(tuplen));
 	stup->tuple = (void *) tup;
 	tuple.data = tup;
