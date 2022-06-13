@@ -34,8 +34,8 @@ static int	local_wal_buffer_offset;
 static ORelOids local_oids;
 static OIndexType local_type;
 
-static void add_wal_record(uint8 rec_type);
-static void add_joint_commit_wal_record(TransactionId xid);
+static void add_finish_wal_record(uint8 rec_type, OXid xmin);
+static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
 static void add_xid_wal_record(OXid oxid);
 static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
@@ -115,12 +115,12 @@ wal_commit(OXid oxid)
 	if (local_wal_buffer_offset == 0)
 		return;
 
-	flush_local_wal_if_needed(sizeof(WALRec));
-	Assert(local_wal_buffer_offset + sizeof(WALRec) <= LOCAL_WAL_BUFFER_SIZE);
+	flush_local_wal_if_needed(sizeof(WALRecFinish));
+	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
-	add_wal_record(WAL_REC_COMMIT);
+	add_finish_wal_record(WAL_REC_COMMIT,  pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(true);
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
@@ -133,12 +133,12 @@ wal_joint_commit(OXid oxid, TransactionId xid)
 {
 	Assert(!is_recovery_process());
 
-	flush_local_wal_if_needed(sizeof(WALRec));
-	Assert(local_wal_buffer_offset + sizeof(WALRec) <= LOCAL_WAL_BUFFER_SIZE);
+	flush_local_wal_if_needed(sizeof(WALRecJointCommit));
+	Assert(local_wal_buffer_offset + sizeof(WALRecJointCommit) <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
-	add_joint_commit_wal_record(xid);
+	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
 	(void) flush_local_wal(true);
 
 	/*
@@ -161,20 +161,20 @@ wal_rollback(OXid oxid)
 	XLogRecPtr	wait_pos;
 
 	Assert(!is_recovery_process());
-	flush_local_wal_if_needed(sizeof(WALRec));
-	Assert(local_wal_buffer_offset + sizeof(WALRec) <= LOCAL_WAL_BUFFER_SIZE);
+	flush_local_wal_if_needed(sizeof(WALRecFinish));
+	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) <= LOCAL_WAL_BUFFER_SIZE);
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
-	add_wal_record(WAL_REC_ROLLBACK);
+	add_finish_wal_record(WAL_REC_ROLLBACK, pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false);
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
 }
 
 static void
-add_wal_record(uint8 rec_type)
+add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
-	WALRec	   *rec;
+	WALRecFinish *rec;
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || WAL_REC_ROLLBACK);
@@ -188,13 +188,15 @@ add_wal_record(uint8 rec_type)
 	}
 	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
-	rec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecFinish *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = rec_type;
+	memcpy(rec->xmin, &xmin, sizeof(xmin));
+
 	local_wal_buffer_offset += sizeof(*rec);
 }
 
 static void
-add_joint_commit_wal_record(TransactionId xid)
+add_joint_commit_wal_record(TransactionId xid, OXid xmin)
 {
 	WALRecJointCommit *rec;
 
@@ -213,6 +215,7 @@ add_joint_commit_wal_record(TransactionId xid)
 	rec = (WALRecJointCommit *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = WAL_REC_JOINT_COMMIT;
 	memcpy(rec->xid, &xid, sizeof(xid));
+	memcpy(rec->xmin, &xmin, sizeof(xmin));
 	local_wal_buffer_offset += sizeof(*rec);
 }
 

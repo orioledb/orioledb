@@ -81,7 +81,14 @@ typedef struct
 {
 	uint8		recType;
 	uint8		xid[sizeof(TransactionId)];
+	uint8		xmin[sizeof(OXid)];
 } WALRecJointCommit;
+
+typedef struct
+{
+	uint8		recType;
+	uint8		xmin[sizeof(OXid)];
+} WALRecFinish;
 
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"

@@ -223,6 +223,11 @@ bool		toast_consistent = false;
 RecoveryUndoLocFlush *recovery_undo_loc_flush;
 
 /*
+ * The last xmin we received from primary.
+ */
+OXid		recovery_xmin = InvalidOXid;
+
+/*
  * Number of successfully finished recovery workers.
  */
 pg_atomic_uint32 *worker_finish_count;
@@ -775,6 +780,9 @@ recovery_init(int worker_id)
 				  *recovery_single_process,
 				  worker_id);
 
+	if (worker_id < 0)
+		recovery_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
+
 	HandleStartupProcInterrupts_hook = o_handle_startup_proc_interrupts_hook;
 }
 
@@ -1300,6 +1308,7 @@ update_run_xmin(void)
 	{
 		xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	}
+	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
@@ -1762,6 +1771,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			bool		commit,
 						sync = false;
+			OXid		xmin;
+
+			memcpy(&xmin, ptr, sizeof(xmin));
+			ptr += sizeof(xmin);
+
+			recovery_xmin = Max(recovery_xmin, xmin);
 
 			Assert(sys_tree_num <= 0 || sys_tree_supports_transactions(sys_tree_num));
 
@@ -1792,11 +1807,15 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		else if (rec_type == WAL_REC_JOINT_COMMIT)
 		{
 			TransactionId xid;
+			OXid		xmin;
 
 			memcpy(&xid, ptr, sizeof(xid));
 			ptr += sizeof(xid);
+			memcpy(&xmin, ptr, sizeof(xmin));
+			ptr += sizeof(xmin);
 
 			cur_state->xid = xid;
+			recovery_xmin = Max(recovery_xmin, xmin);
 			dlist_push_tail(&joint_commit_list, &cur_state->joint_commit_list_node);
 		}
 		else if (rec_type == WAL_REC_RELATION)
