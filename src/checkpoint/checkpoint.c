@@ -201,6 +201,7 @@ checkpoint_reset_stack(CheckpointState *state)
 	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)
 	{
 		state->stack[i].blkno = OInvalidInMemoryBlkno;
+		state->stack[i].hikeyBlkno = OInvalidInMemoryBlkno;
 		state->stack[i].leftmost = true;
 		state->stack[i].offset = 0;
 		state->stack[i].bound = CheckpointBoundNone;
@@ -1514,6 +1515,7 @@ page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno)
 				after_changecount;
 	CurKeyType	cur_key;
 	OInMemoryBlkno blkno_on_checkpoint;
+	OInMemoryBlkno hikey_blkno_on_checkpoint;
 	OIndexType	type;
 	bool		result;
 
@@ -1527,6 +1529,7 @@ page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno)
 		datoid = checkpoint_state->datoid;
 		relnode = checkpoint_state->relnode;
 		blkno_on_checkpoint = checkpoint_state->stack[level].blkno;
+		hikey_blkno_on_checkpoint = checkpoint_state->stack[level].hikeyBlkno;
 		cur_key = checkpoint_state->curKeyType;
 
 		chkp_save_changecount_after(checkpoint_state, after_changecount);
@@ -1545,7 +1548,8 @@ page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno)
 			/* checkpoint already finished */
 			result = false;
 		}
-		else if (blkno_on_checkpoint == blkno)
+		else if (blkno_on_checkpoint == blkno ||
+				 hikey_blkno_on_checkpoint == blkno)
 		{
 			/* page is under checkpoint */
 			result = true;
@@ -1741,7 +1745,8 @@ get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno,
 				after_changecount,
 				cmp;
 	uint32		last_checkpoint_number;
-	OInMemoryBlkno chkp_lvl_blkno;
+	OInMemoryBlkno chkp_lvl_blkno,
+				chkp_lvl_hikey_blkno;
 	OIndexType	type;
 	bool		under_checkpoint;
 
@@ -1756,6 +1761,7 @@ get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno,
 		datoid = checkpoint_state->datoid;
 		relnode = checkpoint_state->relnode;
 		chkp_lvl_blkno = checkpoint_state->stack[level].blkno;
+		chkp_lvl_hikey_blkno = checkpoint_state->stack[level].hikeyBlkno;
 		bound = checkpoint_state->stack[level].bound;
 		cur_key_type = checkpoint_state->curKeyType;
 
@@ -1790,7 +1796,7 @@ get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno,
 			return true;
 		}
 
-		under_checkpoint = chkp_lvl_blkno == blkno;
+		under_checkpoint = (chkp_lvl_blkno == blkno || chkp_lvl_hikey_blkno == blkno);
 		if (!under_checkpoint && O_PAGE_IS(page, LEFTMOST))
 		{
 			/*
@@ -2387,6 +2393,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 		}
 
 		state->stack[l].blkno = *blkno;
+		state->stack[l].hikeyBlkno = *blkno;
 		state->stack[l].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &pageLoc) + 1;
 		state->stack[l].nextkeyType = NextKeyNone;
 		state->stack[l].leftmost = true;
@@ -2422,6 +2429,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 	Assert(!O_PAGE_IS(page, RIGHTMOST));	/* can not be merged */
 
 	state->stack[level].blkno = *blkno;
+	state->stack[level].hikeyBlkno = *blkno;
 
 	checkpointer_update_autonomous(descr, state);
 	if (!state->stack[level].autonomous)
@@ -2461,6 +2469,9 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	bool		mergeParent = false;
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(page)))
+		return false;
+
+	if (state->stack[level].hikeyBlkno == blkno)
 		return false;
 
 	if (!try_lock_page(parentBlkno))
@@ -2556,7 +2567,7 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 			reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 		}
 		else if (is_page_too_sparse(descr, O_GET_IN_MEMORY_PAGE(*blkno)) &&
-				 !state->stack[level].autonomous)
+				 !(level > 0 && *blkno != state->stack[level].hikeyBlkno))
 		{
 			/*
 			 * Try merge page to the right.  Skip merge for autonomous pages,
@@ -2737,7 +2748,10 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 
 	chkp_inc_changecount_before(state);
 	for (i = level; i < ORIOLEDB_MAX_DEPTH; i++)
+	{
 		state->stack[i].bound = CheckpointBoundRightmost;
+		state->stack[i].hikeyBlkno = OInvalidInMemoryBlkno;
+	}
 	/* avoid fail on first traverse to rootPageBlkno */
 	state->stack[level].blkno = blkno;
 	chkp_inc_changecount_after(state);
@@ -2811,10 +2825,12 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 					copy_fixed_shmem_hikey(descr, &state->stack[level].hikey,
 										   page);
 					state->stack[level].bound = CheckpointBoundHikey;
+					state->stack[level].hikeyBlkno = blkno;
 				}
 				else
 				{
 					state->stack[level].bound = CheckpointBoundRightmost;
+					state->stack[level].hikeyBlkno = OInvalidInMemoryBlkno;
 				}
 				chkp_inc_changecount_after(state);
 			}
@@ -3210,6 +3226,7 @@ update_lowest_level_hikey(BTreeDescr *descr, CheckpointState *state, int to_leve
 			/* no more pages on the level */
 			page_info->autonomous = false;
 			page_info->bound = CheckpointBoundRightmost;
+			page_info->hikeyBlkno = OInvalidInMemoryBlkno;
 			continue;
 		}
 
@@ -3223,6 +3240,7 @@ update_lowest_level_hikey(BTreeDescr *descr, CheckpointState *state, int to_leve
 			/* update hikey if no need in autonomous flag */
 			page_info->bound = CheckpointBoundHikey;
 			page_info->autonomous = false;
+			page_info->hikeyBlkno = OInvalidInMemoryBlkno;
 			copy_fixed_shmem_key(descr, &page_info->hikey, hikey);
 		}
 	}
@@ -3279,6 +3297,7 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 			curItem->autonomous = true;
 			curItem->autonomousLeftmost = true;
 			curItem->blkno = OInvalidInMemoryBlkno;
+			curItem->hikeyBlkno = OInvalidInMemoryBlkno;
 		}
 
 		if (cur_level != level)
@@ -3833,6 +3852,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		/* no more need in page data */
 		chkp_inc_changecount_before(state);
 		state->stack[level].blkno = OInvalidInMemoryBlkno;
+		if (write_img)
+			state->stack[level].hikeyBlkno = OInvalidInMemoryBlkno;
 		chkp_inc_changecount_after(state);
 		unlock_page(blkno);
 
@@ -3947,6 +3968,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		/* We've finished operation with the page, allow concurrent operations */
 		chkp_inc_changecount_before(state);
 		state->stack[level].blkno = OInvalidInMemoryBlkno;
+		state->stack[level].hikeyBlkno = OInvalidInMemoryBlkno;
 		chkp_inc_changecount_after(state);
 		unlock_page(blkno);
 

@@ -92,6 +92,13 @@ typedef struct
 	 * processing at now.
 	 */
 	OInMemoryBlkno blkno;
+
+	/*
+	 * Number page containing the relevant hikey. Might be different from
+	 * `blkno` for autonomous pages.
+	 */
+	OInMemoryBlkno hikeyBlkno;
+
 	/* Current valid offset on BTree page. */
 	OffsetNumber offset;
 	/* Is current in memory page leftmost on a BTree level. */
