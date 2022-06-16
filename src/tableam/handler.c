@@ -414,8 +414,6 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	OXid		oxid;
 	BTreeLocationHint hint;
 
-	tmfd->xmax = GetCurrentTransactionId();
-
 	descr = relation_get_descr(rinfo->ri_RelationDesc);
 
 	Assert(descr != NULL);
@@ -454,6 +452,11 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	}
 
 	o_check_tbl_delete_mres(mres, descr, rinfo->ri_RelationDesc);
+
+	if (mres.self_modified)
+		tmfd->xmax = GetCurrentTransactionId();
+	else
+		tmfd->xmax = InvalidTransactionId;
 
 	if (mres.success)
 	{
@@ -495,8 +498,6 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
-
-	tmfd->xmax = GetCurrentTransactionId();
 
 	rel = rinfo->ri_RelationDesc;
 
@@ -593,6 +594,11 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	o_check_tbl_update_mres(mres, descr, rel, slot);
 
 	Assert(mres.success);
+
+	if (mres.self_modified)
+		tmfd->xmax = GetCurrentTransactionId();
+	else
+		tmfd->xmax = InvalidTransactionId;
 
 	if (mres.oldTuple)
 		return mres.self_modified ? TM_SelfModified : TM_Ok;
