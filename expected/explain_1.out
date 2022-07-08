@@ -11,9 +11,12 @@ CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
 		FROM generate_series(1, (length + 20) / 21) i; $$
 LANGUAGE SQL;
 -- Wrapper function, which converts result of SQL query to the text
-CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT, out result text)
+	RETURNS SETOF TEXT AS $$
 	BEGIN
-		RETURN QUERY EXECUTE sql;
+		FOR result IN EXECUTE sql LOOP
+			RETURN NEXT;
+		END LOOP;
 	END $$
 LANGUAGE plpgsql;
 -- table: primary index + TOAST
@@ -588,9 +591,6 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
  Execution Time: x ms
 (8 rows)
 
--- clean-up after EXPLAIN ANALYZE test
-DROP FUNCTION query_to_text;
-DROP TABLE o_explain;
 CREATE TABLE o_test_explain_verbose_rowid (
   val_1 int,
   val_2 int
@@ -605,5 +605,788 @@ EXPLAIN (VERBOSE, COSTS OFF)
          Output: val_1, 10, rowid
 (3 rows)
 
+CREATE TABLE o_explain_formats (
+	key int PRIMARY KEY,
+	val int UNIQUE
+) USING orioledb;
+INSERT INTO o_explain_formats (SELECT v, v FROM generate_series(1, 10) v);
+-- Bitmap Heap Scan all formats with all posible fields BEGIN
+SET enable_indexscan = OFF;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                                                   regexp_replace                                                   
+--------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Sort Key: val
+   Sort Method: quicksort  Memory: xkB
+   ->  Custom Scan (o_scan) on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Bitmap heap scan
+         Recheck Cond: (val > x)
+         ->  Bitmap Index Scan on o_explain_formats_val_key  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+               Index Cond: (val > x)
+               Secondary index (o_explain_formats_val_key) pages: read=x
+         Primary pages: read=x
+ Planning:
+   Buffers: shared hit=x read=x
+ Planning Time: x ms
+ Execution Time: x ms
+(14 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                    regexp_replace                     
+-------------------------------------------------------
+ - Plan:                                              +
+     Node Type: "Sort"                                +
+     Parallel Aware: false                            +
+     Startup Cost: x                                  +
+     Total Cost: x                                    +
+     Plan Rows: x                                     +
+     Plan Width: x                                    +
+     Actual Startup Time: x                           +
+     Actual Total Time: x                             +
+     Actual Rows: x                                   +
+     Actual Loops: x                                  +
+     Sort Key:                                        +
+       - "val"                                        +
+     Sort Method: "quicksort"                         +
+     Sort Space Used: x                               +
+     Sort Space Type: "Memory"                        +
+     Shared Hit Blocks: x                             +
+     Shared Read Blocks: x                            +
+     Shared Dirtied Blocks: x                         +
+     Shared Written Blocks: x                         +
+     Local Hit Blocks: x                              +
+     Local Read Blocks: x                             +
+     Local Dirtied Blocks: x                          +
+     Local Written Blocks: x                          +
+     Temp Read Blocks: x                              +
+     Temp Written Blocks: x                           +
+     Plans:                                           +
+       - Node Type: "Custom Scan"                     +
+         Parent Relationship: "Outer"                 +
+         Custom Plan Provider: "o_scan"               +
+         Parallel Aware: false                        +
+         Relation Name: "o_explain_formats"           +
+         Alias: "o_explain_formats"                   +
+         Startup Cost: x                              +
+         Total Cost: x                                +
+         Plan Rows: x                                 +
+         Plan Width: x                                +
+         Actual Startup Time: x                       +
+         Actual Total Time: x                         +
+         Actual Rows: x                               +
+         Actual Loops: x                              +
+         Custom Scan Subtype: "Bitmap Heap Scan"      +
+         Recheck Cond: "(val > x)"                    +
+         Rows Removed by Index Recheck: x             +
+         Plans:                                       +
+           - Node Type: "Bitmap Index Scan"           +
+             Parent Relationship: "Outer"             +
+             Parallel Aware: false                    +
+             Index Name: "o_explain_formats_val_key"  +
+             Startup Cost: x                          +
+             Total Cost: x                            +
+             Plan Rows: x                             +
+             Plan Width: x                            +
+             Actual Startup Time: x                   +
+             Actual Total Time: x                     +
+             Actual Rows: x                           +
+             Actual Loops: x                          +
+             Index Cond: "(val > x)"                  +
+             Shared Hit Blocks: x                     +
+             Shared Read Blocks: x                    +
+             Shared Dirtied Blocks: x                 +
+             Shared Written Blocks: x                 +
+             Local Hit Blocks: x                      +
+             Local Read Blocks: x                     +
+             Local Dirtied Blocks: x                  +
+             Local Written Blocks: x                  +
+             Temp Read Blocks: x                      +
+             Temp Written Blocks: x                   +
+             Secondary Index Pages:                   +
+               Index Name: "o_explain_formats_val_key"+
+               Read: x                                +
+         Primary Pages:                               +
+           Read: x                                    +
+         Shared Hit Blocks: x                         +
+         Shared Read Blocks: x                        +
+         Shared Dirtied Blocks: x                     +
+         Shared Written Blocks: x                     +
+         Local Hit Blocks: x                          +
+         Local Read Blocks: x                         +
+         Local Dirtied Blocks: x                      +
+         Local Written Blocks: x                      +
+         Temp Read Blocks: x                          +
+         Temp Written Blocks: x                       +
+   Planning:                                          +
+     Shared Hit Blocks: x                             +
+     Shared Read Blocks: x                            +
+     Shared Dirtied Blocks: x                         +
+     Shared Written Blocks: x                         +
+     Local Hit Blocks: x                              +
+     Local Read Blocks: x                             +
+     Local Dirtied Blocks: x                          +
+     Local Written Blocks: x                          +
+     Temp Read Blocks: x                              +
+     Temp Written Blocks: x                           +
+   Planning Time: x                                   +
+   Triggers:                                          +
+   Execution Time: x
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                       regexp_replace                       
+------------------------------------------------------------
+ [                                                         +
+   {                                                       +
+     "Plan": {                                             +
+       "Node Type": "Sort",                                +
+       "Parallel Aware": false,                            +
+       "Startup Cost": x,                                  +
+       "Total Cost": x,                                    +
+       "Plan Rows": x,                                     +
+       "Plan Width": x,                                    +
+       "Actual Startup Time": x,                           +
+       "Actual Total Time": x,                             +
+       "Actual Rows": x,                                   +
+       "Actual Loops": x,                                  +
+       "Sort Key": ["val"],                                +
+       "Sort Method": "quicksort",                         +
+       "Sort Space Used": x,                               +
+       "Sort Space Type": "Memory",                        +
+       "Shared Hit Blocks": x,                             +
+       "Shared Read Blocks": x,                            +
+       "Shared Dirtied Blocks": x,                         +
+       "Shared Written Blocks": x,                         +
+       "Local Hit Blocks": x,                              +
+       "Local Read Blocks": x,                             +
+       "Local Dirtied Blocks": x,                          +
+       "Local Written Blocks": x,                          +
+       "Temp Read Blocks": x,                              +
+       "Temp Written Blocks": x,                           +
+       "Plans": [                                          +
+         {                                                 +
+           "Node Type": "Custom Scan",                     +
+           "Parent Relationship": "Outer",                 +
+           "Custom Plan Provider": "o_scan",               +
+           "Parallel Aware": false,                        +
+           "Relation Name": "o_explain_formats",           +
+           "Alias": "o_explain_formats",                   +
+           "Startup Cost": x,                              +
+           "Total Cost": x,                                +
+           "Plan Rows": x,                                 +
+           "Plan Width": x,                                +
+           "Actual Startup Time": x,                       +
+           "Actual Total Time": x,                         +
+           "Actual Rows": x,                               +
+           "Actual Loops": x,                              +
+           "Custom Scan Subtype": "Bitmap Heap Scan",      +
+           "Recheck Cond": "(val > x)",                    +
+           "Rows Removed by Index Recheck": x,             +
+           "Plans": [                                      +
+             {                                             +
+               "Node Type": "Bitmap Index Scan",           +
+               "Parent Relationship": "Outer",             +
+               "Parallel Aware": false,                    +
+               "Index Name": "o_explain_formats_val_key",  +
+               "Startup Cost": x,                          +
+               "Total Cost": x,                            +
+               "Plan Rows": x,                             +
+               "Plan Width": x,                            +
+               "Actual Startup Time": x,                   +
+               "Actual Total Time": x,                     +
+               "Actual Rows": x,                           +
+               "Actual Loops": x,                          +
+               "Index Cond": "(val > x)",                  +
+               "Shared Hit Blocks": x,                     +
+               "Shared Read Blocks": x,                    +
+               "Shared Dirtied Blocks": x,                 +
+               "Shared Written Blocks": x,                 +
+               "Local Hit Blocks": x,                      +
+               "Local Read Blocks": x,                     +
+               "Local Dirtied Blocks": x,                  +
+               "Local Written Blocks": x,                  +
+               "Temp Read Blocks": x,                      +
+               "Temp Written Blocks": x,                   +
+               "Secondary Index Pages": {                  +
+                 "Index Name": "o_explain_formats_val_key",+
+                 "Read": x                                 +
+               }                                           +
+             }                                             +
+           ],                                              +
+           "Primary Pages": {                              +
+             "Read": x                                     +
+           },                                              +
+           "Shared Hit Blocks": x,                         +
+           "Shared Read Blocks": x,                        +
+           "Shared Dirtied Blocks": x,                     +
+           "Shared Written Blocks": x,                     +
+           "Local Hit Blocks": x,                          +
+           "Local Read Blocks": x,                         +
+           "Local Dirtied Blocks": x,                      +
+           "Local Written Blocks": x,                      +
+           "Temp Read Blocks": x,                          +
+           "Temp Written Blocks": x                        +
+         }                                                 +
+       ]                                                   +
+     },                                                    +
+     "Planning": {                                         +
+       "Shared Hit Blocks": x,                             +
+       "Shared Read Blocks": x,                            +
+       "Shared Dirtied Blocks": x,                         +
+       "Shared Written Blocks": x,                         +
+       "Local Hit Blocks": x,                              +
+       "Local Read Blocks": x,                             +
+       "Local Dirtied Blocks": x,                          +
+       "Local Written Blocks": x,                          +
+       "Temp Read Blocks": x,                              +
+       "Temp Written Blocks": x                            +
+     },                                                    +
+     "Planning Time": x,                                   +
+     "Triggers": [                                         +
+     ],                                                    +
+     "Execution Time": x                                   +
+   }                                                       +
+ ]
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                               regexp_replace                               
+----------------------------------------------------------------------------
+ <explain xmlns="http://wwwxpostgresqlxorg/x/explain">                     +
+   <Query>                                                                 +
+     <Plan>                                                                +
+       <Node-Type>Sort</Node-Type>                                         +
+       <Parallel-Aware>false</Parallel-Aware>                              +
+       <Startup-Cost>x</Startup-Cost>                                      +
+       <Total-Cost>x</Total-Cost>                                          +
+       <Plan-Rows>x</Plan-Rows>                                            +
+       <Plan-Width>x</Plan-Width>                                          +
+       <Actual-Startup-Time>x</Actual-Startup-Time>                        +
+       <Actual-Total-Time>x</Actual-Total-Time>                            +
+       <Actual-Rows>x</Actual-Rows>                                        +
+       <Actual-Loops>x</Actual-Loops>                                      +
+       <Sort-Key>                                                          +
+         <Item>val</Item>                                                  +
+       </Sort-Key>                                                         +
+       <Sort-Method>quicksort</Sort-Method>                                +
+       <Sort-Space-Used>x</Sort-Space-Used>                                +
+       <Sort-Space-Type>Memory</Sort-Space-Type>                           +
+       <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                            +
+       <Shared-Read-Blocks>x</Shared-Read-Blocks>                          +
+       <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                    +
+       <Shared-Written-Blocks>x</Shared-Written-Blocks>                    +
+       <Local-Hit-Blocks>x</Local-Hit-Blocks>                              +
+       <Local-Read-Blocks>x</Local-Read-Blocks>                            +
+       <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                      +
+       <Local-Written-Blocks>x</Local-Written-Blocks>                      +
+       <Temp-Read-Blocks>x</Temp-Read-Blocks>                              +
+       <Temp-Written-Blocks>x</Temp-Written-Blocks>                        +
+       <Plans>                                                             +
+         <Plan>                                                            +
+           <Node-Type>Custom Scan</Node-Type>                              +
+           <Parent-Relationship>Outer</Parent-Relationship>                +
+           <Custom-Plan-Provider>o_scan</Custom-Plan-Provider>             +
+           <Parallel-Aware>false</Parallel-Aware>                          +
+           <Relation-Name>o_explain_formats</Relation-Name>                +
+           <Alias>o_explain_formats</Alias>                                +
+           <Startup-Cost>x</Startup-Cost>                                  +
+           <Total-Cost>x</Total-Cost>                                      +
+           <Plan-Rows>x</Plan-Rows>                                        +
+           <Plan-Width>x</Plan-Width>                                      +
+           <Actual-Startup-Time>x</Actual-Startup-Time>                    +
+           <Actual-Total-Time>x</Actual-Total-Time>                        +
+           <Actual-Rows>x</Actual-Rows>                                    +
+           <Actual-Loops>x</Actual-Loops>                                  +
+           <Custom-Scan-Subtype>Bitmap Heap Scan</Custom-Scan-Subtype>     +
+           <Recheck-Cond>(val &gt; x)</Recheck-Cond>                       +
+           <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
+           <Plans>                                                         +
+             <Plan>                                                        +
+               <Node-Type>Bitmap Index Scan</Node-Type>                    +
+               <Parent-Relationship>Outer</Parent-Relationship>            +
+               <Parallel-Aware>false</Parallel-Aware>                      +
+               <Index-Name>o_explain_formats_val_key</Index-Name>          +
+               <Startup-Cost>x</Startup-Cost>                              +
+               <Total-Cost>x</Total-Cost>                                  +
+               <Plan-Rows>x</Plan-Rows>                                    +
+               <Plan-Width>x</Plan-Width>                                  +
+               <Actual-Startup-Time>x</Actual-Startup-Time>                +
+               <Actual-Total-Time>x</Actual-Total-Time>                    +
+               <Actual-Rows>x</Actual-Rows>                                +
+               <Actual-Loops>x</Actual-Loops>                              +
+               <Index-Cond>(val &gt; x)</Index-Cond>                       +
+               <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                    +
+               <Shared-Read-Blocks>x</Shared-Read-Blocks>                  +
+               <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>            +
+               <Shared-Written-Blocks>x</Shared-Written-Blocks>            +
+               <Local-Hit-Blocks>x</Local-Hit-Blocks>                      +
+               <Local-Read-Blocks>x</Local-Read-Blocks>                    +
+               <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>              +
+               <Local-Written-Blocks>x</Local-Written-Blocks>              +
+               <Temp-Read-Blocks>x</Temp-Read-Blocks>                      +
+               <Temp-Written-Blocks>x</Temp-Written-Blocks>                +
+               <Secondary-Index-Pages>                                     +
+                 <Index-Name>o_explain_formats_val_key</Index-Name>        +
+                 <Read>x</Read>                                            +
+               </Secondary-Index-Pages>                                    +
+             </Plan>                                                       +
+           </Plans>                                                        +
+           <Primary-Pages>                                                 +
+             <Read>x</Read>                                                +
+           </Primary-Pages>                                                +
+           <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
+           <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
+           <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
+           <Shared-Written-Blocks>x</Shared-Written-Blocks>                +
+           <Local-Hit-Blocks>x</Local-Hit-Blocks>                          +
+           <Local-Read-Blocks>x</Local-Read-Blocks>                        +
+           <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                  +
+           <Local-Written-Blocks>x</Local-Written-Blocks>                  +
+           <Temp-Read-Blocks>x</Temp-Read-Blocks>                          +
+           <Temp-Written-Blocks>x</Temp-Written-Blocks>                    +
+         </Plan>                                                           +
+       </Plans>                                                            +
+     </Plan>                                                               +
+     <Planning>                                                            +
+       <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                            +
+       <Shared-Read-Blocks>x</Shared-Read-Blocks>                          +
+       <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                    +
+       <Shared-Written-Blocks>x</Shared-Written-Blocks>                    +
+       <Local-Hit-Blocks>x</Local-Hit-Blocks>                              +
+       <Local-Read-Blocks>x</Local-Read-Blocks>                            +
+       <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                      +
+       <Local-Written-Blocks>x</Local-Written-Blocks>                      +
+       <Temp-Read-Blocks>x</Temp-Read-Blocks>                              +
+       <Temp-Written-Blocks>x</Temp-Written-Blocks>                        +
+     </Planning>                                                           +
+     <Planning-Time>x</Planning-Time>                                      +
+     <Triggers>                                                            +
+     </Triggers>                                                           +
+     <Execution-Time>x</Execution-Time>                                    +
+   </Query>                                                                +
+ </explain>
+(1 row)
+
+RESET enable_indexscan;
+-- Bitmap Heap Scan all formats with all posible fields END
+-- Index Scan all formats with all posible fields BEGIN
+SET enable_indexonlyscan = OFF;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                                          regexp_replace                                           
+---------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_explain_formats_val_key
+   Conds: (val > x)
+   Primary pages: read=x
+   Secondary index (o_explain_formats_val_key) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(9 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                regexp_replace                 
+-----------------------------------------------
+ - Plan:                                      +
+     Node Type: "Custom Scan"                 +
+     Custom Plan Provider: "o_scan"           +
+     Parallel Aware: false                    +
+     Relation Name: "o_explain_formats"       +
+     Alias: "o_explain_formats"               +
+     Startup Cost: x                          +
+     Total Cost: x                            +
+     Plan Rows: x                             +
+     Plan Width: x                            +
+     Actual Startup Time: x                   +
+     Actual Total Time: x                     +
+     Actual Rows: x                           +
+     Actual Loops: x                          +
+     Scan Direction: "Forward"                +
+     Index Name: "o_explain_formats_val_key"  +
+     Custom Scan Subtype: "Index Scan"        +
+     Index Cond: "(val > x)"                  +
+     Rows Removed by Index Recheck: x         +
+     Primary Pages:                           +
+       Read: x                                +
+     Secondary Index Pages:                   +
+       Index Name: "o_explain_formats_val_key"+
+       Read: x                                +
+     Shared Hit Blocks: x                     +
+     Shared Read Blocks: x                    +
+     Shared Dirtied Blocks: x                 +
+     Shared Written Blocks: x                 +
+     Local Hit Blocks: x                      +
+     Local Read Blocks: x                     +
+     Local Dirtied Blocks: x                  +
+     Local Written Blocks: x                  +
+     Temp Read Blocks: x                      +
+     Temp Written Blocks: x                   +
+   Planning:                                  +
+     Shared Hit Blocks: x                     +
+     Shared Read Blocks: x                    +
+     Shared Dirtied Blocks: x                 +
+     Shared Written Blocks: x                 +
+     Local Hit Blocks: x                      +
+     Local Read Blocks: x                     +
+     Local Dirtied Blocks: x                  +
+     Local Written Blocks: x                  +
+     Temp Read Blocks: x                      +
+     Temp Written Blocks: x                   +
+   Planning Time: x                           +
+   Triggers:                                  +
+   Execution Time: x
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                   regexp_replace                   
+----------------------------------------------------
+ [                                                 +
+   {                                               +
+     "Plan": {                                     +
+       "Node Type": "Custom Scan",                 +
+       "Custom Plan Provider": "o_scan",           +
+       "Parallel Aware": false,                    +
+       "Relation Name": "o_explain_formats",       +
+       "Alias": "o_explain_formats",               +
+       "Startup Cost": x,                          +
+       "Total Cost": x,                            +
+       "Plan Rows": x,                             +
+       "Plan Width": x,                            +
+       "Actual Startup Time": x,                   +
+       "Actual Total Time": x,                     +
+       "Actual Rows": x,                           +
+       "Actual Loops": x,                          +
+       "Scan Direction": "Forward",                +
+       "Index Name": "o_explain_formats_val_key",  +
+       "Custom Scan Subtype": "Index Scan",        +
+       "Index Cond": "(val > x)",                  +
+       "Rows Removed by Index Recheck": x,         +
+       "Primary Pages": {                          +
+         "Read": x                                 +
+       },                                          +
+       "Secondary Index Pages": {                  +
+         "Index Name": "o_explain_formats_val_key",+
+         "Read": x                                 +
+       },                                          +
+       "Shared Hit Blocks": x,                     +
+       "Shared Read Blocks": x,                    +
+       "Shared Dirtied Blocks": x,                 +
+       "Shared Written Blocks": x,                 +
+       "Local Hit Blocks": x,                      +
+       "Local Read Blocks": x,                     +
+       "Local Dirtied Blocks": x,                  +
+       "Local Written Blocks": x,                  +
+       "Temp Read Blocks": x,                      +
+       "Temp Written Blocks": x                    +
+     },                                            +
+     "Planning": {                                 +
+       "Shared Hit Blocks": x,                     +
+       "Shared Read Blocks": x,                    +
+       "Shared Dirtied Blocks": x,                 +
+       "Shared Written Blocks": x,                 +
+       "Local Hit Blocks": x,                      +
+       "Local Read Blocks": x,                     +
+       "Local Dirtied Blocks": x,                  +
+       "Local Written Blocks": x,                  +
+       "Temp Read Blocks": x,                      +
+       "Temp Written Blocks": x                    +
+     },                                            +
+     "Planning Time": x,                           +
+     "Triggers": [                                 +
+     ],                                            +
+     "Execution Time": x                           +
+   }                                               +
+ ]
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                             regexp_replace                             
+------------------------------------------------------------------------
+ <explain xmlns="http://wwwxpostgresqlxorg/x/explain">                 +
+   <Query>                                                             +
+     <Plan>                                                            +
+       <Node-Type>Custom Scan</Node-Type>                              +
+       <Custom-Plan-Provider>o_scan</Custom-Plan-Provider>             +
+       <Parallel-Aware>false</Parallel-Aware>                          +
+       <Relation-Name>o_explain_formats</Relation-Name>                +
+       <Alias>o_explain_formats</Alias>                                +
+       <Startup-Cost>x</Startup-Cost>                                  +
+       <Total-Cost>x</Total-Cost>                                      +
+       <Plan-Rows>x</Plan-Rows>                                        +
+       <Plan-Width>x</Plan-Width>                                      +
+       <Actual-Startup-Time>x</Actual-Startup-Time>                    +
+       <Actual-Total-Time>x</Actual-Total-Time>                        +
+       <Actual-Rows>x</Actual-Rows>                                    +
+       <Actual-Loops>x</Actual-Loops>                                  +
+       <Scan-Direction>Forward</Scan-Direction>                        +
+       <Index-Name>o_explain_formats_val_key</Index-Name>              +
+       <Custom-Scan-Subtype>Index Scan</Custom-Scan-Subtype>           +
+       <Index-Cond>(val &gt; x)</Index-Cond>                           +
+       <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
+       <Primary-Pages>                                                 +
+         <Read>x</Read>                                                +
+       </Primary-Pages>                                                +
+       <Secondary-Index-Pages>                                         +
+         <Index-Name>o_explain_formats_val_key</Index-Name>            +
+         <Read>x</Read>                                                +
+       </Secondary-Index-Pages>                                        +
+       <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
+       <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
+       <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
+       <Shared-Written-Blocks>x</Shared-Written-Blocks>                +
+       <Local-Hit-Blocks>x</Local-Hit-Blocks>                          +
+       <Local-Read-Blocks>x</Local-Read-Blocks>                        +
+       <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                  +
+       <Local-Written-Blocks>x</Local-Written-Blocks>                  +
+       <Temp-Read-Blocks>x</Temp-Read-Blocks>                          +
+       <Temp-Written-Blocks>x</Temp-Written-Blocks>                    +
+     </Plan>                                                           +
+     <Planning>                                                        +
+       <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
+       <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
+       <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
+       <Shared-Written-Blocks>x</Shared-Written-Blocks>                +
+       <Local-Hit-Blocks>x</Local-Hit-Blocks>                          +
+       <Local-Read-Blocks>x</Local-Read-Blocks>                        +
+       <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                  +
+       <Local-Written-Blocks>x</Local-Written-Blocks>                  +
+       <Temp-Read-Blocks>x</Temp-Read-Blocks>                          +
+       <Temp-Written-Blocks>x</Temp-Written-Blocks>                    +
+     </Planning>                                                       +
+     <Planning-Time>x</Planning-Time>                                  +
+     <Triggers>                                                        +
+     </Triggers>                                                       +
+     <Execution-Time>x</Execution-Time>                                +
+   </Query>                                                            +
+ </explain>
+(1 row)
+
+RESET enable_indexonlyscan;
+-- Index Scan  all formats with all posible fields END
+-- Index Only Scan all formats with all posible fields BEGIN
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                                          regexp_replace                                           
+---------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index only scan of: o_explain_formats_val_key
+   Conds: (val > x)
+   Secondary index (o_explain_formats_val_key) pages: read=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(8 rows)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                regexp_replace                 
+-----------------------------------------------
+ - Plan:                                      +
+     Node Type: "Custom Scan"                 +
+     Custom Plan Provider: "o_scan"           +
+     Parallel Aware: false                    +
+     Relation Name: "o_explain_formats"       +
+     Alias: "o_explain_formats"               +
+     Startup Cost: x                          +
+     Total Cost: x                            +
+     Plan Rows: x                             +
+     Plan Width: x                            +
+     Actual Startup Time: x                   +
+     Actual Total Time: x                     +
+     Actual Rows: x                           +
+     Actual Loops: x                          +
+     Scan Direction: "Forward"                +
+     Index Name: "o_explain_formats_val_key"  +
+     Custom Scan Subtype: "Index Only Scan"   +
+     Index Cond: "(val > x)"                  +
+     Rows Removed by Index Recheck: x         +
+     Secondary Index Pages:                   +
+       Index Name: "o_explain_formats_val_key"+
+       Read: x                                +
+     Shared Hit Blocks: x                     +
+     Shared Read Blocks: x                    +
+     Shared Dirtied Blocks: x                 +
+     Shared Written Blocks: x                 +
+     Local Hit Blocks: x                      +
+     Local Read Blocks: x                     +
+     Local Dirtied Blocks: x                  +
+     Local Written Blocks: x                  +
+     Temp Read Blocks: x                      +
+     Temp Written Blocks: x                   +
+   Planning:                                  +
+     Shared Hit Blocks: x                     +
+     Shared Read Blocks: x                    +
+     Shared Dirtied Blocks: x                 +
+     Shared Written Blocks: x                 +
+     Local Hit Blocks: x                      +
+     Local Read Blocks: x                     +
+     Local Dirtied Blocks: x                  +
+     Local Written Blocks: x                  +
+     Temp Read Blocks: x                      +
+     Temp Written Blocks: x                   +
+   Planning Time: x                           +
+   Triggers:                                  +
+   Execution Time: x
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                   regexp_replace                   
+----------------------------------------------------
+ [                                                 +
+   {                                               +
+     "Plan": {                                     +
+       "Node Type": "Custom Scan",                 +
+       "Custom Plan Provider": "o_scan",           +
+       "Parallel Aware": false,                    +
+       "Relation Name": "o_explain_formats",       +
+       "Alias": "o_explain_formats",               +
+       "Startup Cost": x,                          +
+       "Total Cost": x,                            +
+       "Plan Rows": x,                             +
+       "Plan Width": x,                            +
+       "Actual Startup Time": x,                   +
+       "Actual Total Time": x,                     +
+       "Actual Rows": x,                           +
+       "Actual Loops": x,                          +
+       "Scan Direction": "Forward",                +
+       "Index Name": "o_explain_formats_val_key",  +
+       "Custom Scan Subtype": "Index Only Scan",   +
+       "Index Cond": "(val > x)",                  +
+       "Rows Removed by Index Recheck": x,         +
+       "Secondary Index Pages": {                  +
+         "Index Name": "o_explain_formats_val_key",+
+         "Read": x                                 +
+       },                                          +
+       "Shared Hit Blocks": x,                     +
+       "Shared Read Blocks": x,                    +
+       "Shared Dirtied Blocks": x,                 +
+       "Shared Written Blocks": x,                 +
+       "Local Hit Blocks": x,                      +
+       "Local Read Blocks": x,                     +
+       "Local Dirtied Blocks": x,                  +
+       "Local Written Blocks": x,                  +
+       "Temp Read Blocks": x,                      +
+       "Temp Written Blocks": x                    +
+     },                                            +
+     "Planning": {                                 +
+       "Shared Hit Blocks": x,                     +
+       "Shared Read Blocks": x,                    +
+       "Shared Dirtied Blocks": x,                 +
+       "Shared Written Blocks": x,                 +
+       "Local Hit Blocks": x,                      +
+       "Local Read Blocks": x,                     +
+       "Local Dirtied Blocks": x,                  +
+       "Local Written Blocks": x,                  +
+       "Temp Read Blocks": x,                      +
+       "Temp Written Blocks": x                    +
+     },                                            +
+     "Planning Time": x,                           +
+     "Triggers": [                                 +
+     ],                                            +
+     "Execution Time": x                           +
+   }                                               +
+ ]
+(1 row)
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+                             regexp_replace                             
+------------------------------------------------------------------------
+ <explain xmlns="http://wwwxpostgresqlxorg/x/explain">                 +
+   <Query>                                                             +
+     <Plan>                                                            +
+       <Node-Type>Custom Scan</Node-Type>                              +
+       <Custom-Plan-Provider>o_scan</Custom-Plan-Provider>             +
+       <Parallel-Aware>false</Parallel-Aware>                          +
+       <Relation-Name>o_explain_formats</Relation-Name>                +
+       <Alias>o_explain_formats</Alias>                                +
+       <Startup-Cost>x</Startup-Cost>                                  +
+       <Total-Cost>x</Total-Cost>                                      +
+       <Plan-Rows>x</Plan-Rows>                                        +
+       <Plan-Width>x</Plan-Width>                                      +
+       <Actual-Startup-Time>x</Actual-Startup-Time>                    +
+       <Actual-Total-Time>x</Actual-Total-Time>                        +
+       <Actual-Rows>x</Actual-Rows>                                    +
+       <Actual-Loops>x</Actual-Loops>                                  +
+       <Scan-Direction>Forward</Scan-Direction>                        +
+       <Index-Name>o_explain_formats_val_key</Index-Name>              +
+       <Custom-Scan-Subtype>Index Only Scan</Custom-Scan-Subtype>      +
+       <Index-Cond>(val &gt; x)</Index-Cond>                           +
+       <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
+       <Secondary-Index-Pages>                                         +
+         <Index-Name>o_explain_formats_val_key</Index-Name>            +
+         <Read>x</Read>                                                +
+       </Secondary-Index-Pages>                                        +
+       <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
+       <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
+       <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
+       <Shared-Written-Blocks>x</Shared-Written-Blocks>                +
+       <Local-Hit-Blocks>x</Local-Hit-Blocks>                          +
+       <Local-Read-Blocks>x</Local-Read-Blocks>                        +
+       <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                  +
+       <Local-Written-Blocks>x</Local-Written-Blocks>                  +
+       <Temp-Read-Blocks>x</Temp-Read-Blocks>                          +
+       <Temp-Written-Blocks>x</Temp-Written-Blocks>                    +
+     </Plan>                                                           +
+     <Planning>                                                        +
+       <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
+       <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
+       <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
+       <Shared-Written-Blocks>x</Shared-Written-Blocks>                +
+       <Local-Hit-Blocks>x</Local-Hit-Blocks>                          +
+       <Local-Read-Blocks>x</Local-Read-Blocks>                        +
+       <Local-Dirtied-Blocks>x</Local-Dirtied-Blocks>                  +
+       <Local-Written-Blocks>x</Local-Written-Blocks>                  +
+       <Temp-Read-Blocks>x</Temp-Read-Blocks>                          +
+       <Temp-Written-Blocks>x</Temp-Written-Blocks>                    +
+     </Planning>                                                       +
+     <Planning-Time>x</Planning-Time>                                  +
+     <Triggers>                                                        +
+     </Triggers>                                                       +
+     <Execution-Time>x</Execution-Time>                                +
+   </Query>                                                            +
+ </explain>
+(1 row)
+
+-- Index Only Scan all formats with all posible fields END
+DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to table o_test_explain_verbose_rowid
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table o_explain
+drop cascades to table o_test_explain_verbose_rowid
+drop cascades to table o_explain_formats

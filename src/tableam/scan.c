@@ -39,6 +39,7 @@
 #include "optimizer/plancat.h"
 #include "optimizer/planmain.h"
 #include "parser/parsetree.h"
+#include "utils/json.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
@@ -777,7 +778,46 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 				OCustomScanState *ocstate = ec->ocstate;
 
 				ExplainNode(planstate, ec->ancestors, "Outer", NULL, ec->es);
-				ec->es->indent += 3;
+				switch (ec->es->format)
+				{
+				case EXPLAIN_FORMAT_TEXT:
+					ec->es->indent += 3;
+					break;
+				case EXPLAIN_FORMAT_JSON:
+					{
+						int i;
+						ec->es->str->len--;
+						for (i = ec->es->str->len; i > 0; i--)
+						{
+							if (ec->es->str->data[i - 1] == '\n')
+								break;
+						}
+						ec->es->str->len -= (ec->es->str->len - i) + 1;
+						for (i = ec->es->str->len; i > 0; i--)
+						{
+							if (ec->es->str->data[i - 1] != ' ')
+								break;
+						}
+						ec->es->indent++;
+					}
+					break;
+				case EXPLAIN_FORMAT_XML:
+					{
+						int i;
+						ec->es->str->len--;
+						for (i = ec->es->str->len; i > 0; i--)
+						{
+							if (ec->es->str->data[i - 1] == '\n')
+								break;
+						}
+						ec->es->str->len -= (ec->es->str->len - i);
+						ec->es->indent++;
+					}
+					break;
+				case EXPLAIN_FORMAT_YAML:
+					ec->es->indent++;
+					break;
+				}
 				if (ocstate->useEaCounters)
 				{
 					OIndexNumber ix_num;
@@ -799,7 +839,17 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 					Assert(ix_num < descr->nIndices);
 					eanalyze_counters_explain(descr, &eaCounters[ix_num], ec->es);
 				}
-				ec->es->indent -= 3;
+				switch (ec->es->format)
+				{
+				case EXPLAIN_FORMAT_TEXT:
+					ec->es->indent -= 3;
+					break;
+				case EXPLAIN_FORMAT_JSON:
+				case EXPLAIN_FORMAT_XML:
+				case EXPLAIN_FORMAT_YAML:
+					ExplainCloseGroup("Plan", "Plan", true, ec->es);
+					break;
+				}
 				break;
 			}
 		default:
@@ -835,9 +885,6 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 	char	   *indexName;
 	StringInfoData title;
 
-	if (es->format != EXPLAIN_FORMAT_TEXT)
-		elog(ERROR, "Only text explain format now supported");
-
 	descr = relation_get_descr(node->ss.ss_currentRelation);
 
 	if (ocstate->o_plan_state->type == O_IndexPlan)
@@ -846,16 +893,35 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 		(OIndexPlanState *) ocstate->o_plan_state;
 		bool		backward = (ix_plan_state->ostate.scanDir ==
 								BackwardScanDirection);
+		char		*direction = !backward ? "Forward" : "Backward";
 
 		initStringInfo(&title);
 		indexName = descr->indices[ix_plan_state->ostate.ixNum]->name.data;
 
-		appendStringInfo(&title, "%s index %sscan of",
-						 !backward ? "Forward" : "Backward",
+		switch (es->format)
+		{
+		case EXPLAIN_FORMAT_TEXT:
+			appendStringInfo(&title, "%s index %sscan of", direction,
 						 ix_plan_state->ostate.onlyCurIx ? "only " : "");
-		ExplainPropertyText(title.data, indexName, es);
-		show_scan_qual(ix_plan_state->stripped_indexquals, "Conds",
-					   &node->ss.ps, ancestors, es);
+			ExplainPropertyText(title.data, indexName, es);
+			show_scan_qual(ix_plan_state->stripped_indexquals, "Conds",
+						&node->ss.ps, ancestors, es);
+			break;
+
+		case EXPLAIN_FORMAT_XML:
+		case EXPLAIN_FORMAT_YAML:
+		case EXPLAIN_FORMAT_JSON:
+			ExplainPropertyText("Scan Direction", direction, es);
+			ExplainPropertyText("Index Name", indexName, es);
+			if (ix_plan_state->ostate.onlyCurIx)
+				ExplainPropertyText("Custom Scan Subtype", "Index Only Scan",
+									es);
+			else
+				ExplainPropertyText("Custom Scan Subtype", "Index Scan", es);
+			show_scan_qual(ix_plan_state->stripped_indexquals, "Index Cond",
+						&node->ss.ps, ancestors, es);
+			break;
+		}
 
 		if (ix_plan_state->stripped_indexquals)
 			show_instrumentation_count("Rows Removed by Index Recheck", 2,
@@ -869,8 +935,20 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 		OBitmapHeapPlanState *bitmap_state =
 		(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
-		appendStringInfoSpaces(es->str, es->indent * 2);
-		appendStringInfoString(es->str, "Bitmap heap scan\n");
+		switch (es->format)
+		{
+		case EXPLAIN_FORMAT_TEXT:
+			appendStringInfoSpaces(es->str, es->indent * 2);
+			appendStringInfoString(es->str, "Bitmap heap scan\n");
+			break;
+
+		case EXPLAIN_FORMAT_XML:
+		case EXPLAIN_FORMAT_YAML:
+		case EXPLAIN_FORMAT_JSON:
+			ExplainPropertyText("Custom Scan Subtype", "Bitmap Heap Scan", es);
+			break;
+		}
+
 		show_scan_qual(bitmap_state->bitmapqualorig, "Recheck Cond",
 					   &node->ss.ps, ancestors, es);
 		if (bitmap_state->bitmapqualorig)
@@ -884,11 +962,13 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 		{
 			OExplainContext ec;
 
+			ExplainOpenGroup("Plans", "Plans", false, es);
 			ec.ancestors = list_copy(ancestors);
 			ec.es = es;
 			ec.ocstate = ocstate;
 			ec.descr = descr;
 			o_explain_node(bitmap_state->bitmapqualplanstate, &ec);
+			ExplainCloseGroup("Plans", "Plans", false, es);
 		}
 	}
 	if (ocstate->useEaCounters)

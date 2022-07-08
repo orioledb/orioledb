@@ -365,7 +365,6 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
        "Strategy": "Plain",                          +
        "Partial Mode": "Simple",                     +
        "Parallel Aware": false,                      +
-       "Async Capable": false,                       +
        "Actual Startup Time": x,                     +
        "Actual Total Time": x,                       +
        "Actual Rows": x,                             +
@@ -386,7 +385,6 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
            "Parent Relationship": "Outer",           +
            "Custom Plan Provider": "o_scan",         +
            "Parallel Aware": false,                  +
-           "Async Capable": false,                   +
            "Relation Name": "bitmap_test",           +
            "Alias": "bitmap_test",                   +
            "Actual Startup Time": x,                 +
@@ -401,7 +399,6 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
                "Node Type": "Bitmap Index Scan",     +
                "Parent Relationship": "Outer",       +
                "Parallel Aware": false,              +
-               "Async Capable": false,               +
                "Index Name": "bitmap_test_ixx",      +
                "Actual Startup Time": x,             +
                "Actual Total Time": x,               +

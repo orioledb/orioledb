@@ -356,14 +356,17 @@ eanalyze_counters_init(OEACallsCounters *eacc, OTableDescr *descr)
 
 /* adds explain analyze info for particular index */
 void
-eanalyze_counter_explain(OEACallsCounter *counter, char *label, ExplainState *es)
+eanalyze_counter_explain(OEACallsCounter *counter, char *label,
+						 char *ix_name, ExplainState *es)
 {
 	StringInfoData explain;
-	char	   *fnames[EA_COUNTERS_NUM] = {"read", "lock", "evict", "write", "load"};
+	char	   *fnames[EA_COUNTERS_NUM] = {"read", "lock", "evict",
+										   "write", "load"};
 	uint32		counts[EA_COUNTERS_NUM],
 				i;
 	bool		is_first,
 				is_null;
+	char	   *label_upcase = NULL;
 
 	Assert(counter != NULL);
 
@@ -382,20 +385,74 @@ eanalyze_counter_explain(OEACallsCounter *counter, char *label, ExplainState *es
 	if (is_null)
 		return;
 
+	switch (es->format)
+	{
+	case EXPLAIN_FORMAT_TEXT:
+		break;
+	case EXPLAIN_FORMAT_JSON:
+	case EXPLAIN_FORMAT_XML:
+	case EXPLAIN_FORMAT_YAML:
+		{
+			int i;
+			bool after_space = true;
+			int len = strlen(label);
+			label_upcase = pstrdup(label);
+			for (i = 0; i < len; i++)
+			{
+				if (after_space)
+					label_upcase[i] = toupper(label_upcase[i]);
+				after_space = label_upcase[i] == ' ';
+			}
+
+			ExplainOpenGroup(label_upcase, label_upcase, true, es);
+			if (ix_name)
+				ExplainPropertyText("Index Name", ix_name, es);
+		}
+		break;
+	}
+
 	is_first = true;
 	for (i = 0; i < EA_COUNTERS_NUM; i++)
+	{
 		if (counts[i] > 0)
 		{
-			if (!is_first)
-				appendStringInfo(&explain, ", ");
-			else
-				initStringInfo(&explain);
-			appendStringInfo(&explain, "%s=%d", fnames[i], counts[i]);
+			switch (es->format)
+			{
+			case EXPLAIN_FORMAT_TEXT:
+				if (!is_first)
+					appendStringInfo(&explain, ", ");
+				else
+					initStringInfo(&explain);
+				appendStringInfo(&explain, "%s=%d", fnames[i], counts[i]);
+				break;
+			case EXPLAIN_FORMAT_JSON:
+			case EXPLAIN_FORMAT_XML:
+			case EXPLAIN_FORMAT_YAML:
+				{
+					char *fname = pstrdup(fnames[i]);
+					fname[0] = toupper(fname[0]);
+					ExplainPropertyUInteger(fname, NULL, counts[i], es);
+					pfree(fname);
+				}
+				break;
+			}
 			is_first = false;
 		}
+	}
 
-	if (!is_first)
-		ExplainPropertyText(label, explain.data, es);
+	switch (es->format)
+	{
+	case EXPLAIN_FORMAT_TEXT:
+		if (!is_first)
+			ExplainPropertyText(label, explain.data, es);
+		break;
+	case EXPLAIN_FORMAT_JSON:
+	case EXPLAIN_FORMAT_XML:
+	case EXPLAIN_FORMAT_YAML:
+		ExplainCloseGroup(label_upcase, label_upcase, true, es);
+		pfree(label_upcase);
+		break;
+	}
 }
 
 /* adds explain analyze info for particular index */
@@ -409,24 +466,22 @@ eanalyze_counters_explain(OTableDescr *descr, OEACallsCounters *counters,
 	initStringInfo(&label);
 
 	eanalyze_counter_explain(&counters->indices[PrimaryIndexNumber],
-							 "Primary pages",
-							 es);
+							 "Primary pages", NULL, es);
 
 	for (i = PrimaryIndexNumber + 1; i < counters->nindices; i++)
 	{
 		resetStringInfo(&label);
-		appendStringInfo(&label,
-						 "Secondary index (%s) pages",
-						 descr->indices[i]->name.data);
-		eanalyze_counter_explain(&counters->indices[i],
-								 label.data,
-								 es);
+		appendStringInfo(&label, "Secondary index");
+		if (es->format == EXPLAIN_FORMAT_TEXT)
+		{
+			appendStringInfo(&label, " (%s)", descr->indices[i]->name.data);
+		}
+		appendStringInfo(&label, " pages");
+
+		eanalyze_counter_explain(&counters->indices[i], label.data,
+								 descr->indices[i]->name.data, es);
 	}
 
-	eanalyze_counter_explain(&counters->toast,
-							 "TOAST pages",
-							 es);
-	eanalyze_counter_explain(&counters->others,
-							 "Other pages",
-							 es);
+	eanalyze_counter_explain(&counters->toast, "TOAST pages", NULL, es);
+	eanalyze_counter_explain(&counters->others, "Other pages", NULL, es);
 }

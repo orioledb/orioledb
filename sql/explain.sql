@@ -14,9 +14,12 @@ CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
 LANGUAGE SQL;
 
 -- Wrapper function, which converts result of SQL query to the text
-CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT, out result text)
+	RETURNS SETOF TEXT AS $$
 	BEGIN
-		RETURN QUERY EXECUTE sql;
+		FOR result IN EXECUTE sql LOOP
+			RETURN NEXT;
+		END LOOP;
 	END $$
 LANGUAGE plpgsql;
 
@@ -239,10 +242,6 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					ON CONFLICT (key) DO UPDATE
 					SET val = o_explain.val + 1, t = EXCLUDED.t;') as t;
 
--- clean-up after EXPLAIN ANALYZE test
-DROP FUNCTION query_to_text;
-DROP TABLE o_explain;
-
 CREATE TABLE o_test_explain_verbose_rowid (
   val_1 int,
   val_2 int
@@ -253,4 +252,73 @@ INSERT INTO o_test_explain_verbose_rowid VALUES (1, 1);
 EXPLAIN (VERBOSE, COSTS OFF)
 	UPDATE o_test_explain_verbose_rowid SET val_2 = 10;
 
+CREATE TABLE o_explain_formats (
+	key int PRIMARY KEY,
+	val int UNIQUE
+) USING orioledb;
+
+INSERT INTO o_explain_formats (SELECT v, v FROM generate_series(1, 10) v);
+
+-- Bitmap Heap Scan all formats with all posible fields BEGIN
+SET enable_indexscan = OFF;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+RESET enable_indexscan;
+-- Bitmap Heap Scan all formats with all posible fields END
+
+-- Index Scan all formats with all posible fields BEGIN
+SET enable_indexonlyscan = OFF;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+							SELECT * FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+RESET enable_indexonlyscan;
+-- Index Scan  all formats with all posible fields END
+
+-- Index Only Scan all formats with all posible fields BEGIN
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+							SELECT val FROM o_explain_formats
+								WHERE val > 5 ORDER BY val;') as t;
+-- Index Only Scan all formats with all posible fields END
+
+DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;

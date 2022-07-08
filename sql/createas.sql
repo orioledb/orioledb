@@ -16,7 +16,7 @@ CREATE TABLE o_test_create_as_no_atts
 SELECT * FROM o_test_create_as_no_atts;
 
 CREATE TABLE o_test_create_as_with_compress (order_id, item_id, quantity, price)
-	USING orioledb WITH (compress = 1) AS 
+	USING orioledb WITH (compress = 1) AS
 		(VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
 SELECT orioledb_tbl_indices('o_test_create_as_with_compress'::regclass);
 SELECT * FROM o_test_create_as_with_compress;
@@ -25,10 +25,11 @@ CREATE TABLE o_test_create_as_with_data (order_id, item_id, quantity, price)
 	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00))
 	WITH DATA;
 SELECT * FROM o_test_create_as_with_data;
-SELECT reloid, relname FROM orioledb_table_oids()
+SELECT relname FROM orioledb_table_oids()
 	JOIN pg_class ON reloid = oid WHERE relname = 'o_test_create_as_with_data';
 DROP TABLE o_test_create_as_with_data;
-SELECT reloid, relname FROM orioledb_table_oids()
+SELECT * FROM o_test_create_as_with_data;
+SELECT relname FROM orioledb_table_oids()
 	JOIN pg_class ON reloid = oid WHERE relname = 'o_test_create_as_with_data';
 
 CREATE TABLE o_test_create_as_no_data (order_id, item_id, quantity, price)
@@ -44,7 +45,7 @@ CREATE SEQUENCE o_matview_seq;
 -- TODO: Implement indices on materialized views and add tests
 -- TODO: Implement alters of materialized view and add tests
 CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
-	USING orioledb AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)), 
+	USING orioledb AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)),
 							  (100, 3, 1, nextval('o_matview_seq'::regclass)));
 SELECT * FROM o_test_matview;
 REFRESH MATERIALIZED VIEW o_test_matview;

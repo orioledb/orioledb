@@ -1,0 +1,129 @@
+CREATE EXTENSION orioledb;
+CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+-- Should fail - exists
+CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+ERROR:  relation "o_test_create_as" already exists
+SELECT * FROM o_test_create_as;
+ order_id | item_id | quantity | price  
+----------+---------+----------+--------
+      100 |       1 |        4 | 100.00
+      100 |       3 |        1 | 200.00
+(2 rows)
+
+CREATE TABLE o_test_create_as_less_atts (order_id, item_id)
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+SELECT * FROM o_test_create_as_less_atts;
+ order_id | item_id | column3 | column4 
+----------+---------+---------+---------
+      100 |       1 |       4 |  100.00
+      100 |       3 |       1 |  200.00
+(2 rows)
+
+CREATE TABLE o_test_create_as_no_atts
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+SELECT * FROM o_test_create_as_no_atts;
+ column1 | column2 | column3 | column4 
+---------+---------+---------+---------
+     100 |       1 |       4 |  100.00
+     100 |       3 |       1 |  200.00
+(2 rows)
+
+CREATE TABLE o_test_create_as_with_compress (order_id, item_id, quantity, price)
+	USING orioledb WITH (compress = 1) AS
+		(VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+SELECT orioledb_tbl_indices('o_test_create_as_with_compress'::regclass);
+                  orioledb_tbl_indices                  
+--------------------------------------------------------
+ Index ctid_primary                                    +
+     Index type: primary, unique, compression = 1, ctid+
+     Leaf tuple size: 5, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: ctid                       +
+ 
+(1 row)
+
+SELECT * FROM o_test_create_as_with_compress;
+ order_id | item_id | quantity | price  
+----------+---------+----------+--------
+      100 |       1 |        4 | 100.00
+      100 |       3 |        1 | 200.00
+(2 rows)
+
+CREATE TABLE o_test_create_as_with_data (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00))
+	WITH DATA;
+SELECT * FROM o_test_create_as_with_data;
+ order_id | item_id | quantity | price  
+----------+---------+----------+--------
+      100 |       1 |        4 | 100.00
+      100 |       3 |        1 | 200.00
+(2 rows)
+
+SELECT relname FROM orioledb_table_oids()
+	JOIN pg_class ON reloid = oid WHERE relname = 'o_test_create_as_with_data';
+          relname           
+----------------------------
+ o_test_create_as_with_data
+(1 row)
+
+DROP TABLE o_test_create_as_with_data;
+SELECT * FROM o_test_create_as_with_data;
+ERROR:  relation "o_test_create_as_with_data" does not exist
+LINE 1: SELECT * FROM o_test_create_as_with_data;
+                      ^
+SELECT relname FROM orioledb_table_oids()
+	JOIN pg_class ON reloid = oid WHERE relname = 'o_test_create_as_with_data';
+ relname 
+---------
+(0 rows)
+
+CREATE TABLE o_test_create_as_no_data (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00))
+	WITH NO DATA;
+SELECT * FROM o_test_create_as_no_data;
+ order_id | item_id | quantity | price 
+----------+---------+----------+-------
+(0 rows)
+
+INSERT INTO o_test_create_as_no_data
+	VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00);
+SELECT * FROM o_test_create_as_no_data;
+ order_id | item_id | quantity | price  
+----------+---------+----------+--------
+      100 |       1 |        4 | 100.00
+      100 |       3 |        1 | 200.00
+(2 rows)
+
+CREATE SEQUENCE o_matview_seq;
+-- TODO: Implement refresh of materialized view and add tests
+-- TODO: Implement indices on materialized views and add tests
+-- TODO: Implement alters of materialized view and add tests
+CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)),
+							  (100, 3, 1, nextval('o_matview_seq'::regclass)));
+WARNING:  created materialized view with orioledb access method will not support refresh
+SELECT * FROM o_test_matview;
+ order_id | item_id | quantity | price 
+----------+---------+----------+-------
+      100 |       1 |        4 |     1
+      100 |       3 |        1 |     2
+(2 rows)
+
+REFRESH MATERIALIZED VIEW o_test_matview;
+ERROR:  materialized views with orioledb access method do not support refresh yet
+SELECT * FROM o_test_matview;
+ order_id | item_id | quantity | price 
+----------+---------+----------+-------
+      100 |       1 |        4 |     1
+      100 |       3 |        1 |     2
+(2 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table o_test_create_as
+drop cascades to table o_test_create_as_less_atts
+drop cascades to table o_test_create_as_no_atts
+drop cascades to table o_test_create_as_with_compress
+drop cascades to table o_test_create_as_no_data
+drop cascades to materialized view o_test_matview

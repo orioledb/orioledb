@@ -69,17 +69,17 @@ EXPLAIN (COSTS OFF)
 SELECT count(*) FROM bitmap_test
 		WHERE i < 1000 AND j < 1000;
 
--- Tests for bitmap EXPLAIN ANALYZE, BUFFERS
-EXPLAIN (FORMAT JSON)
-	SELECT count(*) FROM bitmap_test WHERE i < 100;
-
 -- Wrapper function, which converts result of SQL query to the text
-CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT, out result text)
+	RETURNS SETOF TEXT AS $$
 	BEGIN
-		RETURN QUERY EXECUTE sql;
+		FOR result IN EXECUTE sql LOOP
+			RETURN NEXT;
+		END LOOP;
 	END $$
 LANGUAGE plpgsql;
 
+-- Tests for bitmap EXPLAIN ANALYZE, BUFFERS
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN
 						SELECT count(*) FROM bitmap_test WHERE i < 100') as t;
@@ -100,6 +100,11 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
 						SELECT count(*) FROM bitmap_test
 							WHERE i < 1000 AND j < 1000') as t;
+
+-- Tests for bitmap EXPLAIN FORMAT JSON
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
+						SELECT count(*) FROM bitmap_test WHERE i < 100;') as t;
 
 -- Tests for intersection/union of all possible bitmap entries
 CREATE OR REPLACE FUNCTION bitmap_test_high(int4) RETURNS int4
