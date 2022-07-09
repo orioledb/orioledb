@@ -2998,6 +2998,8 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				if (BTREE_PAGE_ITEMS_COUNT(img) == 1)
 				{
 					BTREE_PAGE_ITEMS_COUNT(img) = 0;
+					memset(img, 0, ORIOLEDB_BLCKSZ);
+					init_page_first_chunk(descr, img, 0);
 					state->stack[level].nextkeyType = NextKeyNone;
 				}
 				else
@@ -3878,6 +3880,18 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		ionum = page_desc->ionum;
 		if (ionum >= 0)
 		{
+			/* Save the key we need to continue from */
+			if (O_PAGE_IS(page, RIGHTMOST))
+			{
+				state->stack[level].nextkeyType = NextKeyGreatest;
+			}
+			else
+			{
+				state->stack[level].nextkeyType = NextKeyValue;
+				copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
+									   page);
+			}
+			message->action = WalkContinue;
 			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
 			unlock_page(blkno);
 			wait_for_io_completion(ionum);
