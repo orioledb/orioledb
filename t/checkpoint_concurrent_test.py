@@ -7,6 +7,7 @@ from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
+from .base_test import wait_bgwriter_stopevent
 
 class CheckpointConcurrentTest(BaseTest):
 	def test_checkpoint_on_droped_table(self):
@@ -496,5 +497,190 @@ class CheckpointConcurrentTest(BaseTest):
 		node.safe_psql("SELECT * FROM o_checkpoint;")
 		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 3736)
 		node.safe_psql('postgres', "CHECKPOINT;")
+		self.assertTrue(node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")[0][0])
+		node.stop()
+
+	def test_checkpoint_concurrent_io(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+						 """
+							orioledb.debug_disable_pools_limit = true
+							orioledb.main_buffers = 1MB
+							bgwriter_delay = 10
+							orioledb.enable_stopevents = true
+						 """)
+
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE IF NOT EXISTS o_checkpoint (
+				id text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE TABLE IF NOT EXISTS o_checkpoint2 (
+				id text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+		""")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con3 = node.connect()
+
+		con1.execute("""
+			INSERT INTO o_checkpoint (SELECT to_char(id, 'fm0000') ||
+									  repeat('x', 2500)
+									  FROM generate_series(1,50) id);
+		""")
+		con1.commit()
+		con1.execute("""
+			SELECT pg_stopevent_set('after_ionum_set',
+									'$.treeName == "o_checkpoint_pkey" &&
+									 $.level == 1 &&
+									 $.hikey.id like_regex "^0007" &&
+									 $backendType == "orioledb background writer"');
+		""")
+		t2 = ThreadQueryExecutor(con2, """
+			INSERT INTO o_checkpoint2 (SELECT to_char(id, 'fm0000') ||
+									   repeat('x', 2500)
+									   FROM generate_series(1,100) id);
+			SELECT COUNT(*) FROM o_checkpoint2;
+		""")
+		t2.start()
+		wait_bgwriter_stopevent(node)
+
+		con1.execute("""
+			SELECT pg_stopevent_set('checkpoint_step',
+									'$.treeName == "o_checkpoint_pkey" &&
+									 $.level == 2 &&
+									 $.action == "walkDownwards" &&
+									 $.lokey == null');
+		""")
+
+		t3 = ThreadQueryExecutor(con3, """
+			CHECKPOINT;
+		""")
+		t3.start()
+
+		wait_checkpointer_stopevent(node)
+		con1.execute("SELECT pg_stopevent_reset('checkpoint_step');")
+		con1.execute("SELECT pg_stopevent_reset('after_ionum_set')")
+
+		t2.join()
+		t3.join()
+
+		con1.close()
+		con2.close()
+		con3.close()
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 50)
+		self.assertTrue(node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")[0][0])
+		node.stop()
+
+	def test_checkpoint_concurrent_io_rightmost(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+						 """
+							orioledb.debug_disable_pools_limit = true
+							orioledb.main_buffers = 2MB
+							bgwriter_delay = 10
+							orioledb.enable_stopevents = true
+						 """)
+
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE IF NOT EXISTS o_checkpoint (
+				id text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE TABLE IF NOT EXISTS o_checkpoint2 (
+				id text NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+		""")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con3 = node.connect()
+
+		con1.execute("""
+			INSERT INTO o_checkpoint (SELECT to_char(id, 'fm0000') ||
+									  repeat('x', 2500)
+									  FROM generate_series(1,50) id);
+		""")
+		con1.commit()
+		con1.execute("""
+			SELECT pg_stopevent_set('after_ionum_set',
+									'$.treeName == "o_checkpoint_pkey" &&
+									 $.level == 1 &&
+									 $.hikey == null &&
+									 $backendType == "orioledb background writer"');
+		""")
+		con2.execute("""
+			INSERT INTO o_checkpoint2 (SELECT to_char(id, 'fm0000') ||
+									   repeat('x', 2500)
+									   FROM generate_series(1,200) id);
+		""")
+		t2 = None
+		for i in range(1, 5):
+			if t2 != None:
+				t2.join()
+				t2 = None
+			bgwriter_pid = None
+			select_list = node.execute("""
+				SELECT pid FROM pg_stat_activity
+					WHERE backend_type = 'orioledb background writer';
+			""")
+			if len(select_list) > 0 and len(select_list[0]) > 0:
+				bgwriter_pid = select_list[0][0]
+
+			if bgwriter_pid == None:
+				continue
+
+			exists = node.execute("""SELECT EXISTS(
+							SELECT se.*
+							FROM pg_stopevents() se
+							WHERE se.waiter_pids @> ARRAY[%d]
+						);""" % (bgwriter_pid))[0][0]
+
+			if exists:
+				break
+
+			t2 = ThreadQueryExecutor(con2, """
+				SELECT orioledb_evict_pages('o_checkpoint2'::regclass, 0);
+				UPDATE o_checkpoint2
+					SET id = OVERLAY(id placing '%c' from 5 for 1)
+						WHERE id BETWEEN '0000' AND '0040';
+			""" % ('F' if i % 2 == 0 else 'x'))
+			t2.start()
+
+		con1.execute("""
+			SELECT pg_stopevent_set('checkpoint_step',
+									'$.treeName == "o_checkpoint_pkey" &&
+									 $.level == 0 &&
+									 $.action == "walkUpwards" &&
+									 $.nextKey.type == "greatest"');
+		""")
+		t3 = ThreadQueryExecutor(con3, """
+			CHECKPOINT;
+		""")
+		t3.start()
+
+		wait_checkpointer_stopevent(node)
+		con1.execute("SELECT pg_stopevent_reset('checkpoint_step')")
+		con1.execute("SELECT pg_stopevent_reset('after_ionum_set')")
+
+		t3.join()
+
+		con1.close()
+		con2.close()
+		con3.close()
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 50)
 		self.assertTrue(node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")[0][0])
 		node.stop()

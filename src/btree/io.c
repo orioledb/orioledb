@@ -1391,6 +1391,14 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 
 			CLEAN_DIRTY_CONCURRENT(blkno);
 			unlock_page(blkno);
+
+			if (STOPEVENTS_ENABLED())
+			{
+				Jsonb	   *params;
+
+				params = btree_page_stopevent_params(desc, p);
+				STOPEVENT(STOPEVENT_AFTER_IONUM_SET, params);
+			}
 			new_downlink = perform_page_io(desc, blkno, img,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 

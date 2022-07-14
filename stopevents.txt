@@ -21,3 +21,4 @@ relock_page
 before_apply_undo
 scan_disk_page
 load_page_refind
+after_ionum_set
