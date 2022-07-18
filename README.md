@@ -56,8 +56,9 @@ The key technical differentiations of OrioleDB are as follows:
    parallelize (done), compact and suitable for active-active
    multimaster (planned).
 
-See, [usage](doc/usage.md) and [architecture](doc/arch.md) documentation
-as well as [PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).
+See [usage](doc/usage.md), [architecture](doc/arch.md), and
+[project structure](doc/structure.md) documentation as well as
+[PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).
 
 ## Status
 
@@ -82,7 +83,7 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL 14 with extensibility patches](https://github.com/orioledb/postgres),
+ * [PostgreSQL 13, 14 or 15 with extensibility patches](https://github.com/orioledb/postgres),
  * Development package of libzstd,
  * python 3.5+ with testgres package.
 
