@@ -182,7 +182,7 @@ check: regresscheck isolationcheck testgrescheck
 endif
 
 COMMIT_HASH = $(shell git rev-parse HEAD)
-override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -DCHECK_PAGE_STRUCT
+override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH)
 
 ifdef VALGRIND
 override with_temp_install += PGCTLTIMEOUT=1200 \

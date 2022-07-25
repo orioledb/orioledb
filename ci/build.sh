@@ -33,9 +33,9 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
 
 cd orioledb
 if [ $CHECK_TYPE = "alignment" ]; then
-	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -fsanitize=alignment -fno-sanitize-recover=alignment" LDFLAGS_SL="-lubsan"
+	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize=alignment -fno-sanitize-recover=alignment" LDFLAGS_SL="-lubsan"
 elif [ $CHECK_TYPE = "check_page" ]; then
-	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -DCHECK_PAGE_STRUCT" LDFLAGS_SL="-lubsan"
+	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT"
 elif [ $CHECK_TYPE != "static" ]; then
 	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
 fi
