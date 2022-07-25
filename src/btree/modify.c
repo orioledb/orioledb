@@ -1128,7 +1128,7 @@ retry:
 
 			if (XACT_INFO_OXID_EQ(xactInfo, opOxid) || XACT_INFO_IS_FINISHED(xactInfo))
 			{
-				OBTreeModifyCallbackAction cbAction;
+				OBTreeModifyCallbackAction cbAction PG_USED_FOR_ASSERTS_ONLY;
 
 				if (callbackInfo->modifyCallback)
 				{
@@ -1207,7 +1207,7 @@ retry:
 			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, loc);
 			if (XACT_INFO_OXID_EQ(xactInfo, opOxid) || XACT_INFO_IS_FINISHED(xactInfo))
 			{
-				OBTreeModifyCallbackAction cbAction;
+				OBTreeModifyCallbackAction cbAction PG_USED_FOR_ASSERTS_ONLY;
 
 				if (callbackInfo->modifyCallback)
 				{

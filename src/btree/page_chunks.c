@@ -621,7 +621,13 @@ page_merge_chunks(Page p, OffsetNumber index)
 	Pointer		chunk1DataPtr,
 				chunk1EndPtr,
 				chunk2DataPtr,
-				endPtr;
+				endPtr,
+				p1_1,
+				p1_2,
+				p2_1,
+				p2_2;
+	int			len1,
+				len2;
 
 	Assert(index + 1 < header->chunksCount);
 
@@ -680,14 +686,14 @@ page_merge_chunks(Page p, OffsetNumber index)
 		SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation) -
 		SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation);
 
-	Pointer		p1_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation) - hikeyShift;
-	Pointer		p1_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
-	int			len1 = SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) -
+	p1_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation) - hikeyShift;
+	p1_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
+	len1 = SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) -
 	SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
 
-	Pointer		p2_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) - hikeyShift;
-	Pointer		p2_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
-	int			len2 = header->hikeysEnd - SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
+	p2_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) - hikeyShift;
+	p2_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
+	len2 = header->hikeysEnd - SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
 
 	header->chunkDesc[index].hikeyFlags = header->chunkDesc[index + 1].hikeyFlags;
 	for (i = index + 2; i < header->chunksCount; i++)

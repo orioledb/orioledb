@@ -789,7 +789,7 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 
 		if (i > 0)
 		{
-			BTreePageChunkDesc *prevChunk = &header->chunkDesc[i - 1];
+			BTreePageChunkDesc *prevChunk = &header->chunkDesc[i - 1] PG_USED_FOR_ASSERTS_ONLY;
 
 			Assert(chunk->shortLocation >= prevChunk->shortLocation);
 			Assert(chunk->offset >= prevChunk->offset);

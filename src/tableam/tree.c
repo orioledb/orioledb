@@ -547,10 +547,9 @@ int
 o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 							 Datum value, bool isnull)
 {
-	uint8		f = bound1->flags;
 	int			cmp;
 
-	Assert(!(f & O_VALUE_BOUND_UNBOUNDED));
+	Assert(!(bound1->flags & O_VALUE_BOUND_UNBOUNDED));
 	if (!(bound1->flags & O_VALUE_BOUND_NULL) && !isnull)
 	{
 		if ((bound1->flags & O_VALUE_BOUND_COERCIBLE) && bound1->value == value)

@@ -156,7 +156,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 {
 	OScanState	ostate = {0};
 	OTableDescr *descr;
-	OIndexDescr *indexDescr;
+	OIndexDescr *indexDescr = NULL;
 	OIndexNumber ix_num;
 	Relation	index,
 				table;
@@ -178,7 +178,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 		if (indexDescr->oids.reloid == bitmap_ix_scan->indexid)
 			break;
 	}
-	Assert(ix_num < descr->nIndices);
+	Assert(ix_num < descr->nIndices && indexDescr != NULL);
 	ostate.ixNum = ix_num;
 	ostate.scanDir = ForwardScanDirection;
 	ostate.indexQuals = bitmap_ix_scan->indexqual;

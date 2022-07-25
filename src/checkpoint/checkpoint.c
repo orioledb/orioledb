@@ -2465,7 +2465,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 				page = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageItemLocator loc;
 	BTreeNonLeafTuphdr *tuphdr;
-	OTuple		key;
+	OTuple		key PG_USED_FOR_ASSERTS_ONLY;
 	bool		mergeParent = false;
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(page)))
@@ -2487,6 +2487,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	BTREE_PAGE_OFFSET_GET_LOCATOR(parentPage, state->stack[level + 1].offset - 1, &loc);
 	Assert(BTREE_PAGE_LOCATOR_IS_VALID(parentPage, &loc));
 	BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, key, parentPage, &loc);
+	Assert(!O_TUPLE_IS_NULL(key));
 
 	if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink) ||
 		DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink) != blkno)
@@ -2498,6 +2499,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	BTREE_PAGE_LOCATOR_NEXT(parentPage, &loc);
 	Assert(BTREE_PAGE_LOCATOR_IS_VALID(parentPage, &loc));
 	BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, key, parentPage, &loc);
+	Assert(!O_TUPLE_IS_NULL(key));
 
 	if (!DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
 	{

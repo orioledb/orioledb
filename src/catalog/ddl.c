@@ -931,11 +931,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		while (stmts != NIL)
 		{
 			Node	   *stmt = (Node *) linitial(stmts);
-
-			stmts = list_delete_first(stmts);
-
 			ObjectAddress address;
 			ObjectAddress secondaryObject = InvalidObjectAddress;
+
+			stmts = list_delete_first(stmts);
 
 			if (IsA(stmt, CreateStmt))
 			{
