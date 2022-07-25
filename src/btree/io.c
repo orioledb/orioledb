@@ -1036,7 +1036,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 	{
 		/*
 		 * Page wasn't yet written during given checkpoint, so we have to
-		 * relocate it in order to implement copy-on-write checkpointing/
+		 * relocate it in order to implement copy-on-write checkpointing.
 		 */
 
 		if (FileExtentIsValid(page_desc->fileExtent))
