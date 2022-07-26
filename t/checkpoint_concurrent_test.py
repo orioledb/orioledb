@@ -504,9 +504,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf('postgresql.conf',
 						 """
-							orioledb.debug_disable_pools_limit = true
-							orioledb.main_buffers = 1MB
-							bgwriter_delay = 10
+							orioledb.debug_disable_bgwriter = true
 							orioledb.enable_stopevents = true
 						 """)
 
@@ -517,15 +515,13 @@ class CheckpointConcurrentTest(BaseTest):
 				id text NOT NULL,
 				PRIMARY KEY (id)
 			) USING orioledb;
-			CREATE TABLE IF NOT EXISTS o_checkpoint2 (
-				id text NOT NULL,
-				PRIMARY KEY (id)
-			) USING orioledb;
 		""")
 
 		con1 = node.connect()
 		con2 = node.connect()
 		con3 = node.connect()
+
+		con2_pid = con2.pid
 
 		con1.execute("""
 			INSERT INTO o_checkpoint (SELECT to_char(id, 'fm0000') ||
@@ -537,17 +533,13 @@ class CheckpointConcurrentTest(BaseTest):
 			SELECT pg_stopevent_set('after_ionum_set',
 									'$.treeName == "o_checkpoint_pkey" &&
 									 $.level == 1 &&
-									 $.hikey.id like_regex "^0007" &&
-									 $backendType == "orioledb background writer"');
+									 $.hikey.id like_regex "^0007"');
 		""")
 		t2 = ThreadQueryExecutor(con2, """
-			INSERT INTO o_checkpoint2 (SELECT to_char(id, 'fm0000') ||
-									   repeat('x', 2500)
-									   FROM generate_series(1,100) id);
-			SELECT COUNT(*) FROM o_checkpoint2;
+			SELECT orioledb_write_pages('o_checkpoint'::regclass);
 		""")
 		t2.start()
-		wait_bgwriter_stopevent(node)
+		wait_stopevent(node, con2_pid)
 
 		con1.execute("""
 			SELECT pg_stopevent_set('checkpoint_step',
@@ -583,9 +575,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf('postgresql.conf',
 						 """
-							orioledb.debug_disable_pools_limit = true
-							orioledb.main_buffers = 2MB
-							bgwriter_delay = 10
+							orioledb.debug_disable_bgwriter = true
 							orioledb.enable_stopevents = true
 						 """)
 
@@ -596,15 +586,13 @@ class CheckpointConcurrentTest(BaseTest):
 				id text NOT NULL,
 				PRIMARY KEY (id)
 			) USING orioledb;
-			CREATE TABLE IF NOT EXISTS o_checkpoint2 (
-				id text NOT NULL,
-				PRIMARY KEY (id)
-			) USING orioledb;
 		""")
 
 		con1 = node.connect()
 		con2 = node.connect()
 		con3 = node.connect()
+
+		con2_pid = con2.pid
 
 		con1.execute("""
 			INSERT INTO o_checkpoint (SELECT to_char(id, 'fm0000') ||
@@ -616,46 +604,14 @@ class CheckpointConcurrentTest(BaseTest):
 			SELECT pg_stopevent_set('after_ionum_set',
 									'$.treeName == "o_checkpoint_pkey" &&
 									 $.level == 1 &&
-									 $.hikey == null &&
-									 $backendType == "orioledb background writer"');
+									 $.hikey == null');
 		""")
-		con2.execute("""
-			INSERT INTO o_checkpoint2 (SELECT to_char(id, 'fm0000') ||
-									   repeat('x', 2500)
-									   FROM generate_series(1,200) id);
+
+		t2 = ThreadQueryExecutor(con2, """
+			SELECT orioledb_write_pages('o_checkpoint'::regclass);
 		""")
-		t2 = None
-		for i in range(1, 5):
-			if t2 != None:
-				t2.join()
-				t2 = None
-			bgwriter_pid = None
-			select_list = node.execute("""
-				SELECT pid FROM pg_stat_activity
-					WHERE backend_type = 'orioledb background writer';
-			""")
-			if len(select_list) > 0 and len(select_list[0]) > 0:
-				bgwriter_pid = select_list[0][0]
-
-			if bgwriter_pid == None:
-				continue
-
-			exists = node.execute("""SELECT EXISTS(
-							SELECT se.*
-							FROM pg_stopevents() se
-							WHERE se.waiter_pids @> ARRAY[%d]
-						);""" % (bgwriter_pid))[0][0]
-
-			if exists:
-				break
-
-			t2 = ThreadQueryExecutor(con2, """
-				SELECT orioledb_evict_pages('o_checkpoint2'::regclass, 0);
-				UPDATE o_checkpoint2
-					SET id = OVERLAY(id placing '%c' from 5 for 1)
-						WHERE id BETWEEN '0000' AND '0040';
-			""" % ('F' if i % 2 == 0 else 'x'))
-			t2.start()
+		t2.start()
+		wait_stopevent(node, con2_pid)
 
 		con1.execute("""
 			SELECT pg_stopevent_set('checkpoint_step',

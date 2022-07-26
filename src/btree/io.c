@@ -93,6 +93,9 @@ static void writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 								 uint64 downlink);
 static void perform_writeback(IOWriteBack *writeback);
 
+PG_FUNCTION_INFO_V1(orioledb_evict_pages);
+PG_FUNCTION_INFO_V1(orioledb_write_pages);
+
 Size
 btree_io_shmem_needs(void)
 {
@@ -1929,12 +1932,9 @@ retry:
 	return evict ? OWalkPageEvicted : OWalkPageWritten;
 }
 
-Datum		orioledb_evict_pages(PG_FUNCTION_ARGS);
-
-PG_FUNCTION_INFO_V1(orioledb_evict_pages);
-
 static bool
-evict_tree_pages_recursive(OInMemoryBlkno blkno, uint32 changeCount, int maxLevel)
+write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 changeCount,
+						   int maxLevel, bool evict)
 {
 	Page		p;
 	int			level;
@@ -1974,16 +1974,17 @@ evict_tree_pages_recursive(OInMemoryBlkno blkno, uint32 changeCount, int maxLeve
 	unlock_page(blkno);
 
 	for (i = 0; i < childPagesCount; i++)
-		(void) evict_tree_pages_recursive(childPageNumbers[i],
+		(void) write_tree_pages_recursive(childPageNumbers[i],
 										  childPageChangeCounts[i],
-										  maxLevel);
+										  maxLevel,
+										  evict);
 
 	if (level <= maxLevel)
 	{
 		while (true)
 		{
 			reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
-			if (walk_page(blkno, true) != OWalkPageMerged)
+			if (walk_page(blkno, evict) != OWalkPageMerged)
 				break;
 		}
 		release_undo_size(UndoReserveTxn);
@@ -1993,31 +1994,26 @@ evict_tree_pages_recursive(OInMemoryBlkno blkno, uint32 changeCount, int maxLeve
 }
 
 static void
-evict_tree_pages(BTreeDescr *desc, int maxLevel)
+write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 {
 	o_btree_load_shmem(desc);
-	if (!evict_tree_pages_recursive(desc->rootInfo.rootPageBlkno,
+	if (!write_tree_pages_recursive(desc->rootInfo.rootPageBlkno,
 									desc->rootInfo.rootPageChangeCount,
-									maxLevel))
+									maxLevel, evict))
 	{
 		desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 		desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 		desc->rootInfo.rootPageChangeCount = 0;
 		o_btree_load_shmem(desc);
-		(void) evict_tree_pages_recursive(desc->rootInfo.rootPageBlkno,
+		(void) write_tree_pages_recursive(desc->rootInfo.rootPageBlkno,
 										  desc->rootInfo.rootPageChangeCount,
-										  maxLevel);
+										  maxLevel, evict);
 	}
 }
 
-/*
- * Run clock replacement algorithm until we evict at least one page.
- */
-Datum
-orioledb_evict_pages(PG_FUNCTION_ARGS)
+static void
+write_relation_pages(Oid relid, int maxLevel, bool evict)
 {
-	Oid			relid = PG_GETARG_OID(0);
-	int			maxLevel = PG_GETARG_INT32(1);
 	OTableDescr *descr;
 	BTreeDescr *td;
 	Relation	rel;
@@ -2037,12 +2033,32 @@ orioledb_evict_pages(PG_FUNCTION_ARGS)
 	for (treen = 0; treen < descr->nIndices; treen++)
 	{
 		td = &descr->indices[treen]->desc;
-		evict_tree_pages(td, maxLevel);
+		write_tree_pages(td, maxLevel, evict);
 	}
 	td = &descr->toast->desc;
-	evict_tree_pages(td, maxLevel);
+	write_tree_pages(td, maxLevel, evict);
 
 	relation_close(rel, AccessShareLock);
+}
+
+Datum
+orioledb_evict_pages(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int			maxLevel = PG_GETARG_INT32(1);
+
+	write_relation_pages(relid, maxLevel, true);
+
+	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_write_pages(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int			maxLevel = ORIOLEDB_MAX_DEPTH;
+
+	write_relation_pages(relid, maxLevel, false);
 
 	PG_RETURN_VOID();
 }
