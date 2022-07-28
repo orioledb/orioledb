@@ -10,16 +10,16 @@
  *
  * ALGORITHM
  *
- *		Big picture algorithm of sequential scan is following.
- *		1. Scan all the internal pages with level == 1.  Total amount of
- *		   internal pages is expected to be small.  So, it should be OK to
+ *		The big picture algorithm of sequential scan is following.
+ *		1. Scan all the internal pages with level == 1. The total amount of
+ *		   internal pages are expected to be small. So, it should be OK to
  *		   scan them in logical order.
- *		   1.1. Immediately scan children leafs and return their contents.
- *		   1.2. Edge cases are handled using iterators.  They expected to be
- *				very rare.
- *		   1.3. Collect on-disk downlinks into array algogether with CSN
- *				at the moment of corresponding internal page read.
- *		2. Ascedingly sort array of downlinks providing as sequential access
+ *		   1.1. Immediately scan children's leaves and return their contents.
+ *		   1.2. Edge cases are handled using iterators. They are expected to
+ *		   be very rare.
+ *		   1.3. Collect on-disk downlinks into an array together with CSN at
+ *		   the moment of the corresponding internal page read.
+ *		2. Ascending sort array of downlinks providing as sequential access
  *		   pattern as possible.
  *		3. Scan sorted downlink and apply the corresponding CSN.
  *
