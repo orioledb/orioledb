@@ -66,7 +66,6 @@ typedef OScanDescData *OScanDesc;
 typedef struct
 {
 	Oid			conflictIxOid;
-	int		   *junkAttrs;
 } OFDWState;
 
 /*
@@ -1294,7 +1293,6 @@ orioledb_init_modify(ModifyTableState *mstate, ResultRelInfo *rinfo)
 	state = (OFDWState *) palloc0(sizeof(OFDWState));
 	rinfo->ri_FdwState = state;
 	state->conflictIxOid = InvalidOid;
-	state->junkAttrs = NULL;
 
 	if (mstate->operation == CMD_INSERT &&
 		node->onConflictAction != ONCONFLICT_NONE)
