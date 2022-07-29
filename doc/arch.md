@@ -94,6 +94,8 @@ Then, checkpointer finished writing page images `7*`, `3*` and `1*` to checkpoin
 
 In general, checkpointing of non-leaf pages is more tricky than described above.  While the checkpointer is writing children of non-leaf page, concurrent splits and merges could happen.  In such cases, we have to reconstruct non-leaf pages based on the state of its children as we met them.  Therefore, we might write to the storage a non-leaf page image, which never existed in the main memory.  Furthermore, we could even write multiple storage pages corresponding to a single main memory page (imagine merges happen above the checkpoint boundary, while splits happen below the checkpoint boundary).  Finally, that is OK, because it reflects how checkpointer wrote the children.
 
+At the moment of time, there could be multiple checkpoints which use different but overlapping sets of blocks.  Therefore, free space management becomes an untrivial task.
+
 Undo log
 --------
 

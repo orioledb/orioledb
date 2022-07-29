@@ -60,3 +60,23 @@ At first, `*.tmp` and `*.map` files contains not free block numbers but free ext
 Since we are dealing with extents, we can just read `*.tmp` and `*.map` files sequentially because we may meet extents that don't match the required length.  In order to deal with free extents, we also have system trees `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF`.  The `SYS_TREES_EXTENTS_LEN_OFF` is ordered by the extent length, and we use it to find the extent which is the best fit for our needs.  The `SYS_TREES_EXTENTS_OFF_LEN` is ordered by the extent offset, and we use it to join the conjuncted extents.
 
 `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF` trees are temporary.  Their content does not survive server restart: we always start with these trees empty.  Once we load some tree, we also load the content of its `*.map` file to `SYS_TREES_EXTENTS_OFF_LEN` and `SYS_TREES_EXTENTS_LEN_OFF`.  When the checkpoint of a tree is completed, we read the content of `*.tmp` file of the previous checkpoint to these trees.  When the checkpoint is completed, we add extents from those trees to the `*.map` file.
+
+Multiple processes could be concurrently looking for the free extent, and one process inserting a new free extent.  Correct handling the concurrency problem is a challenge.  The algorithms are considered below.
+
+The algorithm for getting a free extent for writing the page is given below.
+
+ 1.  Find the shortest fitting extent in the `SYS_TREES_EXTENTS_LEN_OFF` tree and delete it.  If not found, increase `BTreeMetaPage.datafileLength` by the required length and return the corresponding extent.
+ 2.  If there is a remaining part of the selected extent, insert it into the `SYS_TREES_EXTENTS_OFF_LEN` tree.
+ 3.  Delete the selected extent from the `SYS_TREES_EXTENTS_OFF_LEN` tree.
+ 4.  If there is a remaining part of the selected extent, insert it into the `SYS_TREES_EXTENTS_LEN_OFF` tree.
+
+Please, note that if the concurrent process needs to merge the remaining part, it will always find some extent for merge.  In `SYS_TREES_EXTENTS_OFF_LEN`, we insert first (step 2) and only then delete (step 3).  So, there is no intermediate state with no extent to merge.
+
+The algorithm for insertion of a new free extent is given below.
+
+ 1.  In the `SYS_TREES_EXTENTS_OFF_LEN` tree, find the left and right siblings of the new extent.  Check if they are adjacent to a new extent; thus, we need to merge them.
+ 2.  If we need to merge the left sibling, delete it from the `SYS_TREES_EXTENTS_LEN_OFF` tree.  On failure, re-try from step 1.
+ 3.  If we need to merge the right sibling, delete it from the `SYS_TREES_EXTENTS_LEN_OFF` tree.  On failure, re-insert the left sibling if it was deleted, and re-try from step 1.
+ 4.  At this point concurrent process cannot use either left or right siblings because they were deleted from the `SYS_TREES_EXTENTS_LEN_OFF` tree.
+ 5.  Delete siblings to be merged from the `SYS_TREES_EXTENTS_OFF_LEN` tree.
+ 6.  Insert new extent (with siblings merged) into the `SYS_TREES_EXTENTS_OFF_LEN` tree, then the `SYS_TREES_EXTENTS_LEN_OFF` tree.
