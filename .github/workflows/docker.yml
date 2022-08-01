@@ -12,6 +12,11 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v2
 
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^14: ' .pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
@@ -38,3 +43,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PGTAG=${{ env.PGTAG }}

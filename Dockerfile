@@ -3,6 +3,9 @@
 
 FROM alpine:3.15
 
+ARG PGTAG
+ENV PGTAG $PGTAG
+
 # 70 is the standard uid/gid for "postgres" in Alpine
 # https://git.alpinelinux.org/aports/tree/main/postgresql/postgresql.pre-install?h=3.12-stable
 RUN set -eux; \
@@ -63,7 +66,7 @@ RUN set -eux; \
 	curl -o postgresql.tar.gz \
 			--header "Accept: application/vnd.github.v3.raw" \
 			--remote-name \
-			--location https://github.com/orioledb/postgres/tarball/patches14; \
+			--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
 	mkdir -p /usr/src/postgresql; \
 	tar \
 		--extract \

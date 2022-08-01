@@ -34,19 +34,24 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: orioledb/pgrpms
-          ref: orioledb-14
+          ref: orioledb
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ github.event.inputs.version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
         uses: actions/checkout@v2
         with:
           repository: orioledb/postgres
-          ref: patches${{ github.event.inputs.version }}
+          ref: ${{ env.PGTAG }}
           path: rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7/pgsrc
-      - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v2
-        with:
-          path: rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7/pgsrc/contrib/orioledb
       - name: Archive sources
         run: |
+          mv orioledb rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7/pgsrc/contrib
           cd rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7
           tar -czf orioledb.tar.gz -C pgsrc .
           rm -rf pgsrc

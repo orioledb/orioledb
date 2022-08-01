@@ -20,16 +20,20 @@ jobs:
       CHECK_TYPE: ${{ matrix.check_type }}
       COMPILER: ${{ matrix.compiler }}
     steps:
-      - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v2
-        with:
-          repository: orioledb/postgres
-          ref: patches${{ matrix.pg_version }}
-          path: postgresql
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v2
         with:
           path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
       - name: Setup prerequisites
         run: bash ./orioledb/ci/prerequisites.sh
       - name: Build
@@ -57,16 +61,20 @@ jobs:
       CHECK_TYPE: static
       COMPILER: ${{ matrix.compiler }}
     steps:
-      - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v2
-        with:
-          repository: orioledb/postgres
-          ref: patches${{ matrix.pg_version }}
-          path: postgresql
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v2
         with:
           path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v2
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
       - name: Setup prerequisites
         run: bash ./orioledb/ci/prerequisites.sh
       - name: Build
