@@ -110,8 +110,9 @@ OrioleDB is currently in the development stage.  Therefore it has the following 
 
  1. `pg_rewind` copies OrioleDB tables completely. Shortly OrioleDB will implement incremental copying of OrioleDB tables using `pg_rewind`.
  2. OrioleDB current doesn't support parallel scan of tables.  Soon, OrioleDB will implement a parallel option for all kinds of table scans.
- 3. OrioleDB supports just B-tree indexes.  OrioleDB roadmap contains the implementation of analogs of GiST, GIN, and BRIN.
- 4. OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
+ 3. OrioleDB doesn't support prepared transactions.
+ 4. OrioleDB supports just B-tree indexes.  OrioleDB roadmap contains the implementation of analogs of GiST, GIN, and BRIN.
+ 5. OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
 
 Data deletion
 -------------
