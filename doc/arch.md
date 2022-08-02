@@ -125,6 +125,8 @@ OrioleDB has three types of block-level undo records:
 2.  Split undo record: two data pages reference one undo page image,
 3.  Merge undo record: one data page references two undo page images.
 
+OrioleDB uses both circular buffers and block buffers for accessing the undo log.  See [undo log storage](buffering.md) for details.
+
 Row-level WAL
 -------------
 
