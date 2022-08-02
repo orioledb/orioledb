@@ -25,7 +25,7 @@
 #include "utils/typcache.h"
 #include "utils/relcache.h"
 
-#define ORIOLEDB_VERSION "OrioleDB public alpha 7"
+#define ORIOLEDB_VERSION "OrioleDB public alpha 8"
 #define ORIOLEDB_BINARY_VERSION 3
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
