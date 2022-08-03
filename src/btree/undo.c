@@ -960,7 +960,12 @@ clean_chain_has_locks_flag(UndoLocation location, BTreeLeafTuphdr *pageTuphdr,
 						   OInMemoryBlkno blkno)
 {
 	BTreeLeafTuphdr tuphdr;
-	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location();
+	UndoLocation retainedUndoLocation;
+
+	if (!is_recovery_process())
+		retainedUndoLocation = get_snapshot_retained_undo_location();
+	else
+		retainedUndoLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation);
 
 	/*
 	 * Invalid location means that we should update starting from the
