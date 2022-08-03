@@ -412,7 +412,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 						}
 						else
 						{
-							get_prev_leaf_header_from_undo(&tuphdr);
+							get_prev_leaf_header_from_undo(&tuphdr, false);
 							O_TUPLE_SET_NULL(tuple);
 						}
 						inUndo = true;
@@ -549,7 +549,7 @@ btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
 				}
 				if ((!XACT_INFO_IS_FINISHED(tuphdr.xactInfo) || tuphdr.chainHasLocks) &&
 					UndoLocationIsValid(tuphdr.undoLocation))
-					get_prev_leaf_header_from_undo(&tuphdr);
+					get_prev_leaf_header_from_undo(&tuphdr, false);
 				else
 					break;
 			}

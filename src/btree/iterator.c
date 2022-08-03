@@ -317,7 +317,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		if (tupHdr.deleted || XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
 		{
-			get_prev_leaf_header_from_undo(&tupHdr);
+			get_prev_leaf_header_from_undo(&tupHdr, true);
 		}
 		else
 		{

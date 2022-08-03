@@ -96,7 +96,8 @@ extern void btree_relnode_undo_callback(UndoLocation location,
 										UndoStackItem *baseItem, OXid oxid,
 										bool abort,
 										bool changeCountsValid);
-extern void get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr);
+extern void get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr,
+										   bool inPage);
 extern void get_prev_leaf_header_and_tuple_from_undo(BTreeLeafTuphdr *tuphdr,
 													 OTuple *tuple,
 													 LocationIndex sizeAvailable);

@@ -146,7 +146,7 @@ retry:
 		Assert(UndoLocationIsValid(tuphdr->undoLocation));
 		Assert(UNDO_REC_EXISTS(tuphdr->undoLocation));
 
-		get_prev_leaf_header_from_undo(tuphdr);
+		get_prev_leaf_header_from_undo(tuphdr, true);
 		BTREE_PAGE_READ_TUPLE(prev_tuple, p, locator);
 		PAGE_SUB_N_VACATED(p,
 						   BTreeLeafTuphdrSize +
@@ -564,7 +564,7 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 		BTreeLeafTuphdr prev_tuphdr = tuphdr;
 
 		Assert(UndoLocationIsValid(undoLocation) && UNDO_REC_EXISTS(undoLocation));
-		get_prev_leaf_header_from_undo(&prev_tuphdr);
+		get_prev_leaf_header_from_undo(&prev_tuphdr, false);
 
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo) && XACT_INFO_GET_OXID(tuphdr.xactInfo) == oxid)
 		{
@@ -1090,7 +1090,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				Assert(UNDO_REC_EXISTS(undoLocation));
 
 				prev_tuphdr = *conflictTuphdr;
-				get_prev_leaf_header_from_undo(&prev_tuphdr);
+				get_prev_leaf_header_from_undo(&prev_tuphdr, false);
 				if (!UndoLocationIsValid(*conflictUndoLocation))
 				{
 					page_block_reads(blkno);
@@ -1166,7 +1166,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				lastLockOnlyUndoLocation = undoLocation;
 
 			prevChainHasLocks = conflictTuphdr->chainHasLocks;
-			get_prev_leaf_header_from_undo(conflictTuphdr);
+			get_prev_leaf_header_from_undo(conflictTuphdr, false);
 		}
 
 		*conflictUndoLocation = undoLocation;
@@ -1230,7 +1230,7 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 		 */
 		Assert(UNDO_REC_EXISTS(undoLocation));
 
-		get_prev_leaf_header_from_undo(&tuphdr);
+		get_prev_leaf_header_from_undo(&tuphdr, false);
 
 		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && XACT_INFO_GET_OXID(xactInfo) == my_oxid)
 		{
@@ -1310,7 +1310,7 @@ find_non_lock_only_undo_record(BTreeLeafTuphdr *tuphdr)
 		undoLocation = tuphdr->undoLocation;
 		if (!UndoLocationIsValid(undoLocation) || !UNDO_REC_EXISTS(undoLocation))
 			return InvalidUndoLocation;
-		get_prev_leaf_header_from_undo(tuphdr);
+		get_prev_leaf_header_from_undo(tuphdr, false);
 		xactInfo = tuphdr->xactInfo;
 	}
 
@@ -1318,7 +1318,7 @@ find_non_lock_only_undo_record(BTreeLeafTuphdr *tuphdr)
 }
 
 void
-get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr)
+get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr, bool inPage)
 {
 	BTreeLeafTuphdr prevTuphdr;
 
@@ -1327,7 +1327,7 @@ get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr)
 
 	undo_read(tuphdr->undoLocation, sizeof(prevTuphdr), (Pointer) &prevTuphdr);
 
-	if (!XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo))
+	if (!XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo) || !inPage)
 	{
 		*tuphdr = prevTuphdr;
 	}
