@@ -669,6 +669,9 @@ retry:
 	p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 	if (BTREE_PAGE_FIND_IS(context, MODIFY))
 	{
+		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
+			return find_page(context, key, keyType, level);
+		
 		lock_page(intCxt.blkno);
 		intCxt.haveLock = true;
 		intCxt.pagePtr = p;
@@ -705,7 +708,10 @@ retry:
 	else if (BTREE_PAGE_FIND_IS(context, FETCH))
 	{
 		bool		success;
-
+		
+		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
+			return find_page(context, key, keyType, level);
+		
 		context->partial.isPartial = false;
 		intCxt.partial = &context->partial;
 		success = btree_find_read_page(context, intCxt.blkno, intCxt.pageChangeCount, img, key,
