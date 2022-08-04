@@ -34,6 +34,8 @@ In order to implement this scheme, we have to sacrifice rightlinks.  That would 
 
 Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits.  Righlink exists only between splitting a new page and insertion downlink to the parent.  Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function).  Stepping tree pages right and left become more complex too.  Instead of using rightlinks (and leftlinks) one have to find siblings from parent (see find_right_page() and find_left_page()).  However, this complexity is more than justified by better vertical scalability.
 
+See [Concurrency algorithms in OrioleDB B-tree](concurrency.md) for details.
+
 Page structure
 --------------
 
