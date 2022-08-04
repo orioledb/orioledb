@@ -689,7 +689,7 @@ page_merge_chunks(Page p, OffsetNumber index)
 	p1_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation) - hikeyShift;
 	p1_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
 	len1 = SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) -
-	SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
+		SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
 
 	p2_1 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index].hikeyShortLocation) - hikeyShift;
 	p2_2 = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);

@@ -32,7 +32,7 @@
 typedef struct
 {
 	uint8		recType;
-} WALRec;
+}			WALRec;
 
 typedef struct
 {

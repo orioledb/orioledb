@@ -120,7 +120,7 @@ wal_commit(OXid oxid)
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid);
-	add_finish_wal_record(WAL_REC_COMMIT,  pg_atomic_read_u64(&xid_meta->runXmin));
+	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(true);
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
