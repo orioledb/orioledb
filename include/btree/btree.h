@@ -112,9 +112,21 @@ typedef enum
 
 typedef struct
 {
+	/*
+	 * Get the length of a given `tuple` of a `type`.  Must be safe for
+	 * critical sections.
+	 */
 	int			(*len) (BTreeDescr *desc, OTuple tuple, OLengthType type);
+
+	/*
+	 * Changes BTreeKeyLeafTuple to BTreeKeyNonLeafKey.  If `data` is given,
+	 * then write data there.  Otherwise, it may allocate memory or use static
+	 * memory for the result (the `*allocated` flag reflects this).  When
+	 * `data` is given, this function must be safe for the critical section.
+	 */
 	OTuple		(*tuple_make_key) (BTreeDescr *desc, OTuple tuple, Pointer data,
 								   bool keepVersion, bool *allocated);
+
 	JsonbValue *(*key_to_jsonb) (BTreeDescr *desc, OTuple key,
 								 JsonbParseState **state);
 	bool		(*needs_undo) (BTreeDescr *desc, BTreeOperationType action,
