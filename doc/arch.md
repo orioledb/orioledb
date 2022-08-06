@@ -150,6 +150,8 @@ OrioleDB implements parallel application of WAL records.  It launches `orioledb.
 
 Queues might be processed at different paces.  In order to evade MVCC anomalies, we assume the transaction to be committed and visible for readers only once all the workers have completed all the pieces of work associated with that transaction.
 
+See [the details about OrioleDB's recovery](recovery.md).
+
 System catalog
 --------------
 
