@@ -47,3 +47,50 @@ Step 3 depicts page 1 disconnected from its child with IO downlink.
 Finally evicting process writes the on-disk downlink to page 1 (step 4).
 
 ![Evict step 4](evict_step_4.svg)
+
+Page load
+---------
+
+When Postgres backend needs a page referenced by the on-disk downlink on OrioleDB non-leaf page, it has to load that page.
+
+Step 1 depicts the initial state of the non-leaf page 1 before loading its child.  Page 1 is locked and has an on-disk downlink.  At this point, the process needs to replace the downlink with IO in-progress one, unlock page 1 and start the IO.
+
+![Load step 1](load_step_1.svg)
+
+Step 2 depicts the page 1 state while the IO is in progress.  All the concurrent processes dealing with that downlink must wait until IO is completed.  When the IO is completed, our process needs to relock page 1.
+
+![Load step 2](load_step_2.svg)
+
+Step 3 depicts the state when page 1 is relocked.  At this point, our process needs to add child page 2 and make the downlink on page 1 point to page 2.
+
+![Load step 3](load_step_3.svg)
+
+Step 4 represents the final state.  Page 2 is loaded, and page 1 contains the in-memory downlink to page 2.
+
+![Load step 4](load_step_4.svg)
+
+
+Page merge
+----------
+
+When OrioleDB has a page candidate for eviction, and that page is too sparse (with less than 30% of space busy), it considers page merging.  Page merging will also free an in-memory page but does not need an IO, even for a dirty page.
+
+Step 1 depicts the initial state of part of the tree comprising parent page 1, child page to be merged 3 (locked), left sibling 2, and right sibling 4.  At this point, we need to lock the parent page 1.  We release child page 3 lock first.
+
+![Merge step 1](merge_step_1.svg)
+
+Step 2 depicts the state where parent page 1 is locked, but the child is not.  At this point, we need to relock the child page 3 to be merged.  If this page is gone (due to concurrent eviction or another merge), then give up with merging.  We also check that parent is not under checkpoint and give up otherwise.
+
+![Merge step 2](merge_step_2.svg)
+
+Step 3 depicts both parent page 1 and child page 3 locked.  Here we need to select the way to merge.  We check that child page 3 is not under checkpoint and does not have a rightlink.  Give up otherwise.
+
+![Merge step 3](merge_step_3.svg)
+
+Step 4 depicts two possible ways to merge: with right sibling 4 (upper picture) or with left sibling 3 (upper picture).  Note that the left page always saves its identity in either direction we chose.  So if we merge to the left, page 3 will be removed.  We cannot merge with a sibling under checkpoint or have a rightlink.
+
+![Merge step 4](merge_step_4.svg)
+
+Step 5 depicts the merge result.  In this example, we merged to the right.  All the tuples on page 4 were merged into page 3. The result page is marked as page 34.  Page 34 also has a hikey of page 4.  Also, we remove page 4 and the corresponding downlink on page 1.
+
+![Merge step 5](merge_step_5.svg)
