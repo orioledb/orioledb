@@ -34,7 +34,7 @@ In order to implement this scheme, we have to sacrifice rightlinks.  That would 
 
 Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits.  Righlink exists only between splitting a new page and insertion downlink to the parent.  Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function).  Stepping tree pages right and left become more complex too.  Instead of using rightlinks (and leftlinks) one have to find siblings from parent (see find_right_page() and find_left_page()).  However, this complexity is more than justified by better vertical scalability.
 
-See [Concurrency algorithms in OrioleDB B-tree](concurrency.md) for details.
+See [concurrency algorithms in OrioleDB B-tree](concurrency.md) for details.
 
 Page structure
 --------------
@@ -96,7 +96,9 @@ Then, checkpointer finished writing page images `7*`, `3*` and `1*` to checkpoin
 
 In general, checkpointing of non-leaf pages is more tricky than described above.  While the checkpointer is writing children of non-leaf page, concurrent splits and merges could happen.  In such cases, we have to reconstruct non-leaf pages based on the state of its children as we met them.  Therefore, we might write to the storage a non-leaf page image, which never existed in the main memory.  Furthermore, we could even write multiple storage pages corresponding to a single main memory page (imagine merges happen above the checkpoint boundary, while splits happen below the checkpoint boundary).  Finally, that is OK, because it reflects how checkpointer wrote the children.
 
-At the moment of time, there could be multiple checkpoints which use different but overlapping sets of blocks.  Therefore, free space management becomes an untrivial task.
+At the moment of time, there could be multiple checkpoints which use different but overlapping sets of blocks.  Therefore, [free space management](fsm.md) becomes an untrivial task.
+
+See [the detailed description of checkpointing algorithm](checkpoint.md).
 
 Undo log
 --------
