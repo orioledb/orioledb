@@ -1874,7 +1874,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				OTable	   *new_o_table = NULL;
 				OTable	   *old_o_table = NULL;
 				OTableDescr *old_descr;
-				bool		drop;
 				OIndexNumber ix_num;
 				uint16		nindices;
 
@@ -1896,9 +1895,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				}
 				Assert(old_o_table);
 
-				drop = old_o_table->nindices > new_o_table->nindices;
-				nindices = drop ? old_o_table->nindices : new_o_table->nindices;
-
+				nindices = Max(old_o_table->nindices, new_o_table->nindices);
 				for (ix_num = 0; ix_num < nindices - 1; ix_num++)
 				{
 					if (!ORelOidsIsEqual(old_o_table->indices[ix_num].oids,
@@ -1906,7 +1903,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						break;
 				}
 
-				if (!drop)
+				if (new_o_table->nindices > old_o_table->nindices)
 				{
 					OTableDescr tmp_descr;
 
@@ -1926,7 +1923,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					}
 					o_free_tmp_table_descr(&tmp_descr);
 				}
-				else
+				else if (new_o_table->nindices < old_o_table->nindices)
 				{
 					if (old_o_table->indices[ix_num].type == oIndexPrimary)
 					{

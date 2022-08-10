@@ -438,6 +438,27 @@ class ReplicationTest(BaseTest):
 										 stderr=subprocess.DEVNULL)
 				self.assertEqual(pgbench.wait(), 0)
 
+	def test_replication_column_ddl(self):
+		with self.node as master:
+			master.start()
+
+			with self.getReplica().start() as replica:
+				master.execute("CREATE EXTENSION orioledb;")
+				master.execute("CREATE TABLE o_test\n"
+							"    (id integer NOT NULL)\n"
+							"USING orioledb;")
+				master.execute("INSERT INTO o_test VALUES (1);")
+
+				master.execute("ALTER TABLE o_test ADD COLUMN val int;")
+				master.execute("ALTER TABLE o_test RENAME COLUMN val TO val_2;")
+				master.execute("ALTER TABLE o_test DROP COLUMN val_2")
+
+				# wait for synchronization
+				catchup_orioledb(replica)
+				self.assertEqual(1, replica.execute("SELECT * FROM o_test;")[0][0])
+				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
+										expected = False)
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x
