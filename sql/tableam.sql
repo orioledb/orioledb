@@ -780,4 +780,26 @@ WITH inserted AS (
 SELECT substr(t, 6) FROM inserted; 
 
 DROP TABLE heap_table;
+
+CREATE TABLE o_test_add_column
+(
+  id serial primary key,
+  i int4
+) USING orioledb;
+
+CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
+$$
+  SELECT i::text::bigint::float8;
+$$ LANGUAGE sql;
+INSERT INTO o_test_add_column (i)
+  SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
+CREATE SEQUENCE o_test_j_seq;
+BEGIN;
+ALTER TABLE o_test_add_column
+  ADD COLUMN j int4 not null default pseudo_random(2, nextval('o_test_j_seq')) * 20000;
+ROLLBACK;
+
+DROP TABLE o_test_add_column;
+DROP FUNCTION pseudo_random(bigint, bigint);
+
 DROP EXTENSION orioledb CASCADE;

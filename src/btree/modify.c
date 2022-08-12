@@ -761,6 +761,14 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 
 			return OBTreeModifyResultDeleted;
 		}
+		else
+		{
+			/*
+			 * We rollback our own changes to the version existed before.  Thus,
+			 * we need an undo record to modify it.
+			 */
+			context->needsUndo = true;
+		}
 	}
 
 	if (context->undoIsReserved && context->needsUndo)
