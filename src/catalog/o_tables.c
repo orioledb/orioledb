@@ -1786,18 +1786,13 @@ deserialize_o_table(Pointer data, Size length)
 
 	len = o_table->nfields * sizeof(OTableField);
 	o_table->fields = (OTableField *) palloc(len);
-	if (o_table->has_missing)
-		Assert((ptr - data) + len <= length);
-	else
-		Assert((ptr - data) + len == length);
 	memcpy(o_table->fields, ptr, len);
 	ptr += len;
+	Assert(ptr - data <= length);
 
 	if (o_table->has_missing)
 	{
 		int			i;
-		Pointer		start PG_USED_FOR_ASSERTS_ONLY = ptr;
-		int			missing_len PG_USED_FOR_ASSERTS_ONLY = 0;
 
 		o_table->missing = (AttrMissing *)
 			palloc(o_table->nfields * sizeof(AttrMissing));
@@ -1806,23 +1801,18 @@ deserialize_o_table(Pointer data, Size length)
 		{
 			AttrMissing *miss = &o_table->missing[i];
 			bool		isnull;
-			Pointer		datum_start PG_USED_FOR_ASSERTS_ONLY;
 
 			memcpy(&miss->am_present, ptr, sizeof(bool));
 			ptr += sizeof(bool);
-			datum_start = ptr;
 			miss->am_value = datumRestore(&ptr, &isnull);
-			missing_len += sizeof(bool) + (ptr - datum_start);
 		}
-		Assert((start - data) + missing_len <= length);
+
+		Assert(ptr - data <= length);
 	}
 
 	if (o_table->has_default)
 	{
 		int			i;
-		Pointer		start PG_USED_FOR_ASSERTS_ONLY = ptr;
-		Pointer		old_ptr PG_USED_FOR_ASSERTS_ONLY = ptr;
-		int			defval_len PG_USED_FOR_ASSERTS_ONLY = 0;
 
 		o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
 		for (i = 0; i < o_table->nfields; i++)
@@ -1830,13 +1820,13 @@ deserialize_o_table(Pointer data, Size length)
 			char	   *defval_str = o_deserialize_string(&ptr);
 
 			o_table->defvals[i] = stringToNode(defval_str);
-			defval_len += (ptr - old_ptr);
-			old_ptr = ptr;
 			pfree(defval_str);
 		}
-		Assert((start - data) + defval_len == length);
+
+		Assert(ptr - data <= length);
 	}
 
+	Assert(ptr - data == length);
 	return o_table;
 }
 
