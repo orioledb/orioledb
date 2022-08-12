@@ -58,7 +58,7 @@ class EvictionFullMemoryTest(BaseTest):
 		con1.execute("SET orioledb.enable_stopevents = true;")
 		con2.execute("SELECT pg_stopevent_set('split_fail', '$.treeName == \"o_test_pkey\" && $.level == 2');")
 		# prevent to fix root split by an apply_undo()
-		con2.execute("SELECT pg_stopevent_set('before_apply_undo', 'true');")
+		con2.execute("SELECT pg_stopevent_set('before_apply_undo', '$.commit == false');")
 
 		for i in range(1, before_root_split, step):
 			con1.begin()

@@ -299,7 +299,7 @@ class SplitTest(BaseTest):
 		con3.execute("SET orioledb.enable_stopevents = true;")
 		con2.execute("SELECT pg_stopevent_set('split_fail', '$.level == 2 && $pid == %d');" % (con3_pid,))
 		# this breakpoint helps us to avoid root split fix on apply_undo()
-		con2.execute("SELECT pg_stopevent_set('before_apply_undo', 'true');")
+		con2.execute("SELECT pg_stopevent_set('before_apply_undo', '$.commit == false');")
 
 		t3 = ThreadQueryExecutor(con3, "INSERT INTO o_split "
 								 "(SELECT repeat('x', 708) || id FROM generate_series(90000, 99999, 4) id);")

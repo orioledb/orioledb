@@ -583,16 +583,15 @@ apply_undo_branches(OXid oxid)
 		walk_undo_range(item->longPathLocation, item->header.prev, &buf,
 						oxid, true, NULL, false);
 	}
-
 	free_undo_item_buf(&buf);
 }
 
 /*
- * Walk transaction undo stack chain during (sub)transaction abourt or
+ * Walk transaction undo stack chain during (sub)transaction abort or
  * transaction commit.
  */
 static void
-walk_undo_stack(OXid oxid, UndoStackLocations *toLocation, bool abort,
+walk_undo_stack(OXid oxid, UndoStackLocations *toLocation, bool abortTrx,
 				bool changeCountsValid)
 {
 	UndoItemBuf buf;
@@ -601,12 +600,21 @@ walk_undo_stack(OXid oxid, UndoStackLocations *toLocation, bool abort,
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS();
 
-	if (abort)
-		STOPEVENT(STOPEVENT_BEFORE_APPLY_UNDO, NULL);
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+		JsonbParseState *state = NULL;
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_bool_key(&state, "commit", !abortTrx);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+		STOPEVENT(STOPEVENT_BEFORE_APPLY_UNDO, params);
+	}
 
 	init_undo_item_buf(&buf);
 
-	if (!abort)
+	if (!abortTrx)
 	{
 		/*
 		 * One could only do the "on commit" action for the whole transaction
