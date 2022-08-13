@@ -70,6 +70,11 @@ struct BTreeSeqScan
 
 	BTreePageItemLocator intLoc;
 
+	/*
+	 * The page offset we started with according to `prevHikey`;
+	 */
+	OffsetNumber	intStartOffset;
+
 	BTreePageItemLocator leafLoc;
 
 	bool		haveHistImg;
@@ -110,6 +115,8 @@ struct BTreeSeqScan
 };
 
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
+
+static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey);
 
 static void
 load_first_historical_page(BTreeSeqScan *scan)
@@ -209,15 +216,18 @@ load_next_internal_page(BTreeSeqScan *scan)
 {
 	bool		has_next = false;
 
-	scan->context.flags &= ~BTREE_PAGE_FIND_DOWNLINK_LOCATION;
+	scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
 	if (!O_TUPLE_IS_NULL(scan->curHikey.tuple))
 	{
 		copy_fixed_key(scan->desc, &scan->prevHikey, scan->curHikey.tuple);
-		find_page(&scan->context, &scan->curHikey.tuple,
+		find_page(&scan->context, &scan->prevHikey.tuple,
 				  BTreeKeyNonLeafKey, 1);
 	}
 	else
+	{
+		O_TUPLE_SET_NULL(scan->prevHikey.tuple);
 		find_page(&scan->context, NULL, BTreeKeyNone, 1);
+	}
 
 	if (!O_PAGE_IS(scan->context.img, RIGHTMOST))
 		copy_fixed_hikey(scan->desc, &scan->curHikey, scan->context.img);
@@ -226,7 +236,28 @@ load_next_internal_page(BTreeSeqScan *scan)
 
 	if (PAGE_GET_LEVEL(scan->context.img) == 1)
 	{
-		BTREE_PAGE_LOCATOR_FIRST(scan->context.img, &scan->intLoc);
+		/*
+		 * Check if the left bound of the found keyrange corresponds to the
+		 * previous hikey.  Otherwise, use iterator to correct the situation.
+		 */
+		scan->intLoc = scan->context.items[scan->context.index].locator;
+		scan->intStartOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc);
+		if (!O_TUPLE_IS_NULL(scan->prevHikey.tuple))
+		{
+			OTuple	intTup;
+
+			if (scan->intStartOffset > 0)
+				BTREE_PAGE_READ_INTERNAL_TUPLE(intTup, scan->context.img, &scan->intLoc);
+			else
+				intTup = scan->context.lokey.tuple;
+
+			if (o_btree_cmp(scan->desc,
+							&scan->prevHikey.tuple, BTreeKeyNonLeafKey,
+							&intTup, BTreeKeyNonLeafKey) != 0)
+			{
+				scan_make_iterator(scan, scan->prevHikey.tuple);
+			}
+		}
 		has_next = true;
 	}
 	else
@@ -325,10 +356,10 @@ refind_downlink(BTreeSeqScan *scan)
 	int			cmp;
 
 	scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
-	if (BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc) != 0)
+	if (BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc) > scan->intStartOffset)
 		copy_fixed_page_key(scan->desc, &refindKey, scan->context.img, &scan->intLoc);
 	else
-		copy_fixed_key(scan->desc, &refindKey, scan->context.lokey.tuple);
+		copy_fixed_key(scan->desc, &refindKey, scan->prevHikey.tuple);
 
 	if (!O_TUPLE_IS_NULL(refindKey.tuple))
 		find_page(&scan->context, &refindKey.tuple, BTreeKeyNonLeafKey, 1);
@@ -341,8 +372,6 @@ refind_downlink(BTreeSeqScan *scan)
 		clear_fixed_key(&scan->curHikey);
 
 	scan->intLoc = scan->context.items[scan->context.index].locator;
-	if (O_TUPLE_IS_NULL(scan->context.lokey.tuple))
-		return;
 
 	BTREE_PAGE_READ_INTERNAL_TUPLE(downlinkKey, scan->context.img, &scan->intLoc);
 	cmp = o_btree_cmp(scan->desc,
@@ -402,10 +431,10 @@ check_in_memory_leaf_page(BTreeSeqScan *scan)
 	{
 		OTuple		startKey;
 
-		if (BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc) != 0)
+		if (BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc) != scan->intStartOffset)
 			BTREE_PAGE_READ_INTERNAL_TUPLE(startKey, scan->context.img, &scan->intLoc);
 		else if (!O_PAGE_IS(scan->context.img, LEFTMOST))
-			startKey = scan->context.lokey.tuple;
+			startKey = scan->prevHikey.tuple;
 		else
 			O_TUPLE_SET_NULL(startKey);
 		scan_make_iterator(scan, startKey);
@@ -440,12 +469,13 @@ iterate_internal_page(BTreeSeqScan *scan)
 		{
 			BTreePageHeader *header = (BTreePageHeader *) scan->context.img;
 			BTreePageItemLocator end_locator = scan->intLoc;
-			OTuple		start_tuple = {0};
-			OTuple		end_tuple = {0};
+			OTuple		start_tuple;
+			OTuple		end_tuple;
 			bool		has_next_downlink = true;
 
-			if ((scan->intLoc.chunkOffset == 0 &&
-				 scan->intLoc.itemOffset == 0))
+			O_TUPLE_SET_NULL(start_tuple);
+			O_TUPLE_SET_NULL(end_tuple);
+			if (BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc) == scan->intStartOffset)
 			{
 				if (!O_TUPLE_IS_NULL(scan->prevHikey.tuple))
 					start_tuple = scan->prevHikey.tuple;
@@ -501,8 +531,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 			{
 				ReadPageResult result;
 
-				result = o_btree_try_read_page(
-											   scan->desc,
+				result = o_btree_try_read_page(scan->desc,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
 											   DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink),
 											   scan->leafImg,
