@@ -121,6 +121,12 @@ CheckPoint_hook_type next_CheckPoint_hook = NULL;
  */
 MemoryContext btree_insert_context = NULL;
 
+/*
+ * Memory context for btree sequential scans.  Scans needs to survive till
+ * seq_scans_cleanup().
+ */
+MemoryContext btree_seqscan_context = NULL;
+
 OPagePool	page_pools[OPagePoolTypesCount];
 
 static size_t page_pools_size[OPagePoolTypesCount];
@@ -779,6 +785,10 @@ orioledb_shmem_startup(void)
 	btree_insert_context = AllocSetContextCreate(TopMemoryContext,
 												 "orioledb B-tree insert context",
 												 ALLOCSET_DEFAULT_SIZES);
+
+	btree_seqscan_context = AllocSetContextCreate(TopMemoryContext,
+												  "orioledb B-tree seqential scans context",
+												  ALLOCSET_DEFAULT_SIZES);
 
 	if (remove_old_checkpoint_files)
 		recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,

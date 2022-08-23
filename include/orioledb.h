@@ -184,6 +184,7 @@ extern OrioleDBPageDesc *page_descs;
 extern bool remove_old_checkpoint_files;
 extern bool debug_disable_bgwriter;
 extern MemoryContext btree_insert_context;
+extern MemoryContext btree_seqscan_context;
 extern double o_checkpoint_completion_ratio;
 extern int	max_io_concurrency;
 extern bool use_mmap;

@@ -73,7 +73,7 @@ struct BTreeSeqScan
 	/*
 	 * The page offset we started with according to `prevHikey`;
 	 */
-	OffsetNumber	intStartOffset;
+	OffsetNumber intStartOffset;
 
 	BTreePageItemLocator leafLoc;
 
@@ -244,7 +244,7 @@ load_next_internal_page(BTreeSeqScan *scan)
 		scan->intStartOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.img, &scan->intLoc);
 		if (!O_TUPLE_IS_NULL(scan->prevHikey.tuple))
 		{
-			OTuple	intTup;
+			OTuple		intTup;
 
 			if (scan->intStartOffset > 0)
 				BTREE_PAGE_READ_INTERNAL_TUPLE(intTup, scan->context.img, &scan->intLoc);
@@ -649,7 +649,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 							 BTreeSeqScanCallbacks *cb, void *arg,
 							 BlockSampler sampler)
 {
-	BTreeSeqScan *scan = (BTreeSeqScan *) MemoryContextAlloc(TopMemoryContext, sizeof(BTreeSeqScan));
+	BTreeSeqScan *scan = (BTreeSeqScan *) MemoryContextAlloc(btree_seqscan_context,
+															 sizeof(BTreeSeqScan));
 	uint32		checkpointNumberBefore,
 				checkpointNumberAfter;
 	bool		checkpointConcurrent;

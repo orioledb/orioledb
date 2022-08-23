@@ -977,7 +977,7 @@ o_tbl_index_insert(OTableDescr *descr,
 
 	if (primary || o_is_index_predicate_satisfied(id, slot, econtext))
 	{
-		bool	inserted;
+		bool		inserted;
 
 		tts_orioledb_fill_key_bound(slot, id, &knew);
 
@@ -995,15 +995,15 @@ o_tbl_index_insert(OTableDescr *descr,
 		o_btree_load_shmem(bd);
 		if (primary || !id->unique || o_has_nulls(tup))
 			inserted = o_btree_modify(bd, BTreeOperationInsert,
-										tup, BTreeKeyLeafTuple,
-										(Pointer) &knew, BTreeKeyBound,
-										oxid, csn, RowLockUpdate,
-										NULL, callbackInfo) == OBTreeModifyResultInserted;
+									  tup, BTreeKeyLeafTuple,
+									  (Pointer) &knew, BTreeKeyBound,
+									  oxid, csn, RowLockUpdate,
+									  NULL, callbackInfo) == OBTreeModifyResultInserted;
 		else
 			inserted = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
-												(Pointer) &knew, BTreeKeyBound,
-												oxid, csn, RowLockUpdate,
-												NULL, callbackInfo) == OBTreeModifyResultInserted;
+											 (Pointer) &knew, BTreeKeyBound,
+											 oxid, csn, RowLockUpdate,
+											 NULL, callbackInfo) == OBTreeModifyResultInserted;
 
 		((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 
