@@ -1036,21 +1036,21 @@ o_tbl_indices_insert(TupleTableSlot *slot,
 
 	econtext = GetPerTupleExprContext(estate);
 
-	for (i = start_ix; i < descr->nIndices; i++)
+	result.success = o_tbl_index_insert(descr, descr->indices[start_ix], slot,
+										econtext, oxid, csn, callbackInfo);
+	if (!result.success)
 	{
-		result.success = o_tbl_index_insert(descr, descr->indices[i], slot,
-											econtext, oxid, csn, callbackInfo);
-		if (!result.success)
-		{
-			result.failedIxNum = i;
-			result.action = BTreeOperationInsert;
-			result.oldTuple = NULL;
-			return result;
-		}
+		result.failedIxNum = i;
+		result.action = BTreeOperationInsert;
+		result.oldTuple = NULL;
+		return result;
 	}
 
-	for (i = 0; i < start_ix; i++)
+	for (i = 0; i < descr->nIndices; i++)
 	{
+		if (i == start_ix)
+			continue;
+
 		result.success = o_tbl_index_insert(descr, descr->indices[i], slot,
 											econtext, oxid, csn, callbackInfo);
 		if (!result.success)
