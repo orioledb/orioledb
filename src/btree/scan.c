@@ -649,7 +649,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 							 BTreeSeqScanCallbacks *cb, void *arg,
 							 BlockSampler sampler)
 {
-	BTreeSeqScan *scan = (BTreeSeqScan *) palloc(sizeof(BTreeSeqScan));
+	BTreeSeqScan *scan = (BTreeSeqScan *) MemoryContextAlloc(TopMemoryContext, sizeof(BTreeSeqScan));
 	uint32		checkpointNumberBefore,
 				checkpointNumberAfter;
 	bool		checkpointConcurrent;
@@ -1223,15 +1223,16 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 void
 seq_scans_cleanup(void)
 {
-	dlist_iter	iter;
-
 	START_CRIT_SECTION();
-	dlist_foreach(iter, &listOfScans)
+	while (!dlist_is_empty(&listOfScans))
 	{
-		BTreeSeqScan *scan = dlist_container(BTreeSeqScan, listNode, iter.cur);
+		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
 		BTreeMetaPage *metaPageBlkno = BTREE_GET_META(scan->desc);
 
 		(void) pg_atomic_fetch_sub_u32(&metaPageBlkno->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+
+		dlist_delete(&scan->listNode);
+		pfree(scan);
 	}
 	dlist_init(&listOfScans);
 	END_CRIT_SECTION();

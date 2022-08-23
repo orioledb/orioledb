@@ -1105,8 +1105,11 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 	ItemPointerSetBlockNumber(&scan->iptr, 0);
 	ItemPointerSetOffsetNumber(&scan->iptr, FirstOffsetNumber);
 
-	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-	scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, scan->csn);
+	if (descr)
+	{
+		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, scan->csn);
+	}
 
 	return &scan->rs_base;
 }
@@ -1124,7 +1127,9 @@ orioledb_rescan(TableScanDesc sscan, ScanKey key, bool set_params,
 	memcpy(scan->rs_base.rs_key, key, sizeof(ScanKeyData) *
 		   scan->rs_base.rs_nkeys);
 
-	free_btree_seq_scan(scan->scan);
+	if (scan->scan)
+		free_btree_seq_scan(scan->scan);
+
 	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 	scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, scan->csn);
 }
@@ -1136,7 +1141,8 @@ orioledb_endscan(TableScanDesc sscan)
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
-	free_btree_seq_scan(scan->scan);
+	if (scan->scan)
+		free_btree_seq_scan(scan->scan);
 }
 
 static bool
