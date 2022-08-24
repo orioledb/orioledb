@@ -3990,4 +3990,30 @@ ALTER TABLE o_test_add_column
 ROLLBACK;
 DROP TABLE o_test_add_column;
 DROP FUNCTION pseudo_random(bigint, bigint);
+CREATE TABLE o_heap_test
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text
+);
+SELECT orioledb_tbl_structure('o_heap_test'::regclass);
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT orioledb_idx_structure('o_heap_test'::regclass, 'o_heap_test_pkey');
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT orioledb_tbl_check('o_heap_test'::regclass);
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT orioledb_tbl_indices('o_heap_test'::regclass);
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT * FROM orioledb_index_rows('o_heap_test_pkey'::regclass) r;
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT * FROM orioledb_table_pages('o_heap_test'::regclass) p;
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT orioledb_table_description('o_heap_test'::regclass);
+ERROR:  unable to find orioledb table description.
+SELECT orioledb_relation_size('o_heap_test'::regclass);
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT orioledb_evict_pages('o_heap_test'::regclass, 1);
+ERROR:  "o_heap_test" is not a orioledb table
+SELECT orioledb_write_pages('o_heap_test'::regclass);
+ERROR:  "o_heap_test" is not a orioledb table
+DROP TABLE o_heap_test;
 DROP EXTENSION orioledb CASCADE;

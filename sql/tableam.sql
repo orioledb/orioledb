@@ -802,4 +802,23 @@ ROLLBACK;
 DROP TABLE o_test_add_column;
 DROP FUNCTION pseudo_random(bigint, bigint);
 
+CREATE TABLE o_heap_test
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text
+);
+
+SELECT orioledb_tbl_structure('o_heap_test'::regclass);
+SELECT orioledb_idx_structure('o_heap_test'::regclass, 'o_heap_test_pkey');
+SELECT orioledb_tbl_check('o_heap_test'::regclass);
+SELECT orioledb_tbl_indices('o_heap_test'::regclass);
+SELECT * FROM orioledb_index_rows('o_heap_test_pkey'::regclass) r;
+SELECT * FROM orioledb_table_pages('o_heap_test'::regclass) p;
+SELECT orioledb_table_description('o_heap_test'::regclass);
+SELECT orioledb_relation_size('o_heap_test'::regclass);
+SELECT orioledb_evict_pages('o_heap_test'::regclass, 1);
+SELECT orioledb_write_pages('o_heap_test'::regclass);
+
+DROP TABLE o_heap_test;
+
 DROP EXTENSION orioledb CASCADE;

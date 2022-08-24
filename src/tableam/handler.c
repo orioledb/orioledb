@@ -1638,7 +1638,10 @@ relation_get_descr(Relation rel)
 	OTableDescr *result;
 	ORelOids	oids = {MyDatabaseId, RelationGetRelid(rel), rel->rd_node.relNode};
 
-	Assert(is_orioledb_rel(rel));
+	if (!is_orioledb_rel(rel))
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
 
 	if (rel->rd_amcache)
 		return (OTableDescr *) rel->rd_amcache;
