@@ -155,6 +155,7 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
 	python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 installcheck: regresscheck isolationcheck testgrescheck
+	echo "All checks are successful!"
 
 else
 subdir = contrib/orioledb
@@ -179,6 +180,7 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | submake-orioledb temp-insta
 		python3 -m unittest -v $@
 
 check: regresscheck isolationcheck testgrescheck
+	echo "All checks are successful!"
 endif
 
 COMMIT_HASH = $(shell git rev-parse HEAD)
