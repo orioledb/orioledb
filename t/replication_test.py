@@ -475,7 +475,7 @@ class ReplicationTest(BaseTest):
 		orioledb_dir = node.data_dir + "/orioledb_data"
 		all_files = []
 		for f in os.listdir(orioledb_dir):
-			m = re.match(r'(\d)+_(\d)+.*', f)
+			m = re.match(r'(\d+)_(\d+).*', f)
 			if m and int(m.group(1)) > 1:
 				# do not check o_tables BTree files
 				all_files.append(f)
