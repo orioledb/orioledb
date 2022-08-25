@@ -73,9 +73,10 @@ OBJS = src/btree/btree.o \
 	   $(WIN32RES)
 
 REGRESSCHECKS = btree_sys_check \
-				bitmap_scan \
 				btree_compression \
 				btree_print \
+				parallel_scan \
+				bitmap_scan \
 				collate \
 				createas \
 				ddl \

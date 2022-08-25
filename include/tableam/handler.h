@@ -135,4 +135,81 @@ extern OTableDescr *relation_get_descr(Relation rel);
 extern void table_descr_inc_refcnt(OTableDescr *descr);
 extern void table_descr_dec_refcnt(OTableDescr *descr);
 
+extern Size orioledb_parallelscan_estimate(Relation rel);
+extern Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan);
+extern void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
+
+
+typedef enum
+{
+	OParallelScanPageInvalid,
+	OParallelScanPageValid,
+	OParallelScanPageInProgress
+} OParallelScanPageStatus;
+
+/*
+ * OrioleDB-specific shared state for parallel table scan.
+ *
+ * Each backend participating in a parallel table scan has its own BTreeSeqScan
+ * in its memory, that contains a pointer to ParallelOScanDescData. The
+ * information here is sufficient to properly initialize each new BTreeSeqScan
+ * as workers join the scan, and to coordiate their scans.
+ */
+
+typedef struct BTreeIntPageParallelData
+{
+	char		img[ORIOLEDB_BLCKSZ];	/* internal page image */
+	OFixedShmemKey prevHikey;	/* low key of internal page */
+	OffsetNumber offset;
+	OffsetNumber startOffset;	/* first offset on internal page */
+	OParallelScanPageStatus status;
+	int			pageno;			/* debug only */
+	CommitSeqNo imgReadCsn;
+} BTreeIntPageParallelData;
+
+typedef BTreeIntPageParallelData *BTreeIntPageParallel;
+
+#define O_PARALLEL_LEADER_STARTED		1
+#define O_PARALLEL_FIRST_PAGE_LOADED	(1<<1)
+#define O_PARALLEL_IS_SINGLE_LEAF_PAGE  (1<<2)
+#define O_PARALLEL_CURRENT_PAGE			(1<<3)	/* If set then current
+												 * internal page is in
+												 * intPage[1], and next
+												 * internal page is in
+												 * intPage[0]. If not set -
+												 * vice versa. */
+#define O_PARALLEL_DISK_SCAN_STARTED 	(1<<4)
+
+#define CUR_PAGE(poscan)	(&(poscan)->intPage[((poscan)->flags & O_PARALLEL_CURRENT_PAGE) ? 0 : 1])
+#define NEXT_PAGE(poscan)	(&(poscan)->intPage[((poscan)->flags & O_PARALLEL_CURRENT_PAGE) ? 1 : 0])
+
+typedef struct ParallelOScanDescData
+{
+	ParallelTableScanDescData phs_base; /* Shared AM-independent state for
+										 * parallel table scan */
+	BTreeIntPageParallelData intPage[2];
+	slock_t		intpageAccess,
+				workerStart,	/* for sequential workers joining */
+				workerBeginDisk;	/* for sequential joining to disk read
+									 * phase */
+	LWLock		intpageLoad,	/* for sequential internal page loading */
+				downlinksSubscribe, /* workers can get disk downlinks from
+									 * shared state */
+				downlinksPublish;	/* workers can put disk downlinks to
+									 * shared state */
+	uint64		downlinksCount; /* cumulative number of disk downlinks in all
+								 * workers */
+	pg_atomic_uint64 downlinkIndex;
+	ConditionVariable downlinksCv;
+	int			workersReportedCount;	/* number of workers that reported
+										 * disk downlinks number */
+	bits8		flags;
+	int			nworkers;
+	dsm_handle	dsmHandle;
+	/* debug only */
+	int			cur_int_pageno;
+	bool		worker_active[10];
+} ParallelOScanDescData;
+
+typedef ParallelOScanDescData *ParallelOScanDesc;
 #endif

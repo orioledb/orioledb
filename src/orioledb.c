@@ -153,7 +153,8 @@ static ShmemItem shmemItems[] = {
 	{checkpoint_shmem_size, checkpoint_shmem_init},
 	{recovery_shmem_needs, recovery_shmem_init},
 	{o_proc_shmem_needs, o_proc_shmem_init},
-	{ppools_shmem_needs, ppools_shmem_init}
+	{ppools_shmem_needs, ppools_shmem_init},
+	{btree_scan_shmem_needs, btree_scan_init_shmem}
 };
 
 
@@ -776,7 +777,7 @@ orioledb_shmem_startup(void)
 												 "orioledb B-tree insert context",
 												 ALLOCSET_DEFAULT_SIZES);
 
-	btree_seqscan_context = AllocSetContextCreate(TopMemoryContext,
+	btree_seqscan_context = AllocSetContextCreate(TopTransactionContext,
 												  "orioledb B-tree seqential scans context",
 												  ALLOCSET_DEFAULT_SIZES);
 
@@ -1287,7 +1288,10 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 	if (is_orioledb_rel(relation))
 	{
 		/* Evade parallel scan of OrioleDB's tables */
-		rel->rel_parallel_workers = 0;
+		rel->rel_parallel_workers = RelationGetParallelWorkers(relation, -1);
+		if(rel->rel_parallel_workers > 0)
+			elog(WARNING, "Rel parallel workers = %d", rel->rel_parallel_workers);
+
 		if (relation->rd_rel->relhasindex)
 		{
 			int			i;

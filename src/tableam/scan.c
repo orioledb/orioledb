@@ -160,9 +160,9 @@ transform_path(Path *src_path, OTableDescr *descr)
 	result->path.startup_cost = src_path->startup_cost;
 	result->path.total_cost = src_path->total_cost;
 	result->path.pathkeys = src_path->pathkeys;
-	result->path.parallel_aware = false;
-	result->path.parallel_safe = false;
-	result->path.parallel_workers = 0;
+	result->path.parallel_aware = src_path->parallel_aware;
+	result->path.parallel_safe = src_path->parallel_safe;
+	result->path.parallel_workers = src_path->parallel_workers;
 	result->methods = &o_path_methods;
 	result->custom_paths = list_make1(src_path);
 
@@ -291,12 +291,6 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 					i++;
 				}
 			}
-
-			/*
-			 * disable partial scans
-			 */
-			list_free(rel->partial_pathlist);
-			rel->partial_pathlist = NIL;
 		}
 
 		if (relation != NULL)

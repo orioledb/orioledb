@@ -2668,7 +2668,7 @@ prepare_checkpoint_step_params(BTreeDescr *descr,
 		jsonb_push_int8_key(&state, "offset", pageInfo->offset);
 		jsonb_push_key(&state, "nextKey");
 		next_key_to_jsonb(&state, descr, pageInfo->nextkeyType,
-						  pageInfo->nextkey.fixed.tuple);
+						  fixed_shmem_key_get_tuple(&pageInfo->nextkey));
 	}
 
 	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
@@ -3224,6 +3224,8 @@ update_lowest_level_hikey(BTreeDescr *descr, CheckpointState *state, int to_leve
 
 	for (i = 0; i < to_level; i++)
 	{
+		OTuple		pageHikey;
+
 		page_info = &state->stack[i];
 		if (O_TUPLE_IS_NULL(hikey))
 		{
@@ -3235,9 +3237,10 @@ update_lowest_level_hikey(BTreeDescr *descr, CheckpointState *state, int to_leve
 		}
 
 		autonomous = page_info->autonomous;
+		pageHikey = fixed_shmem_key_get_tuple(&page_info->hikey);
 		if (!autonomous || (page_info->bound == CheckpointBoundHikey &&
 							o_btree_cmp(descr,
-										&page_info->hikey.fixed.tuple,
+										&pageHikey,
 										BTreeKeyNonLeafKey,
 										&hikey, BTreeKeyNonLeafKey) <= 0))
 		{
@@ -3493,7 +3496,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			if (state->stack[level].leftmost)
 				O_TUPLE_SET_NULL(key);
 			else
-				key = state->stack[level].lokey.fixed.tuple;
+				key = fixed_shmem_key_get_tuple(&state->stack[level].lokey);
 		}
 
 		if (state->stack[level].nextkeyType != NextKeyNone)
@@ -3502,12 +3505,17 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 
 			Assert(state->stack[level].nextkeyType == NextKeyValue);
 			if (O_TUPLE_IS_NULL(key))
+			{
 				cmp = -1;
+			}
 			else
+			{
+				OTuple	levelNextKey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
 				cmp = o_btree_cmp(descr,
 								  &key, BTreeKeyNonLeafKey,
-								  &state->stack[level].nextkey.fixed.tuple,
+								  &levelNextKey,
 								  BTreeKeyNonLeafKey);
+			}
 
 			if (cmp < 0)
 			{
@@ -3516,6 +3524,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				 * to concurrent inserts.  So, skip it.
 				 */
 				OTuple		hikey;
+				OTuple		levelHikey;
 
 				BTREE_PAGE_LOCATOR_NEXT(page, &loc);
 				prev_less = true;
@@ -3524,10 +3533,14 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					continue;
 
 				if (!O_PAGE_IS(page, RIGHTMOST))
+				{
 					BTREE_PAGE_GET_HIKEY(hikey, page);
+					levelHikey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
+				}
+
 				if (O_PAGE_IS(page, RIGHTMOST) ||
 					o_btree_cmp(descr, &hikey, BTreeKeyNonLeafKey,
-								&state->stack[level].nextkey.fixed.tuple,
+								&levelHikey,
 								BTreeKeyNonLeafKey) > 0)
 				{
 					/*
@@ -3587,7 +3600,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				}
 				else if (nextkey)
 				{
-					downlink_key = state->stack[level].nextkey.fixed.tuple;
+					downlink_key = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
 					downlink_key_size = o_btree_len(descr, downlink_key, OKeyLength);
 				}
 				else
@@ -3595,7 +3608,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					Assert(first_off);
 					Assert(BTREE_PAGE_ITEMS_COUNT(img) != 0);
 					Assert(!state->stack[level].leftmost);
-					downlink_key = state->stack[level].lokey.fixed.tuple;
+					downlink_key = fixed_shmem_key_get_tuple(&state->stack[level].lokey);
 					downlink_key_size = o_btree_len(descr, downlink_key, OKeyLength);
 				}
 
@@ -3721,7 +3734,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				{
 					Assert(!state->stack[level].leftmost);
 					state->stack[level].nextkeyType = NextKeyNone;
-					hikey = state->stack[level].lokey.fixed.tuple;
+					hikey = fixed_shmem_key_get_tuple(&state->stack[level].lokey);
 				}
 				else
 				{
@@ -3729,7 +3742,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					copy_fixed_shmem_page_key(descr,
 											  &state->stack[level].nextkey,
 											  page, &loc);
-					hikey = state->stack[level].nextkey.fixed.tuple;
+					hikey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
 				}
 				unlock_page(blkno);
 				hikey_size = MAXALIGN(o_btree_len(descr, hikey, OKeyLength));
@@ -3759,7 +3772,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				else
 					copy_fixed_shmem_hikey(descr, &state->curKeyValue, page);
 
-				update_lowest_level_hikey(descr, state, level, state->curKeyValue.fixed.tuple);
+				update_lowest_level_hikey(descr, state, level,
+										  fixed_shmem_key_get_tuple(&state->curKeyValue));
 				chkp_inc_changecount_after(state);
 			}
 			else
@@ -3827,25 +3841,28 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		/* we may need to write the autonomous image if hikeys is equal */
 		int			cmp;
 		OTuple		hikey;
+		OTuple		levelHikey;
 
 		BTREE_PAGE_GET_HIKEY(hikey, page);
-		cmp = o_btree_cmp(descr, &state->stack[level].hikey.fixed.tuple, BTreeKeyNonLeafKey,
+		levelHikey = fixed_shmem_key_get_tuple(&state->stack[level].hikey);
+		cmp = o_btree_cmp(descr, &levelHikey, BTreeKeyNonLeafKey,
 						  &hikey, BTreeKeyNonLeafKey);
 		Assert(cmp >= 0);
 		write_img = cmp == 0;
 		if (write_img)
 		{
-			write_hikey = state->stack[level].hikey.fixed.tuple;
+			write_hikey = levelHikey;
 		}
 		else if (!tuple_processed)
 		{
-			cmp = o_btree_cmp(descr, &state->stack[level].hikey.fixed.tuple, BTreeKeyNonLeafKey,
-							  &state->stack[level].nextkey.fixed.tuple, BTreeKeyNonLeafKey);
+			OTuple	levelNextKey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
+			cmp = o_btree_cmp(descr, &levelHikey, BTreeKeyNonLeafKey,
+							  &levelNextKey, BTreeKeyNonLeafKey);
 			Assert(cmp >= 0);
 			if (cmp == 0)
 			{
 				/* we already write the child with the hikey */
-				write_hikey = state->stack[level].hikey.fixed.tuple;
+				write_hikey = levelHikey;
 				write_img = true;
 			}
 		}
@@ -3865,8 +3882,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		{
 			/* no need to write the autonomous image */
 			message->action = WalkUpwards;
-			message->content.upwards.nextkey =
-				state->stack[level].nextkey.fixed;
+			copy_from_fixed_shmem_key(&message->content.upwards.nextkey,
+									  &state->stack[level].nextkey);
 			message->content.upwards.nextkeyType = NextKeyValue;
 			message->content.upwards.parentDirty = false;
 			message->content.upwards.diskDownlink = InvalidDiskDownlink;

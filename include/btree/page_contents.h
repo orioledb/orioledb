@@ -308,7 +308,13 @@ typedef struct
  */
 typedef struct
 {
-	OFixedKey	fixed;
+	union
+	{
+		char		fixedData[O_BTREE_MAX_KEY_SIZE];
+		void	   *p;			/* for alignment purposes */
+	}			data;
+	uint8		formatFlags;
+	bool		notNull;
 	int			len;
 } OFixedShmemKey;
 
@@ -363,6 +369,8 @@ extern void copy_fixed_shmem_page_key(BTreeDescr *desc, OFixedShmemKey *dst,
 									  Page p, BTreePageItemLocator *loc);
 extern void copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst,
 								   Page p);
+extern void clear_fixed_shmem_key(OFixedShmemKey *dst);
+extern OTuple fixed_shmem_key_get_tuple(OFixedShmemKey *src);
 extern void copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src);
 
 extern OTuple page_get_hikey(Page p);

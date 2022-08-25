@@ -610,13 +610,15 @@ clear_fixed_key(OFixedKey *dst)
 void
 copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src)
 {
-	if (O_TUPLE_IS_NULL(src->fixed.tuple))
+	if (!src->notNull)
 	{
 		clear_fixed_key(dst);
 		return;
 	}
 
-	copy_fixed_key_with_len(dst, src->fixed.tuple, src->len);
+	memcpy(dst->fixedData, src->data.fixedData, src->len);
+	dst->tuple.data = dst->fixedData;
+	dst->tuple.formatFlags = src->formatFlags;
 }
 
 void
@@ -624,13 +626,15 @@ copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst, OTuple src)
 {
 	if (O_TUPLE_IS_NULL(src))
 	{
-		clear_fixed_key(&dst->fixed);
+		clear_fixed_shmem_key(dst);
 		return;
 	}
 
 	dst->len = o_btree_len(desc, src, OKeyLength);
-	Assert(dst->len <= sizeof(dst->fixed.fixedData));
-	copy_fixed_key_with_len(&dst->fixed, src, dst->len);
+	Assert(dst->len <= sizeof(dst->data.fixedData));
+	memcpy(dst->data.fixedData, src.data, dst->len);
+	dst->notNull = true;
+	dst->formatFlags = src.formatFlags;
 }
 
 void
@@ -650,6 +654,32 @@ copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst, Page p)
 
 	BTREE_PAGE_GET_HIKEY(src, p);
 	copy_fixed_shmem_key(desc, dst, src);
+}
+
+void
+clear_fixed_shmem_key(OFixedShmemKey *dst)
+{
+	dst->notNull = false;
+	dst->formatFlags = 0;
+	dst->len = 0;
+}
+
+OTuple
+fixed_shmem_key_get_tuple(OFixedShmemKey *src)
+{
+	OTuple		result;
+
+	if (src->notNull)
+	{
+		result.data = src->data.fixedData;
+		result.formatFlags = src->formatFlags;
+	}
+	else
+	{
+		result.data = NULL;
+		result.formatFlags = 0;
+	}
+	return result;
 }
 
 OTuple
