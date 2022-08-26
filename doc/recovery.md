@@ -10,7 +10,7 @@ Unlike other solutions, we do not distribute work between workers transaction-wi
 
 The picture below illustrates the recovery scheme involving the main recovery process and four recovery workers.  The DMLs in the example are related to some single table, in which the primary key is the `id` column of integer type.  The WAL stream contains transactions 1 comprising insert with `id = 1` and update with `id = 2`, transaction 2  comprising delete with `id = 2` and insert with `id = 3`.  The main recovery process distributes these operations to the queues based on the hash of the `id` column (`id = 1` to queue 1, `id = 2` to queue 2, `id = 3` to queue 3). 
 
-![Distribution of messages to recovery queues](recovery_distribute.svg)
+![Distribution of messages to recovery queues](images/recovery_distribute.svg)
 
 Note that the main process does not distribute the transaction begin message because it does not know which workers will be involved in the transaction.  Instead, it attaches the transaction id to the row modification messages.  Also, note that OrioleDB transactions are not necessarily continuous chunks in WAL.  They could be interleaved.  
 
@@ -22,7 +22,7 @@ Recovery processes store the recovery transaction statuses in `recovery_xid_stat
 
 Given that transaction is effectively split between the main process and multiple workers during recovery, the corresponding undo log is also split.  The picture below illustrates this.  The transaction may have the undo chain in the main process.  That chain reflects transaction undo records that existed during checkpointing as well as undo of actions replayed by the main recovery process (such as DDL).  Simultaneously, the transaction may have one or more undo chains in the recovery workers.
 
-![Undo chains during recovery](recovery_undo.svg)
+![Undo chains during recovery](images/recovery_undo.svg)
 
 Primary keys, TOAST, and secondary indexes
 ------------------------------------------
@@ -38,7 +38,7 @@ The key of OrioleDB TOAST tree contains:
 
  There could be multiple versions of the same tuple in the same transaction.  Correspondingly there could be multiple versions of the TOASTed values (if they got updated).  Therefore, we need to correctly match the version of a primary key tuple to that of a TOAST tuple.  We handle this by attaching the version number to the tuple, as depicted below.
 
-![Versions for toast tuples](toast_version.svg)
+![Versions for toast tuples](images/toast_version.svg)
 
 The version number is transaction-wise.  Thus, in each new transaction, the version number starts from zero.  Zero version number is the default.  If the tuple does not contain the version number, then the version is zero.  When the primary key tuple belonging to the in-progress transaction gets updated within the same transaction, its version increases.  The TOASTed fields get updated, and TOAST tuples get the same version as the new primary key tuple.  Therefore when we need to find the TOAST tuple corresponding to the given primary key tuple, we should find the tuple with the greatest version less than equal to the primary key tuple's version.
 
@@ -54,7 +54,7 @@ Also, we are writing to the WAL TOAST tuples first and then primary key tuples.
 
 When the checkpointing of the primary key trees is finished, we mark the current WAL position of the "toast consistency point".  See the picture below.
 
-![Recovery of secondary indexes](recovery_secondary_indexes.svg)
+![Recovery of secondary indexes](images/recovery_secondary_indexes.svg)
 
 We only apply WAL records to TOAST and primary key trees during recovery before the toast consistency point.  We cannot "lose" any secondary index changes in that period because secondary index trees were checkpointer later.  Thus, secondary indexes already contain all the changes made before the toast consistency point.
 

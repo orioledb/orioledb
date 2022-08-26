@@ -24,7 +24,7 @@ When OrioleDB needs a block to write the page, it gets it in the following order
 
 The picture below illustrates the page writing of the tree when there is no concurrent checkpointing.
 
-![Free space management 1](fsm_1.svg)
+![Free space management 1](images/fsm_1.svg)
 
 If the page to be written already has an associated block in the data file, that block number is written to the `*.tmp` and `*.map` files of the next checkpoint.  On the picture, previous block number is written to the `*.tmp` and `*.map` files of checkpoint 2.
 
@@ -32,7 +32,7 @@ This page's new block number is acquired according to the rules described above.
 
 The picture below illustrates the page writing of the tree when there is no concurrent checkpointing.
 
-![Free space management 1](fsm_2.svg)
+![Free space management 1](images/fsm_2.svg)
 
 In the picture above, checkpoint 1 is completed, while checkpoint 2 is in-progress.  Checkpointer processes trees in some deterministic order.
 

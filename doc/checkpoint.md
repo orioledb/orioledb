@@ -12,7 +12,7 @@ Checkpointer walks OrioleDB trees in LNR-order.  The walk is divided into steps.
 
 The picture below is the example of OrioleDB B-tree walking by the checkpointer.
 
-![Checkpoint walk the tree](checkpoint_walk.svg)
+![Checkpoint walk the tree](images/checkpoint_walk.svg)
 
 Checkpointer comes to the root page `n1` with the `WalkDownwards` message (step 1), then checks the first downlink `l1`.  Since `l1` is the in-memory downlink, the checkpointer moves to the leaf page `n2` with the `WalkDownwards` message (step 2).  After flushing `n2`, checkpointer comes back to `n1` with the `WalkUpwards` message (step 3) and continues iteration over `n1` downlinks.  Similarly, it walks down to the `n3` and back via the `l2` downlink (steps 4 and 5).  `l3` appears to be IO in-progress downlink, and the checkpointer has to unlock the `n1` page, and wait till IO is completed and continue with `WalkContinue` message (step 6).  After relocking `n1`, checkpointer finds `l3` to be an on-disk downlink and copies it "as is".   Finally, checkpointer walks down to the `n4` and back via the `l4` downlink (steps 7 and 8).  Then `n1` is done, the checkpointer finishes the walk with the `WalkUpwards` message.
 
@@ -25,7 +25,7 @@ Note that the reconstructed state does not contain in-memory downlinks.  In-memo
 
 The picture below represents an example of a checkpoint state.
 
-![Checkpoint state 1](checkpoint_state_1.svg)
+![Checkpoint state 1](images/checkpoint_state_1.svg)
 
 The root page `n1`, internal page `n3`, and leaf page `n8` are currently under checkpointing.  The downlink `l2` is written to the reconstructed state.  The downlink `l3` is the `next downlink` in the reconstructed state.  Its key is known, but the link is not because the corresponding children were not written yet.  Similarly, downlink `l6` is written, downlink `l7` is the `next downlink`, and downlink `l8` is not processed yet.
 
@@ -38,7 +38,7 @@ Let us imagine that the following event happened:
 
 The resulting state is given in the picture below.  Note that the reconstructed page image contains links `l6` and `l7` (as we visited them before the merge) but contains `l8` and the `next downlink` corresponding to `l9` (as we visited those downlinks after the split).
 
-![Checkpoint state 1](checkpoint_state_2.svg)
+![Checkpoint state 1](images/checkpoint_state_2.svg)
 
 Autonomous non-leaf pages
 -------------------------
