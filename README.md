@@ -58,7 +58,7 @@ The key technical differentiations of OrioleDB are as follows:
 
 See [usage](doc/usage.md), [architecture](doc/arch.md), and
 [project structure](doc/structure.md) documentation as well as
-[PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).
+[PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).  To start the development see [OrioleDB development quickstart](doc/dev_quickstart.md).
 
 ## Status
 
