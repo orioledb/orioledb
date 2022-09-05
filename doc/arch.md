@@ -34,7 +34,7 @@ In order to implement this scheme, we have to sacrifice rightlinks.  That would 
 
 Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits.  Righlink exists only between splitting a new page and insertion downlink to the parent.  Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function).  Stepping tree pages right and left become more complex too.  Instead of using rightlinks (and leftlinks) one have to find siblings from parent (see find_right_page() and find_left_page()).  However, this complexity is more than justified by better vertical scalability.
 
-See [concurrency algorithms in OrioleDB B-tree](images/concurrency.md) for details.
+See [concurrency algorithms in OrioleDB B-tree](concurrency.md) for details.
 
 Page structure
 --------------
@@ -96,9 +96,9 @@ Then, checkpointer finished writing page images `7*`, `3*` and `1*` to checkpoin
 
 In general, checkpointing of non-leaf pages is more tricky than described above.  While the checkpointer is writing children of non-leaf page, concurrent splits and merges could happen.  In such cases, we have to reconstruct non-leaf pages based on the state of its children as we met them.  Therefore, we might write to the storage a non-leaf page image, which never existed in the main memory.  Furthermore, we could even write multiple storage pages corresponding to a single main memory page (imagine merges happen above the checkpoint boundary, while splits happen below the checkpoint boundary).  Finally, that is OK, because it reflects how checkpointer wrote the children.
 
-At the moment of time, there could be multiple checkpoints which use different but overlapping sets of blocks.  Therefore, [free space management](images/fsm.md) becomes an untrivial task.
+At the moment of time, there could be multiple checkpoints which use different but overlapping sets of blocks.  Therefore, [free space management](fsm.md) becomes an untrivial task.
 
-See [the detailed description of checkpointing algorithm](images/checkpoint.md).
+See [the detailed description of checkpointing algorithm](checkpoint.md).
 
 Undo log
 --------
@@ -121,7 +121,8 @@ OrioleDB also supports block-level undo records.  The block-level undo records a
 
 The diagram below gives an example of a `compact` block-level undo record.  Here the data pages contains tuples `t1`, `t2` and `t5`.  However, a page image in the undo log contains tuples `t1`, `t2`, `t3`, and `t4`.  That means, when tuples `t3` and `t4` were deleted, we lacked space for a new tuple `t5`.  In order to do this, we made a `compaction` first.  Therefore, we issue a page-level undo record and erase tuples `t3` and `t4` to fit `t5`.
 
-![Block level undo](images/block_level_undo.svg)
+![Block level undo](
+block_level_undo.svg)
 
 OrioleDB has three types of block-level undo records:
 
@@ -129,7 +130,7 @@ OrioleDB has three types of block-level undo records:
 2.  Split undo record: two data pages reference one undo page image,
 3.  Merge undo record: one data page references two undo page images.
 
-OrioleDB uses both circular buffers and block buffers for accessing the undo log.  See [undo log storage](images/buffering.md) for details.
+OrioleDB uses both circular buffers and block buffers for accessing the undo log.  See [undo log storage](buffering.md) for details.
 
 Row-level WAL
 -------------
@@ -152,7 +153,7 @@ OrioleDB implements parallel application of WAL records.  It launches `orioledb.
 
 Queues might be processed at different paces.  In order to evade MVCC anomalies, we assume the transaction to be committed and visible for readers only once all the workers have completed all the pieces of work associated with that transaction.
 
-See [the details about OrioleDB's recovery](images/recovery.md).
+See [the details about OrioleDB's recovery](recovery.md).
 
 System catalog
 --------------
