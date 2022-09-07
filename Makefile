@@ -102,6 +102,7 @@ ISOLATIONCHECKS = btree_print_backend_id \
 				  rightlink \
 				  rll \
 				  rll_2 \
+				  table_lock_test \
 				  uniq
 TESTGRESCHECKS_PART_1 = t/checkpointer_test.py \
 						t/eviction_bgwriter_test.py \
@@ -128,7 +129,11 @@ TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
 						t/checkpoint_update_test.py \
 						t/checkpoint_update_compress_test.py \
 						t/eviction_full_memory_test.py \
-						t/indices_build_test.py
+						t/indices_build_test.py \
+						t/trigger_test.py \
+						t/vacuum_test.py \
+						t/reindex_test.py \
+						t/schema_test.py
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

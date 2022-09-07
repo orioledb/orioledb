@@ -234,7 +234,10 @@ extern OComparator *o_find_comparator(Oid opfamily,
 									  Oid lefttype,
 									  Oid righttype,
 									  Oid collation);
-extern int	o_call_comparator(OComparator *comparator, Datum left, Datum right);
+extern int	o_call_comparator(OComparator *comparator, Datum left,
+							  Datum right);
+extern void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
+										  Oid righttype);
 
 extern EvictedTreeData *read_evicted_data(ORelOids oids, uint32 chkp_num);
 

@@ -179,8 +179,8 @@ o_fill_key_bounds(Datum v, Oid type,
 		IsBinaryCoercible(type, field->inputtype))
 		coercible = true;
 	else
-		comparator = o_find_comparator(field->opfamily,
-									   type, field->inputtype,
+		comparator = o_find_comparator(field->opfamily, type,
+									   field->inputtype,
 									   field->collation);
 
 	if (low != NULL)

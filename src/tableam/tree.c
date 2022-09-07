@@ -731,11 +731,14 @@ o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 			bool		coercible2 = o_bound_is_coercible(bound2, field);
 
 			if (coercible1 && coercible2)
-				res = o_call_comparator(field->comparator, bound1->value, bound2->value);
+				res = o_call_comparator(field->comparator, bound1->value,
+										bound2->value);
 			else if (coercible1)
-				res = -o_call_comparator(bound2->comparator, bound2->value, bound1->value);
+				res = -o_call_comparator(bound2->comparator, bound2->value,
+										 bound1->value);
 			else if (coercible2)
-				res = o_call_comparator(bound1->comparator, bound1->value, bound2->value);
+				res = o_call_comparator(bound1->comparator, bound1->value,
+										bound2->value);
 			else
 				res = o_call_comparator(o_find_comparator(field->opfamily,
 														  bound1->type,

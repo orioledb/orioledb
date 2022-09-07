@@ -31,43 +31,43 @@ CREATE TABLE IF NOT EXISTS o_explain (
 ) USING orioledb;
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					INSERT INTO o_explain (
 						SELECT id, generate_string(1, 3000)
 						FROM generate_series(4501, 4700, 1) id
-					);') as t;
+					); $$) as t;
 
 -- just explain analyze without buffers
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE)
 					SELECT count(*)
-					FROM o_explain;') as t;
+					FROM o_explain; $$) as t;
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN ANALYZE
+FROM query_to_text($$ EXPLAIN ANALYZE
 					SELECT count(*)
-					FROM o_explain;') as t;
+					FROM o_explain; $$) as t;
 
 -- just explain buffers without analyze, fails
 EXPLAIN (BUFFERS TRUE) SELECT count(*) FROM o_explain;
 
 -- test lowecase letters
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('Explain (analyze TRUE, buffers TRUE)
+FROM query_to_text($$ EXPLAIN (analyze TRUE, buffers TRUE)
 					SELECT count(*)
-					FROM o_explain;') as t;
+					FROM o_explain; $$) as t;
 
 -- does not use TOAST tree (does not fetch TOASTed values)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT count(*)
-					FROM o_explain;') as t;
+					FROM o_explain; $$) as t;
 
 -- uses TOAST to fetch values
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT *
-					FROM o_explain ORDER BY val;') as t;
+					FROM o_explain ORDER BY val; $$) as t;
 
 -- table: primary index + secondary index without TOAST
 DROP TABLE o_explain;
@@ -79,23 +79,23 @@ CREATE TABLE o_explain (
 CREATE INDEX o_explain_sec_non_val ON o_explain (val);
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					INSERT INTO o_explain (
 						SELECT id, id + 1
 						FROM generate_series(1, 5000, 1) id
-					);') as t;
+					); $$) as t;
 
 -- use secondary index for scan
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT *
-					FROM o_explain ORDER BY val;') as t;
+					FROM o_explain ORDER BY val; $$) as t;
 
 -- do not use secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT *
-					FROM o_explain;') as t;
+					FROM o_explain; $$) as t;
 
 DROP TABLE o_explain;
 CREATE TABLE o_explain (
@@ -113,44 +113,44 @@ SELECT SUM(val2) FROM o_explain WHERE val2 > 0; -- check sum
 
 -- uses only secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT SUM(val2) FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 
 -- uses only secondary index - primary index is ctid index stored in secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT ctid FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val1 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
-					SELECT val1 FROM o_explain WHERE val2 > 0;') as t;
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					SELECT val1 FROM o_explain WHERE val2 > 0; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000;') as t;
+					AND val2 < 1000; $$) as t;
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
 
 DROP TABLE o_explain;
@@ -170,42 +170,42 @@ SELECT SUM(val2) FROM o_explain WHERE val2 > 0; -- check sum
 
 -- uses only secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT SUM(s.val2) FROM (
 						SELECT val2 FROM o_explain 
 							WHERE val2 > 0 AND val2 < 1000 
 							ORDER BY val2
-					) s;') as t;
+					) s; $$) as t;
 -- uses secondary index, primary key is stored in secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2;') as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val1 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2;') as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t;
 -- uses only secondary index for fetching secondary index value and primary key
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2;') as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2;') as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t;
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2;') as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t;
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2;') as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t;
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
 
 DROP TABLE o_explain;
@@ -223,24 +223,24 @@ INSERT INTO o_explain (SELECT id, generate_string(1, 3000), id FROM generate_ser
 
 -- do not use TOAST index for this queries (UPDATE TOAST with same values)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
-					UPDATE o_explain SET val = val + 1;') as t;
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+					UPDATE o_explain SET val = val + 1; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					INSERT INTO o_explain
 					(SELECT id, generate_string(1, 3000), id
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
-					SET val = o_explain.val + 1;') as t;
+					SET val = o_explain.val + 1; $$) as t;
 
 -- UPDATE TOAST with equal values (only TOAST reads for compare values)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
+FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					INSERT INTO o_explain
 					(SELECT id, generate_string(1, 3000), id
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
-					SET val = o_explain.val + 1, t = EXCLUDED.t;') as t;
+					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t;
 
 CREATE TABLE o_test_explain_verbose_rowid (
   val_1 int,
@@ -262,63 +262,88 @@ INSERT INTO o_explain_formats (SELECT v, v FROM generate_series(1, 10) v);
 -- Bitmap Heap Scan all formats with all posible fields BEGIN
 SET enable_indexscan = OFF;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 RESET enable_indexscan;
 -- Bitmap Heap Scan all formats with all posible fields END
 
 -- Index Scan all formats with all posible fields BEGIN
 SET enable_indexonlyscan = OFF;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 RESET enable_indexonlyscan;
 -- Index Scan  all formats with all posible fields END
 
 -- Index Only Scan all formats with all posible fields BEGIN
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-	FROM query_to_text('EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
+	FROM query_to_text($$ EXPLAIN (FORMAT XML, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
-								WHERE val > 5 ORDER BY val;') as t;
+								WHERE val > 5 ORDER BY val; $$) as t;
 -- Index Only Scan all formats with all posible fields END
 
+CREATE OR REPLACE FUNCTION explain_as_json(val text) RETURNS json
+LANGUAGE plpgsql AS $$
+DECLARE
+	a json;
+BEGIN
+	EXECUTE val INTO STRICT a;
+	RETURN a;
+END;$$;
+
+CREATE TABLE o_explain_json (
+	val_1 int unique
+) USING orioledb;
+
+INSERT INTO o_explain_json(val_1) VALUES (1), (2);
+SELECT explain_as_json($$ 
+		   EXPLAIN (FORMAT json, BUFFERS, ANALYZE)
+			   SELECT * FROM o_explain_json ORDER BY val_1;
+	   $$)->0->'Plan'->'Actual Rows';
+DELETE FROM o_explain_json;
+SELECT explain_as_json($$ 
+		   EXPLAIN (FORMAT json, BUFFERS, ANALYZE)
+			   SELECT * FROM o_explain_json ORDER BY val_1;
+	   $$)->0->'Plan'->'Actual Rows';
+
+DROP FUNCTION explain_as_json;
 DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;

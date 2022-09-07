@@ -291,4 +291,12 @@ UPDATE o_test_update_set_renamed_column SET val_3 = 5;
 
 SELECT * FROM o_test_update_set_renamed_column;
 
+CREATE TABLE o_test_inherits_1 (
+  val_1 int PRIMARY KEY
+) USING orioledb;
+
+CREATE TABLE o_test_inherits_2 (
+	val_2 int
+) INHERITS (o_test_inherits_1) USING orioledb;
+
 DROP EXTENSION orioledb CASCADE;

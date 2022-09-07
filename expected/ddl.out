@@ -761,11 +761,19 @@ SELECT * FROM o_test_update_set_renamed_column;
      1 |     5
 (1 row)
 
+CREATE TABLE o_test_inherits_1 (
+  val_1 int PRIMARY KEY
+) USING orioledb;
+CREATE TABLE o_test_inherits_2 (
+	val_2 int
+) INHERITS (o_test_inherits_1) USING orioledb;
+ERROR:  INHERITS is not supported for orioledb tables.
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 6 other objects
+NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
 drop cascades to table o_unexisting_column
 drop cascades to table o_test_unique_on_conflict
 drop cascades to table o_test_update_set_renamed_column
+drop cascades to table o_test_inherits_1

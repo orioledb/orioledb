@@ -1796,10 +1796,13 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		cstmt->options = extract_compress_rel_option(cstmt->options,
 														"toast_compress",
 														&toast_compress);
+		validate_compress(compress, "Default");
+		validate_compress(primary_compress, "Primary index");
+		validate_compress(toast_compress, "TOAST");
+
+		if (cstmt->inhRelations != NIL)
+			elog(ERROR, "INHERITS is not supported for orioledb tables.");
 	}
-	validate_compress(compress, "Default");
-	validate_compress(primary_compress, "Primary index");
-	validate_compress(toast_compress, "TOAST");
 
 	/* Create the table itself */
 	address = DefineRelation(cstmt, relkind, InvalidOid, NULL,

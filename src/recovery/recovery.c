@@ -753,7 +753,7 @@ recovery_map_oxid_csn(OXid oxid, bool *found)
 void
 recovery_init(int worker_id)
 {
-	HASHCTL		ctl;
+	HASHCTL			ctl;
 
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(OXid);
