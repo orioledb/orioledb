@@ -49,146 +49,149 @@ typedef uint32 OSysCacheHashKey;	/* GetSysCacheHashValue result type */
 typedef struct OSysCache OSysCache;
 typedef struct OSysCacheHashTreeEntry
 {
-	OSysCache *sys_cache;		/* If NULL only link stored */
+	OSysCache  *sys_cache;		/* If NULL only link stored */
 	Pointer		entry;
 } OSysCacheHashTreeEntry;
 typedef struct OSysCacheHashEntry
 {
 	OSysCacheHashKey key;
-	List	   *tree_entries;	/* list of OSysCacheHashTreeEntry-s
-								   that used because we store entries for all
-								   sys caches in same fastcache for simpler
-								   invalidation of dependent objects */
+	List	   *tree_entries;	/* list of OSysCacheHashTreeEntry-s that used
+								 * because we store entries for all sys caches
+								 * in same fastcache for simpler invalidation
+								 * of dependent objects */
 } OSysCacheHashEntry;
 
 
-typedef struct OSysCacheKeyCommon {
+typedef struct OSysCacheKeyCommon
+{
 	Oid			datoid;
 	XLogRecPtr	lsn;
 	bool		deleted;
 } OSysCacheKeyCommon;
 
-typedef struct OSysCacheKey {
-	OSysCacheKeyCommon	common;
-	Datum				keys[FLEXIBLE_ARRAY_MEMBER];
+typedef struct OSysCacheKey
+{
+	OSysCacheKeyCommon common;
+	Datum		keys[FLEXIBLE_ARRAY_MEMBER];
 } OSysCacheKey;
 
-typedef struct OSysCacheBound {
-	OSysCacheKey   *key;
-	int				nkeys;
+typedef struct OSysCacheBound
+{
+	OSysCacheKey *key;
+	int			nkeys;
 } OSysCacheBound;
 
 /* Key of entry stored in non-TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheKeyCommon	common;
-	Datum				keys[1];
+	OSysCacheKeyCommon common;
+	Datum		keys[1];
 } OSysCacheKey1;
 
 typedef struct
 {
-	OSysCacheKeyCommon	common;
-	Datum				keys[2];
-} OSysCacheKey2;
+	OSysCacheKeyCommon common;
+	Datum		keys[2];
+}			OSysCacheKey2;
 
 typedef struct
 {
-	OSysCacheKeyCommon	common;
-	Datum				keys[3];
+	OSysCacheKeyCommon common;
+	Datum		keys[3];
 } OSysCacheKey3;
 
 typedef struct
 {
-	OSysCacheKeyCommon	common;
-	Datum				keys[4];
+	OSysCacheKeyCommon common;
+	Datum		keys[4];
 } OSysCacheKey4;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunkKeyCommon
 {
-	uint32			offset;
+	uint32		offset;
 } OSysCacheToastChunkKeyCommon;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheToastChunkKeyCommon	common;
-	OSysCacheKey					sys_cache_key;
+	OSysCacheToastChunkKeyCommon common;
+	OSysCacheKey sys_cache_key;
 } OSysCacheToastChunkKey;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheToastChunkKeyCommon	common;
-	OSysCacheKey1					sys_cache_key;
-} OSysCacheToastChunkKey1;
+	OSysCacheToastChunkKeyCommon common;
+	OSysCacheKey1 sys_cache_key;
+}			OSysCacheToastChunkKey1;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheToastChunkKeyCommon	common;
-	OSysCacheKey2					sys_cache_key;
-} OSysCacheToastChunkKey2;
+	OSysCacheToastChunkKeyCommon common;
+	OSysCacheKey2 sys_cache_key;
+}			OSysCacheToastChunkKey2;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheToastChunkKeyCommon	common;
-	OSysCacheKey3					sys_cache_key;
-} OSysCacheToastChunkKey3;
+	OSysCacheToastChunkKeyCommon common;
+	OSysCacheKey3 sys_cache_key;
+}			OSysCacheToastChunkKey3;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheToastChunkKeyCommon	common;
-	OSysCacheKey4					sys_cache_key;
-} OSysCacheToastChunkKey4;
+	OSysCacheToastChunkKeyCommon common;
+	OSysCacheKey4 sys_cache_key;
+}			OSysCacheToastChunkKey4;
 
 /* Key by which entry searched in TOAST sys cache tree */
 typedef struct
 {
-	OSysCacheToastChunkKeyCommon	common;
-	OSysCacheKey				   *key;
-	bool							lsn_cmp;
+	OSysCacheToastChunkKeyCommon common;
+	OSysCacheKey *key;
+	bool		lsn_cmp;
 } OSysCacheToastKeyBound;
 
 /* Chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunkCommon
 {
-	uint32	dataLength;
+	uint32		dataLength;
 } OSysCacheToastChunkCommon;
 
 /* Chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunk1
 {
-	OSysCacheToastChunkKey1		key;
-	OSysCacheToastChunkCommon	common;
-	char						data[FLEXIBLE_ARRAY_MEMBER];
-} OSysCacheToastChunk1;
+	OSysCacheToastChunkKey1 key;
+	OSysCacheToastChunkCommon common;
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+}			OSysCacheToastChunk1;
 
 /* Chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunk2
 {
-	OSysCacheToastChunkKey2		key;
-	OSysCacheToastChunkCommon	common;
-	char						data[FLEXIBLE_ARRAY_MEMBER];
-} OSysCacheToastChunk2;
+	OSysCacheToastChunkKey2 key;
+	OSysCacheToastChunkCommon common;
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+}			OSysCacheToastChunk2;
 
 /* Chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunk3
 {
-	OSysCacheToastChunkKey3		key;
-	OSysCacheToastChunkCommon	common;
-	char						data[FLEXIBLE_ARRAY_MEMBER];
-} OSysCacheToastChunk3;
+	OSysCacheToastChunkKey3 key;
+	OSysCacheToastChunkCommon common;
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+}			OSysCacheToastChunk3;
 
 /* Chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunk4
 {
-	OSysCacheToastChunkKey4		key;
-	OSysCacheToastChunkCommon	common;
-	char						data[FLEXIBLE_ARRAY_MEMBER];
-} OSysCacheToastChunk4;
+	OSysCacheToastChunkKey4 key;
+	OSysCacheToastChunkCommon common;
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+}			OSysCacheToastChunk4;
 
 typedef struct OSysCacheFuncs
 {
@@ -206,8 +209,8 @@ typedef struct OSysCacheFuncs
 
 	/*
 	 * Should be always set. Used inside o_sys_cache_add_if_needed and
-	 * o_sys_cache_update_if_needed. On add entry_ptr is NULL, entry should
-	 * be created and returned.
+	 * o_sys_cache_update_if_needed. On add entry_ptr is NULL, entry should be
+	 * created and returned.
 	 */
 	void		(*fill_entry) (Pointer *entry_ptr, OSysCacheKey *key,
 							   Pointer arg);
@@ -229,20 +232,20 @@ typedef struct OSysCacheFuncs
 
 typedef struct OSysCache
 {
-	int					sys_tree_num;
-	bool				is_toast;
-	bool				update_if_exist;
-	Oid					cc_indexoid;
-	int					cacheId;
-	int					nkeys;
-	MemoryContext		mcxt;	/* context where stored entries from fast
+	int			sys_tree_num;
+	bool		is_toast;
+	bool		update_if_exist;
+	Oid			cc_indexoid;
+	int			cacheId;
+	int			nkeys;
+	MemoryContext mcxt;			/* context where stored entries from fast
 								 * cache */
-	HTAB			   *fast_cache;		/* contains OSysCacheHashEntry-s */
-	HTAB			   *added_hash;		/* contains OSysCacheKey4-s */
-	CCHashFN			cc_hashfunc[CATCACHE_MAXKEYS];
-	OSysCacheHashKey	last_fast_cache_key;
-	Pointer				last_fast_cache_entry;
-	OSysCacheFuncs	   *funcs;
+	HTAB	   *fast_cache;		/* contains OSysCacheHashEntry-s */
+	HTAB	   *added_hash;		/* contains OSysCacheKey4-s */
+	CCHashFN	cc_hashfunc[CATCACHE_MAXKEYS];
+	OSysCacheHashKey last_fast_cache_key;
+	Pointer		last_fast_cache_entry;
+	OSysCacheFuncs *funcs;
 } OSysCache;
 
 /*
@@ -252,8 +255,8 @@ extern void o_sys_caches_init(void);
 
 extern OSysCache *o_create_sys_cache(int sys_tree_num, bool is_toast,
 									 bool update_if_exist,
-									 Oid cc_indexoid, /* cacheinfo indoid */
-									 int cacheId, /* cacheinfo array index */
+									 Oid cc_indexoid,	/* cacheinfo indoid */
+									 int cacheId,	/* cacheinfo array index */
 									 int nkeys,
 									 Oid *keytypes,
 									 HTAB *fast_cache,
@@ -278,23 +281,23 @@ extern void o_sys_caches_add_start(void);
 extern void o_sys_caches_add_finish(void);
 
 extern int	o_sys_cache_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
-							 void *p2, BTreeKeyType k2);
+							void *p2, BTreeKeyType k2);
 extern void o_sys_cache_key_print(BTreeDescr *desc, StringInfo buf,
-								   OTuple key_tup, Pointer arg);
+								  OTuple key_tup, Pointer arg);
 extern JsonbValue *o_sys_cache_key_to_jsonb(BTreeDescr *desc, OTuple tup,
-											 JsonbParseState **state);
+											JsonbParseState **state);
 
 extern int	o_sys_cache_toast_chunk_length(BTreeDescr *desc, OTuple tuple);
 extern int	o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1,
-								   BTreeKeyType k1, void *p2,
-								   BTreeKeyType k2);
+								  BTreeKeyType k1, void *p2,
+								  BTreeKeyType k2);
 extern void o_sys_cache_toast_key_print(BTreeDescr *desc, StringInfo buf,
-										 OTuple tup, Pointer arg);
+										OTuple tup, Pointer arg);
 extern JsonbValue *o_sys_cache_toast_key_to_jsonb(BTreeDescr *desc,
-												   OTuple tup,
-												   JsonbParseState **state);
+												  OTuple tup,
+												  JsonbParseState **state);
 extern void o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
-										 OTuple tup, Pointer arg);
+										OTuple tup, Pointer arg);
 
 #define O_SYS_CACHE_INIT_FUNC(cache_name) \
 void o_##cache_name##_init(MemoryContext mcxt, HTAB *fastcache)
@@ -370,7 +373,7 @@ o_sys_cache_set_datoid_lsn(XLogRecPtr *cur_lsn, Oid *datoid)
 {
 	if (cur_lsn)
 		*cur_lsn = is_recovery_in_progress() ? GetXLogReplayRecPtr(NULL) :
-											   GetXLogWriteRecPtr();
+			GetXLogWriteRecPtr();
 
 	if (datoid)
 	{
@@ -397,7 +400,7 @@ typedef struct OEnum OEnum;
 
 typedef struct
 {
-	OSysCacheKey1	key;
+	OSysCacheKey1 key;
 	/* OID of owning enum type that cached in o_enum_cache */
 	Oid			enumtypid;
 } OEnumOid;
@@ -412,13 +415,13 @@ extern void o_enumoid_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 /* o_range_cache.c */
 typedef struct
 {
-	OSysCacheKey1	key;
+	OSysCacheKey1 key;
 	/* cached TypeCacheEntry->rngelemtype oid */
-	Oid				elem_type;
+	Oid			elem_type;
 	/* cached TypeCacheEntry->rng_collation */
-	Oid				rng_collation;
+	Oid			rng_collation;
 	/* cached TypeCacheEntry->rng_cmp_proc_finfo and oid */
-	Oid				rng_cmp_oid;
+	Oid			rng_cmp_oid;
 } ORange;
 
 O_SYS_CACHE_DECLS(range_cache, ORange, 1);
@@ -431,10 +434,11 @@ extern void o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 /* o_class_cache.c */
 typedef struct OClass OClass;
 
-typedef struct OClassArg {
-	bool	column_drop;
-	bool	sys_table;
-	int		dropped;
+typedef struct OClassArg
+{
+	bool		column_drop;
+	bool		sys_table;
+	int			dropped;
 } OClassArg;
 
 O_SYS_CACHE_DECLS(class_cache, OClass, 1);
@@ -444,14 +448,15 @@ extern TupleDesc o_class_cache_search_tupdesc(Oid cc_reloid);
 /* o_opclass_cache.c */
 typedef struct OOpclass
 {
-	OSysCacheKey1	key;
-	Oid				opfamily;
-	Oid				inputtype;
+	OSysCacheKey1 key;
+	Oid			opfamily;
+	Oid			inputtype;
+
 	/*
 	 * We do not want to set FmgrInfo.fn_oid as random value.
 	 */
-	Oid				cmpOid;
-	Oid				ssupOid;
+	Oid			cmpOid;
+	Oid			ssupOid;
 } OOpclass;
 
 O_SYS_CACHE_DECLS(opclass_cache, OOpclass, 1);
@@ -475,34 +480,34 @@ extern HeapTuple o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid);
 /* o_type_cache.c */
 typedef struct OType
 {
-	OSysCacheKey1	key;
-	NameData		typname;
-	int16			typlen;
-	bool			typbyval;
-	char			typalign;
-	char			typstorage;
-	Oid				typcollation;
-	Oid				typrelid;
-	char			typtype;
-	char			typcategory;
-	bool			typispreferred;
-	bool			typisdefined;
-	regproc			typinput;
-	regproc			typoutput;
-	regproc			typreceive;
-	regproc			typsend;
-	Oid				typelem;
-	char			typdelim;
-	Oid				default_opclass;
+	OSysCacheKey1 key;
+	NameData	typname;
+	int16		typlen;
+	bool		typbyval;
+	char		typalign;
+	char		typstorage;
+	Oid			typcollation;
+	Oid			typrelid;
+	char		typtype;
+	char		typcategory;
+	bool		typispreferred;
+	bool		typisdefined;
+	regproc		typinput;
+	regproc		typoutput;
+	regproc		typreceive;
+	regproc		typsend;
+	Oid			typelem;
+	char		typdelim;
+	Oid			default_opclass;
 } OType;
 
 O_SYS_CACHE_DECLS(type_cache, OType, 1);
-extern Oid o_type_cache_get_typrelid(Oid typeoid);
+extern Oid	o_type_cache_get_typrelid(Oid typeoid);
 extern HeapTuple o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid);
 extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 								   char *typalign, char *typstorage,
 								   Oid *typcollation);
-extern Oid o_type_cache_default_opclass(Oid typeoid);
+extern Oid	o_type_cache_default_opclass(Oid typeoid);
 extern TypeCacheEntry *o_type_elements_cmp_hook(Oid elemtype,
 												MemoryContext mcxt);
 extern void o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
@@ -517,8 +522,8 @@ extern HeapTuple o_aggregate_cache_search_htup(TupleDesc tupdesc, Oid aggfnoid);
 /* o_operator_cache.c */
 typedef struct OOperator
 {
-	OSysCacheKey1	key;
-	regproc			oprcode;
+	OSysCacheKey1 key;
+	regproc		oprcode;
 } OOperator;
 
 O_SYS_CACHE_DECLS(operator_cache, OOperator, 1);
@@ -529,12 +534,12 @@ extern void o_operator_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 /* o_amop_cache.c */
 typedef struct OAmOp
 {
-	OSysCacheKey3	key;
-	Oid				amopmethod;
-	int16			amopstrategy;
-	Oid				amopfamily;
-	Oid				amoplefttype;
-	Oid				amoprighttype;
+	OSysCacheKey3 key;
+	Oid			amopmethod;
+	int16		amopstrategy;
+	Oid			amopfamily;
+	Oid			amoplefttype;
+	Oid			amoprighttype;
 } OAmOp;
 
 O_SYS_CACHE_DECLS(amop_cache, OAmOp, 3);
@@ -547,8 +552,8 @@ extern void o_amop_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 /* o_amproc_cache.c */
 typedef struct OAmProc
 {
-	OSysCacheKey4	key;
-	regproc			amproc;
+	OSysCacheKey4 key;
+	regproc		amproc;
 } OAmProc;
 
 O_SYS_CACHE_DECLS(amproc_cache, OAmProc, 4);

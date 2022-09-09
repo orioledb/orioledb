@@ -496,9 +496,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot, EState *estate,
 	csn = arg->csn;
 
 	mres.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
-						 (arg->oxid == get_current_oxid_if_any()) &&
-						 UndoLocationIsValid(arg->tup_undo_location) &&
-						 (arg->tup_undo_location >= saved_undo_location);
+		(arg->oxid == get_current_oxid_if_any()) &&
+		UndoLocationIsValid(arg->tup_undo_location) &&
+		(arg->tup_undo_location >= saved_undo_location);
 
 	if (mres.success && mres.oldTuple != NULL)
 	{
@@ -563,9 +563,9 @@ o_tbl_delete(OTableDescr *descr, EState *estate, OBTreeKeyBound *primary_key,
 								  csn, hint, arg);
 
 	result.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
-						   (arg->oxid == get_current_oxid_if_any()) &&
-						   UndoLocationIsValid(arg->tup_undo_location) &&
-						   (arg->tup_undo_location >= saved_undo_location);
+		(arg->oxid == get_current_oxid_if_any()) &&
+		UndoLocationIsValid(arg->tup_undo_location) &&
+		(arg->tup_undo_location >= saved_undo_location);
 
 	if (result.success && result.oldTuple != NULL)
 	{

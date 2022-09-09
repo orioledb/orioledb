@@ -70,11 +70,11 @@ typedef struct TypeCacheEnumData
 /* Copied fields of TypeCacheEnumData */
 struct OEnum
 {
-	OSysCacheKey1	key;
-	Oid				bitmap_base; /* OID corresponding to bit 0 of bitmapset */
-	Bitmapset	   *sorted_values;	/* Set of OIDs known to be in order */
-	int				num_values;	/* total number of values in enum */
-	EnumItem	   *enum_values;
+	OSysCacheKey1 key;
+	Oid			bitmap_base;	/* OID corresponding to bit 0 of bitmapset */
+	Bitmapset  *sorted_values;	/* Set of OIDs known to be in order */
+	int			num_values;		/* total number of values in enum */
+	EnumItem   *enum_values;
 };
 
 O_SYS_CACHE_FUNCS(enum_cache, OEnum, 1);
@@ -100,7 +100,8 @@ static OSysCacheFuncs enumoid_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(enum_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	enum_cache = o_create_sys_cache(SYS_TREES_ENUM_CACHE,
 									true, false,
 									TypeOidIndexId, TYPEOID, 1,
@@ -111,7 +112,8 @@ O_SYS_CACHE_INIT_FUNC(enum_cache)
 
 O_SYS_CACHE_INIT_FUNC(enumoid_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	enumoid_cache = o_create_sys_cache(SYS_TREES_ENUMOID_CACHE,
 									   false, false,
 									   EnumOidIndexId, ENUMOID, 1,
@@ -281,7 +283,7 @@ o_enum_cmp_internal_hook(Oid enum_oid, MemoryContext mcxt)
 	enumoid = o_enumoid_cache_search(datoid, enum_oid, cur_lsn,
 									 enumoid_cache->nkeys);
 	o_enum = o_enum_cache_search(datoid, enumoid->enumtypid, cur_lsn,
-									 enum_cache->nkeys);
+								 enum_cache->nkeys);
 	if (o_enum)
 	{
 		TypeCacheEnumData *enumData;

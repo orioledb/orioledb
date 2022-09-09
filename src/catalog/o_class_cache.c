@@ -40,19 +40,19 @@
 static OSysCache *class_cache = NULL;
 
 static Pointer o_class_cache_serialize_entry(Pointer entry,
-											  int *len);
+											 int *len);
 static Pointer o_class_cache_deserialize_entry(MemoryContext mcxt,
-												Pointer data,
-												Size length);
+											   Pointer data,
+											   Size length);
 static void o_class_cache_free_entry(Pointer entry);
 static void o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 									 Pointer arg);
 
 struct OClass
 {
-	OSysCacheKey1	key;
-	Oid				reltype;
-	int				natts;
+	OSysCacheKey1 key;
+	Oid			reltype;
+	int			natts;
 	FormData_pg_attribute *attrs;
 };
 
@@ -71,7 +71,8 @@ static OSysCacheFuncs class_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(class_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	class_cache = o_create_sys_cache(SYS_TREES_CLASS_CACHE,
 									 true, true,
 									 ClassOidIndexId, RELOID, 1,
@@ -83,15 +84,15 @@ O_SYS_CACHE_INIT_FUNC(class_cache)
 void
 o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	Relation			rel;
-	MemoryContext		prev_context;
-	int					i;
-	Size				len;
-	OClass			   *o_class = (OClass *) *entry_ptr;
-	OClassArg		   *carg = (OClassArg *) arg;
-	bool				sys_cache;
-	int					processed = 0;
-	Oid					classoid = DatumGetObjectId(key->keys[0]);
+	Relation	rel;
+	MemoryContext prev_context;
+	int			i;
+	Size		len;
+	OClass	   *o_class = (OClass *) *entry_ptr;
+	OClassArg  *carg = (OClassArg *) arg;
+	bool		sys_cache;
+	int			processed = 0;
+	Oid			classoid = DatumGetObjectId(key->keys[0]);
 
 	sys_cache = carg && !carg->column_drop && carg->sys_table;
 
@@ -101,8 +102,8 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	len = rel->rd_att->natts * sizeof(FormData_pg_attribute);
 	if (o_class != NULL)		/* Existed o_class updated */
 	{
-		o_class->attrs = (FormData_pg_attribute *)repalloc(o_class->attrs,
-														   len);
+		o_class->attrs = (FormData_pg_attribute *) repalloc(o_class->attrs,
+															len);
 		memset(o_class->attrs, 0, len);
 	}
 	else
@@ -115,9 +116,10 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_class->natts = rel->rd_att->natts;
 	for (i = 0; i < o_class->natts; i++)
 	{
-		bool						process;
-		FormData_pg_attribute	   *class_attr,
-								   *typcache_attr;
+		bool		process;
+		FormData_pg_attribute *class_attr,
+				   *typcache_attr;
+
 		class_attr = &o_class->attrs[i];
 		typcache_attr = &rel->rd_att->attrs[i];
 
@@ -143,8 +145,8 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		class_attr->attcollation = typcache_attr->attcollation;
 
 		class_attr->attisdropped = typcache_attr->attisdropped ||
-								   (carg && carg->column_drop &&
-									carg->dropped - 1 == i);
+			(carg && carg->column_drop &&
+			 carg->dropped - 1 == i);
 
 		process = !class_attr->attisdropped && !sys_cache;
 		if (process)
@@ -162,7 +164,7 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 void
 o_class_cache_free_entry(Pointer entry)
 {
-	OClass    *o_class = (OClass *) entry;
+	OClass	   *o_class = (OClass *) entry;
 
 	pfree(o_class->attrs);
 	pfree(o_class);
@@ -172,7 +174,7 @@ Pointer
 o_class_cache_serialize_entry(Pointer entry, int *len)
 {
 	StringInfoData str;
-	OClass    *o_class = (OClass *) entry;
+	OClass	   *o_class = (OClass *) entry;
 
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_class,
@@ -189,7 +191,7 @@ Pointer
 o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 {
 	Pointer		ptr = data;
-	OClass    *o_class = (OClass *) data;
+	OClass	   *o_class = (OClass *) data;
 	int			len;
 
 	o_class = (OClass *) palloc(sizeof(OClass));
@@ -210,10 +212,10 @@ o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 TupleDesc
 o_class_cache_search_tupdesc(Oid cc_reloid)
 {
-	TupleDesc		result = NULL;
-	Oid				datoid;
-	XLogRecPtr		cur_lsn;
-	OClass		   *o_class;
+	TupleDesc	result = NULL;
+	Oid			datoid;
+	XLogRecPtr	cur_lsn;
+	OClass	   *o_class;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 
@@ -231,9 +233,9 @@ o_class_cache_search_tupdesc(Oid cc_reloid)
 TupleDesc
 o_record_cmp_hook(Oid type_id, MemoryContext mcxt)
 {
-	TupleDesc		result = NULL;
-	Oid				reloid;
-	MemoryContext	prev_context = MemoryContextSwitchTo(mcxt);
+	TupleDesc	result = NULL;
+	Oid			reloid;
+	MemoryContext prev_context = MemoryContextSwitchTo(mcxt);
 
 	reloid = o_type_cache_get_typrelid(type_id);
 

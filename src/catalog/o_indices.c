@@ -624,12 +624,12 @@ fillFixedFormatSpec(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 void
 o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 {
-	int				i;
-	int				maxTableAttnum = 0;
-	uint16		   *primary_init_nfields = NULL;
-	ListCell	   *lc;
-	MemoryContext	mcxt,
-					old_mcxt;
+	int			i;
+	int			maxTableAttnum = 0;
+	uint16	   *primary_init_nfields = NULL;
+	ListCell   *lc;
+	MemoryContext mcxt,
+				old_mcxt;
 
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
@@ -754,7 +754,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 		expr_state = ExecInitExpr(node, NULL);
 
 		descr->expressions_state = lappend(descr->expressions_state,
-											expr_state);
+										   expr_state);
 	}
 	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();

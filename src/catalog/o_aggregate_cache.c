@@ -35,26 +35,26 @@ static OSysCache *aggregate_cache = NULL;
 
 struct OAggregate
 {
-	OSysCacheKey1	key;
-	regproc			aggfinalfn;
-	regproc			aggserialfn;
-	regproc			aggdeserialfn;
-	bool			aggfinalextra;
-	regproc			aggcombinefn;
-	regproc			aggtransfn;
-	char			aggfinalmodify;
-	bool			aggmfinalextra;
-	regproc			aggmfinalfn;
-	char			aggmfinalmodify;
-	regproc			aggminvtransfn;
-	regproc			aggmtransfn;
-	Oid				aggmtranstype;
-	Oid				aggtranstype;
-	bool			has_initval;
-	bool			has_minitval;
+	OSysCacheKey1 key;
+	regproc		aggfinalfn;
+	regproc		aggserialfn;
+	regproc		aggdeserialfn;
+	bool		aggfinalextra;
+	regproc		aggcombinefn;
+	regproc		aggtransfn;
+	char		aggfinalmodify;
+	bool		aggmfinalextra;
+	regproc		aggmfinalfn;
+	char		aggmfinalmodify;
+	regproc		aggminvtransfn;
+	regproc		aggmtransfn;
+	Oid			aggmtranstype;
+	Oid			aggtranstype;
+	bool		has_initval;
+	bool		has_minitval;
 
-	char		   *agginitval;
-	char		   *aggminitval;
+	char	   *agginitval;
+	char	   *aggminitval;
 };
 
 static void o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
@@ -63,6 +63,7 @@ static void o_aggregate_cache_free_entry(Pointer entry);
 static Pointer o_aggregate_cache_serialize_entry(Pointer entry, int *len);
 static Pointer o_aggregate_cache_deserialize_entry(MemoryContext mcxt,
 												   Pointer data, Size length);
+
 O_SYS_CACHE_FUNCS(aggregate_cache, OAggregate, 1);
 
 static OSysCacheFuncs aggregate_cache_funcs =
@@ -78,7 +79,8 @@ static OSysCacheFuncs aggregate_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(aggregate_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	aggregate_cache = o_create_sys_cache(SYS_TREES_AGG_CACHE,
 										 true, false,
 										 AggregateFnoidIndexId, AGGFNOID, 1,
@@ -92,13 +94,13 @@ void
 o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 							 Pointer arg)
 {
-	HeapTuple			aggtup;
-	Form_pg_aggregate	aggform;
-	OAggregate		   *o_agg = (OAggregate *) *entry_ptr;
-	MemoryContext		prev_context;
-	Datum				textInitVal;
-	bool				initValueIsNull;
-	Oid					aggfnoid = DatumGetObjectId(key->keys[0]);
+	HeapTuple	aggtup;
+	Form_pg_aggregate aggform;
+	OAggregate *o_agg = (OAggregate *) *entry_ptr;
+	MemoryContext prev_context;
+	Datum		textInitVal;
+	bool		initValueIsNull;
+	Oid			aggfnoid = DatumGetObjectId(key->keys[0]);
 
 	aggtup = SearchSysCache1(AGGFNOID, key->keys[0]);
 	if (!HeapTupleIsValid(aggtup))
@@ -106,7 +108,7 @@ o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	aggform = (Form_pg_aggregate) GETSTRUCT(aggtup);
 
 	prev_context = MemoryContextSwitchTo(aggregate_cache->mcxt);
-	if (o_agg != NULL)		/* Existed o_agg updated */
+	if (o_agg != NULL)			/* Existed o_agg updated */
 	{
 		Assert(false);
 	}
@@ -161,7 +163,7 @@ o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 void
 o_aggregate_cache_free_entry(Pointer entry)
 {
-	OAggregate	   *o_agg = (OAggregate *) entry;
+	OAggregate *o_agg = (OAggregate *) entry;
 
 	if (o_agg->has_initval)
 		pfree(o_agg->agginitval);
@@ -173,8 +175,8 @@ o_aggregate_cache_free_entry(Pointer entry)
 Pointer
 o_aggregate_cache_serialize_entry(Pointer entry, int *len)
 {
-	StringInfoData	str;
-	OAggregate	   *o_agg = (OAggregate *) entry;
+	StringInfoData str;
+	OAggregate *o_agg = (OAggregate *) entry;
 
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_agg,
@@ -192,9 +194,9 @@ Pointer
 o_aggregate_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 									Size length)
 {
-	Pointer			ptr = data;
-	OAggregate	   *o_agg;
-	int				len;
+	Pointer		ptr = data;
+	OAggregate *o_agg;
+	int			len;
 
 	o_agg = (OAggregate *) palloc(sizeof(OAggregate));
 	len = offsetof(OAggregate, agginitval);
@@ -213,12 +215,12 @@ o_aggregate_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 HeapTuple
 o_aggregate_cache_search_htup(TupleDesc tupdesc, Oid aggfnoid)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	HeapTuple		result = NULL;
-	Datum			values[Natts_pg_aggregate] = {0};
-	bool			nulls[Natts_pg_aggregate] = {0};
-	OAggregate	   *o_agg;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_aggregate] = {0};
+	bool		nulls[Natts_pg_aggregate] = {0};
+	OAggregate *o_agg;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_agg = o_aggregate_cache_search(datoid, aggfnoid, cur_lsn,

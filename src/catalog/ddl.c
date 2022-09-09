@@ -395,7 +395,7 @@ static PlannedStmt *
 orioledb_planner_hook(Query *parse, const char *query_string,
 					  int cursorOptions, ParamListInfo boundParams)
 {
-	uint32	depth;
+	uint32		depth;
 
 	depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth, (Datum) 0));
 	first_saved_undo_location = first_saved_undo_location || (depth == 0);
@@ -1064,9 +1064,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	}
 	else if (IsA(pstmt->utilityStmt, CreateTableAsStmt))
 	{
-		CreateTableAsStmt	   *stmt = (CreateTableAsStmt *) pstmt->utilityStmt;
-		bool					create = false,
-								orioledb;
+		CreateTableAsStmt *stmt = (CreateTableAsStmt *) pstmt->utilityStmt;
+		bool		create = false,
+					orioledb;
 
 		if (stmt->into->accessMethod)
 			orioledb = (strcmp(stmt->into->accessMethod, "orioledb") == 0);
@@ -1082,17 +1082,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		/* Check if the relation exists or not */
 		if (create)
 		{
-			ParseState			   *pstate;
-			Query				   *query = castNode(Query, stmt->query);
-			IntoClause			   *into = stmt->into;
-			bool					is_matview = (into->viewQuery != NULL);
-			Oid						save_userid = InvalidOid;
-			int						save_sec_context = 0;
-			int						save_nestlevel = 0;
+			ParseState *pstate;
+			Query	   *query = castNode(Query, stmt->query);
+			IntoClause *into = stmt->into;
+			bool		is_matview = (into->viewQuery != NULL);
+			Oid			save_userid = InvalidOid;
+			int			save_sec_context = 0;
+			int			save_nestlevel = 0;
 
 			/*
-			* Create the tuple receiver object and insert info it will need
-			*/
+			 * Create the tuple receiver object and insert info it will need
+			 */
 			dest = OCreateIntoRelDestReceiver(into);
 
 			pstate = make_parsestate(NULL);
@@ -1100,8 +1100,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			pstate->p_queryEnv = env;
 
 			/*
-			 * The contained Query could be a SELECT, or an EXECUTE utility command.
-			 * If the latter, we just pass it off to ExecuteQuery.
+			 * The contained Query could be a SELECT, or an EXECUTE utility
+			 * command. If the latter, we just pass it off to ExecuteQuery.
 			 */
 			if (query->commandType == CMD_UTILITY &&
 				IsA(query->utilityStmt, ExecuteStmt))
@@ -1114,69 +1114,80 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			else
 			{
 				Assert(query->commandType == CMD_SELECT);
+
 				/*
-				 * For materialized views, lock down security-restricted operations and
-				 * arrange to make GUC variable changes local to this command.  This is
-				 * not necessary for security, but this keeps the behavior similar to
-				 * REFRESH MATERIALIZED VIEW.  Otherwise, one could create a materialized
-				 * view not possible to refresh.
+				 * For materialized views, lock down security-restricted
+				 * operations and arrange to make GUC variable changes local
+				 * to this command.  This is not necessary for security, but
+				 * this keeps the behavior similar to REFRESH MATERIALIZED
+				 * VIEW.  Otherwise, one could create a materialized view not
+				 * possible to refresh.
 				 */
 				if (is_matview)
 				{
 					GetUserIdAndSecContext(&save_userid, &save_sec_context);
 					SetUserIdAndSecContext(save_userid,
 										   save_sec_context |
-											   SECURITY_RESTRICTED_OPERATION);
+										   SECURITY_RESTRICTED_OPERATION);
 					save_nestlevel = NewGUCNestLevel();
 				}
 
 				if (into->skipData)
 				{
 					/*
-					* If WITH NO DATA was specified, do not go through the rewriter,
-					* planner and executor.  Just define the relation using a code path
-					* similar to CREATE VIEW.  This avoids dump/restore problems stemming
-					* from running the planner before all dependencies are set up.
-					*/
+					 * If WITH NO DATA was specified, do not go through the
+					 * rewriter, planner and executor.  Just define the
+					 * relation using a code path similar to CREATE VIEW.
+					 * This avoids dump/restore problems stemming from running
+					 * the planner before all dependencies are set up.
+					 */
 					create_ctas_nodata(query->targetList, into);
 				}
 				else
 				{
-					List		   *rewritten;
-					PlannedStmt	   *plan;
-					QueryDesc	   *queryDesc;
+					List	   *rewritten;
+					PlannedStmt *plan;
+					QueryDesc  *queryDesc;
 
 					/*
-					* Parse analysis was done already, but we still have to run the rule
-					* rewriter.  We do not do AcquireRewriteLocks: we assume the query
-					* either came straight from the parser, or suitable locks were
-					* acquired by plancache.c.
-					*/
+					 * Parse analysis was done already, but we still have to
+					 * run the rule rewriter.  We do not do
+					 * AcquireRewriteLocks: we assume the query either came
+					 * straight from the parser, or suitable locks were
+					 * acquired by plancache.c.
+					 */
 					rewritten = QueryRewrite(query);
 
-					/* SELECT should never rewrite to more or less than one SELECT query */
+					/*
+					 * SELECT should never rewrite to more or less than one
+					 * SELECT query
+					 */
 					if (list_length(rewritten) != 1)
 						elog(ERROR, "unexpected rewrite result for %s",
-							is_matview ? "CREATE MATERIALIZED VIEW" :
-							"CREATE TABLE AS SELECT");
+							 is_matview ? "CREATE MATERIALIZED VIEW" :
+							 "CREATE TABLE AS SELECT");
 					query = linitial_node(Query, rewritten);
 					Assert(query->commandType == CMD_SELECT);
 
 					/* plan the query */
 					plan = pg_plan_query(query, pstate->p_sourcetext,
-										CURSOR_OPT_PARALLEL_OK, params);
+										 CURSOR_OPT_PARALLEL_OK, params);
 
 					/*
-					* Use a snapshot with an updated command ID to ensure this query sees
-					* results of any previously executed queries.  (This could only
-					* matter if the planner executed an allegedly-stable function that
-					* changed the database contents, but let's do it anyway to be
-					* parallel to the EXPLAIN code path.)
-					*/
+					 * Use a snapshot with an updated command ID to ensure
+					 * this query sees results of any previously executed
+					 * queries.  (This could only matter if the planner
+					 * executed an allegedly-stable function that changed the
+					 * database contents, but let's do it anyway to be
+					 * parallel to the EXPLAIN code path.)
+					 */
 					PushCopiedSnapshot(GetActiveSnapshot());
 					UpdateActiveSnapshotCommandId();
 
-					/* Create a QueryDesc, redirecting output to our tuple receiver */
+					/*
+					 * Create a QueryDesc, redirecting output to our tuple
+					 * receiver
+					 */
 					queryDesc = CreateQueryDesc(plan, pstate->p_sourcetext,
 												GetActiveSnapshot(), InvalidSnapshot,
 												dest, params, env, 0);
@@ -1216,7 +1227,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	}
 	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
 	{
-		RefreshMatViewStmt  *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
+		RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
 		Relation	rel;
 		char	   *amname = NULL;
 		bool		orioledb = false;
@@ -1593,7 +1604,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			else if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE &&
 					 (subId != 0))
 			{
-				OClassArg	arg = {.column_drop=true, .dropped=subId};
+				OClassArg	arg = {.column_drop = true,.dropped = subId};
+
 				o_find_composite_type_dependencies(rel->rd_rel->reltype, rel);
 				CommandCounterIncrement();
 				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
@@ -1687,8 +1699,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_POST_ALTER && classId == TypeRelationId)
 	{
-		HeapTuple		typeTuple;
-		Form_pg_type	tform;
+		HeapTuple	typeTuple;
+		Form_pg_type tform;
 
 		typeTuple = typeidType(objectId);
 
@@ -1696,28 +1708,29 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 		switch (tform->typtype)
 		{
-		case TYPTYPE_ENUM:
-			CommandCounterIncrement();
-			o_enum_cache_update_if_needed(MyDatabaseId, objectId, NULL);
-			break;
+			case TYPTYPE_ENUM:
+				CommandCounterIncrement();
+				o_enum_cache_update_if_needed(MyDatabaseId, objectId, NULL);
+				break;
 
-		case TYPTYPE_COMPOSITE:
-			rel = relation_open(typeidTypeRelid(objectId), AccessShareLock);
-			o_find_composite_type_dependencies(objectId, rel);
-			relation_close(rel, AccessShareLock);
-			CommandCounterIncrement();
-			o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
-										   NULL);
-			break;
+			case TYPTYPE_COMPOSITE:
+				rel = relation_open(typeidTypeRelid(objectId), AccessShareLock);
+				o_find_composite_type_dependencies(objectId, rel);
+				relation_close(rel, AccessShareLock);
+				CommandCounterIncrement();
+				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
+											   NULL);
+				break;
 
-		default:
-			break;
+			default:
+				break;
 		}
 		ReleaseSysCache(typeTuple);
 	}
 	else if (access == OAT_DROP && classId == OperatorClassRelationId)
 	{
-		OOpclass *o_opclass = o_opclass_get(objectId);
+		OOpclass   *o_opclass = o_opclass_get(objectId);
+
 		if (o_opclass)
 			o_invalidate_comparator_cache(o_opclass->opfamily,
 										  o_opclass->inputtype,
@@ -1731,16 +1744,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 static ObjectAddress
 o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 {
-	ObjectAddress	address;
-	ObjectAddress	secondaryObject = InvalidObjectAddress;
-	OCompress		compress = default_compress,
-					primary_compress = default_primary_compress,
-					toast_compress = default_toast_compress;
-	Datum			toast_options;
-	static char	   *validnsps[] = HEAP_RELOPT_NAMESPACES;
-	bool			orioledb;
-	CommitSeqNo		csn = COMMITSEQNO_INPROGRESS;
-	OXid			oxid = InvalidOXid;
+	ObjectAddress address;
+	ObjectAddress secondaryObject = InvalidObjectAddress;
+	OCompress	compress = default_compress,
+				primary_compress = default_primary_compress,
+				toast_compress = default_toast_compress;
+	Datum		toast_options;
+	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+	bool		orioledb;
+	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
+	OXid		oxid = InvalidOXid;
 
 	if (cstmt->accessMethod)
 		orioledb = (strcmp(cstmt->accessMethod, "orioledb") == 0);
@@ -1750,14 +1763,14 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 	if (orioledb)
 	{
 		cstmt->options = extract_compress_rel_option(cstmt->options,
-														"compress",
-														&compress);
+													 "compress",
+													 &compress);
 		cstmt->options = extract_compress_rel_option(cstmt->options,
-														"primary_compress",
-														&primary_compress);
+													 "primary_compress",
+													 &primary_compress);
 		cstmt->options = extract_compress_rel_option(cstmt->options,
-														"toast_compress",
-														&toast_compress);
+													 "toast_compress",
+													 &toast_compress);
 		validate_compress(compress, "Default");
 		validate_compress(primary_compress, "Primary index");
 		validate_compress(toast_compress, "TOAST");
@@ -1772,8 +1785,8 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 	EventTriggerCollectSimpleCommand(address, secondaryObject, (Node *) cstmt);
 
 	/*
-	 * Let NewRelationCreateToastTable decide if this one needs a
-	 * secondary relation too.
+	 * Let NewRelationCreateToastTable decide if this one needs a secondary
+	 * relation too.
 	 */
 	CommandCounterIncrement();
 
@@ -1786,19 +1799,18 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 										validnsps,
 										true,
 										false);
-	(void)heap_reloptions(RELKIND_TOASTVALUE,
-							toast_options,
-							true);
+	(void) heap_reloptions(RELKIND_TOASTVALUE,
+						   toast_options,
+						   true);
 
 	NewRelationCreateToastTable(address.objectId,
 								toast_options);
 
 	/*
-	 * orioledb table have no need in PostgreSQL TOAST and this
-	 * calls have no sense for us (see needs_toast_table(rel)
-	 * check inside create_toast_table()), but call
-	 * NewRelationCreateToastTable() always gets
-	 * AccessExclusiveLock on the relation. So we just skip it.
+	 * orioledb table have no need in PostgreSQL TOAST and this calls have no
+	 * sense for us (see needs_toast_table(rel) check inside
+	 * create_toast_table()), but call NewRelationCreateToastTable() always
+	 * gets AccessExclusiveLock on the relation. So we just skip it.
 	 */
 
 	if (!OXidIsValid(oxid))
@@ -1806,14 +1818,14 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 
 	if (orioledb)
 	{
-		Relation rel,
-			toastRel;
-		ORelOids oids,
-			toastOids,
-			*treeOids;
-		TupleDesc tupdesc;
-		OTable *o_table;
-		int numTreeOids;
+		Relation	rel,
+					toastRel;
+		ORelOids	oids,
+					toastOids,
+				   *treeOids;
+		TupleDesc	tupdesc;
+		OTable	   *o_table;
+		int			numTreeOids;
 
 		rel = table_open(address.objectId, AccessShareLock);
 		Assert(rel->rd_node.dbNode == MyDatabaseId);
@@ -1822,15 +1834,15 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		oids.relnode = rel->rd_node.relNode;
 		tupdesc = RelationGetDescr(rel);
 		toastRel = table_open(rel->rd_rel->reltoastrelid,
-								AccessShareLock);
+							  AccessShareLock);
 		toastOids.datoid = MyDatabaseId;
 		toastOids.reloid = toastRel->rd_id;
 		toastOids.relnode = toastRel->rd_node.relNode;
 
 		o_tables_validate_tupdesc(tupdesc);
 		o_table = o_table_tableam_create(oids, toastOids, tupdesc,
-											compress, primary_compress,
-											toast_compress);
+										 compress, primary_compress,
+										 toast_compress);
 		o_opclass_cache_add_table(o_table);
 
 		LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);

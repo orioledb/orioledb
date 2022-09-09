@@ -361,7 +361,7 @@ eanalyze_counter_explain(OEACallsCounter *counter, char *label,
 {
 	StringInfoData explain;
 	char	   *fnames[EA_COUNTERS_NUM] = {"read", "lock", "evict",
-										   "write", "load"};
+	"write", "load"};
 	uint32		counts[EA_COUNTERS_NUM],
 				i;
 	bool		is_first,
@@ -387,28 +387,29 @@ eanalyze_counter_explain(OEACallsCounter *counter, char *label,
 
 	switch (es->format)
 	{
-	case EXPLAIN_FORMAT_TEXT:
-		break;
-	case EXPLAIN_FORMAT_JSON:
-	case EXPLAIN_FORMAT_XML:
-	case EXPLAIN_FORMAT_YAML:
-		{
-			int i;
-			bool after_space = true;
-			int len = strlen(label);
-			label_upcase = pstrdup(label);
-			for (i = 0; i < len; i++)
+		case EXPLAIN_FORMAT_TEXT:
+			break;
+		case EXPLAIN_FORMAT_JSON:
+		case EXPLAIN_FORMAT_XML:
+		case EXPLAIN_FORMAT_YAML:
 			{
-				if (after_space)
-					label_upcase[i] = toupper(label_upcase[i]);
-				after_space = label_upcase[i] == ' ';
-			}
+				int			i;
+				bool		after_space = true;
+				int			len = strlen(label);
 
-			ExplainOpenGroup(label_upcase, label_upcase, true, es);
-			if (ix_name)
-				ExplainPropertyText("Index Name", ix_name, es);
-		}
-		break;
+				label_upcase = pstrdup(label);
+				for (i = 0; i < len; i++)
+				{
+					if (after_space)
+						label_upcase[i] = toupper(label_upcase[i]);
+					after_space = label_upcase[i] == ' ';
+				}
+
+				ExplainOpenGroup(label_upcase, label_upcase, true, es);
+				if (ix_name)
+					ExplainPropertyText("Index Name", ix_name, es);
+			}
+			break;
 	}
 
 	is_first = true;
@@ -418,23 +419,24 @@ eanalyze_counter_explain(OEACallsCounter *counter, char *label,
 		{
 			switch (es->format)
 			{
-			case EXPLAIN_FORMAT_TEXT:
-				if (!is_first)
-					appendStringInfo(&explain, ", ");
-				else
-					initStringInfo(&explain);
-				appendStringInfo(&explain, "%s=%d", fnames[i], counts[i]);
-				break;
-			case EXPLAIN_FORMAT_JSON:
-			case EXPLAIN_FORMAT_XML:
-			case EXPLAIN_FORMAT_YAML:
-				{
-					char *fname = pstrdup(fnames[i]);
-					fname[0] = toupper(fname[0]);
-					ExplainPropertyUInteger(fname, NULL, counts[i], es);
-					pfree(fname);
-				}
-				break;
+				case EXPLAIN_FORMAT_TEXT:
+					if (!is_first)
+						appendStringInfo(&explain, ", ");
+					else
+						initStringInfo(&explain);
+					appendStringInfo(&explain, "%s=%d", fnames[i], counts[i]);
+					break;
+				case EXPLAIN_FORMAT_JSON:
+				case EXPLAIN_FORMAT_XML:
+				case EXPLAIN_FORMAT_YAML:
+					{
+						char	   *fname = pstrdup(fnames[i]);
+
+						fname[0] = toupper(fname[0]);
+						ExplainPropertyUInteger(fname, NULL, counts[i], es);
+						pfree(fname);
+					}
+					break;
 			}
 			is_first = false;
 		}
@@ -442,16 +444,16 @@ eanalyze_counter_explain(OEACallsCounter *counter, char *label,
 
 	switch (es->format)
 	{
-	case EXPLAIN_FORMAT_TEXT:
-		if (!is_first)
-			ExplainPropertyText(label, explain.data, es);
-		break;
-	case EXPLAIN_FORMAT_JSON:
-	case EXPLAIN_FORMAT_XML:
-	case EXPLAIN_FORMAT_YAML:
-		ExplainCloseGroup(label_upcase, label_upcase, true, es);
-		pfree(label_upcase);
-		break;
+		case EXPLAIN_FORMAT_TEXT:
+			if (!is_first)
+				ExplainPropertyText(label, explain.data, es);
+			break;
+		case EXPLAIN_FORMAT_JSON:
+		case EXPLAIN_FORMAT_XML:
+		case EXPLAIN_FORMAT_YAML:
+			ExplainCloseGroup(label_upcase, label_upcase, true, es);
+			pfree(label_upcase);
+			break;
 	}
 }
 

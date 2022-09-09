@@ -51,27 +51,28 @@ typedef struct
 
 typedef struct
 {
-	char   *hint_msg;
-	char   *proname;
+	char	   *hint_msg;
+	char	   *proname;
 } validate_function_arg;
 
 static bool validate_function(Node *node, void *context);
 static Node *o_wrap_top_funcexpr(Node *node);
 static void o_collect_function_walker(Oid functionId, Oid inputcollid,
 									  List *args, void *context);
-static bool plan_tree_walker(Plan *plan, bool (*walker)(), void *context);
+static bool plan_tree_walker(Plan *plan, bool (*walker) (), void *context);
 
 #if PG_VERSION_NUM >= 150000
 #define pg_analyze_and_rewrite_params pg_analyze_and_rewrite_withcb
 #endif
 
-	/*
-	 * error context callback to let us supply a call-stack traceback
-	 */
-	static void sql_validate_error_callback(void *arg)
+ /*
+  * error context callback to let us supply a call-stack traceback
+  */
+static void
+sql_validate_error_callback(void *arg)
 {
-	validate_error_callback_arg	   *callback_arg;
-	int								syntaxerrposition;
+	validate_error_callback_arg *callback_arg;
+	int			syntaxerrposition;
 
 	callback_arg = (validate_error_callback_arg *) arg;
 
@@ -93,23 +94,23 @@ o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
 					   void *context, Oid functionId, Oid inputcollid,
 					   List *args)
 {
-	Form_pg_proc				procedureStruct;
-	MemoryContext				mycxt,
-								oldcxt;
-	ErrorContextCallback		sqlerrcontext;
-	validate_error_callback_arg	callback_arg;
-	Datum						proc_body;
-	bool						isNull;
-	bool						haspolyarg;
-	List					   *querytree_list;
-	int							i;
+	Form_pg_proc procedureStruct;
+	MemoryContext mycxt,
+				oldcxt;
+	ErrorContextCallback sqlerrcontext;
+	validate_error_callback_arg callback_arg;
+	Datum		proc_body;
+	bool		isNull;
+	bool		haspolyarg;
+	List	   *querytree_list;
+	int			i;
 
 	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
 
 	/*
-		* Make a temporary memory context, so that we don't leak all the
-		* stuff that parsing might create.
-		*/
+	 * Make a temporary memory context, so that we don't leak all the stuff
+	 * that parsing might create.
+	 */
 	mycxt = AllocSetContextCreate(CurrentMemoryContext,
 								  "inline_function",
 								  ALLOCSET_DEFAULT_SIZES);
@@ -126,10 +127,9 @@ o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
 	}
 
 	/*
-		* Setup error traceback support for ereport().
-		* This is so that we can finger the function that
-		* bad information came from.
-		*/
+	 * Setup error traceback support for ereport(). This is so that we can
+	 * finger the function that bad information came from.
+	 */
 	callback_arg.proname = NameStr(procedureStruct->proname);
 
 	/* Fetch the function body */
@@ -174,22 +174,22 @@ o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
 	else
 #endif
 	{
-		List   *raw_parsetree_list;
+		List	   *raw_parsetree_list;
 
 		raw_parsetree_list = pg_parse_query(callback_arg.prosrc);
 		querytree_list = NIL;
 
 		if (!haspolyarg)
 		{
-			ListCell				   *lc;
-			SQLFunctionParseInfoPtr		pinfo;
+			ListCell   *lc;
+			SQLFunctionParseInfoPtr pinfo;
 
 			pinfo = prepare_sql_fn_parse_info(procedureTuple, NULL,
 											  InvalidOid);
 			foreach(lc, raw_parsetree_list)
 			{
-				RawStmt *parsetree = lfirst_node(RawStmt, lc);
-				List *querytree_sublist;
+				RawStmt    *parsetree = lfirst_node(RawStmt, lc);
+				List	   *querytree_sublist;
 
 				querytree_sublist = pg_analyze_and_rewrite_params(parsetree,
 																  callback_arg.prosrc,
@@ -204,19 +204,19 @@ o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
 
 
 	/*
-		* The single command must be a simple "SELECT expression".
-		*
-		* Note: if you change the tests involved in this, see also plpgsql's
-		* exec_simple_check_plan().  That generally needs to have the same idea
-		* of what's a "simple expression", so that inlining a function that
-		* previously wasn't inlined won't change plpgsql's conclusion.
-		*/
+	 * The single command must be a simple "SELECT expression".
+	 *
+	 * Note: if you change the tests involved in this, see also plpgsql's
+	 * exec_simple_check_plan().  That generally needs to have the same idea
+	 * of what's a "simple expression", so that inlining a function that
+	 * previously wasn't inlined won't change plpgsql's conclusion.
+	 */
 	if (!haspolyarg)
 	{
-		Oid				rettype;
-		TupleDesc		rettupdesc;
-		ListCell	   *lc;
-		List		   *resulttlist;
+		Oid			rettype;
+		TupleDesc	rettupdesc;
+		ListCell   *lc;
+		List	   *resulttlist;
 
 		foreach(lc, querytree_list)
 		{
@@ -225,17 +225,20 @@ o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
 
 			foreach(lc2, sublist)
 			{
-				Query			   *query = lfirst_node(Query, lc2);
-				Query			   *new_query;
-				List			   *colnames;
-				RangeTblEntry	   *rte;
+				Query	   *query = lfirst_node(Query, lc2);
+				Query	   *new_query;
+				List	   *colnames;
+				RangeTblEntry *rte;
 
 				MemoryContextSwitchTo(oldcxt);
 				new_query = makeNode(Query);
 				new_query->commandType = CMD_SELECT;
 				new_query->canSetTag = true;
 
-				/* We need a moderately realistic colnames list for the subquery RTE */
+				/*
+				 * We need a moderately realistic colnames list for the
+				 * subquery RTE
+				 */
 				colnames = NIL;
 				foreach(lc, query->targetList)
 				{
@@ -244,7 +247,7 @@ o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
 					if (tle->resjunk)
 						continue;
 					colnames = lappend(colnames,
-									makeString(tle->resname ? tle->resname : ""));
+									   makeString(tle->resname ? tle->resname : ""));
 				}
 
 				rte = makeNode(RangeTblEntry);
@@ -311,10 +314,10 @@ o_wrap_top_funcexpr(Node *node)
  */
 static void
 o_process_functions_in_node(Node *node,
-							void (*func_walker)(Oid functionId,
-												Oid inputcollid,
-												List *args,
-												void *context),
+							void (*func_walker) (Oid functionId,
+												 Oid inputcollid,
+												 List *args,
+												 void *context),
 							void *context)
 {
 	Oid			functionId = InvalidOid;
@@ -443,9 +446,9 @@ static void
 validate_function_walker(Oid functionId, Oid inputcollid, List *args,
 						 void *context)
 {
-	HeapTuple		procedureTuple;
-	Form_pg_proc	procedureStruct;
-	validate_function_arg   *arg = (validate_function_arg *) context;
+	HeapTuple	procedureTuple;
+	Form_pg_proc procedureStruct;
+	validate_function_arg *arg = (validate_function_arg *) context;
 
 	procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
 	if (!HeapTupleIsValid(procedureTuple))
@@ -457,17 +460,17 @@ validate_function_walker(Oid functionId, Oid inputcollid, List *args,
 	if (procedureStruct->prolang > SQLlanguageId)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					errmsg("function \"%s\" cannot be used here",
-						   arg->proname),
-					errhint("only C and SQL functions%s",
-							arg->hint_msg)));
+				 errmsg("function \"%s\" cannot be used here",
+						arg->proname),
+				 errhint("only C and SQL functions%s",
+						 arg->hint_msg)));
 	if (procedureStruct->provolatile != PROVOLATILE_IMMUTABLE)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					errmsg("function \"%s\" cannot be used here",
-						   arg->proname),
-					errhint("only immutable functions%s",
-							arg->hint_msg)));
+				 errmsg("function \"%s\" cannot be used here",
+						arg->proname),
+				 errhint("only immutable functions%s",
+						 arg->hint_msg)));
 
 	if (procedureStruct->prolang == SQLlanguageId &&
 		procedureStruct->prokind == PROKIND_FUNCTION)
@@ -481,7 +484,8 @@ validate_function_walker(Oid functionId, Oid inputcollid, List *args,
 static bool
 validate_function(Node *node, void *context)
 {
-	validate_function_arg   *arg = (validate_function_arg *) context;
+	validate_function_arg *arg = (validate_function_arg *) context;
+
 	if (node == NULL)
 		return false;
 
@@ -510,10 +514,10 @@ validate_function(Node *node, void *context)
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-							errmsg("function \"%s\" cannot be used here",
-								   arg->proname),
-							errhint("only queries without relation "
-									"references%s", arg->hint_msg)));
+						 errmsg("function \"%s\" cannot be used here",
+								arg->proname),
+						 errhint("only queries without relation "
+								 "references%s", arg->hint_msg)));
 
 			}
 		}
@@ -529,6 +533,7 @@ void
 o_validate_funcexpr(Node *node, char *hint_msg)
 {
 	validate_function_arg arg = {.hint_msg = hint_msg};
+
 	if (!node)
 		return;
 
@@ -542,7 +547,7 @@ o_validate_funcexpr(Node *node, char *hint_msg)
 void
 o_validate_function_by_oid(Oid procoid, char *hint_msg)
 {
-	FuncExpr *fexpr;
+	FuncExpr   *fexpr;
 	HeapTuple	procedureTuple;
 	Form_pg_proc procedureStruct;
 
@@ -556,8 +561,8 @@ o_validate_function_by_oid(Oid procoid, char *hint_msg)
 	fexpr->funcresulttype = procedureStruct->prorettype;
 	fexpr->funcretset = procedureStruct->proretset;
 	fexpr->funcvariadic = procedureStruct->provariadic;
-	fexpr->funcformat = COERCE_EXPLICIT_CALL; /* doesn't matter */
-	fexpr->funccollid = InvalidOid;		  /* doesn't matter */
+	fexpr->funcformat = COERCE_EXPLICIT_CALL;	/* doesn't matter */
+	fexpr->funccollid = InvalidOid; /* doesn't matter */
 	fexpr->inputcollid = InvalidOid;
 	fexpr->args = NIL;
 	fexpr->location = -1;
@@ -583,177 +588,183 @@ o_collect_function(Node *node, void *context)
 
 	switch (nodeTag(node))
 	{
-	case T_OpExpr:
-		{
-			OpExpr	   *opexpr = (OpExpr *) node;
-			XLogRecPtr	cur_lsn;
-			Oid			datoid;
-			OClassArg	arg = {.sys_table=true};
-
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_operator_cache_add_if_needed(datoid, opexpr->opno,
-										   cur_lsn, NULL);
-		}
-		break;
-	case T_Aggref:
-		{
-			XLogRecPtr	cur_lsn;
-			Oid			datoid;
-			OClassArg	arg = {.sys_table=true};
-			Aggref	   *aggref = (Aggref *) node;
-			ListCell   *lc;
-
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_class_cache_add_if_needed(datoid, AggregateRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_class_cache_add_if_needed(datoid, ProcedureRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_aggregate_cache_add_if_needed(datoid, aggref->aggfnoid,
-											cur_lsn, NULL);
-			o_type_cache_add_if_needed(datoid, aggref->aggtype,
-									   cur_lsn, NULL);
-
-			foreach(lc, aggref->aggargtypes)
+		case T_OpExpr:
 			{
-				o_type_cache_add_if_needed(datoid, lfirst_oid(lc),
-										   cur_lsn, NULL);
-			}
-		}
-		break;
-	case T_Agg:
-		{
-			Agg		   *agg = (Agg *) node;
-			int			i;
-
-			for (i = 0; i < agg->numCols; i++)
-			{
-				Oid				eq_opr = agg->grpOperators[i];
-				CatCList	   *catlist;
-				int				j;
-				OClassArg		arg = {.sys_table=true};
-				XLogRecPtr		cur_lsn;
-				Oid				datoid;
+				OpExpr	   *opexpr = (OpExpr *) node;
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				OClassArg	arg = {.sys_table = true};
 
 				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-				o_class_cache_add_if_needed(datoid, OperatorRelationId,
-											cur_lsn, (Pointer) &arg);
-				o_operator_cache_add_if_needed(datoid, eq_opr, cur_lsn, NULL);
+				o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_operator_cache_add_if_needed(datoid, opexpr->opno,
+											   cur_lsn, NULL);
+			}
+			break;
+		case T_Aggref:
+			{
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				OClassArg	arg = {.sys_table = true};
+				Aggref	   *aggref = (Aggref *) node;
+				ListCell   *lc;
 
-				/*
-				* Search pg_amop to see if the target operator is registered as the "="
-				* operator of any hash opfamily.  If the operator is registered in
-				* multiple opfamilies, assume we can use any one.
-				*/
-				catlist = SearchSysCacheList1(AMOPOPID,
-											  ObjectIdGetDatum(eq_opr));
+				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+				o_class_cache_add_if_needed(datoid, AggregateRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_class_cache_add_if_needed(datoid, ProcedureRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_aggregate_cache_add_if_needed(datoid, aggref->aggfnoid,
+												cur_lsn, NULL);
+				o_type_cache_add_if_needed(datoid, aggref->aggtype,
+										   cur_lsn, NULL);
 
-				for (j = 0; j < catlist->n_members; j++)
+				foreach(lc, aggref->aggargtypes)
 				{
-					HeapTuple		tuple = &catlist->members[j]->tuple;
-					Form_pg_amop	aform = (Form_pg_amop) GETSTRUCT(tuple);
+					o_type_cache_add_if_needed(datoid, lfirst_oid(lc),
+											   cur_lsn, NULL);
+				}
+			}
+			break;
+		case T_Agg:
+			{
+				Agg		   *agg = (Agg *) node;
+				int			i;
 
-					o_class_cache_add_if_needed(datoid,
-												AccessMethodOperatorRelationId,
+				for (i = 0; i < agg->numCols; i++)
+				{
+					Oid			eq_opr = agg->grpOperators[i];
+					CatCList   *catlist;
+					int			j;
+					OClassArg	arg = {.sys_table = true};
+					XLogRecPtr	cur_lsn;
+					Oid			datoid;
+
+					o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+					o_class_cache_add_if_needed(datoid, OperatorRelationId,
 												cur_lsn, (Pointer) &arg);
-					o_amop_cache_add_if_needed(datoid, aform->amopopr,
-											   aform->amoppurpose,
-											   aform->amopfamily, cur_lsn,
-											   NULL);
+					o_operator_cache_add_if_needed(datoid, eq_opr, cur_lsn, NULL);
 
-					if (aform->amopmethod == HASH_AM_OID &&
-						aform->amopstrategy == HTEqualStrategyNumber)
+					/*
+					 * Search pg_amop to see if the target operator is
+					 * registered as the "=" operator of any hash opfamily.
+					 * If the operator is registered in multiple opfamilies,
+					 * assume we can use any one.
+					 */
+					catlist = SearchSysCacheList1(AMOPOPID,
+												  ObjectIdGetDatum(eq_opr));
+
+					for (j = 0; j < catlist->n_members; j++)
 					{
-						Oid result;
-						/*
-						* Get the matching support function(s).  Failure probably
-						* shouldn't happen --- it implies a bogus opfamily --- but
-						* continue looking if so.
-						*/
-						result = get_opfamily_proc(aform->amopfamily,
-												   aform->amoplefttype,
-												   aform->amoplefttype,
-												   HASHSTANDARD_PROC);
-						if (!OidIsValid(result))
-							continue;
+						HeapTuple	tuple = &catlist->members[j]->tuple;
+						Form_pg_amop aform = (Form_pg_amop) GETSTRUCT(tuple);
 
 						o_class_cache_add_if_needed(datoid,
-							AccessMethodProcedureRelationId,
-							cur_lsn, (Pointer) &arg);
-						o_amproc_cache_add_if_needed(datoid, aform->amopfamily,
-													 aform->amoplefttype,
-													 aform->amoplefttype,
-													 HASHSTANDARD_PROC,
-													 cur_lsn, NULL);
+													AccessMethodOperatorRelationId,
+													cur_lsn, (Pointer) &arg);
+						o_amop_cache_add_if_needed(datoid, aform->amopopr,
+												   aform->amoppurpose,
+												   aform->amopfamily, cur_lsn,
+												   NULL);
 
-						/* Only one lookup needed if given operator is single-type */
-						if (aform->amoplefttype == aform->amoprighttype)
+						if (aform->amopmethod == HASH_AM_OID &&
+							aform->amopstrategy == HTEqualStrategyNumber)
+						{
+							Oid			result;
+
+							/*
+							 * Get the matching support function(s).  Failure
+							 * probably shouldn't happen --- it implies a
+							 * bogus opfamily --- but continue looking if so.
+							 */
+							result = get_opfamily_proc(aform->amopfamily,
+													   aform->amoplefttype,
+													   aform->amoplefttype,
+													   HASHSTANDARD_PROC);
+							if (!OidIsValid(result))
+								continue;
+
+							o_class_cache_add_if_needed(datoid,
+														AccessMethodProcedureRelationId,
+														cur_lsn, (Pointer) &arg);
+							o_amproc_cache_add_if_needed(datoid, aform->amopfamily,
+														 aform->amoplefttype,
+														 aform->amoplefttype,
+														 HASHSTANDARD_PROC,
+														 cur_lsn, NULL);
+
+							/*
+							 * Only one lookup needed if given operator is
+							 * single-type
+							 */
+							if (aform->amoplefttype == aform->amoprighttype)
+								break;
+							result = get_opfamily_proc(aform->amopfamily,
+													   aform->amoprighttype,
+													   aform->amoprighttype,
+													   HASHSTANDARD_PROC);
+							if (!OidIsValid(result))
+								continue;
+							o_amproc_cache_add_if_needed(datoid, aform->amopfamily,
+														 aform->amoprighttype,
+														 aform->amoprighttype,
+														 HASHSTANDARD_PROC,
+														 cur_lsn, NULL);
 							break;
-						result = get_opfamily_proc(aform->amopfamily,
-												   aform->amoprighttype,
-												   aform->amoprighttype,
-												   HASHSTANDARD_PROC);
-						if (!OidIsValid(result))
-							continue;
-						o_amproc_cache_add_if_needed(datoid, aform->amopfamily,
-													 aform->amoprighttype,
-													 aform->amoprighttype,
-													 HASHSTANDARD_PROC,
-													 cur_lsn, NULL);
-						break;
+						}
 					}
+
+					ReleaseSysCacheList(catlist);
 				}
-
-				ReleaseSysCacheList(catlist);
 			}
-		}
-		break;
-	case T_FunctionScan:
-		{
-			XLogRecPtr		cur_lsn;
-			Oid				datoid;
-			OClassArg		arg = {.sys_table=true};
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_class_cache_add_if_needed(datoid, ProcedureRelationId, cur_lsn,
-										(Pointer) &arg);
-		}
-		break;
-	case T_WindowFunc:
-		{
-			XLogRecPtr		cur_lsn;
-			Oid				datoid;
-			OClassArg		arg = {.sys_table=true};
-			WindowFunc	   *window_func = (WindowFunc *) node;
+			break;
+		case T_FunctionScan:
+			{
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				OClassArg	arg = {.sys_table = true};
 
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_class_cache_add_if_needed(datoid, AggregateRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_class_cache_add_if_needed(datoid, ProcedureRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_aggregate_cache_add_if_needed(datoid, window_func->winfnoid,
-											cur_lsn, NULL);
-			o_type_cache_add_if_needed(datoid, window_func->wintype,
-									   cur_lsn, NULL);
-		}
-		break;
-	case T_MinMaxExpr:
-		{
-			XLogRecPtr		cur_lsn;
-			Oid				datoid;
-			MinMaxExpr	   *minmaxexpr = (MinMaxExpr *) node;
+				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+				o_class_cache_add_if_needed(datoid, ProcedureRelationId, cur_lsn,
+											(Pointer) &arg);
+			}
+			break;
+		case T_WindowFunc:
+			{
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				OClassArg	arg = {.sys_table = true};
+				WindowFunc *window_func = (WindowFunc *) node;
 
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_type_cache_add_if_needed(datoid, minmaxexpr->minmaxtype,
-									   cur_lsn, NULL);
-		}
-		break;
-	default:
-		break;
+				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+				o_class_cache_add_if_needed(datoid, AggregateRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_class_cache_add_if_needed(datoid, ProcedureRelationId, cur_lsn,
+											(Pointer) &arg);
+				o_aggregate_cache_add_if_needed(datoid, window_func->winfnoid,
+												cur_lsn, NULL);
+				o_type_cache_add_if_needed(datoid, window_func->wintype,
+										   cur_lsn, NULL);
+			}
+			break;
+		case T_MinMaxExpr:
+			{
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				MinMaxExpr *minmaxexpr = (MinMaxExpr *) node;
+
+				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+				o_type_cache_add_if_needed(datoid, minmaxexpr->minmaxtype,
+										   cur_lsn, NULL);
+			}
+			break;
+		default:
+			break;
 	}
 
 	/* Recurse to check arguments */
@@ -790,11 +801,11 @@ void
 o_collect_function_walker(Oid functionId, Oid inputcollid, List *args,
 						  void *context)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	OClassArg		arg = {.sys_table=true};
-	HeapTuple		procedureTuple;
-	Form_pg_proc	procedureStruct;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OClassArg	arg = {.sys_table = true};
+	HeapTuple	procedureTuple;
+	Form_pg_proc procedureStruct;
 
 	procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
 	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
@@ -816,9 +827,9 @@ o_collect_function_walker(Oid functionId, Oid inputcollid, List *args,
 void
 o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 {
-	FuncExpr	   *fexpr;
-	HeapTuple		procedureTuple;
-	Form_pg_proc	procedureStruct;
+	FuncExpr   *fexpr;
+	HeapTuple	procedureTuple;
+	Form_pg_proc procedureStruct;
 
 	procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(procoid));
 	if (!HeapTupleIsValid(procedureTuple))
@@ -830,8 +841,8 @@ o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 	fexpr->funcresulttype = procedureStruct->prorettype;
 	fexpr->funcretset = procedureStruct->proretset;
 	fexpr->funcvariadic = procedureStruct->provariadic;
-	fexpr->funcformat = COERCE_EXPLICIT_CALL; /* doesn't matter */
-	fexpr->funccollid = InvalidOid;		  /* doesn't matter */
+	fexpr->funcformat = COERCE_EXPLICIT_CALL;	/* doesn't matter */
+	fexpr->funccollid = InvalidOid; /* doesn't matter */
 	fexpr->inputcollid = inputcollid;
 	fexpr->args = NIL;
 	fexpr->location = -1;
@@ -843,7 +854,7 @@ o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 }
 
 static bool
-plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
+plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 {
 	ListCell   *lc;
 
@@ -881,7 +892,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 			 */
 		case T_Result:
 			{
-				Result *result = (Result *) plan;
+				Result	   *result = (Result *) plan;
+
 				if (expression_tree_walker((Node *) result->resconstantqual,
 										   walker, context))
 					return true;
@@ -893,31 +905,31 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				ModifyTable *modify_table = (ModifyTable *) plan;
 
 				if (expression_tree_walker(
-						(Node *) modify_table->withCheckOptionLists,
-						walker, context))
+										   (Node *) modify_table->withCheckOptionLists,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) modify_table->returningLists,
-						walker, context))
+										   (Node *) modify_table->returningLists,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) modify_table->onConflictSet,
-						walker, context))
+										   (Node *) modify_table->onConflictSet,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) modify_table->onConflictWhere,
-						walker, context))
+										   (Node *) modify_table->onConflictWhere,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) modify_table->exclRelTlist,
-						walker, context))
+										   (Node *) modify_table->exclRelTlist,
+										   walker, context))
 					return true;
 			}
 			break;
 
 		case T_Append:
 			{
-				Append *append = (Append *) plan;
+				Append	   *append = (Append *) plan;
 
 				foreach(lc, append->appendplans)
 				{
@@ -943,7 +955,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 
 		case T_BitmapAnd:
 			{
-				BitmapAnd *bitmap_and = (BitmapAnd *) plan;
+				BitmapAnd  *bitmap_and = (BitmapAnd *) plan;
+
 				foreach(lc, bitmap_and->bitmapplans)
 				{
 					if (plan_tree_walker((Plan *) lfirst(lc),
@@ -955,7 +968,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 
 		case T_BitmapOr:
 			{
-				BitmapOr *bitmap_or = (BitmapOr *) plan;
+				BitmapOr   *bitmap_or = (BitmapOr *) plan;
+
 				foreach(lc, bitmap_or->bitmapplans)
 				{
 					if (plan_tree_walker((Plan *) lfirst(lc),
@@ -977,7 +991,7 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 
 		case T_IndexScan:
 			{
-				IndexScan *index_scan = (IndexScan *) plan;
+				IndexScan  *index_scan = (IndexScan *) plan;
 
 				if (expression_tree_walker((Node *) index_scan->indexqual,
 										   walker, context))
@@ -989,8 +1003,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) index_scan->indexorderbyorig,
-						walker, context))
+										   (Node *) index_scan->indexorderbyorig,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1000,20 +1014,20 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				IndexOnlyScan *index_only_scan = (IndexOnlyScan *) plan;
 
 				if (expression_tree_walker(
-						(Node *) index_only_scan->recheckqual,
-						walker, context))
+										   (Node *) index_only_scan->recheckqual,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) index_only_scan->indexqual,
-						walker, context))
+										   (Node *) index_only_scan->indexqual,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) index_only_scan->indexorderby,
-						walker, context))
+										   (Node *) index_only_scan->indexorderby,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) index_only_scan->indextlist,
-						walker, context))
+										   (Node *) index_only_scan->indextlist,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1023,12 +1037,12 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				BitmapIndexScan *bitmap_index_scan = (BitmapIndexScan *) plan;
 
 				if (expression_tree_walker(
-						(Node *) bitmap_index_scan->indexqual,
-						walker, context))
+										   (Node *) bitmap_index_scan->indexqual,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) bitmap_index_scan->indexqualorig,
-						walker, context))
+										   (Node *) bitmap_index_scan->indexqualorig,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1038,8 +1052,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				BitmapHeapScan *bitmap_heap_scan = (BitmapHeapScan *) plan;
 
 				if (expression_tree_walker(
-						(Node *) bitmap_heap_scan->bitmapqualorig,
-						walker, context))
+										   (Node *) bitmap_heap_scan->bitmapqualorig,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1049,8 +1063,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				TidScan    *tid_scan = (TidScan *) plan;
 
 				if (expression_tree_walker(
-						(Node *) tid_scan->tidquals,
-						walker, context))
+										   (Node *) tid_scan->tidquals,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1061,8 +1075,8 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				TidRangeScan *tid_range_scan = (TidRangeScan *) plan;
 
 				if (expression_tree_walker(
-						(Node *) tid_range_scan->tidrangequals,
-						walker, context))
+										   (Node *) tid_range_scan->tidrangequals,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1071,6 +1085,7 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 		case T_SubqueryScan:
 			{
 				SubqueryScan *subquery_scan = (SubqueryScan *) plan;
+
 				if (plan_tree_walker((Plan *) subquery_scan->subplan,
 									 walker, context))
 					return true;
@@ -1115,12 +1130,12 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) foreign_scan->fdw_recheck_quals,
-						walker, context))
+										   (Node *) foreign_scan->fdw_recheck_quals,
+										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) foreign_scan->fdw_scan_tlist,
-						walker, context))
+										   (Node *) foreign_scan->fdw_scan_tlist,
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1130,15 +1145,15 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				CustomScan *custom_scan = (CustomScan *) plan;
 
 				if (expression_tree_walker(
-						(Node *) custom_scan->custom_scan_tlist,
-						walker, context))
+										   (Node *) custom_scan->custom_scan_tlist,
+										   walker, context))
 					return true;
 				if (expression_tree_walker((Node *) custom_scan->custom_exprs,
 										   walker, context))
 					return true;
 				if (expression_tree_walker(
-						(Node *) custom_scan->custom_scan_tlist,
-						walker, context))
+										   (Node *) custom_scan->custom_scan_tlist,
+										   walker, context))
 					return true;
 
 				foreach(lc, custom_scan->custom_plans)
@@ -1153,7 +1168,7 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 		case T_MergeJoin:
 		case T_HashJoin:
 			{
-				Join *join = (Join *) plan;
+				Join	   *join = (Join *) plan;
 
 				if (expression_tree_walker((Node *) join->joinqual,
 										   walker, context))
@@ -1200,7 +1215,7 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				Memoize    *memoize = (Memoize *) plan;
 
 				if (expression_tree_walker((Node *) memoize->param_exprs,
-											walker, context))
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1211,20 +1226,20 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				WindowAgg  *window_agg = (WindowAgg *) plan;
 
 				if (expression_tree_walker((Node *) window_agg->startOffset,
-											walker, context))
+										   walker, context))
 					return true;
 				if (expression_tree_walker((Node *) window_agg->endOffset,
-											walker, context))
+										   walker, context))
 					return true;
 			}
 			break;
 
 		case T_Hash:
 			{
-				Hash  *hash = (Hash *) plan;
+				Hash	   *hash = (Hash *) plan;
 
 				if (expression_tree_walker((Node *) hash->hashkeys,
-											walker, context))
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1234,10 +1249,10 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 				Limit	   *limit = (Limit *) plan;
 
 				if (expression_tree_walker((Node *) limit->limitOffset,
-											walker, context))
+										   walker, context))
 					return true;
 				if (expression_tree_walker((Node *) limit->limitCount,
-											walker, context))
+										   walker, context))
 					return true;
 			}
 			break;
@@ -1277,12 +1292,12 @@ plan_tree_walker(Plan *plan, bool (*walker)(), void *context)
 
 static bool
 plannedstatement_tree_walker(PlannedStmt *pstmt,
-							 bool (*walker)(),
+							 bool (*walker) (),
 							 void *context)
 {
-	Plan		   *plan = pstmt->planTree;
-	ListCell	   *lc;
-	ProjectSet	   *project_set;
+	Plan	   *plan = pstmt->planTree;
+	ListCell   *lc;
+	ProjectSet *project_set;
 
 	/* Guard against stack overflow due to overly complex plan trees */
 	check_stack_depth();
@@ -1295,7 +1310,7 @@ plannedstatement_tree_walker(PlannedStmt *pstmt,
 	/* subPlan-s */
 	foreach(lc, pstmt->subplans)
 	{
-		Plan *sp = (Plan *) lfirst(lc);
+		Plan	   *sp = (Plan *) lfirst(lc);
 
 		if (sp && plan_tree_walker(sp, walker, context))
 			return true;

@@ -50,7 +50,8 @@ static OSysCacheFuncs type_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(type_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	type_cache = o_create_sys_cache(SYS_TREES_TYPE_CACHE,
 									false, false,
 									TypeOidIndexId, TYPEOID, 1,
@@ -62,17 +63,17 @@ O_SYS_CACHE_INIT_FUNC(type_cache)
 void
 o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	HeapTuple		typetup;
-	Form_pg_type	typeform;
-	OType		   *o_type = (OType *) *entry_ptr;
-	Oid				typeoid = DatumGetObjectId(key->keys[0]);
+	HeapTuple	typetup;
+	Form_pg_type typeform;
+	OType	   *o_type = (OType *) *entry_ptr;
+	Oid			typeoid = DatumGetObjectId(key->keys[0]);
 
 	typetup = SearchSysCache1(TYPEOID, key->keys[0]);
 	if (!HeapTupleIsValid(typetup))
 		elog(ERROR, "cache lookup failed for type %u", typeoid);
 	typeform = (Form_pg_type) GETSTRUCT(typetup);
 
-	if (o_type != NULL)		/* Existed o_type updated */
+	if (o_type != NULL)			/* Existed o_type updated */
 	{
 		Assert(false);
 	}
@@ -126,12 +127,12 @@ o_type_cache_free_entry(Pointer entry)
 HeapTuple
 o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	HeapTuple		typetup = NULL;
-	Datum			values[Natts_pg_type] = {0};
-	bool			nulls[Natts_pg_type] = {0};
-	OType		   *o_type;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	typetup = NULL;
+	Datum		values[Natts_pg_type] = {0};
+	bool		nulls[Natts_pg_type] = {0};
+	OType	   *o_type;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
@@ -177,9 +178,9 @@ o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid)
 Oid
 o_type_cache_get_typrelid(Oid typeoid)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	OType		   *o_type;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OType	   *o_type;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
@@ -190,9 +191,9 @@ o_type_cache_get_typrelid(Oid typeoid)
 Oid
 o_type_cache_default_opclass(Oid typeoid)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	OType		   *o_type;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OType	   *o_type;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
@@ -204,9 +205,9 @@ void
 o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 					   char *typalign, char *typstorage, Oid *typcollation)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	OType		   *o_type;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OType	   *o_type;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
@@ -228,10 +229,10 @@ TypeCacheEntry *
 o_type_elements_cmp_hook(Oid elemtype, MemoryContext mcxt)
 {
 	TypeCacheEntry *typcache = NULL;
-	MemoryContext	prev_context;
-	Oid				datoid;
-	Oid				opclassoid;
-	OOpclass	   *o_opclass;
+	MemoryContext prev_context;
+	Oid			datoid;
+	Oid			opclassoid;
+	OOpclass   *o_opclass;
 
 	opclassoid = o_type_cache_default_opclass(elemtype);
 
@@ -256,29 +257,29 @@ void
 o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					   OTuple tup, Pointer arg)
 {
-	OType *o_type = (OType *) tup.data;
+	OType	   *o_type = (OType *) tup.data;
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);
 	appendStringInfo(buf, ", typname: %s"
-						  ", typlen: %d"
-						  ", typbyval: %c"
-						  ", typalign: '%c'"
-						  ", typstorage: '%c'"
-						  ", typcollation: %u"
-						  ", typrelid: %u"
-						  ", typtype: '%c'"
-						  ", typcategory: '%c'"
-						  ", typispreferred: %c"
-						  ", typisdefined: %c"
-						  ", typinput: %u"
-						  ", typoutput: %u"
-						  ", typreceive: %u"
-						  ", typsend: %u"
-						  ", typelem: %u"
-						  ", typdelim: '%c'"
-						  ", default_opclass: %u"
-						  ")",
+					 ", typlen: %d"
+					 ", typbyval: %c"
+					 ", typalign: '%c'"
+					 ", typstorage: '%c'"
+					 ", typcollation: %u"
+					 ", typrelid: %u"
+					 ", typtype: '%c'"
+					 ", typcategory: '%c'"
+					 ", typispreferred: %c"
+					 ", typisdefined: %c"
+					 ", typinput: %u"
+					 ", typoutput: %u"
+					 ", typreceive: %u"
+					 ", typsend: %u"
+					 ", typelem: %u"
+					 ", typdelim: '%c'"
+					 ", default_opclass: %u"
+					 ")",
 					 o_type->typname.data,
 					 o_type->typlen,
 					 o_type->typbyval ? 'Y' : 'N',

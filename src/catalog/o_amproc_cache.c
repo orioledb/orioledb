@@ -33,7 +33,7 @@
 static OSysCache *amproc_cache = NULL;
 
 static void o_amproc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
-									Pointer arg);
+									  Pointer arg);
 static void o_amproc_cache_free_entry(Pointer entry);
 
 O_SYS_CACHE_FUNCS(amproc_cache, OAmProc, 4);
@@ -49,7 +49,8 @@ static OSysCacheFuncs amproc_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(amproc_cache)
 {
-	Oid keytypes[] = {OIDOID,OIDOID,OIDOID,INT2OID};
+	Oid			keytypes[] = {OIDOID, OIDOID, OIDOID, INT2OID};
+
 	amproc_cache = o_create_sys_cache(SYS_TREES_AMPROC_CACHE,
 									  false, false,
 									  AccessMethodProcedureIndexId, AMPROCNUM,
@@ -61,14 +62,14 @@ O_SYS_CACHE_INIT_FUNC(amproc_cache)
 void
 o_amproc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	HeapTuple			amproctup;
-	Form_pg_amproc		amprocform;
-	OAmProc			   *o_amproc = (OAmProc *) *entry_ptr;
-	MemoryContext		prev_context;
-	Oid					amprocfamily;
-	Oid					amproclefttype;
-	Oid					amprocrighttype;
-	int16				amprocnum;
+	HeapTuple	amproctup;
+	Form_pg_amproc amprocform;
+	OAmProc    *o_amproc = (OAmProc *) *entry_ptr;
+	MemoryContext prev_context;
+	Oid			amprocfamily;
+	Oid			amproclefttype;
+	Oid			amprocrighttype;
+	int16		amprocnum;
 
 	amprocfamily = DatumGetObjectId(key->keys[0]);
 	amproclefttype = DatumGetObjectId(key->keys[1]);
@@ -110,12 +111,12 @@ o_amproc_cache_search_htup(TupleDesc tupdesc, Oid amprocfamily,
 						   Oid amproclefttype, Oid amprocrighttype,
 						   int16 amprocnum)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	HeapTuple		result = NULL;
-	Datum			values[Natts_pg_amproc] = {0};
-	bool			nulls[Natts_pg_amproc] = {0};
-	OAmProc		   *o_amproc;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_amproc] = {0};
+	bool		nulls[Natts_pg_amproc] = {0};
+	OAmProc    *o_amproc;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_amproc = o_amproc_cache_search(datoid, amprocfamily, amproclefttype,
@@ -135,9 +136,9 @@ o_amproc_cache_search_htup(TupleDesc tupdesc, Oid amprocfamily,
  */
 void
 o_amproc_cache_tup_print(BTreeDescr *desc, StringInfo buf,
-					   OTuple tup, Pointer arg)
+						 OTuple tup, Pointer arg)
 {
-	OAmProc *o_amproc = (OAmProc *) tup.data;
+	OAmProc    *o_amproc = (OAmProc *) tup.data;
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);

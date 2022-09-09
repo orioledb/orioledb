@@ -55,7 +55,8 @@ static OSysCacheFuncs range_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(range_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	range_cache = o_create_sys_cache(SYS_TREES_RANGE_CACHE,
 									 false, true,
 									 TypeOidIndexId, TYPEOID, 1,
@@ -67,9 +68,9 @@ O_SYS_CACHE_INIT_FUNC(range_cache)
 void
 o_range_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	TypeCacheEntry	   *typcache;
-	ORange			   *o_range = (ORange *) *entry_ptr;
-	Oid					typoid = DatumGetObjectId(key->keys[0]);
+	TypeCacheEntry *typcache;
+	ORange	   *o_range = (ORange *) *entry_ptr;
+	Oid			typoid = DatumGetObjectId(key->keys[0]);
 
 	/*
 	 * find typecache entry
@@ -115,16 +116,17 @@ o_range_cmp_hook(FunctionCallInfo fcinfo, Oid rngtypid,
 	if (typcache == NULL ||
 		typcache->type_id != rngtypid)
 	{
-		XLogRecPtr		cur_lsn;
-		Oid				datoid;
-		ORange		   *o_range;
+		XLogRecPtr	cur_lsn;
+		Oid			datoid;
+		ORange	   *o_range;
 
 		o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 		o_range = o_range_cache_search(datoid, rngtypid, cur_lsn,
 									   range_cache->nkeys);
 		if (o_range)
 		{
-			MemoryContext	prev_context = MemoryContextSwitchTo(mcxt);
+			MemoryContext prev_context = MemoryContextSwitchTo(mcxt);
+
 			typcache = palloc0(sizeof(TypeCacheEntry));
 			typcache->type_id = rngtypid;
 			typcache->rngelemtype = palloc0(sizeof(TypeCacheEntry));
@@ -155,12 +157,12 @@ void
 o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 						OTuple tup, Pointer arg)
 {
-	ORange *o_range = (ORange *) tup.data;
+	ORange	   *o_range = (ORange *) tup.data;
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);
 	appendStringInfo(buf, ", elem_type: %u, rng_collation: %d, "
-						  "rng_cmp_oid: %u)",
+					 "rng_cmp_oid: %u)",
 					 o_range->elem_type, o_range->rng_collation,
 					 o_range->rng_cmp_oid);
 }

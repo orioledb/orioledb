@@ -50,7 +50,8 @@ static OSysCacheFuncs operator_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(operator_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	operator_cache = o_create_sys_cache(SYS_TREES_OPER_CACHE,
 										false, false,
 										OperatorOidIndexId, OPEROID, 1,
@@ -63,11 +64,11 @@ O_SYS_CACHE_INIT_FUNC(operator_cache)
 void
 o_operator_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	HeapTuple			opertup;
-	Form_pg_operator	operform;
-	OOperator		   *o_operator = (OOperator *) *entry_ptr;
-	MemoryContext		prev_context;
-	Oid					operoid = DatumGetObjectId(key->keys[0]);
+	HeapTuple	opertup;
+	Form_pg_operator operform;
+	OOperator  *o_operator = (OOperator *) *entry_ptr;
+	MemoryContext prev_context;
+	Oid			operoid = DatumGetObjectId(key->keys[0]);
 
 	opertup = SearchSysCache1(OPEROID, key->keys[0]);
 	if (!HeapTupleIsValid(opertup))
@@ -100,13 +101,13 @@ o_operator_cache_free_entry(Pointer entry)
 HeapTuple
 o_operator_cache_search_htup(TupleDesc tupdesc, Oid operoid)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	HeapTuple		result = NULL;
-	Datum			values[Natts_pg_operator] = {0};
-	bool			nulls[Natts_pg_operator] = {0};
-	OOperator	   *o_operator;
-	NameData		oname;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_operator] = {0};
+	bool		nulls[Natts_pg_operator] = {0};
+	OOperator  *o_operator;
+	NameData	oname;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_operator = o_operator_cache_search(datoid, operoid, cur_lsn,
@@ -131,7 +132,7 @@ void
 o_operator_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 						   OTuple tup, Pointer arg)
 {
-	OOperator *o_operator = (OOperator *) tup.data;
+	OOperator  *o_operator = (OOperator *) tup.data;
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);

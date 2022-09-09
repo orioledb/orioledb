@@ -780,43 +780,45 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 				ExplainNode(planstate, ec->ancestors, "Outer", NULL, ec->es);
 				switch (ec->es->format)
 				{
-				case EXPLAIN_FORMAT_TEXT:
-					ec->es->indent += 3;
-					break;
-				case EXPLAIN_FORMAT_JSON:
-					{
-						int i;
-						ec->es->str->len--;
-						for (i = ec->es->str->len; i > 0; i--)
+					case EXPLAIN_FORMAT_TEXT:
+						ec->es->indent += 3;
+						break;
+					case EXPLAIN_FORMAT_JSON:
 						{
-							if (ec->es->str->data[i - 1] == '\n')
-								break;
+							int			i;
+
+							ec->es->str->len--;
+							for (i = ec->es->str->len; i > 0; i--)
+							{
+								if (ec->es->str->data[i - 1] == '\n')
+									break;
+							}
+							ec->es->str->len -= (ec->es->str->len - i) + 1;
+							for (i = ec->es->str->len; i > 0; i--)
+							{
+								if (ec->es->str->data[i - 1] != ' ')
+									break;
+							}
+							ec->es->indent++;
 						}
-						ec->es->str->len -= (ec->es->str->len - i) + 1;
-						for (i = ec->es->str->len; i > 0; i--)
+						break;
+					case EXPLAIN_FORMAT_XML:
 						{
-							if (ec->es->str->data[i - 1] != ' ')
-								break;
+							int			i;
+
+							ec->es->str->len--;
+							for (i = ec->es->str->len; i > 0; i--)
+							{
+								if (ec->es->str->data[i - 1] == '\n')
+									break;
+							}
+							ec->es->str->len -= (ec->es->str->len - i);
+							ec->es->indent++;
 						}
+						break;
+					case EXPLAIN_FORMAT_YAML:
 						ec->es->indent++;
-					}
-					break;
-				case EXPLAIN_FORMAT_XML:
-					{
-						int i;
-						ec->es->str->len--;
-						for (i = ec->es->str->len; i > 0; i--)
-						{
-							if (ec->es->str->data[i - 1] == '\n')
-								break;
-						}
-						ec->es->str->len -= (ec->es->str->len - i);
-						ec->es->indent++;
-					}
-					break;
-				case EXPLAIN_FORMAT_YAML:
-					ec->es->indent++;
-					break;
+						break;
 				}
 				if (ocstate->useEaCounters)
 				{
@@ -841,14 +843,14 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 				}
 				switch (ec->es->format)
 				{
-				case EXPLAIN_FORMAT_TEXT:
-					ec->es->indent -= 3;
-					break;
-				case EXPLAIN_FORMAT_JSON:
-				case EXPLAIN_FORMAT_XML:
-				case EXPLAIN_FORMAT_YAML:
-					ExplainCloseGroup("Plan", "Plan", true, ec->es);
-					break;
+					case EXPLAIN_FORMAT_TEXT:
+						ec->es->indent -= 3;
+						break;
+					case EXPLAIN_FORMAT_JSON:
+					case EXPLAIN_FORMAT_XML:
+					case EXPLAIN_FORMAT_YAML:
+						ExplainCloseGroup("Plan", "Plan", true, ec->es);
+						break;
 				}
 				break;
 			}
@@ -893,34 +895,34 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 		(OIndexPlanState *) ocstate->o_plan_state;
 		bool		backward = (ix_plan_state->ostate.scanDir ==
 								BackwardScanDirection);
-		char		*direction = !backward ? "Forward" : "Backward";
+		char	   *direction = !backward ? "Forward" : "Backward";
 
 		initStringInfo(&title);
 		indexName = descr->indices[ix_plan_state->ostate.ixNum]->name.data;
 
 		switch (es->format)
 		{
-		case EXPLAIN_FORMAT_TEXT:
-			appendStringInfo(&title, "%s index %sscan of", direction,
-						 ix_plan_state->ostate.onlyCurIx ? "only " : "");
-			ExplainPropertyText(title.data, indexName, es);
-			show_scan_qual(ix_plan_state->stripped_indexquals, "Conds",
-						&node->ss.ps, ancestors, es);
-			break;
+			case EXPLAIN_FORMAT_TEXT:
+				appendStringInfo(&title, "%s index %sscan of", direction,
+								 ix_plan_state->ostate.onlyCurIx ? "only " : "");
+				ExplainPropertyText(title.data, indexName, es);
+				show_scan_qual(ix_plan_state->stripped_indexquals, "Conds",
+							   &node->ss.ps, ancestors, es);
+				break;
 
-		case EXPLAIN_FORMAT_XML:
-		case EXPLAIN_FORMAT_YAML:
-		case EXPLAIN_FORMAT_JSON:
-			ExplainPropertyText("Scan Direction", direction, es);
-			ExplainPropertyText("Index Name", indexName, es);
-			if (ix_plan_state->ostate.onlyCurIx)
-				ExplainPropertyText("Custom Scan Subtype", "Index Only Scan",
-									es);
-			else
-				ExplainPropertyText("Custom Scan Subtype", "Index Scan", es);
-			show_scan_qual(ix_plan_state->stripped_indexquals, "Index Cond",
-						&node->ss.ps, ancestors, es);
-			break;
+			case EXPLAIN_FORMAT_XML:
+			case EXPLAIN_FORMAT_YAML:
+			case EXPLAIN_FORMAT_JSON:
+				ExplainPropertyText("Scan Direction", direction, es);
+				ExplainPropertyText("Index Name", indexName, es);
+				if (ix_plan_state->ostate.onlyCurIx)
+					ExplainPropertyText("Custom Scan Subtype", "Index Only Scan",
+										es);
+				else
+					ExplainPropertyText("Custom Scan Subtype", "Index Scan", es);
+				show_scan_qual(ix_plan_state->stripped_indexquals, "Index Cond",
+							   &node->ss.ps, ancestors, es);
+				break;
 		}
 
 		if (ix_plan_state->stripped_indexquals)
@@ -937,16 +939,16 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 
 		switch (es->format)
 		{
-		case EXPLAIN_FORMAT_TEXT:
-			appendStringInfoSpaces(es->str, es->indent * 2);
-			appendStringInfoString(es->str, "Bitmap heap scan\n");
-			break;
+			case EXPLAIN_FORMAT_TEXT:
+				appendStringInfoSpaces(es->str, es->indent * 2);
+				appendStringInfoString(es->str, "Bitmap heap scan\n");
+				break;
 
-		case EXPLAIN_FORMAT_XML:
-		case EXPLAIN_FORMAT_YAML:
-		case EXPLAIN_FORMAT_JSON:
-			ExplainPropertyText("Custom Scan Subtype", "Bitmap Heap Scan", es);
-			break;
+			case EXPLAIN_FORMAT_XML:
+			case EXPLAIN_FORMAT_YAML:
+			case EXPLAIN_FORMAT_JSON:
+				ExplainPropertyText("Custom Scan Subtype", "Bitmap Heap Scan", es);
+				break;
 		}
 
 		show_scan_qual(bitmap_state->bitmapqualorig, "Recheck Cond",

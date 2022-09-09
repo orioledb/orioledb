@@ -72,16 +72,16 @@ struct OComparatorKey
 
 struct OComparator
 {
-	OComparatorKey	key;
-	bool			haveSortSupport;
+	OComparatorKey key;
+	bool		haveSortSupport;
 
 	/* Filled when haveSortSupport == false */
-	FmgrInfo		finfo;
+	FmgrInfo	finfo;
 
 	/* Filled when haveSortSupport == true */
-	MemoryContext	ssup_cxt;
-	void		   *ssup_extra;
-	int			   (*ssup_comparator) (Datum x, Datum y, SortSupport ssup);
+	MemoryContext ssup_cxt;
+	void	   *ssup_extra;
+	int			(*ssup_comparator) (Datum x, Datum y, SortSupport ssup);
 };
 
 static HTAB *oTableDescrHash;
@@ -1088,7 +1088,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * If comparator isn't cached, then look for comparator with sort support
 	 * function.
 	 */
-	Assert(OidIsValid(opclass->key.common.datoid));	/* ssup may use SysCache */
+	Assert(OidIsValid(opclass->key.common.datoid)); /* ssup may use SysCache */
 	if (MyDatabaseId == opclass->key.common.datoid &&
 		OidIsValid(opclass->ssupOid))
 	{
@@ -1168,9 +1168,9 @@ o_add_comparator_to_cache(OComparator *comparator)
 void
 o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 {
-	OComparator	   *comparator;
-	HASH_SEQ_STATUS	scan_status;
-	OComparatorKey	key = {
+	OComparator *comparator;
+	HASH_SEQ_STATUS scan_status;
+	OComparatorKey key = {
 		.opfamily = opfamily,
 		.lefttype = lefttype,
 		.righttype = righttype
@@ -1188,7 +1188,8 @@ o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 			key.lefttype == comparator->key.lefttype &&
 			key.righttype == comparator->key.righttype)
 		{
-			Oid collation = comparator->key.collation;
+			Oid			collation = comparator->key.collation;
+
 			if (comparator->ssup_extra)
 				pfree(comparator->ssup_extra);
 			key.collation = collation;

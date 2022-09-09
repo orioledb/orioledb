@@ -50,7 +50,8 @@ static OSysCacheFuncs amop_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(amop_cache)
 {
-	Oid keytypes[] = {OIDOID,CHAROID,OIDOID};
+	Oid			keytypes[] = {OIDOID, CHAROID, OIDOID};
+
 	amop_cache = o_create_sys_cache(SYS_TREES_AMOP_CACHE,
 									false, false,
 									AccessMethodOperatorIndexId, AMOPOPID, 3,
@@ -63,13 +64,13 @@ O_SYS_CACHE_INIT_FUNC(amop_cache)
 void
 o_amop_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	HeapTuple			amoptup;
-	Form_pg_amop		amopform;
-	OAmOp			   *o_amop = (OAmOp *) *entry_ptr;
-	MemoryContext		prev_context;
-	Oid					amopopr;
-	char				amoppurpose;
-	Oid					amopfamily;
+	HeapTuple	amoptup;
+	Form_pg_amop amopform;
+	OAmOp	   *o_amop = (OAmOp *) *entry_ptr;
+	MemoryContext prev_context;
+	Oid			amopopr;
+	char		amoppurpose;
+	Oid			amopfamily;
 
 	amopopr = DatumGetObjectId(key->keys[0]);
 	amoppurpose = DatumGetChar(key->keys[1]);
@@ -83,7 +84,7 @@ o_amop_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	amopform = (Form_pg_amop) GETSTRUCT(amoptup);
 
 	prev_context = MemoryContextSwitchTo(amop_cache->mcxt);
-	if (o_amop != NULL)		/* Existed o_amop updated */
+	if (o_amop != NULL)			/* Existed o_amop updated */
 	{
 		Assert(false);
 	}
@@ -112,9 +113,9 @@ o_amop_cache_free_entry(Pointer entry)
 static HeapTuple
 o_amop_to_htup(OAmOp *o_amop, TupleDesc tupdesc)
 {
-	HeapTuple		result = NULL;
-	Datum			values[Natts_pg_amop] = {0};
-	bool			nulls[Natts_pg_amop] = {0};
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_amop] = {0};
+	bool		nulls[Natts_pg_amop] = {0};
 
 	if (o_amop)
 	{
@@ -139,9 +140,9 @@ HeapTuple
 o_amop_cache_search_htup(TupleDesc tupdesc, Oid amopopr, char amoppurpose,
 						 Oid amopfamily)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	OAmOp		   *o_amop;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OAmOp	   *o_amop;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_amop = o_amop_cache_search(datoid, amopopr, amoppurpose, amopfamily,
@@ -152,11 +153,11 @@ o_amop_cache_search_htup(TupleDesc tupdesc, Oid amopopr, char amoppurpose,
 List *
 o_amop_cache_search_htup_list(TupleDesc tupdesc, Oid amopopr)
 {
-	List			   *result = NIL;
-	BTreeDescr		   *td = get_sys_tree(amop_cache->sys_tree_num);
-	BTreeIterator	   *it;
-	OSysCacheKey3		key = {0};
-	OSysCacheBound		bound = {.key = (OSysCacheKey *) &key, .nkeys = 1};
+	List	   *result = NIL;
+	BTreeDescr *td = get_sys_tree(amop_cache->sys_tree_num);
+	BTreeIterator *it;
+	OSysCacheKey3 key = {0};
+	OSysCacheBound bound = {.key = (OSysCacheKey *) &key,.nkeys = 1};
 
 	o_sys_cache_set_datoid_lsn(&key.common.lsn, &key.common.datoid);
 	key.keys[0] = ObjectIdGetDatum(amopopr);
@@ -166,11 +167,11 @@ o_amop_cache_search_htup_list(TupleDesc tupdesc, Oid amopopr)
 
 	do
 	{
-		OTuple			tup = o_btree_iterator_fetch(it, NULL,
-													 (Pointer) &bound,
-													 BTreeKeyBound, true,
-													 NULL);
-		OAmOp		   *o_amop = (OAmOp *) tup.data;
+		OTuple		tup = o_btree_iterator_fetch(it, NULL,
+												 (Pointer) &bound,
+												 BTreeKeyBound, true,
+												 NULL);
+		OAmOp	   *o_amop = (OAmOp *) tup.data;
 
 		if (O_TUPLE_IS_NULL(tup))
 			break;
@@ -192,12 +193,12 @@ void
 o_amop_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					   OTuple tup, Pointer arg)
 {
-	OAmOp *o_amop = (OAmOp *) tup.data;
+	OAmOp	   *o_amop = (OAmOp *) tup.data;
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);
 	appendStringInfo(buf, ", amopmethod: %u, amopstrategy: %d, amopfamily: %u"
-						  ", amoplefttype: %u, amoprighttype: %u)",
+					 ", amoplefttype: %u, amoprighttype: %u)",
 					 o_amop->amopmethod,
 					 o_amop->amopstrategy,
 					 o_amop->amopfamily,

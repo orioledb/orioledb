@@ -60,7 +60,8 @@ static OSysCacheFuncs opclass_cache_funcs =
  */
 O_SYS_CACHE_INIT_FUNC(opclass_cache)
 {
-	Oid keytypes[] = {OIDOID};
+	Oid			keytypes[] = {OIDOID};
+
 	opclass_cache = o_create_sys_cache(SYS_TREES_OPCLASS_CACHE,
 									   false, false,
 									   OpclassOidIndexId, CLAOID, 1,
@@ -111,8 +112,8 @@ o_opclass_cache_add_table(OTable *o_table)
 
 		for (cur_ix = 0; cur_ix < o_table->nindices; cur_ix++)
 		{
-			OTableIndex	   *index = &o_table->indices[cur_ix];
-			int				cur_field;
+			OTableIndex *index = &o_table->indices[cur_ix];
+			int			cur_field;
 
 			for (cur_field = 0; cur_field < index->nfields; cur_field++)
 			{
@@ -146,13 +147,13 @@ o_opclass_get(Oid opclassoid)
 HeapTuple
 o_opclass_cache_search_htup(TupleDesc tupdesc, Oid opclassoid)
 {
-	XLogRecPtr		cur_lsn;
-	Oid				datoid;
-	HeapTuple		result = NULL;
-	Datum			values[Natts_pg_opclass] = {0};
-	bool			nulls[Natts_pg_opclass] = {0};
-	OOpclass	   *o_opclass;
-	NameData		oname;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_opclass] = {0};
+	bool		nulls[Natts_pg_opclass] = {0};
+	OOpclass   *o_opclass;
+	NameData	oname;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_opclass = o_opclass_cache_search(datoid, opclassoid, cur_lsn,
@@ -175,11 +176,11 @@ o_opclass_cache_search_htup(TupleDesc tupdesc, Oid opclassoid)
 void
 o_opclass_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	HeapTuple		opclasstuple;
-	Form_pg_opclass	opclassform;
-	Oid				base_type;
-	OOpclass	   *o_opclass = (OOpclass *) *entry_ptr;
-	Oid				opclassoid = DatumGetObjectId(key->keys[0]);
+	HeapTuple	opclasstuple;
+	Form_pg_opclass opclassform;
+	Oid			base_type;
+	OOpclass   *o_opclass = (OOpclass *) *entry_ptr;
+	Oid			opclassoid = DatumGetObjectId(key->keys[0]);
 
 	/*
 	 * find typecache entry
@@ -230,12 +231,12 @@ void
 o_opclass_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 						  OTuple tup, Pointer arg)
 {
-	OOpclass *o_opclass = (OOpclass *) tup.data;
+	OOpclass   *o_opclass = (OOpclass *) tup.data;
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);
 	appendStringInfo(buf, ", opfamily: %u, inputtype: %d, "
-						  "cmpOid: %u, ssupOid: %u)",
+					 "cmpOid: %u, ssupOid: %u)",
 					 o_opclass->opfamily, o_opclass->inputtype,
 					 o_opclass->cmpOid, o_opclass->ssupOid);
 }

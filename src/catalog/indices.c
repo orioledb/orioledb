@@ -141,7 +141,7 @@ o_validate_index_elements(OTable *o_table, OIndexNumber ix_num,
 
 	if (whereClause)
 		o_validate_funcexpr(whereClause, " are supported in "
-										 "orioledb index predicate");
+							"orioledb index predicate");
 
 	foreach(field_cell, index_elems)
 	{
@@ -185,7 +185,7 @@ o_validate_index_elements(OTable *o_table, OIndexNumber ix_num,
 		else
 		{
 			o_validate_funcexpr(ielem->expr, " are supported in "
-											 "orioledb index expressions");
+								"orioledb index expressions");
 		}
 	}
 }
