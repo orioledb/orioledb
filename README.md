@@ -83,7 +83,7 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [13 (tag: patches13_1)](https://github.com/orioledb/postgres/tree/patches13_1), [14 (tag: patches14_1)](https://github.com/orioledb/postgres/tree/patches14_1) or [15 (tag: patches15_1)](https://github.com/orioledb/postgres/tree/patches15_1);
+ * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [13 (tag: patches13_2)](https://github.com/orioledb/postgres/tree/patches13_2), [14 (tag: patches14_2)](https://github.com/orioledb/postgres/tree/patches14_2) or [15 (tag: patches15_2)](https://github.com/orioledb/postgres/tree/patches15_2);
  * Development package of libzstd;
  * python 3.5+ with testgres package.
 
