@@ -223,7 +223,6 @@ ORIOLEDB_PATCHSET_VERSION=1
 endif
 CUR_ORIOLEDB_PATCHSET_VERSION := $(shell grep '$(MAJORVERSION)' .pgtags | cut -d'_' -f2)
 
-.PHONY: check_patchset_version
 check_patchset_version:
 	@if [ $(CUR_ORIOLEDB_PATCHSET_VERSION) != $(ORIOLEDB_PATCHSET_VERSION) ]; then \
 		echo "Wrong orioledb patchset version:"\
