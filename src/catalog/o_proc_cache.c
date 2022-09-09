@@ -1566,7 +1566,6 @@ postquel_get_single_result(TupleTableSlot *slot,
 	 */
 	oldcontext = MemoryContextSwitchTo(resultcontext);
 
-	elog(WARNING, "fcache->returnsTuple: %c", fcache->returnsTuple ? 'Y' : 'N');
 	if (fcache->returnsTuple)
 	{
 		/* We must return the whole tuple as a Datum. */
@@ -1653,8 +1652,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 	List	   *eslist;
 	ListCell   *eslc;
 
-	elog(WARNING, "o_fmgr_sql");
-
 	/*
 	 * Setup error traceback support for ereport()
 	 */
@@ -1712,7 +1709,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 		init_sql_fcache(fcinfo, fcinfo->fncollation, lazyEvalOK, NULL, NULL);
 		fcache = (SQLFunctionCachePtr) fcinfo->flinfo->fn_extra;
 	}
-	elog(WARNING, "fcinfo->isnull 0: %c", fcinfo->isnull ? 'Y' : 'N');
 
 	/*
 	 * Switch to context in which the fcache lives.  This ensures that our
@@ -1861,9 +1857,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 			}
 		}
 	}
-	elog(WARNING, "fcinfo->isnull 1: %c", fcinfo->isnull ? 'Y' : 'N');
-
-	elog(WARNING, "fcache->returnsSet: %c", fcache->returnsSet ? 'Y' : 'N');
 
 	/*
 	 * The tuplestore now contains whatever row(s) we are supposed to return.
@@ -1920,7 +1913,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 			 */
 			rsi->isDone = ExprEndResult;
 
-			elog(WARNING, "WOW 0");
 			fcinfo->isnull = true;
 			result = (Datum) 0;
 
@@ -1947,7 +1939,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 			if (fcache->junkFilter)
 				rsi->setDesc = CreateTupleDescCopy(fcache->junkFilter->jf_cleanTupType);
 
-			elog(WARNING, "WOW 1");
 			fcinfo->isnull = true;
 			result = (Datum) 0;
 
@@ -1975,7 +1966,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 													fcache, oldcontext);
 			else
 			{
-				elog(WARNING, "WOW 2");
 				fcinfo->isnull = true;
 				result = (Datum) 0;
 			}
@@ -1984,7 +1974,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 		{
 			/* Should only get here for VOID functions and procedures */
 			Assert(fcache->rettype == VOIDOID);
-			elog(WARNING, "WOW 3");
 			fcinfo->isnull = true;
 			result = (Datum) 0;
 		}
@@ -1992,7 +1981,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 		/* Clear the tuplestore, but keep it for next time */
 		tuplestore_clear(fcache->tstore);
 	}
-	elog(WARNING, "fcinfo->isnull 2: %c", fcinfo->isnull ? 'Y' : 'N');
 
 	/* Pop snapshot if we have pushed one */
 	if (pushed_snapshot)
@@ -2018,9 +2006,6 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 	error_context_stack = sqlerrcontext.previous;
 
 	MemoryContextSwitchTo(oldcontext);
-
-	elog(WARNING, "fcinfo->isnull: %c", fcinfo->isnull ? 'Y' : 'N');
-	elog(WARNING, "o_fmgr_sql END");
 
 	return result;
 }
