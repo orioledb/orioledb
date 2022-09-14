@@ -9,6 +9,11 @@ ulimit -c unlimited -S
 mkdir -p /tmp/cores-$GITHUB_SHA-$TIMESTAMP
 sudo sh -c "echo \"/tmp/cores-$GITHUB_SHA-$TIMESTAMP/%t_%p.core\" > /proc/sys/kernel/core_pattern"
 
+# remember number of oom-killer visits in syslog before test
+[ -f /var/log/system.log ] && syslogfile=/var/log/system.log || syslogfile=/var/log/syslog
+[ -f $syslogfile ] && cat $syslogfile | grep oom-kill | wc -l > ./ooms.tmp \
+					|| { echo "Syslog file not found"; status=1; }
+
 
 status=0
 THREADS=4

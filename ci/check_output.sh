@@ -4,6 +4,16 @@ set -eu
 
 status=0
 
+[ -f /var/log/system.log ] && syslogfile=/var/log/system.log || syslogfile=/var/log/syslog
+[ -f $syslogfile ] || { echo "Syslog file not found"; status=1; }
+oomcount=$(cat $syslogfile | grep oom-kill | wc -l)
+[ -f ./ooms.tmp ] && { oomsbefore=$(cat ./ooms.tmp); rm ./ooms.tmp; } || \
+	{ oomsbefore=0; echo "File ooms.tmp not found. check.sh should be run before check-output.sh"; status=1;}
+if [ $oomcount != $oomsbefore ]; then
+    echo "======== OOM-kller came during the tests"
+    status=1
+fi
+
 # show diff if it exists
 for f in ` find . -name regression.diffs ` ; do
 	echo "========= Contents of $f" 
