@@ -1026,8 +1026,8 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		 * to keep track of the original query boundaries.
 		 *
 		 * Note: since parsing and planning is done in fcontext, we will
-		 * generate a lot of cruft that lives as long as the fcache does.
-		 * This is annoying but we'll not worry about it until the module is
+		 * generate a lot of cruft that lives as long as the fcache does. This
+		 * is annoying but we'll not worry about it until the module is
 		 * rewritten to use plancache.c.
 		 */
 		queryTree_list = NIL;

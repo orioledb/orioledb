@@ -650,8 +650,8 @@ o_collect_function(Node *node, void *context)
 
 					/*
 					 * Search pg_amop to see if the target operator is
-					 * registered as the "=" operator of any hash opfamily.
-					 * If the operator is registered in multiple opfamilies,
+					 * registered as the "=" operator of any hash opfamily. If
+					 * the operator is registered in multiple opfamilies,
 					 * assume we can use any one.
 					 */
 					catlist = SearchSysCacheList1(AMOPOPID,

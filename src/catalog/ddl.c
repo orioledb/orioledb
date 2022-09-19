@@ -1137,9 +1137,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					/*
 					 * If WITH NO DATA was specified, do not go through the
 					 * rewriter, planner and executor.  Just define the
-					 * relation using a code path similar to CREATE VIEW.
-					 * This avoids dump/restore problems stemming from running
-					 * the planner before all dependencies are set up.
+					 * relation using a code path similar to CREATE VIEW. This
+					 * avoids dump/restore problems stemming from running the
+					 * planner before all dependencies are set up.
 					 */
 					create_ctas_nodata(query->targetList, into);
 				}

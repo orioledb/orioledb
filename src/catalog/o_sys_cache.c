@@ -57,8 +57,8 @@ static Pointer o_sys_cache_get_from_toast_tree(OSysCache *sys_cache,
 static bool o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key,
 							Pointer entry);
 static bool o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry);
-static int o_sys_cache_key_cmp(int nkeys,
-							   OSysCacheKey *key1, OSysCacheKey *key2);
+static int	o_sys_cache_key_cmp(int nkeys,
+								OSysCacheKey *key1, OSysCacheKey *key2);
 static void o_sys_cache_keys_to_str(StringInfo buf, int nkeys,
 									OSysCacheKey *key);
 
@@ -67,8 +67,8 @@ static uint32 oSysCacheToastGetMaxChunkSize(void *key, void *arg);
 static void oSysCacheToastUpdateKey(void *key, uint32 offset, void *arg);
 static void *oSysCacheToastGetNextKey(void *key, void *arg);
 static OTuple oSysCacheToastCreateTuple(void *key, Pointer data,
-										 uint32 offset, int length,
-										 void *arg);
+										uint32 offset, int length,
+										void *arg);
 static OTuple oSysCacheToastCreateKey(void *key, uint32 offset, void *arg);
 static Pointer oSysCacheToastGetTupleData(OTuple tuple, void *arg);
 static uint32 oSysCacheToastGetTupleOffset(OTuple tuple, void *arg);
@@ -95,9 +95,9 @@ static MemoryContext sys_cache_cxt = NULL;
 static HTAB *sys_cache_fastcache;
 static List *sys_caches = NIL;
 
-static ResourceOwner	my_owner = NULL;
-static Oid				save_userid;
-static int				save_sec_context;
+static ResourceOwner my_owner = NULL;
+static Oid	save_userid;
+static int	save_sec_context;
 
 /*
  * Initializes the enum B-tree memory.
@@ -108,8 +108,8 @@ o_sys_caches_init(void)
 	HASHCTL		ctl;
 
 	sys_cache_cxt = AllocSetContextCreate(TopMemoryContext,
-										 "OrioleDB sys_caches fastcache context",
-										 ALLOCSET_DEFAULT_SIZES);
+										  "OrioleDB sys_caches fastcache context",
+										  ALLOCSET_DEFAULT_SIZES);
 
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(OSysCacheHashKey);
@@ -179,9 +179,9 @@ o_create_sys_cache(int sys_tree_num, bool is_toast, bool update_if_exist,
 				   Oid *keytypes, HTAB *fast_cache,
 				   MemoryContext mcxt, OSysCacheFuncs *funcs)
 {
-	OSysCache	   *sys_cache;
-	MemoryContext	old_mcxt;
-	int				i;
+	OSysCache  *sys_cache;
+	MemoryContext old_mcxt;
+	int			i;
 
 	Assert(fast_cache);
 	Assert(funcs);
@@ -280,11 +280,12 @@ invalidate_fastcache_entry(int cacheid, uint32 hashvalue)
 		foreach(lc, fast_cache_entry->tree_entries)
 		{
 			OSysCacheHashTreeEntry *tree_entry;
+
 			tree_entry = (OSysCacheHashTreeEntry *) lfirst(lc);
 
 			if (tree_entry->sys_cache)
 			{
-				OSysCache *sys_cache = tree_entry->sys_cache;
+				OSysCache  *sys_cache = tree_entry->sys_cache;
 
 				if (!memcmp(&sys_cache->last_fast_cache_key,
 							&fast_cache_entry->key,
@@ -311,16 +312,19 @@ orioledb_syscache_hook(Datum arg, int cacheid, uint32 hashvalue)
 void
 orioledb_setup_syscache_hooks(void)
 {
-	ListCell *lc;
-	List	 *cacheIds = NIL;
+	ListCell   *lc;
+	List	   *cacheIds = NIL;
+
 	foreach(lc, sys_caches)
 	{
-		OSysCache *sys_cache = (OSysCache *) lfirst(lc);
+		OSysCache  *sys_cache = (OSysCache *) lfirst(lc);
+
 		cacheIds = list_append_unique_int(cacheIds, sys_cache->cacheId);
 	}
 	foreach(lc, cacheIds)
 	{
-		int cacheId = lfirst_int(lc);
+		int			cacheId = lfirst_int(lc);
+
 		CacheRegisterSyscacheCallback(cacheId, orioledb_syscache_hook,
 									  PointerGetDatum(NULL));
 	}
@@ -330,12 +334,12 @@ orioledb_setup_syscache_hooks(void)
 void
 o_sys_caches_add_start()
 {
-	HASHCTL			ctl;
-	ListCell	   *lc;
+	HASHCTL		ctl;
+	ListCell   *lc;
 
 	foreach(lc, sys_caches)
 	{
-		OSysCache *sys_cache = (OSysCache *) lfirst(lc);
+		OSysCache  *sys_cache = (OSysCache *) lfirst(lc);
 
 		MemSet(&ctl, 0, sizeof(ctl));
 		ctl.keysize = sizeof(OSysCacheKey4);
@@ -352,11 +356,12 @@ o_sys_caches_add_start()
 void
 o_sys_caches_add_finish()
 {
-	ListCell	   *lc;
+	ListCell   *lc;
 
 	foreach(lc, sys_caches)
 	{
-		OSysCache *sys_cache = (OSysCache *) lfirst(lc);
+		OSysCache  *sys_cache = (OSysCache *) lfirst(lc);
+
 		Assert(sys_cache->added_hash != NULL);
 		hash_destroy(sys_cache->added_hash);
 		sys_cache->added_hash = NULL;
@@ -366,12 +371,12 @@ o_sys_caches_add_finish()
 Pointer
 o_sys_cache_search(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 {
-	bool						found;
-	OSysCacheHashKey			cur_fast_cache_key;
-	OSysCacheHashEntry		   *fast_cache_entry;
-	Pointer						tree_entry;
-	MemoryContext				prev_context;
-	OSysCacheHashTreeEntry	   *new_entry;
+	bool		found;
+	OSysCacheHashKey cur_fast_cache_key;
+	OSysCacheHashEntry *fast_cache_entry;
+	Pointer		tree_entry;
+	MemoryContext prev_context;
+	OSysCacheHashTreeEntry *new_entry;
 
 	cur_fast_cache_key = compute_hash_value(sys_cache->cc_hashfunc,
 											sys_cache->nkeys, key);
@@ -381,7 +386,8 @@ o_sys_cache_search(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 				sizeof(OSysCacheHashKey)) &&
 		sys_cache->last_fast_cache_entry)
 	{
-		OSysCacheKey   *sys_cache_key;
+		OSysCacheKey *sys_cache_key;
+
 		sys_cache_key = (OSysCacheKey *) sys_cache->last_fast_cache_entry;
 
 		if (sys_cache_key->common.datoid == key->common.datoid &&
@@ -400,11 +406,13 @@ o_sys_cache_search(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 		foreach(lc, fast_cache_entry->tree_entries)
 		{
 			OSysCacheHashTreeEntry *tree_entry;
+
 			tree_entry = (OSysCacheHashTreeEntry *) lfirst(lc);
 
 			if (tree_entry->sys_cache == sys_cache)
 			{
-				OSysCacheKey   *sys_cache_key;
+				OSysCacheKey *sys_cache_key;
+
 				sys_cache_key = (OSysCacheKey *) tree_entry->entry;
 
 				if (sys_cache_key->common.datoid == key->common.datoid &&
@@ -474,7 +482,7 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 	Pointer		result = NULL;
 	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
 	OSysCacheToastKeyBound toast_key = {.common = {.offset = 0},
-										.key = key, .lsn_cmp = false};
+	.key = key,.lsn_cmp = false};
 
 	data = generic_toast_get_any_with_callback(&oSysCacheToastAPI,
 											   (Pointer) &toast_key,
@@ -486,7 +494,7 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 	if (data == NULL)
 		return NULL;
 	result = sys_cache->funcs->toast_deserialize_entry(sys_cache->mcxt,
-														data, dataLength);
+													   data, dataLength);
 	pfree(data);
 
 	return result;
@@ -495,10 +503,10 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 Pointer
 o_sys_cache_get_from_tree(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 {
-	BTreeDescr		   *td = get_sys_tree(sys_cache->sys_tree_num);
-	BTreeIterator	   *it;
-	OTuple				last_tup;
-	OSysCacheBound		bound = {.key = key, .nkeys = nkeys};
+	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
+	BTreeIterator *it;
+	OTuple		last_tup;
+	OSysCacheBound bound = {.key = key,.nkeys = nkeys};
 
 	it = o_btree_iterator_create(td, (Pointer) &bound, BTreeKeyBound,
 								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
@@ -506,11 +514,11 @@ o_sys_cache_get_from_tree(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 	O_TUPLE_SET_NULL(last_tup);
 	do
 	{
-		OTuple				tup = o_btree_iterator_fetch(it, NULL,
-														 (Pointer) &bound,
-														 BTreeKeyBound, true,
-														 NULL);
-		OSysCacheKey   *sys_cache_key;
+		OTuple		tup = o_btree_iterator_fetch(it, NULL,
+												 (Pointer) &bound,
+												 BTreeKeyBound, true,
+												 NULL);
+		OSysCacheKey *sys_cache_key;
 
 		if (O_TUPLE_IS_NULL(tup))
 			break;
@@ -542,8 +550,8 @@ o_sys_cache_fill_locktag(LOCKTAG *tag, Oid datoid, Oid classoid,
 static void
 o_sys_cache_lock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 {
-	LOCKTAG				locktag;
-	OSysCacheHashKey	key_hash;
+	LOCKTAG		locktag;
+	OSysCacheHashKey key_hash;
 
 	key_hash = compute_hash_value(sys_cache->cc_hashfunc, sys_cache->nkeys,
 								  key);
@@ -557,8 +565,8 @@ o_sys_cache_lock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 static void
 o_sys_cache_unlock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 {
-	LOCKTAG				locktag;
-	OSysCacheHashKey	key_hash;
+	LOCKTAG		locktag;
+	OSysCacheHashKey key_hash;
 
 	key_hash = compute_hash_value(sys_cache->cc_hashfunc, sys_cache->nkeys,
 								  key);
@@ -568,7 +576,8 @@ o_sys_cache_unlock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 
 	if (!LockRelease(&locktag, lockmode, false))
 	{
-		StringInfo str = makeStringInfo();
+		StringInfo	str = makeStringInfo();
+
 		o_sys_cache_keys_to_str(str, sys_cache->nkeys, key);
 		elog(ERROR, "Can not release %s catalog cache lock on datoid = %d, "
 			 "key = %s", lockmode == AccessShareLock ? "share" : "exclusive",
@@ -584,9 +593,9 @@ static
 bool
 o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 {
-	bool				inserted;
-	OSysCacheKey	   *entry_key = (OSysCacheKey *) entry;
-	BTreeDescr		   *desc = get_sys_tree(sys_cache->sys_tree_num);
+	bool		inserted;
+	OSysCacheKey *entry_key = (OSysCacheKey *) entry;
+	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
 
 	entry_key->common = key->common;
 	memcpy(entry_key->keys, key->keys, sizeof(Datum) * sys_cache->nkeys);
@@ -601,10 +610,10 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 	}
 	else
 	{
-		Pointer					data;
-		int						len;
-		OSysCacheToastKeyBound	toast_key = {0};
-		OAutonomousTxState		state;
+		Pointer		data;
+		int			len;
+		OSysCacheToastKeyBound toast_key = {0};
+		OAutonomousTxState state;
 
 		toast_key.key = entry_key;
 		toast_key.common.offset = 0;
@@ -666,10 +675,10 @@ static BTreeModifyCallbackInfo callbackInfo =
 bool
 o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 {
-	bool				result;
-	OSysCacheKey	   *sys_cache_key;
-	BTreeDescr		   *desc = get_sys_tree(sys_cache->sys_tree_num);
-	OSysCacheBound		bound = {.nkeys = sys_cache->nkeys};
+	bool		result;
+	OSysCacheKey *sys_cache_key;
+	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
+	OSysCacheBound bound = {.nkeys = sys_cache->nkeys};
 
 	sys_cache_key = (OSysCacheKey *) updated_entry;
 	bound.key = sys_cache_key;
@@ -691,7 +700,7 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 									get_current_oxid(), COMMITSEQNO_INPROGRESS,
 									RowLockNoKeyUpdate, NULL,
 									&callbackInfo) ==
-					 OBTreeModifyResultUpdated;
+				OBTreeModifyResultUpdated;
 			if (result)
 				o_wal_update(desc, tup);
 		}
@@ -705,10 +714,10 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 	}
 	else
 	{
-		Pointer					data;
-		int						len;
-		OSysCacheToastKeyBound	toast_key = {0};
-		OAutonomousTxState		state;
+		Pointer		data;
+		int			len;
+		OSysCacheToastKeyBound toast_key = {0};
+		OAutonomousTxState state;
 
 		toast_key.key = sys_cache_key;
 		toast_key.common.offset = 0;
@@ -740,15 +749,16 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 void
 o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
 {
-	Pointer			entry = NULL;
-	bool			inserted PG_USED_FOR_ASSERTS_ONLY;
-	bool			found = false;
+	Pointer		entry = NULL;
+	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
+	bool		found = false;
 
 	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
 
 	if (sys_cache->added_hash)
 	{
-		OSysCacheKey4	hash_key = {0};
+		OSysCacheKey4 hash_key = {0};
+
 		hash_key.common.datoid = key->common.datoid;
 		memcpy(hash_key.keys, key->keys, sizeof(Datum) * sys_cache->nkeys);
 		hash_search(sys_cache->added_hash, &hash_key, HASH_ENTER,
@@ -788,9 +798,9 @@ void
 o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 							 Pointer arg)
 {
-	Pointer			entry = NULL;
-	OSysCacheKey   *sys_cache_key;
-	bool			updated PG_USED_FOR_ASSERTS_ONLY;
+	Pointer		entry = NULL;
+	OSysCacheKey *sys_cache_key;
+	bool		updated PG_USED_FOR_ASSERTS_ONLY;
 
 	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
 
@@ -813,8 +823,8 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 bool
 o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 {
-	Pointer			entry;
-	OSysCacheKey   *sys_cache_key;
+	Pointer		entry;
+	OSysCacheKey *sys_cache_key;
 
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
@@ -847,8 +857,8 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 		BTreeLocationHint hint;
 		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
 											false, &end, &hint);
-		OSysCacheKey   *sys_cache_key;
-		OTuple			key_tup;
+		OSysCacheKey *sys_cache_key;
+		OTuple		key_tup;
 
 		if (O_TUPLE_IS_NULL(tup))
 		{
@@ -877,8 +887,8 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 			}
 			else
 			{
-				OSysCacheToastKeyBound	toast_key = {0};
-				OAutonomousTxState		state;
+				OSysCacheToastKeyBound toast_key = {0};
+				OAutonomousTxState state;
 
 				toast_key.key = sys_cache_key;
 				toast_key.common.offset = 0;
@@ -912,10 +922,12 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 void
 o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo)
 {
-	ListCell *lc;
+	ListCell   *lc;
+
 	foreach(lc, sys_caches)
 	{
-		OSysCache *sys_cache = (OSysCache *) lfirst(lc);
+		OSysCache  *sys_cache = (OSysCache *) lfirst(lc);
+
 		o_sys_cache_delete_by_lsn(sys_cache, checkPointRedo);
 	}
 }
@@ -942,7 +954,7 @@ oSysCacheToastGetMaxChunkSize(void *key, void *arg)
 	max_chunk_size = MAXALIGN_DOWN((O_BTREE_MAX_TUPLE_SIZE * 3 -
 									MAXALIGN(chunk_key_len)) /
 								   3) -
-					 (chunk_key_len + sizeof(OSysCacheToastChunkCommon));
+		(chunk_key_len + sizeof(OSysCacheToastChunkCommon));
 
 	return max_chunk_size;
 }
@@ -958,17 +970,18 @@ oSysCacheToastUpdateKey(void *key, uint32 offset, void *arg)
 static inline int
 nkeys_for_desc(BTreeDescr *desc)
 {
-	OTuple	tup = {0};
-	int		key_len;
-	bool	toast = desc->ops->cmp == o_sys_cache_toast_cmp;
-	int		nkeys;
+	OTuple		tup = {0};
+	int			key_len;
+	bool		toast = desc->ops->cmp == o_sys_cache_toast_cmp;
+	int			nkeys;
 
 	if (toast)
 	{
-		int		chunk_key_len;
+		int			chunk_key_len;
+
 		chunk_key_len = o_btree_len(desc, tup, OKeyLength);
 		key_len = chunk_key_len -
-				  offsetof(OSysCacheToastChunkKey, sys_cache_key);
+			offsetof(OSysCacheToastChunkKey, sys_cache_key);
 	}
 	else
 	{
@@ -982,13 +995,13 @@ nkeys_for_desc(BTreeDescr *desc)
 static void *
 oSysCacheToastGetNextKey(void *key, void *arg)
 {
-	BTreeDescr					   *desc = (BTreeDescr *) arg;
-	OSysCacheToastKeyBound		   *ckey = (OSysCacheToastKeyBound *) key;
-	static OSysCacheKey4			nextKey = {0};
-	static OSysCacheToastKeyBound	nextKeyBound = {.key =
-										(OSysCacheKey *) &nextKey};
-	int								nkeys;
-	int								key_len;
+	BTreeDescr *desc = (BTreeDescr *) arg;
+	OSysCacheToastKeyBound *ckey = (OSysCacheToastKeyBound *) key;
+	static OSysCacheKey4 nextKey = {0};
+	static OSysCacheToastKeyBound nextKeyBound = {.key =
+	(OSysCacheKey *) &nextKey};
+	int			nkeys;
+	int			key_len;
 
 	nkeys = nkeys_for_desc(desc);
 
@@ -1005,15 +1018,15 @@ static OTuple
 oSysCacheToastCreateTuple(void *key, Pointer data, uint32 offset,
 						  int length, void *arg)
 {
-	OSysCacheToastKeyBound	   *bound = (OSysCacheToastKeyBound *) key;
-	Pointer						chunk;
-	OTuple						result;
-	OTuple						tup = {0};
-	BTreeDescr				   *desc = (BTreeDescr *) arg;
-	int							key_len;
-	int							chunk_key_len;
-	OSysCacheToastChunkKey	   *chunk_key;
-	OSysCacheToastChunkCommon  *common;
+	OSysCacheToastKeyBound *bound = (OSysCacheToastKeyBound *) key;
+	Pointer		chunk;
+	OTuple		result;
+	OTuple		tup = {0};
+	BTreeDescr *desc = (BTreeDescr *) arg;
+	int			key_len;
+	int			chunk_key_len;
+	OSysCacheToastChunkKey *chunk_key;
+	OSysCacheToastChunkCommon *common;
 
 	bound->common.offset = offset;
 
@@ -1040,9 +1053,9 @@ oSysCacheToastCreateTuple(void *key, Pointer data, uint32 offset,
 static OTuple
 oSysCacheToastCreateKey(void *key, uint32 offset, void *arg)
 {
-	OSysCacheToastChunkKey	   *ckey = (OSysCacheToastChunkKey *) key;
-	OSysCacheToastChunkKey	   *ckey_copy;
-	OTuple						result;
+	OSysCacheToastChunkKey *ckey = (OSysCacheToastChunkKey *) key;
+	OSysCacheToastChunkKey *ckey_copy;
+	OTuple		result;
 
 	ckey_copy = (OSysCacheToastChunkKey *) palloc(sizeof(OSysCacheToastChunkKey));
 	*ckey_copy = *ckey;
@@ -1056,10 +1069,10 @@ oSysCacheToastCreateKey(void *key, uint32 offset, void *arg)
 static Pointer
 oSysCacheToastGetTupleData(OTuple tuple, void *arg)
 {
-	BTreeDescr	   *desc = (BTreeDescr *) arg;
-	int				chunk_key_len;
-	OTuple			tup = {0};
-	Pointer			chunk = tuple.data;
+	BTreeDescr *desc = (BTreeDescr *) arg;
+	int			chunk_key_len;
+	OTuple		tup = {0};
+	Pointer		chunk = tuple.data;
 
 	chunk_key_len = o_btree_len(desc, tup, OKeyLength);
 
@@ -1069,8 +1082,8 @@ oSysCacheToastGetTupleData(OTuple tuple, void *arg)
 static uint32
 oSysCacheToastGetTupleOffset(OTuple tuple, void *arg)
 {
-	Pointer						chunk = tuple.data;
-	OSysCacheToastChunkKey	   *chunk_key;
+	Pointer		chunk = tuple.data;
+	OSysCacheToastChunkKey *chunk_key;
 
 	chunk_key = (OSysCacheToastChunkKey *) chunk;
 
@@ -1080,11 +1093,11 @@ oSysCacheToastGetTupleOffset(OTuple tuple, void *arg)
 static uint32
 oSysCacheToastGetTupleDataSize(OTuple tuple, void *arg)
 {
-	Pointer						chunk = tuple.data;
-	OSysCacheToastChunkCommon  *common;
-	BTreeDescr				   *desc = (BTreeDescr *) arg;
-	int							chunk_key_len;
-	OTuple						tup = {0};
+	Pointer		chunk = tuple.data;
+	OSysCacheToastChunkCommon *common;
+	BTreeDescr *desc = (BTreeDescr *) arg;
+	int			chunk_key_len;
+	OTuple		tup = {0};
 
 	chunk_key_len = o_btree_len(desc, tup, OKeyLength);
 
@@ -1108,7 +1121,8 @@ custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 		case TYPTYPE_COMPOSITE:
 			if (typeform->typtypmod == -1)
 			{
-				OClassArg	arg = {.sys_table=false};
+				OClassArg	arg = {.sys_table = false};
+
 				o_class_cache_add_if_needed(datoid, typeform->typrelid,
 											insert_lsn, (Pointer) &arg);
 				o_type_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
@@ -1156,8 +1170,8 @@ custom_types_add_all(OTable *o_table, OTableIndex *o_table_index)
 		o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 		for (cur_field = 0; cur_field < o_table_index->nfields; cur_field++)
 		{
-			int	attnum = o_table_index->fields[cur_field].attnum;
-			Oid	typid;
+			int			attnum = o_table_index->fields[cur_field].attnum;
+			Oid			typid;
 
 			if (attnum != EXPR_ATTNUM)
 				typid = o_table->fields[attnum].typid;
@@ -1176,9 +1190,10 @@ custom_types_add_all(OTable *o_table, OTableIndex *o_table_index)
 void
 o_composite_type_element_save(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 {
-	Oid opclassoid;
+	Oid			opclassoid;
 
-	custom_type_add_if_needed(datoid, typoid, insert_lsn);o_type_cache_add_if_needed(datoid, typoid, insert_lsn, NULL);
+	custom_type_add_if_needed(datoid, typoid, insert_lsn);
+	o_type_cache_add_if_needed(datoid, typoid, insert_lsn, NULL);
 	opclassoid = o_type_cache_default_opclass(typoid);
 	o_opclass_cache_add_if_needed(datoid, opclassoid, insert_lsn, NULL);
 }
@@ -1187,17 +1202,17 @@ static CatCTup *
 heap_to_catctup(CatCache *cache, TupleDesc cc_tupdesc, HeapTuple tuple,
 				bool refcount)
 {
-	CatCTup		   *ct;
-	HeapTuple		dtp;
-	MemoryContext	oldcxt;
-	int				i;
+	CatCTup    *ct;
+	HeapTuple	dtp;
+	MemoryContext oldcxt;
+	int			i;
 
 	/*
-	 * If there are any out-of-line toasted fields in the tuple, expand
-	 * them in-line. This saves cycles during later use of the
-	 * catcache entry, and also protects us against the possibility of
-	 * the toast tuples being freed before we attempt to fetch them, in
-	 * case of something using a slightly stale catcache entry.
+	 * If there are any out-of-line toasted fields in the tuple, expand them
+	 * in-line. This saves cycles during later use of the catcache entry, and
+	 * also protects us against the possibility of the toast tuples being
+	 * freed before we attempt to fetch them, in case of something using a
+	 * slightly stale catcache entry.
 	 */
 	if (HeapTupleHasExternal(tuple))
 		dtp = toast_flatten_tuple(tuple, cc_tupdesc);
@@ -1215,7 +1230,7 @@ heap_to_catctup(CatCache *cache, TupleDesc cc_tupdesc, HeapTuple tuple,
 												  sizeof(CatCTup));
 	/* copy tuple contents */
 	memcpy((char *) ct->tuple.t_data, (const char *) dtp->t_data,
-			dtp->t_len);
+		   dtp->t_len);
 	MemoryContextSwitchTo(oldcxt);
 
 	if (dtp != tuple)
@@ -1224,8 +1239,8 @@ heap_to_catctup(CatCache *cache, TupleDesc cc_tupdesc, HeapTuple tuple,
 	/* extract keys - they'll point into the tuple if not by-value */
 	for (i = 0; i < cache->cc_nkeys; i++)
 	{
-		Datum atp;
-		bool isnull;
+		Datum		atp;
+		bool		isnull;
 
 		atp = heap_getattr(&ct->tuple, cache->cc_keyno[i], cc_tupdesc,
 						   &isnull);
@@ -1234,8 +1249,8 @@ heap_to_catctup(CatCache *cache, TupleDesc cc_tupdesc, HeapTuple tuple,
 	}
 
 	/*
-	 * Finish initializing the CatCTup header, and add it to the
-	 * cache's linked list and counts.
+	 * Finish initializing the CatCTup header, and add it to the cache's
+	 * linked list and counts.
 	 */
 	ct->ct_magic = CT_MAGIC;
 	ct->my_cache = cache;
@@ -1254,136 +1269,136 @@ static CatCTup *
 o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 							  Datum v3, Datum v4)
 {
-	CatCTup	   *result = NULL;
+	CatCTup    *result = NULL;
 	TupleDesc	tupdesc = NULL;
 	HeapTuple	hook_tuple = NULL;
 
 	switch (cache->cc_indexoid)
 	{
-	case AggregateFnoidIndexId:
-	case AccessMethodOperatorIndexId:
-	case AccessMethodProcedureIndexId:
-	case AuthIdOidIndexId:
-	case OperatorClassRelationId:
-	case OperatorOidIndexId:
-	case ProcedureOidIndexId:
-	case TypeOidIndexId:
-		if (cache->cc_tupdesc)
-			tupdesc = cache->cc_tupdesc;
-		else
-			tupdesc = o_class_cache_search_tupdesc(cache->cc_reloid);
-		break;
-	default:
-		break;
+		case AggregateFnoidIndexId:
+		case AccessMethodOperatorIndexId:
+		case AccessMethodProcedureIndexId:
+		case AuthIdOidIndexId:
+		case OperatorClassRelationId:
+		case OperatorOidIndexId:
+		case ProcedureOidIndexId:
+		case TypeOidIndexId:
+			if (cache->cc_tupdesc)
+				tupdesc = cache->cc_tupdesc;
+			else
+				tupdesc = o_class_cache_search_tupdesc(cache->cc_reloid);
+			break;
+		default:
+			break;
 	}
 
 	switch (cache->cc_indexoid)
 	{
-	case AggregateFnoidIndexId:
-		{
-			Oid			aggfnoid;
+		case AggregateFnoidIndexId:
+			{
+				Oid			aggfnoid;
 
-			aggfnoid = DatumGetObjectId(v1);
+				aggfnoid = DatumGetObjectId(v1);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_aggregate_cache_search_htup(tupdesc, aggfnoid);
-		}
-		break;
-	case AccessMethodOperatorIndexId:
-		{
-			Oid		amopopr;
-			char	amoppurpose;
-			Oid		amopfamily;
+				hook_tuple = o_aggregate_cache_search_htup(tupdesc, aggfnoid);
+			}
+			break;
+		case AccessMethodOperatorIndexId:
+			{
+				Oid			amopopr;
+				char		amoppurpose;
+				Oid			amopfamily;
 
-			amopopr = DatumGetObjectId(v1);
-			amoppurpose = DatumGetChar(v2);
-			amopfamily = DatumGetObjectId(v3);
+				amopopr = DatumGetObjectId(v1);
+				amoppurpose = DatumGetChar(v2);
+				amopfamily = DatumGetObjectId(v3);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_amop_cache_search_htup(tupdesc, amopopr,
-												  amoppurpose, amopfamily);
-		}
-		break;
-	case AccessMethodProcedureIndexId:
-		{
-			Oid		amprocfamily;
-			Oid		amproclefttype;
-			Oid		amprocrighttype;
-			int16	amprocnum;
+				hook_tuple = o_amop_cache_search_htup(tupdesc, amopopr,
+													  amoppurpose, amopfamily);
+			}
+			break;
+		case AccessMethodProcedureIndexId:
+			{
+				Oid			amprocfamily;
+				Oid			amproclefttype;
+				Oid			amprocrighttype;
+				int16		amprocnum;
 
-			amprocfamily = DatumGetObjectId(v1);
-			amproclefttype = DatumGetObjectId(v2);
-			amprocrighttype = DatumGetObjectId(v3);
-			amprocnum = DatumGetChar(v4);
+				amprocfamily = DatumGetObjectId(v1);
+				amproclefttype = DatumGetObjectId(v2);
+				amprocrighttype = DatumGetObjectId(v3);
+				amprocnum = DatumGetChar(v4);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_amproc_cache_search_htup(tupdesc, amprocfamily,
-													amproclefttype,
-													amprocrighttype,
-													amprocnum);
-		}
-		break;
-	case AuthIdOidIndexId:
-		{
-			Oid		authoid;
+				hook_tuple = o_amproc_cache_search_htup(tupdesc, amprocfamily,
+														amproclefttype,
+														amprocrighttype,
+														amprocnum);
+			}
+			break;
+		case AuthIdOidIndexId:
+			{
+				Oid			authoid;
 
-			authoid = DatumGetObjectId(v1);
+				authoid = DatumGetObjectId(v1);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_auth_cache_search_htup(tupdesc, authoid);
-		}
-		break;
-	case OperatorClassRelationId:
-		{
-			Oid			opclassoid;
+				hook_tuple = o_auth_cache_search_htup(tupdesc, authoid);
+			}
+			break;
+		case OperatorClassRelationId:
+			{
+				Oid			opclassoid;
 
-			opclassoid = DatumGetObjectId(v1);
+				opclassoid = DatumGetObjectId(v1);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_opclass_cache_search_htup(tupdesc, opclassoid);
-		}
-		break;
-	case OperatorOidIndexId:
-		{
-			Oid			operoid;
+				hook_tuple = o_opclass_cache_search_htup(tupdesc, opclassoid);
+			}
+			break;
+		case OperatorOidIndexId:
+			{
+				Oid			operoid;
 
-			operoid = DatumGetObjectId(v1);
+				operoid = DatumGetObjectId(v1);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_operator_cache_search_htup(tupdesc, operoid);
-		}
-		break;
-	case ProcedureOidIndexId:
-		{
-			Oid			procoid;
+				hook_tuple = o_operator_cache_search_htup(tupdesc, operoid);
+			}
+			break;
+		case ProcedureOidIndexId:
+			{
+				Oid			procoid;
 
-			procoid = DatumGetObjectId(v1);
+				procoid = DatumGetObjectId(v1);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_proc_cache_search_htup(tupdesc, procoid);
-		}
-		break;
-	case TypeOidIndexId:
-		{
-			Oid			typeoid;
+				hook_tuple = o_proc_cache_search_htup(tupdesc, procoid);
+			}
+			break;
+		case TypeOidIndexId:
+			{
+				Oid			typeoid;
 
-			typeoid = DatumGetObjectId(v1);
+				typeoid = DatumGetObjectId(v1);
 
-			Assert(tupdesc);
+				Assert(tupdesc);
 
-			hook_tuple = o_type_cache_search_htup(tupdesc, typeoid);
-		}
-		break;
+				hook_tuple = o_type_cache_search_htup(tupdesc, typeoid);
+			}
+			break;
 
-	default:
-		break;
+		default:
+			break;
 	}
 
 	if (hook_tuple)
@@ -1399,68 +1414,68 @@ static CatCList *
 o_SearchCatCacheList_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 						  Datum v3)
 {
-	CatCList *cl = NULL;
+	CatCList   *cl = NULL;
 
 	switch (cache->cc_indexoid)
 	{
-	case AccessMethodOperatorIndexId:
-		{
-			TupleDesc tupdesc = NULL;
-			List   *htup_list;
-			int		nmembers;
-			Oid		amopopr;
-			int		i;
-			ListCell *lc;
-			MemoryContext	oldcxt;
-
-			if (cache->cc_tupdesc)
-				tupdesc = cache->cc_tupdesc;
-			else
-				tupdesc = o_class_cache_search_tupdesc(cache->cc_reloid);
-
-			Assert(nkeys == 1);
-			amopopr = DatumGetObjectId(v1);
-
-			Assert(tupdesc);
-
-			htup_list = o_amop_cache_search_htup_list(tupdesc, amopopr);
-			if (htup_list != NIL)
+		case AccessMethodOperatorIndexId:
 			{
-				nmembers = list_length(htup_list);
+				TupleDesc	tupdesc = NULL;
+				List	   *htup_list;
+				int			nmembers;
+				Oid			amopopr;
+				int			i;
+				ListCell   *lc;
+				MemoryContext oldcxt;
 
-				oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
-				cl = (CatCList *)
-					palloc0(offsetof(CatCList, members) +
-							nmembers * sizeof(CatCTup *));
-				MemoryContextSwitchTo(oldcxt);
+				if (cache->cc_tupdesc)
+					tupdesc = cache->cc_tupdesc;
+				else
+					tupdesc = o_class_cache_search_tupdesc(cache->cc_reloid);
 
-				cl->cl_magic = CL_MAGIC;
-				cl->my_cache = cache;
-				cl->n_members = nmembers;
+				Assert(nkeys == 1);
+				amopopr = DatumGetObjectId(v1);
 
-				ResourceOwnerEnlargeCatCacheListRefs(CurrentResourceOwner);
-				i = 0;
-				foreach(lc, htup_list)
+				Assert(tupdesc);
+
+				htup_list = o_amop_cache_search_htup_list(tupdesc, amopopr);
+				if (htup_list != NIL)
 				{
-					HeapTuple ht = lfirst(lc);
-					CatCTup *ct;
+					nmembers = list_length(htup_list);
 
-					ct = heap_to_catctup(cache, tupdesc, ht, false);
-					cl->members[i++] = ct;
-					ct->c_list = cl;
+					oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
+					cl = (CatCList *)
+						palloc0(offsetof(CatCList, members) +
+								nmembers * sizeof(CatCTup *));
+					MemoryContextSwitchTo(oldcxt);
+
+					cl->cl_magic = CL_MAGIC;
+					cl->my_cache = cache;
+					cl->n_members = nmembers;
+
+					ResourceOwnerEnlargeCatCacheListRefs(CurrentResourceOwner);
+					i = 0;
+					foreach(lc, htup_list)
+					{
+						HeapTuple	ht = lfirst(lc);
+						CatCTup    *ct;
+
+						ct = heap_to_catctup(cache, tupdesc, ht, false);
+						cl->members[i++] = ct;
+						ct->c_list = cl;
+					}
+					Assert(i == nmembers);
+
+					cl->refcount++;
+					ResourceOwnerRememberCatCacheListRef(CurrentResourceOwner, cl);
 				}
-				Assert(i == nmembers);
 
-				cl->refcount++;
-				ResourceOwnerRememberCatCacheListRef(CurrentResourceOwner, cl);
+				if (tupdesc && tupdesc != cache->cc_tupdesc)
+					FreeTupleDesc(tupdesc);
 			}
-
-			if (tupdesc && tupdesc != cache->cc_tupdesc)
-				FreeTupleDesc(tupdesc);
-		}
-		break;
-	default:
-		break;
+			break;
+		default:
+			break;
 	}
 
 	return cl;
@@ -1469,24 +1484,25 @@ o_SearchCatCacheList_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 static TupleDesc
 o_SysCacheGetAttr_hook(CatCache *SysCache)
 {
-	TupleDesc tupdesc = NULL;
+	TupleDesc	tupdesc = NULL;
+
 	switch (SysCache->cc_indexoid)
 	{
-	case AggregateFnoidIndexId:
-	case AccessMethodOperatorIndexId:
-	case AccessMethodProcedureIndexId:
-	case AuthIdOidIndexId:
-	case OperatorClassRelationId:
-	case OperatorOidIndexId:
-	case ProcedureOidIndexId:
-	case TypeOidIndexId:
-		if (SysCache->cc_tupdesc)
-			tupdesc = SysCache->cc_tupdesc;
-		else
-			tupdesc = o_class_cache_search_tupdesc(SysCache->cc_reloid);
-		break;
-	default:
-		break;
+		case AggregateFnoidIndexId:
+		case AccessMethodOperatorIndexId:
+		case AccessMethodProcedureIndexId:
+		case AuthIdOidIndexId:
+		case OperatorClassRelationId:
+		case OperatorOidIndexId:
+		case ProcedureOidIndexId:
+		case TypeOidIndexId:
+			if (SysCache->cc_tupdesc)
+				tupdesc = SysCache->cc_tupdesc;
+			else
+				tupdesc = o_class_cache_search_tupdesc(SysCache->cc_reloid);
+			break;
+		default:
+			break;
 	}
 
 	return tupdesc;
@@ -1495,8 +1511,8 @@ o_SysCacheGetAttr_hook(CatCache *SysCache)
 static int
 o_sys_cache_key_cmp(int nkeys, OSysCacheKey *key1, OSysCacheKey *key2)
 {
-	int	i;
-	int	cmp = 0;
+	int			i;
+	int			cmp = 0;
 
 	for (i = 0; i < nkeys; i++)
 	{
@@ -1520,17 +1536,18 @@ int
 o_sys_cache_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1, void *p2,
 				BTreeKeyType k2)
 {
-	OSysCacheKey	   *key1;
-	OSysCacheKey	   *key2;
-	bool				lsn_cmp = true;
-	int					nkeys;
-	int					cmp;
+	OSysCacheKey *key1;
+	OSysCacheKey *key2;
+	bool		lsn_cmp = true;
+	int			nkeys;
+	int			cmp;
 
 	nkeys = nkeys_for_desc(desc);
 
 	if (k1 == BTreeKeyBound)
 	{
 		OSysCacheBound *bound = (OSysCacheBound *) p1;
+
 		key1 = bound->key;
 		nkeys = bound->nkeys;
 		lsn_cmp = false;
@@ -1541,6 +1558,7 @@ o_sys_cache_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1, void *p2,
 	if (k2 == BTreeKeyBound)
 	{
 		OSysCacheBound *bound = (OSysCacheBound *) p2;
+
 		key2 = bound->key;
 		nkeys = bound->nkeys;
 		lsn_cmp = false;
@@ -1565,7 +1583,7 @@ o_sys_cache_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1, void *p2,
 static void
 o_sys_cache_keys_to_str(StringInfo buf, int nkeys, OSysCacheKey *key)
 {
-	int i;
+	int			i;
 
 	appendStringInfo(buf, "(");
 	for (i = 0; i < nkeys; i++)
@@ -1584,7 +1602,7 @@ void
 o_sys_cache_key_print(BTreeDescr *desc, StringInfo buf, OTuple key_tup,
 					  Pointer arg)
 {
-	OSysCacheKey   *key = (OSysCacheKey *) key_tup.data;
+	OSysCacheKey *key = (OSysCacheKey *) key_tup.data;
 	uint32		id,
 				off;
 
@@ -1602,7 +1620,8 @@ static void
 o_sys_cache_key_push_to_jsonb_state(BTreeDescr *desc, OSysCacheKey *key,
 									JsonbParseState **state)
 {
-	StringInfo str;
+	StringInfo	str;
+
 	jsonb_push_int8_key(state, "datoid", key->common.datoid);
 	jsonb_push_int8_key(state, "lsn", key->common.lsn);
 	jsonb_push_bool_key(state, "deleted", key->common.deleted);
@@ -1617,7 +1636,7 @@ o_sys_cache_key_push_to_jsonb_state(BTreeDescr *desc, OSysCacheKey *key,
 JsonbValue *
 o_sys_cache_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state)
 {
-	OSysCacheKey   *key = (OSysCacheKey *) tup.data;
+	OSysCacheKey *key = (OSysCacheKey *) tup.data;
 
 	(void) pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
 	o_sys_cache_key_push_to_jsonb_state(desc, key, state);
@@ -1627,17 +1646,17 @@ o_sys_cache_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state)
 int
 o_sys_cache_toast_chunk_length(BTreeDescr *desc, OTuple tuple)
 {
-	Pointer							chunk = tuple.data;
-	int								chunk_key_len;
-	OTuple							tup = {0};
-	OSysCacheToastChunkCommon	   *common;
+	Pointer		chunk = tuple.data;
+	int			chunk_key_len;
+	OTuple		tup = {0};
+	OSysCacheToastChunkCommon *common;
 
 	chunk_key_len = o_btree_len(desc, tup, OKeyLength);
 
 	common = (OSysCacheToastChunkCommon *) (chunk + chunk_key_len);
 
 	return chunk_key_len + sizeof(OSysCacheToastChunkCommon) +
-		   common->dataLength;
+		common->dataLength;
 }
 
 /*
@@ -1649,20 +1668,20 @@ o_sys_cache_toast_chunk_length(BTreeDescr *desc, OTuple tuple)
  */
 int
 o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
-					   void *p2, BTreeKeyType k2)
+					  void *p2, BTreeKeyType k2)
 {
-	uint32				offset1,
-						offset2;
-	OSysCacheKey	   *key1 = NULL;
-	OSysCacheKey	   *key2 = NULL;
-	OSysCacheKey4		_key = {0};
-	OSysCacheBound		_bound = {.key = (OSysCacheKey *) &_key};
-	OTuple				key_tuple1 = {0},
-						key_tuple2 = {0};
-	Pointer				sys_cache_key_cmp_arg1 = NULL,
-						sys_cache_key_cmp_arg2 = NULL;
-	int					sys_cache_key_cmp_result;
-	int					nkeys;
+	uint32		offset1,
+				offset2;
+	OSysCacheKey *key1 = NULL;
+	OSysCacheKey *key2 = NULL;
+	OSysCacheKey4 _key = {0};
+	OSysCacheBound _bound = {.key = (OSysCacheKey *) &_key};
+	OTuple		key_tuple1 = {0},
+				key_tuple2 = {0};
+	Pointer		sys_cache_key_cmp_arg1 = NULL,
+				sys_cache_key_cmp_arg2 = NULL;
+	int			sys_cache_key_cmp_result;
+	int			nkeys;
 
 	nkeys = nkeys_for_desc(desc);
 	_bound.nkeys = nkeys;
@@ -1685,7 +1704,8 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 	else
 	{
 		OSysCacheToastChunkKey *chunk_key =
-			((OSysCacheToastChunkKey *) ((OTuple *) p1)->data);
+		((OSysCacheToastChunkKey *) ((OTuple *) p1)->data);
+
 		key1 = &chunk_key->sys_cache_key;
 		offset1 = chunk_key->common.offset;
 	}
@@ -1714,7 +1734,8 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 	else
 	{
 		OSysCacheToastChunkKey *chunk_key =
-			((OSysCacheToastChunkKey *) ((OTuple *) p2)->data);
+		((OSysCacheToastChunkKey *) ((OTuple *) p2)->data);
+
 		key2 = &chunk_key->sys_cache_key;
 		offset2 = chunk_key->common.offset;
 	}
@@ -1743,9 +1764,9 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
  */
 void
 o_sys_cache_toast_key_print(BTreeDescr *desc, StringInfo buf,
-							 OTuple tup, Pointer arg)
+							OTuple tup, Pointer arg)
 {
-	OTuple key_tup = {0};
+	OTuple		key_tup = {0};
 	OSysCacheToastChunkKey *key = (OSysCacheToastChunkKey *) tup.data;
 
 	appendStringInfo(buf, "(");
@@ -1774,10 +1795,10 @@ void
 o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
 							OTuple tup, Pointer arg)
 {
-	OTuple						key_tup = {0};
-	Pointer						chunk = tup.data;
-	OSysCacheToastChunkCommon  *common;
-	int							chunk_key_len;
+	OTuple		key_tup = {0};
+	Pointer		chunk = tup.data;
+	OSysCacheToastChunkCommon *common;
+	int			chunk_key_len;
 
 	chunk_key_len = o_btree_len(desc, key_tup, OKeyLength);
 
@@ -1792,10 +1813,10 @@ o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
 HeapTuple
 o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid)
 {
-	HeapTuple		result = NULL;
-	Datum			values[Natts_pg_authid] = {0};
-	bool			nulls[Natts_pg_authid] = {0};
-	NameData		oname;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_authid] = {0};
+	bool		nulls[Natts_pg_authid] = {0};
+	NameData	oname;
 
 	Assert(authoid == BOOTSTRAP_SUPERUSERID);
 
