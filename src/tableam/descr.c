@@ -469,6 +469,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	descr->newTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
 	descr->defvals_exprstate = NULL;
+	o_sys_cache_search_datoid = o_table->oids.datoid;
 	if (o_table->defvals)
 	{
 		int			i;

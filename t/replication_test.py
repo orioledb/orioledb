@@ -459,6 +459,32 @@ class ReplicationTest(BaseTest):
 				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
 										expected = False)
 
+	def test_replication_create_table_add_column_same_trx(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+		""")
+
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con:
+					con.begin()
+					con.execute("""
+						CREATE TABLE o_test_1 (
+							a int
+						) USING orioledb;
+
+						ALTER TABLE o_test_1 ADD COLUMN b serial;
+
+						INSERT INTO o_test_1 VALUES (1), (2), (3);
+					""")
+					con.commit()
+
+				catchup_orioledb(replica)
+				self.assertEqual(replica.execute("SELECT * FROM o_test_1"),
+								 [(1, 1), (2, 2), (3, 3)])
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x
