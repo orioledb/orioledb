@@ -1199,4 +1199,28 @@ EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
 SELECT * FROM o_test_unique_as_pkey ORDER BY val;
 RESET enable_seqscan;
 
+CREATE TABLE o_test_renames
+(
+	key bigint NOT NULL,
+	val int,
+	PRIMARY KEY (key)
+) USING orioledb;
+
+CREATE INDEX o_test_renames_idx ON o_test_renames (val);
+
+\d o_test_renames
+SELECT orioledb_table_description('o_test_renames'::regclass);
+SELECT description FROM orioledb_table WHERE reloid = 'o_test_renames'::regclass;
+\d o_test_renames_idx
+SELECT orioledb_tbl_indices('o_test_renames'::regclass);
+SELECT description FROM orioledb_index WHERE index_reloid = 'o_test_renames_idx'::regclass;
+ALTER TABLE o_test_renames_idx RENAME TO o_test_renames_idx_as_tbl;
+\d o_test_renames
+\d o_test_renames_idx
+ALTER INDEX o_test_renames RENAME TO o_test_renames_as_ix;
+\d o_test_renames
+\d o_test_renames_as_ix
+ALTER TABLE o_test_renames_as_ix RENAME COLUMN o_test_renames_idx_as_tbl TO val2;
+\d o_test_renames_as_ix
+
 DROP EXTENSION orioledb CASCADE;

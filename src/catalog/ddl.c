@@ -1269,57 +1269,64 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		if (stmt->renameType == OBJECT_INDEX)
 		{
-			Relation	idx = relation_openrv(stmt->relation, AccessExclusiveLock);
-			Relation	tbl = relation_open(idx->rd_index->indrelid,
-											AccessShareLock);
-
-			if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
-				 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
-				is_orioledb_rel(tbl))
+			Relation	idx = relation_openrv(stmt->relation,
+											  AccessExclusiveLock);
+			if (idx->rd_rel->relkind == RELKIND_INDEX)
 			{
-				OTable	   *o_table;
-				ORelOids	table_oids = {MyDatabaseId, tbl->rd_rel->oid, tbl->rd_node.relNode};
+				Relation	tbl = relation_open(idx->rd_index->indrelid,
+												AccessShareLock);
 
-				o_table = o_tables_get(table_oids);
-				if (o_table == NULL)
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+					tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+					is_orioledb_rel(tbl))
 				{
-					elog(NOTICE, "orioledb table %s not found", RelationGetRelationName(tbl));
-				}
-				else
-				{
-					int			ix_num;
-					CommitSeqNo csn;
-					OXid		oxid;
-					ORelOids	idx_oids = {MyDatabaseId, idx->rd_rel->oid, idx->rd_node.relNode};
+					OTable	   *o_table;
+					ORelOids	table_oids = {MyDatabaseId, tbl->rd_rel->oid,
+											  tbl->rd_node.relNode};
 
-					for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+					o_table = o_tables_get(table_oids);
+					if (o_table == NULL)
 					{
-						OTableIndex *index = &o_table->indices[ix_num];
+						elog(NOTICE, "orioledb table %s not found",
+							 RelationGetRelationName(tbl));
+					}
+					else
+					{
+						int			ix_num;
+						CommitSeqNo csn;
+						OXid		oxid;
+						ORelOids	idx_oids = {MyDatabaseId, idx->rd_rel->oid,
+												idx->rd_node.relNode};
 
-						if (ORelOidsIsEqual(index->oids, idx_oids))
+						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
-							namestrcpy(&index->name, stmt->newname);
-							break;
+							OTableIndex *index = &o_table->indices[ix_num];
+
+							if (ORelOidsIsEqual(index->oids, idx_oids))
+							{
+								namestrcpy(&index->name, stmt->newname);
+								break;
+							}
 						}
-					}
-					Assert(ix_num < o_table->nindices);
-					fill_current_oxid_csn(&oxid, &csn);
-					o_tables_update(o_table, oxid, csn);
-					o_indices_update(o_table, ix_num, oxid, csn);
-					o_invalidate_oids(idx_oids);
-					o_add_invalidate_undo_item(idx_oids,
-											   O_INVALIDATE_OIDS_ON_ABORT);
-					if (!ORelOidsIsEqual(idx_oids, table_oids))
-					{
-						o_invalidate_oids(table_oids);
-						o_add_invalidate_undo_item(table_oids,
+						Assert(ix_num < o_table->nindices);
+						fill_current_oxid_csn(&oxid, &csn);
+						o_tables_update(o_table, oxid, csn);
+						o_indices_update(o_table, ix_num, oxid, csn);
+						o_invalidate_oids(idx_oids);
+						o_add_invalidate_undo_item(idx_oids,
 												   O_INVALIDATE_OIDS_ON_ABORT);
+						if (!ORelOidsIsEqual(idx_oids, table_oids))
+						{
+							o_invalidate_oids(table_oids);
+							o_add_invalidate_undo_item(table_oids,
+													   O_INVALIDATE_OIDS_ON_ABORT);
+						}
+						AcceptInvalidationMessages();
+						o_table_free(o_table);
 					}
-					AcceptInvalidationMessages();
-					o_table_free(o_table);
 				}
+				relation_close(tbl, AccessShareLock);
 			}
-			relation_close(tbl, AccessShareLock);
 			relation_close(idx, AccessExclusiveLock);
 		}
 		else if (stmt->renameType == OBJECT_COLUMN)

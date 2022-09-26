@@ -5879,8 +5879,115 @@ SELECT * FROM o_test_unique_as_pkey ORDER BY val;
 (5 rows)
 
 RESET enable_seqscan;
+CREATE TABLE o_test_renames
+(
+	key bigint NOT NULL,
+	val int,
+	PRIMARY KEY (key)
+) USING orioledb;
+CREATE INDEX o_test_renames_idx ON o_test_renames (val);
+\d o_test_renames
+           Table "public.o_test_renames"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ key    | bigint  |           | not null | 
+ val    | integer |           |          | 
+Indexes:
+    "o_test_renames_pkey" PRIMARY KEY, btree (key)
+    "o_test_renames_idx" btree (val) INCLUDE (key)
+
+SELECT orioledb_table_description('o_test_renames'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+     val | integer |    (null) |     true |  false        +
+ 
+(1 row)
+
+SELECT description FROM orioledb_table WHERE reloid = 'o_test_renames'::regclass;
+                        description                        
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+     val | integer |    (null) |     true |  false        +
+ 
+(1 row)
+
+\d o_test_renames_idx
+  Index "public.o_test_renames_idx"
+ Column |  Type   | Key? | Definition 
+--------+---------+------+------------
+ val    | integer | yes  | val
+ key    | bigint  | no   | key
+btree, for table "public.o_test_renames"
+
+SELECT orioledb_tbl_indices('o_test_renames'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_renames_pkey                     +
+     Index type: primary, unique               +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+ Index o_test_renames_idx                      +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val, key           +
+     Leaf tuple fields: val, key               +
+ 
+(1 row)
+
+SELECT description FROM orioledb_index WHERE index_reloid = 'o_test_renames_idx'::regclass;
+                    description                     
+----------------------------------------------------
+  Column |    Type | Collation | Nullable | Droped +
+     val | integer |    (null) |     true |  false +
+     key |  bigint |    (null) |    false |  false +
+                                                   +
+ Key fields: (val, key)                            +
+ 
+(1 row)
+
+ALTER TABLE o_test_renames_idx RENAME TO o_test_renames_idx_as_tbl;
+\d o_test_renames
+           Table "public.o_test_renames"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ key    | bigint  |           | not null | 
+ val    | integer |           |          | 
+Indexes:
+    "o_test_renames_pkey" PRIMARY KEY, btree (key)
+    "o_test_renames_idx_as_tbl" btree (val) INCLUDE (key)
+
+\d o_test_renames_idx
+ALTER INDEX o_test_renames RENAME TO o_test_renames_as_ix;
+\d o_test_renames
+\d o_test_renames_as_ix
+        Table "public.o_test_renames_as_ix"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ key    | bigint  |           | not null | 
+ val    | integer |           |          | 
+Indexes:
+    "o_test_renames_pkey" PRIMARY KEY, btree (key)
+    "o_test_renames_idx_as_tbl" btree (val) INCLUDE (key)
+
+ALTER TABLE o_test_renames_as_ix RENAME COLUMN o_test_renames_idx_as_tbl TO val2;
+ERROR:  column "o_test_renames_idx_as_tbl" does not exist
+\d o_test_renames_as_ix
+        Table "public.o_test_renames_as_ix"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ key    | bigint  |           | not null | 
+ val    | integer |           |          | 
+Indexes:
+    "o_test_renames_pkey" PRIMARY KEY, btree (key)
+    "o_test_renames_idx_as_tbl" btree (val) INCLUDE (key)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 30 other objects
+NOTICE:  drop cascades to 31 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -5911,3 +6018,4 @@ drop cascades to table o_test82
 drop cascades to table o_test83
 drop cascades to table o_test_partial_idx_update
 drop cascades to table o_test_unique_as_pkey
+drop cascades to table o_test_renames_as_ix
