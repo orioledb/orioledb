@@ -6,7 +6,7 @@ SET parallel_tuple_cost = 0;
 SET enable_seqscan = ON;
 SET enable_bitmapscan = OFF;
 SET enable_indexscan = OFF;
-CREATE TABLE bitmap_test
+CREATE TABLE seq_scan_test
 (
 	id serial primary key,
 	i int4
@@ -15,39 +15,39 @@ CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
 $$
 	SELECT substr(sha256(($1::text || ' ' || $2::text)::bytea)::text,2,16)::bit(52)::bigint::float8 / pow(2.0, 52.0);
 $$ LANGUAGE sql;
-ALTER SEQUENCE bitmap_test_id_seq RESTART WITH 100000;
-INSERT INTO bitmap_test (i)
+ALTER SEQUENCE seq_scan_test_id_seq RESTART WITH 100000;
+INSERT INTO seq_scan_test (i)
 	SELECT pseudo_random(1, v) * 1200000 FROM generate_series(1,300000) v;
-ANALYZE bitmap_test;
-CREATE INDEX bitmap_test_ix1 ON bitmap_test (i);
+ANALYZE seq_scan_test;
+CREATE INDEX seq_scan_test_ix1 ON seq_scan_test (i);
 SET max_parallel_workers_per_gather = 0;
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 100;
-          QUERY PLAN           
--------------------------------
+EXPLAIN (COSTS OFF) SELECT count(*) FROM seq_scan_test WHERE i < 100;
+           QUERY PLAN            
+---------------------------------
  Aggregate
-   ->  Seq Scan on bitmap_test
+   ->  Seq Scan on seq_scan_test
          Filter: (i < 100)
 (3 rows)
 
-SELECT count(*) FROM bitmap_test WHERE i < 100;
+SELECT count(*) FROM seq_scan_test WHERE i < 100;
  count 
 -------
     19
 (1 row)
 
 SET max_parallel_workers_per_gather = 5;
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 100;
-                     QUERY PLAN                     
-----------------------------------------------------
+EXPLAIN (COSTS OFF) SELECT count(*) FROM seq_scan_test WHERE i < 100;
+                      QUERY PLAN                      
+------------------------------------------------------
  Finalize Aggregate
    ->  Gather
          Workers Planned: 5
          ->  Partial Aggregate
-               ->  Parallel Seq Scan on bitmap_test
+               ->  Parallel Seq Scan on seq_scan_test
                      Filter: (i < 100)
 (6 rows)
 
-SELECT count(*) FROM bitmap_test WHERE i < 100;
+SELECT count(*) FROM seq_scan_test WHERE i < 100;
  count 
 -------
     19
@@ -55,17 +55,17 @@ SELECT count(*) FROM bitmap_test WHERE i < 100;
 
 SET max_parallel_workers_per_gather = 0;
 EXPLAIN (COSTS OFF)
-	SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i,id LIMIT 20;
-             QUERY PLAN              
--------------------------------------
+	SELECT * FROM seq_scan_test WHERE i < 100 ORDER BY i,id LIMIT 20;
+              QUERY PLAN               
+---------------------------------------
  Limit
    ->  Sort
          Sort Key: i, id
-         ->  Seq Scan on bitmap_test
+         ->  Seq Scan on seq_scan_test
                Filter: (i < 100)
 (5 rows)
 
-SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i,id LIMIT 20;
+SELECT * FROM seq_scan_test WHERE i < 100 ORDER BY i,id LIMIT 20;
    id   | i  
 --------+----
  132074 |  0
@@ -91,19 +91,19 @@ SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i,id LIMIT 20;
 
 SET max_parallel_workers_per_gather = 5;
 EXPLAIN (COSTS OFF)
-	SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i,id LIMIT 20;
-                     QUERY PLAN                     
-----------------------------------------------------
+	SELECT * FROM seq_scan_test WHERE i < 100 ORDER BY i,id LIMIT 20;
+                      QUERY PLAN                      
+------------------------------------------------------
  Limit
    ->  Gather Merge
          Workers Planned: 5
          ->  Sort
                Sort Key: i, id
-               ->  Parallel Seq Scan on bitmap_test
+               ->  Parallel Seq Scan on seq_scan_test
                      Filter: (i < 100)
 (7 rows)
 
-SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i,id LIMIT 20;
+SELECT * FROM seq_scan_test WHERE i < 100 ORDER BY i,id LIMIT 20;
    id   | i  
 --------+----
  132074 |  0
@@ -128,33 +128,33 @@ SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i,id LIMIT 20;
 (19 rows)
 
 SET max_parallel_workers_per_gather = 0;
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 1000;
-          QUERY PLAN           
--------------------------------
+EXPLAIN (COSTS OFF) SELECT count(*) FROM seq_scan_test WHERE i < 1000;
+           QUERY PLAN            
+---------------------------------
  Aggregate
-   ->  Seq Scan on bitmap_test
+   ->  Seq Scan on seq_scan_test
          Filter: (i < 1000)
 (3 rows)
 
-SELECT count(*) FROM bitmap_test WHERE i < 1000;
+SELECT count(*) FROM seq_scan_test WHERE i < 1000;
  count 
 -------
    246
 (1 row)
 
 SET max_parallel_workers_per_gather = 5;
-EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 1000;
-                     QUERY PLAN                     
-----------------------------------------------------
+EXPLAIN (COSTS OFF) SELECT count(*) FROM seq_scan_test WHERE i < 1000;
+                      QUERY PLAN                      
+------------------------------------------------------
  Finalize Aggregate
    ->  Gather
          Workers Planned: 5
          ->  Partial Aggregate
-               ->  Parallel Seq Scan on bitmap_test
+               ->  Parallel Seq Scan on seq_scan_test
                      Filter: (i < 1000)
 (6 rows)
 
-SELECT count(*) FROM bitmap_test WHERE i < 1000;
+SELECT count(*) FROM seq_scan_test WHERE i < 1000;
  count 
 -------
    246
@@ -162,17 +162,17 @@ SELECT count(*) FROM bitmap_test WHERE i < 1000;
 
 SET max_parallel_workers_per_gather = 0;
 EXPLAIN (COSTS OFF)
-	SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
-             QUERY PLAN              
--------------------------------------
+	SELECT * FROM seq_scan_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
+              QUERY PLAN               
+---------------------------------------
  Limit
    ->  Sort
          Sort Key: i, id
-         ->  Seq Scan on bitmap_test
+         ->  Seq Scan on seq_scan_test
                Filter: (i < 1000)
 (5 rows)
 
-SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
+SELECT * FROM seq_scan_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
    id   |  i  
 --------+-----
  132074 |   0
@@ -199,19 +199,19 @@ SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
 
 SET max_parallel_workers_per_gather = 5;
 EXPLAIN (COSTS OFF)
-	SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
-                     QUERY PLAN                     
-----------------------------------------------------
+	SELECT * FROM seq_scan_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
+                      QUERY PLAN                      
+------------------------------------------------------
  Limit
    ->  Gather Merge
          Workers Planned: 5
          ->  Sort
                Sort Key: i, id
-               ->  Parallel Seq Scan on bitmap_test
+               ->  Parallel Seq Scan on seq_scan_test
                      Filter: (i < 1000)
 (7 rows)
 
-SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
+SELECT * FROM seq_scan_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
    id   |  i  
 --------+-----
  132074 |   0
@@ -238,15 +238,15 @@ SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i,id LIMIT 20;
 
 SET max_parallel_workers_per_gather = 0;
 EXPLAIN (COSTS OFF)
-	SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
+	SELECT count(*) FROM seq_scan_test WHERE i < 1000 OR i > 13000;
                  QUERY PLAN                  
 ---------------------------------------------
  Aggregate
-   ->  Seq Scan on bitmap_test
+   ->  Seq Scan on seq_scan_test
          Filter: ((i < 1000) OR (i > 13000))
 (3 rows)
 
-SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
+SELECT count(*) FROM seq_scan_test WHERE i < 1000 OR i > 13000;
  count  
 --------
  296960
@@ -254,18 +254,18 @@ SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
 
 SET max_parallel_workers_per_gather = 5;
 EXPLAIN (COSTS OFF)
-	SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
+	SELECT count(*) FROM seq_scan_test WHERE i < 1000 OR i > 13000;
                        QUERY PLAN                        
 ---------------------------------------------------------
  Finalize Aggregate
    ->  Gather
          Workers Planned: 5
          ->  Partial Aggregate
-               ->  Parallel Seq Scan on bitmap_test
+               ->  Parallel Seq Scan on seq_scan_test
                      Filter: ((i < 1000) OR (i > 13000))
 (6 rows)
 
-SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
+SELECT count(*) FROM seq_scan_test WHERE i < 1000 OR i > 13000;
  count  
 --------
  296960
@@ -273,17 +273,17 @@ SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
 
 SET max_parallel_workers_per_gather = 0;
 EXPLAIN (COSTS OFF)
-	SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
+	SELECT * FROM seq_scan_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
                     QUERY PLAN                     
 ---------------------------------------------------
  Limit
    ->  Sort
          Sort Key: i, id
-         ->  Seq Scan on bitmap_test
+         ->  Seq Scan on seq_scan_test
                Filter: ((i < 1000) OR (i > 13000))
 (5 rows)
 
-SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
+SELECT * FROM seq_scan_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
    id   |  i  
 --------+-----
  132074 |   0
@@ -310,7 +310,7 @@ SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
 
 SET max_parallel_workers_per_gather = 5;
 EXPLAIN (COSTS OFF)
-	SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
+	SELECT * FROM seq_scan_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
                        QUERY PLAN                        
 ---------------------------------------------------------
  Limit
@@ -318,11 +318,11 @@ EXPLAIN (COSTS OFF)
          Workers Planned: 5
          ->  Sort
                Sort Key: i, id
-               ->  Parallel Seq Scan on bitmap_test
+               ->  Parallel Seq Scan on seq_scan_test
                      Filter: ((i < 1000) OR (i > 13000))
 (7 rows)
 
-SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
+SELECT * FROM seq_scan_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
    id   |  i  
 --------+-----
  132074 |   0
@@ -357,4 +357,4 @@ RESET enable_bitmapscan;
 RESET enable_indexscan;
 DROP FUNCTION pseudo_random;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to table bitmap_test
+NOTICE:  drop cascades to table seq_scan_test
