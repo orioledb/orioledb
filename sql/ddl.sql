@@ -159,11 +159,16 @@ ALTER TABLE o_ddl_missing ADD COLUMN n int4, ADD COLUMN o int4[];
 SELECT * FROM o_ddl_missing;
 UPDATE o_ddl_missing SET l = 5, n = 6, o = '{1, 5, 2}' WHERE i BETWEEN 3 AND 7;
 SELECT * FROM o_ddl_missing;
-ALTER TABLE o_ddl_missing 
-	DROP COLUMN m, 
-	ADD COLUMN p int4[] DEFAULT '{2, 4, 8}', 
+ALTER TABLE o_ddl_missing
+	DROP COLUMN m,
+	ADD COLUMN p int4[] DEFAULT '{2, 4, 8}',
 	ADD COLUMN r int4[];
 SELECT * FROM o_ddl_missing;
+
+CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
+$$
+	SELECT substr(sha256(($1::text || ' ' || $2::text)::bytea)::text,2,16)::bit(52)::bigint::float8 / pow(2.0, 52.0);
+$$ LANGUAGE sql;
 
 CREATE TABLE o_test_add_column
 (
@@ -223,7 +228,7 @@ INSERT INTO o_test_multiple_analyzes
 BEGIN;
 select count(1) from o_test_multiple_analyzes;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('explain (analyze, buffers) 
+FROM query_to_text('explain (analyze, buffers)
 	select * from o_test_multiple_analyzes ORDER BY aid DESC LIMIT 10;') as t;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('explain (analyze, buffers)
@@ -270,9 +275,9 @@ CREATE UNIQUE INDEX ON o_test_unique_on_conflict(key);
 
 INSERT INTO o_test_unique_on_conflict(key)
 	(SELECT key FROM generate_series (1, 1) key);
-INSERT INTO o_test_unique_on_conflict (key) 
+INSERT INTO o_test_unique_on_conflict (key)
 	SELECT * FROM generate_series(1, 1)
-	ON CONFLICT (key) DO UPDATE 
+	ON CONFLICT (key) DO UPDATE
 		SET key = o_test_unique_on_conflict.key + 100;
 SELECT * FROM o_test_unique_on_conflict;
 
@@ -299,4 +304,5 @@ CREATE TABLE o_test_inherits_2 (
 	val_2 int
 ) INHERITS (o_test_inherits_1) USING orioledb;
 
+DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;

@@ -368,9 +368,9 @@ SELECT * FROM o_ddl_missing;
  10 |   | 2 |   | 
 (10 rows)
 
-ALTER TABLE o_ddl_missing 
-	DROP COLUMN m, 
-	ADD COLUMN p int4[] DEFAULT '{2, 4, 8}', 
+ALTER TABLE o_ddl_missing
+	DROP COLUMN m,
+	ADD COLUMN p int4[] DEFAULT '{2, 4, 8}',
 	ADD COLUMN r int4[];
 SELECT * FROM o_ddl_missing;
  i  | l | n |    o    |    p    | r 
@@ -387,6 +387,10 @@ SELECT * FROM o_ddl_missing;
  10 |   |   |         | {2,4,8} | 
 (10 rows)
 
+CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
+$$
+	SELECT substr(sha256(($1::text || ' ' || $2::text)::bytea)::text,2,16)::bit(52)::bigint::float8 / pow(2.0, 52.0);
+$$ LANGUAGE sql;
 CREATE TABLE o_test_add_column
 (
 	id serial primary key,
@@ -651,7 +655,7 @@ select count(1) from o_test_multiple_analyzes;
 (1 row)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
-FROM query_to_text('explain (analyze, buffers) 
+FROM query_to_text('explain (analyze, buffers)
 	select * from o_test_multiple_analyzes ORDER BY aid DESC LIMIT 10;') as t;
                                                  regexp_replace                                                 
 ----------------------------------------------------------------------------------------------------------------
@@ -732,9 +736,9 @@ CREATE TABLE o_test_unique_on_conflict (
 CREATE UNIQUE INDEX ON o_test_unique_on_conflict(key);
 INSERT INTO o_test_unique_on_conflict(key)
 	(SELECT key FROM generate_series (1, 1) key);
-INSERT INTO o_test_unique_on_conflict (key) 
+INSERT INTO o_test_unique_on_conflict (key)
 	SELECT * FROM generate_series(1, 1)
-	ON CONFLICT (key) DO UPDATE 
+	ON CONFLICT (key) DO UPDATE
 		SET key = o_test_unique_on_conflict.key + 100;
 SELECT * FROM o_test_unique_on_conflict;
  key 
@@ -769,6 +773,8 @@ CREATE TABLE o_test_inherits_2 (
 	val_2 int
 ) INHERITS (o_test_inherits_1) USING orioledb;
 ERROR:  INHERITS is not supported for orioledb tables.
+DROP FUNCTION pseudo_random CASCADE;
+NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table o_ddl_missing

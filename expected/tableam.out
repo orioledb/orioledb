@@ -3861,7 +3861,7 @@ WITH inserted AS (
 			SELECT ID, 'abcdef' || (ID % 100) t
 			FROM generate_series(1,100) ID) tmp
 			GROUP BY t) returning *)
-SELECT substr(t, 6) FROM inserted; 
+SELECT substr(t, 6) FROM inserted;
  substr 
 --------
  f36
@@ -3973,7 +3973,7 @@ WITH inserted AS (
 			SELECT ID, 'abcdef' || (ID % 100) t
 			FROM generate_series(1,100) ID) tmp
 			GROUP BY t) returning *)
-SELECT substr(t, 6) FROM inserted; 
+SELECT substr(t, 6) FROM inserted;
 ERROR:  duplicate key value violates unique constraint "o_tableam_snapshot_check"
 DETAIL:  Key ('abcdef36') already exists
 DROP TABLE heap_table;
@@ -3986,7 +3986,6 @@ CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
 $$
   SELECT i::text::bigint::float8;
 $$ LANGUAGE sql;
-ERROR:  function "pseudo_random" already exists with same argument types
 INSERT INTO o_test_add_column (i)
   SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
 CREATE SEQUENCE o_test_j_seq;

@@ -769,7 +769,7 @@ WITH inserted AS (
 			SELECT ID, 'abcdef' || (ID % 100) t
 			FROM generate_series(1,100) ID) tmp
 			GROUP BY t) returning *)
-SELECT substr(t, 6) FROM inserted; 
+SELECT substr(t, 6) FROM inserted;
 WITH inserted AS (
 	INSERT INTO o_tableam_snapshot_check (
 		SELECT t, COUNT(*)
@@ -777,7 +777,7 @@ WITH inserted AS (
 			SELECT ID, 'abcdef' || (ID % 100) t
 			FROM generate_series(1,100) ID) tmp
 			GROUP BY t) returning *)
-SELECT substr(t, 6) FROM inserted; 
+SELECT substr(t, 6) FROM inserted;
 
 DROP TABLE heap_table;
 

@@ -1367,4 +1367,5 @@ SELECT * FROM bitmap_test_complex WHERE val IN ('13!', 'b');
 EXPLAIN (COSTS OFF) SELECT * FROM bitmap_test_complex WHERE val < '13!';
 SELECT * FROM bitmap_test_complex WHERE val < '13!';
 
+DROP FUNCTION pseudo_random;
 DROP EXTENSION orioledb CASCADE;
