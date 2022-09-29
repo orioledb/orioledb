@@ -101,6 +101,76 @@ class TriggerTest(BaseTest):
 						 """),
 						 [(1, 1), (2, 1)])
 
+	def test_4(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
+
+			INSERT INTO o_test_1 (val_1, val_2)
+				(SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
+
+			CREATE OR REPLACE FUNCTION func_trig_o_test_1()
+			RETURNS TRIGGER AS
+			$$
+			BEGIN
+			INSERT INTO o_test_1(val_1)
+				VALUES (OLD.val_1);
+			RETURN OLD;
+			END;
+			$$
+			LANGUAGE 'plpgsql';
+
+			CREATE TRIGGER trig_o_test_1 AFTER DELETE
+			ON o_test_1 FOR EACH STATEMENT
+			EXECUTE PROCEDURE func_trig_o_test_1();
+
+			DELETE FROM o_test_1 WHERE val_1 = 3;
+			""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		node.stop()
+
+	def test_5(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
+
+			INSERT INTO o_test_1 (val_1, val_2)
+				(SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
+
+			CREATE OR REPLACE FUNCTION func_trig_o_test_1()
+			RETURNS TRIGGER AS
+			$$
+			BEGIN
+			INSERT INTO o_test_1(val_1)
+				VALUES (OLD.val_1);
+			RETURN OLD;
+			END;
+			$$
+			LANGUAGE 'plpgsql';
+
+			CREATE TRIGGER trig_o_test_1 AFTER UPDATE
+			ON o_test_1 FOR EACH STATEMENT
+			EXECUTE PROCEDURE func_trig_o_test_1();
+
+			UPDATE o_test_1 SET val_1 = val_1 + 100;
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		node.stop()
+
 	def test_7(self):
 		node = self.node
 		node.start()
@@ -151,6 +221,51 @@ class TriggerTest(BaseTest):
 			CREATE TABLE o_test_2 (val_3, val_4)USING orioledb
 				AS (SELECT * FROM o_test_1);
 		""")
+		node.stop()
+
+	def test_10(self):
+		node = self.node
+		node.start()
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+
+				CREATE TABLE o_test_1(
+					val_1 int,
+					val_2 int
+				)USING orioledb;
+
+				INSERT INTO o_test_1 (val_1, val_2)
+					(SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
+
+				CREATE OR REPLACE FUNCTION func_trig_o_test_1()
+				RETURNS TRIGGER AS
+				$$
+				BEGIN
+				INSERT INTO o_test_1(val_1)
+					VALUES (OLD.val_1);
+				RETURN OLD;
+				END;
+				$$
+				LANGUAGE 'plpgsql';
+
+				CREATE TRIGGER trig_o_test_1 AFTER INSERT
+				ON o_test_1 FOR EACH STATEMENT
+				EXECUTE PROCEDURE func_trig_o_test_1();
+
+				INSERT INTO o_test_1 (val_1, val_2)
+					(SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
+			""")
+
+		m=[x.group(0) for x in list(re.finditer(r'.*\n', e.exception.message))[0:3]]
+		self.assertEqual("".join(m),
+						"ERROR:  stack depth limit exceeded\n" +
+						"HINT:  Increase the configuration parameter \"max_stack_depth\" (currently 2048kB), after ensuring the platform's stack depth limit is adequate.\n" +
+						"CONTEXT:  SQL statement \"INSERT INTO o_test_1(val_1)\n")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
 		node.stop()
 
 	def test_11(self):
@@ -656,4 +771,55 @@ class TriggerTest(BaseTest):
 		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
 			(3,103), (4,104), (5,105), (None, None)])
 
+		node.stop()
+
+	def test_23(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+
+				CREATE TABLE o_test_1(
+					val_1 int,
+					val_2 int
+				)USING orioledb;
+
+				CREATE TABLE o_test_2(
+					val_3 int,
+					val_4 int
+				)USING orioledb;
+
+				CREATE OR REPLACE FUNCTION func_1() RETURNS TRIGGER AS $$
+					BEGIN
+						IF (TG_OP = 'INSERT') THEN
+							INSERT INTO o_test_2(val_3, val_4)
+								VALUES (1, 1);
+						END IF;
+						RETURN NULL;
+					END;
+				$$ LANGUAGE plpgsql;
+
+				CREATE TRIGGER trig_1
+					AFTER INSERT ON o_test_1
+					REFERENCING NEW TABLE AS new_table
+					FOR EACH STATEMENT EXECUTE FUNCTION func_1();
+				CREATE TRIGGER trig_2
+					AFTER UPDATE ON o_test_1
+					REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+					FOR EACH STATEMENT EXECUTE FUNCTION func_1();
+				CREATE TRIGGER trig_3
+					AFTER DELETE ON o_test_1
+					REFERENCING OLD TABLE AS old_table
+					FOR EACH STATEMENT EXECUTE FUNCTION func_1();
+
+				INSERT INTO o_test_1(val_1, val_2)
+					VALUES (1, 1);
+
+				UPDATE o_test_1 SET val_2 = val_2 + 100;
+
+				DELETE FROM o_test_1 WHERE val_2 = 1;
+				""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
 		node.stop()
