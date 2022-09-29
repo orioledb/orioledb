@@ -181,10 +181,13 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	Datum	   *values = slot->tts_values;
 	bool	   *isnull = slot->tts_isnull;
 	bool		hastoast = false;
-	OIndexDescr *idx = descr->indices[oslot->ixnum];
+	OIndexDescr *idx;
 
 	if (__natts <= slot->tts_nvalid || O_TUPLE_IS_NULL(oslot->tuple))
 		return;
+
+	Assert(descr);
+	idx = descr->indices[oslot->ixnum];
 
 	Assert(slot->tts_nvalid == 0 || oslot->ixnum == PrimaryIndexNumber);
 

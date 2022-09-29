@@ -304,5 +304,22 @@ CREATE TABLE o_test_inherits_2 (
 	val_2 int
 ) INHERITS (o_test_inherits_1) USING orioledb;
 
+BEGIN;
+CREATE TABLE o_test(
+	id integer NOT NULL,
+	val text NOT NULL,
+	PRIMARY KEY(id),
+	UNIQUE(id, val)
+) USING orioledb;
+CREATE TABLE o_test_child(
+	id integer NOT NULL,
+	o_test_ID integer NOT NULL REFERENCES o_test (id),
+	PRIMARY KEY(id)
+) USING orioledb;
+INSERT INTO o_test(id, val) VALUES (1, 'hello');
+INSERT INTO o_test(id, val) VALUES (2, 'hey');
+DELETE FROM o_test where id = 1;
+COMMIT;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
