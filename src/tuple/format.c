@@ -766,6 +766,7 @@ o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	return result;
 }
 
+
 uint32
 o_tuple_get_version(OTuple tuple)
 {
@@ -807,4 +808,24 @@ o_tuple_set_version(OTupleFixedFormatSpec *spec, OTuple *tuple,
 	header->len = sizeof(OTupleHeaderData) + spec->len;
 	header->hasnulls = 0;
 	header->version = version;
+}
+
+void
+o_tuple_set_ctid(OTuple tuple, ItemPointer iptr)
+{
+	Pointer		data = tuple.data;
+	OTupleHeader header = (OTupleHeader) data;
+
+	if (tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT)
+	{
+		*((ItemPointer) data) = *iptr;
+	}
+	else if (header->hasnulls)
+	{
+		*((ItemPointer) (data + SizeOfOTupleHeader + MAXALIGN(BITMAPLEN(header->natts)))) = *iptr;
+	}
+	else
+	{
+		*((ItemPointer) (data + SizeOfOTupleHeader)) = *iptr;
+	}
 }

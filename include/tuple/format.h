@@ -199,5 +199,6 @@ extern OTuple o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 extern uint32 o_tuple_get_version(OTuple tuple);
 extern void o_tuple_set_version(OTupleFixedFormatSpec *spec, OTuple *tuple,
 								uint32 version);
+extern void o_tuple_set_ctid(OTuple tuple, ItemPointer iptr);
 
 #endif							/* __TUPLE_FORMAT_H__ */

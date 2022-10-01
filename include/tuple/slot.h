@@ -70,5 +70,6 @@ extern bool tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 											 TupleTableSlot *newSlot,
 											 OTableDescr *descr,
 											 OXid oxid, CommitSeqNo csn);
+extern void tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr);
 
 #endif							/* __TUPLE_SLOT_H__ */

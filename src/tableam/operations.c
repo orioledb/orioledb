@@ -167,8 +167,11 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 	{
+		ItemPointerData iptr;
+
 		o_btree_load_shmem(&primary->desc);
-		slot->tts_tid = btree_ctid_get_and_inc(&primary->desc);
+		iptr = btree_ctid_get_and_inc(&primary->desc);
+		tts_orioledb_set_ctid(slot, &iptr);
 	}
 
 	tts_orioledb_toast(slot, descr);

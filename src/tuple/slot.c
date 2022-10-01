@@ -1507,6 +1507,16 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 	return result;
 }
 
+void
+tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+
+	slot->tts_tid = *iptr;
+	if (!O_TUPLE_IS_NULL(oslot->tuple) && oslot->ixnum == PrimaryIndexNumber)
+		o_tuple_set_ctid(oslot->tuple, iptr);
+}
+
 const TupleTableSlotOps TTSOpsOrioleDB = {
 	.base_slot_size = sizeof(OTableSlot),
 	.init = tts_orioledb_init,

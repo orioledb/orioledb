@@ -821,4 +821,12 @@ SELECT orioledb_write_pages('o_heap_test'::regclass);
 
 DROP TABLE o_heap_test;
 
+CREATE TABLE o_ctid_test (val_1 int) USING orioledb;
+INSERT INTO o_ctid_test VALUES (1);
+INSERT INTO o_ctid_test SELECT * FROM o_ctid_test;
+INSERT INTO o_ctid_test VALUES (0);
+SELECT count(*) FROM o_ctid_test;
+DELETE FROM o_ctid_test WHERE val_1 != 0;
+SELECT * FROM o_ctid_test;
+
 DROP EXTENSION orioledb CASCADE;
