@@ -76,8 +76,10 @@ typedef struct
 	OXid		oxid;
 	CommitSeqNo csn;
 	LockWaitPolicy waitPolicy;
+	UndoLocation tupUndoLocation;
 	bool		wouldBlock;
 	bool		modified;
+	bool		selfModified;
 } OLockCallbackArg;
 
 extern void o_tbl_insert(OTableDescr *descr, Relation relation,

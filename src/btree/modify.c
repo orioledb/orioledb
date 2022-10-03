@@ -711,12 +711,6 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								O_PAGE_GET_CHANGE_COUNT(page),
 								&undoLocation);
 	}
-
-	if (first_saved_undo_location)
-	{
-		saved_undo_location = undoLocation;
-		first_saved_undo_location = false;
-	}
 }
 
 static OBTreeModifyResult
@@ -797,12 +791,6 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 	else
 	{
 		undoLocation = InvalidUndoLocation;
-	}
-
-	if (first_saved_undo_location)
-	{
-		saved_undo_location = undoLocation;
-		first_saved_undo_location = false;
 	}
 
 	START_CRIT_SECTION();

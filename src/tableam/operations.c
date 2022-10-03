@@ -238,6 +238,11 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 
 	Assert(res == OBTreeModifyResultLocked || res == OBTreeModifyResultFound || res == OBTreeModifyResultNotFound);
 
+	larg->selfModified = COMMITSEQNO_IS_INPROGRESS(larg->csn) &&
+		(larg->oxid == get_current_oxid_if_any()) &&
+		UndoLocationIsValid(larg->tupUndoLocation) &&
+		(larg->tupUndoLocation >= saved_undo_location);
+
 	return res;
 }
 
@@ -1486,9 +1491,15 @@ o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 	o_arg->modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
 	if (XACT_INFO_IS_FINISHED(xactInfo))
+	{
 		o_arg->csn = o_arg->modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
+	}
 	else
+	{
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
+		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+		o_arg->tupUndoLocation = location;
+	}
 
 	copy_tuple_to_slot(tup, slot, o_arg->descr, o_arg->csn,
 					   PrimaryIndexNumber, hint);

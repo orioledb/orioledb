@@ -77,10 +77,11 @@ extern Datum pg_trigger_depth(PG_FUNCTION_ARGS);
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
-static planner_hook_type prev_planner_hook = NULL;
+static ExecutorStart_hook_type prev_ExecutorStart = NULL;
+static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
-bool		first_saved_undo_location = true;
-UndoLocation saved_undo_location;
+UndoLocation	saved_undo_location = InvalidUndoLocation;
+List		   *saved_undo_locations = NIL; /* list of UndoLocation* */
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -95,10 +96,8 @@ static void orioledb_utility_command(PlannedStmt *pstmt,
 static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 										Oid objectId, int subId, void *arg);
 
-static PlannedStmt *orioledb_planner_hook(Query *parse,
-										  const char *query_string,
-										  int cursorOptions,
-										  ParamListInfo boundParams);
+static void orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags);
+static void orioledb_ExecutorEnd_hook(QueryDesc *queryDesc);
 static void create_ctas_nodata(List *tlist, IntoClause *into);
 static ObjectAddress o_define_relation(CreateStmt *cstmt, char relkind,
 									   const char *queryString);
@@ -124,8 +123,10 @@ orioledb_setup_ddl_hooks(void)
 	ProcessUtility_hook = orioledb_utility_command;
 	old_objectaccess_hook = object_access_hook;
 	object_access_hook = orioledb_object_access_hook;
-	prev_planner_hook = planner_hook;
-	planner_hook = orioledb_planner_hook;
+	prev_ExecutorStart = ExecutorStart_hook;
+	ExecutorStart_hook = orioledb_ExecutorStart_hook;
+	prev_ExecutorEnd = ExecutorEnd_hook;
+	ExecutorEnd_hook = orioledb_ExecutorEnd_hook;
 }
 
 List *
@@ -391,21 +392,46 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 	return strtype;
 }
 
-static PlannedStmt *
-orioledb_planner_hook(Query *parse, const char *query_string,
-					  int cursorOptions, ParamListInfo boundParams)
+static void
+orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags)
 {
-	uint32		depth;
+	UndoLocation		lastUsedLocation;
+	UndoLocation	   *cur_undo_location;
+	MemoryContext		oldcxt;
 
-	depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth, (Datum) 0));
-	first_saved_undo_location = first_saved_undo_location || (depth == 0);
-
-	if (prev_planner_hook)
-		return prev_planner_hook(parse, query_string, cursorOptions,
-								 boundParams);
+	lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+	cur_undo_location = (UndoLocation *) palloc0(sizeof(UndoLocation));
+	saved_undo_location = lastUsedLocation;
+	*cur_undo_location = lastUsedLocation;
+	saved_undo_locations = lappend(saved_undo_locations, cur_undo_location);
+	MemoryContextSwitchTo(oldcxt);
+	if (prev_ExecutorStart)
+		return prev_ExecutorStart(queryDesc, eflags);
 	else
-		return standard_planner(parse, query_string, cursorOptions,
-								boundParams);
+		return standard_ExecutorStart(queryDesc, eflags);
+}
+
+static void
+orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
+{
+	ListCell   *last;
+
+	last = list_tail(saved_undo_locations);
+	pfree(lfirst(last));
+	saved_undo_locations = list_delete_last(saved_undo_locations);
+	if (saved_undo_locations != NIL)
+	{
+		last = list_tail(saved_undo_locations);
+		saved_undo_location = *(UndoLocation *) lfirst(last);
+	}
+	else
+		saved_undo_location = InvalidUndoLocation;
+
+	if (prev_ExecutorEnd)
+		return prev_ExecutorEnd(queryDesc);
+	else
+		return standard_ExecutorEnd(queryDesc);
 }
 
 static bool
@@ -838,8 +864,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						 struct QueryCompletion *qc)
 {
 	bool		call_next = true;
-
-	first_saved_undo_location = true;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))

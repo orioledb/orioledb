@@ -649,6 +649,7 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	larg.waitPolicy = wait_policy;
 	larg.wouldBlock = false;
 	larg.modified = false;
+	larg.selfModified = false;
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, NULL, NULL);
 
@@ -658,6 +659,18 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 		tmfd->traversed = true;
 	else
 		tmfd->traversed = false;
+
+	if (larg.selfModified)
+	{
+		tmfd->xmax = GetCurrentTransactionId();
+		tmfd->cmax = GetCurrentCommandId(true);
+		return TM_SelfModified;
+	}
+	else
+	{
+		tmfd->xmax = InvalidTransactionId;
+		tmfd->cmax = InvalidCommandId;
+	}
 
 	if (larg.wouldBlock)
 		return TM_WouldBlock;
