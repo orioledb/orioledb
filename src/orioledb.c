@@ -1273,6 +1273,7 @@ orioledb_error_cleanup_hook(void)
 	unset_skip_ucm();
 	btree_io_error_cleanup();
 	seq_scans_cleanup();
+	cleanup_saved_undo_locations();
 }
 
 static void

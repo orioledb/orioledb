@@ -1,5 +1,8 @@
 from .base_test import BaseTest
 from testgres.exceptions import QueryException
+from testgres.connection import DatabaseError
+import psycopg2
+import gc
 import re
 
 class TriggerTest(BaseTest):
@@ -100,6 +103,66 @@ class TriggerTest(BaseTest):
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
 						 """),
 						 [(1, 1), (2, 1)])
+
+	def test_saved_undo_locations_cleanup(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int,
+				val_2 int
+			) USING orioledb;
+			INSERT INTO o_test_1 (val_1, val_2)
+					(SELECT val_1, 1 FROM generate_series (1, 2) val_1);
+
+			CREATE OR REPLACE FUNCTION func_trig_o_test_11()
+			RETURNS TRIGGER AS $$
+			BEGIN
+				DELETE FROM o_test_1 WHERE val_1 = OLD.val_1;
+				RETURN OLD;
+			END;
+			$$ LANGUAGE 'plpgsql';
+		""")
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(1, 1), (2, 1)])
+		node.safe_psql("""
+			CREATE TRIGGER trig_o_test_11 BEFORE UPDATE
+				ON o_test_1 FOR EACH ROW
+				EXECUTE PROCEDURE func_trig_o_test_11();
+		""")
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(1, 1), (2, 1)])
+		con1 = node.connect()
+		with self.assertRaises(DatabaseError) as e:
+			con1.execute("""
+				UPDATE o_test_1 SET val_1 = val_1 + 1000
+					WHERE mod(val_1, 2) = 0;
+			""")
+		self.assertErrorMessageEquals(e, "tuple to be updated was already "
+										 "modified by an operation triggered "
+										 "by the current command",
+									   "Consider using an AFTER trigger "
+									   "instead of a BEFORE trigger to "
+									   "propagate changes to other rows.")
+		con1.rollback()
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(1, 1), (2, 1)])
+		node.safe_psql("DROP TRIGGER trig_o_test_11 ON o_test_1;")
+		con1.execute("""
+			UPDATE o_test_1 SET val_1 = val_1 + 1000 WHERE val_1 = 1;
+		""")
+		con1.commit()
+		self.assertEqual(node.execute("""
+							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
+						 """),
+						 [(2, 1), (1001, 1)])
 
 	def test_4(self):
 		node = self.node

@@ -264,6 +264,6 @@ typedef struct OIndexDescr OIndexDescr;
 /* ddl.c */
 extern void orioledb_setup_ddl_hooks(void);
 extern UndoLocation saved_undo_location;
-extern List *saved_undo_locations;
+void cleanup_saved_undo_locations(void);
 
 #endif							/* __ORIOLEDB_H__ */

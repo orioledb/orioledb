@@ -72,16 +72,14 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 
-/* commands/trigger.c */
-extern Datum pg_trigger_depth(PG_FUNCTION_ARGS);
-
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 UndoLocation	saved_undo_location = InvalidUndoLocation;
-List		   *saved_undo_locations = NIL; /* list of UndoLocation* */
+static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
+static bool		isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -399,6 +397,20 @@ orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags)
 	UndoLocation	   *cur_undo_location;
 	MemoryContext		oldcxt;
 
+#ifdef USE_ASSERT_CHECKING
+	{
+		uint32	depth;
+		bool	top_level = isTopLevel;
+
+		isTopLevel = false;
+		depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth,
+												   (Datum) 0));
+		if (top_level && depth == 0)
+			Assert(saved_undo_locations == NIL &&
+				   saved_undo_location == InvalidUndoLocation);
+	}
+#endif
+
 	lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 	cur_undo_location = (UndoLocation *) palloc0(sizeof(UndoLocation));
@@ -432,6 +444,20 @@ orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
 		return prev_ExecutorEnd(queryDesc);
 	else
 		return standard_ExecutorEnd(queryDesc);
+}
+
+void
+cleanup_saved_undo_locations()
+{
+	while (saved_undo_locations != NIL)
+	{
+		ListCell   *last;
+
+		last = list_tail(saved_undo_locations);
+		pfree(lfirst(last));
+		saved_undo_locations = list_delete_last(saved_undo_locations);
+	}
+	saved_undo_location = InvalidUndoLocation;
 }
 
 static bool
@@ -864,6 +890,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						 struct QueryCompletion *qc)
 {
 	bool		call_next = true;
+
+#ifdef USE_ASSERT_CHECKING
+	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
+#endif
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
