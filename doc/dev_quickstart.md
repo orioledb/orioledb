@@ -15,6 +15,12 @@ git clone https://github.com/orioledb/postgres.git --branch patches15 --single-b
 cd postgres-patches15/
 ```
 
+### Checkout to required patch tag:
+Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
+```bash
+git checkout patches15_4
+```
+
 ### Enable Valgrind support in PostgreSQL code (optional)
 ```bash
 sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include/pg_config_manual.h
@@ -24,8 +30,7 @@ sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include
 ```bash
 PG_PREFIX=$HOME/pg15
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
-THREADS=$(cat /proc/cpuinfo | grep processor | wc -l) 
-# determine cpu core amount
+THREADS=$(cat /proc/cpuinfo | grep processor | wc -l) # determine cpu core amount
 make -j$THREADS
 make -j$THREADS install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
@@ -104,6 +109,12 @@ exec zsh -l
 ```bash
 git clone https://github.com/orioledb/postgres.git --branch patches15 --single-branch postgres-patches15
 cd postgres-patches15/
+```
+
+### Checkout to required patch tag:
+Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
+```bash
+git checkout patches15_4
 ```
 
 ### Configure and build
@@ -191,6 +202,12 @@ sudo apt install git build-essential flex bison pkg-config libreadline-dev make 
 ```bash
 git clone https://github.com/orioledb/postgres.git --branch patches15 --single-branch postgres-patches15
 cd postgres-patches15/
+```
+
+### Checkout to required patch tag:
+Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
+```bash
+git checkout patches15_4
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
