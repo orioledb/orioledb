@@ -121,8 +121,7 @@ OrioleDB also supports block-level undo records.  The block-level undo records a
 
 The diagram below gives an example of a `compact` block-level undo record.  Here the data pages contains tuples `t1`, `t2` and `t5`.  However, a page image in the undo log contains tuples `t1`, `t2`, `t3`, and `t4`.  That means, when tuples `t3` and `t4` were deleted, we lacked space for a new tuple `t5`.  In order to do this, we made a `compaction` first.  Therefore, we issue a page-level undo record and erase tuples `t3` and `t4` to fit `t5`.
 
-![Block level undo](
-block_level_undo.svg)
+![Block level undo](images/block_level_undo.svg)
 
 OrioleDB has three types of block-level undo records:
 
