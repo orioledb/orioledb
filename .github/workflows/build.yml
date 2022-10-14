@@ -21,7 +21,7 @@ jobs:
       COMPILER: ${{ matrix.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           path: orioledb
       - name: Get the required tag name
@@ -29,7 +29,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -62,7 +62,7 @@ jobs:
       COMPILER: ${{ matrix.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           path: orioledb
       - name: Get the required tag name
@@ -70,7 +70,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
