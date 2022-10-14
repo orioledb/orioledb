@@ -901,6 +901,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
 #endif
 
+#if PG_VERSION_NUM >= 140000
+	/* copied from standard_ProcessUtility */
+	if (readOnlyTree)
+		pstmt = copyObject(pstmt);
+#endif
+
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
 	{

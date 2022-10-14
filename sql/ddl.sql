@@ -321,5 +321,24 @@ INSERT INTO o_test(id, val) VALUES (2, 'hey');
 DELETE FROM o_test where id = 1;
 COMMIT;
 
+CREATE FUNCTION func_1(int) RETURNS int AS $$
+DECLARE TOTAL int;
+BEGIN
+	CREATE TEMP TABLE o_test_1(val_1 int)USING orioledb;
+	INSERT INTO o_test_1 VALUES($1);
+	INSERT INTO o_test_1 VALUES(11);
+	INSERT INTO o_test_1 VALUES(12);
+	INSERT INTO o_test_1 VALUES(13);
+	SELECT sum(val_1) INTO total FROM o_test_1;
+	DROP TABLE o_test_1;
+	RETURN total;
+end
+$$ language plpgsql;
+
+SELECT func_1(1);
+SELECT func_1(2);
+SELECT func_1(3);
+DROP FUNCTION func_1 CASCADE;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
