@@ -340,5 +340,21 @@ SELECT func_1(2);
 SELECT func_1(3);
 DROP FUNCTION func_1 CASCADE;
 
+CREATE TABLE o_test_opcoptions_reset (
+	val_1 int NOT NULL,
+	val_3 text DEFAULT 'abc'
+) USING orioledb;
+
+INSERT INTO o_test_opcoptions_reset (val_1) VALUES (1);
+
+BEGIN;
+CREATE INDEX o_test_opcoptions_reset_idx1 ON o_test_opcoptions_reset (val_3);
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_opcoptions_reset;
+SELECT * FROM o_test_opcoptions_reset;
+ALTER TABLE o_test_opcoptions_reset ADD PRIMARY KEY (val_1);
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_opcoptions_reset;
+SELECT * FROM o_test_opcoptions_reset;
+COMMIT;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;

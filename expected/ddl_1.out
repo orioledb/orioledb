@@ -821,10 +821,43 @@ SELECT func_1(3);
 (1 row)
 
 DROP FUNCTION func_1 CASCADE;
+CREATE TABLE o_test_opcoptions_reset (
+	val_1 int NOT NULL,
+	val_3 text DEFAULT 'abc'
+) USING orioledb;
+INSERT INTO o_test_opcoptions_reset (val_1) VALUES (1);
+BEGIN;
+CREATE INDEX o_test_opcoptions_reset_idx1 ON o_test_opcoptions_reset (val_3);
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_opcoptions_reset;
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on o_test_opcoptions_reset
+(1 row)
+
+SELECT * FROM o_test_opcoptions_reset;
+ val_1 | val_3 
+-------+-------
+     1 | abc
+(1 row)
+
+ALTER TABLE o_test_opcoptions_reset ADD PRIMARY KEY (val_1);
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_opcoptions_reset;
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on o_test_opcoptions_reset
+(1 row)
+
+SELECT * FROM o_test_opcoptions_reset;
+ val_1 | val_3 
+-------+-------
+     1 | abc
+(1 row)
+
+COMMIT;
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -834,3 +867,4 @@ drop cascades to table o_test_update_set_renamed_column
 drop cascades to table o_test_inherits_1
 drop cascades to table o_test
 drop cascades to table o_test_child
+drop cascades to table o_test_opcoptions_reset

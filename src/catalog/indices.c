@@ -732,8 +732,10 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			OTableIndex *table_index = &o_table->indices[i];
 			int			ctid_off = o_table->has_primary ? 0 : 1;
 			OIndexDescr *idx_descr = descr->indices[i + ctid_off];
-			Relation	indexRelation =
-			index_open(table_index->oids.reloid, AccessExclusiveLock);
+			Relation	indexRelation;
+
+			indexRelation = index_open(table_index->oids.reloid,
+									   AccessExclusiveLock);
 
 			if (table_index->type != oIndexPrimary)
 			{
@@ -816,6 +818,17 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 #else
 						InsertPgAttributeTuple(pg_attribute, &attribute, (Datum) 0, NULL);
 #endif
+					}
+
+					if (indexRelation->rd_opcoptions)
+					{
+						for (i = 0; i < index_form->indnatts; i++)
+						{
+							if (indexRelation->rd_opcoptions[i])
+								pfree(indexRelation->rd_opcoptions[i]);
+						}
+						pfree(indexRelation->rd_opcoptions);
+						indexRelation->rd_opcoptions = NULL;
 					}
 
 					class_form->relnatts += pkey_natts;
