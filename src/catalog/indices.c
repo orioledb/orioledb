@@ -831,6 +831,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 						pfree(indexRelation->rd_opcoptions);
 						indexRelation->rd_opcoptions = NULL;
 					}
+
 					if (indexRelation->rd_support)
 						pfree(indexRelation->rd_support);
 					if (indexRelation->rd_supportinfo)
