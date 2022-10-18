@@ -775,6 +775,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 					bool		nulls[Natts_pg_index] = {0};
 					bool		replaces[Natts_pg_index] = {0};
 					HeapTuple	old_index_tuple;
+					int			nsupport;
 
 					pkey_natts = idx_descr->nFields -
 						idx_descr->nPrimaryFields;
@@ -830,9 +831,23 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 						pfree(indexRelation->rd_opcoptions);
 						indexRelation->rd_opcoptions = NULL;
 					}
+					if (indexRelation->rd_support)
+						pfree(indexRelation->rd_support);
+					if (indexRelation->rd_supportinfo)
+						pfree(indexRelation->rd_supportinfo);
 
 					class_form->relnatts += pkey_natts;
 					index_form->indnatts += pkey_natts;
+
+					nsupport = index_form->indnatts *
+							   indexRelation->rd_indam->amsupport;
+					indexRelation->rd_support = (RegProcedure *)
+						MemoryContextAllocZero(indexRelation->rd_indexcxt,
+											   nsupport *
+											   sizeof(RegProcedure));
+					indexRelation->rd_supportinfo = (FmgrInfo *)
+						MemoryContextAllocZero(indexRelation->rd_indexcxt,
+											   nsupport * sizeof(FmgrInfo));
 
 					indkey = buildint2vector(NULL, index_form->indnatts);
 					for (i = 0; i < index_form->indnkeyatts; i++)
