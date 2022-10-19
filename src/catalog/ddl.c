@@ -79,6 +79,7 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
+static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 
 UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
@@ -99,6 +100,11 @@ static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 
 static void orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags);
 static void orioledb_ExecutorEnd_hook(QueryDesc *queryDesc);
+static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
+									  ScanDirection direction,
+									  uint64 count,
+									  bool execute_once);
+static bool o_intorel_receive(TupleTableSlot *slot, DestReceiver *self);
 static void create_ctas_nodata(List *tlist, IntoClause *into);
 static ObjectAddress o_define_relation(CreateStmt *cstmt, char relkind,
 									   const char *queryString);
@@ -122,6 +128,8 @@ orioledb_setup_ddl_hooks(void)
 {
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = orioledb_utility_command;
+	prev_ExecutorRun_hook = ExecutorRun_hook;
+	ExecutorRun_hook = orioledb_ExecutorRun_hook;
 	old_objectaccess_hook = object_access_hook;
 	object_access_hook = orioledb_object_access_hook;
 	prev_ExecutorStart = ExecutorStart_hook;
@@ -1473,6 +1481,34 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									context, params, env,
 									dest, qc);
 	}
+}
+
+static void
+orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
+						  ScanDirection direction,
+						  uint64 count,
+						  bool execute_once)
+{
+	if (queryDesc->dest->mydest == DestIntoRel)
+	{
+		/* "into" has same offset in o_data_receiver as in DR_intorel */
+		IntoClause	   *into = ((o_data_receiver *) queryDesc->dest)->into;
+		bool			orioledb;
+
+		if (into->accessMethod)
+			orioledb = (strcmp(into->accessMethod, "orioledb") == 0);
+		else
+			orioledb = (strcmp(default_table_access_method, "orioledb") == 0);
+		if (orioledb && queryDesc->dest->receiveSlot != o_intorel_receive)
+		{
+			pfree(queryDesc->dest);
+			queryDesc->dest = OCreateIntoRelDestReceiver(into);
+		}
+	}
+	if (prev_ExecutorRun_hook)
+		(*prev_ExecutorRun_hook) (queryDesc, direction, count, execute_once);
+	else
+		standard_ExecutorRun(queryDesc, direction, count, execute_once);
 }
 
 static void

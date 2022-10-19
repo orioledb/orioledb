@@ -40,6 +40,78 @@ INSERT INTO o_test_create_as_no_data
 	VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00);
 SELECT * FROM o_test_create_as_no_data;
 
+-- EXPLAIN ANALYZE tests
+
+-- Wrapper function, which converts result of SQL query to the text
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT, out result text)
+	RETURNS SETOF TEXT AS $$
+	BEGIN
+		FOR result IN EXECUTE sql LOOP
+			RETURN NEXT;
+		END LOOP;
+	END $$
+LANGUAGE plpgsql;
+
+BEGIN;
+SET LOCAL default_table_access_method = 'orioledb';
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			SELECT * INTO tbl_into FROM generate_series(1,3) a; $$) as t;
+COMMIT;
+
+BEGIN;
+SET LOCAL default_table_access_method = 'orioledb';
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			CREATE TABLE tbl_as_nodata (a)
+				AS SELECT generate_series(1,3) WITH NO DATA; $$) as t;
+SELECT * FROM tbl_as_nodata;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			CREATE TABLE tbl_as_nodata (a)
+				AS SELECT generate_series(1,3) WITH NO DATA; $$) as t;
+ROLLBACK;
+
+BEGIN;
+SET LOCAL default_table_access_method = 'orioledb';
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			CREATE TABLE tbl_as_nodata (a)
+				AS SELECT generate_series(1,3) WITH NO DATA; $$) as t;
+COMMIT;
+
+BEGIN;
+SET LOCAL default_table_access_method = 'orioledb';
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			CREATE TABLE tbl_as_data (a)
+				AS SELECT generate_series(1,3) WITH DATA; $$) as t;
+SELECT * FROM tbl_as_data;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			CREATE TABLE tbl_as_data (a)
+				AS SELECT generate_series(1,3) WITH DATA; $$) as t;
+ROLLBACK;
+
+BEGIN;
+SET LOCAL default_table_access_method = 'orioledb';
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$
+		EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+			CREATE TABLE tbl_as_data (a)
+				AS SELECT generate_series(1,3) WITH DATA; $$) as t;
+COMMIT;
+
+SELECT * FROM tbl_into;
+SELECT * FROM tbl_as_nodata;
+SELECT * FROM tbl_as_data;
+
 CREATE SEQUENCE o_matview_seq;
 -- TODO: Implement refresh of materialized view and add tests
 -- TODO: Implement indices on materialized views and add tests
@@ -51,4 +123,5 @@ SELECT * FROM o_test_matview;
 REFRESH MATERIALIZED VIEW o_test_matview;
 SELECT * FROM o_test_matview;
 
+DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;
