@@ -367,12 +367,29 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 	{
 		OTableIndexField *ix_field;
 		IndexElem  *ielem = castNode(IndexElem, lfirst(field_cell));
+		Node	   *expr = ielem->expr;
 
+		if (expr)
+			while (IsA(expr, CollateExpr))
+				expr = (Node *) ((CollateExpr *) expr)->arg;
 		ix_field = &index->fields[ixfield_num];
-		if (!ielem->expr)
+		if (!expr)
 		{
 			/* Field validation performed in o_validate_index_elements */
 			ix_field->attnum = o_table_fieldnum(o_table, ielem->name);
+			field = &o_table->fields[ix_field->attnum];
+
+			if (ielem->collation)
+			{
+				ix_field->collation = get_collation_oid(ielem->collation,
+														false);
+			}
+			field_typeid = field->typid;
+		}
+		else if (IsA(expr, Var) &&
+				 ((Var *) expr)->varattno != InvalidAttrNumber)
+		{
+			ix_field->attnum = ((Var *) expr)->varattno - 1;
 			field = &o_table->fields[ix_field->attnum];
 
 			if (ielem->collation)

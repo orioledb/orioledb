@@ -175,6 +175,35 @@ INSERT INTO o_test_expression (SELECT id, id || 'text'
 
 ANALYZE o_test_expression;
 
+CREATE OR REPLACE FUNCTION smart_explain(sql TEXT) RETURNS SETOF TEXT AS $$
+	DECLARE
+		row RECORD;
+		line text;
+		indent integer;
+		skip_indent integer;
+		skip_start integer;
+	BEGIN
+		skip_indent := 0;
+		skip_start := 0;
+		FOR row IN EXECUTE sql LOOP
+			line := row."QUERY PLAN";
+			indent := length((regexp_match(line, '^ *'))[1]);
+			IF line ~ '^ *->  Result' OR line ~ '^Result' THEN
+				skip_indent := 6;
+				skip_start := indent;
+			ELSE
+				IF indent >= skip_start THEN
+					line := substr(line, skip_indent + 1);
+				ELSE
+					skip_indent := 0;
+					skip_start := 0;
+				END IF;
+				RETURN NEXT line;
+			END IF;
+		END LOOP;
+	END $$
+LANGUAGE plpgsql;
+
 SET enable_seqscan = off;
 SELECT smart_explain(
 'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
@@ -829,4 +858,5 @@ SELECT count(*) FROM o_ctid_test;
 DELETE FROM o_ctid_test WHERE val_1 != 0;
 SELECT * FROM o_ctid_test;
 
+DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

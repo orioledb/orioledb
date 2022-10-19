@@ -1368,4 +1368,5 @@ EXPLAIN (COSTS OFF) SELECT * FROM bitmap_test_complex WHERE val < '13!';
 SELECT * FROM bitmap_test_complex WHERE val < '13!';
 
 DROP FUNCTION pseudo_random;
+DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

@@ -3942,6 +3942,7 @@ SELECT * FROM bitmap_test_complex WHERE val < '13!';
 (2 rows)
 
 DROP FUNCTION pseudo_random;
+DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table bitmap_test

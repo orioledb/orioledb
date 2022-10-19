@@ -155,6 +155,35 @@ CREATE UNIQUE INDEX o_test57_uniq ON o_test57(key);
 CREATE INDEX o_test57_reg ON o_test57(foo);
 SELECT orioledb_tbl_indices('o_test57'::regclass);
 
+CREATE OR REPLACE FUNCTION smart_explain(sql TEXT) RETURNS SETOF TEXT AS $$
+	DECLARE
+		row RECORD;
+		line text;
+		indent integer;
+		skip_indent integer;
+		skip_start integer;
+	BEGIN
+		skip_indent := 0;
+		skip_start := 0;
+		FOR row IN EXECUTE sql LOOP
+			line := row."QUERY PLAN";
+			indent := length((regexp_match(line, '^ *'))[1]);
+			IF line ~ '^ *->  Result' OR line ~ '^Result' THEN
+				skip_indent := 6;
+				skip_start := indent;
+			ELSE
+				IF indent >= skip_start THEN
+					line := substr(line, skip_indent + 1);
+				ELSE
+					skip_indent := 0;
+					skip_start := 0;
+				END IF;
+				RETURN NEXT line;
+			END IF;
+		END LOOP;
+	END $$
+LANGUAGE plpgsql;
+
 -- three indices, (key, value) is primary
 CREATE TABLE o_test58
 (
@@ -1223,4 +1252,39 @@ ALTER INDEX o_test_renames RENAME TO o_test_renames_as_ix;
 ALTER TABLE o_test_renames_as_ix RENAME COLUMN o_test_renames_idx_as_tbl TO val2;
 \d o_test_renames_as_ix
 
+CREATE TABLE o_test_subexpr_collate (
+    val_1 int PRIMARY KEY,
+    val_2 text COLLATE "C" NOT NULL
+)USING orioledb;
+
+INSERT INTO o_test_subexpr_collate
+	SELECT v, 'XXX' || v FROM generate_series(1, 5) v;
+
+SET enable_seqscan = off;
+
+CREATE INDEX o_test_subexpr_collate_ix1 ON o_test_subexpr_collate (val_2);
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_subexpr_collate ORDER BY val_2;
+SELECT * FROM o_test_subexpr_collate ORDER BY val_2;
+
+CREATE INDEX o_test_subexpr_collate_ix2
+	ON o_test_subexpr_collate (val_2 COLLATE "C");
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_subexpr_collate ORDER BY val_2 COLLATE "C";
+SELECT * FROM o_test_subexpr_collate ORDER BY val_2 COLLATE "C";
+
+CREATE INDEX o_test_subexpr_collate_ix3
+	ON o_test_subexpr_collate ((val_2 COLLATE "C"));
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
+SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
+
+ALTER TABLE o_test_subexpr_collate DROP CONSTRAINT o_test_subexpr_collate_pkey;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
+SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
+
+RESET enable_seqscan;
+
+DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

@@ -14,6 +14,35 @@ CREATE INDEX o_test_subquery_idx2 ON o_test_subquery (val2);
 
 analyze o_test_subquery;
 
+CREATE OR REPLACE FUNCTION smart_explain(sql TEXT) RETURNS SETOF TEXT AS $$
+	DECLARE
+		row RECORD;
+		line text;
+		indent integer;
+		skip_indent integer;
+		skip_start integer;
+	BEGIN
+		skip_indent := 0;
+		skip_start := 0;
+		FOR row IN EXECUTE sql LOOP
+			line := row."QUERY PLAN";
+			indent := length((regexp_match(line, '^ *'))[1]);
+			IF line ~ '^ *->  Result' OR line ~ '^Result' THEN
+				skip_indent := 6;
+				skip_start := indent;
+			ELSE
+				IF indent >= skip_start THEN
+					line := substr(line, skip_indent + 1);
+				ELSE
+					skip_indent := 0;
+					skip_start := 0;
+				END IF;
+				RETURN NEXT line;
+			END IF;
+		END LOOP;
+	END $$
+LANGUAGE plpgsql;
+
 -- index subscan; index only qual
 SELECT smart_explain(
 'EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
@@ -119,4 +148,5 @@ WITH o_test_subquery_all AS (
     ORDER BY val2
 ) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
 
+DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
