@@ -772,7 +772,6 @@ CREATE TABLE o_test_inherits_1 (
 CREATE TABLE o_test_inherits_2 (
 	val_2 int
 ) INHERITS (o_test_inherits_1) USING orioledb;
-ERROR:  INHERITS is not supported for orioledb tables.
 BEGIN;
 CREATE TABLE o_test(
 	id integer NOT NULL,
@@ -792,7 +791,7 @@ COMMIT;
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -800,5 +799,6 @@ drop cascades to table o_unexisting_column
 drop cascades to table o_test_unique_on_conflict
 drop cascades to table o_test_update_set_renamed_column
 drop cascades to table o_test_inherits_1
+drop cascades to table o_test_inherits_2
 drop cascades to table o_test
 drop cascades to table o_test_child

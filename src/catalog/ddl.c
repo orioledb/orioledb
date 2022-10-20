@@ -36,6 +36,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
+#include "catalog/pg_inherits.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_type.h"
 #include "catalog/toasting.h"
@@ -408,6 +409,146 @@ orioledb_planner_hook(Query *parse, const char *query_string,
 								boundParams);
 }
 
+static void
+o_at_exec_add_column(AlterTableCmd *cmd, OTable *o_table, Relation rel,
+					 const char *queryString, LOCKMODE lockmode)
+{
+	OTableField	   *field;
+	ColumnDef	   *col_def = (ColumnDef *) cmd->def;
+	HeapTuple		typeTuple;
+	Form_pg_type	tform;
+	Oid				typeOid;
+	Oid				collOid;
+	AttrMissing	   *attrmiss = NULL;
+	AttrMissing		attrmiss_temp;
+	Expr		   *defval = NULL;
+	List		   *inhoids;
+	List		   *parents;
+	ListCell	   *lc;
+
+	o_table->nfields++;
+	o_table->fields = repalloc(o_table->fields,
+							   o_table->nfields *
+								   sizeof(OTableField));
+	memset(&o_table->fields[o_table->nfields - 1], 0,
+		   sizeof(OTableField));
+	field = &o_table->fields[o_table->nfields - 1];
+	typeTuple = typenameType(NULL, col_def->typeName,
+							 &field->typmod);
+	tform = (Form_pg_type)GETSTRUCT(typeTuple);
+	typeOid = tform->oid;
+	collOid = GetColumnDefCollation(NULL, col_def, typeOid);
+	/* make sure datatype is legal for a column */
+	CheckAttributeType(col_def->colname, typeOid, collOid,
+					   list_make1_oid(rel->rd_rel->reltype),
+					   0);
+
+	strlcpy(field->name.data, col_def->colname, NAMEDATALEN);
+	field->typid = typeOid;
+	field->collation = collOid;
+	field->typlen = tform->typlen;
+	field->ndims = list_length(col_def->typeName->arrayBounds);
+	field->byval = tform->typbyval;
+	field->align = tform->typalign;
+	field->storage = tform->typstorage;
+	field->droped = false;
+	field->notnull = col_def->is_not_null;
+	field->hasdef = col_def->raw_default != NULL;
+	field->hasmissing = !col_def->generated && field->hasdef;
+
+	if (field->hasmissing)
+	{
+		Expr *expr2;
+		ParseNamespaceItem *nsitem;
+		ParseState *pstate;
+
+		pstate = make_parsestate(NULL);
+		pstate->p_sourcetext = queryString;
+		nsitem = addRangeTableEntryForRelation(pstate,
+											   rel,
+											   AccessShareLock,
+											   NULL,
+											   false,
+											   true);
+		addNSItemToQuery(pstate, nsitem, true, true, true);
+
+		expr2 = (Expr *)cookDefault(pstate,
+									col_def->raw_default,
+									tform->oid, tform->typtypmod,
+									NameStr(field->name),
+									col_def->generated);
+
+		if (field->hasmissing &&
+			contain_volatile_functions((Node *)expr2))
+			field->hasmissing = false;
+
+		if (field->hasmissing)
+		{
+			EState *estate = NULL;
+			ExprContext *econtext;
+			ExprState *exprState;
+			MemoryContext oldcxt;
+			bool missingIsNull = true;
+			Datum missingval = (Datum)0;
+
+			expr2 = expression_planner(expr2);
+
+			oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+			estate = CreateExecutorState();
+			exprState = ExecPrepareExpr(expr2, estate);
+			econtext = GetPerTupleExprContext(estate);
+
+			missingval = ExecEvalExpr(exprState, econtext,
+									  &missingIsNull);
+
+			FreeExecutorState(estate);
+			free_parsestate(pstate);
+
+			attrmiss_temp.am_value = datumCopy(missingval,
+											   field->byval,
+											   field->typlen);
+			MemoryContextSwitchTo(oldcxt);
+			attrmiss_temp.am_present = true;
+			attrmiss = &attrmiss_temp;
+			defval = expr2;
+		}
+		else if (field->hasdef)
+		{
+			defval = expression_planner(expr2);
+		}
+	}
+	o_table_fill_constr(o_table, o_table->nfields - 1,
+						attrmiss, defval);
+	ReleaseSysCache(typeTuple);
+
+	inhoids = find_all_inheritors(rel->rd_rel->oid, lockmode, &parents);
+
+	inhoids = list_delete_first(inhoids);
+	foreach(lc, inhoids)
+	{
+		Oid			child_oid = lfirst_oid(lc);
+		Relation	child_rel = relation_open(child_oid, NoLock);
+		ORelOids	oids = {MyDatabaseId, child_oid,
+							child_rel->rd_node.relNode};
+		OTable	   *child_o_table = o_tables_get(oids);
+		CommitSeqNo	csn;
+		OXid		oxid;
+
+		o_at_exec_add_column(cmd, child_o_table, child_rel, queryString,
+							 lockmode);
+		relation_close(child_rel, NoLock);
+		fill_current_oxid_csn(&oxid, &csn);
+		o_tables_validate_tupdesc(o_table_tupdesc(child_o_table));
+		o_tables_update(child_o_table, oxid, csn);
+		o_opclass_cache_add_table(child_o_table);
+		o_indices_update(child_o_table, PrimaryIndexNumber, oxid, csn);
+		if (child_o_table->has_primary)
+			o_invalidate_oids(child_o_table->indices[PrimaryIndexNumber].oids);
+		o_invalidate_oids(child_o_table->oids);
+		o_table_free(child_o_table);
+	}
+}
+
 static bool
 validate_at_utility(PlannedStmt *pstmt,
 					const char *queryString,
@@ -621,122 +762,20 @@ validate_at_utility(PlannedStmt *pstmt,
 
 					if (ix_num == PrimaryIndexNumber)
 						o_index_drop(rel, PrimaryIndexNumber);
-					break;
 				}
+				break;
 			case AT_AddIndex:
 				{
 					o_index_create(rel, (IndexStmt *) cmd->def,
 								   queryString, pstmt->utilityStmt);
 					call_next = false;
-					break;
 				}
+				break;
 			case AT_AddColumn:
 				{
-					OTableField *field;
-					ColumnDef  *col_def = (ColumnDef *) cmd->def;
-					HeapTuple	typeTuple;
-					Form_pg_type tform;
-					Oid			typeOid;
-					Oid			collOid;
-					AttrMissing *attrmiss = NULL;
-					AttrMissing attrmiss_temp;
-					Expr	   *defval = NULL;
-
-					o_table->nfields++;
-					o_table->fields = repalloc(o_table->fields,
-											   o_table->nfields *
-											   sizeof(OTableField));
-					memset(&o_table->fields[o_table->nfields - 1], 0,
-						   sizeof(OTableField));
-					field = &o_table->fields[o_table->nfields - 1];
-					typeTuple = typenameType(NULL, col_def->typeName,
-											 &field->typmod);
-					tform = (Form_pg_type) GETSTRUCT(typeTuple);
-					typeOid = tform->oid;
-					collOid = GetColumnDefCollation(NULL, col_def, typeOid);
-					/* make sure datatype is legal for a column */
-					CheckAttributeType(col_def->colname, typeOid, collOid,
-									   list_make1_oid(rel->rd_rel->reltype),
-									   0);
-
-					strlcpy(field->name.data, col_def->colname, NAMEDATALEN);
-					field->typid = typeOid;
-					field->collation = collOid;
-					field->typlen = tform->typlen;
-					field->ndims = list_length(col_def->typeName->arrayBounds);
-					field->byval = tform->typbyval;
-					field->align = tform->typalign;
-					field->storage = tform->typstorage;
-					field->droped = false;
-					field->notnull = col_def->is_not_null;
-					field->hasdef = col_def->raw_default != NULL;
-					field->hasmissing = !col_def->generated && field->hasdef;
-
-					if (field->hasmissing)
-					{
-						Expr	   *expr2;
-						ParseNamespaceItem *nsitem;
-						ParseState *pstate;
-
-						pstate = make_parsestate(NULL);
-						pstate->p_sourcetext = queryString;
-						nsitem = addRangeTableEntryForRelation(pstate,
-															   rel,
-															   AccessShareLock,
-															   NULL,
-															   false,
-															   true);
-						addNSItemToQuery(pstate, nsitem, true, true, true);
-
-						expr2 = (Expr *) cookDefault(pstate,
-													 col_def->raw_default,
-													 tform->oid, tform->typtypmod,
-													 NameStr(field->name),
-													 col_def->generated);
-
-						if (field->hasmissing &&
-							contain_volatile_functions((Node *) expr2))
-							field->hasmissing = false;
-
-						if (field->hasmissing)
-						{
-							EState	   *estate = NULL;
-							ExprContext *econtext;
-							ExprState  *exprState;
-							MemoryContext oldcxt;
-							bool		missingIsNull = true;
-							Datum		missingval = (Datum) 0;
-
-							expr2 = expression_planner(expr2);
-
-							oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-							estate = CreateExecutorState();
-							exprState = ExecPrepareExpr(expr2, estate);
-							econtext = GetPerTupleExprContext(estate);
-
-							missingval = ExecEvalExpr(exprState, econtext,
-													  &missingIsNull);
-
-							FreeExecutorState(estate);
-							free_parsestate(pstate);
-
-							attrmiss_temp.am_value = datumCopy(missingval,
-															   field->byval,
-															   field->typlen);
-							MemoryContextSwitchTo(oldcxt);
-							attrmiss_temp.am_present = true;
-							attrmiss = &attrmiss_temp;
-							defval = expr2;
-						}
-						else if (field->hasdef)
-						{
-							defval = expression_planner(expr2);
-						}
-					}
-					o_table_fill_constr(o_table, o_table->nfields - 1,
-										attrmiss, defval);
-					ReleaseSysCache(typeTuple);
-
+					LOCKMODE lockmode = AlterTableGetLockLevel(cmds);
+					o_at_exec_add_column(cmd, o_table, rel, queryString,
+										 lockmode);
 					tupdesc_changed = true;
 					updated = true;
 				}
@@ -1781,9 +1820,6 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		validate_compress(compress, "Default");
 		validate_compress(primary_compress, "Primary index");
 		validate_compress(toast_compress, "TOAST");
-
-		if (cstmt->inhRelations != NIL)
-			elog(ERROR, "INHERITS is not supported for orioledb tables.");
 	}
 
 	/* Create the table itself */

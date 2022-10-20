@@ -1,0 +1,149 @@
+CREATE EXTENSION orioledb;
+CREATE TABLE p_stock (
+	item_id int
+) USING orioledb;
+CREATE TABLE c_stock(
+	ex int
+) INHERITS (p_stock) USING orioledb;
+SELECT orioledb_table_description('p_stock'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('p_stock'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+SELECT orioledb_table_description('c_stock'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+       ex | integer |    (null) |     true |  false       +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('c_stock'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+ALTER TABLE p_stock ADD COLUMN balance int;
+SELECT orioledb_table_description('p_stock'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+  balance | integer |    (null) |     true |  false       +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('p_stock'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+SELECT orioledb_table_description('c_stock'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+       ex | integer |    (null) |     true |  false       +
+  balance | integer |    (null) |     true |  false       +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('c_stock'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+INSERT INTO p_stock (item_id, balance) VALUES (1, 2);
+INSERT INTO p_stock (item_id, balance) VALUES (3, 4);
+INSERT INTO c_stock (item_id, ex, balance) VALUES (5, 6, 7);
+SELECT * FROM p_stock;
+ item_id | balance 
+---------+---------
+       1 |       2
+       3 |       4
+       5 |       7
+(3 rows)
+
+SELECT * FROM c_stock;
+ item_id | ex | balance 
+---------+----+---------
+       5 |  6 |       7
+(1 row)
+
+EXPLAIN (COSTS OFF) UPDATE p_stock SET balance = balance + 1;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Update on p_stock
+   Update on p_stock p_stock_1
+   Update on c_stock p_stock_2
+   ->  Result
+         ->  Append
+               ->  Seq Scan on p_stock p_stock_1
+               ->  Seq Scan on c_stock p_stock_2
+(7 rows)
+
+UPDATE p_stock SET balance = balance + 1;
+SELECT * FROM p_stock;
+ item_id | balance 
+---------+---------
+       1 |       3
+       3 |       5
+       5 |       8
+(3 rows)
+
+SELECT * FROM c_stock;
+ item_id | ex | balance 
+---------+----+---------
+       5 |  6 |       8
+(1 row)
+
+DELETE FROM p_stock WHERE item_id = 5;
+SELECT * FROM p_stock;
+ item_id | balance 
+---------+---------
+       1 |       3
+       3 |       5
+(2 rows)
+
+SELECT * FROM c_stock;
+ item_id | ex | balance 
+---------+----+---------
+(0 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table p_stock
+drop cascades to table c_stock

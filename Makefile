@@ -83,6 +83,7 @@ REGRESSCHECKS = btree_sys_check \
 				foreign_keys \
 				indices \
 				indices_build \
+				inherits \
 				ioc \
 				joins \
 				opclass \
