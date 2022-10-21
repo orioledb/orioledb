@@ -1331,6 +1331,22 @@ rollback_to_savepoint(UndoStackKind kind, SubTransactionId parentSubid,
 	update_subxact_undo_location(toLoc.subxactLocation);
 }
 
+static void
+update_subxact_undo_location_on_commit(SubTransactionId parentSubid)
+{
+	UndoStackLocations toLoc;
+	UndoLocation location;
+	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS();
+	UndoItemBuf buf;
+
+	init_undo_item_buf(&buf);
+	location = pg_atomic_read_u64(&sharedLocations->subxactLocation);
+	search_for_undo_sub_location(UndoStackFull, location, &buf, parentSubid,
+								 &toLoc.location, &toLoc.subxactLocation);
+	free_undo_item_buf(&buf);
+	update_subxact_undo_location(toLoc.subxactLocation);
+}
+
 void
 undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					  SubTransactionId parentSubid, void *arg)
@@ -1349,7 +1365,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			add_savepoint_wal_record(parentSubid);
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
-			/* In future we may want to release subxact undo location */
+			update_subxact_undo_location_on_commit(parentSubid);
 			break;
 		case SUBXACT_EVENT_ABORT_SUB:
 			rollback_to_savepoint(UndoStackFull, parentSubid, true);

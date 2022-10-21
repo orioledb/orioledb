@@ -371,4 +371,33 @@ DROP TABLE o_subtrans_2;
 DROP TABLE o_subtrans_3;
 DROP TABLE o_subtrans_4;
 
+-- Test some interesting cases to check that orioledb doesn't break them
+BEGIN;
+	SAVEPOINT one;
+	ROLLBACK TO one;
+	RELEASE one;
+	SAVEPOINT two;
+	RELEASE two;
+	SAVEPOINT three;
+	ROLLBACK TO three;
+	RELEASE three;
+COMMIT;
+
+BEGIN;
+	SAVEPOINT one;
+	ROLLBACK TO one;
+	RELEASE one;
+	SAVEPOINT two;
+	RELEASE two;
+	SAVEPOINT three;
+		SAVEPOINT four;
+			SAVEPOINT five;
+				SAVEPOINT six;
+				ROLLBACK TO four;
+		ROLLBACK TO four;
+		RELEASE four;
+	ROLLBACK TO three;
+	RELEASE three;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
