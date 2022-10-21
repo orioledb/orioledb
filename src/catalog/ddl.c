@@ -854,6 +854,7 @@ is_alter_table_partition(PlannedStmt *pstmt)
 
 #if PG_VERSION_NUM < 140000
 #define objtype relkind
+#endif
 
 /*
  * OCreateTableAsRelExists --- check existence of relation for CreateTableAsStmt
@@ -871,25 +872,11 @@ OCreateTableAsRelExists(CreateTableAsStmt *ctas)
 	nspid = RangeVarGetCreationNamespace(into->rel);
 
 	if (get_relname_relid(into->rel->relname, nspid))
-	{
-		if (!ctas->if_not_exists)
-			ereport(ERROR,
-					(errcode(ERRCODE_DUPLICATE_TABLE),
-					 errmsg("relation \"%s\" already exists",
-							into->rel->relname)));
-
-		/* The relation exists and IF NOT EXISTS has been specified */
-		ereport(NOTICE,
-				(errcode(ERRCODE_DUPLICATE_TABLE),
-				 errmsg("relation \"%s\" already exists, skipping",
-						into->rel->relname)));
 		return true;
-	}
 
 	/* Relation does not exist, it can be created */
 	return false;
 }
-#endif
 
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
@@ -1147,11 +1134,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		else
 			orioledb = (strcmp(default_table_access_method, "orioledb") == 0);
 
-#if PG_VERSION_NUM < 140000
 		create = !OCreateTableAsRelExists(stmt) && orioledb;
-#else
-		create = !CreateTableAsRelExists(stmt) && orioledb;
-#endif
 
 		/* Check if the relation exists or not */
 		if (create)
