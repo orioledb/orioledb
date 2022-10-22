@@ -776,6 +776,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 					bool		replaces[Natts_pg_index] = {0};
 					HeapTuple	old_index_tuple;
 					int			nsupport;
+					int			indkey_ix;
 
 					pkey_natts = idx_descr->nFields -
 						idx_descr->nPrimaryFields;
@@ -851,13 +852,13 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 											   nsupport * sizeof(FmgrInfo));
 
 					indkey = buildint2vector(NULL, index_form->indnatts);
-					for (i = 0; i < index_form->indnkeyatts; i++)
-						indkey->values[i] = index_form->indkey.values[i];
-					for (i = 0; i < pkey_natts; i++)
+					for (indkey_ix = 0; indkey_ix < index_form->indnkeyatts; indkey_ix++)
+						indkey->values[indkey_ix] = index_form->indkey.values[indkey_ix];
+					for (indkey_ix = 0; indkey_ix < pkey_natts; indkey_ix++)
 					{
-						int			j = index_form->indnkeyatts + i;
+						int			j = index_form->indnkeyatts + indkey_ix;
 						OIndexField *idx_field =
-						&idx_descr->fields[idx_descr->nPrimaryFields + i];
+						&idx_descr->fields[idx_descr->nPrimaryFields + indkey_ix];
 
 						indkey->values[j] = idx_field->tableAttnum;
 					}
@@ -911,7 +912,6 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			index_update_stats(indexRelation, false, index_tuples);
 			index_close(indexRelation, AccessExclusiveLock);
 		}
-
 
 		/* Make the updated catalog row versions visible */
 		CommandCounterIncrement();

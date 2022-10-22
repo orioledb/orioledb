@@ -720,7 +720,8 @@ LINE 1: ...LE o_unexisting_column ALTER key_2 TYPE int USING key_2::int...
 HINT:  Perhaps you meant to reference the column "o_unexisting_column.key".
 ALTER TABLE o_unexisting_column ALTER COLUMN key_2
 	ADD GENERATED ALWAYS AS IDENTITY;
-ERROR:  column "key_2" of relation "o_unexisting_column" does not exist
+ERROR:  unsupported alter table subcommand
+DETAIL:  Subcommand "ADD IDENTITY" is not supported on OrioleDB tables.
 ALTER TABLE o_unexisting_column ALTER COLUMN key
 	ADD GENERATED ALWAYS AS IDENTITY;
 ERROR:  unsupported alter table subcommand
