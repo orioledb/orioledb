@@ -1136,209 +1136,234 @@ orioledb_utility_command(PlannedStmt *pstmt,
 #if PG_VERSION_NUM >= 140000
 		ListCell		   *cell;
 		bool				isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
+#endif
+		bool				isCompleteQuery = (context <= 
+											   PROCESS_UTILITY_QUERY);
+		bool				needCleanup;
 
-		/*
-		 * Disallow ALTER TABLE .. DETACH CONCURRENTLY in a
-		 * transaction block or function.  (Perhaps it could be
-		 * allowed in a procedure, but don't hold your breath.)
-		 */
-		foreach(cell, atstmt->cmds)
+		needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
+
+		/* PG_TRY block is to ensure we call EventTriggerEndCompleteQuery */
+		PG_TRY();
 		{
-			AlterTableCmd *cmd = (AlterTableCmd *) lfirst(cell);
+			if (isCompleteQuery)
+				EventTriggerDDLCommandStart(pstmt->utilityStmt);
 
-			/* Disallow DETACH CONCURRENTLY in a transaction block */
-			if (cmd->subtype == AT_DetachPartition)
+#if PG_VERSION_NUM >= 140000
+			/*
+			* Disallow ALTER TABLE .. DETACH CONCURRENTLY in a
+			* transaction block or function.  (Perhaps it could be
+			* allowed in a procedure, but don't hold your breath.)
+			*/
+			foreach(cell, atstmt->cmds)
 			{
-				if (((PartitionCmd *) cmd->def)->concurrent)
-					PreventInTransactionBlock(isTopLevel,
-												"ALTER TABLE ... DETACH CONCURRENTLY");
+				AlterTableCmd *cmd = (AlterTableCmd *) lfirst(cell);
+
+				/* Disallow DETACH CONCURRENTLY in a transaction block */
+				if (cmd->subtype == AT_DetachPartition)
+				{
+					if (((PartitionCmd *) cmd->def)->concurrent)
+						PreventInTransactionBlock(isTopLevel,
+													"ALTER TABLE ... DETACH CONCURRENTLY");
+				}
 			}
-		}
 #endif
 
-		/*
-		 * Figure out lock mode, and acquire lock.  This also does
-		 * basic permissions checks, so that we won't wait for a
-		 * lock on (for example) a relation on which we have no
-		 * permissions.
-		 */
-		lockmode = AlterTableGetLockLevel(atstmt->cmds);
-		relid = AlterTableLookupRelation(atstmt, lockmode);
+			/*
+			* Figure out lock mode, and acquire lock.  This also does
+			* basic permissions checks, so that we won't wait for a
+			* lock on (for example) a relation on which we have no
+			* permissions.
+			*/
+			lockmode = AlterTableGetLockLevel(atstmt->cmds);
+			relid = AlterTableLookupRelation(atstmt, lockmode);
 
-		if (OidIsValid(relid))
-		{
-			AlterTableUtilityContext atcontext;
-			List *ixconstraints = NIL;
-
-			/* Set up info needed for recursive callbacks ... */
-			atcontext.pstmt = pstmt;
-			atcontext.queryString = queryString;
-			atcontext.relid = relid;
-			atcontext.params = params;
-			atcontext.queryEnv = env;
-
-			/* ... ensure we have an event trigger context ... */
-			EventTriggerAlterTableStart(pstmt->utilityStmt);
-			EventTriggerAlterTableRelid(relid);
-			
-			if (atstmt->objtype == OBJECT_TABLE)
+			if (OidIsValid(relid))
 			{
-				if (lockmode == AccessExclusiveLock)
+				AlterTableUtilityContext atcontext;
+				List *ixconstraints = NIL;
+
+				/* Set up info needed for recursive callbacks ... */
+				atcontext.pstmt = pstmt;
+				atcontext.queryString = queryString;
+				atcontext.relid = relid;
+				atcontext.params = params;
+				atcontext.queryEnv = env;
+
+				/* ... ensure we have an event trigger context ... */
+				EventTriggerAlterTableStart(pstmt->utilityStmt);
+				EventTriggerAlterTableRelid(relid);
+				
+				if (atstmt->objtype == OBJECT_TABLE)
 				{
-					Relation rel = table_open(relid, lockmode);
-					if (is_orioledb_rel(rel))
+					if (lockmode == AccessExclusiveLock)
 					{
-						ListCell   *lc;
-
-						foreach(lc, atstmt->cmds)
+						Relation rel = table_open(relid, lockmode);
+						if (is_orioledb_rel(rel))
 						{
-							AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lc);
+							ListCell   *lc;
 
-							if(validate_at_utility(pstmt, queryString, relid,
-												   cmd, rel, &ixconstraints))
-								atstmt->cmds = foreach_delete_current(atstmt->cmds, lc);
+							foreach(lc, atstmt->cmds)
+							{
+								AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lc);
+
+								if(validate_at_utility(pstmt, queryString, relid,
+													cmd, rel, &ixconstraints))
+									atstmt->cmds = foreach_delete_current(atstmt->cmds, lc);
+							}
 						}
+						table_close(rel, lockmode);
 					}
-					table_close(rel, lockmode);
 				}
-			}
 
-			/* ... and do it */
-			AlterTable(atstmt, lockmode, &atcontext);
+				/* ... and do it */
+				AlterTable(atstmt, lockmode, &atcontext);
 
-			if (atstmt->objtype == OBJECT_TABLE)
-			{
-				if (lockmode == AccessExclusiveLock)
+				if (atstmt->objtype == OBJECT_TABLE)
 				{
-					Relation rel = table_open(relid, lockmode);
-					if (is_orioledb_rel(rel))
+					if (lockmode == AccessExclusiveLock)
 					{
-						ListCell   *lc;
-
-						foreach (lc, ixconstraints)
+						Relation rel = table_open(relid, lockmode);
+						if (is_orioledb_rel(rel))
 						{
-							Constraint *con = (Constraint *) lfirst(lc);
-							IndexStmt *index;
-							List *notnullcmds = NIL;
+							ListCell   *lc;
 
-							if (con->indexname != NULL)
+							foreach (lc, ixconstraints)
 							{
-								elog(ERROR, "ADD PRIMARY USING not supported yet.");
-							}
+								Constraint *con = (Constraint *) lfirst(lc);
+								IndexStmt *index;
+								List *notnullcmds = NIL;
 
-							index = makeNode(IndexStmt);
-
-							index->unique = (con->contype != CONSTR_EXCLUSION);
-							index->primary = (con->contype == CONSTR_PRIMARY);
-
-							index->isconstraint = true;
-							index->deferrable = con->deferrable;
-							index->initdeferred = con->initdeferred;
-
-							if (con->conname != NULL)
-								index->idxname = pstrdup(con->conname);
-							else
-								index->idxname = NULL;	/* DefineIndex will choose name */
-
-							index->relation = atstmt->relation;
-							index->accessMethod = con->access_method ? con->access_method : DEFAULT_INDEX_TYPE;
-							index->options = con->options;
-							index->tableSpace = con->indexspace;
-							index->whereClause = con->where_clause;
-							index->indexParams = NIL;
-							index->indexIncludingParams = NIL;
-							index->excludeOpNames = NIL;
-							index->idxcomment = NULL;
-							index->indexOid = InvalidOid;
-							index->oldNode = InvalidOid;
-							index->oldCreateSubid = InvalidSubTransactionId;
-							index->oldFirstRelfilenodeSubid = InvalidSubTransactionId;
-							index->transformed = false;
-							index->concurrent = false;
-							index->if_not_exists = false;
-							index->reset_default_tblspc = con->reset_default_tblspc;
-							index = transformIndexStmt(relid, index, queryString);
-
-							if (con->contype == CONSTR_EXCLUSION)
-							{
-								foreach (lc, con->exclusions)
+								if (con->indexname != NULL)
 								{
-									List *pair = (List *)lfirst(lc);
-									IndexElem *elem;
-									List *opname;
-
-									Assert(list_length(pair) == 2);
-									elem = linitial_node(IndexElem, pair);
-									opname = lsecond_node(List, pair);
-
-									index->indexParams = lappend(index->indexParams, elem);
-									index->excludeOpNames = lappend(index->excludeOpNames, opname);
+									elog(ERROR, "ADD PRIMARY USING not supported yet.");
 								}
-							}
-							else
-							{
-								foreach (lc, con->keys)
+
+								index = makeNode(IndexStmt);
+
+								index->unique = (con->contype != CONSTR_EXCLUSION);
+								index->primary = (con->contype == CONSTR_PRIMARY);
+
+								index->isconstraint = true;
+								index->deferrable = con->deferrable;
+								index->initdeferred = con->initdeferred;
+
+								if (con->conname != NULL)
+									index->idxname = pstrdup(con->conname);
+								else
+									index->idxname = NULL;	/* DefineIndex will choose name */
+
+								index->relation = atstmt->relation;
+								index->accessMethod = con->access_method ? con->access_method : DEFAULT_INDEX_TYPE;
+								index->options = con->options;
+								index->tableSpace = con->indexspace;
+								index->whereClause = con->where_clause;
+								index->indexParams = NIL;
+								index->indexIncludingParams = NIL;
+								index->excludeOpNames = NIL;
+								index->idxcomment = NULL;
+								index->indexOid = InvalidOid;
+								index->oldNode = InvalidOid;
+								index->oldCreateSubid = InvalidSubTransactionId;
+								index->oldFirstRelfilenodeSubid = InvalidSubTransactionId;
+								index->transformed = false;
+								index->concurrent = false;
+								index->if_not_exists = false;
+								index->reset_default_tblspc = con->reset_default_tblspc;
+								index = transformIndexStmt(relid, index, queryString);
+
+								if (con->contype == CONSTR_EXCLUSION)
 								{
-									char *key = strVal(lfirst(lc));
-									IndexElem *iparam;
-
-									/* OK, add it to the index definition */
-									iparam = makeNode(IndexElem);
-									iparam->name = pstrdup(key);
-									iparam->expr = NULL;
-									iparam->indexcolname = NULL;
-									iparam->collation = NIL;
-									iparam->opclass = NIL;
-									iparam->opclassopts = NIL;
-									iparam->ordering = SORTBY_DEFAULT;
-									iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
-									index->indexParams = lappend(index->indexParams, iparam);
-									if (index->primary)
+									foreach (lc, con->exclusions)
 									{
-										AlterTableCmd *notnullcmd = makeNode(AlterTableCmd);
+										List *pair = (List *)lfirst(lc);
+										IndexElem *elem;
+										List *opname;
 
-										notnullcmd->subtype = AT_SetNotNull;
-										notnullcmd->name = pstrdup(key);
+										Assert(list_length(pair) == 2);
+										elem = linitial_node(IndexElem, pair);
+										opname = lsecond_node(List, pair);
 
-										validate_at_utility(pstmt, queryString, relid,
-															notnullcmd, rel, &ixconstraints);
-										notnullcmds = lappend(notnullcmds, notnullcmd);
+										index->indexParams = lappend(index->indexParams, elem);
+										index->excludeOpNames = lappend(index->excludeOpNames, opname);
 									}
 								}
-							}
-							if (index->primary)
-							{
-								AlterTableStmt *alterstmt = makeNode(AlterTableStmt);
-								table_close(rel, lockmode);
+								else
+								{
+									foreach (lc, con->keys)
+									{
+										char *key = strVal(lfirst(lc));
+										IndexElem *iparam;
 
-								alterstmt->relation = copyObject(atstmt->relation);
-								alterstmt->cmds = notnullcmds;
-								alterstmt->objtype = OBJECT_TABLE;
-								alterstmt->missing_ok = false;
-								AlterTable(alterstmt, lockmode, &atcontext);
-								rel = table_open(relid, lockmode);
+										/* OK, add it to the index definition */
+										iparam = makeNode(IndexElem);
+										iparam->name = pstrdup(key);
+										iparam->expr = NULL;
+										iparam->indexcolname = NULL;
+										iparam->collation = NIL;
+										iparam->opclass = NIL;
+										iparam->opclassopts = NIL;
+										iparam->ordering = SORTBY_DEFAULT;
+										iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
+										index->indexParams = lappend(index->indexParams, iparam);
+										if (index->primary)
+										{
+											AlterTableCmd *notnullcmd = makeNode(AlterTableCmd);
+
+											notnullcmd->subtype = AT_SetNotNull;
+											notnullcmd->name = pstrdup(key);
+
+											validate_at_utility(pstmt, queryString, relid,
+																notnullcmd, rel, &ixconstraints);
+											notnullcmds = lappend(notnullcmds, notnullcmd);
+										}
+									}
+								}
+								if (index->primary)
+								{
+									AlterTableStmt *alterstmt = makeNode(AlterTableStmt);
+									table_close(rel, lockmode);
+
+									alterstmt->relation = copyObject(atstmt->relation);
+									alterstmt->cmds = notnullcmds;
+									alterstmt->objtype = OBJECT_TABLE;
+									alterstmt->missing_ok = false;
+									AlterTable(alterstmt, lockmode, &atcontext);
+									rel = table_open(relid, lockmode);
+								}
+								/* 
+								* TODO: Find way to add validation before
+								* indices builds without using 
+								* transformAlterTableStmt
+								*/
+								o_index_create(rel, index,
+											queryString, pstmt->utilityStmt);
 							}
-							/* 
-							 * TODO: Find way to add validation before
-							 * indices builds without using 
-							 * transformAlterTableStmt
-							 */
-							o_index_create(rel, index,
-										   queryString, pstmt->utilityStmt);
 						}
+						table_close(rel, lockmode);
 					}
-					table_close(rel, lockmode);
 				}
-			}
 
-			/* done */
-			EventTriggerAlterTableEnd();
-			AcceptInvalidationMessages();
+				/* done */
+				EventTriggerAlterTableEnd();
+				AcceptInvalidationMessages();
+			}
+			else
+				ereport(NOTICE,
+						(errmsg("relation \"%s\" does not exist, skipping",
+								atstmt->relation->relname)));
+			if (isCompleteQuery)
+			{
+				EventTriggerSQLDrop(pstmt->utilityStmt);
+				EventTriggerDDLCommandEnd(pstmt->utilityStmt);
+			}
 		}
-		else
-			ereport(NOTICE,
-					(errmsg("relation \"%s\" does not exist, skipping",
-							atstmt->relation->relname)));
+		PG_FINALLY();
+		{
+			if (needCleanup)
+				EventTriggerEndCompleteQuery();
+		}
+		PG_END_TRY();
 		call_next = false;
 	}
 	else if (IsA(pstmt->utilityStmt, CreateStmt))
@@ -1350,86 +1375,98 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		List	   *stmts;
 		RangeVar   *table_rv = NULL;
 		bool		isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
-		bool		needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
+		bool		needCleanup;
 
-		stmts = transformCreateStmt((CreateStmt *) pstmt->utilityStmt, queryString);
+		needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
 
-		/*
-		 * ... and do it.  We can't use foreach() because we may modify the
-		 * list midway through, so pick off the elements one at a time, the
-		 * hard way.
-		 */
-		while (stmts != NIL)
+		/* PG_TRY block is to ensure we call EventTriggerEndCompleteQuery */
+		PG_TRY();
 		{
-			Node	   *stmt = (Node *) linitial(stmts);
+			if (isCompleteQuery)
+				EventTriggerDDLCommandStart(pstmt->utilityStmt);
 
-			stmts = list_delete_first(stmts);
+			stmts = transformCreateStmt((CreateStmt *) pstmt->utilityStmt, queryString);
 
-			if (IsA(stmt, CreateStmt))
+			/*
+			* ... and do it.  We can't use foreach() because we may modify the
+			* list midway through, so pick off the elements one at a time, the
+			* hard way.
+			*/
+			while (stmts != NIL)
 			{
-				CreateStmt *cstmt = (CreateStmt *) stmt;
+				Node	   *stmt = (Node *) linitial(stmts);
 
-				/* Remember transformed RangeVar for LIKE */
-				table_rv = cstmt->relation;
+				stmts = list_delete_first(stmts);
 
-				o_define_relation(cstmt, RELKIND_RELATION, queryString);
-			}
-			else if (IsA(stmt, TableLikeClause))
-			{
-				/*
-				 * Do delayed processing of LIKE options.  This will result in
-				 * additional sub-statements for us to process.  Those should
-				 * get done before any remaining actions, so prepend them to
-				 * "stmts".
-				 */
-				TableLikeClause *like = (TableLikeClause *) stmt;
-				List	   *morestmts;
+				if (IsA(stmt, CreateStmt))
+				{
+					CreateStmt *cstmt = (CreateStmt *) stmt;
 
-				Assert(table_rv != NULL);
+					/* Remember transformed RangeVar for LIKE */
+					table_rv = cstmt->relation;
 
-				morestmts = expandTableLikeClause(table_rv, like);
-				stmts = list_concat(morestmts, stmts);
-			}
-			else
-			{
-				/*
-				 * Recurse for anything else.  Note the recursive call will
-				 * stash the objects so created into our event trigger
-				 * context.
-				 */
-				PlannedStmt *wrapper;
+					o_define_relation(cstmt, RELKIND_RELATION, queryString);
+				}
+				else if (IsA(stmt, TableLikeClause))
+				{
+					/*
+					* Do delayed processing of LIKE options.  This will result in
+					* additional sub-statements for us to process.  Those should
+					* get done before any remaining actions, so prepend them to
+					* "stmts".
+					*/
+					TableLikeClause *like = (TableLikeClause *) stmt;
+					List	   *morestmts;
 
-				wrapper = makeNode(PlannedStmt);
-				wrapper->commandType = CMD_UTILITY;
-				wrapper->canSetTag = false;
-				wrapper->utilityStmt = stmt;
-				wrapper->stmt_location = pstmt->stmt_location;
-				wrapper->stmt_len = pstmt->stmt_len;
+					Assert(table_rv != NULL);
 
-				ProcessUtility(wrapper,
-							   queryString,
+					morestmts = expandTableLikeClause(table_rv, like);
+					stmts = list_concat(morestmts, stmts);
+				}
+				else
+				{
+					/*
+					* Recurse for anything else.  Note the recursive call will
+					* stash the objects so created into our event trigger
+					* context.
+					*/
+					PlannedStmt *wrapper;
+
+					wrapper = makeNode(PlannedStmt);
+					wrapper->commandType = CMD_UTILITY;
+					wrapper->canSetTag = false;
+					wrapper->utilityStmt = stmt;
+					wrapper->stmt_location = pstmt->stmt_location;
+					wrapper->stmt_len = pstmt->stmt_len;
+
+					ProcessUtility(wrapper,
+								   queryString,
 #if PG_VERSION_NUM >= 140000
-							   readOnlyTree,
+								   readOnlyTree,
 #endif
-							   PROCESS_UTILITY_SUBCOMMAND,
-							   params,
-							   NULL,
-							   None_Receiver,
-							   NULL);
+								   PROCESS_UTILITY_SUBCOMMAND,
+								   params,
+								   NULL,
+								   None_Receiver,
+								   NULL);
+				}
+
+				if (stmts != NIL)
+					CommandCounterIncrement();
 			}
 
-			if (stmts != NIL)
-				CommandCounterIncrement();
+			if (isCompleteQuery)
+			{
+				EventTriggerSQLDrop(pstmt->utilityStmt);
+				EventTriggerDDLCommandEnd(pstmt->utilityStmt);
+			}
 		}
-
-		if (isCompleteQuery)
+		PG_FINALLY();
 		{
-			EventTriggerSQLDrop(pstmt->utilityStmt);
-			EventTriggerDDLCommandEnd(pstmt->utilityStmt);
+			if (needCleanup)
+				EventTriggerEndCompleteQuery();
 		}
-
-		if (needCleanup)
-			EventTriggerEndCompleteQuery();
+		PG_END_TRY();
 		call_next = false;
 	}
 	else if (IsA(pstmt->utilityStmt, CreateTableAsStmt))
