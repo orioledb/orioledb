@@ -1474,21 +1474,27 @@ explain (verbose, costs off) select * from matest0 order by 1-id;
 ------------------------------------------------------------------------
  Merge Append
    Sort Key: ((1 - matest0.id))
-   ->  Custom Scan (o_scan) on public.matest0 matest0_1
+   ->  Result
          Output: matest0_1.id, matest0_1.name, (1 - matest0_1.id)
-         Forward index scan of: matest0i
-   ->  Custom Scan (o_scan) on public.matest1 matest0_2
+         ->  Custom Scan (o_scan) on public.matest0 matest0_1
+               Output: matest0_1.id, matest0_1.name
+               Forward index scan of: matest0i
+   ->  Result
          Output: matest0_2.id, matest0_2.name, (1 - matest0_2.id)
-         Forward index scan of: matest1i
+         ->  Custom Scan (o_scan) on public.matest1 matest0_2
+               Output: matest0_2.id, matest0_2.name
+               Forward index scan of: matest1i
    ->  Sort
          Output: matest0_3.id, matest0_3.name, ((1 - matest0_3.id))
          Sort Key: ((1 - matest0_3.id))
          ->  Seq Scan on public.matest2 matest0_3
                Output: matest0_3.id, matest0_3.name, (1 - matest0_3.id)
-   ->  Custom Scan (o_scan) on public.matest3 matest0_4
+   ->  Result
          Output: matest0_4.id, matest0_4.name, (1 - matest0_4.id)
-         Forward index scan of: matest3i
-(16 rows)
+         ->  Custom Scan (o_scan) on public.matest3 matest0_4
+               Output: matest0_4.id, matest0_4.name
+               Forward index scan of: matest3i
+(22 rows)
 
 select * from matest0 order by 1-id;
  id |  name  
@@ -1502,8 +1508,8 @@ select * from matest0 order by 1-id;
 (6 rows)
 
 explain (verbose, costs off) select min(1-id) from matest0;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Result
    Output: $0
    InitPlan 1 (returns $0)
@@ -1513,26 +1519,34 @@ explain (verbose, costs off) select min(1-id) from matest0;
                  Output: ((1 - matest0.id))
                  ->  Merge Append
                        Sort Key: ((1 - matest0.id))
-                       ->  Custom Scan (o_scan) on public.matest0 matest0_1
-                             Output: matest0_1.id, ((1 - matest0_1.id))
-                             Forward index only scan of: matest0i
-                             Conds: (((1 - matest0_1.id)) IS NOT NULL)
-                       ->  Custom Scan (o_scan) on public.matest1 matest0_2
-                             Output: matest0_2.id, ((1 - matest0_2.id))
-                             Forward index only scan of: matest1i
-                             Conds: (((1 - matest0_2.id)) IS NOT NULL)
+                       ->  Result
+                             Output: matest0_1.id, (1 - matest0_1.id)
+                             ->  Custom Scan (o_scan) on public.matest0 matest0_1
+                                   Output: matest0_1.id
+                                   Forward index only scan of: matest0i
+                                   Conds: (((1 - matest0_1.id)) IS NOT NULL)
+                       ->  Result
+                             Output: matest0_2.id, (1 - matest0_2.id)
+                             ->  Custom Scan (o_scan) on public.matest1 matest0_2
+                                   Output: matest0_2.id
+                                   Forward index only scan of: matest1i
+                                   Conds: (((1 - matest0_2.id)) IS NOT NULL)
                        ->  Sort
                              Output: matest0_3.id, ((1 - matest0_3.id))
                              Sort Key: ((1 - matest0_3.id))
-                             ->  Custom Scan (o_scan) on public.matest2 matest0_3
+                             ->  Result
                                    Output: matest0_3.id, (1 - matest0_3.id)
-                                   Filter: ((1 - matest0_3.id) IS NOT NULL)
-                                   Forward index only scan of: matest2_pkey
-                       ->  Custom Scan (o_scan) on public.matest3 matest0_4
-                             Output: matest0_4.id, ((1 - matest0_4.id))
-                             Forward index only scan of: matest3i
-                             Conds: (((1 - matest0_4.id)) IS NOT NULL)
-(28 rows)
+                                   ->  Custom Scan (o_scan) on public.matest2 matest0_3
+                                         Output: matest0_3.id
+                                         Filter: ((1 - matest0_3.id) IS NOT NULL)
+                                         Forward index only scan of: matest2_pkey
+                       ->  Result
+                             Output: matest0_4.id, (1 - matest0_4.id)
+                             ->  Custom Scan (o_scan) on public.matest3 matest0_4
+                                   Output: matest0_4.id
+                                   Forward index only scan of: matest3i
+                                   Conds: (((1 - matest0_4.id)) IS NOT NULL)
+(36 rows)
 
 select min(1-id) from matest0;
  min 

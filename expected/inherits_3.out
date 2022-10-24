@@ -141,7 +141,2116 @@ SELECT * FROM c_stock;
 ---------+----+---------
 (0 rows)
 
-DROP EXTENSION orioledb CASCADE;
+--
+-- Test inheritance features
+--
+CREATE TABLE a (aa TEXT) USING orioledb;
+CREATE TABLE b (bb TEXT) INHERITS (a) USING orioledb;
+CREATE TABLE c (cc TEXT) INHERITS (a) USING orioledb;
+CREATE TABLE d (dd TEXT) INHERITS (b,c,a) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "aa"
+NOTICE:  merging multiple inherited definitions of column "aa"
+INSERT INTO a(aa) VALUES('aaa');
+INSERT INTO a(aa) VALUES('aaaa');
+INSERT INTO a(aa) VALUES('aaaaa');
+INSERT INTO a(aa) VALUES('aaaaaa');
+INSERT INTO a(aa) VALUES('aaaaaaa');
+INSERT INTO a(aa) VALUES('aaaaaaaa');
+INSERT INTO b(aa) VALUES('bbb');
+INSERT INTO b(aa) VALUES('bbbb');
+INSERT INTO b(aa) VALUES('bbbbb');
+INSERT INTO b(aa) VALUES('bbbbbb');
+INSERT INTO b(aa) VALUES('bbbbbbb');
+INSERT INTO b(aa) VALUES('bbbbbbbb');
+INSERT INTO c(aa) VALUES('ccc');
+INSERT INTO c(aa) VALUES('cccc');
+INSERT INTO c(aa) VALUES('ccccc');
+INSERT INTO c(aa) VALUES('cccccc');
+INSERT INTO c(aa) VALUES('ccccccc');
+INSERT INTO c(aa) VALUES('cccccccc');
+INSERT INTO d(aa) VALUES('ddd');
+INSERT INTO d(aa) VALUES('dddd');
+INSERT INTO d(aa) VALUES('ddddd');
+INSERT INTO d(aa) VALUES('dddddd');
+INSERT INTO d(aa) VALUES('ddddddd');
+INSERT INTO d(aa) VALUES('dddddddd');
+SELECT relname, a.* FROM a, pg_class where a.tableoid = pg_class.oid;
+ relname |    aa    
+---------+----------
+ a       | aaa
+ a       | aaaa
+ a       | aaaaa
+ a       | aaaaaa
+ a       | aaaaaaa
+ a       | aaaaaaaa
+ b       | bbb
+ b       | bbbb
+ b       | bbbbb
+ b       | bbbbbb
+ b       | bbbbbbb
+ b       | bbbbbbbb
+ c       | ccc
+ c       | cccc
+ c       | ccccc
+ c       | cccccc
+ c       | ccccccc
+ c       | cccccccc
+ d       | ddd
+ d       | dddd
+ d       | ddddd
+ d       | dddddd
+ d       | ddddddd
+ d       | dddddddd
+(24 rows)
+
+SELECT relname, b.* FROM b, pg_class where b.tableoid = pg_class.oid;
+ relname |    aa    | bb 
+---------+----------+----
+ b       | bbb      | 
+ b       | bbbb     | 
+ b       | bbbbb    | 
+ b       | bbbbbb   | 
+ b       | bbbbbbb  | 
+ b       | bbbbbbbb | 
+ d       | ddd      | 
+ d       | dddd     | 
+ d       | ddddd    | 
+ d       | dddddd   | 
+ d       | ddddddd  | 
+ d       | dddddddd | 
+(12 rows)
+
+SELECT relname, c.* FROM c, pg_class where c.tableoid = pg_class.oid;
+ relname |    aa    | cc 
+---------+----------+----
+ c       | ccc      | 
+ c       | cccc     | 
+ c       | ccccc    | 
+ c       | cccccc   | 
+ c       | ccccccc  | 
+ c       | cccccccc | 
+ d       | ddd      | 
+ d       | dddd     | 
+ d       | ddddd    | 
+ d       | dddddd   | 
+ d       | ddddddd  | 
+ d       | dddddddd | 
+(12 rows)
+
+SELECT relname, d.* FROM d, pg_class where d.tableoid = pg_class.oid;
+ relname |    aa    | bb | cc | dd 
+---------+----------+----+----+----
+ d       | ddd      |    |    | 
+ d       | dddd     |    |    | 
+ d       | ddddd    |    |    | 
+ d       | dddddd   |    |    | 
+ d       | ddddddd  |    |    | 
+ d       | dddddddd |    |    | 
+(6 rows)
+
+SELECT relname, a.* FROM ONLY a, pg_class where a.tableoid = pg_class.oid;
+ relname |    aa    
+---------+----------
+ a       | aaa
+ a       | aaaa
+ a       | aaaaa
+ a       | aaaaaa
+ a       | aaaaaaa
+ a       | aaaaaaaa
+(6 rows)
+
+SELECT relname, b.* FROM ONLY b, pg_class where b.tableoid = pg_class.oid;
+ relname |    aa    | bb 
+---------+----------+----
+ b       | bbb      | 
+ b       | bbbb     | 
+ b       | bbbbb    | 
+ b       | bbbbbb   | 
+ b       | bbbbbbb  | 
+ b       | bbbbbbbb | 
+(6 rows)
+
+SELECT relname, c.* FROM ONLY c, pg_class where c.tableoid = pg_class.oid;
+ relname |    aa    | cc 
+---------+----------+----
+ c       | ccc      | 
+ c       | cccc     | 
+ c       | ccccc    | 
+ c       | cccccc   | 
+ c       | ccccccc  | 
+ c       | cccccccc | 
+(6 rows)
+
+SELECT relname, d.* FROM ONLY d, pg_class where d.tableoid = pg_class.oid;
+ relname |    aa    | bb | cc | dd 
+---------+----------+----+----+----
+ d       | ddd      |    |    | 
+ d       | dddd     |    |    | 
+ d       | ddddd    |    |    | 
+ d       | dddddd   |    |    | 
+ d       | ddddddd  |    |    | 
+ d       | dddddddd |    |    | 
+(6 rows)
+
+UPDATE a SET aa='zzzz' WHERE aa='aaaa';
+UPDATE ONLY a SET aa='zzzzz' WHERE aa='aaaaa';
+UPDATE b SET aa='zzz' WHERE aa='aaa';
+UPDATE ONLY b SET aa='zzz' WHERE aa='aaa';
+UPDATE a SET aa='zzzzzz' WHERE aa LIKE 'aaa%';
+SELECT relname, a.* FROM a, pg_class where a.tableoid = pg_class.oid;
+ relname |    aa    
+---------+----------
+ a       | zzzzzz
+ a       | zzzz
+ a       | zzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+ b       | bbb
+ b       | bbbb
+ b       | bbbbb
+ b       | bbbbbb
+ b       | bbbbbbb
+ b       | bbbbbbbb
+ c       | ccc
+ c       | cccc
+ c       | ccccc
+ c       | cccccc
+ c       | ccccccc
+ c       | cccccccc
+ d       | ddd
+ d       | dddd
+ d       | ddddd
+ d       | dddddd
+ d       | ddddddd
+ d       | dddddddd
+(24 rows)
+
+SELECT relname, b.* FROM b, pg_class where b.tableoid = pg_class.oid;
+ relname |    aa    | bb 
+---------+----------+----
+ b       | bbb      | 
+ b       | bbbb     | 
+ b       | bbbbb    | 
+ b       | bbbbbb   | 
+ b       | bbbbbbb  | 
+ b       | bbbbbbbb | 
+ d       | ddd      | 
+ d       | dddd     | 
+ d       | ddddd    | 
+ d       | dddddd   | 
+ d       | ddddddd  | 
+ d       | dddddddd | 
+(12 rows)
+
+SELECT relname, c.* FROM c, pg_class where c.tableoid = pg_class.oid;
+ relname |    aa    | cc 
+---------+----------+----
+ c       | ccc      | 
+ c       | cccc     | 
+ c       | ccccc    | 
+ c       | cccccc   | 
+ c       | ccccccc  | 
+ c       | cccccccc | 
+ d       | ddd      | 
+ d       | dddd     | 
+ d       | ddddd    | 
+ d       | dddddd   | 
+ d       | ddddddd  | 
+ d       | dddddddd | 
+(12 rows)
+
+SELECT relname, d.* FROM d, pg_class where d.tableoid = pg_class.oid;
+ relname |    aa    | bb | cc | dd 
+---------+----------+----+----+----
+ d       | ddd      |    |    | 
+ d       | dddd     |    |    | 
+ d       | ddddd    |    |    | 
+ d       | dddddd   |    |    | 
+ d       | ddddddd  |    |    | 
+ d       | dddddddd |    |    | 
+(6 rows)
+
+SELECT relname, a.* FROM ONLY a, pg_class where a.tableoid = pg_class.oid;
+ relname |   aa   
+---------+--------
+ a       | zzzzzz
+ a       | zzzz
+ a       | zzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+(6 rows)
+
+SELECT relname, b.* FROM ONLY b, pg_class where b.tableoid = pg_class.oid;
+ relname |    aa    | bb 
+---------+----------+----
+ b       | bbb      | 
+ b       | bbbb     | 
+ b       | bbbbb    | 
+ b       | bbbbbb   | 
+ b       | bbbbbbb  | 
+ b       | bbbbbbbb | 
+(6 rows)
+
+SELECT relname, c.* FROM ONLY c, pg_class where c.tableoid = pg_class.oid;
+ relname |    aa    | cc 
+---------+----------+----
+ c       | ccc      | 
+ c       | cccc     | 
+ c       | ccccc    | 
+ c       | cccccc   | 
+ c       | ccccccc  | 
+ c       | cccccccc | 
+(6 rows)
+
+SELECT relname, d.* FROM ONLY d, pg_class where d.tableoid = pg_class.oid;
+ relname |    aa    | bb | cc | dd 
+---------+----------+----+----+----
+ d       | ddd      |    |    | 
+ d       | dddd     |    |    | 
+ d       | ddddd    |    |    | 
+ d       | dddddd   |    |    | 
+ d       | ddddddd  |    |    | 
+ d       | dddddddd |    |    | 
+(6 rows)
+
+UPDATE b SET aa='new';
+SELECT relname, a.* FROM a, pg_class where a.tableoid = pg_class.oid;
+ relname |    aa    
+---------+----------
+ a       | zzzzzz
+ a       | zzzz
+ a       | zzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+ b       | new
+ b       | new
+ b       | new
+ b       | new
+ b       | new
+ b       | new
+ c       | ccc
+ c       | cccc
+ c       | ccccc
+ c       | cccccc
+ c       | ccccccc
+ c       | cccccccc
+ d       | new
+ d       | new
+ d       | new
+ d       | new
+ d       | new
+ d       | new
+(24 rows)
+
+SELECT relname, b.* FROM b, pg_class where b.tableoid = pg_class.oid;
+ relname | aa  | bb 
+---------+-----+----
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+(12 rows)
+
+SELECT relname, c.* FROM c, pg_class where c.tableoid = pg_class.oid;
+ relname |    aa    | cc 
+---------+----------+----
+ c       | ccc      | 
+ c       | cccc     | 
+ c       | ccccc    | 
+ c       | cccccc   | 
+ c       | ccccccc  | 
+ c       | cccccccc | 
+ d       | new      | 
+ d       | new      | 
+ d       | new      | 
+ d       | new      | 
+ d       | new      | 
+ d       | new      | 
+(12 rows)
+
+SELECT relname, d.* FROM d, pg_class where d.tableoid = pg_class.oid;
+ relname | aa  | bb | cc | dd 
+---------+-----+----+----+----
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+(6 rows)
+
+SELECT relname, a.* FROM ONLY a, pg_class where a.tableoid = pg_class.oid;
+ relname |   aa   
+---------+--------
+ a       | zzzzzz
+ a       | zzzz
+ a       | zzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+ a       | zzzzzz
+(6 rows)
+
+SELECT relname, b.* FROM ONLY b, pg_class where b.tableoid = pg_class.oid;
+ relname | aa  | bb 
+---------+-----+----
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+(6 rows)
+
+SELECT relname, c.* FROM ONLY c, pg_class where c.tableoid = pg_class.oid;
+ relname |    aa    | cc 
+---------+----------+----
+ c       | ccc      | 
+ c       | cccc     | 
+ c       | ccccc    | 
+ c       | cccccc   | 
+ c       | ccccccc  | 
+ c       | cccccccc | 
+(6 rows)
+
+SELECT relname, d.* FROM ONLY d, pg_class where d.tableoid = pg_class.oid;
+ relname | aa  | bb | cc | dd 
+---------+-----+----+----+----
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+(6 rows)
+
+UPDATE a SET aa='new';
+DELETE FROM ONLY c WHERE aa='new';
+SELECT relname, a.* FROM a, pg_class where a.tableoid = pg_class.oid;
+ relname | aa  
+---------+-----
+ a       | new
+ a       | new
+ a       | new
+ a       | new
+ a       | new
+ a       | new
+ b       | new
+ b       | new
+ b       | new
+ b       | new
+ b       | new
+ b       | new
+ d       | new
+ d       | new
+ d       | new
+ d       | new
+ d       | new
+ d       | new
+(18 rows)
+
+SELECT relname, b.* FROM b, pg_class where b.tableoid = pg_class.oid;
+ relname | aa  | bb 
+---------+-----+----
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+(12 rows)
+
+SELECT relname, c.* FROM c, pg_class where c.tableoid = pg_class.oid;
+ relname | aa  | cc 
+---------+-----+----
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+ d       | new | 
+(6 rows)
+
+SELECT relname, d.* FROM d, pg_class where d.tableoid = pg_class.oid;
+ relname | aa  | bb | cc | dd 
+---------+-----+----+----+----
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+(6 rows)
+
+SELECT relname, a.* FROM ONLY a, pg_class where a.tableoid = pg_class.oid;
+ relname | aa  
+---------+-----
+ a       | new
+ a       | new
+ a       | new
+ a       | new
+ a       | new
+ a       | new
+(6 rows)
+
+SELECT relname, b.* FROM ONLY b, pg_class where b.tableoid = pg_class.oid;
+ relname | aa  | bb 
+---------+-----+----
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+ b       | new | 
+(6 rows)
+
+SELECT relname, c.* FROM ONLY c, pg_class where c.tableoid = pg_class.oid;
+ relname | aa | cc 
+---------+----+----
+(0 rows)
+
+SELECT relname, d.* FROM ONLY d, pg_class where d.tableoid = pg_class.oid;
+ relname | aa  | bb | cc | dd 
+---------+-----+----+----+----
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+ d       | new |    |    | 
+(6 rows)
+
+DELETE FROM a;
+SELECT relname, a.* FROM a, pg_class where a.tableoid = pg_class.oid;
+ relname | aa 
+---------+----
+(0 rows)
+
+SELECT relname, b.* FROM b, pg_class where b.tableoid = pg_class.oid;
+ relname | aa | bb 
+---------+----+----
+(0 rows)
+
+SELECT relname, c.* FROM c, pg_class where c.tableoid = pg_class.oid;
+ relname | aa | cc 
+---------+----+----
+(0 rows)
+
+SELECT relname, d.* FROM d, pg_class where d.tableoid = pg_class.oid;
+ relname | aa | bb | cc | dd 
+---------+----+----+----+----
+(0 rows)
+
+SELECT relname, a.* FROM ONLY a, pg_class where a.tableoid = pg_class.oid;
+ relname | aa 
+---------+----
+(0 rows)
+
+SELECT relname, b.* FROM ONLY b, pg_class where b.tableoid = pg_class.oid;
+ relname | aa | bb 
+---------+----+----
+(0 rows)
+
+SELECT relname, c.* FROM ONLY c, pg_class where c.tableoid = pg_class.oid;
+ relname | aa | cc 
+---------+----+----
+(0 rows)
+
+SELECT relname, d.* FROM ONLY d, pg_class where d.tableoid = pg_class.oid;
+ relname | aa | bb | cc | dd 
+---------+----+----+----+----
+(0 rows)
+
+-- Confirm PRIMARY KEY adds NOT NULL constraint to child table
+CREATE TABLE z (b TEXT, PRIMARY KEY(aa, b)) inherits (a) USING orioledb;
+INSERT INTO z VALUES (NULL, 'text'); -- should fail
+ERROR:  null value in column "aa" of relation "z" violates not-null constraint
+DETAIL:  Failing row contains (null, text).
+-- Check inherited UPDATE with all children excluded
+create table some_tab (a int, b int) USING orioledb;
+create table some_tab_child () inherits (some_tab) USING orioledb;
+insert into some_tab_child values(1,2);
+explain (verbose, costs off)
+update some_tab set a = a + 1 where false;
+            QUERY PLAN             
+-----------------------------------
+ Update on public.some_tab
+   Update on public.some_tab
+   ->  Result
+         Output: (a + 1), b, rowid
+         One-Time Filter: false
+(5 rows)
+
+update some_tab set a = a + 1 where false;
+explain (verbose, costs off)
+update some_tab set a = a + 1 where false returning b, a;
+            QUERY PLAN             
+-----------------------------------
+ Update on public.some_tab
+   Output: b, a
+   Update on public.some_tab
+   ->  Result
+         Output: (a + 1), b, rowid
+         One-Time Filter: false
+(6 rows)
+
+update some_tab set a = a + 1 where false returning b, a;
+ b | a 
+---+---
+(0 rows)
+
+table some_tab;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+drop table some_tab cascade;
+NOTICE:  drop cascades to table some_tab_child
+-- Check UPDATE with inherited target and an inherited source table
+CREATE TABLE foo(f1 int, f2 int);
+CREATE TABLE foo2(f3 int) inherits (foo);
+CREATE TABLE bar(f1 int, f2 int);
+CREATE TABLE bar2(f3 int) inherits (bar);
+insert into foo values(1,1);
+insert into foo values(3,3);
+insert into foo2 values(2,2,2);
+insert into foo2 values(3,3,3);
+insert into bar values(1,1);
+insert into bar values(2,2);
+insert into bar values(3,3);
+insert into bar values(4,4);
+insert into bar2 values(1,1,1);
+insert into bar2 values(2,2,2);
+insert into bar2 values(3,3,3);
+insert into bar2 values(4,4,4);
+update bar set f2 = f2 + 100 where f1 in (select f1 from foo);
+select tableoid::regclass::text as relname, bar.* from bar order by 1,2;
+ relname | f1 | f2  
+---------+----+-----
+ bar     |  1 | 101
+ bar     |  2 | 102
+ bar     |  3 | 103
+ bar     |  4 |   4
+ bar2    |  1 | 101
+ bar2    |  2 | 102
+ bar2    |  3 | 103
+ bar2    |  4 |   4
+(8 rows)
+
+-- Check UPDATE with inherited target and an appendrel subquery
+update bar set f2 = f2 + 100
+from
+  ( select f1 from foo union all select f1+3 from foo ) ss
+where bar.f1 = ss.f1;
+select tableoid::regclass::text as relname, bar.* from bar order by 1,2;
+ relname | f1 | f2  
+---------+----+-----
+ bar     |  1 | 201
+ bar     |  2 | 202
+ bar     |  3 | 203
+ bar     |  4 | 104
+ bar2    |  1 | 201
+ bar2    |  2 | 202
+ bar2    |  3 | 203
+ bar2    |  4 | 104
+(8 rows)
+
+-- Check UPDATE with *partitioned* inherited target and an appendrel subquery
+create table some_tab (a int) USING orioledb;
+insert into some_tab values (0);
+create table some_tab_child () inherits (some_tab) USING orioledb;
+insert into some_tab_child values (1);
+drop table some_tab cascade;
+NOTICE:  drop cascades to table some_tab_child
+/* Test multiple inheritance of column defaults */
+CREATE TABLE firstparent (tomorrow date default now()::date + 1) USING orioledb;
+CREATE TABLE secondparent (tomorrow date default  now() :: date  +  1) USING orioledb;
+CREATE TABLE jointchild () INHERITS (firstparent, secondparent) USING orioledb;  -- ok
+NOTICE:  merging multiple inherited definitions of column "tomorrow"
+CREATE TABLE thirdparent (tomorrow date default now()::date - 1) USING orioledb;
+CREATE TABLE otherchild () INHERITS (firstparent, thirdparent) USING orioledb;  -- not ok
+NOTICE:  merging multiple inherited definitions of column "tomorrow"
+ERROR:  column "tomorrow" inherits conflicting default values
+HINT:  To resolve the conflict, specify a default explicitly.
+CREATE TABLE otherchild (tomorrow date default now())
+  INHERITS (firstparent, thirdparent) USING orioledb;  -- ok, child resolves ambiguous default
+NOTICE:  merging multiple inherited definitions of column "tomorrow"
+NOTICE:  merging column "tomorrow" with inherited definition
+DROP TABLE firstparent, secondparent, jointchild, thirdparent, otherchild;
+-- The above verified that we can change the type of a multiply-inherited
+-- column; but we should reject that if any definition was inherited from
+-- an unrelated parent.
+CREATE TABLE parent1(f1 int, f2 int);
+CREATE TABLE parent2(f1 int, f3 bigint);
+CREATE TABLE childtab(f4 int) inherits(parent1, parent2);
+NOTICE:  merging multiple inherited definitions of column "f1"
+alter table parent1 alter column f1 type bigint;  -- fail, conflict w/parent2
+ERROR:  cannot alter inherited column "f1" of relation "childtab"
+alter table parent1 alter column f2 type bigint;  -- ok
+-- Test non-inheritable parent constraints
+create table p1(ff1 int) USING orioledb;
+alter table p1 add constraint p1chk check (ff1 > 0) no inherit;
+alter table p1 add constraint p2chk check (ff1 > 10);
+-- connoinherit should be true for NO INHERIT constraint
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pgc.connoinherit from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname = 'p1' order by 1,2;
+ relname | conname | contype | conislocal | coninhcount | connoinherit 
+---------+---------+---------+------------+-------------+--------------
+ p1      | p1chk   | c       | t          |           0 | t
+ p1      | p2chk   | c       | t          |           0 | f
+(2 rows)
+
+-- Test that child does not inherit NO INHERIT constraints
+create table c1 () inherits (p1) USING orioledb;
+\d p1
+                 Table "public.p1"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ ff1    | integer |           |          | 
+Check constraints:
+    "p1chk" CHECK (ff1 > 0) NO INHERIT
+    "p2chk" CHECK (ff1 > 10)
+Number of child tables: 1 (Use \d+ to list them.)
+
+\d c1
+                 Table "public.c1"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ ff1    | integer |           |          | 
+Check constraints:
+    "p2chk" CHECK (ff1 > 10)
+Inherits: p1
+
+-- Test that child does not override inheritable constraints of the parent
+create table c2 (constraint p2chk check (ff1 > 10) no inherit) inherits (p1) USING orioledb;	--fails
+ERROR:  constraint "p2chk" conflicts with inherited constraint on relation "c2"
+drop table p1 cascade;
+NOTICE:  drop cascades to table c1
+-- Tests for casting between the rowtypes of parent and child
+-- tables. See the pgsql-hackers thread beginning Dec. 4/04
+create table base (i integer) USING orioledb;
+create table derived () inherits (base) USING orioledb;
+create table more_derived (like derived, b int) inherits (derived) USING orioledb;
+NOTICE:  merging column "i" with inherited definition
+insert into derived (i) values (0);
+select derived::base from derived;
+ derived 
+---------
+ (0)
+(1 row)
+
+select NULL::derived::base;
+ base 
+------
+ 
+(1 row)
+
+-- remove redundant conversions.
+explain (verbose on, costs off) select row(i, b)::more_derived::derived::base from more_derived;
+                QUERY PLAN                 
+-------------------------------------------
+ Seq Scan on public.more_derived
+   Output: (ROW(i, b)::more_derived)::base
+(2 rows)
+
+explain (verbose on, costs off) select (1, 2)::more_derived::derived::base;
+      QUERY PLAN       
+-----------------------
+ Result
+   Output: '(1)'::base
+(2 rows)
+
+drop table more_derived;
+drop table derived;
+drop table base;
+create table p1(ff1 int) USING orioledb;
+create table p2(f1 text) USING orioledb;
+create function p2text(p2) returns text as 'select $1.f1' language sql;
+create table c1(f3 int) inherits(p1,p2) USING orioledb;
+insert into c1 values(123456789, 'hi', 42);
+select p2text(c1.*) from c1;
+ p2text 
+--------
+ hi
+(1 row)
+
+drop function p2text(p2);
+drop table c1;
+drop table p2;
+drop table p1;
+CREATE TABLE ac (aa TEXT) USING orioledb;
+alter table ac add constraint ac_check check (aa is not null);
+CREATE TABLE bc (bb TEXT) INHERITS (ac) USING orioledb;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname  | contype | conislocal | coninhcount |      consrc      
+---------+----------+---------+------------+-------------+------------------
+ ac      | ac_check | c       | t          |           0 | (aa IS NOT NULL)
+ bc      | ac_check | c       | f          |           1 | (aa IS NOT NULL)
+(2 rows)
+
+insert into ac (aa) values (NULL);
+ERROR:  new row for relation "ac" violates check constraint "ac_check"
+DETAIL:  Failing row contains (null).
+insert into bc (aa) values (NULL);
+ERROR:  new row for relation "bc" violates check constraint "ac_check"
+DETAIL:  Failing row contains (null, null).
+alter table bc drop constraint ac_check;  -- fail, disallowed
+ERROR:  cannot drop inherited constraint "ac_check" of relation "bc"
+alter table ac drop constraint ac_check;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname | contype | conislocal | coninhcount | consrc 
+---------+---------+---------+------------+-------------+--------
+(0 rows)
+
+-- try the unnamed-constraint case
+alter table ac add check (aa is not null);
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname |   conname   | contype | conislocal | coninhcount |      consrc      
+---------+-------------+---------+------------+-------------+------------------
+ ac      | ac_aa_check | c       | t          |           0 | (aa IS NOT NULL)
+ bc      | ac_aa_check | c       | f          |           1 | (aa IS NOT NULL)
+(2 rows)
+
+insert into ac (aa) values (NULL);
+ERROR:  new row for relation "ac" violates check constraint "ac_aa_check"
+DETAIL:  Failing row contains (null).
+insert into bc (aa) values (NULL);
+ERROR:  new row for relation "bc" violates check constraint "ac_aa_check"
+DETAIL:  Failing row contains (null, null).
+alter table bc drop constraint ac_aa_check;  -- fail, disallowed
+ERROR:  cannot drop inherited constraint "ac_aa_check" of relation "bc"
+alter table ac drop constraint ac_aa_check;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname | contype | conislocal | coninhcount | consrc 
+---------+---------+---------+------------+-------------+--------
+(0 rows)
+
+alter table ac add constraint ac_check check (aa is not null);
+alter table bc no inherit ac;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname  | contype | conislocal | coninhcount |      consrc      
+---------+----------+---------+------------+-------------+------------------
+ ac      | ac_check | c       | t          |           0 | (aa IS NOT NULL)
+ bc      | ac_check | c       | t          |           0 | (aa IS NOT NULL)
+(2 rows)
+
+alter table bc drop constraint ac_check;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname  | contype | conislocal | coninhcount |      consrc      
+---------+----------+---------+------------+-------------+------------------
+ ac      | ac_check | c       | t          |           0 | (aa IS NOT NULL)
+(1 row)
+
+alter table ac drop constraint ac_check;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname | contype | conislocal | coninhcount | consrc 
+---------+---------+---------+------------+-------------+--------
+(0 rows)
+
+drop table bc;
+drop table ac;
+create table ac (a int constraint check_a check (a <> 0)) USING orioledb;
+create table bc (a int constraint check_a check (a <> 0), b int constraint check_b check (b <> 0)) inherits (ac) USING orioledb;
+NOTICE:  merging column "a" with inherited definition
+NOTICE:  merging constraint "check_a" with inherited definition
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
+ relname | conname | contype | conislocal | coninhcount |  consrc  
+---------+---------+---------+------------+-------------+----------
+ ac      | check_a | c       | t          |           0 | (a <> 0)
+ bc      | check_a | c       | t          |           1 | (a <> 0)
+ bc      | check_b | c       | t          |           0 | (b <> 0)
+(3 rows)
+
+drop table bc;
+drop table ac;
+create table ac (a int constraint check_a check (a <> 0)) USING orioledb;
+create table bc (b int constraint check_b check (b <> 0)) USING orioledb;
+create table cc (c int constraint check_c check (c <> 0)) inherits (ac, bc) USING orioledb;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc', 'cc') order by 1,2;
+ relname | conname | contype | conislocal | coninhcount |  consrc  
+---------+---------+---------+------------+-------------+----------
+ ac      | check_a | c       | t          |           0 | (a <> 0)
+ bc      | check_b | c       | t          |           0 | (b <> 0)
+ cc      | check_a | c       | f          |           1 | (a <> 0)
+ cc      | check_b | c       | f          |           1 | (b <> 0)
+ cc      | check_c | c       | t          |           0 | (c <> 0)
+(5 rows)
+
+alter table cc no inherit bc;
+select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc', 'cc') order by 1,2;
+ relname | conname | contype | conislocal | coninhcount |  consrc  
+---------+---------+---------+------------+-------------+----------
+ ac      | check_a | c       | t          |           0 | (a <> 0)
+ bc      | check_b | c       | t          |           0 | (b <> 0)
+ cc      | check_a | c       | f          |           1 | (a <> 0)
+ cc      | check_b | c       | t          |           0 | (b <> 0)
+ cc      | check_c | c       | t          |           0 | (c <> 0)
+(5 rows)
+
+drop table cc;
+drop table bc;
+drop table ac;
+create table p1(f1 int) USING orioledb;
+create table p2(f2 int) USING orioledb;
+create table c1(f3 int) inherits(p1,p2) USING orioledb;
+insert into c1 values(1,-1,2);
+alter table p2 add constraint cc check (f2>0);  -- fail
+ERROR:  check constraint "cc" of relation "c1" is violated by some row
+alter table p2 add check (f2>0);  -- check it without a name, too
+ERROR:  check constraint "p2_f2_check" of relation "c1" is violated by some row
+delete from c1;
+insert into c1 values(1,1,2);
+alter table p2 add check (f2>0);
+insert into c1 values(1,-1,2);  -- fail
+ERROR:  new row for relation "c1" violates check constraint "p2_f2_check"
+DETAIL:  Failing row contains (1, -1, 2).
+create table c2(f3 int) inherits(p1,p2) USING orioledb;
+\d c2
+                 Table "public.c2"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ f1     | integer |           |          | 
+ f2     | integer |           |          | 
+ f3     | integer |           |          | 
+Check constraints:
+    "p2_f2_check" CHECK (f2 > 0)
+Inherits: p1,
+          p2
+
+create table c3 (f4 int) inherits(c1,c2) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "f1"
+NOTICE:  merging multiple inherited definitions of column "f2"
+NOTICE:  merging multiple inherited definitions of column "f3"
+\d c3
+                 Table "public.c3"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ f1     | integer |           |          | 
+ f2     | integer |           |          | 
+ f3     | integer |           |          | 
+ f4     | integer |           |          | 
+Check constraints:
+    "p2_f2_check" CHECK (f2 > 0)
+Inherits: c1,
+          c2
+
+drop table p1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table c1
+drop cascades to table c2
+drop cascades to table c3
+drop table p2 cascade;
+create table pp1 (f1 int) USING orioledb;
+create table cc1 (f2 text, f3 int) inherits (pp1) USING orioledb;
+alter table pp1 add column a1 int check (a1 > 0);
+\d cc1
+                Table "public.cc1"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ f1     | integer |           |          | 
+ f2     | text    |           |          | 
+ f3     | integer |           |          | 
+ a1     | integer |           |          | 
+Check constraints:
+    "pp1_a1_check" CHECK (a1 > 0)
+Inherits: pp1
+
+create table cc2(f4 float) inherits(pp1,cc1) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "f1"
+NOTICE:  merging multiple inherited definitions of column "a1"
+\d cc2
+                     Table "public.cc2"
+ Column |       Type       | Collation | Nullable | Default 
+--------+------------------+-----------+----------+---------
+ f1     | integer          |           |          | 
+ a1     | integer          |           |          | 
+ f2     | text             |           |          | 
+ f3     | integer          |           |          | 
+ f4     | double precision |           |          | 
+Check constraints:
+    "pp1_a1_check" CHECK (a1 > 0)
+Inherits: pp1,
+          cc1
+
+alter table pp1 add column a2 int check (a2 > 0);
+NOTICE:  merging definition of column "a2" for child "cc2"
+NOTICE:  merging constraint "pp1_a2_check" with inherited definition
+\d cc2
+                     Table "public.cc2"
+ Column |       Type       | Collation | Nullable | Default 
+--------+------------------+-----------+----------+---------
+ f1     | integer          |           |          | 
+ a1     | integer          |           |          | 
+ f2     | text             |           |          | 
+ f3     | integer          |           |          | 
+ f4     | double precision |           |          | 
+ a2     | integer          |           |          | 
+Check constraints:
+    "pp1_a1_check" CHECK (a1 > 0)
+    "pp1_a2_check" CHECK (a2 > 0)
+Inherits: pp1,
+          cc1
+
+drop table pp1 cascade;
 NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table cc1
+drop cascades to table cc2
+-- Test for renaming in simple multiple inheritance
+CREATE TABLE inht1 (a int, b int) USING orioledb;
+CREATE TABLE inhs1 (b int, c int) USING orioledb;
+CREATE TABLE inhts (d int) INHERITS (inht1, inhs1) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "b"
+ALTER TABLE inht1 RENAME a TO aa;
+ALTER TABLE inht1 RENAME b TO bb;                -- to be failed
+ERROR:  cannot rename inherited column "b"
+ALTER TABLE inhts RENAME aa TO aaa;      -- to be failed
+ERROR:  cannot rename inherited column "aa"
+ALTER TABLE inhts RENAME d TO dd;
+\d+ inhts
+                                   Table "public.inhts"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ aa     | integer |           |          |         | plain   |              | 
+ b      | integer |           |          |         | plain   |              | 
+ c      | integer |           |          |         | plain   |              | 
+ dd     | integer |           |          |         | plain   |              | 
+Inherits: inht1,
+          inhs1
+
+DROP TABLE inhts;
+-- Test for renaming in diamond inheritance
+CREATE TABLE inht2 (x int) INHERITS (inht1) USING orioledb;
+CREATE TABLE inht3 (y int) INHERITS (inht1) USING orioledb;
+CREATE TABLE inht4 (z int) INHERITS (inht2, inht3) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "aa"
+NOTICE:  merging multiple inherited definitions of column "b"
+ALTER TABLE inht1 RENAME aa TO aaa;
+\d+ inht4
+                                   Table "public.inht4"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ aaa    | integer |           |          |         | plain   |              | 
+ b      | integer |           |          |         | plain   |              | 
+ x      | integer |           |          |         | plain   |              | 
+ y      | integer |           |          |         | plain   |              | 
+ z      | integer |           |          |         | plain   |              | 
+Inherits: inht2,
+          inht3
+
+CREATE TABLE inhts (d int) INHERITS (inht2, inhs1) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "b"
+ALTER TABLE inht1 RENAME aaa TO aaaa;
+ALTER TABLE inht1 RENAME b TO bb;                -- to be failed
+ERROR:  cannot rename inherited column "b"
+\d+ inhts
+                                   Table "public.inhts"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ aaaa   | integer |           |          |         | plain   |              | 
+ b      | integer |           |          |         | plain   |              | 
+ x      | integer |           |          |         | plain   |              | 
+ c      | integer |           |          |         | plain   |              | 
+ d      | integer |           |          |         | plain   |              | 
+Inherits: inht2,
+          inhs1
+
+WITH RECURSIVE r AS (
+  SELECT 'inht1'::regclass AS inhrelid
+UNION ALL
+  SELECT c.inhrelid FROM pg_inherits c, r WHERE r.inhrelid = c.inhparent
+)
+SELECT a.attrelid::regclass, a.attname, a.attinhcount, e.expected
+  FROM (SELECT inhrelid, count(*) AS expected FROM pg_inherits
+        WHERE inhparent IN (SELECT inhrelid FROM r) GROUP BY inhrelid) e
+  JOIN pg_attribute a ON e.inhrelid = a.attrelid WHERE NOT attislocal
+  ORDER BY a.attrelid::regclass::name, a.attnum;
+ attrelid | attname | attinhcount | expected 
+----------+---------+-------------+----------
+ inht2    | aaaa    |           1 |        1
+ inht2    | b       |           1 |        1
+ inht3    | aaaa    |           1 |        1
+ inht3    | b       |           1 |        1
+ inht4    | aaaa    |           2 |        2
+ inht4    | b       |           2 |        2
+ inht4    | x       |           1 |        2
+ inht4    | y       |           1 |        2
+ inhts    | aaaa    |           1 |        1
+ inhts    | b       |           2 |        1
+ inhts    | x       |           1 |        1
+ inhts    | c       |           1 |        1
+(12 rows)
+
+DROP TABLE inht1, inhs1 CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table inht2
+drop cascades to table inhts
+drop cascades to table inht3
+drop cascades to table inht4
+-- Test non-inheritable indices [UNIQUE, EXCLUDE] constraints
+CREATE TABLE test_constraints (id int, val1 varchar, val2 int, UNIQUE(val1, val2)) USING orioledb;
+CREATE TABLE test_constraints_inh () INHERITS (test_constraints) USING orioledb;
+\d+ test_constraints
+                                   Table "public.test_constraints"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ id     | integer           |           |          |         | plain    |              | 
+ val1   | character varying |           |          |         | extended |              | 
+ val2   | integer           |           |          |         | plain    |              | 
+Indexes:
+    "test_constraints_val1_val2_key" UNIQUE CONSTRAINT, btree (val1, val2)
+Child tables: test_constraints_inh
+
+ALTER TABLE ONLY test_constraints DROP CONSTRAINT test_constraints_val1_val2_key;
+\d+ test_constraints
+                                   Table "public.test_constraints"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ id     | integer           |           |          |         | plain    |              | 
+ val1   | character varying |           |          |         | extended |              | 
+ val2   | integer           |           |          |         | plain    |              | 
+Child tables: test_constraints_inh
+
+\d+ test_constraints_inh
+                                 Table "public.test_constraints_inh"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ id     | integer           |           |          |         | plain    |              | 
+ val1   | character varying |           |          |         | extended |              | 
+ val2   | integer           |           |          |         | plain    |              | 
+Inherits: test_constraints
+
+DROP TABLE test_constraints_inh;
+DROP TABLE test_constraints;
+-- Test non-inheritable foreign key constraints
+CREATE TABLE test_primary_constraints(id int PRIMARY KEY) USING orioledb;
+CREATE TABLE test_foreign_constraints(id1 int REFERENCES test_primary_constraints(id)) USING orioledb;
+CREATE TABLE test_foreign_constraints_inh () INHERITS (test_foreign_constraints) USING orioledb;
+\d+ test_primary_constraints
+                         Table "public.test_primary_constraints"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id     | integer |           | not null |         | plain   |              | 
+Indexes:
+    "test_primary_constraints_pkey" PRIMARY KEY, btree (id)
+Referenced by:
+    TABLE "test_foreign_constraints" CONSTRAINT "test_foreign_constraints_id1_fkey" FOREIGN KEY (id1) REFERENCES test_primary_constraints(id)
+
+\d+ test_foreign_constraints
+                         Table "public.test_foreign_constraints"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id1    | integer |           |          |         | plain   |              | 
+Foreign-key constraints:
+    "test_foreign_constraints_id1_fkey" FOREIGN KEY (id1) REFERENCES test_primary_constraints(id)
+Child tables: test_foreign_constraints_inh
+
+ALTER TABLE test_foreign_constraints DROP CONSTRAINT test_foreign_constraints_id1_fkey;
+\d+ test_foreign_constraints
+                         Table "public.test_foreign_constraints"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id1    | integer |           |          |         | plain   |              | 
+Child tables: test_foreign_constraints_inh
+
+\d+ test_foreign_constraints_inh
+                       Table "public.test_foreign_constraints_inh"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id1    | integer |           |          |         | plain   |              | 
+Inherits: test_foreign_constraints
+
+DROP TABLE test_foreign_constraints_inh;
+DROP TABLE test_foreign_constraints;
+DROP TABLE test_primary_constraints;
+-- Test foreign key behavior
+create table inh_fk_1 (a int primary key) USING orioledb;
+insert into inh_fk_1 values (1), (2), (3);
+create table inh_fk_2 (x int primary key, y int references inh_fk_1 on delete cascade) USING orioledb;
+insert into inh_fk_2 values (11, 1), (22, 2), (33, 3);
+create table inh_fk_2_child () inherits (inh_fk_2) USING orioledb;
+insert into inh_fk_2_child values (111, 1), (222, 2);
+delete from inh_fk_1 where a = 1;
+select * from inh_fk_1 order by 1;
+ a 
+---
+ 2
+ 3
+(2 rows)
+
+select * from inh_fk_2 order by 1, 2;
+  x  | y 
+-----+---
+  22 | 2
+  33 | 3
+ 111 | 1
+ 222 | 2
+(4 rows)
+
+drop table inh_fk_1, inh_fk_2, inh_fk_2_child;
+-- Test that parent and child CHECK constraints can be created in either order
+create table p1(f1 int) USING orioledb;
+create table p1_c1() inherits(p1) USING orioledb;
+alter table p1 add constraint inh_check_constraint1 check (f1 > 0);
+alter table p1_c1 add constraint inh_check_constraint1 check (f1 > 0);
+NOTICE:  merging constraint "inh_check_constraint1" with inherited definition
+alter table p1_c1 add constraint inh_check_constraint2 check (f1 < 10);
+alter table p1 add constraint inh_check_constraint2 check (f1 < 10);
+NOTICE:  merging constraint "inh_check_constraint2" with inherited definition
+select conrelid::regclass::text as relname, conname, conislocal, coninhcount
+from pg_constraint where conname like 'inh\_check\_constraint%'
+order by 1, 2;
+ relname |        conname        | conislocal | coninhcount 
+---------+-----------------------+------------+-------------
+ p1      | inh_check_constraint1 | t          |           0
+ p1      | inh_check_constraint2 | t          |           0
+ p1_c1   | inh_check_constraint1 | t          |           1
+ p1_c1   | inh_check_constraint2 | t          |           1
+(4 rows)
+
+drop table p1 cascade;
+NOTICE:  drop cascades to table p1_c1
+-- Test that a valid child can have not-valid parent, but not vice versa
+create table invalid_check_con(f1 int) USING orioledb;
+create table invalid_check_con_child() inherits(invalid_check_con) USING orioledb;
+alter table invalid_check_con_child add constraint inh_check_constraint check(f1 > 0) not valid;
+alter table invalid_check_con add constraint inh_check_constraint check(f1 > 0); -- fail
+ERROR:  constraint "inh_check_constraint" conflicts with NOT VALID constraint on relation "invalid_check_con_child"
+alter table invalid_check_con_child drop constraint inh_check_constraint;
+insert into invalid_check_con values(0);
+alter table invalid_check_con_child add constraint inh_check_constraint check(f1 > 0);
+alter table invalid_check_con add constraint inh_check_constraint check(f1 > 0) not valid;
+NOTICE:  merging constraint "inh_check_constraint" with inherited definition
+insert into invalid_check_con values(0); -- fail
+ERROR:  new row for relation "invalid_check_con" violates check constraint "inh_check_constraint"
+DETAIL:  Failing row contains (0).
+insert into invalid_check_con_child values(0); -- fail
+ERROR:  new row for relation "invalid_check_con_child" violates check constraint "inh_check_constraint"
+DETAIL:  Failing row contains (0).
+select conrelid::regclass::text as relname, conname,
+       convalidated, conislocal, coninhcount, connoinherit
+from pg_constraint where conname like 'inh\_check\_constraint%'
+order by 1, 2;
+         relname         |       conname        | convalidated | conislocal | coninhcount | connoinherit 
+-------------------------+----------------------+--------------+------------+-------------+--------------
+ invalid_check_con       | inh_check_constraint | f            | t          |           0 | f
+ invalid_check_con_child | inh_check_constraint | t            | t          |           1 | f
+(2 rows)
+
+-- We don't drop the invalid_check_con* tables, to test dump/reload with
+--
+-- Test parameterized append plans for inheritance trees
+--
+CREATE TABLE patest0 (id, x) as
+  select x, x from generate_series(0,1000) x;
+CREATE TABLE patest1() inherits (patest0);
+insert into patest1
+  select x, x from generate_series(0,1000) x;
+CREATE TABLE patest2() inherits (patest0);
+insert into patest2
+  select x, x from generate_series(0,1000) x;
+create index patest0i on patest0(id);
+create index patest1i on patest1(id);
+create index patest2i on patest2(id);
+analyze patest0;
+analyze patest1;
+analyze patest2;
+explain (costs off)
+select * from patest0 join (select f1 from int4_tbl limit 1) ss on id = f1;
+ERROR:  relation "int4_tbl" does not exist
+LINE 2: select * from patest0 join (select f1 from int4_tbl limit 1)...
+                                                   ^
+select * from patest0 join (select f1 from int4_tbl limit 1) ss on id = f1;
+ERROR:  relation "int4_tbl" does not exist
+LINE 1: select * from patest0 join (select f1 from int4_tbl limit 1)...
+                                                   ^
+drop index patest2i;
+explain (costs off)
+select * from patest0 join (select f1 from int4_tbl limit 1) ss on id = f1;
+ERROR:  relation "int4_tbl" does not exist
+LINE 2: select * from patest0 join (select f1 from int4_tbl limit 1)...
+                                                   ^
+select * from patest0 join (select f1 from int4_tbl limit 1) ss on id = f1;
+ERROR:  relation "int4_tbl" does not exist
+LINE 1: select * from patest0 join (select f1 from int4_tbl limit 1)...
+                                                   ^
+drop table patest0 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table patest1
+drop cascades to table patest2
+--
+-- Test merge-append plans for inheritance trees
+--
+create table matest0 (id serial primary key, name text) USING orioledb;
+create table matest1 (id integer primary key) inherits (matest0) USING orioledb;
+NOTICE:  merging column "id" with inherited definition
+create table matest2 (id integer primary key) inherits (matest0) USING orioledb;
+NOTICE:  merging column "id" with inherited definition
+create table matest3 (id integer primary key) inherits (matest0) USING orioledb;
+NOTICE:  merging column "id" with inherited definition
+create index matest0i on matest0 ((1-id));
+create index matest1i on matest1 ((1-id));
+-- create index matest2i on matest2 ((1-id));  -- intentionally missing
+create index matest3i on matest3 ((1-id));
+insert into matest1 (name) values ('Test 1');
+insert into matest1 (name) values ('Test 2');
+insert into matest2 (name) values ('Test 3');
+insert into matest2 (name) values ('Test 4');
+insert into matest3 (name) values ('Test 5');
+insert into matest3 (name) values ('Test 6');
+set enable_indexscan = off;  -- force use of seqscan/sort, so no merge
+explain (verbose, costs off) select * from matest0 order by 1-id;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: matest0.id, matest0.name, ((1 - matest0.id))
+   Sort Key: ((1 - matest0.id))
+   ->  Result
+         Output: matest0.id, matest0.name, (1 - matest0.id)
+         ->  Append
+               ->  Seq Scan on public.matest0 matest0_1
+                     Output: matest0_1.id, matest0_1.name
+               ->  Seq Scan on public.matest1 matest0_2
+                     Output: matest0_2.id, matest0_2.name
+               ->  Seq Scan on public.matest2 matest0_3
+                     Output: matest0_3.id, matest0_3.name
+               ->  Seq Scan on public.matest3 matest0_4
+                     Output: matest0_4.id, matest0_4.name
+(14 rows)
+
+select * from matest0 order by 1-id;
+ id |  name  
+----+--------
+  6 | Test 6
+  5 | Test 5
+  4 | Test 4
+  3 | Test 3
+  2 | Test 2
+  1 | Test 1
+(6 rows)
+
+explain (verbose, costs off) select min(1-id) from matest0;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   Output: min((1 - matest0.id))
+   ->  Append
+         ->  Seq Scan on public.matest0 matest0_1
+               Output: matest0_1.id
+         ->  Seq Scan on public.matest1 matest0_2
+               Output: matest0_2.id
+         ->  Seq Scan on public.matest2 matest0_3
+               Output: matest0_3.id
+         ->  Seq Scan on public.matest3 matest0_4
+               Output: matest0_4.id
+(11 rows)
+
+select min(1-id) from matest0;
+ min 
+-----
+  -5
+(1 row)
+
+reset enable_indexscan;
+set enable_seqscan = off;  -- plan with fewest seqscans should be merge
+set enable_parallel_append = off; -- Don't let parallel-append interfere
+explain (verbose, costs off) select * from matest0 order by 1-id;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Merge Append
+   Sort Key: ((1 - matest0.id))
+   ->  Custom Scan (o_scan) on public.matest0 matest0_1
+         Output: matest0_1.id, matest0_1.name, (1 - matest0_1.id)
+         Forward index scan of: matest0i
+   ->  Custom Scan (o_scan) on public.matest1 matest0_2
+         Output: matest0_2.id, matest0_2.name, (1 - matest0_2.id)
+         Forward index scan of: matest1i
+   ->  Sort
+         Output: matest0_3.id, matest0_3.name, ((1 - matest0_3.id))
+         Sort Key: ((1 - matest0_3.id))
+         ->  Seq Scan on public.matest2 matest0_3
+               Output: matest0_3.id, matest0_3.name, (1 - matest0_3.id)
+   ->  Custom Scan (o_scan) on public.matest3 matest0_4
+         Output: matest0_4.id, matest0_4.name, (1 - matest0_4.id)
+         Forward index scan of: matest3i
+(16 rows)
+
+select * from matest0 order by 1-id;
+ id |  name  
+----+--------
+  6 | Test 6
+  5 | Test 5
+  4 | Test 4
+  3 | Test 3
+  2 | Test 2
+  1 | Test 1
+(6 rows)
+
+explain (verbose, costs off) select min(1-id) from matest0;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Result
+   Output: $0
+   InitPlan 1 (returns $0)
+     ->  Limit
+           Output: ((1 - matest0.id))
+           ->  Result
+                 Output: ((1 - matest0.id))
+                 ->  Merge Append
+                       Sort Key: ((1 - matest0.id))
+                       ->  Custom Scan (o_scan) on public.matest0 matest0_1
+                             Output: matest0_1.id, ((1 - matest0_1.id))
+                             Forward index only scan of: matest0i
+                             Conds: (((1 - matest0_1.id)) IS NOT NULL)
+                       ->  Custom Scan (o_scan) on public.matest1 matest0_2
+                             Output: matest0_2.id, ((1 - matest0_2.id))
+                             Forward index only scan of: matest1i
+                             Conds: (((1 - matest0_2.id)) IS NOT NULL)
+                       ->  Sort
+                             Output: matest0_3.id, ((1 - matest0_3.id))
+                             Sort Key: ((1 - matest0_3.id))
+                             ->  Custom Scan (o_scan) on public.matest2 matest0_3
+                                   Output: matest0_3.id, (1 - matest0_3.id)
+                                   Filter: ((1 - matest0_3.id) IS NOT NULL)
+                                   Forward index only scan of: matest2_pkey
+                       ->  Custom Scan (o_scan) on public.matest3 matest0_4
+                             Output: matest0_4.id, ((1 - matest0_4.id))
+                             Forward index only scan of: matest3i
+                             Conds: (((1 - matest0_4.id)) IS NOT NULL)
+(28 rows)
+
+select min(1-id) from matest0;
+ min 
+-----
+  -5
+(1 row)
+
+reset enable_seqscan;
+reset enable_parallel_append;
+drop table matest0 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table matest1
+drop cascades to table matest2
+drop cascades to table matest3
+--
+-- Check that use of an index with an extraneous column doesn't produce
+-- a plan with extraneous sorting
+--
+create table matest0 (a int, b int, c int, d int) USING orioledb;
+create table matest1 () inherits(matest0) USING orioledb;
+create index matest0i on matest0 (b, c);
+create index matest1i on matest1 (b, c);
+set enable_nestloop = off;  -- we want a plan with two MergeAppends
+explain (costs off)
+select t1.* from matest0 t1, matest0 t2
+where t1.b = t2.b and t2.c = t2.d
+order by t1.b limit 10;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Limit
+   ->  Merge Join
+         Merge Cond: (t1.b = t2.b)
+         ->  Merge Append
+               Sort Key: t1.b
+               ->  Custom Scan (o_scan) on matest0 t1_1
+                     Forward index scan of: matest0i
+               ->  Custom Scan (o_scan) on matest1 t1_2
+                     Forward index scan of: matest1i
+         ->  Materialize
+               ->  Merge Append
+                     Sort Key: t2.b
+                     ->  Custom Scan (o_scan) on matest0 t2_1
+                           Filter: (c = d)
+                           Forward index scan of: matest0i
+                     ->  Custom Scan (o_scan) on matest1 t2_2
+                           Filter: (c = d)
+                           Forward index scan of: matest1i
+(18 rows)
+
+reset enable_nestloop;
+drop table matest0 cascade;
+NOTICE:  drop cascades to table matest1
+--
+-- Test merge-append for UNION ALL append relations
+--
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+-- Check handling of duplicated, constant, or volatile targetlist items
+explain (costs off)
+SELECT thousand, tenthous FROM tenk1
+UNION ALL
+SELECT thousand, thousand FROM tenk1
+ORDER BY thousand, tenthous;
+ERROR:  relation "tenk1" does not exist
+LINE 2: SELECT thousand, tenthous FROM tenk1
+                                       ^
+explain (costs off)
+SELECT thousand, tenthous, thousand+tenthous AS x FROM tenk1
+UNION ALL
+SELECT 42, 42, hundred FROM tenk1
+ORDER BY thousand, tenthous;
+ERROR:  relation "tenk1" does not exist
+LINE 2: SELECT thousand, tenthous, thousand+tenthous AS x FROM tenk1
+                                                               ^
+explain (costs off)
+SELECT thousand, tenthous FROM tenk1
+UNION ALL
+SELECT thousand, random()::integer FROM tenk1
+ORDER BY thousand, tenthous;
+ERROR:  relation "tenk1" does not exist
+LINE 2: SELECT thousand, tenthous FROM tenk1
+                                       ^
+-- Check min/max aggregate optimization
+explain (costs off)
+SELECT min(x) FROM
+  (SELECT unique1 AS x FROM tenk1 a
+   UNION ALL
+   SELECT unique2 AS x FROM tenk1 b) s;
+ERROR:  relation "tenk1" does not exist
+LINE 3:   (SELECT unique1 AS x FROM tenk1 a
+                                    ^
+explain (costs off)
+SELECT min(y) FROM
+  (SELECT unique1 AS x, unique1 AS y FROM tenk1 a
+   UNION ALL
+   SELECT unique2 AS x, unique2 AS y FROM tenk1 b) s;
+ERROR:  relation "tenk1" does not exist
+LINE 3:   (SELECT unique1 AS x, unique1 AS y FROM tenk1 a
+                                                  ^
+-- XXX planner doesn't recognize that index on unique2 is sufficiently sorted
+explain (costs off)
+SELECT x, y FROM
+  (SELECT thousand AS x, tenthous AS y FROM tenk1 a
+   UNION ALL
+   SELECT unique2 AS x, unique2 AS y FROM tenk1 b) s
+ORDER BY x, y;
+ERROR:  relation "tenk1" does not exist
+LINE 3:   (SELECT thousand AS x, tenthous AS y FROM tenk1 a
+                                                    ^
+-- exercise rescan code path via a repeatedly-evaluated subquery
+explain (costs off)
+SELECT
+    ARRAY(SELECT f.i FROM (
+        (SELECT d + g.i FROM generate_series(4, 30, 3) d ORDER BY 1)
+        UNION ALL
+        (SELECT d + g.i FROM generate_series(0, 30, 5) d ORDER BY 1)
+    ) f(i)
+    ORDER BY f.i LIMIT 10)
+FROM generate_series(1, 3) g(i);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Function Scan on generate_series g
+   SubPlan 1
+     ->  Limit
+           ->  Merge Append
+                 Sort Key: ((d.d + g.i))
+                 ->  Sort
+                       Sort Key: ((d.d + g.i))
+                       ->  Function Scan on generate_series d
+                 ->  Sort
+                       Sort Key: ((d_1.d + g.i))
+                       ->  Function Scan on generate_series d_1
+(11 rows)
+
+SELECT
+    ARRAY(SELECT f.i FROM (
+        (SELECT d + g.i FROM generate_series(4, 30, 3) d ORDER BY 1)
+        UNION ALL
+        (SELECT d + g.i FROM generate_series(0, 30, 5) d ORDER BY 1)
+    ) f(i)
+    ORDER BY f.i LIMIT 10)
+FROM generate_series(1, 3) g(i);
+            array             
+------------------------------
+ {1,5,6,8,11,11,14,16,17,20}
+ {2,6,7,9,12,12,15,17,18,21}
+ {3,7,8,10,13,13,16,18,19,22}
+(3 rows)
+
+reset enable_seqscan;
+reset enable_indexscan;
+reset enable_bitmapscan;
+--
+-- Check handling of a constant-null CHECK constraint
+--
+create table cnullparent (f1 int) USING orioledb;
+create table cnullchild (check (f1 = 1 or f1 = null)) inherits(cnullparent) USING orioledb;
+insert into cnullchild values(1);
+insert into cnullchild values(2);
+insert into cnullchild values(null);
+select * from cnullparent;
+ f1 
+----
+  1
+  2
+   
+(3 rows)
+
+select * from cnullparent where f1 = 2;
+ f1 
+----
+  2
+(1 row)
+
+drop table cnullparent cascade;
+NOTICE:  drop cascades to table cnullchild
+--
+-- Check use of temporary tables with inheritance trees
+--
+create table inh_perm_parent (a1 int) USING orioledb;
+CREATE TABLE inh_temp_parent (a1 int);
+CREATE TABLE inh_temp_child () inherits (inh_perm_parent); -- ok
+create table inh_perm_child () inherits (inh_temp_parent) USING orioledb; -- error
+CREATE TABLE inh_temp_child_2 () inherits (inh_temp_parent); -- ok
+insert into inh_perm_parent values (1);
+insert into inh_temp_parent values (2);
+insert into inh_temp_child values (3);
+insert into inh_temp_child_2 values (4);
+select tableoid::regclass, a1 from inh_perm_parent;
+    tableoid     | a1 
+-----------------+----
+ inh_perm_parent |  1
+ inh_temp_child  |  3
+(2 rows)
+
+select tableoid::regclass, a1 from inh_temp_parent;
+     tableoid     | a1 
+------------------+----
+ inh_temp_parent  |  2
+ inh_temp_child_2 |  4
+(2 rows)
+
+drop table inh_perm_parent cascade;
+NOTICE:  drop cascades to table inh_temp_child
+drop table inh_temp_parent cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table inh_perm_child
+drop cascades to table inh_temp_child_2
+CREATE TABLE o_test_inh_circular_parent (
+	key int
+) USING orioledb;
+CREATE TABLE o_test_inh_circular_child (
+	val int
+) INHERITS (o_test_inh_circular_parent) USING orioledb;
+ALTER TABLE o_test_inh_circular_parent INHERIT o_test_inh_circular_child;
+ERROR:  circular inheritance not allowed
+DETAIL:  "o_test_inh_circular_child" is already a child of "o_test_inh_circular_parent".
+--
+-- test the "star" operators a bit more thoroughly -- this time,
+-- throw in lots of NULL fields...
+--
+-- a is the type root
+-- b and c inherit from a (one-level single inheritance)
+-- d inherits from b and c (two-level multiple inheritance)
+-- e inherits from c (two-level single inheritance)
+-- f inherits from e (three-level single inheritance)
+--
+CREATE TABLE a_star (
+	class		char,
+	a 			int4
+) USING orioledb;
+CREATE TABLE b_star (
+	b 			text
+) INHERITS (a_star) USING orioledb;
+CREATE TABLE c_star (
+	c 			name
+) INHERITS (a_star) USING orioledb;
+CREATE TABLE d_star (
+	d 			float8
+) INHERITS (b_star, c_star) USING orioledb;
+NOTICE:  merging multiple inherited definitions of column "class"
+NOTICE:  merging multiple inherited definitions of column "a"
+CREATE TABLE e_star (
+	e 			int2
+) INHERITS (c_star) USING orioledb;
+CREATE TABLE f_star (
+	f 			polygon
+) INHERITS (e_star) USING orioledb;
+INSERT INTO a_star (class, a) VALUES ('a', 1);
+INSERT INTO a_star (class, a) VALUES ('a', 2);
+INSERT INTO a_star (class) VALUES ('a');
+INSERT INTO b_star (class, a, b) VALUES ('b', 3, 'mumble'::text);
+INSERT INTO b_star (class, a) VALUES ('b', 4);
+INSERT INTO b_star (class, b) VALUES ('b', 'bumble'::text);
+INSERT INTO b_star (class) VALUES ('b');
+INSERT INTO c_star (class, a, c) VALUES ('c', 5, 'hi mom'::name);
+INSERT INTO c_star (class, a) VALUES ('c', 6);
+INSERT INTO c_star (class, c) VALUES ('c', 'hi paul'::name);
+INSERT INTO c_star (class) VALUES ('c');
+INSERT INTO d_star (class, a, b, c, d)
+   VALUES ('d', 7, 'grumble'::text, 'hi sunita'::name, '0.0'::float8);
+INSERT INTO d_star (class, a, b, c)
+   VALUES ('d', 8, 'stumble'::text, 'hi koko'::name);
+INSERT INTO d_star (class, a, b, d)
+   VALUES ('d', 9, 'rumble'::text, '1.1'::float8);
+INSERT INTO d_star (class, a, c, d)
+   VALUES ('d', 10, 'hi kristin'::name, '10.01'::float8);
+INSERT INTO d_star (class, b, c, d)
+   VALUES ('d', 'crumble'::text, 'hi boris'::name, '100.001'::float8);
+INSERT INTO d_star (class, a, b)
+   VALUES ('d', 11, 'fumble'::text);
+INSERT INTO d_star (class, a, c)
+   VALUES ('d', 12, 'hi avi'::name);
+INSERT INTO d_star (class, a, d)
+   VALUES ('d', 13, '1000.0001'::float8);
+INSERT INTO d_star (class, b, c)
+   VALUES ('d', 'tumble'::text, 'hi andrew'::name);
+INSERT INTO d_star (class, b, d)
+   VALUES ('d', 'humble'::text, '10000.00001'::float8);
+INSERT INTO d_star (class, c, d)
+   VALUES ('d', 'hi ginger'::name, '100000.000001'::float8);
+INSERT INTO d_star (class, a) VALUES ('d', 14);
+INSERT INTO d_star (class, b) VALUES ('d', 'jumble'::text);
+INSERT INTO d_star (class, c) VALUES ('d', 'hi jolly'::name);
+INSERT INTO d_star (class, d) VALUES ('d', '1000000.0000001'::float8);
+INSERT INTO d_star (class) VALUES ('d');
+INSERT INTO e_star (class, a, c, e)
+   VALUES ('e', 15, 'hi carol'::name, '-1'::int2);
+INSERT INTO e_star (class, a, c)
+   VALUES ('e', 16, 'hi bob'::name);
+INSERT INTO e_star (class, a, e)
+   VALUES ('e', 17, '-2'::int2);
+INSERT INTO e_star (class, c, e)
+   VALUES ('e', 'hi michelle'::name, '-3'::int2);
+INSERT INTO e_star (class, a)
+   VALUES ('e', 18);
+INSERT INTO e_star (class, c)
+   VALUES ('e', 'hi elisa'::name);
+INSERT INTO e_star (class, e)
+   VALUES ('e', '-4'::int2);
+INSERT INTO f_star (class, a, c, e, f)
+   VALUES ('f', 19, 'hi claire'::name, '-5'::int2, '(1,3),(2,4)'::polygon);
+INSERT INTO f_star (class, a, c, e)
+   VALUES ('f', 20, 'hi mike'::name, '-6'::int2);
+INSERT INTO f_star (class, a, c, f)
+   VALUES ('f', 21, 'hi marcel'::name, '(11,44),(22,55),(33,66)'::polygon);
+INSERT INTO f_star (class, a, e, f)
+   VALUES ('f', 22, '-7'::int2, '(111,555),(222,666),(333,777),(444,888)'::polygon);
+INSERT INTO f_star (class, c, e, f)
+   VALUES ('f', 'hi keith'::name, '-8'::int2,
+	   '(1111,3333),(2222,4444)'::polygon);
+INSERT INTO f_star (class, a, c)
+   VALUES ('f', 24, 'hi marc'::name);
+INSERT INTO f_star (class, a, e)
+   VALUES ('f', 25, '-9'::int2);
+INSERT INTO f_star (class, a, f)
+   VALUES ('f', 26, '(11111,33333),(22222,44444)'::polygon);
+INSERT INTO f_star (class, c, e)
+   VALUES ('f', 'hi allison'::name, '-10'::int2);
+INSERT INTO f_star (class, c, f)
+   VALUES ('f', 'hi jeff'::name,
+           '(111111,333333),(222222,444444)'::polygon);
+INSERT INTO f_star (class, e, f)
+   VALUES ('f', '-11'::int2, '(1111111,3333333),(2222222,4444444)'::polygon);
+INSERT INTO f_star (class, a) VALUES ('f', 27);
+INSERT INTO f_star (class, c) VALUES ('f', 'hi carl'::name);
+INSERT INTO f_star (class, e) VALUES ('f', '-12'::int2);
+INSERT INTO f_star (class, f)
+   VALUES ('f', '(11111111,33333333),(22222222,44444444)'::polygon);
+INSERT INTO f_star (class) VALUES ('f');
+-- Analyze the X_star tables for better plan stability in later tests
+ANALYZE a_star;
+ANALYZE b_star;
+ANALYZE c_star;
+ANALYZE d_star;
+ANALYZE e_star;
+ANALYZE f_star;
+--
+-- inheritance stress test
+--
+SELECT * FROM a_star*;
+ class | a  
+-------+----
+ a     |  1
+ a     |  2
+ a     |   
+ b     |  3
+ b     |  4
+ b     |   
+ b     |   
+ c     |  5
+ c     |  6
+ c     |   
+ c     |   
+ d     |  7
+ d     |  8
+ d     |  9
+ d     | 10
+ d     |   
+ d     | 11
+ d     | 12
+ d     | 13
+ d     |   
+ d     |   
+ d     |   
+ d     | 14
+ d     |   
+ d     |   
+ d     |   
+ d     |   
+ e     | 15
+ e     | 16
+ e     | 17
+ e     |   
+ e     | 18
+ e     |   
+ e     |   
+ f     | 19
+ f     | 20
+ f     | 21
+ f     | 22
+ f     |   
+ f     | 24
+ f     | 25
+ f     | 26
+ f     |   
+ f     |   
+ f     |   
+ f     | 27
+ f     |   
+ f     |   
+ f     |   
+ f     |   
+(50 rows)
+
+SELECT *
+   FROM b_star* x
+   WHERE x.b = text 'bumble' or x.a < 3;
+ class | a |   b    
+-------+---+--------
+ b     |   | bumble
+(1 row)
+
+SELECT class, a
+   FROM c_star* x
+   WHERE x.c ~ text 'hi';
+ class | a  
+-------+----
+ c     |  5
+ c     |   
+ d     |  7
+ d     |  8
+ d     | 10
+ d     |   
+ d     | 12
+ d     |   
+ d     |   
+ d     |   
+ e     | 15
+ e     | 16
+ e     |   
+ e     |   
+ f     | 19
+ f     | 20
+ f     | 21
+ f     |   
+ f     | 24
+ f     |   
+ f     |   
+ f     |   
+(22 rows)
+
+SELECT class, b, c
+   FROM d_star* x
+   WHERE x.a < 100;
+ class |    b    |     c      
+-------+---------+------------
+ d     | grumble | hi sunita
+ d     | stumble | hi koko
+ d     | rumble  | 
+ d     |         | hi kristin
+ d     | fumble  | 
+ d     |         | hi avi
+ d     |         | 
+ d     |         | 
+(8 rows)
+
+SELECT class, c FROM e_star* x WHERE x.c NOTNULL;
+ class |      c      
+-------+-------------
+ e     | hi carol
+ e     | hi bob
+ e     | hi michelle
+ e     | hi elisa
+ f     | hi claire
+ f     | hi mike
+ f     | hi marcel
+ f     | hi keith
+ f     | hi marc
+ f     | hi allison
+ f     | hi jeff
+ f     | hi carl
+(12 rows)
+
+SELECT * FROM f_star* x WHERE x.c ISNULL;
+ class | a  | c |  e  |                     f                     
+-------+----+---+-----+-------------------------------------------
+ f     | 22 |   |  -7 | ((111,555),(222,666),(333,777),(444,888))
+ f     | 25 |   |  -9 | 
+ f     | 26 |   |     | ((11111,33333),(22222,44444))
+ f     |    |   | -11 | ((1111111,3333333),(2222222,4444444))
+ f     | 27 |   |     | 
+ f     |    |   | -12 | 
+ f     |    |   |     | ((11111111,33333333),(22222222,44444444))
+ f     |    |   |     | 
+(8 rows)
+
+-- grouping and aggregation on inherited sets have been busted in the past...
+SELECT sum(a) FROM a_star*;
+ sum 
+-----
+ 355
+(1 row)
+
+SELECT class, sum(a) FROM a_star* GROUP BY class ORDER BY class;
+ class | sum 
+-------+-----
+ a     |   3
+ b     |   7
+ c     |  11
+ d     |  84
+ e     |  66
+ f     | 184
+(6 rows)
+
+ALTER TABLE f_star RENAME COLUMN f TO ff;
+ALTER TABLE e_star* RENAME COLUMN e TO ee;
+ALTER TABLE d_star* RENAME COLUMN d TO dd;
+ALTER TABLE c_star* RENAME COLUMN c TO cc;
+ALTER TABLE b_star* RENAME COLUMN b TO bb;
+ALTER TABLE a_star* RENAME COLUMN a TO aa;
+SELECT class, aa
+   FROM a_star* x
+   WHERE aa ISNULL;
+ class | aa 
+-------+----
+ a     |   
+ b     |   
+ b     |   
+ c     |   
+ c     |   
+ d     |   
+ d     |   
+ d     |   
+ d     |   
+ d     |   
+ d     |   
+ d     |   
+ d     |   
+ e     |   
+ e     |   
+ e     |   
+ f     |   
+ f     |   
+ f     |   
+ f     |   
+ f     |   
+ f     |   
+ f     |   
+ f     |   
+(24 rows)
+
+-- As of Postgres 7.1, ALTER implicitly recurses,
+-- so this should be same as ALTER a_star*
+ALTER TABLE a_star RENAME COLUMN aa TO foo;
+SELECT class, foo
+   FROM a_star* x
+   WHERE x.foo >= 2;
+ class | foo 
+-------+-----
+ a     |   2
+ b     |   3
+ b     |   4
+ c     |   5
+ c     |   6
+ d     |   7
+ d     |   8
+ d     |   9
+ d     |  10
+ d     |  11
+ d     |  12
+ d     |  13
+ d     |  14
+ e     |  15
+ e     |  16
+ e     |  17
+ e     |  18
+ f     |  19
+ f     |  20
+ f     |  21
+ f     |  22
+ f     |  24
+ f     |  25
+ f     |  26
+ f     |  27
+(25 rows)
+
+ALTER TABLE a_star RENAME COLUMN foo TO aa;
+SELECT *
+   from a_star*
+   WHERE aa < 1000;
+ class | aa 
+-------+----
+ a     |  1
+ a     |  2
+ b     |  3
+ b     |  4
+ c     |  5
+ c     |  6
+ d     |  7
+ d     |  8
+ d     |  9
+ d     | 10
+ d     | 11
+ d     | 12
+ d     | 13
+ d     | 14
+ e     | 15
+ e     | 16
+ e     | 17
+ e     | 18
+ f     | 19
+ f     | 20
+ f     | 21
+ f     | 22
+ f     | 24
+ f     | 25
+ f     | 26
+ f     | 27
+(26 rows)
+
+ALTER TABLE f_star ADD COLUMN f int4;
+UPDATE f_star SET f = 10;
+ALTER TABLE e_star* ADD COLUMN e int4;
+--UPDATE e_star* SET e = 42;
+SELECT * FROM e_star*;
+ class | aa |     cc      | ee  | e 
+-------+----+-------------+-----+---
+ e     | 15 | hi carol    |  -1 |  
+ e     | 16 | hi bob      |     |  
+ e     | 17 |             |  -2 |  
+ e     |    | hi michelle |  -3 |  
+ e     | 18 |             |     |  
+ e     |    | hi elisa    |     |  
+ e     |    |             |  -4 |  
+ f     | 19 | hi claire   |  -5 |  
+ f     | 20 | hi mike     |  -6 |  
+ f     | 21 | hi marcel   |     |  
+ f     | 22 |             |  -7 |  
+ f     |    | hi keith    |  -8 |  
+ f     | 24 | hi marc     |     |  
+ f     | 25 |             |  -9 |  
+ f     | 26 |             |     |  
+ f     |    | hi allison  | -10 |  
+ f     |    | hi jeff     |     |  
+ f     |    |             | -11 |  
+ f     | 27 |             |     |  
+ f     |    | hi carl     |     |  
+ f     |    |             | -12 |  
+ f     |    |             |     |  
+ f     |    |             |     |  
+(23 rows)
+
+ALTER TABLE a_star* ADD COLUMN a text;
+NOTICE:  merging definition of column "a" for child "d_star"
+-- That ALTER TABLE should have added TOAST tables.
+SELECT relname, reltoastrelid <> 0 AS has_toast_table
+   FROM pg_class
+   WHERE oid::regclass IN ('a_star', 'c_star')
+   ORDER BY 1;
+ relname | has_toast_table 
+---------+-----------------
+ a_star  | t
+ c_star  | t
+(2 rows)
+
+SELECT class, aa, a FROM a_star*;
+ class | aa | a 
+-------+----+---
+ a     |  1 | 
+ a     |  2 | 
+ a     |    | 
+ b     |  3 | 
+ b     |  4 | 
+ b     |    | 
+ b     |    | 
+ c     |  5 | 
+ c     |  6 | 
+ c     |    | 
+ c     |    | 
+ d     |  7 | 
+ d     |  8 | 
+ d     |  9 | 
+ d     | 10 | 
+ d     |    | 
+ d     | 11 | 
+ d     | 12 | 
+ d     | 13 | 
+ d     |    | 
+ d     |    | 
+ d     |    | 
+ d     | 14 | 
+ d     |    | 
+ d     |    | 
+ d     |    | 
+ d     |    | 
+ e     | 15 | 
+ e     | 16 | 
+ e     | 17 | 
+ e     |    | 
+ e     | 18 | 
+ e     |    | 
+ e     |    | 
+ f     | 19 | 
+ f     | 20 | 
+ f     | 21 | 
+ f     | 22 | 
+ f     |    | 
+ f     | 24 | 
+ f     | 25 | 
+ f     | 26 | 
+ f     |    | 
+ f     |    | 
+ f     |    | 
+ f     | 27 | 
+ f     |    | 
+ f     |    | 
+ f     |    | 
+ f     |    | 
+(50 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table p_stock
 drop cascades to table c_stock
+drop cascades to table a
+drop cascades to table b
+drop cascades to table c
+drop cascades to table d
+drop cascades to table z
+drop cascades to table invalid_check_con
+drop cascades to table invalid_check_con_child
+drop cascades to table o_test_inh_circular_parent
+drop cascades to table o_test_inh_circular_child
+drop cascades to table a_star
+drop cascades to table b_star
+drop cascades to table c_star
+drop cascades to table d_star
+drop cascades to table e_star
+drop cascades to table f_star

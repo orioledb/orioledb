@@ -690,6 +690,8 @@ validate_at_utility(PlannedStmt *pstmt,
 			case AT_GenericOptions:
 			case AT_SetNotNull:
 			case AT_ChangeOwner:
+			case AT_AddInherit:
+			case AT_DropInherit:
 				break;
 			default:
 				ereport(ERROR,
@@ -784,6 +786,8 @@ validate_at_utility(PlannedStmt *pstmt,
 			case AT_ColumnDefault:
 			case AT_GenericOptions:
 			case AT_ChangeOwner:
+			case AT_AddInherit:
+			case AT_DropInherit:
 				break;
 			default:
 				/* handled by check */
