@@ -21,8 +21,8 @@ fi
 
 cd postgresql
 ./configure $CONFIG_ARGS
-make -j4
-make -j4 install
+make -j `nproc`
+make -j `nproc` install
 cd ..
 
 if [ $CHECK_TYPE = "static" ] && [ $COMPILER = "clang" ]; then
@@ -33,11 +33,11 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
 
 cd orioledb
 if [ $CHECK_TYPE = "alignment" ]; then
-	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize=alignment -fno-sanitize-recover=alignment" LDFLAGS_SL="-lubsan"
+	make -j `nproc` USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize=alignment -fno-sanitize-recover=alignment" LDFLAGS_SL="-lubsan"
 elif [ $CHECK_TYPE = "check_page" ]; then
-	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT"
+	make -j `nproc` USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT"
 elif [ $CHECK_TYPE != "static" ]; then
-	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
+	make -j `nproc` USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
 fi
-make USE_PGXS=1 install
+mak -j `nproc` USE_PGXS=1 install
 cd ..
