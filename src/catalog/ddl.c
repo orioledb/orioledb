@@ -26,6 +26,9 @@
 #include "access/heapam.h"
 #include "access/reloptions.h"
 #include "access/tableam.h"
+#if PG_VERSION_NUM >= 140000
+#include "access/toast_compression.h"
+#endif
 #include "access/transam.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
@@ -719,6 +722,9 @@ validate_at_utility(PlannedStmt *pstmt,
 					field->byval = tform->typbyval;
 					field->align = tform->typalign;
 					field->storage = tform->typstorage;
+#if PG_VERSION_NUM >= 140000
+					field->compression = InvalidCompressionMethod;
+#endif
 					field->droped = false;
 					field->notnull = col_def->is_not_null;
 					field->hasdef = col_def->raw_default != NULL;

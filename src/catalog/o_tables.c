@@ -517,6 +517,9 @@ o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
 		field->byval = attr->attbyval;
 		field->align = attr->attalign;
 		field->storage = attr->attstorage;
+#if PG_VERSION_NUM >= 140000
+		field->compression = attr->attcompression;
+#endif
 		field->droped = attr->attisdropped;
 		field->notnull = attr->attnotnull;
 		field->hasmissing = attr->atthasmissing;
@@ -1361,6 +1364,9 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 	att->attbyval = field->byval;
 	att->attalign = field->align;
 	att->attstorage = field->storage;
+#if PG_VERSION_NUM >= 140000
+	att->attcompression = field->compression;
+#endif
 	att->attcollation = field->collation;
 }
 

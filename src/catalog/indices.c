@@ -798,7 +798,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 						attribute.attalign = table_field->align;
 						attribute.attstorage = table_field->storage;
 #if PG_VERSION_NUM >= 140000
-						attribute.attcompression = '\0';
+						attribute.attcompression = table_field->compression;
 #endif
 						attribute.attnotnull = table_field->notnull;
 						attribute.atthasdef = false;

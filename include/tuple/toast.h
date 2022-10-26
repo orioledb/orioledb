@@ -15,6 +15,9 @@
 
 #include "access/htup.h"
 #include "access/detoast.h"
+#if PG_VERSION_NUM >= 140000
+#include "access/toast_compression.h"
+#endif
 
 #include "orioledb.h"
 
@@ -53,6 +56,10 @@ typedef struct OToastValue
 {
 	/* always TOAST pointer (0x80 for big-endian or 0x01 for little-endian) */
 	uint8		pointer;
+#if PG_VERSION_NUM >= 140000
+	/* compression method of TOASTed data */
+	uint8		compression;
+#endif
 	/* raw size of TOASTed data without headers */
 	int32		raw_size;
 	/* size of TOASTed data */
