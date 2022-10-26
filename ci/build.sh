@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eu
+set -eux
 
 if [ $COMPILER = "clang" ]; then
 	export CC=clang-$LLVM_VER
@@ -21,8 +21,8 @@ fi
 
 cd postgresql
 ./configure $CONFIG_ARGS
-make -sj4
-make -sj4 install
+make -j4
+make -j4 install
 cd ..
 
 if [ $CHECK_TYPE = "static" ] && [ $COMPILER = "clang" ]; then
@@ -39,4 +39,5 @@ elif [ $CHECK_TYPE = "check_page" ]; then
 elif [ $CHECK_TYPE != "static" ]; then
 	make USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
 fi
+make USE_PGXS=1 install
 cd ..
