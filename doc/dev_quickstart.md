@@ -18,7 +18,7 @@ cd postgres-patches15/
 ### Checkout to required patch tag:
 Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
 ```bash
-git checkout patches15_4
+git checkout patches15_5
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -114,7 +114,7 @@ cd postgres-patches15/
 ### Checkout to required patch tag:
 Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
 ```bash
-git checkout patches15_4
+git checkout patches15_5
 ```
 
 ### Configure and build
@@ -207,7 +207,7 @@ cd postgres-patches15/
 ### Checkout to required patch tag:
 Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
 ```bash
-git checkout patches15_4
+git checkout patches15_5
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
