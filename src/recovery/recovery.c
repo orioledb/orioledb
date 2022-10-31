@@ -564,6 +564,38 @@ o_recovery_start_hook(void)
 		apply_xids_branches();
 }
 
+#if PG_VERSION_NUM >= 150000
+void
+orioledb_redo(XLogReaderState *record)
+{
+	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+	Pointer		msg_start = (Pointer) XLogRecGetData(record);
+	int			msg_len = XLogRecGetDataLen(record);
+	bool		recovery_single;
+
+	Assert(info == ORIOLEDB_XLOG_CONTAINER);
+	recovery_single = *recovery_single_process;
+
+	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr)
+	{
+		toast_consistent = true;
+		if (!recovery_single)
+			workers_notify_toast_consistent();
+	}
+
+	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
+	{
+		replay_container(msg_start, msg_start + msg_len,
+						 recovery_single, record->ReadRecPtr);
+	}
+
+	if (unexpected_worker_detach)
+	{
+		abort_recovery(workers_pool, recovery_pool_size_guc);
+		elog(ERROR, "orioledb recovery worker detached unexpectedly.");
+	}
+}
+#else
 void
 o_recovery_logicalmsg_redo_hook(XLogReaderState *record)
 {
@@ -603,6 +635,7 @@ o_recovery_logicalmsg_redo_hook(XLogReaderState *record)
 		}
 	}
 }
+#endif
 
 void
 o_recovery_finish_hook(bool cleanup)

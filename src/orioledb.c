@@ -38,6 +38,7 @@
 #include "workers/bgwriter.h"
 
 #include "access/table.h"
+#include "access/xlog_internal.h"
 #include "catalog/pg_enum.h"
 #include "executor/execExpr.h"
 #include "funcapi.h"
@@ -102,7 +103,7 @@ int			device_length_guc = 0;
 Size		device_length = 0;
 double		o_checkpoint_completion_ratio;
 int			bgwriter_num_workers = 1;
-int			max_io_concurrency = 1;
+int			max_io_concurrency = 0;
 ODBProcData *oProcData;
 int			default_compress = InvalidOCompress;
 int			default_primary_compress = InvalidOCompress;
@@ -177,6 +178,44 @@ PG_FUNCTION_INFO_V1(orioledb_page_stats);
 PG_FUNCTION_INFO_V1(orioledb_version);
 PG_FUNCTION_INFO_V1(orioledb_commit_hash);
 PG_FUNCTION_INFO_V1(ucm_check);
+
+#if PG_VERSION_NUM >= 150000
+static void
+orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
+{
+	appendStringInfo(buf, "OrioleDB WAL container");
+}
+
+static const char *
+orioledb_rm_identify(uint8 info)
+{
+	return "OrioleDB WAL container";
+}
+
+static void
+o_recovery_shutdown_hook(void)
+{
+	o_recovery_finish_hook(false);
+}
+
+static void
+o_recovery_cleanup(void)
+{
+	o_recovery_finish_hook(true);
+}
+
+static RmgrData rmgr =
+{
+	.rm_name = "OrioleDB resource manager",
+	.rm_startup = o_recovery_start_hook,
+	.rm_cleanup = o_recovery_cleanup,
+	.rm_redo = orioledb_redo,
+	.rm_desc = orioledb_rm_desc,
+	.rm_identify = orioledb_rm_identify,
+	.rm_mask = NULL,
+	.rm_decode = NULL
+};
+#endif
 
 void
 _PG_init(void)
@@ -595,9 +634,15 @@ _PG_init(void)
 	CacheRegisterUsercacheCallback(orioledb_usercache_hook, PointerGetDatum(NULL));
 	CheckPoint_hook = o_perform_checkpoint;
 	after_checkpoint_cleanup_hook = o_after_checkpoint_cleanup_hook;
+
+#if PG_VERSION_NUM >= 150000
+	RegisterCustomRmgr(ORIOLEDB_RMGR_ID, &rmgr);
+	RedoShutdownHook = o_recovery_shutdown_hook;
+#else
 	logicalmsg_redo_hook = o_recovery_logicalmsg_redo_hook;
 	RedoStartHook = o_recovery_start_hook;
 	RedoFinishHook = o_recovery_finish_hook;
+#endif
 	snapshot_hook = orioledb_snapshot_hook;
 	CustomErrorCleanupHook = orioledb_error_cleanup_hook;
 	snapshot_register_hook = undo_snapshot_register_hook;
@@ -1152,6 +1197,8 @@ void
 o_invalidate_oids(ORelOids oids)
 {
 	SharedInvalidationMessage msg;
+
+	Assert(ORelOidsIsValid(oids));
 
 	msg.usr.id = SHAREDINVALUSERCACHE_ID;
 	msg.usr.arg1 = oids.datoid;

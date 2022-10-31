@@ -14,6 +14,7 @@
 
 #include "orioledb.h"
 
+#include "access/xloginsert.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -382,7 +383,13 @@ flush_local_wal_if_needed(int required_length)
 XLogRecPtr
 log_logical_wal_container(Pointer ptr, int length)
 {
+#if PG_VERSION_NUM >= 150000
+	XLogBeginInsert();
+	XLogRegisterData(ptr, length);
+	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+#else
 	return LogLogicalMessage(ORIOLEDB_WAL_PREFIX, ptr, length, false);
+#endif
 }
 
 /*

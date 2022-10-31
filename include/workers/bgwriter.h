@@ -16,6 +16,6 @@
 extern bool IsBGWriter;
 
 extern void register_bgwriter(void);
-extern void bgwriter_main(Datum main_arg);
+PGDLLEXPORT void bgwriter_main(Datum);
 
 #endif							/* __BGWRITER_H__ */

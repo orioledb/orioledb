@@ -744,9 +744,9 @@ jf_cleanTupType_init_entry(TupleDesc desc,
 	/*
 	 * sanity checks
 	 */
-	AssertArg(PointerIsValid(desc));
-	AssertArg(attributeNumber >= 1);
-	AssertArg(attributeNumber <= desc->natts);
+	Assert(PointerIsValid(desc));
+	Assert(attributeNumber >= 1);
+	Assert(attributeNumber <= desc->natts);
 
 	/*
 	 * initialize the attribute fields

@@ -1218,6 +1218,43 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 	return ret;
 }
 
+/* Info needed to use an old-style comparison function as a sort comparator */
+typedef struct
+{
+	FmgrInfo	flinfo;			/* lookup data for comparison function */
+	FunctionCallInfoBaseData fcinfo;	/* reusable callinfo structure */
+} SortShimExtra;
+
+#define SizeForSortShimExtra(nargs) (offsetof(SortShimExtra, fcinfo) + SizeForFunctionCallInfo(nargs))
+
+/*
+ * Shim function for calling an old-style comparator
+ *
+ * This is essentially an inlined version of FunctionCall2Coll(), except
+ * we assume that the FunctionCallInfoBaseData was already mostly set up by
+ * PrepareSortSupportComparisonShim.
+ */
+static int
+comparison_shim(Datum x, Datum y, SortSupport ssup)
+{
+	SortShimExtra *extra = (SortShimExtra *) ssup->ssup_extra;
+	Datum		result;
+
+	extra->fcinfo.args[0].value = x;
+	extra->fcinfo.args[1].value = y;
+
+	/* just for paranoia's sake, we reset isnull each time */
+	extra->fcinfo.isnull = false;
+
+	result = FunctionCallInvoke(&extra->fcinfo);
+
+	/* Check for null result, since caller is clearly not expecting one */
+	if (extra->fcinfo.isnull)
+		elog(ERROR, "function %u returned NULL", extra->flinfo.fn_oid);
+
+	return result;
+}
+
 void
 o_finish_sort_support_function(OComparator *comparator, SortSupport ssup)
 {

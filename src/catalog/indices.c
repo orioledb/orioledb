@@ -111,7 +111,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 	}
 	PG_END_TRY();
 	in_indexes_rebuild = false;
-	o_table_fill_oids(oTable, rel, &rel->rd_node);
+	o_table_fill_oids(oTable, rel, &RelGetNode(rel));
 	orioledb_free_rd_amcache(rel);
 }
 
@@ -204,18 +204,16 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 						ODefineIndexContext **arg)
 {
 	int			nattrs;
-	Oid			myrelid = RelationGetRelid(rel);
-	ORelOids	oids = {MyDatabaseId,
-		myrelid,
-	rel->rd_node.relNode};
+	ORelOids	oids;
 	OIndexType	ix_type;
 	static ODefineIndexContext context;
 	OTable	   *o_table;
-	bool		reuse = OidIsValid(stmt->oldNode);
+	bool		reuse = OidIsValid(IndexStmtGetOldNode(stmt));
 
+	ORelOidsSetFromRel(oids, rel);
 	*arg = &context;
 
-	context.oldNode = stmt->oldNode;
+	context.oldNode = IndexStmtGetOldNode(stmt);
 
 	if (!reuse)
 	{
@@ -317,8 +315,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	OTableDescr *old_descr = NULL;
 	bool		reuse = false;
 	bool		is_build = false;
-	Oid			myrelid = RelationGetRelid(rel);
-	ORelOids	oids = {MyDatabaseId, myrelid, rel->rd_node.relNode};
+	ORelOids	oids;
 	OIndexType	ix_type;
 	OCompress	compress = InvalidOCompress;
 	int16		indnatts;
@@ -326,6 +323,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	bool		relispartition;
 	OBTOptions *options;
 
+	ORelOidsSetFromRel(oids, rel);
 	index_rel = index_open(indoid, AccessShareLock);
 	if (context)
 		reuse = OidIsValid(context->oldNode);
@@ -392,7 +390,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			if (ix_type == oIndexPrimary)
 			{
 				o_table_free(old_o_table);
-				oids.relnode = rel->rd_node.relNode;
+				ORelOidsSetFromRel(oids, rel);
 				old_o_table = o_tables_get(oids);
 				if (old_o_table == NULL)
 				{
@@ -623,7 +621,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 
 		if (o_is_index_predicate_satisfied(idx, primarySlot, idx->econtext))
 		{
-			oldContext = MemoryContextSwitchTo(sortstate->tuplecontext);
+			oldContext = MemoryContextSwitchTo(TuplesortstateGetPublic(sortstate)->tuplecontext);
 			secondaryTup = tts_orioledb_make_secondary_tuple(primarySlot,
 															 idx, true);
 			MemoryContextSwitchTo(oldContext);
@@ -645,7 +643,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 
 	btree_write_index_data(&idx->desc, idx->leafTupdesc, sortstate,
 						   ctid, &fileHeader);
-	tuplesort_end_orioledb_index(sortstate);
+	tuplesort_end(sortstate);
 
 	/*
 	 * We hold oTablesAddLock till o_tables_update().  So, checkpoint number
@@ -750,7 +748,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 			index_tuples[i]++;
 
-			oldContext = MemoryContextSwitchTo(sortstates[i]->tuplecontext);
+			oldContext = MemoryContextSwitchTo(TuplesortstateGetPublic(sortstates[i])->tuplecontext);
 			if (i == 0)
 			{
 				if (idx->primaryIsCtid)
@@ -790,14 +788,14 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 							   (idx->primaryIsCtid &&
 								i == PrimaryIndexNumber) ? ctid : 0,
 							   &fileHeaders[i]);
-		tuplesort_end_orioledb_index(sortstates[i]);
+		tuplesort_end(sortstates[i]);
 	}
 	pfree(sortstates);
 
 	tuplesort_performsort(toastSortState);
 	btree_write_index_data(&descr->toast->desc, descr->toast->leafTupdesc,
 						   toastSortState, 0, &toastFileHeader);
-	tuplesort_end_orioledb_index(toastSortState);
+	tuplesort_end(toastSortState);
 
 	/*
 	 * We hold oTablesAddLock till o_tables_update().  So, checkpoint number
@@ -895,10 +893,10 @@ drop_secondary_index(OTable *o_table, OIndexNumber ix_num)
 void
 o_index_drop(Relation tbl, OIndexNumber ix_num)
 {
-	ORelOids	oids = {MyDatabaseId, tbl->rd_rel->oid,
-	tbl->rd_node.relNode};
+	ORelOids	oids;
 	OTable	   *o_table;
 
+	ORelOidsSetFromRel(oids, tbl);
 	o_table = o_tables_get(oids);
 
 	if (o_table == NULL)

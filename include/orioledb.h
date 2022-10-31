@@ -36,6 +36,8 @@
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_EVT_EXTENSION "evt"
+#define ORIOLEDB_RMGR_ID (129)
+#define ORIOLEDB_XLOG_CONTAINER (0x00)
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
@@ -124,6 +126,34 @@ typedef struct
 	Oid			reloid;
 	Oid			relnode;
 } ORelOids;
+
+#if PG_VERSION_NUM >= 160000
+	typedef RelFileLocator RelFileNode;
+	#define PG_FUNCNAME_MACRO   __func__
+	#define ORelOidsSetFromRel(oids, rel) \
+	do { \
+		(oids).datoid = MyDatabaseId; \
+		(oids).reloid = (rel)->rd_id; \
+		(oids).relnode = (rel)->rd_locator.relNumber; \
+	} while (0)
+	#define RelIsInMyDatabase(rel) ((rel)->rd_locator.dbOid == MyDatabaseId)
+	#define RelGetNode(rel) ((rel)->rd_locator)
+	#define RelFileNodeGetNode(node) ((node)->relNumber)
+	#define IndexStmtGetOldNode(stmt) ((stmt)->oldNumber)
+	#define RelationSetNewRelfilenode(relation, persistence) \
+		RelationSetNewRelfilenumber(relation, persistence)
+#else
+	#define ORelOidsSetFromRel(oids, rel) \
+	do { \
+		(oids).datoid = MyDatabaseId; \
+		(oids).reloid = (rel)->rd_id; \
+		(oids).relnode = (rel)->rd_node.relNode; \
+	} while (0)
+	#define RelIsInMyDatabase(rel) ((rel)->rd_node.dbNode == MyDatabaseId)
+	#define RelGetNode(rel) ((rel)->rd_node)
+	#define RelFileNodeGetNode(node) ((node)->relNode)
+	#define IndexStmtGetOldNode(stmt) ((stmt)->oldNode)
+#endif
 
 #define ORelOidsIsValid(oids) (OidIsValid((oids).datoid) && OidIsValid((oids).reloid) && OidIsValid((oids).relnode))
 #define ORelOidsIsEqual(l, r) ((l).datoid == (r).datoid && (l).reloid == (r).reloid && (l).relnode == (r).relnode)

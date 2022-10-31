@@ -47,17 +47,16 @@ typedef struct
 	OXid		conflictOxid;
 	OXid		oxid;
 	CommitSeqNo csn;
-	BTreeDescr *conflictBTree;
 	OIndexNumber conflictIxNum;
 	bool		copyPrimaryOxid;
+	RowLockMode lockMode;
 } InsertOnConflictCallbackArg;
 
 typedef struct
 {
 	TupleTableSlot *scanSlot;
-	ResultRelInfo *rinfo;
+	TupleTableSlot *tmpSlot;
 	OTableDescr *descr;
-	EPQState   *epqstate;
 	OTableSlot *newSlot;
 	OXid		oxid;
 	CommitSeqNo csn;
@@ -66,6 +65,7 @@ typedef struct
 	bool		modified;
 	bool		changingPart;
 	Bitmapset  *keyAttrs;
+	int			options;
 } OModifyCallbackArg;
 
 typedef struct
@@ -73,7 +73,6 @@ typedef struct
 	Relation	rel;
 	TupleTableSlot *scanSlot;
 	OTableDescr *descr;
-	EPQState   *epqstate;
 	OXid		oxid;
 	CommitSeqNo csn;
 	LockWaitPolicy waitPolicy;
@@ -86,25 +85,23 @@ typedef struct
 extern TupleTableSlot *o_tbl_insert(OTableDescr *descr, Relation relation,
 									TupleTableSlot *slot, OXid oxid,
 									CommitSeqNo csn);
-extern TupleTableSlot *o_tbl_insert_on_conflict(ModifyTableState *mstate,
-												EState *estate,
-												ResultRelInfo *rinfo,
-												OTableDescr *descr,
-												TupleTableSlot *slot,
-												OnConflictAction on_conflict,
-												OIndexNumber conflict_ix);
+extern TupleTableSlot *o_tbl_insert_with_arbiter(Relation rel,
+												 OTableDescr *descr,
+												 TupleTableSlot *slot,
+												 List *arbiterIndexes,
+												 LockTupleMode lockmode,
+												 TupleTableSlot *lockedSlot);
 extern OBTreeModifyResult o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey,
 									 LockTupleMode mode, OXid oxid,
 									 OLockCallbackArg *larg,
 									 BTreeLocationHint *hint);
 extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
-									   EState *estate, OBTreeKeyBound *oldPkey,
+									   OBTreeKeyBound *oldPkey,
 									   Relation rel, OXid oxid,
 									   CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg);
 extern OTableModifyResult o_tbl_delete(OTableDescr *descr,
-									   EState *estate,
 									   OBTreeKeyBound *primary_key,
 									   OXid oxid, CommitSeqNo csn,
 									   BTreeLocationHint *hint,

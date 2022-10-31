@@ -321,7 +321,7 @@ get_data(OIndexDescr *toast, OTuple tuple)
 {
 	int			natts = toast->leafTupdesc->natts;
 
-	return DatumGetByteaPP(o_fastgetattr_ptr(tuple, natts, toast->leafTupdesc, &toast->leafSpec));
+	return DatumGetByteaPP(PointerGetDatum(o_fastgetattr_ptr(tuple, natts, toast->leafTupdesc, &toast->leafSpec)));
 }
 
 static Pointer
@@ -470,7 +470,7 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 			length = max_length;
 		}
 
-		mctx = MemoryContextSwitchTo(sortstate->tuplecontext);
+		mctx = MemoryContextSwitchTo(TuplesortstateGetPublic(sortstate)->tuplecontext);
 		tup = api->createTuple(key, data, offset, length, arg);
 		MemoryContextSwitchTo(mctx);
 
@@ -1043,7 +1043,7 @@ o_get_raw_value(Datum value, bool *free)
 		{
 			result = o_detoast(result);
 			*free = true;
-			Assert(DatumGetPointer(result) != NULL);
+			Assert(result != NULL);
 		}
 		else
 		{
@@ -1078,7 +1078,7 @@ o_get_src_value(Datum value, bool *free)
 		if (VARATT_IS_EXTERNAL_ORIOLEDB(value))
 		{
 			result = o_detoast(result);
-			Assert(DatumGetPointer(result) != NULL);
+			Assert(result != NULL);
 		}
 		else
 		{

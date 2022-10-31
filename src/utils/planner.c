@@ -55,11 +55,13 @@ typedef struct
 	char	   *proname;
 } validate_function_arg;
 
+typedef bool (*WalkerFunc) (Node *node, void *context);
+
 static bool validate_function(Node *node, void *context);
 static Node *o_wrap_top_funcexpr(Node *node);
 static void o_collect_function_walker(Oid functionId, Oid inputcollid,
 									  List *args, void *context);
-static bool plan_tree_walker(Plan *plan, bool (*walker) (), void *context);
+static bool plan_tree_walker(Plan *plan, WalkerFunc, void *context);
 
 #if PG_VERSION_NUM >= 150000
 #define pg_analyze_and_rewrite_params pg_analyze_and_rewrite_withcb
@@ -90,7 +92,7 @@ sql_validate_error_callback(void *arg)
 }
 
 static void
-o_process_sql_function(HeapTuple procedureTuple, bool (*walker) (),
+o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 					   void *context, Oid functionId, Oid inputcollid,
 					   List *args)
 {
@@ -569,7 +571,11 @@ o_validate_function_by_oid(Oid procoid, char *hint_msg)
 static inline bool
 is_a_plan(Node *node)
 {
+#if PG_VERSION_NUM >= 160000
+	return (nodeTag(node) >= T_Result) && (nodeTag(node) <= T_Limit);
+#else
 	return (nodeTag(node) >= T_Plan) && (nodeTag(node) <= T_Limit);
+#endif
 }
 
 static bool
@@ -870,7 +876,7 @@ o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 }
 
 static bool
-plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
+plan_tree_walker(Plan *plan, WalkerFunc walker, void *context)
 {
 	ListCell   *lc;
 
@@ -890,14 +896,14 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 	/* lefttree */
 	if (outerPlan(plan))
 	{
-		if (walker(outerPlan(plan), context))
+		if (walker((Node *) outerPlan(plan), context))
 			return true;
 	}
 
 	/* righttree */
 	if (innerPlan(plan))
 	{
-		if (walker(innerPlan(plan), context))
+		if (walker((Node *) innerPlan(plan), context))
 			return true;
 	}
 
@@ -920,24 +926,19 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				ModifyTable *modify_table = (ModifyTable *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) modify_table->withCheckOptionLists,
+				if (expression_tree_walker((Node *) modify_table->withCheckOptionLists,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) modify_table->returningLists,
+				if (expression_tree_walker((Node *) modify_table->returningLists,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) modify_table->onConflictSet,
+				if (expression_tree_walker((Node *) modify_table->onConflictSet,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) modify_table->onConflictWhere,
+				if (expression_tree_walker((Node *) modify_table->onConflictWhere,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) modify_table->exclRelTlist,
+				if (expression_tree_walker((Node *) modify_table->exclRelTlist,
 										   walker, context))
 					return true;
 			}
@@ -1018,8 +1019,7 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 				if (expression_tree_walker((Node *) index_scan->indexorderby,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) index_scan->indexorderbyorig,
+				if (expression_tree_walker((Node *) index_scan->indexorderbyorig,
 										   walker, context))
 					return true;
 			}
@@ -1029,20 +1029,16 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				IndexOnlyScan *index_only_scan = (IndexOnlyScan *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) index_only_scan->recheckqual,
+				if (expression_tree_walker((Node *) index_only_scan->recheckqual,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) index_only_scan->indexqual,
+				if (expression_tree_walker((Node *) index_only_scan->indexqual,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) index_only_scan->indexorderby,
+				if (expression_tree_walker((Node *) index_only_scan->indexorderby,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) index_only_scan->indextlist,
+				if (expression_tree_walker((Node *) index_only_scan->indextlist,
 										   walker, context))
 					return true;
 			}
@@ -1052,12 +1048,10 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				BitmapIndexScan *bitmap_index_scan = (BitmapIndexScan *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) bitmap_index_scan->indexqual,
+				if (expression_tree_walker((Node *) bitmap_index_scan->indexqual,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) bitmap_index_scan->indexqualorig,
+				if (expression_tree_walker((Node *) bitmap_index_scan->indexqualorig,
 										   walker, context))
 					return true;
 			}
@@ -1067,8 +1061,7 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				BitmapHeapScan *bitmap_heap_scan = (BitmapHeapScan *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) bitmap_heap_scan->bitmapqualorig,
+				if (expression_tree_walker((Node *) bitmap_heap_scan->bitmapqualorig,
 										   walker, context))
 					return true;
 			}
@@ -1078,8 +1071,7 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				TidScan    *tid_scan = (TidScan *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) tid_scan->tidquals,
+				if (expression_tree_walker((Node *) tid_scan->tidquals,
 										   walker, context))
 					return true;
 			}
@@ -1090,8 +1082,7 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				TidRangeScan *tid_range_scan = (TidRangeScan *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) tid_range_scan->tidrangequals,
+				if (expression_tree_walker((Node *) tid_range_scan->tidrangequals,
 										   walker, context))
 					return true;
 			}
@@ -1145,12 +1136,10 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 				if (expression_tree_walker((Node *) foreign_scan->fdw_exprs,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) foreign_scan->fdw_recheck_quals,
+				if (expression_tree_walker((Node *) foreign_scan->fdw_recheck_quals,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) foreign_scan->fdw_scan_tlist,
+				if (expression_tree_walker((Node *) foreign_scan->fdw_scan_tlist,
 										   walker, context))
 					return true;
 			}
@@ -1160,15 +1149,13 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 			{
 				CustomScan *custom_scan = (CustomScan *) plan;
 
-				if (expression_tree_walker(
-										   (Node *) custom_scan->custom_scan_tlist,
+				if (expression_tree_walker((Node *) custom_scan->custom_scan_tlist,
 										   walker, context))
 					return true;
 				if (expression_tree_walker((Node *) custom_scan->custom_exprs,
 										   walker, context))
 					return true;
-				if (expression_tree_walker(
-										   (Node *) custom_scan->custom_scan_tlist,
+				if (expression_tree_walker((Node *) custom_scan->custom_scan_tlist,
 										   walker, context))
 					return true;
 
@@ -1299,7 +1286,7 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 
 	foreach(lc, plan->initPlan)
 	{
-		if (walker(plan->initPlan, context))
+		if (walker((Node *) plan->initPlan, context))
 			return true;
 	}
 
@@ -1308,7 +1295,7 @@ plan_tree_walker(Plan *plan, bool (*walker) (), void *context)
 
 static bool
 plannedstatement_tree_walker(PlannedStmt *pstmt,
-							 bool (*walker) (),
+							 WalkerFunc walker,
 							 void *context)
 {
 	Plan	   *plan = pstmt->planTree;

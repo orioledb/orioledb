@@ -513,8 +513,13 @@ oxid_notify_all(void)
 	uint32		proclock_hashcode;
 	List	   *procs = NIL;
 	ListCell   *lc;
+#if PG_VERSION_NUM >= 160000
+	dclist_head *waitQueue;
+	dlist_iter	iter;
+#else
 	PROC_QUEUE *waitQueue;
-	int			queue_size;
+	int			i;
+#endif
 
 	vxid.localTransactionId = MyProc->lxid;
 	vxid.backendId = MyBackendId;
@@ -556,15 +561,20 @@ oxid_notify_all(void)
 	if (!proclock)
 		elog(PANIC, "failed to re-find shared proclock object");
 
-	waitQueue = &(lock->waitProcs);
-	queue_size = waitQueue->size;
 
-	Assert(queue_size >= 0);
+	waitQueue = &lock->waitProcs;
+
+#if PG_VERSION_NUM >= 160000
+	dclist_foreach(iter, waitQueue)
+	{
+		proc = dlist_container(PGPROC, links, iter.cur);
+#else
+	Assert(waitQueue->size >= 0);
 
 	proc = (PGPROC *) waitQueue->links.next;
-
-	while (queue_size-- > 0)
+	for (i = 0; i < waitQueue->size; i++)
 	{
+#endif
 		if (
 #if PG_VERSION_NUM >= 140000
 			proc->waitStatus == PROC_WAIT_STATUS_WAITING &&
@@ -582,7 +592,9 @@ oxid_notify_all(void)
 			procs = lappend(procs, proc);
 		}
 
+#if PG_VERSION_NUM < 160000
 		proc = (PGPROC *) proc->links.next;
+#endif
 	}
 
 	foreach(lc, procs)

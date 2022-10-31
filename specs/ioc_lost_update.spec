@@ -4,7 +4,7 @@ setup
 	CREATE TABLE IF NOT EXISTS o_ioc (
 		id int8 NOT NULL,
 		t  text NOT NULL,
-		PRIMARY KEY(id)
+		UNIQUE(id)
 	) USING orioledb;
 	TRUNCATE o_ioc;
 

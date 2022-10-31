@@ -16,7 +16,11 @@
 #include "btree/btree.h"
 
 extern void o_recovery_start_hook(void);
+#if PG_VERSION_NUM >= 150000
+extern void orioledb_redo(XLogReaderState *record);
+#else
 extern void o_recovery_logicalmsg_redo_hook(XLogReaderState *record);
+#endif
 extern void o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn);
 extern void o_recovery_finish_hook(bool cleanup);
 

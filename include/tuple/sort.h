@@ -24,7 +24,6 @@ extern Tuplesortstate *tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 													  int workMem,
 													  bool randomAccess,
 													  SortCoordinate coordinate);
-extern void tuplesort_end_orioledb_index(Tuplesortstate *state);
 extern OTuple tuplesort_getotuple(Tuplesortstate *state, bool forward);
 extern void tuplesort_putotuple(Tuplesortstate *state, OTuple tup);
 

@@ -90,6 +90,7 @@ typedef struct
 static void get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 								BTreeLocationHint *hint, CommitSeqNo *csn,
 								uint32 *version);
+static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
 
 
 /* ------------------------------------------------------------------------
@@ -147,16 +148,6 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
  * Callbacks for non-modifying operations on individual tuples for heap AM
  * ------------------------------------------------------------------------
  */
-
-static bool
-orioledb_tableam_fetch_row_version(Relation relation,
-								   ItemPointer tid,
-								   Snapshot snapshot,
-								   TupleTableSlot *slot)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return true;
-}
 
 static TupleFetchCallbackResult
 fetch_row_version_callback(OTuple tuple, OXid tupOxid, CommitSeqNo csn,
@@ -227,17 +218,25 @@ orioledb_fetch_row_version(Relation relation,
 	return true;
 }
 
-/*
- * Refetches row version in given slot.
- */
 static bool
-orioledb_refetch_row_version(Relation rel, TupleTableSlot *slot)
+orioledb_tuple_tid_valid(TableScanDesc scan, ItemPointer tid)
+{
+	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	return false;
+}
+
+static bool
+orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
+								  Snapshot snapshot)
 {
 	OBTreeKeyBound pkey;
 	OTableDescr *descr;
 	OTuple		tuple;
 	CommitSeqNo tupleCsn;
 	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+
+	if (snapshot != SnapshotSelf)
+		return true;
 
 	descr = relation_get_descr(rel);
 
@@ -262,20 +261,7 @@ orioledb_refetch_row_version(Relation rel, TupleTableSlot *slot)
 	slot->tts_tableOid = RelationGetRelid(rel);
 
 	return true;
-}
 
-static bool
-orioledb_tuple_tid_valid(TableScanDesc scan, ItemPointer tid)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return false;
-}
-
-static bool
-orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
-								  Snapshot snapshot)
-{
-	return true;
 }
 
 
@@ -307,9 +293,9 @@ orioledb_get_row_ref_type(Relation rel)
 }
 
 static TupleTableSlot *
-orioledb_tableam_tuple_insert(Relation relation, TupleTableSlot *slot,
-							  CommandId cid, int options,
-							  BulkInsertState bistate)
+orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
+					  CommandId cid, int options, BulkInsertState bistate,
+					  bool *insert_indexes)
 {
 	OTableDescr *descr;
 	CommitSeqNo csn;
@@ -317,67 +303,25 @@ orioledb_tableam_tuple_insert(Relation relation, TupleTableSlot *slot,
 
 	descr = relation_get_descr(relation);
 	fill_current_oxid_csn(&oxid, &csn);
+	*insert_indexes = false;
 	return o_tbl_insert(descr, relation, slot, oxid, csn);
 }
 
-static void
-orioledb_tuple_insert_speculative(Relation relation, TupleTableSlot *slot,
-								  CommandId cid, int options,
-								  BulkInsertState bistate, uint32 specToken)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-}
-
-static void
-orioledb_tuple_complete_speculative(Relation relation, TupleTableSlot *slot,
-									uint32 specToken, bool succeeded)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-}
-
-static TM_Result
-orioledb_tableam_tuple_delete(Relation relation, ItemPointer tid, CommandId cid,
-							  Snapshot snapshot, Snapshot crosscheck, bool wait,
-							  TM_FailureData *tmfd, bool changingPart)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return TM_Ok;
-}
-
-static OIndexNumber
-get_ix_num_by_oid(OTableDescr *descr, Oid ixOid)
-{
-	OIndexNumber ixNum;
-
-	if (!OidIsValid(ixOid))
-		return InvalidIndexNumber;
-
-	for (ixNum = 0; ixNum < descr->nIndices; ixNum++)
-	{
-		if (descr->indices[ixNum]->oids.reloid == ixOid)
-			return ixNum;
-	}
-
-	return InvalidIndexNumber;
-}
-
 static TupleTableSlot *
-orioledb_tuple_insert_on_conflict(ModifyTableState *mstate,
-								  EState *estate,
-								  ResultRelInfo *rinfo,
-								  TupleTableSlot *slot)
+orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
+								   TupleTableSlot *slot,
+								   CommandId cid, int options,
+								   struct BulkInsertStateData *bistate,
+								   List *arbiterIndexes,
+								   EState *estate,
+								   LockTupleMode lockmode,
+								   TupleTableSlot *lockedSlot,
+								   TupleTableSlot *tempSlot)
 {
+	Relation	rel = rinfo->ri_RelationDesc;
 	OTableDescr *descr;
 	OTuple		tup;
-	Relation	rel = rinfo->ri_RelationDesc;
-	OnConflictAction on_conflict;
-	OFDWState  *state = (OFDWState *) rinfo->ri_FdwState;
 	OIndexDescr *id;
-	OIndexNumber ix_num;
-
-	on_conflict = ((ModifyTable *) mstate->ps.plan)->onConflictAction;
-
-	o_check_constraints(rinfo, slot, estate);
 
 	descr = relation_get_descr(rel);
 	Assert(descr);
@@ -404,22 +348,17 @@ orioledb_tuple_insert_on_conflict(ModifyTableState *mstate,
 								RelationGetRelationName(rel),
 								false);
 
-	ix_num = get_ix_num_by_oid(descr, state->conflictIxOid);
-	slot = o_tbl_insert_on_conflict(mstate, estate, rinfo, descr, slot,
-									on_conflict, ix_num);
+	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes,
+									 lockmode, lockedSlot);
 
 	return slot;
 }
 
 static TM_Result
-orioledb_tuple_delete(ModifyTableState *mstate,
-					  ResultRelInfo *rinfo,
-					  EState *estate,
-					  Datum tupleid,
-					  TupleTableSlot *returningSlot,
-					  CommandId cid,
-					  Snapshot snapshot, Snapshot crosscheck, bool wait,
-					  TM_FailureData *tmfd, bool changingPart)
+orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
+					  Snapshot snapshot, Snapshot crosscheck, int options,
+					  TM_FailureData *tmfd, bool changingPart,
+					  TupleTableSlot *oldSlot)
 {
 	OModifyCallbackArg marg;
 	OTableModifyResult mres;
@@ -428,7 +367,7 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	OXid		oxid;
 	BTreeLocationHint hint;
 
-	descr = relation_get_descr(rinfo->ri_RelationDesc);
+	descr = relation_get_descr(relation);
 
 	Assert(descr != NULL);
 	if (GET_PRIMARY(descr)->primaryIsCtid)
@@ -438,35 +377,32 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 
 	marg.descr = descr;
 	marg.oxid = oxid;
-	marg.csn = snapshot->snapshotcsn;
-	marg.rinfo = rinfo;
-	marg.epqstate = &mstate->mt_epqstate;
-	marg.scanSlot = returningSlot ? returningSlot : descr->oldTuple;
+	marg.options = options;
+	marg.scanSlot = oldSlot;
+	marg.tmpSlot = descr->oldTuple;
+	marg.modified = false;
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, NULL, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL);
 
-	mres = o_tbl_delete(descr, estate, &pkey, oxid, snapshot->snapshotcsn,
-						&hint, &marg);
+	mres = o_tbl_delete(descr, &pkey, oxid,
+						snapshot->snapshotcsn, &hint, &marg);
 
-	if (mres.success && mres.action == BTreeOperationLock)
+	if (marg.modified)
 	{
-		TupleTableSlot *epqslot;
-
-		epqslot = EvalPlanQualNext(marg.epqstate);
-		if (TupIsNull(epqslot))
-			/* Tuple not passing quals anymore, exiting... */
-			return TM_Deleted;
-
-		tts_orioledb_fill_key_bound(mres.oldTuple, GET_PRIMARY(descr), &pkey);
-		mres = o_tbl_delete(descr, estate, &pkey, oxid, marg.csn,
-							&hint, &marg);
-		Assert(mres.action != BTreeOperationLock);
-		/* ExecClearTuple(mres.oldTuple); */
+		rowid_set_csn(GET_PRIMARY(descr), tupleid, marg.csn);
+		tmfd->traversed = true;
+	}
+	else
+	{
+		tmfd->traversed = false;
 	}
 
-	o_check_tbl_delete_mres(mres, descr, rinfo->ri_RelationDesc);
+	if (mres.success && mres.action == BTreeOperationLock)
+		return TM_Updated;
+
+	o_check_tbl_delete_mres(mres, descr, relation);
 
 	if (mres.self_modified)
 	{
@@ -481,118 +417,75 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 
 	if (mres.success)
 	{
-		Assert(mres.oldTuple != NULL);
-		if (returningSlot && mres.oldTuple != returningSlot)
-			ExecCopySlot(returningSlot, mres.oldTuple);
-
 		return mres.self_modified ? TM_SelfModified : TM_Ok;
 	}
 
-	return mres.self_modified ? TM_SelfModified : TM_Deleted;
+	return mres.self_modified ? TM_SelfModified : (marg.modified ? TM_Updated : TM_Deleted);
 }
 
 static TM_Result
-orioledb_tableam_tuple_update(Relation relation, ItemPointer otid, TupleTableSlot *slot,
-							  CommandId cid, Snapshot snapshot, Snapshot crosscheck,
-							  bool wait, TM_FailureData *tmfd,
-							  LockTupleMode *lockmode, bool *update_indexes)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return TM_Ok;
-}
-
-static TM_Result
-orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
-					  EState *estate,
-					  Datum tupleid, TupleTableSlot *slot,
+orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 					  CommandId cid, Snapshot snapshot, Snapshot crosscheck,
-					  bool wait, TM_FailureData *tmfd,
-					  LockTupleMode *lockmode, bool *update_indexes)
+					  int options, TM_FailureData *tmfd,
+					  LockTupleMode *lockmode,
+#if PG_VERSION_NUM >= 160000
+					  TU_UpdateIndexes *update_indexes,
+#else
+					  bool *update_indexes,
+#endif
+					  TupleTableSlot *oldSlot)
 {
 	OTableModifyResult mres;
 	OModifyCallbackArg marg;
-	Relation	rel;
 	OBTreeKeyBound old_pkey;
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
 
-	rel = rinfo->ri_RelationDesc;
-
-	descr = relation_get_descr(rinfo->ri_RelationDesc);
+	descr = relation_get_descr(relation);
 
 	Assert(descr != NULL);
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
-	o_check_constraints(rinfo, slot, mstate->ps.state);
-
+#if PG_VERSION_NUM >= 160000
+	*update_indexes = TU_None;
+#else
 	*update_indexes = false;
+#endif
 	oxid = get_current_oxid();
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
-						NULL, NULL);
+						&marg.csn, NULL);
 
 	marg.descr = descr;
 	marg.oxid = oxid;
-	marg.csn = snapshot->snapshotcsn;
-	marg.rinfo = rinfo;
-	marg.epqstate = &mstate->mt_epqstate;
-	marg.scanSlot = descr->oldTuple;
-	marg.changingPart = false;
+	marg.options = options;
+	marg.scanSlot = oldSlot;
+	marg.tmpSlot = descr->oldTuple;
+	marg.modified = false;
 	marg.newSlot = (OTableSlot *) slot;
-	marg.keyAttrs = RelationGetIndexAttrBitmap(rinfo->ri_RelationDesc,
+	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
 
-	mres = o_tbl_update(descr, slot, estate, &old_pkey, rel,
+	mres = o_tbl_update(descr, slot, &old_pkey, relation,
 						oxid, snapshot->snapshotcsn, &hint, &marg);
+
+	if (marg.modified)
+	{
+		rowid_set_csn(GET_PRIMARY(descr), tupleid, marg.csn);
+		tmfd->traversed = true;
+	}
+	else
+		tmfd->traversed = false;
 
 	if (mres.success && mres.action == BTreeOperationLock)
 	{
-		TupleTableSlot *epqslot;
-		bool		partition_constraint_failed;
-
-		epqslot = EvalPlanQualNext(marg.epqstate);
-		if (TupIsNull(epqslot))
+		if (TupIsNull(oldSlot))
 			/* Tuple not passing quals anymore, exiting... */
 			return TM_Deleted;
 
-#if PG_VERSION_NUM >= 140000
-#if PG_VERSION_NUM >= 150000
-		if (!rinfo->ri_matchedMergeAction)
-#endif
-			(void) ExecGetUpdateNewTuple(rinfo, epqslot, mres.oldTuple);
-#else
-		slot = ExecFilterJunk(mstate->ps.state->es_result_relation_info->ri_junkFilter,
-							  epqslot);
-#endif
-
-		partition_constraint_failed =
-			rel->rd_rel->relispartition &&
-			!ExecPartitionCheck(rinfo, slot, estate, false);
-		if (!partition_constraint_failed &&
-			rinfo->ri_WithCheckOptions != NIL)
-		{
-			/*
-			 * ExecWithCheckOptions() will skip any WCOs which are not of the
-			 * kind we are looking for at this point.
-			 */
-			ExecWithCheckOptions(WCO_RLS_UPDATE_CHECK,
-								 rinfo, slot, estate);
-		}
-
-		if (partition_constraint_failed)
-			return TM_Updated;
-
-		if (rel->rd_att->constr)
-			ExecConstraints(rinfo, slot, estate);
-
-		tts_orioledb_fill_key_bound(mres.oldTuple, GET_PRIMARY(descr), &old_pkey);
-		ExecMaterializeSlot(slot);
-		mres = o_tbl_update(descr, slot, estate, &old_pkey, rel,
-							oxid, marg.csn, &hint, &marg);
-		Assert(mres.action != BTreeOperationLock);
-		/* ExecClearTuple(mres.oldTuple); */
+		return TM_Updated;
 	}
 
 	if (mres.self_modified)
@@ -607,22 +500,12 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 		tmfd->cmax = InvalidCommandId;
 	}
 
-	o_check_tbl_update_mres(mres, descr, rel, slot);
+	o_check_tbl_update_mres(mres, descr, relation, slot);
 
 	bms_free(marg.keyAttrs);
 	Assert(mres.success);
 
-	return mres.oldTuple ? TM_Ok : TM_Deleted;
-}
-
-static TM_Result
-orioledb_tableam_tuple_lock(Relation relation, ItemPointer tid, Snapshot snapshot,
-							TupleTableSlot *slot, CommandId cid, LockTupleMode mode,
-							LockWaitPolicy wait_policy, uint8 flags,
-							TM_FailureData *tmfd)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return TM_Ok;
+	return mres.oldTuple ? TM_Ok : (marg.modified ? TM_Updated : TM_Deleted);
 }
 
 static TM_Result
@@ -646,20 +529,21 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	larg.rel = rel;
 	larg.descr = descr;
 	larg.oxid = oxid;
-	larg.csn = snapshot->snapshotcsn;
-	larg.epqstate = NULL;
 	larg.scanSlot = slot;
 	larg.waitPolicy = wait_policy;
 	larg.wouldBlock = false;
 	larg.modified = false;
 	larg.selfModified = false;
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, NULL, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL);
 
 	res = o_tbl_lock(descr, &pkey, mode, oxid, &larg, &hint);
 
 	if (larg.modified)
+	{
+		rowid_set_csn(GET_PRIMARY(descr), tupleid, larg.csn);
 		tmfd->traversed = true;
+	}
 	else
 		tmfd->traversed = false;
 
@@ -724,17 +608,14 @@ orioledb_relation_set_new_filenode(Relation rel,
 					new_oids,
 				   *newTreeOids;
 
-		old_oids.datoid = MyDatabaseId;
-		old_oids.reloid = rel->rd_rel->oid;
-		old_oids.relnode = rel->rd_node.relNode;
+		ORelOidsSetFromRel(old_oids, rel);
 		old_o_table = o_tables_get(old_oids);
 		Assert(old_o_table != NULL);
 		oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
 
 		tupdesc = RelationGetDescr(rel);
-		new_oids.datoid = MyDatabaseId;
-		new_oids.reloid = rel->rd_rel->oid;
-		new_oids.relnode = newrnode->relNode;
+		ORelOidsSetFromRel(new_oids, rel);
+		new_oids.relnode = RelFileNodeGetNode(newrnode);
 
 		new_o_table = o_table_tableam_create(new_oids, tupdesc);
 		o_opclass_cache_add_table(new_o_table);
@@ -773,9 +654,9 @@ orioledb_relation_set_new_filenode(Relation rel,
 static void
 orioledb_relation_nontransactional_truncate(Relation rel)
 {
-	ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid,
-	rel->rd_node.relNode};
+	ORelOids	oids;
 
+	ORelOidsSetFromRel(oids, rel);
 	if (rel->rd_rel->oid == 0 || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
 		return;
 
@@ -1276,15 +1157,15 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 }
 
 static void
-orioledb_tableam_multi_insert(Relation relation, TupleTableSlot **slots,
-							  int ntuples, CommandId cid,
-							  int options, BulkInsertState bistate)
+orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
+					  CommandId cid, int options, BulkInsertState bistate,
+					  bool *insert_indexes)
 {
 	int			i;
 
 	for (i = 0; i < ntuples; i++)
-		orioledb_tableam_tuple_insert(relation, slots[i],
-									  cid, options, bistate);
+		orioledb_tuple_insert(relation, slots[i],
+							  cid, options, bistate, insert_indexes);
 }
 
 static void
@@ -1317,52 +1198,6 @@ orioledb_compute_xid_horizon_for_tuples(Relation rel,
 	return 0;
 }
 #endif
-
-static void
-orioledb_init_modify(ModifyTableState *mstate, ResultRelInfo *rinfo)
-{
-	OTableDescr *descr = relation_get_descr(rinfo->ri_RelationDesc);
-	ModifyTable *node = (ModifyTable *) mstate->ps.plan;
-	OFDWState  *state;
-
-	if (!rinfo->ri_FdwState)
-	{
-		state = (OFDWState *) palloc0(sizeof(OFDWState));
-		rinfo->ri_FdwState = state;
-		state->conflictIxOid = InvalidOid;
-
-		if (mstate->operation == CMD_INSERT &&
-			node->onConflictAction != ONCONFLICT_NONE)
-		{
-			List	   *arbiterIndexes;
-			Oid			arbiterOid;
-			int			i;
-
-			arbiterIndexes = rinfo->ri_onConflictArbiterIndexes;
-
-			if (arbiterIndexes == NIL)
-			{
-				state->conflictIxOid = InvalidOid;
-			}
-			else
-			{
-				arbiterOid = list_nth_oid(arbiterIndexes, 0);
-
-				for (i = 0; i < descr->nIndices; i++)
-				{
-					if (descr->indices[i]->oids.reloid == arbiterOid)
-					{
-						state->conflictIxOid = arbiterOid;
-						break;
-					}
-				}
-			}
-
-			if (state->conflictIxOid < 0)
-				elog(ERROR, "Arbiter index isn't matched");
-		}
-	}
-}
 
 void
 orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
@@ -1847,7 +1682,8 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
  * Option parser for anything that uses StdRdOptions.
  */
 static bytea *
-orioledb_btoptions(Datum reloptions, bool validate, relopt_kind kind)
+orioledb_indexoptions(amoptions_function amoptions, char relkind,
+					  Datum reloptions, bool validate)
 {
 	static bool relopts_set = false;
 	static local_relopts relopts = {0};
@@ -1914,9 +1750,6 @@ orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 		case RELKIND_MATVIEW:
 			return orioledb_default_reloptions(reloptions, validate,
 											   RELOPT_KIND_HEAP);
-		case RELKIND_INDEX:
-			/* Checking of other indexam-s required if their support added */
-			return orioledb_btoptions(reloptions, validate, RELOPT_KIND_BTREE);
 		default:
 			/* other relkinds are not supported */
 			return NULL;
@@ -1937,78 +1770,74 @@ orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
  * ------------------------------------------------------------------------
  */
 
-static const ExtendedTableAmRoutine orioledb_am_methods = {
-	.tableam = {.type = T_ExtendedTableAmRoutine,
-		.slot_callbacks = orioledb_slot_callbacks,
-
-		.scan_begin = orioledb_beginscan,
-		.scan_end = orioledb_endscan,
-		.scan_rescan = orioledb_rescan,
-		.scan_getnextslot = orioledb_getnextslot,
-
-		.parallelscan_estimate = orioledb_parallelscan_estimate,
-		.parallelscan_initialize = orioledb_parallelscan_initialize,
-		.parallelscan_reinitialize = orioledb_parallelscan_reinitialize,
-
-		.index_fetch_begin = orioledb_index_fetch_begin,
-		.index_fetch_reset = orioledb_index_fetch_reset,
-		.index_fetch_end = orioledb_index_fetch_end,
-		.index_fetch_tuple = orioledb_index_fetch_tuple,
-#if PG_VERSION_NUM >= 140000
-		.index_delete_tuples = orioledb_index_delete_tuples,
-#endif
-
-		.tuple_insert = orioledb_tableam_tuple_insert,
-		.tuple_insert_speculative = orioledb_tuple_insert_speculative,
-		.tuple_complete_speculative = orioledb_tuple_complete_speculative,
-		.multi_insert = orioledb_tableam_multi_insert,
-		.tuple_delete = orioledb_tableam_tuple_delete,
-		.tuple_update = orioledb_tableam_tuple_update,
-		.tuple_lock = orioledb_tableam_tuple_lock,
-		.finish_bulk_insert = orioledb_finish_bulk_insert,
-
-		.tuple_fetch_row_version = orioledb_tableam_fetch_row_version,
-		.tuple_get_latest_tid = orioledb_get_latest_tid,
-		.tuple_tid_valid = orioledb_tuple_tid_valid,
-		.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
-#if PG_VERSION_NUM < 140000
-		.compute_xid_horizon_for_tuples = orioledb_compute_xid_horizon_for_tuples,
-#endif
-
-		.relation_set_new_filenode = orioledb_relation_set_new_filenode,
-		.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
-		.relation_copy_data = orioledb_relation_copy_data,
-		.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
-		.relation_vacuum = orioledb_vacuum_rel,
-		.scan_analyze_next_block = orioledb_scan_analyze_next_block,
-		.scan_analyze_next_tuple = orioledb_scan_analyze_next_tuple,
-		.index_build_range_scan = orioledb_index_build_range_scan,
-		.index_validate_scan = orioledb_index_validate_scan,
-
-		.relation_size = orioledb_relation_size,
-		.relation_needs_toast_table = orioledb_relation_needs_toast_table,
-		.relation_toast_am = orioledb_relation_toast_am,
-
-		.relation_estimate_size = orioledb_estimate_rel_size,
-		.scan_bitmap_next_block = orioledb_scan_bitmap_next_block,
-		.scan_bitmap_next_tuple = orioledb_scan_bitmap_next_tuple,
-		.scan_sample_next_block = orioledb_scan_sample_next_block,
-		.scan_sample_next_tuple = orioledb_scan_sample_next_tuple
-	},
+static const TableAmRoutine orioledb_am_methods = {
+	.type = T_TableAmRoutine,
+	.slot_callbacks = orioledb_slot_callbacks,
 	.get_row_ref_type = orioledb_get_row_ref_type,
-	.tuple_insert_on_conflict = orioledb_tuple_insert_on_conflict,
+	.free_rd_amcache = orioledb_free_rd_amcache,
+
+	.scan_begin = orioledb_beginscan,
+	.scan_end = orioledb_endscan,
+	.scan_rescan = orioledb_rescan,
+	.scan_getnextslot = orioledb_getnextslot,
+
+	.parallelscan_estimate = orioledb_parallelscan_estimate,
+	.parallelscan_initialize = orioledb_parallelscan_initialize,
+	.parallelscan_reinitialize = orioledb_parallelscan_reinitialize,
+
+	.index_fetch_begin = orioledb_index_fetch_begin,
+	.index_fetch_reset = orioledb_index_fetch_reset,
+	.index_fetch_end = orioledb_index_fetch_end,
+	.index_fetch_tuple = orioledb_index_fetch_tuple,
+#if PG_VERSION_NUM >= 140000
+	.index_delete_tuples = orioledb_index_delete_tuples,
+#endif
+
+	.tuple_insert = orioledb_tuple_insert,
+	.tuple_insert_with_arbiter = orioledb_tuple_insert_with_arbiter,
+	.multi_insert = orioledb_multi_insert,
 	.tuple_delete = orioledb_tuple_delete,
 	.tuple_update = orioledb_tuple_update,
 	.tuple_lock = orioledb_tuple_lock,
+	.finish_bulk_insert = orioledb_finish_bulk_insert,
+
 	.tuple_fetch_row_version = orioledb_fetch_row_version,
-	.tuple_refetch_row_version = orioledb_refetch_row_version,
-	.init_modify = orioledb_init_modify,
-	.free_rd_amcache = orioledb_free_rd_amcache,
+	.tuple_get_latest_tid = orioledb_get_latest_tid,
+	.tuple_tid_valid = orioledb_tuple_tid_valid,
+	.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
+#if PG_VERSION_NUM < 140000
+	.compute_xid_horizon_for_tuples = orioledb_compute_xid_horizon_for_tuples,
+#endif
+
+#if PG_VERSION_NUM >= 160000
+	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
+#else
+	.relation_set_new_filenode = orioledb_relation_set_new_filenode,
+#endif
+	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
+	.relation_copy_data = orioledb_relation_copy_data,
+	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
+	.relation_vacuum = orioledb_vacuum_rel,
+	.scan_analyze_next_block = orioledb_scan_analyze_next_block,
+	.scan_analyze_next_tuple = orioledb_scan_analyze_next_tuple,
+	.index_build_range_scan = orioledb_index_build_range_scan,
+	.index_validate_scan = orioledb_index_validate_scan,
+
+	.relation_size = orioledb_relation_size,
+	.relation_needs_toast_table = orioledb_relation_needs_toast_table,
+	.relation_toast_am = orioledb_relation_toast_am,
+
+	.relation_estimate_size = orioledb_estimate_rel_size,
+	.scan_bitmap_next_block = orioledb_scan_bitmap_next_block,
+	.scan_bitmap_next_tuple = orioledb_scan_bitmap_next_tuple,
+	.scan_sample_next_block = orioledb_scan_sample_next_block,
+	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
+	.tuple_is_current = orioledb_tuple_is_current,
 	.define_index_validate = orioledb_define_index_validate,
 	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table,
 	.reloptions = orioledb_reloptions,
-	.tuple_is_current = orioledb_tuple_is_current
+	.indexoptions = orioledb_indexoptions
 };
 
 bool
@@ -2041,8 +1870,9 @@ OTableDescr *
 relation_get_descr(Relation rel)
 {
 	OTableDescr *result;
-	ORelOids	oids = {MyDatabaseId, RelationGetRelid(rel), rel->rd_node.relNode};
+	ORelOids	oids;
 
+	ORelOidsSetFromRel(oids, rel);
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -2107,23 +1937,28 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 	}
 }
 
-void
-o_check_constraints(ResultRelInfo *rinfo, TupleTableSlot *slot, EState *estate)
+static void
+rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn)
 {
-	/*
-	 * Check the constraints of the tuple.
-	 */
-	if (rinfo->ri_RelationDesc->rd_att->constr)
-		ExecConstraints(rinfo, slot, estate);
+	bytea	   *rowid;
+	Pointer		p;
 
-	/*
-	 * Also check the tuple against the partition constraint, if there is one;
-	 * except that if we got here via tuple-routing, we don't need to if
-	 * there's no BR trigger defined on the partition.
-	 */
-	if (rinfo->ri_RelationDesc->rd_rel->relispartition &&
-		(rinfo->ri_RootResultRelInfo == NULL ||
-		 (rinfo->ri_TrigDesc &&
-		  rinfo->ri_TrigDesc->trig_insert_before_row)))
-		ExecPartitionCheck(rinfo, slot, estate, true);
+	if (!id->primaryIsCtid)
+	{
+		ORowIdAddendumNonCtid *add;
+
+		rowid = DatumGetByteaP(pkDatum);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumNonCtid *) p;
+		add->csn = csn;
+	}
+	else
+	{
+		ORowIdAddendumCtid *add;
+
+		rowid = DatumGetByteaP(pkDatum);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumCtid *) p;
+		add->csn = csn;
+	}
 }

@@ -124,7 +124,7 @@ extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
  * Recovery master/workers functions.
  */
 extern BackgroundWorkerHandle *recovery_worker_register(int worker_id);
-extern void recovery_worker_main(Datum main_arg);
+PGDLLEXPORT void recovery_worker_main(Datum main_arg);
 
 /*
  * Recovery utility.

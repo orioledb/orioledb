@@ -127,9 +127,6 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 		case AT_AddColumn:
 			strtype = "ADD COLUMN";
 			break;
-		case AT_AddColumnRecurse:
-			strtype = "ADD COLUMN (and recurse)";
-			break;
 		case AT_AddColumnToView:
 			strtype = "ADD COLUMN TO VIEW";
 			break;
@@ -163,9 +160,6 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 		case AT_DropColumn:
 			strtype = "DROP COLUMN";
 			break;
-		case AT_DropColumnRecurse:
-			strtype = "DROP COLUMN (and recurse)";
-			break;
 		case AT_AddIndex:
 			strtype = "ADD INDEX";
 			break;
@@ -174,9 +168,6 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 			break;
 		case AT_AddConstraint:
 			strtype = "ADD CONSTRAINT";
-			break;
-		case AT_AddConstraintRecurse:
-			strtype = "ADD CONSTRAINT (and recurse)";
 			break;
 		case AT_ReAddConstraint:
 			strtype = "(re) ADD CONSTRAINT";
@@ -187,17 +178,11 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 		case AT_ValidateConstraint:
 			strtype = "VALIDATE CONSTRAINT";
 			break;
-		case AT_ValidateConstraintRecurse:
-			strtype = "VALIDATE CONSTRAINT (and recurse)";
-			break;
 		case AT_AddIndexConstraint:
 			strtype = "ADD CONSTRAINT (using index)";
 			break;
 		case AT_DropConstraint:
 			strtype = "DROP CONSTRAINT";
-			break;
-		case AT_DropConstraintRecurse:
-			strtype = "DROP CONSTRAINT (and recurse)";
 			break;
 		case AT_ReAddComment:
 			strtype = "(re) ADD COMMENT";
@@ -330,6 +315,23 @@ deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
 		default:
 			strtype = "unrecognized";
 			break;
+#if PG_VERSION_NUM < 160000
+		case AT_AddColumnRecurse:
+			strtype = "ADD COLUMN (and recurse)";
+			break;
+		case AT_DropColumnRecurse:
+			strtype = "DROP COLUMN (and recurse)";
+			break;
+		case AT_AddConstraintRecurse:
+			strtype = "ADD CONSTRAINT (and recurse)";
+			break;
+		case AT_ValidateConstraintRecurse:
+			strtype = "VALIDATE CONSTRAINT (and recurse)";
+			break;
+		case AT_DropConstraintRecurse:
+			strtype = "DROP CONSTRAINT (and recurse)";
+			break;
+#endif
 	}
 
 	return strtype;
@@ -526,10 +528,11 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 			is_orioledb_rel(rel))
 		{
 			OTable	   *table;
-			ORelOids	table_oids = {MyDatabaseId, rel->rd_rel->oid,
-			rel->rd_node.relNode};
+			ORelOids	table_oids;
 			bool		found = false;
 			int			i;
+
+			ORelOidsSetFromRel(table_oids, rel);
 
 			table = o_tables_get(table_oids);
 			if (table == NULL)
@@ -704,9 +707,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTable	   *table;
 				ORelOids   *treeOids;
 				int			numTreeOids;
-				ORelOids	oids = {MyDatabaseId,
-					objectId,
-				rel->rd_node.relNode};
+				ORelOids	oids;
+
+				ORelOidsSetFromRel(oids, rel);
 
 				fill_current_oxid_csn(&oxid, &csn);
 				Assert(relation_get_descr(rel) != NULL);
@@ -723,9 +726,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				OTable	   *o_table;
 				OTableField *o_field = NULL;
-				ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid,
-				rel->rd_node.relNode};
+				ORelOids	oids;
 
+				ORelOidsSetFromRel(oids, rel);
 				o_table = o_tables_get(oids);
 				if (o_table == NULL)
 				{
@@ -881,11 +884,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTableField *field;
 				Form_pg_attribute attr;
 				OTable	   *o_table;
-				ORelOids	oids = {MyDatabaseId,
-					rel->rd_rel->oid,
-				rel->rd_node.relNode};
+				ORelOids	oids;
 				CommitSeqNo csn;
 				OXid		oxid;
+
+				ORelOidsSetFromRel(oids, rel);
 
 				o_table = o_tables_get(oids);
 				if (o_table == NULL)
@@ -928,10 +931,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				fill_current_oxid_csn(&oxid, &csn);
 
-				Assert(rel->rd_node.dbNode == MyDatabaseId);
-				oids.datoid = MyDatabaseId;
-				oids.reloid = rel->rd_id;
-				oids.relnode = rel->rd_node.relNode;
+				Assert(RelIsInMyDatabase(rel));
+				ORelOidsSetFromRel(oids, rel);
 				tupdesc = RelationGetDescr(rel);
 
 				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
@@ -971,13 +972,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					options = (ORelOptions *) tbl->rd_options;
 
-					Assert(tbl->rd_node.dbNode == MyDatabaseId);
-					oids.datoid = MyDatabaseId;
-					oids.reloid = tbl->rd_id;
-					oids.relnode = tbl->rd_node.relNode;
-					toastOids.datoid = MyDatabaseId;
-					toastOids.reloid = rel->rd_id;
-					toastOids.relnode = rel->rd_node.relNode;
+					Assert(RelIsInMyDatabase(tbl));
+					ORelOidsSetFromRel(oids, tbl);
+					ORelOidsSetFromRel(toastOids, rel);
 
 					o_table = o_tables_get(oids);
 					o_table->toast_oids = toastOids;
@@ -1048,12 +1045,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		{
 			Form_pg_attribute attr;
 			OTable	   *o_table;
-			ORelOids	oids = {MyDatabaseId,
-				rel->rd_rel->oid,
-			rel->rd_node.relNode};
+			ORelOids	oids;
 			CommitSeqNo csn;
 			OXid		oxid;
 
+			ORelOidsSetFromRel(oids, rel);
 			o_table = o_tables_get(oids);
 			if (o_table == NULL)
 			{
@@ -1117,10 +1113,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 (subId != 0) && is_orioledb_rel(rel))
 			{
 				OTable	   *o_table;
-				ORelOids	oids = {MyDatabaseId,
-					rel->rd_rel->oid,
-				rel->rd_node.relNode};
+				ORelOids	oids;
 
+				ORelOidsSetFromRel(oids, rel);
 				o_table = o_tables_get(oids);
 				if (o_table == NULL)
 				{
@@ -1221,9 +1216,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				old_rel = relation_open(rel->rd_rel->relrewrite, NoLock);
 
-				old_oids.datoid = MyDatabaseId;
-				old_oids.reloid = old_rel->rd_id;
-				old_oids.relnode = old_rel->rd_node.relNode;
+				ORelOidsSetFromRel(old_oids, old_rel);
 				old_o_table = o_tables_get(old_oids);
 				if (old_o_table == NULL)
 				{
@@ -1232,9 +1225,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						 RelationGetRelationName(old_rel));
 				}
 
-				new_oids.datoid = MyDatabaseId;
-				new_oids.reloid = rel->rd_id;
-				new_oids.relnode = rel->rd_node.relNode;
+				ORelOidsSetFromRel(new_oids, rel);
 				new_o_table = o_tables_get(new_oids);
 				if (new_o_table == NULL)
 				{
@@ -1271,9 +1262,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					is_orioledb_rel(tbl))
 				{
 					OTable	   *o_table;
-					ORelOids	table_oids = {MyDatabaseId, tbl->rd_rel->oid,
-					tbl->rd_node.relNode};
+					ORelOids	table_oids;
 
+					ORelOidsSetFromRel(table_oids, tbl);
 					o_table = o_tables_get(table_oids);
 					if (o_table == NULL)
 					{
@@ -1285,10 +1276,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						int			ix_num;
 						CommitSeqNo csn;
 						OXid		oxid;
-						ORelOids	idx_oids = {MyDatabaseId,
-							rel->rd_rel->oid,
-						rel->rd_node.relNode};
+						ORelOids	idx_oids;
 
+						ORelOidsSetFromRel(idx_oids, rel);
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							OTableIndex *index = &o_table->indices[ix_num];

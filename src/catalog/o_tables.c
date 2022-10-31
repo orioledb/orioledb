@@ -1324,9 +1324,7 @@ orioledb_table_description(PG_FUNCTION_ARGS)
 		Oid			relid = PG_GETARG_OID(0);
 
 		rel = relation_open(relid, AccessShareLock);
-		oids.datoid = MyDatabaseId;
-		oids.reloid = relid;
-		oids.relnode = rel->rd_node.relNode;
+		ORelOidsSetFromRel(oids, rel);
 		relation_close(rel, AccessShareLock);
 	}
 	else if (PG_NARGS() == 3)
@@ -1455,10 +1453,10 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 	/*
 	 * sanity checks
 	 */
-	AssertArg(PointerIsValid(desc));
-	AssertArg(att_num >= 1);
-	AssertArg(att_num <= desc->natts);
-	AssertArg(field != NULL);
+	Assert(PointerIsValid(desc));
+	Assert(att_num >= 1);
+	Assert(att_num <= desc->natts);
+	Assert(field != NULL);
 
 	/*
 	 * initialize the attribute fields
@@ -1711,20 +1709,16 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
 
 	oTable->oids.datoid = MyDatabaseId;
 	oTable->oids.reloid = rel->rd_id;
-	oTable->oids.relnode = newrnode->relNode;
+	oTable->oids.relnode = RelFileNodeGetNode(newrnode);
 
 	toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
-	oTable->toast_oids.datoid = MyDatabaseId;
-	oTable->toast_oids.reloid = toastRel->rd_id;
-	oTable->toast_oids.relnode = toastRel->rd_node.relNode;
+	ORelOidsSetFromRel(oTable->toast_oids, toastRel);
 	table_close(toastRel, AccessShareLock);
 
 	for (i = 0; i < oTable->nindices; i++)
 	{
 		indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
-		oTable->indices[i].oids.datoid = MyDatabaseId;
-		oTable->indices[i].oids.reloid = indexRel->rd_id;
-		oTable->indices[i].oids.relnode = indexRel->rd_node.relNode;
+		ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
 		relation_close(indexRel, AccessShareLock);
 	}
 }

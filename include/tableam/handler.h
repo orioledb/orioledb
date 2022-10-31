@@ -129,7 +129,6 @@ extern bool o_drop_shared_root_info(Oid datoid, Oid relnode);
 extern void o_tableam_descr_init(void);
 extern void o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode);
 extern void init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg);
-extern void o_check_constraints(ResultRelInfo *rinfo, TupleTableSlot *slot, EState *estate);
 extern void orioledb_free_rd_amcache(Relation rel);
 extern OTableDescr *relation_get_descr(Relation rel);
 extern void table_descr_inc_refcnt(OTableDescr *descr);

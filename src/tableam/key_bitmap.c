@@ -107,8 +107,9 @@ o_keybitmap_range_is_valid(RBTree *rbtree, uint64 low, uint64 high)
 		lowNode.key = low;
 		lowNode.bitmap = NULL;
 
-		node = (OKeyBitmapRBTNode *) rbt_find_great_equal(rbtree,
-														  &lowNode.rbtnode);
+		node = (OKeyBitmapRBTNode *) rbt_find_great(rbtree,
+													&lowNode.rbtnode,
+													true);
 		if (!node)
 			break;
 
@@ -205,8 +206,9 @@ o_keybitmap_get_next(RBTree *rbtree, uint64 prev, bool *found)
 
 	lowNode.key = prev;
 	lowNode.bitmap = NULL;
-	node = (OKeyBitmapRBTNode *) rbt_find_great_equal(rbtree,
-													  &lowNode.rbtnode);
+	node = (OKeyBitmapRBTNode *) rbt_find_great(rbtree,
+												&lowNode.rbtnode,
+												true);
 	if (!node)
 	{
 		*found = false;
