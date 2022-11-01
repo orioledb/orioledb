@@ -1620,10 +1620,44 @@ orioledb_drop_column(Relation rel, const char *colName)
 	{
 		CommitSeqNo	csn;
 		OXid		oxid;
-		fill_current_oxid_csn(&oxid, &csn);
+
 		o_field->droped = true;
+
 		o_tables_validate_tupdesc(o_table_tupdesc(o_table));
 
+		fill_current_oxid_csn(&oxid, &csn);
+		o_tables_update(o_table, oxid, csn);
+		update_tupdesc(o_table, oxid, csn);
+	}
+	o_table_free(o_table);
+}
+
+static void
+orioledb_change_not_null(Relation rel, const char *colName, bool new_val)
+{
+	OTable	   *o_table;
+	OTableField *o_field = NULL;
+	ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid, rel->rd_node.relNode};
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+	{
+		/* table does not exist */
+		elog(NOTICE, "orioledb table \"%s\" not found",
+			 RelationGetRelationName(rel));
+		return;
+	}
+
+	o_field = o_table_field_by_name(o_table, colName);
+
+	if (o_field && (o_field->notnull != new_val))
+	{
+		CommitSeqNo	csn;
+		OXid		oxid;
+
+		o_field->notnull = new_val;
+
+		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_update(o_table, oxid, csn);
 		update_tupdesc(o_table, oxid, csn);
 	}
@@ -1849,6 +1883,7 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.rewrite_table = orioledb_rewrite_table,
 	.add_column = orioledb_add_column,
 	.drop_column = orioledb_drop_column,
+	.change_not_null = orioledb_change_not_null,
 	.free_rd_amcache = orioledb_free_rd_amcache,
 	.analyze_table = orioledb_analyze_table
 };

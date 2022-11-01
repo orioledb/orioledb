@@ -506,8 +506,6 @@ validate_at_utility(PlannedStmt *pstmt,
 	switch (cmd->subtype)
 	{
 		case AT_AlterColumnType:
-		case AT_DropNotNull:
-		case AT_SetNotNull:
 		case AT_ColumnDefault:
 			o_field = o_table_field_by_name(o_table, cmd->name);
 			break;
@@ -520,8 +518,6 @@ validate_at_utility(PlannedStmt *pstmt,
 	switch (cmd->subtype)
 	{
 		case AT_AlterColumnType:
-		case AT_DropNotNull:
-
 			/*
 			 * We don't support rewriting the relation for now.  So, we
 			 * can only change the type if new type is binary coersible
@@ -609,6 +605,7 @@ validate_at_utility(PlannedStmt *pstmt,
 		case AT_GenericOptions:
 		case AT_SetNotNull:
 		case AT_ChangeOwner:
+		case AT_DropNotNull:
 			break;
 		default:
 			ereport(ERROR,
@@ -650,20 +647,6 @@ validate_at_utility(PlannedStmt *pstmt,
 				}
 			}
 			break;
-		case AT_DropNotNull:
-			if (o_field && o_field->notnull)
-			{
-				o_field->notnull = false;
-				updated = true;
-			}
-			break;
-		case AT_SetNotNull:
-			if (o_field && !o_field->notnull)
-			{
-				o_field->notnull = true;
-				updated = true;
-			}
-			break;
 		case AT_DropConstraint:
 			{
 				OIndexNumber ix_num;
@@ -696,6 +679,8 @@ validate_at_utility(PlannedStmt *pstmt,
 		case AT_ColumnDefault:
 		case AT_GenericOptions:
 		case AT_ChangeOwner:
+		case AT_SetNotNull:
+		case AT_DropNotNull:
 			break;
 		default:
 			/* handled by check */
