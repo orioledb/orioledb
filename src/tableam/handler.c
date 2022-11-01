@@ -1473,6 +1473,16 @@ orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel)
 }
 
 static void
+update_tupdesc(OTable *o_table, OXid oxid, CommitSeqNo csn)
+{
+	o_opclass_cache_add_table(o_table);
+	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
+	if (o_table->has_primary)
+		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
+	o_invalidate_oids(o_table->oids);
+}
+
+static void
 orioledb_add_column(Relation rel, const char *queryString)
 {
 	OTableField				   *field;
@@ -1562,18 +1572,62 @@ orioledb_add_column(Relation rel, const char *queryString)
 		table_close(attrelation, RowExclusiveLock);
 
 	o_tables_update(o_table, oxid, csn);
-	o_opclass_cache_add_table(o_table);
-	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
-	if (o_table->has_primary)
-		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
-	o_invalidate_oids(o_table->oids);
+	update_tupdesc(o_table, oxid, csn);
 	o_table_free(o_table);
 }
 
 static void
-orioledb_drop_column(Relation rel)
+orioledb_drop_column(Relation rel, const char *colName)
 {
-	elog(ERROR, "Not implemented yet: orioledb_drop_column");
+	OTable	   *o_table;
+	OTableField *o_field = NULL;
+	int			i;
+	ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid, rel->rd_node.relNode};
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+	{
+		/* table does not exist */
+		elog(NOTICE, "orioledb table \"%s\" not found",
+			 RelationGetRelationName(rel));
+		return;
+	}
+
+	o_field = o_table_field_by_name(o_table, colName);
+
+	for (i = 0; i < o_table->nindices; i++)
+	{
+		OTableIndex *index = &o_table->indices[i];
+		int			j;
+
+		for (j = 0; j < index->nfields; j++)
+		{
+			OTableField *field = &o_table->fields[index->fields[j].attnum];
+
+			if (pg_strcasecmp(NameStr(field->name), colName) == 0)
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("could not drop the column")),
+						errdetail("Column \"%s\" of OrioleDB table \"%s\""
+								  " id used in \"%s\" index definition.",
+								  colName,
+								  RelationGetRelationName(rel),
+								  NameStr(index->name)));
+		}
+	}
+
+	if (o_field && !o_field->droped)
+	{
+		CommitSeqNo	csn;
+		OXid		oxid;
+		fill_current_oxid_csn(&oxid, &csn);
+		o_field->droped = true;
+		o_tables_validate_tupdesc(o_table_tupdesc(o_table));
+
+		o_tables_update(o_table, oxid, csn);
+		update_tupdesc(o_table, oxid, csn);
+	}
+	o_table_free(o_table);
 }
 
 void

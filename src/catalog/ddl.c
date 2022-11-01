@@ -506,7 +506,6 @@ validate_at_utility(PlannedStmt *pstmt,
 	switch (cmd->subtype)
 	{
 		case AT_AlterColumnType:
-		case AT_DropColumn:
 		case AT_DropNotNull:
 		case AT_SetNotNull:
 		case AT_ColumnDefault:
@@ -521,7 +520,6 @@ validate_at_utility(PlannedStmt *pstmt,
 	switch (cmd->subtype)
 	{
 		case AT_AlterColumnType:
-		case AT_DropColumn:
 		case AT_DropNotNull:
 
 			/*
@@ -604,6 +602,7 @@ validate_at_utility(PlannedStmt *pstmt,
 			break;
 		case AT_AddIndex:
 		case AT_AddColumn:
+		case AT_DropColumn:
 		case AT_ColumnDefault:
 		case AT_AddConstraint:
 		case AT_DropConstraint:
@@ -651,13 +650,6 @@ validate_at_utility(PlannedStmt *pstmt,
 				}
 			}
 			break;
-		case AT_DropColumn:
-			if (o_field && !o_field->droped)
-			{
-				o_field->droped = true;
-				updated = true;
-			}
-			break;
 		case AT_DropNotNull:
 			if (o_field && o_field->notnull)
 			{
@@ -700,6 +692,7 @@ validate_at_utility(PlannedStmt *pstmt,
 			}
 			break;
 		case AT_AddColumn:
+		case AT_DropColumn:
 		case AT_ColumnDefault:
 		case AT_GenericOptions:
 		case AT_ChangeOwner:
