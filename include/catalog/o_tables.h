@@ -98,7 +98,15 @@ typedef struct
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
 	Expr	  **defvals;
 	uint32		version;		/* not serialized in serialize_o_table */
+	MemoryContext	tbl_mctx; /* not serialized in serialize_o_table */
 } OTable;
+
+#define OGetTableContext(table) \
+	((table)->tbl_mctx ? \
+	 (table)->tbl_mctx : \
+		((table)->tbl_mctx = AllocSetContextCreate(TopMemoryContext, \
+												   "OTableContext", \
+												   ALLOCSET_DEFAULT_SIZES)))
 
 extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 							   OIndexType type, List *index_elems,
@@ -145,10 +153,6 @@ extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);
 
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
-
-/* Same o_tables_update, but it also writes old_relnode to WAL */
-extern bool o_tables_update_on_rebuild(OTable *table, OXid oxid,
-									   CommitSeqNo csn, Oid old_relnode);
 
 /* Checks tuple descriptor for compatibility with orioledb module */
 extern void o_tables_validate_tupdesc(TupleDesc tupdesc);
@@ -234,5 +238,7 @@ o_table_fieldnum(OTable *table, const char *name)
 	}
 	return i;
 }
+
+extern void orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr);
 
 #endif							/* __O_TABLES_H__ */

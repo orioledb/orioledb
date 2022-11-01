@@ -21,6 +21,7 @@
 #include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/indices.h"
+#include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "tableam/descr.h"
@@ -34,6 +35,7 @@
 #include "access/heapam.h"
 #include "access/multixact.h"
 #include "access/tableam.h"
+#include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/pg_am_d.h"
 #include "catalog/storage.h"
@@ -43,15 +45,19 @@
 #include "nodes/execnodes.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/plancat.h"
+#include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
+#include "tcop/utility.h"
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
 #else
 #include "pgstat.h"
 #endif
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
+#include "utils/syscache.h"
 
 typedef struct OScanDescData
 {
@@ -1390,16 +1396,37 @@ orioledb_init_modify(ModifyTableState *mstate, ResultRelInfo *rinfo)
 	}
 }
 
-static bool
-orioledb_rewrite_table(Relation old_rel)
+void
+orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 {
-	bool		result = false;
+	strlcpy(NameStr(field->name), NameStr(attr->attname), NAMEDATALEN);
+	field->typid = attr->atttypid;
+	field->collation = attr->attcollation;
+	field->typmod = attr->atttypmod;
+	field->typlen = attr->attlen;
+	field->ndims = attr->attndims;
+	field->byval = attr->attbyval;
+	field->align = attr->attalign;
+	field->storage = attr->attstorage;
+#if PG_VERSION_NUM >= 140000
+	field->compression = attr->attcompression;
+#endif
+	field->droped = attr->attisdropped;
+	field->notnull = attr->attnotnull;
+	field->hasmissing = attr->atthasmissing;
+	field->hasdef = attr->atthasdef;
+}
 
-	ORelOids	oids;
-	OTable	   *old_o_table,
-			   *o_table;
-	OTableDescr *old_descr,
-				tmp_descr;
+static bool
+orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel)
+{
+	bool			result = false;
+	ORelOids		oids;
+	OTable		   *old_o_table,
+				   *o_table;
+	OTableDescr	   *old_descr,
+					tmp_descr;
+	TupleDesc		newDesc = RelationGetDescr(old_rel);
 
 	oids.datoid = MyDatabaseId;
 	oids.reloid = old_rel->rd_id;
@@ -1423,7 +1450,9 @@ orioledb_rewrite_table(Relation old_rel)
 	}
 	assign_new_oids(o_table, old_rel);
 
-	o_table->primary_init_nfields = old_o_table->nfields;
+	o_table->primary_init_nfields = o_table->nfields;
+	if (oldDesc->natts < newDesc->natts && !o_table->has_primary)
+		o_table->primary_init_nfields++;
 
 	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 	old_descr = o_fetch_table_descr(old_o_table->oids);
@@ -1441,6 +1470,110 @@ orioledb_rewrite_table(Relation old_rel)
 	result = true;
 
 	return result;
+}
+
+static void
+orioledb_add_column(Relation rel, AlterTableUtilityContext *context)
+{
+	OTableField				   *field;
+	Form_pg_attribute			attr;
+	OTable					   *o_table;
+	ORelOids					oids = {MyDatabaseId,
+										rel->rd_rel->oid,
+										rel->rd_node.relNode};
+	Node					   *defaultexpr;
+	AttrMissing				   *attrmiss = NULL;
+	AttrMissing					attrmiss_temp;
+	CommitSeqNo					csn;
+	OXid						oxid;
+	Relation					attrelation = NULL;
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+	{
+		/* table does not exist */
+		elog(NOTICE, "orioledb table \"%s\" not found", RelationGetRelationName(rel));
+		return;
+	}
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	o_table->nfields++;
+	o_table->fields = repalloc(o_table->fields, o_table->nfields *
+													sizeof(OTableField));
+	memset(&o_table->fields[o_table->nfields - 1], 0, sizeof(OTableField));
+	field = &o_table->fields[o_table->nfields - 1];
+	attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
+	orioledb_attr_to_field(field, attr);
+
+	if (attr->atthasdef)
+		defaultexpr = build_column_default(rel, attr->attnum);
+	else
+		defaultexpr = NULL;
+
+	if (attr->atthasmissing)
+	{
+		Datum					missingval;
+		Expr				   *expr2;
+		ParseNamespaceItem	   *nsitem;
+		ParseState			   *pstate;
+		EState				   *estate = NULL;
+		ExprContext			   *econtext;
+		ExprState			   *exprState;
+		MemoryContext			tbl_cxt;
+		MemoryContext			oldcxt;
+		bool					missingIsNull = true;
+
+		pstate = make_parsestate(NULL);
+		pstate->p_sourcetext = context->queryString;
+		nsitem = addRangeTableEntryForRelation(pstate,
+												rel,
+												AccessShareLock,
+												NULL,
+												false,
+												true);
+		addNSItemToQuery(pstate, nsitem, true, true, true);
+
+		expr2 = expression_planner((Expr *) defaultexpr);
+
+		tbl_cxt = OGetTableContext(o_table);
+		oldcxt = MemoryContextSwitchTo(tbl_cxt);
+		estate = CreateExecutorState();
+		exprState = ExecPrepareExpr(expr2, estate);
+		econtext = GetPerTupleExprContext(estate);
+
+		missingval = ExecEvalExpr(exprState, econtext,
+									&missingIsNull);
+
+		FreeExecutorState(estate);
+		free_parsestate(pstate);
+
+		attrmiss_temp.am_value = datumCopy(missingval,
+											field->byval,
+											field->typlen);
+		MemoryContextSwitchTo(oldcxt);
+		attrmiss_temp.am_present = true;
+		attrmiss = &attrmiss_temp;
+		defaultexpr = (Node *) expr2;
+	}
+	o_table_fill_constr(o_table, o_table->nfields - 1, attrmiss,
+						(Expr *) defaultexpr);
+	if (attrelation)
+		table_close(attrelation, RowExclusiveLock);
+
+	o_tables_update(o_table, oxid, csn);
+	o_opclass_cache_add_table(o_table);
+	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
+	if (o_table->has_primary)
+		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
+	o_invalidate_oids(o_table->oids);
+	o_table_free(o_table);
+}
+
+static void
+orioledb_drop_column(Relation rel)
+{
+	elog(ERROR, "Not implemented yet: orioledb_drop_column");
 }
 
 void
@@ -1660,6 +1793,8 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.tuple_refetch_row_version = orioledb_refetch_row_version,
 	.init_modify = orioledb_init_modify,
 	.rewrite_table = orioledb_rewrite_table,
+	.add_column = orioledb_add_column,
+	.drop_column = orioledb_drop_column,
 	.free_rd_amcache = orioledb_free_rd_amcache,
 	.analyze_table = orioledb_analyze_table
 };

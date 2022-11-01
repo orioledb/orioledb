@@ -472,15 +472,18 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	o_sys_cache_search_datoid = o_table->oids.datoid;
 	if (o_table->defvals)
 	{
-		int			i;
+		int		i;
+		int		ctid_off = o_table->has_primary ? 0 : 1;
 
 		descr->defvals_exprstate = palloc0(sizeof(ExprState *) *
-										   o_table->nfields);
+										   (o_table->nfields + ctid_off));
 		for (i = 0; i < o_table->nfields; i++)
 		{
 			if (o_table->defvals[i])
-				descr->defvals_exprstate[i] = ExecInitExpr(o_table->defvals[i],
-														   NULL);
+			{
+				descr->defvals_exprstate[i + ctid_off] =
+					ExecInitExpr(o_table->defvals[i], NULL);
+			}
 		}
 	}
 	descr->estate = CreateExecutorState();

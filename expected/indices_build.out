@@ -23536,9 +23536,151 @@ SELECT orioledb_tbl_indices('o_indices10'::regclass);
 
 RESET enable_seqscan;
 RESET enable_bitmapscan;
+-- Test table rewrite after adding new column with default
+-- with volatile function
+CREATE TABLE o_test_default_volatile (
+	a int,
+	d int
+) USING orioledb;
+INSERT INTO o_test_default_volatile (a, d) VALUES (1, 100), (2, 100), (3, 100);
+SELECT * FROM o_test_default_volatile;
+ a |  d  
+---+-----
+ 1 | 100
+ 2 | 100
+ 3 | 100
+(3 rows)
+
+CREATE SEQUENCE o_test_default_volatile_seq;
+ALTER TABLE o_test_default_volatile
+	ADD COLUMN b int DEFAULT nextval('o_test_default_volatile_seq');
+SELECT * FROM o_test_default_volatile;
+ a |  d  | b 
+---+-----+---
+ 1 | 100 | 1
+ 2 | 100 | 2
+ 3 | 100 | 3
+(3 rows)
+
+\d+ o_test_default_volatile
+                                              Table "public.o_test_default_volatile"
+ Column |  Type   | Collation | Nullable |                     Default                      | Storage | Stats target | Description 
+--------+---------+-----------+----------+--------------------------------------------------+---------+--------------+-------------
+ a      | integer |           |          |                                                  | plain   |              | 
+ d      | integer |           |          |                                                  | plain   |              | 
+ b      | integer |           |          | nextval('o_test_default_volatile_seq'::regclass) | plain   |              | 
+
+SELECT orioledb_table_description('o_test_default_volatile'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+       a | integer |    (null) |     true |  false        +
+       d | integer |    (null) |     true |  false        +
+       b | integer |    (null) |     true |  false        +
+ 
+(1 row)
+
+SELECT attname, atthasdef, atthasmissing FROM pg_attribute
+	WHERE attrelid = 'o_test_default_volatile'::regclass;
+ attname  | atthasdef | atthasmissing 
+----------+-----------+---------------
+ tableoid | f         | f
+ cmax     | f         | f
+ xmax     | f         | f
+ cmin     | f         | f
+ xmin     | f         | f
+ ctid     | f         | f
+ a        | f         | f
+ d        | f         | f
+ b        | t         | f
+(9 rows)
+
+INSERT INTO o_test_default_volatile (a, d)
+	VALUES (10, 200), (20, 200), (30, 200);
+SELECT * FROM o_test_default_volatile ORDER BY a DESC;
+ a  |  d  | b 
+----+-----+---
+ 30 | 200 | 6
+ 20 | 200 | 5
+ 10 | 200 | 4
+  3 | 100 | 3
+  2 | 100 | 2
+  1 | 100 | 1
+(6 rows)
+
+SELECT * FROM o_test_default_volatile;
+ a  |  d  | b 
+----+-----+---
+  1 | 100 | 1
+  2 | 100 | 2
+  3 | 100 | 3
+ 10 | 200 | 4
+ 20 | 200 | 5
+ 30 | 200 | 6
+(6 rows)
+
+SELECT * FROM o_test_default_volatile ORDER BY a DESC;
+ a  |  d  | b 
+----+-----+---
+ 30 | 200 | 6
+ 20 | 200 | 5
+ 10 | 200 | 4
+  3 | 100 | 3
+  2 | 100 | 2
+  1 | 100 | 1
+(6 rows)
+
+-- Same as test above but checking that serial does the same
+CREATE TABLE o_test_add_serial (
+	a int
+) USING orioledb;
+INSERT INTO o_test_add_serial VALUES (1), (2), (3);
+ALTER TABLE o_test_add_serial ADD COLUMN b serial;
+\d+ o_test_add_serial
+                                               Table "public.o_test_add_serial"
+ Column |  Type   | Collation | Nullable |                   Default                    | Storage | Stats target | Description 
+--------+---------+-----------+----------+----------------------------------------------+---------+--------------+-------------
+ a      | integer |           |          |                                              | plain   |              | 
+ b      | integer |           | not null | nextval('o_test_add_serial_b_seq'::regclass) | plain   |              | 
+
+INSERT INTO o_test_add_serial VALUES (10), (20), (30);
+SELECT * FROM o_test_add_serial ORDER BY a DESC;
+ a  | b 
+----+---
+ 30 | 6
+ 20 | 5
+ 10 | 4
+  3 | 3
+  2 | 2
+  1 | 1
+(6 rows)
+
+SELECT * FROM o_test_add_serial;
+ a  | b 
+----+---
+  1 | 1
+  2 | 2
+  3 | 3
+ 10 | 4
+ 20 | 5
+ 30 | 6
+(6 rows)
+
+SELECT * FROM o_test_add_serial ORDER BY a DESC;
+ a  | b 
+----+---
+ 30 | 6
+ 20 | 5
+ 10 | 4
+  3 | 3
+  2 | 2
+  1 | 1
+(6 rows)
+
 DROP FUNCTION generate_string;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 15 other objects
 DETAIL:  drop cascades to table o_indices0
 drop cascades to table o_indices1
 drop cascades to table o_indices2
@@ -23552,3 +23694,5 @@ drop cascades to table o_indices8
 drop cascades to table o_indices8_ctid
 drop cascades to table o_indices9
 drop cascades to table o_indices10
+drop cascades to table o_test_default_volatile
+drop cascades to table o_test_add_serial

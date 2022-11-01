@@ -493,5 +493,48 @@ SELECT orioledb_tbl_indices('o_indices10'::regclass);
 RESET enable_seqscan;
 RESET enable_bitmapscan;
 
+-- Test table rewrite after adding new column with default
+-- with volatile function
+CREATE TABLE o_test_default_volatile (
+	a int,
+	d int
+) USING orioledb;
+
+INSERT INTO o_test_default_volatile (a, d) VALUES (1, 100), (2, 100), (3, 100);
+SELECT * FROM o_test_default_volatile;
+
+CREATE SEQUENCE o_test_default_volatile_seq;
+ALTER TABLE o_test_default_volatile
+	ADD COLUMN b int DEFAULT nextval('o_test_default_volatile_seq');
+SELECT * FROM o_test_default_volatile;
+
+\d+ o_test_default_volatile
+SELECT orioledb_table_description('o_test_default_volatile'::regclass);
+
+SELECT attname, atthasdef, atthasmissing FROM pg_attribute
+	WHERE attrelid = 'o_test_default_volatile'::regclass;
+
+INSERT INTO o_test_default_volatile (a, d)
+	VALUES (10, 200), (20, 200), (30, 200);
+SELECT * FROM o_test_default_volatile ORDER BY a DESC;
+SELECT * FROM o_test_default_volatile;
+SELECT * FROM o_test_default_volatile ORDER BY a DESC;
+
+-- Same as test above but checking that serial does the same
+CREATE TABLE o_test_add_serial (
+	a int
+) USING orioledb;
+
+INSERT INTO o_test_add_serial VALUES (1), (2), (3);
+
+ALTER TABLE o_test_add_serial ADD COLUMN b serial;
+
+\d+ o_test_add_serial
+
+INSERT INTO o_test_add_serial VALUES (10), (20), (30);
+SELECT * FROM o_test_add_serial ORDER BY a DESC;
+SELECT * FROM o_test_add_serial;
+SELECT * FROM o_test_add_serial ORDER BY a DESC;
+
 DROP FUNCTION generate_string;
 DROP EXTENSION orioledb CASCADE;

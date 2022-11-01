@@ -525,22 +525,7 @@ o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
 		Form_pg_attribute attr = &tupdesc->attrs[i];
 		OTableField *field = &o_table->fields[i];
 
-		strlcpy(field->name.data, NameStr(attr->attname), NAMEDATALEN);
-		field->typid = attr->atttypid;
-		field->collation = attr->attcollation;
-		field->typmod = attr->atttypmod;
-		field->typlen = attr->attlen;
-		field->ndims = attr->attndims;
-		field->byval = attr->attbyval;
-		field->align = attr->attalign;
-		field->storage = attr->attstorage;
-#if PG_VERSION_NUM >= 140000
-		field->compression = attr->attcompression;
-#endif
-		field->droped = attr->attisdropped;
-		field->notnull = attr->attnotnull;
-		field->hasmissing = attr->atthasmissing;
-		field->hasdef = attr->atthasdef;
+		orioledb_attr_to_field(field, attr);
 	}
 	o_table->nindices = 0;
 
@@ -978,11 +963,13 @@ o_table_free(OTable *table)
 	if (table->indices)
 		pfree(table->indices);
 	pfree(table->fields);
+	if (table->tbl_mctx)
+		MemoryContextDelete(table->tbl_mctx);
 	pfree(table);
 }
 
-static bool
-o_tables_update_without_wal(OTable *table, OXid oxid, CommitSeqNo csn)
+bool
+o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 {
 	OTableChunkKey key;
 	OTable	   *old_table;
@@ -1006,26 +993,6 @@ o_tables_update_without_wal(OTable *table, OXid oxid, CommitSeqNo csn)
 	pfree(data);
 	o_table_free(old_table);
 
-	return result;
-}
-
-bool
-o_tables_update_on_rebuild(OTable *table, OXid oxid, CommitSeqNo csn,
-						   Oid old_relnode)
-{
-	bool		result;
-
-	result = o_tables_update_without_wal(table, oxid, csn);
-	add_invalidate_wal_record(table->oids, old_relnode);
-	return result;
-}
-
-bool
-o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
-{
-	bool		result;
-
-	result = o_tables_update_without_wal(table, oxid, csn);
 	add_invalidate_wal_record(table->oids, table->oids.relnode);
 	return result;
 }
