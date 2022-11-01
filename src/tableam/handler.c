@@ -1473,7 +1473,7 @@ orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel)
 }
 
 static void
-orioledb_add_column(Relation rel, AlterTableUtilityContext *context)
+orioledb_add_column(Relation rel, const char *queryString)
 {
 	OTableField				   *field;
 	Form_pg_attribute			attr;
@@ -1525,7 +1525,7 @@ orioledb_add_column(Relation rel, AlterTableUtilityContext *context)
 		bool					missingIsNull = true;
 
 		pstate = make_parsestate(NULL);
-		pstate->p_sourcetext = context->queryString;
+		pstate->p_sourcetext = queryString;
 		nsitem = addRangeTableEntryForRelation(pstate,
 												rel,
 												AccessShareLock,
