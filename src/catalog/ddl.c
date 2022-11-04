@@ -35,6 +35,7 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_attrdef.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
@@ -474,238 +475,6 @@ cleanup_saved_undo_locations()
 }
 
 static bool
-validate_at_utility(PlannedStmt *pstmt,
-					const char *queryString,
-					Oid relid, AlterTableCmd *cmd, Relation rel,
-					List **ixconstraints)
-{
-	OTable	   *o_table;
-	OTableField *o_field = NULL;
-	int			i;
-	ColumnDef  *coldef;
-	Oid			type;
-	bool		updated;
-	bool		tupdesc_changed;
-	ORelOids	oids = {MyDatabaseId, relid, rel->rd_node.relNode};
-	CommitSeqNo csn;
-	OXid		oxid;
-	bool		remove_cmd = false;
-
-	fill_current_oxid_csn(&oxid, &csn);
-
-	o_table = o_tables_get(oids);
-	if (o_table == NULL)
-	{
-		/* table does not exist */
-		elog(NOTICE, "orioledb table \"%s\" not found", RelationGetRelationName(rel));
-		return remove_cmd;
-	}
-
-	updated = false;
-	tupdesc_changed = false;
-	switch (cmd->subtype)
-	{
-		case AT_AlterColumnType:
-		case AT_ColumnDefault:
-			o_field = o_table_field_by_name(o_table, cmd->name);
-			break;
-
-		default:
-			break;
-	}
-
-	/* make checks */
-	switch (cmd->subtype)
-	{
-		case AT_AlterColumnType:
-			/*
-			 * We don't support rewriting the relation for now.  So, we
-			 * can only change the type if new type is binary coersible
-			 * with the old one.
-			 */
-			if (cmd->subtype == AT_AlterColumnType && o_field)
-			{
-				coldef = (ColumnDef *) cmd->def;
-				type = typenameTypeId(NULL, coldef->typeName);
-
-				if (!IsBinaryCoercible(o_field->typid, type))
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("could not change the column type")),
-							errdetail("Column \"%s\" of OrioleDB table \"%s\" has type \"%s\". Can't change to \"%s\", because it's not binary coersible.",
-										cmd->name,
-										RelationGetRelationName(rel),
-										format_type_be(o_field->typid),
-										TypeNameToString(coldef->typeName)));
-			}
-
-			if (o_table->nindices == 0)
-				break;
-
-			for (i = 0; i < o_table->nindices; i++)
-			{
-				OTableIndex *index = &o_table->indices[i];
-				int			j;
-
-				for (j = 0; j < index->nfields; j++)
-				{
-					OTableField *field = &o_table->fields[index->fields[j].attnum];
-
-					if (pg_strcasecmp(NameStr(field->name), cmd->name) != 0)
-						continue;
-
-					if (cmd->subtype == AT_DropColumn)
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									errmsg("could not drop the column")),
-								errdetail("Column \"%s\" of OrioleDB table \"%s\" id used in \"%s\" index definition.",
-											cmd->name,
-											RelationGetRelationName(rel),
-											NameStr(index->name)));
-					else if (cmd->subtype == AT_AlterColumnType)
-					{
-						coldef = (ColumnDef *) cmd->def;
-
-						if (OidIsValid(index->fields[j].collation))
-							continue;
-
-						if (coldef->collClause != NULL)
-						{
-							Oid			collid = get_collation_oid(coldef->collClause->collname, false);
-
-							if (collid != field->collation)
-								ereport(ERROR,
-										(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-											errmsg("could not change the column collation")),
-										errdetail("Column \"%s\" of OrioleDB table \"%s\" id used in \"%s\" index definition.",
-													cmd->name,
-													RelationGetRelationName(rel),
-													NameStr(index->name)));
-						}
-						else if (field->collation != DEFAULT_COLLATION_OID)
-						{
-							ereport(ERROR,
-									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-										errmsg("could not change the column collation")),
-									errdetail("Column \"%s\" of OrioleDB table \"%s\" id used in \"%s\" index definition.",
-												cmd->name,
-												RelationGetRelationName(rel),
-												NameStr(index->name)));
-						}
-					}
-				}
-			}
-			break;
-		case AT_AddIndex:
-		case AT_AddColumn:
-		case AT_DropColumn:
-		case AT_ColumnDefault:
-		case AT_AddConstraint:
-		case AT_DropConstraint:
-		case AT_GenericOptions:
-		case AT_SetNotNull:
-		case AT_ChangeOwner:
-		case AT_DropNotNull:
-			break;
-		default:
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("unsupported alter table subcommand")),
-					errdetail("Subcommand \"%s\" is not "
-								"supported on OrioleDB tables.",
-								deparse_alter_table_cmd_subtype(cmd)));
-			break;
-	}
-
-	/* all checks are passed, confirm changes for field */
-	switch (cmd->subtype)
-	{
-		case AT_AlterColumnType:
-			if (o_field)
-			{
-				ColumnDef  *coldef = (ColumnDef *) cmd->def;
-				Oid			type = typenameTypeId(NULL,
-													coldef->typeName);
-
-				if (o_field->typid != type)
-				{
-					o_field->typid = type;
-					updated = true;
-				}
-				if (coldef->collClause != NULL)
-				{
-					List	   *collname = coldef->collClause->collname;
-					Oid			collid;
-
-					collid = get_collation_oid(collname, false);
-
-					if (o_field->collation != collid)
-					{
-						o_field->collation = collid;
-						updated = true;
-					}
-				}
-			}
-			break;
-		case AT_DropConstraint:
-			{
-				OIndexNumber ix_num;
-				OTableDescr *descr = relation_get_descr(rel);
-
-				Assert(descr != NULL);
-				ix_num = o_find_ix_num_by_name(descr, cmd->name);
-
-				if (ix_num == PrimaryIndexNumber)
-					o_index_drop(rel, PrimaryIndexNumber);
-			}
-			break;
-		case AT_AddConstraint:
-			{
-				Constraint *con = (Constraint *) cmd->def;
-				if (con->contype == CONSTR_PRIMARY ||
-					con->contype == CONSTR_UNIQUE ||
-					con->contype == CONSTR_EXCLUSION)
-				{
-					if (con->contype == CONSTR_PRIMARY)
-						*ixconstraints = lcons(con, *ixconstraints);
-					else
-						*ixconstraints = lappend(*ixconstraints, con);
-					remove_cmd = true;
-				}
-			}
-			break;
-		case AT_AddColumn:
-		case AT_DropColumn:
-		case AT_ColumnDefault:
-		case AT_GenericOptions:
-		case AT_ChangeOwner:
-		case AT_SetNotNull:
-		case AT_DropNotNull:
-			break;
-		default:
-			/* handled by check */
-			Assert(false);
-			break;
-	}
-
-	if (updated)
-	{
-		o_tables_validate_tupdesc(o_table_tupdesc(o_table));
-		o_tables_update(o_table, oxid, csn);
-		if (tupdesc_changed)
-		{
-			o_opclass_cache_add_table(o_table);
-			o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
-			if (o_table->has_primary)
-				o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
-			o_invalidate_oids(o_table->oids);
-		}
-	}
-	o_table_free(o_table);
-	return remove_cmd;
-}
-
-static bool
 is_alter_table_partition(PlannedStmt *pstmt)
 {
 	AlterTableStmt *top_atstmt = (AlterTableStmt *) pstmt->utilityStmt;
@@ -1015,7 +784,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (OidIsValid(relid))
 			{
 				AlterTableUtilityContext atcontext;
-				List *ixconstraints = NIL;
 
 				/* Set up info needed for recursive callbacks ... */
 				atcontext.pstmt = pstmt;
@@ -1041,9 +809,31 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							{
 								AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lc);
 
-								if(validate_at_utility(pstmt, queryString, relid,
-													cmd, rel, &ixconstraints))
-									atstmt->cmds = foreach_delete_current(atstmt->cmds, lc);
+								/* make checks */
+								switch (cmd->subtype)
+								{
+								case AT_AlterColumnType:
+								case AT_AddIndex:
+								case AT_AddColumn:
+								case AT_DropColumn:
+								case AT_ColumnDefault:
+								case AT_AddConstraint:
+								case AT_DropConstraint:
+								case AT_GenericOptions:
+								case AT_SetNotNull:
+								case AT_ChangeOwner:
+								case AT_DropNotNull:
+									break;
+								default:
+									ereport(ERROR,
+											(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+											 errmsg("unsupported alter table subcommand")),
+											errdetail("Subcommand \"%s\" is not "
+													  "supported on OrioleDB tables yet. "
+													  "Please send a bug report.",
+													  deparse_alter_table_cmd_subtype(cmd)));
+									break;
+								}
 							}
 						}
 						table_close(rel, lockmode);
@@ -1052,131 +842,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 				/* ... and do it */
 				AlterTable(atstmt, lockmode, &atcontext);
-
-				if (atstmt->objtype == OBJECT_TABLE)
-				{
-					if (lockmode == AccessExclusiveLock)
-					{
-						Relation rel = table_open(relid, lockmode);
-						if (is_orioledb_rel(rel))
-						{
-							ListCell   *lc;
-
-							foreach (lc, ixconstraints)
-							{
-								Constraint *con = (Constraint *) lfirst(lc);
-								IndexStmt *index;
-								List *notnullcmds = NIL;
-
-								if (con->indexname != NULL)
-								{
-									elog(ERROR, "ADD PRIMARY USING not supported yet.");
-								}
-
-								index = makeNode(IndexStmt);
-
-								index->unique = (con->contype != CONSTR_EXCLUSION);
-								index->primary = (con->contype == CONSTR_PRIMARY);
-
-								index->isconstraint = true;
-								index->deferrable = con->deferrable;
-								index->initdeferred = con->initdeferred;
-
-								if (con->conname != NULL)
-									index->idxname = pstrdup(con->conname);
-								else
-									index->idxname = NULL;	/* DefineIndex will choose name */
-
-								index->relation = atstmt->relation;
-								index->accessMethod = con->access_method ? con->access_method : DEFAULT_INDEX_TYPE;
-								index->options = con->options;
-								index->tableSpace = con->indexspace;
-								index->whereClause = con->where_clause;
-								index->indexParams = NIL;
-								index->indexIncludingParams = NIL;
-								index->excludeOpNames = NIL;
-								index->idxcomment = NULL;
-								index->indexOid = InvalidOid;
-								index->oldNode = InvalidOid;
-								index->oldCreateSubid = InvalidSubTransactionId;
-								index->oldFirstRelfilenodeSubid = InvalidSubTransactionId;
-								index->transformed = false;
-								index->concurrent = false;
-								index->if_not_exists = false;
-								index->reset_default_tblspc = con->reset_default_tblspc;
-								index = transformIndexStmt(relid, index, queryString);
-
-								if (con->contype == CONSTR_EXCLUSION)
-								{
-									foreach (lc, con->exclusions)
-									{
-										List *pair = (List *)lfirst(lc);
-										IndexElem *elem;
-										List *opname;
-
-										Assert(list_length(pair) == 2);
-										elem = linitial_node(IndexElem, pair);
-										opname = lsecond_node(List, pair);
-
-										index->indexParams = lappend(index->indexParams, elem);
-										index->excludeOpNames = lappend(index->excludeOpNames, opname);
-									}
-								}
-								else
-								{
-									foreach (lc, con->keys)
-									{
-										char *key = strVal(lfirst(lc));
-										IndexElem *iparam;
-
-										/* OK, add it to the index definition */
-										iparam = makeNode(IndexElem);
-										iparam->name = pstrdup(key);
-										iparam->expr = NULL;
-										iparam->indexcolname = NULL;
-										iparam->collation = NIL;
-										iparam->opclass = NIL;
-										iparam->opclassopts = NIL;
-										iparam->ordering = SORTBY_DEFAULT;
-										iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
-										index->indexParams = lappend(index->indexParams, iparam);
-										if (index->primary)
-										{
-											AlterTableCmd *notnullcmd = makeNode(AlterTableCmd);
-
-											notnullcmd->subtype = AT_SetNotNull;
-											notnullcmd->name = pstrdup(key);
-
-											validate_at_utility(pstmt, queryString, relid,
-																notnullcmd, rel, &ixconstraints);
-											notnullcmds = lappend(notnullcmds, notnullcmd);
-										}
-									}
-								}
-								if (index->primary)
-								{
-									AlterTableStmt *alterstmt = makeNode(AlterTableStmt);
-									table_close(rel, lockmode);
-
-									alterstmt->relation = copyObject(atstmt->relation);
-									alterstmt->cmds = notnullcmds;
-									alterstmt->objtype = OBJECT_TABLE;
-									alterstmt->missing_ok = false;
-									AlterTable(alterstmt, lockmode, &atcontext);
-									rel = table_open(relid, lockmode);
-								}
-								/*
-								* TODO: Find way to add validation before
-								* indices builds without using
-								* transformAlterTableStmt
-								*/
-								o_index_create(rel, index,
-											queryString, pstmt->utilityStmt);
-							}
-						}
-						table_close(rel, lockmode);
-					}
-				}
 
 				/* done */
 				EventTriggerAlterTableEnd();
@@ -1484,22 +1149,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		pfree(amname);
 		table_close(rel, AccessShareLock);
 	}
-	else if (IsA(pstmt->utilityStmt, IndexStmt))
-	{
-		IndexStmt  *stmt = (IndexStmt *) pstmt->utilityStmt;
-		Relation	rel;
-
-		rel = table_openrv(stmt->relation, AccessExclusiveLock);
-
-		if ((rel->rd_rel->relkind == RELKIND_RELATION ||
-			 rel->rd_rel->relkind == RELKIND_MATVIEW) && is_orioledb_rel(rel))
-		{
-			o_index_create(rel, stmt, queryString, pstmt->utilityStmt);
-
-			call_next = false;
-		}
-		table_close(rel, AccessExclusiveLock);
-	}
 	else if (IsA(pstmt->utilityStmt, RenameStmt))
 	{
 		RenameStmt *stmt = (RenameStmt *) pstmt->utilityStmt;
@@ -1645,7 +1294,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				o_table = o_tables_get(table_oids);
 				if (o_table == NULL)
 				{
-					elog(NOTICE, "orioledb table %s not found", RelationGetRelationName(tbl));
+					elog(NOTICE, "orioledb table %s not found",
+						 RelationGetRelationName(tbl));
 				}
 				else
 				{
@@ -1900,6 +1550,39 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				pfree(treeOids);
 				o_table_free(table);
 			}
+			else if ((rel->rd_rel->relkind == RELKIND_RELATION) &&
+					 (subId != 0) && is_orioledb_rel(rel))
+			{
+				OTable	   *o_table;
+				OTableField *o_field = NULL;
+				ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid,
+									rel->rd_node.relNode};
+
+				o_table = o_tables_get(oids);
+				if (o_table == NULL)
+				{
+					/* table does not exist */
+					elog(NOTICE, "orioledb table \"%s\" not found",
+						RelationGetRelationName(rel));
+				}
+				else
+				{
+					o_field = &o_table->fields[subId - 1];
+
+					if (o_field && !o_field->droped)
+					{
+						CommitSeqNo	csn;
+						OXid		oxid;
+
+						o_field->droped = true;
+
+						fill_current_oxid_csn(&oxid, &csn);
+						o_tables_update(o_table, oxid, csn);
+						o_tables_after_update(o_table, oxid, csn);
+					}
+					o_table_free(o_table);
+				}
+			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX &&
 					 drop_arg->dropflags == 0)
 
@@ -2015,8 +1698,171 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
 											   NULL);
 			}
+			else if ((rel->rd_rel->relkind == RELKIND_RELATION) &&
+					 (subId != 0) && is_orioledb_rel(rel))
+			{
+				OTableField			   *field;
+				Form_pg_attribute		attr;
+				OTable				   *o_table;
+				ORelOids				oids = {MyDatabaseId,
+												rel->rd_rel->oid,
+												rel->rd_node.relNode};
+				CommitSeqNo				csn;
+				OXid					oxid;
+
+				o_table = o_tables_get(oids);
+				if (o_table == NULL)
+				{
+					/* table does not exist */
+					elog(NOTICE, "orioledb table \"%s\" not found", RelationGetRelationName(rel));
+				}
+				else
+				{
+					fill_current_oxid_csn(&oxid, &csn);
+
+					o_table->nfields++;
+					o_table->fields = repalloc(o_table->fields,
+											o_table->nfields *
+												sizeof(OTableField));
+					memset(&o_table->fields[o_table->nfields - 1], 0,
+						sizeof(OTableField));
+
+					CommandCounterIncrement();
+					field = &o_table->fields[o_table->nfields - 1];
+					attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
+					orioledb_attr_to_field(field, attr);
+
+					o_table_resize_constr(o_table);
+
+					o_tables_update(o_table, oxid, csn);
+					o_tables_after_update(o_table, oxid, csn);
+					o_table_free(o_table);
+				}
+			}
+			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+					 (subId == 0) && is_orioledb_rel(rel))
+			{
+				ORelOids	oids;
+				TupleDesc	tupdesc;
+				OTable	   *o_table;
+				CommitSeqNo	csn = COMMITSEQNO_INPROGRESS;
+				OXid		oxid = InvalidOXid;
+
+				fill_current_oxid_csn(&oxid, &csn);
+
+				Assert(rel->rd_node.dbNode == MyDatabaseId);
+				oids.datoid = MyDatabaseId;
+				oids.reloid = rel->rd_id;
+				oids.relnode = rel->rd_node.relNode;
+				tupdesc = RelationGetDescr(rel);
+
+				o_table = o_table_tableam_create(oids, tupdesc);
+				o_opclass_cache_add_table(o_table);
+
+				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+				o_tables_add(o_table, oxid, csn);
+			}
 			relation_close(rel, AccessShareLock);
 		}
+	}
+	else if (access == OAT_POST_CREATE && classId == AttrDefaultRelationId)
+	{
+		rel = relation_open(objectId, AccessShareLock);
+
+		if (rel != NULL && (rel->rd_rel->relkind == RELKIND_RELATION) &&
+			(subId != 0) && is_orioledb_rel(rel))
+		{
+			OTableField				   *field;
+			Form_pg_attribute			attr;
+			OTable					   *o_table;
+			ORelOids					oids = {MyDatabaseId,
+												rel->rd_rel->oid,
+												rel->rd_node.relNode};
+			Node					   *defaultexpr;
+			AttrMissing				   *attrmiss = NULL;
+			AttrMissing					attrmiss_temp;
+			CommitSeqNo					csn;
+			OXid						oxid;
+
+			o_table = o_tables_get(oids);
+			if (o_table == NULL)
+			{
+				/* table does not exist */
+				elog(NOTICE, "orioledb table \"%s\" not found",
+					 RelationGetRelationName(rel));
+			}
+			else
+			{
+				bool missing_before;
+
+				fill_current_oxid_csn(&oxid, &csn);
+				attr = &rel->rd_att->attrs[subId - 1];
+				missing_before = attr->atthasmissing;
+				CommandCounterIncrement();
+				field = &o_table->fields[subId - 1];
+				attr = &rel->rd_att->attrs[subId - 1];
+				orioledb_attr_to_field(field, attr);
+
+				if (attr->atthasdef)
+					defaultexpr = build_column_default(rel, attr->attnum);
+				else
+					defaultexpr = NULL;
+
+				if (!missing_before && attr->atthasmissing)
+				{
+					Datum					missingval;
+					Expr				   *expr2;
+					ParseNamespaceItem	   *nsitem;
+					ParseState			   *pstate;
+					EState				   *estate = NULL;
+					ExprContext			   *econtext;
+					ExprState			   *exprState;
+					MemoryContext			tbl_cxt;
+					MemoryContext			oldcxt;
+					bool					missingIsNull = true;
+
+					pstate = make_parsestate(NULL);
+					pstate->p_sourcetext = NULL;
+					nsitem = addRangeTableEntryForRelation(pstate,
+															rel,
+															AccessShareLock,
+															NULL,
+															false,
+															true);
+					addNSItemToQuery(pstate, nsitem, true, true, true);
+
+					expr2 = expression_planner((Expr *) defaultexpr);
+
+					tbl_cxt = OGetTableContext(o_table);
+					oldcxt = MemoryContextSwitchTo(tbl_cxt);
+					estate = CreateExecutorState();
+					exprState = ExecPrepareExpr(expr2, estate);
+					econtext = GetPerTupleExprContext(estate);
+
+					missingval = ExecEvalExpr(exprState, econtext,
+												&missingIsNull);
+
+					FreeExecutorState(estate);
+					free_parsestate(pstate);
+
+					attrmiss_temp.am_value = datumCopy(missingval,
+														field->byval,
+														field->typlen);
+					MemoryContextSwitchTo(oldcxt);
+					attrmiss_temp.am_present = true;
+					attrmiss = &attrmiss_temp;
+					defaultexpr = (Node *) expr2;
+				}
+				o_table_fill_constr(o_table, subId - 1, attrmiss,
+									(Expr *) defaultexpr);
+
+				o_tables_update(o_table, oxid, csn);
+				o_tables_after_update(o_table, oxid, csn);
+				o_table_free(o_table);
+			}
+		}
+		relation_close(rel, AccessShareLock);
 	}
 	else if (access == OAT_POST_ALTER && classId == RelationRelationId)
 	{
@@ -2091,6 +1937,7 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 	bool		orioledb;
 	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
 	OXid		oxid = InvalidOXid;
+	int 		old_max_parallel_maintenance_workers;
 
 	if (cstmt->accessMethod)
 		orioledb = (strcmp(cstmt->accessMethod, "orioledb") == 0);
@@ -2140,8 +1987,17 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 						   toast_options,
 						   true);
 
+	if (orioledb)
+	{
+		old_max_parallel_maintenance_workers =
+			max_parallel_maintenance_workers;
+		max_parallel_maintenance_workers = 0;
+	}
 	NewRelationCreateToastTable(address.objectId,
 								toast_options);
+	if (orioledb)
+		max_parallel_maintenance_workers =
+			old_max_parallel_maintenance_workers;
 
 	/*
 	 * orioledb table have no need in PostgreSQL TOAST and this calls have no
@@ -2160,7 +2016,6 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		ORelOids	oids,
 					toastOids,
 				   *treeOids;
-		TupleDesc	tupdesc;
 		OTable	   *o_table;
 		int			numTreeOids;
 
@@ -2169,21 +2024,27 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		oids.datoid = MyDatabaseId;
 		oids.reloid = rel->rd_id;
 		oids.relnode = rel->rd_node.relNode;
-		tupdesc = RelationGetDescr(rel);
-		toastRel = table_open(rel->rd_rel->reltoastrelid,
-							  AccessShareLock);
+		toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
 		toastOids.datoid = MyDatabaseId;
 		toastOids.reloid = toastRel->rd_id;
 		toastOids.relnode = toastRel->rd_node.relNode;
 
-		o_tables_validate_tupdesc(tupdesc);
-		o_table = o_table_tableam_create(oids, toastOids, tupdesc,
-										 compress, primary_compress,
-										 toast_compress);
-		o_opclass_cache_add_table(o_table);
+		o_table = o_tables_get(oids);
+		o_table->toast_oids = toastOids;
 
-		LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
-		o_tables_add(o_table, oxid, csn);
+		if (OCompressIsValid(compress))
+		{
+			if (!OCompressIsValid(primary_compress))
+				primary_compress = compress;
+			if (!OCompressIsValid(toast_compress))
+				toast_compress = compress;
+		}
+		o_table->default_compress = compress;
+		o_table->toast_compress = toast_compress;
+		o_table->primary_compress = primary_compress;
+
+		o_tables_update(o_table, oxid, csn);
+		o_tables_after_update(o_table, oxid, csn);
 		LWLockRelease(&checkpoint_state->oTablesAddLock);
 
 		treeOids = o_table_make_index_oids(o_table, &numTreeOids);

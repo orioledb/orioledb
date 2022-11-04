@@ -450,4 +450,23 @@ EXPLAIN (COSTS off) SELECT * FROM o_test1 WHERE t2 = 2;
 SELECT * FROM o_test1 WHERE t2 = 2;
 DROP TABLE o_test1;
 
+-- TEST substring
+CREATE TABLE o_test_substr (
+	key int,
+	val text
+) USING orioledb;
+
+INSERT INTO o_test_substr VALUES (1, repeat('a', 4000) || repeat('b', 4000));
+INSERT INTO o_test_substr VALUES (2, repeat('a', 150000) || repeat('b', 150000));
+INSERT INTO o_test_substr VALUES (3, (SELECT array_agg(md5(g::text))::text
+									FROM generate_series(1, 256) g));
+SELECT * FROM o_test_substr;
+
+SELECT key, length(val), pg_column_size(val), substring(val for 30),
+	   substr(val, 10, 10) from o_test_substr WHERE key = 1;
+SELECT key, length(val), pg_column_size(val), substring(val for 30),
+	   substr(val, 20, 10) from o_test_substr WHERE key = 2;
+SELECT key, length(val), pg_column_size(val), substring(val for 30),
+	   substr(val, 30, 10) from o_test_substr WHERE key = 3;
+
 DROP EXTENSION orioledb CASCADE;

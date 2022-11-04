@@ -19,10 +19,19 @@
 
 #include "catalog/o_tables.h"
 
-extern void o_index_create(Relation rel,
-						   IndexStmt *stmt,
-						   const char *queryString,
-						   Node *utilityStmt);
+typedef struct ODefineIndexContext {
+	ORelOids	oids;
+	OIndexType	ix_num;
+	OTable	   *o_table;
+	OTable	   *old_o_table;
+	bool		is_build;
+} ODefineIndexContext;
+
+extern void o_define_index_validate(Relation rel, IndexStmt *stmt,
+									ODefineIndexContext **arg);
+extern void o_define_index(Relation rel, ObjectAddress address,
+					  	   ODefineIndexContext *context);
+
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
 										  char *ix_name);

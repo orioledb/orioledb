@@ -191,31 +191,28 @@ o_validate_index_elements(OTable *o_table, OIndexNumber ix_num,
 }
 
 void
-o_index_create(Relation rel,
-			   IndexStmt *stmt,
-			   const char *queryString,
-			   Node *utilityStmt)
+o_define_index_validate(Relation rel, IndexStmt *stmt,
+						ODefineIndexContext **arg)
 {
-	int			nattrs;
-	Oid			myrelid = RelationGetRelid(rel);
-	ORelOids	oids = {MyDatabaseId, myrelid, rel->rd_node.relNode};
-	Oid			relid;
+	int nattrs;
+	Oid myrelid = RelationGetRelid(rel);
+	ORelOids oids = {MyDatabaseId, myrelid, rel->rd_node.relNode};
 	OIndexNumber ix_num;
-	OCompress	compress = InvalidOCompress;
-	OIndexType	ix_type;
-	OTable	   *old_o_table = NULL;
-	OTable	   *o_table;
-	Relation	index_rel;
-	ObjectAddress address;
-	bool		is_build;
-	ORelOids	primary_oids;
-	OTableDescr *old_descr = NULL;
-	List	   *index_expr_fields = NIL;
-	List	   *index_predicate = NIL;
+	OCompress compress = InvalidOCompress;
+	OIndexType ix_type;
+	ORelOids primary_oids;
+	static ODefineIndexContext context;
+	OTable *o_table;
+
+	*arg = &context;
+
+	context.oids = oids;
+	context.is_build = false;
+	context.o_table = NULL;
+	context.old_o_table = NULL;
 
 	if (strcmp(stmt->accessMethod, "btree") != 0)
-		ereport(ERROR, errmsg("'%s' access method is not supported",
-							  stmt->accessMethod),
+		ereport(ERROR, errmsg("'%s' access method is not supported", stmt->accessMethod),
 				errhint("Only 'btree' access method supported now "
 						"for indices on orioledb tables."));
 
@@ -232,225 +229,208 @@ o_index_create(Relation rel,
 
 	if (stmt->options != NIL)
 		elog(ERROR, "orioledb tables indices support "
-			 "only \"compress\" option.");
+					"only \"compress\" option.");
 
 	if (stmt->indexIncludingParams != NIL)
 		elog(ERROR, "include indexes are not supported");
 
-	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
-									 0,
-									 RangeVarCallbackOwnsRelation,
-									 NULL);
-
-	o_table = o_tables_get(oids);
-	if (o_table == NULL)
+	context.o_table = o_tables_get(oids);
+	if (context.o_table == NULL)
 	{
 		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
-			 (unsigned) oids.datoid, (unsigned) oids.reloid, (unsigned) oids.relnode);
-	}
+			 (unsigned) oids.datoid, (unsigned) oids.reloid,
+			 (unsigned) oids.relnode);
+		}
+		o_table = context.o_table;
 
-	/* check index type */
-	if (stmt->primary)
-		ix_type = oIndexPrimary;
-	else if (stmt->unique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+		/* check index type */
+		if (stmt->primary)
+			ix_type = oIndexPrimary;
+		else if (stmt->unique)
+			ix_type = oIndexUnique;
+		else
+			ix_type = oIndexRegular;
 
-	/* check index fields number */
-	nattrs = list_length(stmt->indexParams);
-	if (ix_type == oIndexPrimary)
-	{
-		if (o_table->nindices > 0)
+		/* check index fields number */
+		nattrs = list_length(stmt->indexParams);
+		if (ix_type == oIndexPrimary)
 		{
-			int			nattrs_max = 0,
-						ix;
+			if (o_table->nindices > 0)
+			{
+				int nattrs_max = 0,
+					ix;
+
+				if (o_table->has_primary)
+					elog(ERROR, "table already has primary index");
+
+				for (ix = 0; ix < o_table->nindices; ix++)
+					nattrs_max = Max(nattrs_max, o_table->indices[ix].nfields);
+
+				if (nattrs_max + nattrs > INDEX_MAX_KEYS)
+				{
+					elog(ERROR, "too many fields in the primary index for exiting indices");
+				}
+			}
+		}
+		else
+		{
+			if (o_table->nindices > 0 &&
+				o_table->indices[0].type != oIndexRegular &&
+				nattrs + o_table->indices[0].nfields > INDEX_MAX_KEYS)
+			{
+				elog(ERROR, "too many fields in the index");
+			}
+		}
+
+		primary_oids = ix_type == oIndexPrimary ||
+					   !o_table->has_primary ?
+						   o_table->oids :
+						   o_table->indices[PrimaryIndexNumber].oids;
+		context.is_build = tbl_data_exists(&primary_oids);
+
+		/* Rebuild, assign new oids */
+		if (ix_type == oIndexPrimary)
+		{
+			context.old_o_table = context.o_table;
+			context.o_table = o_tables_get(oids);
+			o_table = context.o_table;
+			assign_new_oids(o_table, rel);
+			oids = o_table->oids;
+			context.oids = oids;
+		}
+
+		if (ix_type == oIndexPrimary)
+		{
+			ix_num = 0; /* place first */
+			o_table->has_primary = true;
+			o_table->primary_init_nfields = o_table->nfields;
+		}
+		else
+		{
+			ix_num = o_table->nindices;
+		}
+		context.ix_num = ix_num;
+
+		o_table->indices = (OTableIndex *)
+			repalloc(o_table->indices, sizeof(OTableIndex) *
+										   (o_table->nindices + 1));
+
+		/* move indices if needed */
+		if (ix_type == oIndexPrimary && o_table->nindices > 0)
+		{
+			memmove(&o_table->indices[1], &o_table->indices[0],
+					o_table->nindices * (sizeof(OTableIndex)));
+		}
+		o_table->nindices++;
+
+		memset(&o_table->indices[ix_num], 0, sizeof(OTableIndex));
+
+		o_table->indices[ix_num].type = ix_type;
+		o_table->indices[ix_num].nfields = list_length(stmt->indexParams);
+
+		if (OCompressIsValid(compress))
+			o_table->indices[ix_num].compress = compress;
+		else if (ix_type == oIndexPrimary)
+			o_table->indices[ix_num].compress = o_table->primary_compress;
+		else
+			o_table->indices[ix_num].compress = o_table->default_compress;
+
+		/*
+		 * Add primary key fields, because otherwise, when planning a query with a
+		 * where clause consisting only of index fields and primary key fields, an
+		 * index-only scan is not selected.
+		 */
+		if (ix_type != oIndexPrimary)
+		{
+			int i;
+			int nfields;
+
+			/* Remove assert if INCLUDE supported */
+			Assert(!stmt->indexIncludingParams);
 
 			if (o_table->has_primary)
-				elog(ERROR, "table already has primary index");
-
-			for (ix = 0; ix < o_table->nindices; ix++)
-				nattrs_max = Max(nattrs_max, o_table->indices[ix].nfields);
-
-			if (nattrs_max + nattrs > INDEX_MAX_KEYS)
 			{
-				elog(ERROR, "too many fields in the primary index for exiting indices");
+				nfields = o_table->indices[PrimaryIndexNumber].nfields;
+
+				for (i = 0; i < nfields; i++)
+				{
+					OTableIndexField *field;
+					OTableField *table_field;
+					IndexElem *iparam = makeNode(IndexElem);
+
+					field = &o_table->indices[PrimaryIndexNumber].fields[i];
+					table_field = &o_table->fields[field->attnum];
+
+					iparam->name = pstrdup(table_field->name.data);
+					iparam->expr = NULL;
+					iparam->indexcolname = NULL;
+					iparam->collation = NIL;
+					iparam->opclass = NIL;
+					iparam->opclassopts = NIL;
+					stmt->indexIncludingParams =
+						lappend(stmt->indexIncludingParams, iparam);
+				}
 			}
 		}
-	}
-	else
-	{
-		if (o_table->nindices > 0
-			&& o_table->indices[0].type != oIndexRegular
-			&& nattrs + o_table->indices[0].nfields > INDEX_MAX_KEYS)
+
+		if (stmt->idxname == NULL)
 		{
-			elog(ERROR, "too many fields in the index");
+			List *indexColNames = ChooseIndexColumnNames(stmt->indexParams);
+
+			stmt->idxname = ChooseIndexName(RelationGetRelationName(rel),
+											RelationGetNamespace(rel),
+											indexColNames,
+											stmt->excludeOpNames,
+											stmt->primary,
+											stmt->isconstraint);
 		}
-	}
 
-	primary_oids = ix_type == oIndexPrimary || !o_table->has_primary ?
-		o_table->oids :
-		o_table->indices[PrimaryIndexNumber].oids;
-	is_build = tbl_data_exists(&primary_oids);
+		/* check index fields */
+		o_validate_index_elements(o_table, ix_num, ix_type,
+								  stmt->indexParams, stmt->whereClause);
+}
 
-	/* Rebuild, assign new oids */
-	if (ix_type == oIndexPrimary)
-	{
-		old_o_table = o_table;
-		o_table = o_tables_get(oids);
-		assign_new_oids(o_table, rel);
-		oids = o_table->oids;
-	}
-
-	if (ix_type == oIndexPrimary)
-	{
-		ix_num = 0;				/* place first */
-		o_table->has_primary = true;
-		o_table->primary_init_nfields = o_table->nfields;
-	}
-	else
-	{
-		ix_num = o_table->nindices;
-	}
-
-	o_table->indices = (OTableIndex *) repalloc(o_table->indices,
-												sizeof(OTableIndex) * (o_table->nindices + 1));
-
-	/* move indices if needed */
-	if (ix_type == oIndexPrimary && o_table->nindices > 0)
-	{
-		memmove(&o_table->indices[1],
-				&o_table->indices[0],
-				o_table->nindices * (sizeof(OTableIndex)));
-	}
-	o_table->nindices++;
-
-	memset(&o_table->indices[ix_num],
-		   0,
-		   sizeof(OTableIndex));
-
-	o_table->indices[ix_num].type = ix_type;
-	o_table->indices[ix_num].nfields = list_length(stmt->indexParams);
-
-	if (OCompressIsValid(compress))
-		o_table->indices[ix_num].compress = compress;
-	else if (ix_type == oIndexPrimary)
-		o_table->indices[ix_num].compress = o_table->primary_compress;
-	else
-		o_table->indices[ix_num].compress = o_table->default_compress;
-
-	/*
-	 * Add primary key fields, because otherwise, when planning a query with a
-	 * where clause consisting only of index fields and primary key fields, an
-	 * index-only scan is not selected.
-	 */
-	if (ix_type != oIndexPrimary)
-	{
-		int			i;
-		int			nfields;
-
-		/* Remove assert if INCLUDE supported */
-		Assert(!stmt->indexIncludingParams);
-
-		if (o_table->has_primary)
-		{
-			nfields = o_table->indices[PrimaryIndexNumber].nfields;
-
-			for (i = 0; i < nfields; i++)
-			{
-				OTableIndexField *field =
-				&o_table->indices[PrimaryIndexNumber].fields[i];
-				OTableField *table_field = &o_table->fields[field->attnum];
-				IndexElem  *iparam = makeNode(IndexElem);
-
-				iparam->name = pstrdup(table_field->name.data);
-				iparam->expr = NULL;
-				iparam->indexcolname = NULL;
-				iparam->collation = NIL;
-				iparam->opclass = NIL;
-				iparam->opclassopts = NIL;
-				stmt->indexIncludingParams =
-					lappend(stmt->indexIncludingParams, iparam);
-			}
-		}
-	}
-
-	/* define index */
-	stmt = transformIndexStmt(relid, stmt, queryString);
-
-	if (stmt->idxname == NULL)
-	{
-		List	   *indexColNames = ChooseIndexColumnNames(stmt->indexParams);
-
-		stmt->idxname = ChooseIndexName(RelationGetRelationName(rel),
-										RelationGetNamespace(rel),
-										indexColNames,
-										stmt->excludeOpNames,
-										stmt->primary,
-										stmt->isconstraint);
-	}
-
-	/* check index fields */
-	o_validate_index_elements(o_table, ix_num, ix_type, stmt->indexParams,
-							  stmt->whereClause);
-	EventTriggerAlterTableStart(utilityStmt);
-	address =
-		DefineIndex(relid,		/* OID of heap relation */
-					stmt,
-					InvalidOid, /* no predefined OID */
-					InvalidOid, /* no parent index */
-					InvalidOid, /* no parent constraint */
-					false,		/* is_alter_table */
-					true,		/* check_rights */
-					false,		/* check_not_in_use */
-					false,		/* skip_build */
-					false);		/* quiet */
-
-	/*
-	 * Add the CREATE INDEX node itself to stash right away; if there were any
-	 * commands stashed in the ALTER TABLE code, we need them to appear after
-	 * this one.
-	 */
-	EventTriggerCollectSimpleCommand(address,
-									 InvalidObjectAddress,
-									 utilityStmt);
-	EventTriggerAlterTableEnd();
+void
+o_define_index(Relation rel, ObjectAddress address,
+			   ODefineIndexContext *context)
+{
+	Relation index_rel;
+	OTable *o_table = context->o_table;
+	OTable *old_o_table = context->old_o_table;
+	OIndexNumber ix_num = context->ix_num;
+	OTableIndex *index = &o_table->indices[ix_num];
+	OTableDescr *old_descr = NULL;
 
 	index_rel = index_open(address.objectId, AccessShareLock);
-	memcpy(&o_table->indices[ix_num].name,
-		   &index_rel->rd_rel->relname,
+	memcpy(&index->name, &index_rel->rd_rel->relname,
 		   sizeof(NameData));
-	o_table->indices[ix_num].oids.relnode = index_rel->rd_rel->relfilenode;
+	index->oids.relnode = index_rel->rd_rel->relfilenode;
 
-	index_expr_fields = RelationGetIndexExpressions(index_rel);
-	index_predicate = RelationGetIndexPredicate(index_rel);
 	/* fill index fields */
-	o_table_fill_index(o_table, ix_num, ix_type, stmt->indexParams,
-					   index_expr_fields, index_predicate);
+	o_table_fill_index(o_table, ix_num, index->type, index_rel);
 
 	index_close(index_rel, AccessShareLock);
 
-	o_table->indices[ix_num].oids.datoid = MyDatabaseId;
-	o_table->indices[ix_num].oids.reloid = address.objectId;
+	index->oids.datoid = MyDatabaseId;
+	index->oids.reloid = address.objectId;
 
 	o_opclass_cache_add_table(o_table);
-	custom_types_add_all(o_table, &o_table->indices[ix_num]);
+	custom_types_add_all(o_table, index);
 
 	/* update o_table */
 	if (old_o_table)
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 
 	/* create orioledb index from exist data */
-	if (is_build)
+	if (context->is_build)
 	{
 		OTableDescr tmpDescr;
 
-		if (ix_type == oIndexPrimary)
+		if (index->type == oIndexPrimary)
 		{
 			Assert(old_o_table);
 			o_fill_tmp_table_descr(&tmpDescr, o_table);
-			rebuild_indices(old_o_table, old_descr,
-							o_table, &tmpDescr);
+			rebuild_indices(old_o_table, old_descr, o_table, &tmpDescr);
 			o_free_tmp_table_descr(&tmpDescr);
 		}
 		else
@@ -461,10 +441,10 @@ o_index_create(Relation rel,
 		}
 	}
 
-	if (ix_type == oIndexPrimary)
+	if (index->type == oIndexPrimary)
 	{
 		CommitSeqNo csn;
-		OXid		oxid;
+		OXid oxid;
 
 		Assert(old_o_table);
 		fill_current_oxid_csn(&oxid, &csn);
@@ -477,15 +457,15 @@ o_index_create(Relation rel,
 
 		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_update(o_table, oxid, csn);
-		add_undo_create_relnode(o_table->oids,
-								&o_table->indices[ix_num].oids,
-								1);
-		recreate_table_descr_by_oids(oids);
+		add_undo_create_relnode(o_table->oids, &index->oids, 1);
+		recreate_table_descr_by_oids(context->oids);
 	}
 
+	if (old_o_table)
+		o_table_free(old_o_table);
 	o_table_free(o_table);
 
-	if (is_build)
+	if (context->is_build)
 		LWLockRelease(&checkpoint_state->oTablesAddLock);
 }
 

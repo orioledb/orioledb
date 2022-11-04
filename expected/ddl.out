@@ -129,6 +129,10 @@ SELECT * FROM o_ddl_check;
 
 -- Fails, because types aren't binary compatible
 ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
+ERROR:  column "f2" cannot be cast automatically to type timestamp without time zone
+HINT:  You might need to specify "USING f2::timestamp without time zone".
+ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
+  USING f2::timestamp without time zone;
 ERROR:  could not change the column type
 DETAIL:  Column "f2" of OrioleDB table "o_ddl_check" has type "character varying". Can't change to "pg_catalog.timestamp", because it's not binary coersible.
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
@@ -146,23 +150,21 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
 
 ALTER TABLE o_ddl_check DROP f2;
 ALTER TABLE o_ddl_check DROP f1;
-ERROR:  could not drop the column
-DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pkey" index definition.
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
+      f1 |              text |         C |    false |   true +
       f2 | character varying |     POSIX |    false |   true +
       f3 |           integer |    (null) |     true |  false +
  
 (1 row)
 
 SELECT * FROM o_ddl_check;
- f1 | f3 
-----+----
- 1  |   
+ f3 
+----
+   
 (1 row)
 
 DROP TABLE o_ddl_check;
@@ -721,11 +723,11 @@ HINT:  Perhaps you meant to reference the column "o_unexisting_column.key".
 ALTER TABLE o_unexisting_column ALTER COLUMN key_2
 	ADD GENERATED ALWAYS AS IDENTITY;
 ERROR:  unsupported alter table subcommand
-DETAIL:  Subcommand "ADD IDENTITY" is not supported on OrioleDB tables.
+DETAIL:  Subcommand "ADD IDENTITY" is not supported on OrioleDB tables yet. Please send a bug report.
 ALTER TABLE o_unexisting_column ALTER COLUMN key
 	ADD GENERATED ALWAYS AS IDENTITY;
 ERROR:  unsupported alter table subcommand
-DETAIL:  Subcommand "ADD IDENTITY" is not supported on OrioleDB tables.
+DETAIL:  Subcommand "ADD IDENTITY" is not supported on OrioleDB tables yet. Please send a bug report.
 UPDATE o_unexisting_column SET key_2 = 4 WHERE key = 2;
 ERROR:  column "key_2" of relation "o_unexisting_column" does not exist
 LINE 1: UPDATE o_unexisting_column SET key_2 = 4 WHERE key = 2;

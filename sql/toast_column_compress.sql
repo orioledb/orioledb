@@ -9,7 +9,7 @@ INSERT INTO o_test_2 VALUES (1, repeat('a', 4000) || repeat('b', 4000));
 INSERT INTO o_test_2 VALUES (2, repeat('a', 150000) || repeat('b', 150000));
 INSERT INTO o_test_2 VALUES (3, (SELECT array_agg(md5(g::text))::text
 									FROM generate_series(1, 256) g));
-SELECT  FROM o_test_2;
+SELECT * FROM o_test_2;
 
 SELECT octet_length(val), pg_column_size(val),
 	   pg_column_compression(val) FROM o_test_2 WHERE key = 1;

@@ -160,7 +160,8 @@ CREATE TABLE pg_test_cid_record
 	PRIMARY KEY(a)
 );
 BEGIN;
-INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid));
+INSERT INTO pg_test_cid_record VALUES (ROW('2'::cid));
 ERROR:  could not identify a comparison function for type cid
 COMMIT;
 DROP TABLE pg_test_cid_record;
@@ -173,10 +174,12 @@ CREATE TABLE o_test_cid_record
 ) USING orioledb;
 ERROR:  could not identify a comparison function for type cid
 BEGIN;
-INSERT INTO o_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+INSERT INTO o_test_cid_record VALUES (ROW('1'::cid));
 ERROR:  relation "o_test_cid_record" does not exist
-LINE 1: INSERT INTO o_test_cid_record VALUES (ROW('1'::cid)), (ROW('...
+LINE 1: INSERT INTO o_test_cid_record VALUES (ROW('1'::cid));
                     ^
+INSERT INTO o_test_cid_record VALUES (ROW('2'::cid));
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 DROP TYPE o_rec;
 CREATE TABLE pg_test_xid_array
@@ -459,7 +462,7 @@ SELECT * FROM o_test_record_type_alter;
  (10,20) |   5
 (10 rows)
 
-ALTER TABLE o_test_record_type_alter ADD COLUMN val3 int NOT NULL DEFAULT 18;
+ALTER TABLE o_test_record_type_alter ADD COLUMN val3 int DEFAULT 18;
 ALTER TABLE o_test_record_type_alter ADD COLUMN val4 text DEFAULT 'abc';
 SELECT * FROM o_test_record_type_alter;
    key   | val | val3 | val4 
@@ -496,7 +499,11 @@ SELECT * FROM o_test_record_type_alter;
 UPDATE o_test_record_type_alter tb SET val3 = 33 WHERE (key).a BETWEEN 5 AND 8;
 UPDATE o_test_record_type_alter tb SET val4 = 'c' WHERE (key).a BETWEEN 7 AND 9;
 INSERT INTO o_test_record_type_alter (key, val3)
-	SELECT (id, id * 2)::record_type_non_altered, id FROM generate_series(11, 15) id;
+	SELECT (id, id * 2)::record_type_non_altered, id
+		FROM generate_series(11, 13) id;
+INSERT INTO o_test_record_type_alter (key)
+	SELECT (id, id * 2)::record_type_non_altered
+		FROM generate_series(14, 15) id;
 SELECT * FROM o_test_record_type_alter;
    key   | val | val3 | val4 
 ---------+-----+------+------
@@ -513,8 +520,8 @@ SELECT * FROM o_test_record_type_alter;
  (11,22) |   5 |   11 | b
  (12,24) |   5 |   12 | b
  (13,26) |   5 |   13 | b
- (14,28) |   5 |   14 | b
- (15,30) |   5 |   15 | b
+ (14,28) |   5 |      | b
+ (15,30) |   5 |      | b
 (15 rows)
 
 CREATE INDEX o_test_record_type_alter_idx1 ON o_test_record_type_alter (val4);
@@ -543,18 +550,18 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
      Item 2: offset = 400, tuple = ('(0,3)', '(3,6)', '5', '18', 'abc')                +
      Item 3: offset = 464, tuple = ('(0,4)', '(4,8)', '5', '18', 'abc')                +
      Item 4: offset = 528, tuple = ('(0,5)', '(5,10)', '5', '33', 'abc')               +
-   Chunk 1: offset = 5, location = 600, hikey location = 80, hikey = ('(0,10)')        +
-     Item 5: offset = 608, tuple = ('(0,6)', '(6,12)', '5', '33', 'abc')               +
-     Item 6: offset = 680, tuple = ('(0,7)', '(7,14)', '5', '33', 'c')                 +
-     Item 7: offset = 752, tuple = ('(0,8)', '(8,16)', '5', '33', 'c')                 +
-     Item 8: offset = 824, tuple = ('(0,9)', '(9,18)', '5', '18', 'c')                 +
-   Chunk 2: offset = 9, location = 896, hikey location = 88                            +
-     Item 9: offset = 912, tuple = ('(0,10)', '(10,20)', '5', '18', 'abc')             +
-     Item 10: offset = 976, tuple = ('(0,11)', '(11,22)', '5', '11', 'b')              +
-     Item 11: offset = 1048, tuple = ('(0,12)', '(12,24)', '5', '12', 'b')             +
-     Item 12: offset = 1120, tuple = ('(0,13)', '(13,26)', '5', '13', 'b')             +
-     Item 13: offset = 1192, tuple = ('(0,14)', '(14,28)', '5', '14', 'b')             +
-     Item 14: offset = 1264, tuple = ('(0,15)', '(15,30)', '5', '15', 'b')             +
+   Chunk 1: offset = 5, location = 600, hikey location = 80, hikey = ('(0,11)')        +
+     Item 5: offset = 616, tuple = ('(0,6)', '(6,12)', '5', '33', 'abc')               +
+     Item 6: offset = 688, tuple = ('(0,7)', '(7,14)', '5', '33', 'c')                 +
+     Item 7: offset = 760, tuple = ('(0,8)', '(8,16)', '5', '33', 'c')                 +
+     Item 8: offset = 832, tuple = ('(0,9)', '(9,18)', '5', '18', 'c')                 +
+     Item 9: offset = 904, tuple = ('(0,10)', '(10,20)', '5', '18', 'abc')             +
+   Chunk 2: offset = 10, location = 968, hikey location = 88                           +
+     Item 10: offset = 984, tuple = ('(0,11)', '(11,22)', '5', '11', 'b')              +
+     Item 11: offset = 1056, tuple = ('(0,12)', '(12,24)', '5', '12', 'b')             +
+     Item 12: offset = 1128, tuple = ('(0,13)', '(13,26)', '5', '13', 'b')             +
+     Item 13: offset = 1200, tuple = ('(0,14)', '(14,28)', '5', null, 'b')             +
+     Item 14: offset = 1280, tuple = ('(0,15)', '(15,30)', '5', null, 'b')             +
                                                                                        +
  Index o_test_record_type_alter_idx1 contents                                          +
  Page 0: level = 0, maxKeyLen = 18, nVacatedBytes = 0                                  +
@@ -605,8 +612,8 @@ SELECT * FROM o_test_record_type_alter;
  (11,22) |   5 |   11 | b
  (12,24) |   5 |   12 | b
  (13,26) |   5 |   13 | b
- (14,28) |   5 |   14 | b
- (15,30) |   5 |   15 | b
+ (14,28) |   5 |      | b
+ (15,30) |   5 |      | b
 (15 rows)
 
 BEGIN;
@@ -628,8 +635,8 @@ SELECT * FROM o_test_record_type_alter;
  (11,22) |   5 |   11 | b
  (12,24) |   5 |   12 | b
  (13,26) |   5 |   13 | b
- (14,28) |   5 |   14 | b
- (15,30) |   5 |   15 | b
+ (14,28) |   5 |      | b
+ (15,30) |   5 |      | b
 (15 rows)
 
 ALTER TABLE o_test_record_type_alter
@@ -664,8 +671,8 @@ SELECT * FROM o_test_record_type_alter;
  (11,22) |   5 |   11 | b    | (1,)
  (12,24) |   5 |   12 | b    | (1,)
  (13,26) |   5 |   13 | b    | (1,)
- (14,28) |   5 |   14 | b    | (1,)
- (15,30) |   5 |   15 | b    | (1,)
+ (14,28) |   5 |      | b    | (1,)
+ (15,30) |   5 |      | b    | (1,)
 (15 rows)
 
 UPDATE o_test_record_type_alter SET val5.b = 4;
@@ -689,8 +696,8 @@ SELECT * FROM o_test_record_type_alter;
  (11,22) |   5 |   11 | b    | (1,22)
  (12,24) |   5 |   12 | b    | (1,24)
  (13,26) |   5 |   13 | b    | (1,26)
- (14,28) |   5 |   14 | b    | (1,28)
- (15,30) |   5 |   15 | b    | (1,30)
+ (14,28) |   5 |      | b    | (1,28)
+ (15,30) |   5 |      | b    | (1,30)
 (15 rows)
 
 SELECT * FROM o_test_record_type_alter WHERE (val5).c % 6 = 0;
@@ -700,7 +707,7 @@ SELECT * FROM o_test_record_type_alter WHERE (val5).c % 6 = 0;
  (6,12)  |   5 |   33 | abc  | (1,12)
  (9,18)  |   5 |   18 | c    | (1,18)
  (12,24) |   5 |   12 | b    | (1,24)
- (15,30) |   5 |   15 | b    | (1,30)
+ (15,30) |   5 |      | b    | (1,30)
 (5 rows)
 
 SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
@@ -739,8 +746,8 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
      Item 11: offset = 1424, tuple = ('(12,24)', '5', '12', 'b', '(1,24)')            +
    Chunk 3: offset = 12, location = 1528, hikey location = 192                        +
      Item 12: offset = 1536, tuple = ('(13,26)', '5', '13', 'b', '(1,26)')            +
-     Item 13: offset = 1640, tuple = ('(14,28)', '5', '14', 'b', '(1,28)')            +
-     Item 14: offset = 1744, tuple = ('(15,30)', '5', '15', 'b', '(1,30)')            +
+     Item 13: offset = 1640, tuple = ('(14,28)', '5', null, 'b', '(1,28)')            +
+     Item 14: offset = 1744, tuple = ('(15,30)', '5', null, 'b', '(1,30)')            +
                                                                                       +
  Index o_test_record_type_alter_idx1 contents                                         +
  Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                                 +

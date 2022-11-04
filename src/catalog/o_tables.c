@@ -319,29 +319,30 @@ o_deparse_expression(char *expr_str, Oid relid)
 
 void
 o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
-				   OIndexType type, List *index_elems,
-				   List *index_expr_elems, List *index_predicate)
+				   OIndexType type, Relation index_rel)
 {
-	OTableField *field;
-	ListCell   *field_cell;
-	Oid			field_typeid;
-	int			ixfield_num;
-	OTableIndex *index = &o_table->indices[ix_num];
-	ListCell   *index_expr_elem = list_head(index_expr_elems);
-	int			ix_exprfield_num;
-	ListCell   *lc;
-	MemoryContext mcxt,
-				old_mcxt;
+	OTableIndex	   *index = &o_table->indices[ix_num];
+	ListCell	   *index_expr_elem = list_head(index_rel->rd_indexprs);
+	int				ix_exprfield_num;
+	ListCell	   *lc;
+	MemoryContext	mcxt,
+					old_mcxt;
+	int				keyno;
+	Datum			datum;
+	oidvector	   *indclass;
+	oidvector	   *indcollation;
+	bool			isnull;
 
 	index->index_mctx = NULL;
 	mcxt = OGetIndexContext(index);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
-	if (index_expr_elems)
+	if (index_rel->rd_indexprs != NIL)
 	{
-		index->nexprfields = list_length(index_expr_elems);
+		index->nexprfields = list_length(index_rel->rd_indexprs);
 		index->exprfields = palloc0(index->nexprfields * sizeof(OTableField));
 	}
-	index->predicate = (List *) expression_planner((Expr *) index_predicate);
+	index->predicate = (List *)
+		expression_planner((Expr *) index_rel->rd_indpred);
 	if (index->predicate)
 	{
 		index->predicate_str =
@@ -350,7 +351,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 	}
 	o_collect_funcexpr((Node *) index->predicate);
 	index->expressions = NIL;
-	foreach(lc, index_expr_elems)
+	foreach(lc, index_rel->rd_indexprs)
 	{
 		Expr	   *e = (Expr *) lfirst(lc);
 		Expr	   *node;
@@ -361,54 +362,44 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 	o_collect_funcexpr((Node *) index->expressions);
 	MemoryContextSwitchTo(old_mcxt);
 
-	ixfield_num = 0;
-	ix_exprfield_num = 0;
-	foreach(field_cell, index_elems)
-	{
-		OTableIndexField *ix_field;
-		IndexElem  *ielem = castNode(IndexElem, lfirst(field_cell));
-		Node	   *expr = ielem->expr;
+	/* Must get indclass the hard way */
+	datum = SysCacheGetAttr(INDEXRELID, index_rel->rd_indextuple,
+							Anum_pg_index_indclass, &isnull);
+	Assert(!isnull);
+	indclass = (oidvector *) DatumGetPointer(datum);
 
-		if (expr)
-			while (IsA(expr, CollateExpr))
-				expr = (Node *) ((CollateExpr *) expr)->arg;
-		ix_field = &index->fields[ixfield_num];
-		if (!expr)
+	/* Extract indcollation from the pg_index tuple */
+	datum = SysCacheGetAttr(INDEXRELID, index_rel->rd_indextuple,
+							Anum_pg_index_indcollation, &isnull);
+	Assert(!isnull);
+	indcollation = (oidvector *) DatumGetPointer(datum);
+
+	ix_exprfield_num = 0;
+	for (keyno = 0; keyno < index_rel->rd_index->indnkeyatts; keyno++)
+	{
+		AttrNumber			attnum = index_rel->rd_index->indkey.values[keyno];
+		OTableIndexField   *ix_field;
+		int16				opt = index_rel->rd_indoption[keyno];
+
+		ix_field = &index->fields[keyno];
+		if (AttributeNumberIsValid(attnum))
 		{
 			/* Field validation performed in o_validate_index_elements */
-			ix_field->attnum = o_table_fieldnum(o_table, ielem->name);
-			field = &o_table->fields[ix_field->attnum];
-
-			if (ielem->collation)
-			{
-				ix_field->collation = get_collation_oid(ielem->collation,
-														false);
-			}
-			field_typeid = field->typid;
-		}
-		else if (IsA(expr, Var) &&
-				 ((Var *) expr)->varattno != InvalidAttrNumber)
-		{
-			ix_field->attnum = ((Var *) expr)->varattno - 1;
-			field = &o_table->fields[ix_field->attnum];
-
-			if (ielem->collation)
-			{
-				ix_field->collation = get_collation_oid(ielem->collation,
-														false);
-			}
-			field_typeid = field->typid;
+			ix_field->attnum = attnum - 1;
 		}
 		else
 		{
-			Node	   *indexkey;
-			HeapTuple	tuple;
-			Form_pg_type typeTup;
-			OTableField *exprField = &index->exprfields[ix_exprfield_num++];
+			/* Expressional index */
+			Node		   *indexkey;
+			HeapTuple		tuple;
+			Form_pg_type	typeTup;
+			OTableField	   *exprField;
+			Oid				field_typeid;
 
-			Assert(index_expr_elems);
+			Assert(index_rel->rd_indexprs);
 			indexkey = lfirst(index_expr_elem);
-			index_expr_elem = lnext(index_expr_elems, index_expr_elem);
+			index_expr_elem = lnext(index_rel->rd_indexprs, index_expr_elem);
+			exprField = &index->exprfields[ix_exprfield_num++];
 
 			/*
 			 * Lookup the expression type in pg_type for the type length etc.
@@ -449,56 +440,80 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 							   NIL, 0);
 
 			ix_field->attnum = EXPR_ATTNUM;
-			ix_field->collation = exprField->collation;
 		}
-		ix_field->ordering = ielem->ordering;
-		ix_field->nullsOrdering = ielem->nulls_ordering;
-		ix_field->opclass = ResolveOpClass(ielem->opclass,
-										   field_typeid,
-										   "btree",
-										   BTREE_AM_OID);
-		ixfield_num++;
+		ix_field->collation = indcollation->values[keyno];
+		ix_field->opclass = indclass->values[keyno];
+		ix_field->ordering = SORTBY_DEFAULT;
+		ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
+		if (opt & INDOPTION_DESC)
+		{
+			ix_field->ordering = SORTBY_DESC;
+			if ((opt & INDOPTION_NULLS_FIRST) == 0)
+				ix_field->nullsOrdering = SORTBY_NULLS_LAST;
+		}
+		else if (opt & INDOPTION_NULLS_FIRST)
+		{
+			ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
+		}
 	}
+}
+
+void
+o_table_resize_constr(OTable *o_table)
+{
+	MemoryContext	oldcxt;
+	MemoryContext	tbl_cxt;
+
+	tbl_cxt = OGetTableContext(o_table);
+	oldcxt = MemoryContextSwitchTo(tbl_cxt);
+
+	if (!o_table->missing)
+		o_table->missing = palloc0(o_table->nfields * sizeof(AttrMissing));
+	else
+		o_table->missing = repalloc(o_table->missing,
+									o_table->nfields * sizeof(AttrMissing));
+	o_table->missing[o_table->nfields - 1].am_present = false;
+	o_table->missing[o_table->nfields - 1].am_value = 0;
+
+	if (!o_table->defvals)
+		o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
+	else
+		o_table->defvals = repalloc(o_table->defvals,
+									o_table->nfields * sizeof(Expr *));
+	o_table->defvals[o_table->nfields - 1] = NULL;
+
+	MemoryContextSwitchTo(oldcxt);
 }
 
 void
 o_table_fill_constr(OTable *o_table, int i, AttrMissing *attrmiss,
 					Expr *defval)
 {
-	OTableField *field = &o_table->fields[i];
-	MemoryContext oldcxt;
+	OTableField	   *field = &o_table->fields[i];
+	MemoryContext	oldcxt;
+	MemoryContext	tbl_cxt;
 
-	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+	tbl_cxt = OGetTableContext(o_table);
+	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
-	o_table->has_missing = o_table->has_missing || field->hasmissing;
-	if (!o_table->missing)
-		o_table->missing = palloc0(o_table->nfields * sizeof(AttrMissing));
-	else
-		o_table->missing = repalloc(o_table->missing,
-									o_table->nfields * sizeof(AttrMissing));
-
-	o_table->missing[i].am_present = field->hasmissing && attrmiss->am_present;
-	if (o_table->missing[i].am_present)
-		o_table->missing[i].am_value = datumCopy(attrmiss->am_value,
-												 field->byval, field->typlen);
-	else
-		o_table->missing[i].am_value = 0;
-
-	o_table->has_default = o_table->has_default || field->hasdef;
-	if (!o_table->defvals)
-		o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
-	else
-		o_table->defvals = repalloc(o_table->defvals,
-									o_table->nfields * sizeof(Expr *));
+	if (attrmiss)
+	{
+		o_table->missing[i].am_present = field->hasmissing &&
+										 attrmiss->am_present;
+		if (o_table->missing[i].am_present)
+			o_table->missing[i].am_value = datumCopy(attrmiss->am_value,
+													 field->byval,
+													 field->typlen);
+		else
+			o_table->missing[i].am_value = 0;
+	}
 
 	o_table->defvals[i] = copyObject(defval);
 	MemoryContextSwitchTo(oldcxt);
 }
 
 OTable *
-o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
-					   OCompress default_compress, OCompress primary_compress,
-					   OCompress toast_compress)
+o_table_tableam_create(ORelOids oids, TupleDesc tupdesc)
 {
 	OTable	   *o_table;
 	int			i;
@@ -508,17 +523,7 @@ o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 	o_table->fields = palloc0(o_table->nfields * sizeof(OTableField));
 	o_table->oids = oids;
-	o_table->toast_oids = toastOids;
-	o_table->has_missing = false;
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
-
-	if (OCompressIsValid(default_compress))
-	{
-		if (!OCompressIsValid(primary_compress))
-			primary_compress = default_compress;
-		if (!OCompressIsValid(toast_compress))
-			toast_compress = default_compress;
-	}
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -528,10 +533,7 @@ o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
 		orioledb_attr_to_field(field, attr);
 	}
 	o_table->nindices = 0;
-
-	o_table->toast_compress = toast_compress;
-	o_table->primary_compress = primary_compress;
-	o_table->default_compress = default_compress;
+	o_table_resize_constr(o_table);
 
 	return o_table;
 }
@@ -589,39 +591,39 @@ o_table_fields_make_tupdesc(OTableField *fields, int nfields)
 }
 
 void
-o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table)
+o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 {
-	if (o_table->has_missing)
+	MemoryContext	oldcxt;
+	MemoryContext	idx_cxt;
+	int				i;
+	int				ctid_off;
+
+	idx_cxt = OGetIndexContext(descr);
+	oldcxt = MemoryContextSwitchTo(idx_cxt);
+	ctid_off = o_table->has_primary ? 0 : 1;
+
+	tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));
+	tupdesc->constr->missing = (AttrMissing *)
+		palloc0((o_table->nfields + ctid_off) * sizeof(AttrMissing));
+
+	if (!o_table->has_primary)
+		tupdesc->constr->missing[0].am_present = false;
+
+	for (i = 0; i < o_table->nfields; i++)
 	{
-		MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-		int			i;
-		int			ctid_off;
+		OTableField *field = &o_table->fields[i];
+		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[i + ctid_off];
 
-		ctid_off = o_table->has_primary ? 0 : 1;
+		tupdesc_miss->am_present = o_table->missing[i].am_present;
 
-		tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));
-		tupdesc->constr->missing = (AttrMissing *)
-			palloc0((o_table->nfields + ctid_off) * sizeof(AttrMissing));
-
-		if (!o_table->has_primary)
-			tupdesc->constr->missing[0].am_present = false;
-
-		for (i = 0; i < o_table->nfields; i++)
+		if (o_table->missing[i].am_present)
 		{
-			OTableField *field = &o_table->fields[i];
-			AttrMissing *tupdesc_miss = &tupdesc->constr->missing[i + ctid_off];
-
-			tupdesc_miss->am_present = o_table->missing[i].am_present;
-
-			if (o_table->missing[i].am_present)
-			{
-				tupdesc_miss->am_value =
-					datumCopy(o_table->missing[i].am_value, field->byval,
-							  field->typlen);
-			}
+			tupdesc_miss->am_value =
+				datumCopy(o_table->missing[i].am_value, field->byval,
+							field->typlen);
 		}
-		MemoryContextSwitchTo(oldcxt);
 	}
+	MemoryContextSwitchTo(oldcxt);
 }
 
 TupleDesc
@@ -691,9 +693,12 @@ o_table_make_index_keys(OTable *table, int *num)
 		keys[keys_num++].oids = table->indices[i].oids;
 	}
 
-	keys[keys_num].type = oIndexToast;
-	keys[keys_num].ixNum = TOASTIndexNumber;
-	keys[keys_num++].oids = table->toast_oids;
+	if (ORelOidsIsValid(table->toast_oids))
+	{
+		keys[keys_num].type = oIndexToast;
+		keys[keys_num].ixNum = TOASTIndexNumber;
+		keys[keys_num++].oids = table->toast_oids;
+	}
 
 	qsort(keys, keys_num, sizeof(OTableIndexOidsKey), index_keys_cmp);
 
@@ -945,15 +950,12 @@ o_table_free(OTable *table)
 {
 	int			i;
 
-	if (table->has_missing)
+	for (i = 0; i < table->nfields; i++)
 	{
-		for (i = 0; i < table->nfields; i++)
-		{
-			if (table->missing[i].am_present && !table->fields[i].byval)
-				pfree(DatumGetPointer(table->missing[i].am_value));
-		}
-		pfree(table->missing);
+		if (table->missing[i].am_present && !table->fields[i].byval)
+			pfree(DatumGetPointer(table->missing[i].am_value));
 	}
+	pfree(table->missing);
 	for (i = 0; i < table->nindices; i++)
 	{
 		if (table->indices[i].index_mctx)
@@ -998,22 +1000,13 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 }
 
 void
-o_tables_validate_tupdesc(TupleDesc tupdesc)
+o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 {
-	int			i,
-				droped = 0;
-
-	if (tupdesc->natts < 1)
-		elog(ERROR, "orioledb table should contain attributes.");
-
-	for (i = 0; i < tupdesc->natts; i++)
-	{
-		if (tupdesc->attrs[i].attisdropped)
-			droped++;
-	}
-
-	if (droped == tupdesc->natts)
-		elog(ERROR, "all attributes are dropped.");
+	o_opclass_cache_add_table(o_table);
+	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
+	if (o_table->has_primary)
+		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
+	o_invalidate_oids(o_table->oids);
 }
 
 bool
@@ -1396,40 +1389,30 @@ serialize_o_table(OTable *o_table, int *size)
 	appendBinaryStringInfo(&str, (Pointer) o_table->fields,
 						   o_table->nfields * sizeof(OTableField));
 
-	if (o_table->has_missing)
+	for (i = 0; i < o_table->nfields; i++)
 	{
-		int			i;
+		Size		field_size;
+		Pointer		buf,
+					buf_start;
 
-		for (i = 0; i < o_table->nfields; i++)
-		{
-			Size		field_size;
-			Pointer		buf,
-						buf_start;
-
-			field_size = datumEstimateSpace(o_table->missing[i].am_value,
-											!o_table->missing[i].am_present,
-											o_table->fields[i].byval,
-											o_table->fields[i].typlen);
-			appendBinaryStringInfo(&str,
-								   (Pointer) &o_table->missing[i].am_present,
-								   sizeof(bool));
-			buf = palloc(field_size);
-			buf_start = buf;	/* copied because datumSerialize moves buf ptr */
-			datumSerialize(o_table->missing[i].am_value,
-						   !o_table->missing[i].am_present,
-						   o_table->fields[i].byval,
-						   o_table->fields[i].typlen,
-						   &buf);
-			appendBinaryStringInfo(&str, buf_start, field_size);
-		}
+		field_size = datumEstimateSpace(o_table->missing[i].am_value,
+										!o_table->missing[i].am_present,
+										o_table->fields[i].byval,
+										o_table->fields[i].typlen);
+		appendBinaryStringInfo(&str, (Pointer) &o_table->missing[i].am_present,
+							   sizeof(bool));
+		buf = palloc(field_size);
+		buf_start = buf;	/* copied because datumSerialize moves buf ptr */
+		datumSerialize(o_table->missing[i].am_value,
+					   !o_table->missing[i].am_present,
+					   o_table->fields[i].byval,
+					   o_table->fields[i].typlen,
+					   &buf);
+		appendBinaryStringInfo(&str, buf_start, field_size);
 	}
-	if (o_table->has_default)
-	{
-		int			i;
 
-		for (i = 0; i < o_table->nfields; i++)
-			o_serialize_string(nodeToString(o_table->defvals[i]), &str);
-	}
+	for (i = 0; i < o_table->nfields; i++)
+		o_serialize_string(nodeToString(o_table->defvals[i]), &str);
 
 	*size = str.len;
 	return str.data;
@@ -1485,48 +1468,32 @@ deserialize_o_table(Pointer data, Size length)
 
 	len = o_table->nfields * sizeof(OTableField);
 	o_table->fields = (OTableField *) palloc(len);
-	if (o_table->has_missing || o_table->has_default)
-		Assert((ptr - data) + len <= length);
-	else
-		Assert((ptr - data) + len == length);
+	Assert((ptr - data) + len <= length);
 	memcpy(o_table->fields, ptr, len);
 	ptr += len;
 	Assert(ptr - data <= length);
 
-	if (o_table->has_missing)
+	o_table->missing = (AttrMissing *)
+		palloc(o_table->nfields * sizeof(AttrMissing));
+
+	for (i = 0; i < o_table->nfields; i++)
 	{
-		int			i;
+		AttrMissing *miss = &o_table->missing[i];
+		bool		isnull;
 
-		o_table->missing = (AttrMissing *)
-			palloc(o_table->nfields * sizeof(AttrMissing));
-
-		for (i = 0; i < o_table->nfields; i++)
-		{
-			AttrMissing *miss = &o_table->missing[i];
-			bool		isnull;
-
-			memcpy(&miss->am_present, ptr, sizeof(bool));
-			ptr += sizeof(bool);
-			miss->am_value = datumRestore(&ptr, &isnull);
-		}
-
-		Assert(ptr - data <= length);
+		memcpy(&miss->am_present, ptr, sizeof(bool));
+		ptr += sizeof(bool);
+		miss->am_value = datumRestore(&ptr, &isnull);
 	}
+	Assert(ptr - data <= length);
 
-	if (o_table->has_default)
+	o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
+	for (i = 0; i < o_table->nfields; i++)
 	{
-		int			i;
+		char	   *defval_str = o_deserialize_string(&ptr);
 
-		o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
-		for (i = 0; i < o_table->nfields; i++)
-		{
-			char	   *defval_str = o_deserialize_string(&ptr);
-
-			o_table->defvals[i] = stringToNode(defval_str);
-			pfree(defval_str);
-		}
-
-		Assert(ptr - data <= length);
+		o_table->defvals[i] = stringToNode(defval_str);
+		pfree(defval_str);
 	}
 
 	Assert(ptr - data == length);

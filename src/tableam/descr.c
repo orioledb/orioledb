@@ -908,8 +908,13 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 		descr->indices[cur_ix]->refcnt++;
 	}
 
-	descr->toast = get_index_descr(table->toast_oids, oIndexToast, false);
-	descr->toast->refcnt++;
+	if (ORelOidsIsValid(table->toast_oids))
+	{
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false);
+		descr->toast->refcnt++;
+	}
+	else
+		descr->toast = NULL;
 
 	o_find_toastable_attrs(descr);
 }
@@ -1325,7 +1330,13 @@ recreate_table_descr_by_oids(ORelOids oids)
 	descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
 
 	if (found)
+	{
+		OIndexDescr *indexDescr;
+		indexDescr = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
+		if (found)
+			index_descr_delete_from_hash(indexDescr);
 		recreate_table_descr(descr);
+	}
 	else
 		(void) create_table_descr(oids);
 }

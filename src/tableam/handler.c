@@ -37,7 +37,9 @@
 #include "access/tableam.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
-#include "catalog/pg_am_d.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_am.h"
+#include "catalog/pg_collation.h"
 #include "catalog/storage.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
@@ -45,10 +47,13 @@
 #include "nodes/execnodes.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/plancat.h"
+#include "parser/parse_coerce.h"
 #include "parser/parse_relation.h"
+#include "parser/parse_type.h"
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
+#include "utils/builtins.h"
 #if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
 #else
@@ -1473,166 +1478,6 @@ orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel)
 }
 
 static void
-update_tupdesc(OTable *o_table, OXid oxid, CommitSeqNo csn)
-{
-	o_opclass_cache_add_table(o_table);
-	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
-	if (o_table->has_primary)
-		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
-	o_invalidate_oids(o_table->oids);
-}
-
-static void
-orioledb_add_column(Relation rel, const char *queryString)
-{
-	OTableField				   *field;
-	Form_pg_attribute			attr;
-	OTable					   *o_table;
-	ORelOids					oids = {MyDatabaseId,
-										rel->rd_rel->oid,
-										rel->rd_node.relNode};
-	Node					   *defaultexpr;
-	AttrMissing				   *attrmiss = NULL;
-	AttrMissing					attrmiss_temp;
-	CommitSeqNo					csn;
-	OXid						oxid;
-	Relation					attrelation = NULL;
-
-	o_table = o_tables_get(oids);
-	if (o_table == NULL)
-	{
-		/* table does not exist */
-		elog(NOTICE, "orioledb table \"%s\" not found", RelationGetRelationName(rel));
-		return;
-	}
-
-	fill_current_oxid_csn(&oxid, &csn);
-
-	o_table->nfields++;
-	o_table->fields = repalloc(o_table->fields, o_table->nfields *
-													sizeof(OTableField));
-	memset(&o_table->fields[o_table->nfields - 1], 0, sizeof(OTableField));
-	field = &o_table->fields[o_table->nfields - 1];
-	attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
-	orioledb_attr_to_field(field, attr);
-
-	if (attr->atthasdef)
-		defaultexpr = build_column_default(rel, attr->attnum);
-	else
-		defaultexpr = NULL;
-
-	if (attr->atthasmissing)
-	{
-		Datum					missingval;
-		Expr				   *expr2;
-		ParseNamespaceItem	   *nsitem;
-		ParseState			   *pstate;
-		EState				   *estate = NULL;
-		ExprContext			   *econtext;
-		ExprState			   *exprState;
-		MemoryContext			tbl_cxt;
-		MemoryContext			oldcxt;
-		bool					missingIsNull = true;
-
-		pstate = make_parsestate(NULL);
-		pstate->p_sourcetext = queryString;
-		nsitem = addRangeTableEntryForRelation(pstate,
-												rel,
-												AccessShareLock,
-												NULL,
-												false,
-												true);
-		addNSItemToQuery(pstate, nsitem, true, true, true);
-
-		expr2 = expression_planner((Expr *) defaultexpr);
-
-		tbl_cxt = OGetTableContext(o_table);
-		oldcxt = MemoryContextSwitchTo(tbl_cxt);
-		estate = CreateExecutorState();
-		exprState = ExecPrepareExpr(expr2, estate);
-		econtext = GetPerTupleExprContext(estate);
-
-		missingval = ExecEvalExpr(exprState, econtext,
-									&missingIsNull);
-
-		FreeExecutorState(estate);
-		free_parsestate(pstate);
-
-		attrmiss_temp.am_value = datumCopy(missingval,
-											field->byval,
-											field->typlen);
-		MemoryContextSwitchTo(oldcxt);
-		attrmiss_temp.am_present = true;
-		attrmiss = &attrmiss_temp;
-		defaultexpr = (Node *) expr2;
-	}
-	o_table_fill_constr(o_table, o_table->nfields - 1, attrmiss,
-						(Expr *) defaultexpr);
-	if (attrelation)
-		table_close(attrelation, RowExclusiveLock);
-
-	o_tables_update(o_table, oxid, csn);
-	update_tupdesc(o_table, oxid, csn);
-	o_table_free(o_table);
-}
-
-static void
-orioledb_drop_column(Relation rel, const char *colName)
-{
-	OTable	   *o_table;
-	OTableField *o_field = NULL;
-	int			i;
-	ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid, rel->rd_node.relNode};
-
-	o_table = o_tables_get(oids);
-	if (o_table == NULL)
-	{
-		/* table does not exist */
-		elog(NOTICE, "orioledb table \"%s\" not found",
-			 RelationGetRelationName(rel));
-		return;
-	}
-
-	o_field = o_table_field_by_name(o_table, colName);
-
-	for (i = 0; i < o_table->nindices; i++)
-	{
-		OTableIndex *index = &o_table->indices[i];
-		int			j;
-
-		for (j = 0; j < index->nfields; j++)
-		{
-			OTableField *field = &o_table->fields[index->fields[j].attnum];
-
-			if (pg_strcasecmp(NameStr(field->name), colName) == 0)
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("could not drop the column")),
-						errdetail("Column \"%s\" of OrioleDB table \"%s\""
-								  " id used in \"%s\" index definition.",
-								  colName,
-								  RelationGetRelationName(rel),
-								  NameStr(index->name)));
-		}
-	}
-
-	if (o_field && !o_field->droped)
-	{
-		CommitSeqNo	csn;
-		OXid		oxid;
-
-		o_field->droped = true;
-
-		o_tables_validate_tupdesc(o_table_tupdesc(o_table));
-
-		fill_current_oxid_csn(&oxid, &csn);
-		o_tables_update(o_table, oxid, csn);
-		update_tupdesc(o_table, oxid, csn);
-	}
-	o_table_free(o_table);
-}
-
-static void
 orioledb_change_not_null(Relation rel, const char *colName, bool new_val)
 {
 	OTable	   *o_table;
@@ -1659,9 +1504,139 @@ orioledb_change_not_null(Relation rel, const char *colName, bool new_val)
 
 		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_update(o_table, oxid, csn);
-		update_tupdesc(o_table, oxid, csn);
+		o_tables_after_update(o_table, oxid, csn);
 	}
 	o_table_free(o_table);
+}
+
+static bool
+orioledb_alter_column_type(Relation rel, char *colName, ColumnDef *def)
+{
+	OTable		   *o_table;
+	OTableField	   *o_field = NULL;
+	ORelOids		oids = {MyDatabaseId,
+							rel->rd_rel->oid,
+							rel->rd_node.relNode};
+	int				i;
+	Oid				type;
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+	{
+		/* table does not exist */
+		elog(NOTICE, "orioledb table \"%s\" not found",
+			 RelationGetRelationName(rel));
+		return true;
+	}
+
+	o_field = o_table_field_by_name(o_table, colName);
+	type = typenameTypeId(NULL, def->typeName);
+
+	/*
+	 * We don't support rewriting the relation for now.  So, we
+	 * can only change the type if new type is binary coersible
+	 * with the old one.
+	 */
+	if (o_field)
+	{
+		if (!IsBinaryCoercible(o_field->typid, type))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("could not change the column type")),
+					errdetail("Column \"%s\" of OrioleDB table \"%s\" "
+							  "has type \"%s\". Can't change to \"%s\", "
+							  "because it's not binary coersible.",
+							  colName,
+							  RelationGetRelationName(rel),
+							  format_type_be(o_field->typid),
+							  TypeNameToString(def->typeName)));
+	}
+
+	for (i = 0; i < o_table->nindices; i++)
+	{
+		OTableIndex *index = &o_table->indices[i];
+		int j;
+
+		for (j = 0; j < index->nfields; j++)
+		{
+			OTableField *field = &o_table->fields[index->fields[j].attnum];
+
+			if (pg_strcasecmp(NameStr(field->name), colName) != 0)
+				continue;
+
+			if (def->collClause != NULL)
+			{
+				Oid	collid = get_collation_oid(def->collClause->collname,
+											   false);
+
+				if (collid != field->collation)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("could not change the column "
+									   "collation")),
+							errdetail("Column \"%s\" of OrioleDB table \"%s\" "
+									  "id used in \"%s\" index definition.",
+										colName,
+										RelationGetRelationName(rel),
+										NameStr(index->name)));
+			}
+			else if (field->collation != DEFAULT_COLLATION_OID)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("could not change the column collation")),
+						errdetail("Column \"%s\" of OrioleDB table \"%s\" "
+								  "id used in \"%s\" index definition.",
+									colName,
+									RelationGetRelationName(rel),
+									NameStr(index->name)));
+			}
+		}
+	}
+
+	if (o_field)
+	{
+		if (def->collClause != NULL)
+		{
+			List	   *collname = def->collClause->collname;
+			Oid			collid;
+
+			collid = get_collation_oid(collname, false);
+
+			if (o_field->collation != collid)
+				o_field->collation = collid;
+		}
+	}
+
+	if (o_field && (o_field->typid != type))
+	{
+		CommitSeqNo	csn;
+		OXid		oxid;
+
+		o_field->typid = type;
+
+		fill_current_oxid_csn(&oxid, &csn);
+		o_tables_update(o_table, oxid, csn);
+		o_tables_after_update(o_table, oxid, csn);
+	}
+	o_table_free(o_table);
+	return false;
+	return true;
+}
+
+static bool
+orioledb_define_index_validate(Relation rel, IndexStmt *stmt,
+							   void **arg)
+{
+	o_define_index_validate(rel, stmt, (ODefineIndexContext **) arg);
+	return true;
+}
+
+static bool
+orioledb_define_index(Relation rel, ObjectAddress address, void *arg)
+{
+	o_define_index(rel, address, (ODefineIndexContext *) arg);
+	return true;
 }
 
 void
@@ -1880,11 +1855,12 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.tuple_fetch_row_version = orioledb_fetch_row_version,
 	.tuple_refetch_row_version = orioledb_refetch_row_version,
 	.init_modify = orioledb_init_modify,
-	.rewrite_table = orioledb_rewrite_table,
-	.add_column = orioledb_add_column,
-	.drop_column = orioledb_drop_column,
-	.change_not_null = orioledb_change_not_null,
 	.free_rd_amcache = orioledb_free_rd_amcache,
+	.rewrite_table = orioledb_rewrite_table,
+	.change_not_null = orioledb_change_not_null,
+	.alter_column_type = orioledb_alter_column_type,
+	.define_index_validate = orioledb_define_index_validate,
+	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table
 };
 

@@ -91,8 +91,6 @@ typedef struct
 	uint16		nindices;
 	Oid			tid_btree_ops_oid;	/* have to store it here */
 	bool		has_primary;
-	bool		has_missing;
-	bool		has_default;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
@@ -109,14 +107,10 @@ typedef struct
 												   ALLOCSET_DEFAULT_SIZES)))
 
 extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
-							   OIndexType type, List *index_elems,
-							   List *index_expr_elems,
-							   List *index_predicate);
+							   OIndexType type, Relation index_rel);
 
 /* Creates and fills OTable. */
-extern OTable *o_table_tableam_create(ORelOids oids, ORelOids toastOids, TupleDesc tupdesc,
-									  OCompress default_compress, OCompress primary_compress,
-									  OCompress toast_compress);
+extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc);
 
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,
@@ -154,8 +148,8 @@ extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
 
-/* Checks tuple descriptor for compatibility with orioledb module */
-extern void o_tables_validate_tupdesc(TupleDesc tupdesc);
+/* Invalidates descriptors after o_tables_update */
+void o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
 
 /* Free memory of OTable struct */
 extern void o_table_free(OTable *table);
@@ -217,10 +211,11 @@ o_tables_rel_unlock(ORelOids *oids, int lockmode)
 extern void o_table_fill_oids(OTable *oTable, Relation rel,
 							  const RelFileNode *newrnode);
 
+extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, int i,
 								AttrMissing *attrmiss, Expr *defval);
-extern void o_tupdesc_load_constr(TupleDesc tupdesc,
-								  OTable *o_table);
+extern void o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table,
+								  OIndexDescr *descr);
 extern char *o_get_type_name(Oid typid, int32 typmod);
 extern char *o_get_collation_name(Oid colid);
 

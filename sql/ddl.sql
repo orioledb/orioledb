@@ -58,6 +58,8 @@ SELECT * FROM o_ddl_check;
 
 -- Fails, because types aren't binary compatible
 ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
+ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
+  USING f2::timestamp without time zone;
 
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;

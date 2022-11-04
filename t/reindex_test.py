@@ -81,31 +81,23 @@ class ReindexTest(BaseTest):
 	def test_4(self):
 		node = self.node
 		node.start()
-		with self.assertRaises(QueryException) as e:
-			node.safe_psql("""
-				CREATE EXTENSION orioledb;
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
 
-				CREATE TABLE o_test_1(
-					val_1 int,
-					val_2 int
-				)USING orioledb;
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
 
-				INSERT INTO o_test_1
-					(SELECT val_1, val_1 FROM generate_series(1, 50) AS val_1);
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 FROM generate_series(1, 50) AS val_1);
 
-				CREATE INDEX ind_val_1 ON o_test_1(val_1);
+			CREATE INDEX ind_val_1 ON o_test_1(val_1);
+		""")
 
-				ALTER TABLE o_test_1 DROP COLUMN val_1;
-			""")
-
-			con1 = node.connect(autocommit=True)
-			con1.execute("REINDEX INDEX ind_val_1;")
-			con1.close()
-
-		self.assertErrorMessageEquals(e, "could not drop the column",
-						 			  "Column \"val_1\" of OrioleDB table \"o_test_1\" "
-									  "id used in \"ind_val_1\" index definition.",
-									  "DETAIL")
+		con1 = node.connect(autocommit=True)
+		con1.execute("REINDEX INDEX ind_val_1;")
+		con1.close()
 		node.stop(['-m', 'immediate'])
 
 		node.start()

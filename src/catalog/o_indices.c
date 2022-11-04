@@ -645,7 +645,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 
 		if (o_table)
 		{
-			o_tupdesc_load_constr(descr->leafTupdesc, o_table);
+			o_tupdesc_load_constr(descr->leafTupdesc, o_table, descr);
 			primary_init_nfields = palloc(sizeof(*primary_init_nfields));
 			*primary_init_nfields = o_table->primary_init_nfields;
 			o_table_free(o_table);

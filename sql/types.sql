@@ -107,7 +107,8 @@ CREATE TABLE pg_test_cid_record
 	PRIMARY KEY(a)
 );
 BEGIN;
-INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid));
+INSERT INTO pg_test_cid_record VALUES (ROW('2'::cid));
 COMMIT;
 DROP TABLE pg_test_cid_record;
 DROP TYPE pg_rec;
@@ -119,7 +120,8 @@ CREATE TABLE o_test_cid_record
 	PRIMARY KEY(a)
 ) USING orioledb;
 BEGIN;
-INSERT INTO o_test_cid_record VALUES (ROW('1'::cid)), (ROW('2'::cid));
+INSERT INTO o_test_cid_record VALUES (ROW('1'::cid));
+INSERT INTO o_test_cid_record VALUES (ROW('2'::cid));
 COMMIT;
 DROP TYPE o_rec;
 
@@ -251,7 +253,7 @@ INSERT INTO o_test_record_type_alter
 	SELECT (id, id * 2)::record_type_non_altered FROM generate_series(1, 10) id;
 SELECT * FROM o_test_record_type_alter;
 
-ALTER TABLE o_test_record_type_alter ADD COLUMN val3 int NOT NULL DEFAULT 18;
+ALTER TABLE o_test_record_type_alter ADD COLUMN val3 int DEFAULT 18;
 ALTER TABLE o_test_record_type_alter ADD COLUMN val4 text DEFAULT 'abc';
 SELECT * FROM o_test_record_type_alter;
 ALTER TABLE o_test_record_type_alter ALTER COLUMN val3 DROP DEFAULT;
@@ -260,7 +262,11 @@ SELECT * FROM o_test_record_type_alter;
 UPDATE o_test_record_type_alter tb SET val3 = 33 WHERE (key).a BETWEEN 5 AND 8;
 UPDATE o_test_record_type_alter tb SET val4 = 'c' WHERE (key).a BETWEEN 7 AND 9;
 INSERT INTO o_test_record_type_alter (key, val3)
-	SELECT (id, id * 2)::record_type_non_altered, id FROM generate_series(11, 15) id;
+	SELECT (id, id * 2)::record_type_non_altered, id
+		FROM generate_series(11, 13) id;
+INSERT INTO o_test_record_type_alter (key)
+	SELECT (id, id * 2)::record_type_non_altered
+		FROM generate_series(14, 15) id;
 SELECT * FROM o_test_record_type_alter;
 
 CREATE INDEX o_test_record_type_alter_idx1 ON o_test_record_type_alter (val4);
