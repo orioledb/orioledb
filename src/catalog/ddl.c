@@ -41,6 +41,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
+#include "catalog/pg_inherits.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_type.h"
 #include "catalog/toasting.h"
@@ -823,6 +824,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 								case AT_SetNotNull:
 								case AT_ChangeOwner:
 								case AT_DropNotNull:
+								case AT_AddInherit:
+								case AT_DropInherit:
 									break;
 								default:
 									ereport(ERROR,
@@ -1958,9 +1961,6 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		validate_compress(compress, "Default");
 		validate_compress(primary_compress, "Primary index");
 		validate_compress(toast_compress, "TOAST");
-
-		if (cstmt->inhRelations != NIL)
-			elog(ERROR, "INHERITS is not supported for orioledb tables.");
 	}
 
 	/* Create the table itself */
