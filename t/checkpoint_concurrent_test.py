@@ -456,7 +456,8 @@ class CheckpointConcurrentTest(BaseTest):
 		node.append_conf('postgresql.conf',
 						 "log_min_messages = notice\n"
 						 "orioledb.main_buffers = 48MB\n"
-						 "orioledb.enable_stopevents = true\n")
+						 "orioledb.enable_stopevents = true\n"
+						 "max_parallel_workers_per_gather = 0\n")
 		node.start()
 		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
 		node.safe_psql('postgres', """CREATE TABLE IF NOT EXISTS o_checkpoint (
