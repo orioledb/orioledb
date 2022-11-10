@@ -424,3 +424,82 @@ class IndicesBuildTest(BaseTest):
 					WHERE val{i} > 0 ORDER BY val{i}""",
 				f'o_indices0_idx{i}')
 		node.stop()
+
+	def test_alter_column_type(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_ddl_check
+			(
+				f1 text NOT NULL COLLATE "C",
+				f2 varchar NOT NULL,
+				f3 integer,
+				PRIMARY KEY (f1)
+			) USING orioledb;
+
+			INSERT INTO o_ddl_check VALUES ('ABC1', 'ABC2', NULL);
+			INSERT INTO o_ddl_check VALUES ('ABC2', 'ABC4', NULL);
+			INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
+		""")
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'ABC2', None),
+						  ('ABC2', 'ABC4', None),
+						  ('ABC3', 'ABC6', None)])
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'ABC2', None),
+						  ('ABC2', 'ABC4', None),
+						  ('ABC3', 'ABC6', None)])
+		node.safe_psql("""
+			ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
+		""")
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'ABC2', None),
+						  ('ABC2', 'ABC4', None),
+						  ('ABC3', 'ABC6', None)])
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'ABC2', None),
+						  ('ABC2', 'ABC4', None),
+						  ('ABC3', 'ABC6', None)])
+		node.safe_psql("""
+			ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
+		""")
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'ABC2', None),
+						  ('ABC2', 'ABC4', None),
+						  ('ABC3', 'ABC6', None)])
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'ABC2', None),
+						  ('ABC2', 'ABC4', None),
+						  ('ABC3', 'ABC6', None)])
+		node.safe_psql("""
+			ALTER TABLE o_ddl_check ALTER f2 TYPE char
+				USING substr(f2, substr(f2,4,1)::int / 2, 1);
+		""")
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'A', None),
+						  ('ABC2', 'B', None),
+						  ('ABC3', 'C', None)])
+		node.safe_psql("""
+			INSERT INTO o_ddl_check VALUES ('ABC4', 'D', NULL);
+		""")
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'A', None),
+						  ('ABC2', 'B', None),
+						  ('ABC3', 'C', None),
+						  ('ABC4', 'D', None)])
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
+						 [('ABC1', 'A', None),
+						  ('ABC2', 'B', None),
+						  ('ABC3', 'C', None),
+						  ('ABC4', 'D', None)])
+		node.stop()

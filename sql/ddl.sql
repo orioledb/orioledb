@@ -25,11 +25,14 @@ CREATE TABLE o_ddl_check
 	f3 integer,
 	PRIMARY KEY (f1)
 ) USING orioledb;
-INSERT INTO o_ddl_check VALUES ('1', '2', NULL);
+INSERT INTO o_ddl_check VALUES ('ABC1', 'ABC2', NULL);
 -- Fails, because of NOT NULL constraint
 INSERT INTO o_ddl_check VALUES ('2', NULL, '3');
 -- Fails, because of unique constraint
-INSERT INTO o_ddl_check VALUES ('1', '2', '3');
+INSERT INTO o_ddl_check VALUES ('ABC1', '2', '3');
+
+INSERT INTO o_ddl_check VALUES ('ABC2', 'ABC4', NULL);
+INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
 
 SELECT * FROM o_ddl_check;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
@@ -37,33 +40,83 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
 -- Fails because can't drop NOT NULL contraint on PK
 ALTER TABLE o_ddl_check ALTER f1 DROP NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
+
 -- Fails on unknown option
 ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
 ALTER TABLE o_ddl_check ALTER f2 TYPE text;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
 
 -- OK, because 'f2' isn't indexed
 ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
 
--- Fails, because 'f2' is indexed with different collation
+-- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
+-- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE varchar COLLATE "POSIX";
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
 -- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
+-- OK, because same type and collation
+ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
+-- OK, because binary compatible and collations match
+ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "POSIX";
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
 
--- Fails, because types aren't binary compatible
+-- Fails, because no default conversion
 ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
+-- Fails, because wrong date format
 ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
   USING f2::timestamp without time zone;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
+
+-- OK, because expression is valid conversion to char
+ALTER TABLE o_ddl_check ALTER f2 TYPE char
+	USING substr(f2, substr(f2,4,1)::int / 2, 1);
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
+
+BEGIN;
+ALTER TABLE o_ddl_check ALTER f2 TYPE int
+	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
+ROLLBACK;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
 
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+SELECT * FROM o_ddl_check;
 
 ALTER TABLE o_ddl_check DROP f2;
 ALTER TABLE o_ddl_check DROP f1;

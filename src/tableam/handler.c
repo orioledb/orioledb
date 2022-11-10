@@ -60,6 +60,7 @@
 #include "pgstat.h"
 #endif
 #include "utils/datum.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
 #include "utils/syscache.h"
@@ -1423,53 +1424,50 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 }
 
 static bool
-orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel)
+orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel, List *newvals)
 {
 	bool			result = false;
 	ORelOids		oids;
 	OTable		   *old_o_table,
-				   *o_table;
-	OTableDescr	   *old_descr,
+				   *new_o_table;
+	OTableDescr		old_tmp_descr,
 					tmp_descr;
 	TupleDesc		newDesc = RelationGetDescr(old_rel);
+	uint32			version;
 
 	oids.datoid = MyDatabaseId;
 	oids.reloid = old_rel->rd_id;
 	oids.relnode = old_rel->rd_node.relNode;
-	o_table = o_tables_get(oids);
+	new_o_table = o_tables_get(oids);
 
-	if (o_table == NULL)
+	if (new_o_table == NULL)
 	{
 		/* it does not exist */
 		elog(ERROR, "orioledb table \"%s\" not found",
 			 RelationGetRelationName(old_rel));
 	}
 
-	old_o_table = o_table;
-	o_table = o_tables_get(o_table->oids);
-	if (o_table == NULL)
-	{
-		/* it does not exist */
-		elog(ERROR, "orioledb table \"%s\" not found",
-			 RelationGetRelationName(old_rel));
-	}
-	assign_new_oids(o_table, old_rel);
+	/* o_table always updated before rewrite */
+	version = new_o_table->version - 1;
+	old_o_table = o_tables_get_by_oids_and_version(oids, &version);
+	assign_new_oids(new_o_table, old_rel);
 
-	o_table->primary_init_nfields = o_table->nfields;
-	if (oldDesc->natts < newDesc->natts && !o_table->has_primary)
-		o_table->primary_init_nfields++;
+	new_o_table->primary_init_nfields = new_o_table->nfields;
+	if (oldDesc->natts < newDesc->natts && !new_o_table->has_primary)
+		new_o_table->primary_init_nfields++;
 
 	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
-	old_descr = o_fetch_table_descr(old_o_table->oids);
-
-	o_fill_tmp_table_descr(&tmp_descr, o_table);
-	rebuild_indices(old_o_table, old_descr, o_table, &tmp_descr);
+	o_fill_tmp_table_descr(&old_tmp_descr, old_o_table);
+	o_fill_tmp_table_descr(&tmp_descr, new_o_table);
+	rebuild_indices(old_o_table, &old_tmp_descr, new_o_table, &tmp_descr,
+					newvals);
+	o_free_tmp_table_descr(&old_tmp_descr);
 	o_free_tmp_table_descr(&tmp_descr);
 
-	recreate_o_table(old_o_table, o_table);
+	recreate_o_table(old_o_table, new_o_table);
 
 	o_table_free(old_o_table);
-	o_table_free(o_table);
+	o_table_free(new_o_table);
 	LWLockRelease(&checkpoint_state->oTablesAddLock);
 
 	result = true;
@@ -1477,157 +1475,11 @@ orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel)
 	return result;
 }
 
-static void
-orioledb_change_not_null(Relation rel, const char *colName, bool new_val)
-{
-	OTable	   *o_table;
-	OTableField *o_field = NULL;
-	ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid, rel->rd_node.relNode};
-
-	o_table = o_tables_get(oids);
-	if (o_table == NULL)
-	{
-		/* table does not exist */
-		elog(NOTICE, "orioledb table \"%s\" not found",
-			 RelationGetRelationName(rel));
-		return;
-	}
-
-	o_field = o_table_field_by_name(o_table, colName);
-
-	if (o_field && (o_field->notnull != new_val))
-	{
-		CommitSeqNo	csn;
-		OXid		oxid;
-
-		o_field->notnull = new_val;
-
-		fill_current_oxid_csn(&oxid, &csn);
-		o_tables_update(o_table, oxid, csn);
-		o_tables_after_update(o_table, oxid, csn);
-	}
-	o_table_free(o_table);
-}
-
-static bool
-orioledb_alter_column_type(Relation rel, char *colName, ColumnDef *def)
-{
-	OTable		   *o_table;
-	OTableField	   *o_field = NULL;
-	ORelOids		oids = {MyDatabaseId,
-							rel->rd_rel->oid,
-							rel->rd_node.relNode};
-	int				i;
-	Oid				type;
-
-	o_table = o_tables_get(oids);
-	if (o_table == NULL)
-	{
-		/* table does not exist */
-		elog(NOTICE, "orioledb table \"%s\" not found",
-			 RelationGetRelationName(rel));
-		return true;
-	}
-
-	o_field = o_table_field_by_name(o_table, colName);
-	type = typenameTypeId(NULL, def->typeName);
-
-	/*
-	 * We don't support rewriting the relation for now.  So, we
-	 * can only change the type if new type is binary coersible
-	 * with the old one.
-	 */
-	if (o_field)
-	{
-		if (!IsBinaryCoercible(o_field->typid, type))
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("could not change the column type")),
-					errdetail("Column \"%s\" of OrioleDB table \"%s\" "
-							  "has type \"%s\". Can't change to \"%s\", "
-							  "because it's not binary coersible.",
-							  colName,
-							  RelationGetRelationName(rel),
-							  format_type_be(o_field->typid),
-							  TypeNameToString(def->typeName)));
-	}
-
-	for (i = 0; i < o_table->nindices; i++)
-	{
-		OTableIndex *index = &o_table->indices[i];
-		int j;
-
-		for (j = 0; j < index->nfields; j++)
-		{
-			OTableField *field = &o_table->fields[index->fields[j].attnum];
-
-			if (pg_strcasecmp(NameStr(field->name), colName) != 0)
-				continue;
-
-			if (def->collClause != NULL)
-			{
-				Oid	collid = get_collation_oid(def->collClause->collname,
-											   false);
-
-				if (collid != field->collation)
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("could not change the column "
-									   "collation")),
-							errdetail("Column \"%s\" of OrioleDB table \"%s\" "
-									  "id used in \"%s\" index definition.",
-										colName,
-										RelationGetRelationName(rel),
-										NameStr(index->name)));
-			}
-			else if (field->collation != DEFAULT_COLLATION_OID)
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("could not change the column collation")),
-						errdetail("Column \"%s\" of OrioleDB table \"%s\" "
-								  "id used in \"%s\" index definition.",
-									colName,
-									RelationGetRelationName(rel),
-									NameStr(index->name)));
-			}
-		}
-	}
-
-	if (o_field)
-	{
-		if (def->collClause != NULL)
-		{
-			List	   *collname = def->collClause->collname;
-			Oid			collid;
-
-			collid = get_collation_oid(collname, false);
-
-			if (o_field->collation != collid)
-				o_field->collation = collid;
-		}
-	}
-
-	if (o_field && (o_field->typid != type))
-	{
-		CommitSeqNo	csn;
-		OXid		oxid;
-
-		o_field->typid = type;
-
-		fill_current_oxid_csn(&oxid, &csn);
-		o_tables_update(o_table, oxid, csn);
-		o_tables_after_update(o_table, oxid, csn);
-	}
-	o_table_free(o_table);
-	return false;
-	return true;
-}
-
 static bool
 orioledb_define_index_validate(Relation rel, IndexStmt *stmt,
 							   void **arg)
 {
+	alter_column_reuse = false;
 	o_define_index_validate(rel, stmt, (ODefineIndexContext **) arg);
 	return true;
 }
@@ -1857,8 +1709,6 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.init_modify = orioledb_init_modify,
 	.free_rd_amcache = orioledb_free_rd_amcache,
 	.rewrite_table = orioledb_rewrite_table,
-	.change_not_null = orioledb_change_not_null,
-	.alter_column_type = orioledb_alter_column_type,
 	.define_index_validate = orioledb_define_index_validate,
 	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table

@@ -27,20 +27,24 @@ CREATE TABLE o_ddl_check
 	f3 integer,
 	PRIMARY KEY (f1)
 ) USING orioledb;
-INSERT INTO o_ddl_check VALUES ('1', '2', NULL);
+INSERT INTO o_ddl_check VALUES ('ABC1', 'ABC2', NULL);
 -- Fails, because of NOT NULL constraint
 INSERT INTO o_ddl_check VALUES ('2', NULL, '3');
 ERROR:  null value in column "f2" of relation "o_ddl_check" violates not-null constraint
 DETAIL:  Failing row contains (2, null, 3).
 -- Fails, because of unique constraint
-INSERT INTO o_ddl_check VALUES ('1', '2', '3');
+INSERT INTO o_ddl_check VALUES ('ABC1', '2', '3');
 ERROR:  duplicate key value violates unique constraint "o_ddl_check"
-DETAIL:  Key ('1') already exists
+DETAIL:  Key ('ABC1') already exists
+INSERT INTO o_ddl_check VALUES ('ABC2', 'ABC4', NULL);
+INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
 SELECT * FROM o_ddl_check;
- f1 | f2 | f3 
-----+----+----
- 1  | 2  |   
-(1 row)
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
 
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
@@ -67,11 +71,23 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
  
 (1 row)
 
-SELECT * FROM o_ddl_check;
- f1 | f2 | f3 
-----+----+----
- 1  | 2  |   
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
 (1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
 
 -- Fails on unknown option
 ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
@@ -88,6 +104,24 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
  
 (1 row)
 
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
 -- OK, because 'f2' isn't indexed
 ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
@@ -101,13 +135,86 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
  
 (1 row)
 
--- Fails, because 'f2' is indexed with different collation
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
+-- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text;
-ERROR:  could not change the column collation
-DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pkey" index definition.
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |   default |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
+-- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE varchar COLLATE "POSIX";
-ERROR:  could not change the column collation
-DETAIL:  Column "f1" of OrioleDB table "o_ddl_check" id used in "o_ddl_check_pkey" index definition.
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
+  Column |              Type | Collation | Nullable | Droped +
+      f1 | character varying |     POSIX |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
 -- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
@@ -121,22 +228,26 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
  
 (1 row)
 
-SELECT * FROM o_ddl_check;
- f1 | f2 | f3 
-----+----+----
- 1  | 2  |   
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
 (1 row)
 
--- Fails, because types aren't binary compatible
-ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
-ERROR:  column "f2" cannot be cast automatically to type timestamp without time zone
-HINT:  You might need to specify "USING f2::timestamp without time zone".
-ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
-  USING f2::timestamp without time zone;
-ERROR:  could not change the column type
-DETAIL:  Column "f2" of OrioleDB table "o_ddl_check" has type "character varying". Can't change to "pg_catalog.timestamp", because it's not binary coersible.
-ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
-ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
+-- OK, because same type and collation
+ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
@@ -148,16 +259,256 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
  
 (1 row)
 
-ALTER TABLE o_ddl_check DROP f2;
-ALTER TABLE o_ddl_check DROP f1;
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
+-- OK, because binary compatible and collations match
+ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
 --------------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1   +
   Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |   true +
-      f2 | character varying |     POSIX |    false |   true +
+      f1 |              text |     POSIX |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
       f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
+-- Fails, because no default conversion
+ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
+ERROR:  column "f2" cannot be cast automatically to type timestamp without time zone
+HINT:  You might need to specify "USING f2::timestamp without time zone".
+-- Fails, because wrong date format
+ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
+  USING f2::timestamp without time zone;
+ERROR:  invalid input syntax for type timestamp: "ABC2"
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                  orioledb_table_description                  
+--------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |     POSIX |    false |  false +
+      f2 | character varying |     POSIX |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
+(3 rows)
+
+-- OK, because expression is valid conversion to char
+ALTER TABLE o_ddl_check ALTER f2 TYPE char
+	USING substr(f2, substr(f2,4,1)::int / 2, 1);
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+      f1 |         text |     POSIX |    false |  false   +
+      f2 | character(1) |   default |    false |  false   +
+      f3 |      integer |    (null) |     true |  false   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  | f2 | f3 
+------+----+----
+ ABC1 | A  |   
+ ABC2 | B  |   
+ ABC3 | C  |   
+(3 rows)
+
+BEGIN;
+ALTER TABLE o_ddl_check ALTER f2 TYPE int
+	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+      f1 |    text |     POSIX |    false |  false        +
+      f2 | integer |    (null) |    false |  false        +
+      f3 | integer |    (null) |     true |  false        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  | f2 | f3 
+------+----+----
+ ABC1 | 10 |   
+ ABC2 | 11 |   
+ ABC3 | 12 |   
+(3 rows)
+
+ROLLBACK;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+      f1 |         text |     POSIX |    false |  false   +
+      f2 | character(1) |   default |    false |  false   +
+      f3 |      integer |    (null) |     true |  false   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  | f2 | f3 
+------+----+----
+ ABC1 | A  |   
+ ABC2 | B  |   
+ ABC3 | C  |   
+(3 rows)
+
+ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+      f1 |         text |     POSIX |    false |  false   +
+      f2 | character(1) |   default |     true |  false   +
+      f3 |      integer |    (null) |     true |  false   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  | f2 | f3 
+------+----+----
+ ABC1 | A  |   
+ ABC2 | B  |   
+ ABC3 | C  |   
+(3 rows)
+
+ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+      f1 |         text |     POSIX |    false |  false   +
+      f2 | character(1) |   default |    false |  false   +
+      f3 |      integer |    (null) |     true |  false   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ 
+(1 row)
+
+SELECT * FROM o_ddl_check;
+  f1  | f2 | f3 
+------+----+----
+ ABC1 | A  |   
+ ABC2 | B  |   
+ ABC3 | C  |   
+(3 rows)
+
+ALTER TABLE o_ddl_check DROP f2;
+ALTER TABLE o_ddl_check DROP f1;
+SELECT orioledb_table_description('o_ddl_check'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+      f1 |         text |     POSIX |    false |   true   +
+      f2 | character(1) |   default |    false |   true   +
+      f3 |      integer |    (null) |     true |  false   +
  
 (1 row)
 
@@ -165,7 +516,9 @@ SELECT * FROM o_ddl_check;
  f3 
 ----
    
-(1 row)
+   
+   
+(3 rows)
 
 DROP TABLE o_ddl_check;
 CREATE TABLE o_ddl_check

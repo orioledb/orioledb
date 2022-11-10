@@ -743,12 +743,13 @@ static void
 o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 					  OXid oxid, CommitSeqNo csn)
 {
-	OTableIndexOidsKey *old_keys = NULL;
-	OTableIndexOidsKey *new_keys = NULL;
-	int			old_keys_num = 0,
-				new_keys_num = 0,
-				i = 0,
-				j = 0;
+	OTableIndexOidsKey	   *old_keys = NULL;
+	OTableIndexOidsKey	   *new_keys = NULL;
+	int						old_keys_num = 0,
+							new_keys_num = 0,
+							i = 0,
+							j = 0;
+	bool					reuse = false;
 
 	old_keys = o_table_make_index_keys(old_table, &old_keys_num);
 	new_keys = o_table_make_index_keys(new_table, &new_keys_num);
@@ -775,24 +776,35 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 				j++;
 				continue;
 			}
+			else if (new_keys_num == old_keys_num &&
+					 old_keys[i].oids.datoid == new_keys[j].oids.datoid &&
+					 old_keys[i].oids.reloid != new_keys[j].oids.reloid &&
+					 old_keys[i].oids.relnode == new_keys[j].oids.relnode)
+			{
+				reuse = true;
+			}
 		}
 
 		if (cmp < 0)
 		{
 			bool		result;
 
-			elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
-				 old_keys[i].type,
-				 old_keys[i].oids.datoid,
-				 old_keys[i].oids.reloid,
-				 old_keys[i].oids.relnode,
-				 old_table->oids.datoid,
-				 old_table->oids.reloid,
-				 old_table->oids.relnode);
+			if (!reuse)
+			{
+				elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
+					old_keys[i].type,
+					old_keys[i].oids.datoid,
+					old_keys[i].oids.reloid,
+					old_keys[i].oids.relnode,
+					old_table->oids.datoid,
+					old_table->oids.reloid,
+					old_table->oids.relnode);
 
-			result = o_indices_del(old_table, old_keys[i].ixNum, oxid, csn);
-			if (!result)
-				elog(ERROR, "missing entries in o_indices");
+				result = o_indices_del(old_table, old_keys[i].ixNum,
+									   oxid, csn);
+				if (!result)
+					elog(ERROR, "missing entries in o_indices");
+			}
 			i++;
 		}
 
@@ -800,17 +812,22 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 		{
 			bool		result PG_USED_FOR_ASSERTS_ONLY;
 
-			elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
-				 new_keys[j].type,
-				 new_keys[j].oids.datoid,
-				 new_keys[j].oids.reloid,
-				 new_keys[j].oids.relnode,
-				 new_table->oids.datoid,
-				 new_table->oids.reloid,
-				 new_table->oids.relnode);
+			if (!reuse)
+			{
+				elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
+					new_keys[j].type,
+					new_keys[j].oids.datoid,
+					new_keys[j].oids.reloid,
+					new_keys[j].oids.relnode,
+					new_table->oids.datoid,
+					new_table->oids.reloid,
+					new_table->oids.relnode);
 
-			result = o_indices_add(new_table, new_keys[j].ixNum, oxid, csn);
-			Assert(result);
+				result = o_indices_add(new_table, new_keys[j].ixNum,
+									   oxid, csn);
+				Assert(result);
+			}
+			reuse = false;
 			j++;
 		}
 	}
@@ -1005,7 +1022,11 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 	o_opclass_cache_add_table(o_table);
 	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
 	if (o_table->has_primary)
+	{
+		o_add_invalidate_undo_item(o_table->indices[PrimaryIndexNumber].oids,
+								O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
+	}
 	o_invalidate_oids(o_table->oids);
 }
 

@@ -89,6 +89,8 @@ UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
 static bool		isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 
+bool	alter_column_reuse = false;
+
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
 #if PG_VERSION_NUM >= 140000
@@ -1587,13 +1589,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX &&
-					 drop_arg->dropflags == 0)
-
+					 drop_arg->dropflags != PERFORM_DELETION_OF_RELATION)
+			{
 				/*
-				 * dropflags == PERFORM_DELETION_OF_RELATION also ignored, to
+				 * dropflags == PERFORM_DELETION_OF_RELATION ignored, to
 				 * not drop indices when whole table dropped
 				 */
-			{
 				Relation	tbl = relation_open(rel->rd_index->indrelid,
 												AccessShareLock);
 
@@ -1608,18 +1609,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					ix_num = o_find_ix_num_by_name(descr, rel->rd_rel->relname.data);
 					if (ix_num != InvalidIndexNumber)
 					{
-						OIndexNumber ix_num;
-						OTableDescr *descr = relation_get_descr(tbl);
-
-						Assert(descr != NULL);
-						ix_num = o_find_ix_num_by_name(descr, rel->rd_rel->relname.data);
-						Assert(ix_num != InvalidIndexNumber);
 						if (descr->indices[ix_num]->primaryIsCtid)
 							ix_num--;
 						relation_close(rel, AccessShareLock);
 						is_open = false;
 
-						o_index_drop(tbl, ix_num);
+						if (!alter_column_reuse)
+							o_index_drop(tbl, ix_num);
+						alter_column_reuse = false;
 					}
 				}
 				relation_close(tbl, AccessShareLock);
@@ -1762,8 +1759,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				o_table = o_table_tableam_create(oids, tupdesc);
 				o_opclass_cache_add_table(o_table);
-
-				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 				o_tables_add(o_table, oxid, csn);
 			}
 			relation_close(rel, AccessShareLock);
@@ -1880,6 +1875,44 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
 											   NULL);
 			}
+			else if (rel->rd_rel->relkind == RELKIND_RELATION &&
+					 (subId != 0) && is_orioledb_rel(rel))
+			{
+				OTableField *field;
+				Form_pg_attribute attr;
+				OTable *o_table;
+				ORelOids oids = {MyDatabaseId,
+								 rel->rd_rel->oid,
+								 rel->rd_node.relNode};
+				CommitSeqNo csn;
+				OXid oxid;
+
+				o_table = o_tables_get(oids);
+				if (o_table == NULL)
+				{
+					/* table does not exist */
+					elog(NOTICE, "orioledb table \"%s\" not found",
+						 RelationGetRelationName(rel));
+				}
+				else
+				{
+					OTableField old_field;
+
+					old_field = o_table->fields[subId - 1];
+					CommandCounterIncrement();
+					field = &o_table->fields[subId - 1];
+					attr = &rel->rd_att->attrs[subId - 1];
+					orioledb_attr_to_field(field, attr);
+
+					alter_column_reuse = old_field.typid == field->typid &&
+										 old_field.collation == field->collation;
+
+					fill_current_oxid_csn(&oxid, &csn);
+					o_tables_update(o_table, oxid, csn);
+					o_tables_after_update(o_table, oxid, csn);
+					o_table_free(o_table);
+				}
+			}
 			relation_close(rel, AccessShareLock);
 		}
 	}
@@ -1961,6 +1994,7 @@ o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
 		validate_compress(compress, "Default");
 		validate_compress(primary_compress, "Primary index");
 		validate_compress(toast_compress, "TOAST");
+		LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 	}
 
 	/* Create the table itself */

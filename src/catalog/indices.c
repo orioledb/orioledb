@@ -51,6 +51,15 @@
 #include "utils/syscache.h"
 #include "utils/tuplesort.h"
 
+/* copied from tablecmds.c */
+typedef struct NewColumnValue
+{
+	AttrNumber	attnum;			/* which column */
+	Expr	   *expr;			/* expression to compute */
+	ExprState  *exprstate;		/* execution state */
+	bool		is_generated;	/* is it a GENERATED expression? */
+} NewColumnValue;
+
 bool		in_indexes_rebuild = false;
 
 bool
@@ -194,45 +203,52 @@ void
 o_define_index_validate(Relation rel, IndexStmt *stmt,
 						ODefineIndexContext **arg)
 {
-	int nattrs;
-	Oid myrelid = RelationGetRelid(rel);
-	ORelOids oids = {MyDatabaseId, myrelid, rel->rd_node.relNode};
-	OIndexNumber ix_num;
-	OCompress compress = InvalidOCompress;
-	OIndexType ix_type;
-	ORelOids primary_oids;
-	static ODefineIndexContext context;
-	OTable *o_table;
+	int							nattrs;
+	Oid							myrelid = RelationGetRelid(rel);
+	ORelOids					oids = {MyDatabaseId,
+										myrelid,
+										rel->rd_node.relNode};
+	OIndexNumber				ix_num;
+	OCompress					compress = InvalidOCompress;
+	OIndexType					ix_type;
+	ORelOids					primary_oids;
+	static ODefineIndexContext	context;
+	OTable					   *o_table;
+	bool						reuse = OidIsValid(stmt->oldNode);
 
 	*arg = &context;
 
 	context.oids = oids;
 	context.is_build = false;
+	context.reuse = reuse;
 	context.o_table = NULL;
 	context.old_o_table = NULL;
 
-	if (strcmp(stmt->accessMethod, "btree") != 0)
-		ereport(ERROR, errmsg("'%s' access method is not supported", stmt->accessMethod),
-				errhint("Only 'btree' access method supported now "
-						"for indices on orioledb tables."));
+	if (!reuse)
+	{
+		if (strcmp(stmt->accessMethod, "btree") != 0)
+			ereport(ERROR, errmsg("'%s' access method is not supported", stmt->accessMethod),
+					errhint("Only 'btree' access method supported now "
+							"for indices on orioledb tables."));
 
-	if (stmt->concurrent)
-		elog(ERROR, "concurrent indexes are not supported.");
+		if (stmt->concurrent)
+			elog(ERROR, "concurrent indexes are not supported.");
 
-	if (stmt->tableSpace != NULL)
-		elog(ERROR, "tablespaces aren't supported");
+		if (stmt->tableSpace != NULL)
+			elog(ERROR, "tablespaces aren't supported");
 
-	stmt->options = extract_compress_rel_option(stmt->options,
-												"compress",
-												&compress);
-	validate_compress(compress, "Index");
+		stmt->options = extract_compress_rel_option(stmt->options,
+													"compress",
+													&compress);
+		validate_compress(compress, "Index");
 
-	if (stmt->options != NIL)
-		elog(ERROR, "orioledb tables indices support "
-					"only \"compress\" option.");
+		if (stmt->options != NIL)
+			elog(ERROR, "orioledb tables indices support "
+						"only \"compress\" option.");
 
-	if (stmt->indexIncludingParams != NIL)
-		elog(ERROR, "include indexes are not supported");
+		if (stmt->indexIncludingParams != NIL)
+			elog(ERROR, "include indexes are not supported");
+	}
 
 	context.o_table = o_tables_get(oids);
 	if (context.o_table == NULL)
@@ -240,9 +256,12 @@ o_define_index_validate(Relation rel, IndexStmt *stmt,
 		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
 			 (unsigned) oids.datoid, (unsigned) oids.reloid,
 			 (unsigned) oids.relnode);
-		}
-		o_table = context.o_table;
+	}
 
+	o_table = context.o_table;
+
+	if (!reuse)
+	{
 		/* check index type */
 		if (stmt->primary)
 			ix_type = oIndexPrimary;
@@ -309,8 +328,24 @@ o_define_index_validate(Relation rel, IndexStmt *stmt,
 		{
 			ix_num = o_table->nindices;
 		}
-		context.ix_num = ix_num;
+	}
+	else
+	{
+		int	i;
 
+		ix_num = InvalidIndexNumber;
+		for (i = 0; i < o_table->nindices; i++)
+		{
+			if (o_table->indices[i].oids.relnode == stmt->oldNode)
+				ix_num = i;
+		}
+		Assert(ix_num != InvalidIndexNumber);
+	}
+
+	context.ix_num = ix_num;
+
+	if (!reuse)
+	{
 		o_table->indices = (OTableIndex *)
 			repalloc(o_table->indices, sizeof(OTableIndex) *
 										   (o_table->nindices + 1));
@@ -388,6 +423,7 @@ o_define_index_validate(Relation rel, IndexStmt *stmt,
 		/* check index fields */
 		o_validate_index_elements(o_table, ix_num, ix_type,
 								  stmt->indexParams, stmt->whereClause);
+	}
 }
 
 void
@@ -402,46 +438,52 @@ o_define_index(Relation rel, ObjectAddress address,
 	OTableDescr *old_descr = NULL;
 
 	index_rel = index_open(address.objectId, AccessShareLock);
-	memcpy(&index->name, &index_rel->rd_rel->relname,
-		   sizeof(NameData));
+	if (!context->reuse)
+		memcpy(&index->name, &index_rel->rd_rel->relname,
+			   sizeof(NameData));
 	index->oids.relnode = index_rel->rd_rel->relfilenode;
 
 	/* fill index fields */
-	o_table_fill_index(o_table, ix_num, index->type, index_rel);
+	if (!context->reuse)
+		o_table_fill_index(o_table, ix_num, index->type, index_rel);
 
 	index_close(index_rel, AccessShareLock);
 
 	index->oids.datoid = MyDatabaseId;
 	index->oids.reloid = address.objectId;
 
-	o_opclass_cache_add_table(o_table);
-	custom_types_add_all(o_table, index);
-
-	/* update o_table */
-	if (old_o_table)
-		old_descr = o_fetch_table_descr(old_o_table->oids);
-
-	/* create orioledb index from exist data */
-	if (context->is_build)
+	if (!context->reuse)
 	{
-		OTableDescr tmpDescr;
+		o_opclass_cache_add_table(o_table);
+		custom_types_add_all(o_table, index);
 
-		if (index->type == oIndexPrimary)
+		/* update o_table */
+		if (old_o_table)
+			old_descr = o_fetch_table_descr(old_o_table->oids);
+
+		/* create orioledb index from exist data */
+		if (context->is_build)
 		{
-			Assert(old_o_table);
-			o_fill_tmp_table_descr(&tmpDescr, o_table);
-			rebuild_indices(old_o_table, old_descr, o_table, &tmpDescr);
-			o_free_tmp_table_descr(&tmpDescr);
-		}
-		else
-		{
-			o_fill_tmp_table_descr(&tmpDescr, o_table);
-			build_secondary_index(o_table, &tmpDescr, ix_num);
-			o_free_tmp_table_descr(&tmpDescr);
+			OTableDescr tmpDescr;
+
+			if (index->type == oIndexPrimary)
+			{
+				Assert(old_o_table);
+				o_fill_tmp_table_descr(&tmpDescr, o_table);
+				rebuild_indices(old_o_table, old_descr, o_table, &tmpDescr,
+								NULL);
+				o_free_tmp_table_descr(&tmpDescr);
+			}
+			else
+			{
+				o_fill_tmp_table_descr(&tmpDescr, o_table);
+				build_secondary_index(o_table, &tmpDescr, ix_num);
+				o_free_tmp_table_descr(&tmpDescr);
+			}
 		}
 	}
 
-	if (index->type == oIndexPrimary)
+	if (!context->reuse && index->type == oIndexPrimary)
 	{
 		CommitSeqNo csn;
 		OXid oxid;
@@ -572,21 +614,26 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 
 void
 rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
-				OTable *o_table, OTableDescr *descr)
+				OTable *o_table, OTableDescr *descr, List *newvals)
 {
-	BTreeIterator *iter;
-	OIndexDescr *primary,
-			   *idx;
-	Tuplesortstate **sortstates;
-	Tuplesortstate *toastSortState;
-	TupleTableSlot *primarySlot;
-	int			i;
-	Relation	tableRelation;
-	double		heap_tuples,
-				index_tuples;
-	uint64		ctid;
-	CheckpointFileHeader *fileHeaders;
-	CheckpointFileHeader toastFileHeader;
+	BTreeIterator		   *iter;
+	OIndexDescr			   *primary,
+						   *idx;
+	Tuplesortstate		  **sortstates;
+	Tuplesortstate		   *toastSortState;
+	TupleTableSlot		   *primarySlot;
+	TupleTableSlot		   *newPrimarySlot;
+	int						i;
+	Relation				tableRelation;
+	double					heap_tuples,
+							index_tuples;
+	uint64					ctid;
+	CheckpointFileHeader   *fileHeaders;
+	CheckpointFileHeader	toastFileHeader;
+	EState				   *estate;
+	ExprContext			   *econtext;
+	ListCell			   *lc;
+	MemoryContext			oldCxt;
 
 	primary = GET_PRIMARY(old_descr);
 	o_btree_load_shmem(&primary->desc);
@@ -602,16 +649,38 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		sortstates[i] = tuplesort_begin_orioledb_index(idx, work_mem, false, NULL);
 	}
 	primarySlot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
+	newPrimarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+
+	/*
+	 * Set all columns in the new slot to NULL initially, to ensure
+	 * columns added as part of the rewrite are initialized to NULL.
+	 * That is necessary as tab->newvals will not contain an
+	 * expression for columns with a NULL default, e.g. when adding a
+	 * column without a default together with a column with a default
+	 * requiring an actual rewrite.
+	 */
+	ExecStoreAllNullTuple(newPrimarySlot);
 
 	btree_open_smgr(&descr->toast->desc);
 	toastSortState = tuplesort_begin_orioledb_toast(descr->toast,
 													descr->indices[0],
 													work_mem, false, NULL);
 
+	estate = CreateExecutorState();
+	econtext = GetPerTupleExprContext(estate);
+	foreach(lc, newvals)
+	{
+		NewColumnValue *ex = lfirst(lc);
+
+		/* expr already planned */
+		ex->exprstate = ExecInitExpr((Expr *) ex->expr, NULL);
+	}
+
 	iter = o_btree_iterator_create(&primary->desc, NULL, BTreeKeyNone,
 								   COMMITSEQNO_INPROGRESS, ForwardScanDirection);
 	heap_tuples = 0;
 	ctid = 0;
+	oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
 	while (true)
 	{
 		OTuple		primaryTup;
@@ -628,7 +697,30 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 		slot_getallattrs(primarySlot);
 		tts_orioledb_detoast(primarySlot);
-		tts_orioledb_toast(primarySlot, descr);
+
+		ExecClearTuple(newPrimarySlot);
+
+		/* copy attributes */
+		memcpy(newPrimarySlot->tts_values, primarySlot->tts_values,
+				sizeof(Datum) * primarySlot->tts_nvalid);
+		memcpy(newPrimarySlot->tts_isnull, primarySlot->tts_isnull,
+				sizeof(bool) * primarySlot->tts_nvalid);
+		newPrimarySlot->tts_nvalid = primarySlot->tts_nvalid;
+		newPrimarySlot->tts_tableOid = old_descr->oids.reloid;
+
+		econtext->ecxt_scantuple = primarySlot;
+		foreach(lc, newvals)
+		{
+			NewColumnValue *ex = lfirst(lc);
+
+			if (ex->is_generated)
+				continue;
+
+			newPrimarySlot->tts_values[ex->attnum - 1] =
+				ExecEvalExpr(ex->exprstate, econtext,
+							 &newPrimarySlot->tts_isnull[ex->attnum - 1]);
+		}
+		tts_orioledb_toast(newPrimarySlot, descr);
 
 		for (i = 0; i < descr->nIndices; i++)
 		{
@@ -637,7 +729,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 			idx = descr->indices[i];
 
-			if (!o_is_index_predicate_satisfied(idx, primarySlot,
+			if (!o_is_index_predicate_satisfied(idx, newPrimarySlot,
 												idx->econtext))
 				continue;
 
@@ -646,30 +738,36 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			{
 				if (idx->primaryIsCtid)
 				{
-					primarySlot->tts_tid.ip_posid = (OffsetNumber) ctid;
-					BlockIdSet(&primarySlot->tts_tid.ip_blkid, (uint32) (ctid >> 16));
+					newPrimarySlot->tts_tid.ip_posid = (OffsetNumber) ctid;
+					BlockIdSet(&newPrimarySlot->tts_tid.ip_blkid,
+							   (uint32) (ctid >> 16));
 					ctid++;
 				}
-				newTup = tts_orioledb_form_orphan_tuple(primarySlot, descr);
+				newTup = tts_orioledb_form_orphan_tuple(newPrimarySlot, descr);
 			}
 			else
 			{
-				newTup = tts_orioledb_make_secondary_tuple(primarySlot, idx, true);
+				newTup = tts_orioledb_make_secondary_tuple(newPrimarySlot,
+														   idx, true);
 			}
 			MemoryContextSwitchTo(oldContext);
-
-			o_btree_check_size_of_tuple(o_tuple_size(newTup, &idx->leafSpec), idx->name.data, true);
+			o_btree_check_size_of_tuple(o_tuple_size(newTup, &idx->leafSpec),
+										idx->name.data, true);
 			tuplesort_putotuple(sortstates[i], newTup);
 		}
 
-		tts_orioledb_toast_sort_add(primarySlot, descr, toastSortState);
+		tts_orioledb_toast_sort_add(newPrimarySlot, descr, toastSortState);
 
 		ExecClearTuple(primarySlot);
+		ExecClearTuple(newPrimarySlot);
 		heap_tuples++;
 	}
 	index_tuples = heap_tuples;
 
+	MemoryContextSwitchTo(oldCxt);
+	FreeExecutorState(estate);
 	ExecDropSingleTupleTableSlot(primarySlot);
+	ExecDropSingleTupleTableSlot(newPrimarySlot);
 	btree_iterator_free(iter);
 
 	for (i = 0; i < descr->nIndices; i++)
@@ -677,7 +775,8 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		idx = descr->indices[i];
 		tuplesort_performsort(sortstates[i]);
 		btree_write_index_data(&idx->desc, idx->leafTupdesc, sortstates[i],
-							   (idx->primaryIsCtid && i == PrimaryIndexNumber) ? ctid : 0,
+							   (idx->primaryIsCtid &&
+								i == PrimaryIndexNumber) ? ctid : 0,
 							   &fileHeaders[i]);
 		tuplesort_end_orioledb_index(sortstates[i]);
 	}
@@ -922,7 +1021,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 
 	o_fill_tmp_table_descr(&tmp_descr, o_table);
-	rebuild_indices(old_o_table, old_descr, o_table, &tmp_descr);
+	rebuild_indices(old_o_table, old_descr, o_table, &tmp_descr, NULL);
 	o_free_tmp_table_descr(&tmp_descr);
 
 	recreate_o_table(old_o_table, o_table);
