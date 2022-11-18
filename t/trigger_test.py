@@ -1,8 +1,6 @@
 from .base_test import BaseTest
 from testgres.exceptions import QueryException
 from testgres.connection import DatabaseError
-import psycopg2
-import gc
 import re
 
 class TriggerTest(BaseTest):
@@ -237,53 +235,63 @@ class TriggerTest(BaseTest):
 	def test_7(self):
 		node = self.node
 		node.start()
-		node.safe_psql("""
-			CREATE EXTENSION IF NOT EXISTS orioledb;
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				CREATE EXTENSION IF NOT EXISTS orioledb;
 
-			CREATE TABLE o_test_1 (val_1, val_2) -- USING orioledb
-				AS (SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
+				CREATE TABLE o_test_1 (val_1, val_2) USING orioledb
+					AS (SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
 
-			CREATE OR REPLACE FUNCTION func_trig_1()
-			RETURNS event_trigger
-			LANGUAGE plpgsql
-			AS $$
-			BEGIN
-			RAISE EXCEPTION 'command % is disabled', tg_tag;
-			END;
-			$$;
+				CREATE OR REPLACE FUNCTION func_trig_1()
+				RETURNS event_trigger
+				LANGUAGE plpgsql
+				AS $$
+				BEGIN
+				RAISE EXCEPTION 'command % is disabled', tg_tag;
+				END;
+				$$;
 
-			CREATE EVENT TRIGGER trig_1 ON ddl_command_start
-			EXECUTE FUNCTION func_trig_1();
+				CREATE EVENT TRIGGER trig_1 ON ddl_command_start
+				EXECUTE FUNCTION func_trig_1();
 
-			CREATE TABLE o_test_2 (val_3, val_4)USING orioledb
-				AS (SELECT * FROM o_test_1);
-		""")
+				CREATE TABLE o_test_2 (val_3, val_4) USING orioledb
+					AS (SELECT * FROM o_test_1);
+			""")
+		self.assertErrorMessageEquals(e, "command CREATE TABLE AS is disabled",
+									  "PL/pgSQL function func_trig_1() "
+									  "line 3 at RAISE",
+									  second_title="CONTEXT")
 		node.stop()
 
 	def test_8(self):
 		node = self.node
 		node.start()
-		node.safe_psql("""
-			CREATE EXTENSION IF NOT EXISTS orioledb;
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				CREATE EXTENSION IF NOT EXISTS orioledb;
 
-			CREATE TABLE o_test_1 (val_1, val_2)USING orioledb
-				AS (SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
+				CREATE TABLE o_test_1 (val_1, val_2) USING orioledb
+					AS (SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
 
-			CREATE OR REPLACE FUNCTION func_trig_1()
-			RETURNS event_trigger
-			LANGUAGE plpgsql
-			AS $$
-			BEGIN
-			RAISE EXCEPTION 'command % is disabled', tg_tag;
-			END;
-			$$;
+				CREATE OR REPLACE FUNCTION func_trig_1()
+				RETURNS event_trigger
+				LANGUAGE plpgsql
+				AS $$
+				BEGIN
+				RAISE EXCEPTION 'command % is disabled', tg_tag;
+				END;
+				$$;
 
-			CREATE EVENT TRIGGER trig_1 ON ddl_command_end
-			EXECUTE FUNCTION func_trig_1();
+				CREATE EVENT TRIGGER trig_1 ON ddl_command_end
+				EXECUTE FUNCTION func_trig_1();
 
-			CREATE TABLE o_test_2 (val_3, val_4)USING orioledb
-				AS (SELECT * FROM o_test_1);
-		""")
+				CREATE TABLE o_test_2 (val_3, val_4) USING orioledb
+					AS (SELECT * FROM o_test_1);
+			""")
+		self.assertErrorMessageEquals(e, "command CREATE TABLE AS is disabled",
+									  "PL/pgSQL function func_trig_1() "
+									  "line 3 at RAISE",
+									  second_title="CONTEXT")
 		node.stop()
 
 	def test_10(self):

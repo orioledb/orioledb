@@ -210,7 +210,8 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel
 {
 	bool		result = true;
 
-	if (rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_RELATION)
+	if (rte->rtekind == RTE_RELATION &&
+		(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
 	{
 		Relation	relation = relation_open(rte->relid, NoLock);
 
@@ -245,7 +246,8 @@ void
 orioledb_set_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 							   Index rti, RangeTblEntry *rte)
 {
-	if (rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_RELATION)
+	if (rte->rtekind == RTE_RELATION &&
+		(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
 	{
 		Relation	relation = table_open(rte->relid, NoLock);
 

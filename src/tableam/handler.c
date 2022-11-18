@@ -303,9 +303,9 @@ orioledb_get_row_ref_type(Relation rel)
 }
 
 static void
-orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
-					  EState *estate, CommandId cid,
-					  int options, BulkInsertState bistate)
+orioledb_tableam_tuple_insert(Relation relation, TupleTableSlot *slot,
+							  CommandId cid, int options,
+							  BulkInsertState bistate)
 {
 	OTableDescr *descr;
 	CommitSeqNo csn;
@@ -313,15 +313,7 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 
 	descr = relation_get_descr(relation);
 	fill_current_oxid_csn(&oxid, &csn);
-	o_tbl_insert(descr, relation, estate, slot, oxid, csn);
-}
-
-static void
-orioledb_tableam_tuple_insert(Relation relation, TupleTableSlot *slot,
-							  CommandId cid, int options,
-							  BulkInsertState bistate)
-{
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	o_tbl_insert(descr, relation, slot, oxid, csn);
 }
 
 static void
@@ -721,42 +713,49 @@ orioledb_relation_set_new_filenode(Relation rel,
 		rel->rd_rel->relkind != RELKIND_TOASTVALUE &&
 		!is_in_indexes_rebuild())
 	{
-		OTable	   *o_table;
+		OTable	   *old_o_table,
+				   *new_o_table;
+		TupleDesc	tupdesc;
 		CommitSeqNo csn;
 		OXid		oxid;
 		int			oldTreeOidsNum,
 					newTreeOidsNum;
-		ORelOids	oldOids,
+		ORelOids	old_oids,
 				   *oldTreeOids,
-					newOids,
+					new_oids,
 				   *newTreeOids;
 
-		oldOids.datoid = MyDatabaseId;
-		oldOids.reloid = rel->rd_rel->oid;
-		oldOids.relnode = rel->rd_node.relNode;
+		old_oids.datoid = MyDatabaseId;
+		old_oids.reloid = rel->rd_rel->oid;
+		old_oids.relnode = rel->rd_node.relNode;
+		old_o_table = o_tables_get(old_oids);
+		Assert(old_o_table != NULL);
+		oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
 
-		fill_current_oxid_csn(&oxid, &csn);
+		tupdesc = RelationGetDescr(rel);
+		new_oids.datoid = MyDatabaseId;
+		new_oids.reloid = rel->rd_rel->oid;
+		new_oids.relnode = newrnode->relNode;
 
-		o_table = o_tables_get(oldOids);
-		Assert(o_table != NULL);
-		oldTreeOids = o_table_make_index_oids(o_table, &oldTreeOidsNum);
+		new_o_table = o_table_tableam_create(new_oids, tupdesc);
+		o_opclass_cache_add_table(new_o_table);
+		o_table_fill_oids(new_o_table, rel, newrnode);
 
-		o_table_fill_oids(o_table, rel, newrnode);
-
-		newOids = o_table->oids;
-		newTreeOids = o_table_make_index_oids(o_table, &newTreeOidsNum);
+		newTreeOids = o_table_make_index_oids(new_o_table, &newTreeOidsNum);
 
 		LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
-		o_tables_drop_by_oids(oldOids, oxid, csn);
-		o_tables_add(o_table, oxid, csn);
+
+		fill_current_oxid_csn(&oxid, &csn);
+		o_tables_drop_by_oids(old_oids, oxid, csn);
+		o_tables_add(new_o_table, oxid, csn);
 		LWLockRelease(&checkpoint_state->oTablesAddLock);
-		o_table_free(o_table);
+		o_table_free(new_o_table);
 
 		orioledb_free_rd_amcache(rel);
 
-		Assert(o_fetch_table_descr(newOids) != NULL);
-		add_undo_truncate_relnode(oldOids, oldTreeOids, oldTreeOidsNum,
-								  newOids, newTreeOids, newTreeOidsNum);
+		Assert(o_fetch_table_descr(new_oids) != NULL);
+		add_undo_truncate_relnode(old_oids, oldTreeOids, oldTreeOidsNum,
+								  new_oids, newTreeOids, newTreeOidsNum);
 		pfree(oldTreeOids);
 		pfree(newTreeOids);
 	}
@@ -1313,19 +1312,11 @@ orioledb_tableam_multi_insert(Relation relation, TupleTableSlot **slots,
 							  int ntuples, CommandId cid,
 							  int options, BulkInsertState bistate)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-}
-
-static void
-orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
-					  EState *estate,
-					  CommandId cid, int options, BulkInsertState bistate)
-{
 	int			i;
 
 	for (i = 0; i < ntuples; i++)
-		orioledb_tuple_insert(relation, slots[i], estate,
-							  cid, options, bistate);
+		orioledb_tableam_tuple_insert(relation, slots[i],
+									  cid, options, bistate);
 }
 
 static void
@@ -1424,58 +1415,6 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 }
 
 static bool
-orioledb_rewrite_table(TupleDesc oldDesc, Relation old_rel, List *newvals)
-{
-	bool			result = false;
-	ORelOids		oids;
-	OTable		   *old_o_table,
-				   *new_o_table;
-	OTableDescr		old_tmp_descr,
-					tmp_descr;
-	TupleDesc		newDesc = RelationGetDescr(old_rel);
-	uint32			version;
-
-	oids.datoid = MyDatabaseId;
-	oids.reloid = old_rel->rd_id;
-	oids.relnode = old_rel->rd_node.relNode;
-	new_o_table = o_tables_get(oids);
-
-	if (new_o_table == NULL)
-	{
-		/* it does not exist */
-		elog(ERROR, "orioledb table \"%s\" not found",
-			 RelationGetRelationName(old_rel));
-	}
-
-	/* o_table always updated before rewrite */
-	version = new_o_table->version - 1;
-	old_o_table = o_tables_get_by_oids_and_version(oids, &version);
-	assign_new_oids(new_o_table, old_rel);
-
-	new_o_table->primary_init_nfields = new_o_table->nfields;
-	if (oldDesc->natts < newDesc->natts && !new_o_table->has_primary)
-		new_o_table->primary_init_nfields++;
-
-	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
-	o_fill_tmp_table_descr(&old_tmp_descr, old_o_table);
-	o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-	rebuild_indices(old_o_table, &old_tmp_descr, new_o_table, &tmp_descr,
-					newvals);
-	o_free_tmp_table_descr(&old_tmp_descr);
-	o_free_tmp_table_descr(&tmp_descr);
-
-	recreate_o_table(old_o_table, new_o_table);
-
-	o_table_free(old_o_table);
-	o_table_free(new_o_table);
-	LWLockRelease(&checkpoint_state->oTablesAddLock);
-
-	result = true;
-
-	return result;
-}
-
-static bool
 orioledb_define_index_validate(Relation rel, IndexStmt *stmt,
 							   void **arg)
 {
@@ -1485,9 +1424,12 @@ orioledb_define_index_validate(Relation rel, IndexStmt *stmt,
 }
 
 static bool
-orioledb_define_index(Relation rel, ObjectAddress address, void *arg)
+orioledb_define_index(Relation rel, Oid indoid, bool reindex,
+					  bool skip_constraint_checks, void *arg)
 {
-	o_define_index(rel, address, (ODefineIndexContext *) arg);
+	if (!is_in_indexes_rebuild())
+		o_define_index(rel, indoid, reindex, skip_constraint_checks,
+					   (ODefineIndexContext *) arg);
 	return true;
 }
 
@@ -1698,8 +1640,6 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 		.scan_sample_next_tuple = orioledb_scan_sample_next_tuple
 	},
 	.get_row_ref_type = orioledb_get_row_ref_type,
-	.tuple_insert = orioledb_tuple_insert,
-	.multi_insert = orioledb_multi_insert,
 	.tuple_insert_on_conflict = orioledb_tuple_insert_on_conflict,
 	.tuple_delete = orioledb_tuple_delete,
 	.tuple_update = orioledb_tuple_update,
@@ -1708,7 +1648,6 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.tuple_refetch_row_version = orioledb_refetch_row_version,
 	.init_modify = orioledb_init_modify,
 	.free_rd_amcache = orioledb_free_rd_amcache,
-	.rewrite_table = orioledb_rewrite_table,
 	.define_index_validate = orioledb_define_index_validate,
 	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table

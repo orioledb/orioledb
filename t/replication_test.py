@@ -407,14 +407,14 @@ class ReplicationTest(BaseTest):
 						synchronous_commit = 'remote_apply',
 						default_table_access_method = 'orioledb')
 			master.start()
-			master.safe_psql("""CREATE EXTENSION orioledb;""")
-			pgbench = master.pgbench(options=["-i", "-s", "1"],
-									 stdout=subprocess.DEVNULL,
-									 stderr=subprocess.DEVNULL)
-			self.assertEqual(pgbench.wait(), 0)
 
 			# create a backup
 			with self.getReplica() as replica:
+				master.safe_psql("""CREATE EXTENSION orioledb;""")
+				pgbench = master.pgbench(options=["-i", "-s", "1"],
+										stdout=subprocess.DEVNULL,
+										stderr=subprocess.DEVNULL)
+				self.assertEqual(pgbench.wait(), 0)
 				replica.start()
 				master.stop()
 				master.append_conf(filename='postgresql.conf',
@@ -462,12 +462,12 @@ class ReplicationTest(BaseTest):
 	def test_replication_create_table_add_column_same_trx(self):
 		node = self.node
 		node.start()
-		node.safe_psql("""
-			CREATE EXTENSION orioledb;
-		""")
 
 		with self.node as master:
 			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+				""")
 				with master.connect() as con:
 					con.begin()
 					con.execute("""
@@ -482,6 +482,8 @@ class ReplicationTest(BaseTest):
 					con.commit()
 
 				catchup_orioledb(replica)
+				self.assertEqual(master.execute("SELECT * FROM o_test_1"),
+								 [(1, 1), (2, 2), (3, 3)])
 				self.assertEqual(replica.execute("SELECT * FROM o_test_1"),
 								 [(1, 1), (2, 2), (3, 3)])
 

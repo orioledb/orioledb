@@ -107,7 +107,7 @@ typedef struct
 												   ALLOCSET_DEFAULT_SIZES)))
 
 extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
-							   OIndexType type, Relation index_rel);
+							   Relation index_rel);
 
 /* Creates and fills OTable. */
 extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc);
@@ -147,6 +147,10 @@ extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);
 
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
+
+/* Updates OTable description in o_tables list without indices processing */
+extern bool o_tables_update_without_oids_indexes(OTable *table, OXid oxid,
+												 CommitSeqNo csn);
 
 /* Invalidates descriptors after o_tables_update */
 void o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
@@ -210,6 +214,7 @@ o_tables_rel_unlock(ORelOids *oids, int lockmode)
 
 extern void o_table_fill_oids(OTable *oTable, Relation rel,
 							  const RelFileNode *newrnode);
+extern void o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table);
 
 extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, int i,

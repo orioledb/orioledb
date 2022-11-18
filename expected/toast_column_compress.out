@@ -75,5 +75,93 @@ SELECT key, length(val), substring(val for 30),
    3 |   8449 | {c4ca4238a0b923820dcc509a6f758 | 849b,c81e7
 (1 row)
 
+CREATE SEQUENCE o_matview_seq;
+CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 'a',
+							   nextval('o_matview_seq'::regclass)),
+							  (100, 3, 'b',
+							   nextval('o_matview_seq'::regclass)));
+\set HIDE_TOAST_COMPRESSION false
+SET orioledb.table_description_compress = true;
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+SELECT orioledb_table_description('o_test_matview'::regclass);
+                     orioledb_table_description                     
+--------------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1         +
+    Column |    Type | Collation | Nullable | Droped | Compression +
+  order_id | integer |    (null) |     true |  false |             +
+   item_id | integer |    (null) |     true |  false |             +
+  quantity |    text |   default |     true |  false |             +
+     price |  bigint |    (null) |     true |  false |             +
+ 
+(1 row)
+
+\d+ o_test_matview
+                                 Materialized view "public.o_test_matview"
+  Column  |  Type   | Collation | Nullable | Default | Storage  | Compression | Stats target | Description 
+----------+---------+-----------+----------+---------+----------+-------------+--------------+-------------
+ order_id | integer |           |          |         | plain    |             |              | 
+ item_id  | integer |           |          |         | plain    |             |              | 
+ quantity | text    |           |          |         | extended |             |              | 
+ price    | bigint  |           |          |         | plain    |             |              | 
+View definition:
+ SELECT "*VALUES*".column1 AS order_id,
+    "*VALUES*".column2 AS item_id,
+    "*VALUES*".column3 AS quantity,
+    "*VALUES*".column4 AS price
+   FROM (VALUES (100,1,'a'::text,nextval('o_matview_seq'::regclass)), (100,3,'b'::text,nextval('o_matview_seq'::regclass))) "*VALUES*";
+
+ALTER MATERIALIZED VIEW o_test_matview
+	ALTER COLUMN quantity SET COMPRESSION pglz;
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+SELECT orioledb_table_description('o_test_matview'::regclass);
+                     orioledb_table_description                     
+--------------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1         +
+    Column |    Type | Collation | Nullable | Droped | Compression +
+  order_id | integer |    (null) |     true |  false |             +
+   item_id | integer |    (null) |     true |  false |             +
+  quantity |    text |   default |     true |  false |        pglz +
+     price |  bigint |    (null) |     true |  false |             +
+ 
+(1 row)
+
+\d+ o_test_matview
+                                 Materialized view "public.o_test_matview"
+  Column  |  Type   | Collation | Nullable | Default | Storage  | Compression | Stats target | Description 
+----------+---------+-----------+----------+---------+----------+-------------+--------------+-------------
+ order_id | integer |           |          |         | plain    |             |              | 
+ item_id  | integer |           |          |         | plain    |             |              | 
+ quantity | text    |           |          |         | extended | pglz        |              | 
+ price    | bigint  |           |          |         | plain    |             |              | 
+View definition:
+ SELECT "*VALUES*".column1 AS order_id,
+    "*VALUES*".column2 AS item_id,
+    "*VALUES*".column3 AS quantity,
+    "*VALUES*".column4 AS price
+   FROM (VALUES (100,1,'a'::text,nextval('o_matview_seq'::regclass)), (100,3,'b'::text,nextval('o_matview_seq'::regclass))) "*VALUES*";
+
+SET orioledb.table_description_compress = false;
+\set HIDE_TOAST_COMPRESSION true
+DROP SEQUENCE o_matview_seq CASCADE;
+NOTICE:  drop cascades to materialized view o_test_matview
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table o_test_2

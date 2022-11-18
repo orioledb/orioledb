@@ -48,7 +48,6 @@ static OTableModifyResult o_update_secondary_indices(OTableDescr *descr,
 
 static OTableModifyResult o_tbl_indices_insert(TupleTableSlot *slot,
 											   OTableDescr *descr,
-											   EState *estate,
 											   OIndexNumber start_ix, OXid oxid,
 											   CommitSeqNo csn,
 											   BTreeModifyCallbackInfo *callbackInfo);
@@ -144,8 +143,7 @@ static void o_report_duplicate(Relation rel, OIndexDescr *id,
 
 void
 o_tbl_insert(OTableDescr *descr, Relation relation,
-			 EState *estate, TupleTableSlot *slot,
-			 OXid oxid, CommitSeqNo csn)
+			 TupleTableSlot *slot, OXid oxid, CommitSeqNo csn)
 {
 	OTableModifyResult mres;
 	OTuple		tup;
@@ -181,7 +179,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 								RelationGetRelationName(relation),
 								false);
 
-	mres = o_tbl_indices_insert(slot, descr, estate, PrimaryIndexNumber, oxid,
+	mres = o_tbl_indices_insert(slot, descr, PrimaryIndexNumber, oxid,
 								csn, &callbackInfo);
 
 	if (!mres.success)
@@ -308,7 +306,7 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 
 		memset(&mres, 0, sizeof(OTableModifyResult));
 
-		mres = o_tbl_indices_insert(slot, descr, estate, conflict_ix, oxid,
+		mres = o_tbl_indices_insert(slot, descr, conflict_ix, oxid,
 									csn, &callbackInfo);
 
 		if (mres.success)
@@ -961,7 +959,6 @@ static bool
 o_tbl_index_insert(OTableDescr *descr,
 				   OIndexDescr *id,
 				   TupleTableSlot *slot,
-				   ExprContext *econtext,
 				   OXid oxid, CommitSeqNo csn,
 				   BTreeModifyCallbackInfo *callbackInfo)
 {
@@ -970,7 +967,7 @@ o_tbl_index_insert(OTableDescr *descr,
 	OBTreeKeyBound knew;
 	bool		primary = (bd->type == oIndexPrimary);
 
-	if (primary || o_is_index_predicate_satisfied(id, slot, econtext))
+	if (primary || o_is_index_predicate_satisfied(id, slot, id->econtext))
 	{
 		bool		inserted;
 
@@ -1015,24 +1012,20 @@ o_tbl_index_insert(OTableDescr *descr,
 static OTableModifyResult
 o_tbl_indices_insert(TupleTableSlot *slot,
 					 OTableDescr *descr,
-					 EState *estate,
 					 OIndexNumber start_ix,
 					 OXid oxid, CommitSeqNo csn,
 					 BTreeModifyCallbackInfo *callbackInfo)
 {
 	OTableModifyResult result;
 	int			i;
-	ExprContext *econtext;
 
 	result.success = true;
 
 	i = start_ix;
 	Assert(i < descr->nIndices);
 
-	econtext = GetPerTupleExprContext(estate);
-
 	result.success = o_tbl_index_insert(descr, descr->indices[start_ix], slot,
-										econtext, oxid, csn, callbackInfo);
+										oxid, csn, callbackInfo);
 	if (!result.success)
 	{
 		result.failedIxNum = i;
@@ -1047,7 +1040,7 @@ o_tbl_indices_insert(TupleTableSlot *slot,
 			continue;
 
 		result.success = o_tbl_index_insert(descr, descr->indices[i], slot,
-											econtext, oxid, csn, callbackInfo);
+											oxid, csn, callbackInfo);
 		if (!result.success)
 		{
 			result.failedIxNum = i;

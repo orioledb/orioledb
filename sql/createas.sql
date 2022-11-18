@@ -2,10 +2,17 @@ CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
 	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+SELECT orioledb_tbl_indices('o_test_create_as'::regclass);
 -- Should fail - exists
 CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
 	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
 SELECT * FROM o_test_create_as;
+
+BEGIN;
+CREATE TABLE o_test_create_as_abort (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
+SELECT * FROM o_test_create_as_abort;
+ROLLBACK;
 
 CREATE TABLE o_test_create_as_less_atts (order_id, item_id)
 	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
@@ -113,15 +120,40 @@ SELECT * FROM tbl_as_nodata;
 SELECT * FROM tbl_as_data;
 
 CREATE SEQUENCE o_matview_seq;
--- TODO: Implement refresh of materialized view and add tests
--- TODO: Implement indices on materialized views and add tests
--- TODO: Implement alters of materialized view and add tests
 CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
-	USING orioledb AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)),
-							  (100, 3, 1, nextval('o_matview_seq'::regclass)));
+	USING orioledb AS (VALUES (100, 1, 'a',
+							   nextval('o_matview_seq'::regclass)),
+							  (100, 3, 'b',
+							   nextval('o_matview_seq'::regclass)));
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+SELECT * FROM o_test_matview;
+SELECT * FROM o_test_matview;
+REFRESH MATERIALIZED VIEW o_test_matview;
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+SELECT * FROM o_test_matview;
 SELECT * FROM o_test_matview;
 REFRESH MATERIALIZED VIEW o_test_matview;
 SELECT * FROM o_test_matview;
+SELECT * FROM o_test_matview;
 
+CREATE INDEX o_test_matview_ix1 ON o_test_matview (item_id DESC);
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY item_id DESC;
+SELECT * FROM o_test_matview ORDER BY item_id DESC;
+REINDEX INDEX o_test_matview_ix1;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY item_id DESC;
+SELECT * FROM o_test_matview ORDER BY item_id DESC;
+
+CREATE INDEX o_test_matview_ix2 ON o_test_matview (quantity);
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+ALTER MATERIALIZED VIEW o_test_matview RENAME quantity TO quantity2;
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+SELECT orioledb_table_description('o_test_matview'::regclass);
+\d+ o_test_matview
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY quantity2;
+SELECT * FROM o_test_matview ORDER BY quantity2;
+
+DROP SEQUENCE o_matview_seq CASCADE;
 DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;

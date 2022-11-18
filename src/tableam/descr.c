@@ -604,7 +604,7 @@ find_tree_in_descr(OTableDescr *descr, ORelOids oids)
 }
 
 /*
- * o_fetch_descr_extended fetches OTableDescr from cache, or creates a new one.
+ * o_fetch_table_descr fetches OTableDescr from cache, or creates a new one.
  */
 OTableDescr *
 o_fetch_table_descr(ORelOids oids)

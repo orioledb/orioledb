@@ -83,8 +83,7 @@ typedef struct
 } OLockCallbackArg;
 
 extern void o_tbl_insert(OTableDescr *descr, Relation relation,
-						 EState *estate, TupleTableSlot *slot, OXid oxid,
-						 CommitSeqNo csn);
+						 TupleTableSlot *slot, OXid oxid, CommitSeqNo csn);
 extern TupleTableSlot *o_tbl_insert_on_conflict(ModifyTableState *mstate,
 												EState *estate,
 												ResultRelInfo *rinfo,

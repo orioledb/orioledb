@@ -106,6 +106,9 @@ ODBProcData *oProcData;
 int			default_compress = InvalidOCompress;
 int			default_primary_compress = InvalidOCompress;
 int			default_toast_compress = InvalidOCompress;
+#if PG_VERSION_NUM >= 140000
+bool		orioledb_table_description_compress = false;
+#endif
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -469,6 +472,20 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+#if PG_VERSION_NUM >= 140000
+	DefineCustomBoolVariable("orioledb.table_description_compress",
+							 "Display compression column in "
+							 "orioledb_table_description",
+							 NULL,
+							 &orioledb_table_description_compress,
+							 false,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+#endif
 
 	main_buffers_count = ((Size) main_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	free_tree_buffers_count = ((Size) free_tree_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;

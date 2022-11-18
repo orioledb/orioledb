@@ -29,4 +29,25 @@ SELECT key, length(val), substring(val for 30),
 SELECT key, length(val), substring(val for 30),
 	   substr(val, 30, 10) from o_test_2 WHERE key = 3;
 
+CREATE SEQUENCE o_matview_seq;
+CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
+	USING orioledb AS (VALUES (100, 1, 'a',
+							   nextval('o_matview_seq'::regclass)),
+							  (100, 3, 'b',
+							   nextval('o_matview_seq'::regclass)));
+
+\set HIDE_TOAST_COMPRESSION false
+SET orioledb.table_description_compress = true;
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+SELECT orioledb_table_description('o_test_matview'::regclass);
+\d+ o_test_matview
+ALTER MATERIALIZED VIEW o_test_matview
+	ALTER COLUMN quantity SET COMPRESSION pglz;
+SELECT orioledb_tbl_indices('o_test_matview'::regclass);
+SELECT orioledb_table_description('o_test_matview'::regclass);
+\d+ o_test_matview
+SET orioledb.table_description_compress = false;
+\set HIDE_TOAST_COMPRESSION true
+
+DROP SEQUENCE o_matview_seq CASCADE;
 DROP EXTENSION orioledb CASCADE;

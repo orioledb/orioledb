@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * o_tables.c
+ * planner.c
  * 		Routines for query processing.
  *
  * Copyright (c) 2021-2022, Oriole DB Inc.

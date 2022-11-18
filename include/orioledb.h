@@ -196,6 +196,9 @@ extern Size device_length;
 extern int	default_compress;
 extern int	default_primary_compress;
 extern int	default_toast_compress;
+#if PG_VERSION_NUM >= 140000
+extern bool	orioledb_table_description_compress;
+#endif
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MyProc->pgprocno >= 0 && \

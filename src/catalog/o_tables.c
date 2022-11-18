@@ -318,8 +318,7 @@ o_deparse_expression(char *expr_str, Oid relid)
 }
 
 void
-o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
-				   OIndexType type, Relation index_rel)
+o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 {
 	OTableIndex	   *index = &o_table->indices[ix_num];
 	ListCell	   *index_expr_elem = list_head(index_rel->rd_indexprs);
@@ -524,6 +523,9 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc)
 	o_table->fields = palloc0(o_table->nfields * sizeof(OTableField));
 	o_table->oids = oids;
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
+	o_table->default_compress = InvalidOCompress;
+	o_table->primary_compress = InvalidOCompress;
+	o_table->toast_compress = InvalidOCompress;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -725,7 +727,10 @@ o_table_make_index_oids(OTable *table, int *num)
 	for (i = 0; i < oids_num; i++)
 		oids[i] = table->indices[i].oids;
 
-	oids[oids_num++] = table->toast_oids;
+	if (ORelOidsIsValid(table->toast_oids))
+	{
+		oids[oids_num++] = table->toast_oids;
+	}
 
 	/* ctid primary index if needed */
 	if (table->nindices == 0 ||
@@ -987,8 +992,9 @@ o_table_free(OTable *table)
 	pfree(table);
 }
 
-bool
-o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
+static bool
+o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
+					   bool update_indices)
 {
 	OTableChunkKey key;
 	OTable	   *old_table;
@@ -1004,7 +1010,8 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 
 	systrees_modify_start();
 	old_table = o_tables_get(table->oids);
-	o_tables_oids_indexes(old_table, table, oxid, csn);
+	if (update_indices)
+		o_tables_oids_indexes(old_table, table, oxid, csn);
 	result = generic_toast_update(&oTablesToastAPI, (Pointer) &key, data, len,
 								  oxid, csn, get_sys_tree(SYS_TREES_O_TABLES));
 	systrees_modify_end();
@@ -1016,6 +1023,18 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	return result;
 }
 
+bool
+o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
+{
+	return o_tables_update_common(table, oxid, csn, true);
+}
+
+bool
+o_tables_update_without_oids_indexes(OTable *table, OXid oxid, CommitSeqNo csn)
+{
+	return o_tables_update_common(table, oxid, csn, false);
+}
+
 void
 o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 {
@@ -1024,10 +1043,16 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 	if (o_table->has_primary)
 	{
 		o_add_invalidate_undo_item(o_table->indices[PrimaryIndexNumber].oids,
-								O_INVALIDATE_OIDS_ON_ABORT);
+								   O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
 	}
 	o_invalidate_oids(o_table->oids);
+	if (ORelOidsIsValid(o_table->toast_oids))
+	{
+		o_add_invalidate_undo_item(o_table->toast_oids,
+								   O_INVALIDATE_OIDS_ON_ABORT);
+		o_invalidate_oids(o_table->toast_oids);
+	}
 }
 
 bool
@@ -1148,12 +1173,17 @@ describe_table(ORelOids oids)
 					 table->default_compress,
 					 table->primary_compress,
 					 table->toast_compress);
-	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Droped \n",
+	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Droped ",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
+#if PG_VERSION_NUM >= 140000
+	if (orioledb_table_description_compress)
+		appendStringInfo(&title, "| Compression ");
+#endif
+	appendStringInfo(&title, "\n");
 	initStringInfo(&format);
-	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%6s \n",
+	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%6s ",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
@@ -1172,6 +1202,16 @@ describe_table(ORelOids oids)
 						 colname ? colname : "(null)",
 						 field->notnull ? "false" : "true",
 						 field->droped ? "true" : "false");
+#if PG_VERSION_NUM >= 140000
+		if (orioledb_table_description_compress)
+		{
+			const char *compression = "";
+			if (CompressionMethodIsValid(field->compression))
+				compression = GetCompressionMethodName(field->compression);
+			appendStringInfo(&buf, "| %11s ", compression);
+		}
+#endif
+		appendStringInfo(&buf, "\n");
 	}
 
 	return cstring_to_text(buf.data);
@@ -1598,4 +1638,19 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
 		oTable->indices[i].oids.relnode = indexRel->rd_node.relNode;
 		relation_close(indexRel, AccessShareLock);
 	}
+}
+
+void
+o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table)
+{
+	ORelOids	temp_oids = old_o_table->oids;
+
+	old_o_table->oids.datoid = new_o_table->oids.datoid;
+	old_o_table->oids.reloid = new_o_table->oids.reloid;
+	new_o_table->oids.datoid = temp_oids.datoid;
+	new_o_table->oids.reloid = temp_oids.reloid;
+
+	new_o_table->default_compress = old_o_table->default_compress;
+	new_o_table->primary_compress = old_o_table->primary_compress;
+	new_o_table->toast_compress = old_o_table->toast_compress;
 }
