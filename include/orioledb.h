@@ -13,16 +13,20 @@
 #ifndef __ORIOLEDB_H__
 #define __ORIOLEDB_H__
 
+#include "access/reloptions.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "common/int.h"
 #include "port/atomics.h"
 #include "storage/bufpage.h"
 #include "storage/fd.h"
 #include "storage/lock.h"
 #include "storage/procarray.h"
 #include "storage/spin.h"
+#include "utils/builtins.h"
 #include "utils/jsonb.h"
 #include "utils/typcache.h"
+#include "utils/rel.h"
 #include "utils/relcache.h"
 
 #define ORIOLEDB_VERSION "OrioleDB public alpha 8"
@@ -227,9 +231,16 @@ typedef int OCompress;
  * The header of compressed data contains compressed data length.
  */
 typedef uint16 OCompressHeader;
+typedef struct ORelOptions
+{
+	int32			vl_len_;	/* varlena header (do not touch directly!) */
+	StdRdOptions	std_options;
+	int				compress_offset;
+	int				primary_compress_offset;
+	int				toast_compress_offset;
+} ORelOptions;
 
-extern List *extract_compress_rel_option(List *defs, char *option, int *value);
-extern void validate_compress(OCompress compress, char *prefix);
+extern int16 o_parse_compress(const char *value);
 extern void o_invalidate_oids(ORelOids oids);
 
 #define EXPR_ATTNUM (FirstLowInvalidHeapAttributeNumber - 1)

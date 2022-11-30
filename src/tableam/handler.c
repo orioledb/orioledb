@@ -30,10 +30,13 @@
 #include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
+#include "utils/compress.h"
 #include "utils/stopevent.h"
 
 #include "access/heapam.h"
+#include "access/heaptoast.h"
 #include "access/multixact.h"
+#include "access/reloptions.h"
 #include "access/tableam.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
@@ -1575,6 +1578,304 @@ orioledb_analyze_table(Relation relation,
 	*totalpages = TREE_NUM_LEAF_PAGES(&pk->desc);
 }
 
+static void
+validate_compress(OCompress compress, char *prefix)
+{
+	OCompress	max_compress = o_compress_max_lvl();
+
+	if (compress < -1 || compress > max_compress)
+	{
+		elog(ERROR, "%s compression level must be between %d and %d",
+			 prefix, -1, max_compress);
+	}
+}
+
+static void
+validate_default_compress(const char *value)
+{
+	if (value)
+		validate_compress(o_parse_compress(value), "Default");
+}
+
+static void
+validate_primary_compress(const char *value)
+{
+	if (value)
+		validate_compress(o_parse_compress(value), "Primary index");
+}
+
+static void
+validate_toast_compress(const char *value)
+{
+	if (value)
+		validate_compress(o_parse_compress(value), "TOAST");
+}
+
+#if PG_VERSION_NUM >= 140000
+/* values from StdRdOptIndexCleanup */
+static relopt_enum_elt_def StdRdOptIndexCleanupValues[] =
+{
+	{"auto", STDRD_OPTION_VACUUM_INDEX_CLEANUP_AUTO},
+	{"on", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
+	{"off", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
+	{"true", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
+	{"false", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
+	{"yes", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
+	{"no", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
+	{"1", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
+	{"0", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
+	{(const char *) NULL}		/* list terminator */
+};
+#endif
+
+/*
+ * Option parser for anything that uses StdRdOptions.
+ */
+static bytea *
+orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
+{
+	static bool				relopts_set = false;
+	static local_relopts	relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext	oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(ORelOptions));
+
+		/* Options from default_reloptions */
+		add_local_int_reloption(&relopts, "fillfactor",
+								"Packs table pages only to this percentage",
+								HEAP_DEFAULT_FILLFACTOR, HEAP_MIN_FILLFACTOR,
+								100,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, fillfactor));
+		add_local_bool_reloption(&relopts, "autovacuum_enabled",
+								 "Enables autovacuum in this relation",
+								 true,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions, autovacuum) +
+									 offsetof(AutoVacOpts, enabled));
+		add_local_int_reloption(&relopts, "autovacuum_vacuum_threshold",
+								"Minimum number of tuple updates or deletes "
+								"prior to vacuum",
+								-1, 0, INT_MAX,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, vacuum_threshold));
+		add_local_int_reloption(&relopts, "autovacuum_vacuum_insert_threshold",
+								"Minimum number of tuple inserts "
+								"prior to vacuum, "
+								"or -1 to disable insert vacuums",
+								-2, -1, INT_MAX,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts,
+											 vacuum_ins_threshold));
+		add_local_int_reloption(&relopts, "autovacuum_analyze_threshold",
+								"Minimum number of tuple inserts, "
+								"updates or deletes prior to analyze",
+								-1, 0, INT_MAX,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, analyze_threshold));
+		add_local_int_reloption(&relopts, "autovacuum_vacuum_cost_limit",
+								"Vacuum cost amount available before napping, "
+								"for autovacuum",
+								-1, 1, 10000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, vacuum_cost_limit));
+		add_local_int_reloption(&relopts, "autovacuum_freeze_min_age",
+								"Minimum age at which VACUUM should freeze "
+								"a table row, for autovacuum",
+								-1, 0, 1000000000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, freeze_min_age));
+		add_local_int_reloption(&relopts, "autovacuum_freeze_max_age",
+								"Age at which to autovacuum a table "
+								"to prevent transaction ID wraparound",
+								-1, 100000, 2000000000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, freeze_max_age));
+		add_local_int_reloption(&relopts, "autovacuum_freeze_table_age",
+								"Age at which VACUUM should perform "
+								"a full table sweep to freeze row versions",
+								-1, 0, 2000000000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, freeze_table_age));
+		add_local_int_reloption(&relopts,
+								"autovacuum_multixact_freeze_min_age",
+								"Minimum multixact age at which VACUUM should "
+								"freeze a row multixact's, for autovacuum",
+								-1, 0, 1000000000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts,
+											 multixact_freeze_min_age));
+		add_local_int_reloption(&relopts,
+								"autovacuum_multixact_freeze_max_age",
+								"Multixact age at which to autovacuum a table "
+								"to prevent multixact wraparound",
+								-1, 10000, 2000000000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts,
+											 multixact_freeze_max_age));
+		add_local_int_reloption(&relopts,
+								"autovacuum_multixact_freeze_table_age",
+								"Age of multixact at which VACUUM should "
+								"perform a full table sweep to freeze "
+								"row versions",
+								-1, 0, 2000000000,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts,
+											 multixact_freeze_table_age));
+		add_local_int_reloption(&relopts, "log_autovacuum_min_duration",
+								"Sets the minimum execution time above which "
+								"autovacuum actions will be logged",
+								-1, -1, INT_MAX,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, autovacuum) +
+									offsetof(AutoVacOpts, log_min_duration));
+		add_local_int_reloption(&relopts, "toast_tuple_target",
+								"Sets the target tuple length at which "
+								"external columns will be toasted",
+								TOAST_TUPLE_TARGET, 128,
+								TOAST_TUPLE_TARGET_MAIN,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions,
+											 toast_tuple_target));
+		add_local_real_reloption(&relopts, "autovacuum_vacuum_cost_delay",
+								 "Vacuum cost delay in milliseconds, "
+								 "for autovacuum",
+								 -1, 0.0, 100.0,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions, autovacuum) +
+									 offsetof(AutoVacOpts, vacuum_cost_delay));
+		add_local_real_reloption(&relopts, "autovacuum_vacuum_scale_factor",
+								 "Number of tuple updates or deletes prior to "
+								 "vacuum as a fraction of reltuples",
+								 -1, 0.0, 100.0,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions, autovacuum) +
+									 offsetof(AutoVacOpts,
+											  vacuum_scale_factor));
+		add_local_real_reloption(&relopts,
+								 "autovacuum_vacuum_insert_scale_factor",
+								 "Number of tuple inserts prior to vacuum "
+								 "as a fraction of reltuples",
+								 -1, 0.0, 100.0,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions, autovacuum) +
+									 offsetof(AutoVacOpts,
+											  vacuum_ins_scale_factor));
+		add_local_real_reloption(&relopts,
+								 "autovacuum_analyze_scale_factor",
+								 "Number of tuple inserts, updates or deletes "
+								 "prior to analyze as a fraction of reltuples",
+								 -1, 0.0, 100.0,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions, autovacuum) +
+									 offsetof(AutoVacOpts,
+											  analyze_scale_factor));
+		add_local_bool_reloption(&relopts, "user_catalog_table",
+								 "Declare a table as an additional "
+								 "catalog table, e.g. for the purpose of "
+								 "logical replication",
+								 false,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions,
+											  user_catalog_table));
+		add_local_int_reloption(&relopts, "parallel_workers",
+								"Number of parallel processes that can be "
+								"used per executor node for this relation.",
+								-1, 0, 1024,
+								offsetof(ORelOptions, std_options) +
+									offsetof(StdRdOptions, parallel_workers));
+#if PG_VERSION_NUM >= 140000
+		add_local_enum_reloption(&relopts, "vacuum_index_cleanup",
+								 "Controls index vacuuming and index cleanup",
+								 StdRdOptIndexCleanupValues,
+								 STDRD_OPTION_VACUUM_INDEX_CLEANUP_AUTO,
+								 gettext_noop("Valid values are \"on\", "
+								 			  "\"off\", and \"auto\"."),
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions,
+											  vacuum_index_cleanup));
+#else
+		add_local_bool_reloption(&relopts, "vacuum_index_cleanup",
+								 "Enables index vacuuming and index cleanup",
+								 true,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions,
+											  vacuum_index_cleanup));
+#endif
+		add_local_bool_reloption(&relopts, "vacuum_truncate",
+								 "Enables vacuum to truncate empty pages at "
+								 "the end of this table",
+								 true,
+								 offsetof(ORelOptions, std_options) +
+									 offsetof(StdRdOptions, vacuum_truncate));
+
+		/* Options for orioledb tables */
+		add_local_string_reloption(&relopts, "compress",
+								   "Default compression level for "
+								   "all table data structures",
+								   NULL, validate_default_compress, NULL,
+								   offsetof(ORelOptions, compress_offset));
+		add_local_string_reloption(&relopts, "primary_compress",
+								   "Compression level for the "
+								   "table primary key",
+								   NULL, validate_primary_compress, NULL,
+								   offsetof(ORelOptions,
+											primary_compress_offset));
+		add_local_string_reloption(&relopts, "toast_compress",
+								   "Compression level for the "
+								   "table TOASTed values",
+								   NULL, validate_toast_compress, NULL,
+								   offsetof(ORelOptions,
+											toast_compress_offset));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
+}
+
+static bytea *
+orioledb_reloptions(char relkind, Datum reloptions, bool validate)
+{
+	StdRdOptions *rdopts;
+
+	switch (relkind)
+	{
+		case RELKIND_TOASTVALUE:
+			rdopts = (StdRdOptions *)
+				default_reloptions(reloptions, validate, RELOPT_KIND_TOAST);
+			if (rdopts != NULL)
+			{
+				/* adjust default-only parameters for TOAST relations */
+				rdopts->fillfactor = 100;
+				rdopts->autovacuum.analyze_threshold = -1;
+				rdopts->autovacuum.analyze_scale_factor = -1;
+			}
+			return (bytea *) rdopts;
+		case RELKIND_RELATION:
+		case RELKIND_MATVIEW:
+			return orioledb_default_reloptions(reloptions, validate,
+											   RELOPT_KIND_HEAP);
+		default:
+			/* other relkinds are not supported */
+			return NULL;
+	}
+}
+
 
 /* ------------------------------------------------------------------------
  * Definition of the orioledb table access method.
@@ -1650,7 +1951,8 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.free_rd_amcache = orioledb_free_rd_amcache,
 	.define_index_validate = orioledb_define_index_validate,
 	.define_index = orioledb_define_index,
-	.analyze_table = orioledb_analyze_table
+	.analyze_table = orioledb_analyze_table,
+	.reloptions = orioledb_reloptions
 };
 
 bool

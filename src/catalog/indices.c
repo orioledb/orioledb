@@ -28,6 +28,7 @@
 #include "tuple/slot.h"
 #include "tuple/sort.h"
 #include "tuple/toast.h"
+#include "utils/compress.h"
 #include "utils/planner.h"
 
 #include "access/genam.h"
@@ -195,6 +196,51 @@ o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
 			o_validate_funcexpr(ielem->expr, " are supported in "
 								"orioledb index expressions");
 		}
+	}
+}
+
+static List *
+extract_compress_rel_option(List *defs, char *option, int *value)
+{
+	bool		founded = false;
+	int			i;
+
+	i = 0;
+	while (i < list_length(defs))
+	{
+		DefElem    *def = (DefElem *) list_nth(defs, i);
+
+		if (strcmp(def->defname, option) == 0)
+		{
+			if (def->arg == NULL)
+				*value = O_COMPRESS_DEFAULT;
+			else if (!IsA(def->arg, Integer))
+				elog(ERROR, "Option %s must be integer value.", option);
+			else
+				*value = intVal(def->arg);
+			founded = true;
+		}
+
+		if (founded)
+		{
+			defs = list_delete_nth_cell(defs, i);
+			break;
+		}
+		i++;
+	}
+
+	return defs;
+}
+
+static void
+validate_compress(OCompress compress, char *prefix)
+{
+	OCompress	max_compress = o_compress_max_lvl();
+
+	if (compress < -1 || compress > max_compress)
+	{
+		elog(ERROR, "%s compression level must be between %d and %d",
+			 prefix, -1, max_compress);
 	}
 }
 

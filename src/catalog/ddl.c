@@ -84,7 +84,6 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
-static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 
 UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
@@ -107,86 +106,18 @@ static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 
 static void orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags);
 static void orioledb_ExecutorEnd_hook(QueryDesc *queryDesc);
-static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
-									  ScanDirection direction,
-									  uint64 count,
-									  bool execute_once);
-static bool o_intorel_receive(TupleTableSlot *slot, DestReceiver *self);
-static ObjectAddress o_define_relation(CreateStmt *cstmt, char relkind,
-									   const char *queryString);
-static DestReceiver *OCreateIntoRelDestReceiver(IntoClause *intoClause);
-
-typedef struct
-{
-	DestReceiver pub;			/* publicly-known function pointers */
-	IntoClause *into;			/* target relation specification */
-	/* These fields are filled by intorel_startup: */
-	Relation	rel;			/* relation to write to */
-	ObjectAddress reladdr;		/* address of rel, for ExecCreateTableAs */
-	CommandId	output_cid;		/* cmin to insert in output tuples */
-	int			ti_options;		/* table_tuple_insert performance options */
-	BulkInsertState bistate;	/* bulk insert state */
-	EState	   *estate;
-} o_data_receiver;
 
 void
 orioledb_setup_ddl_hooks(void)
 {
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = orioledb_utility_command;
-	prev_ExecutorRun_hook = ExecutorRun_hook;
-	ExecutorRun_hook = orioledb_ExecutorRun_hook;
 	old_objectaccess_hook = object_access_hook;
 	object_access_hook = orioledb_object_access_hook;
 	prev_ExecutorStart = ExecutorStart_hook;
 	ExecutorStart_hook = orioledb_ExecutorStart_hook;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = orioledb_ExecutorEnd_hook;
-}
-
-List *
-extract_compress_rel_option(List *defs, char *option, int *value)
-{
-	bool		founded = false;
-	int			i;
-
-	i = 0;
-	while (i < list_length(defs))
-	{
-		DefElem    *def = (DefElem *) list_nth(defs, i);
-
-		if (strcmp(def->defname, option) == 0)
-		{
-			if (def->arg == NULL)
-				*value = O_COMPRESS_DEFAULT;
-			else if (!IsA(def->arg, Integer))
-				elog(ERROR, "Option %s must be integer value.", option);
-			else
-				*value = intVal(def->arg);
-			founded = true;
-		}
-
-		if (founded)
-		{
-			defs = list_delete_nth_cell(defs, i);
-			break;
-		}
-		i++;
-	}
-
-	return defs;
-}
-
-void
-validate_compress(OCompress compress, char *prefix)
-{
-	OCompress	max_compress = o_compress_max_lvl();
-
-	if (compress < -1 || compress > max_compress)
-	{
-		elog(ERROR, "%s compression level must be between %d and %d",
-			 prefix, -1, max_compress);
-	}
 }
 
 static const char *
@@ -708,109 +639,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			table_close(rel, lockmode);
 		}
 	}
-	else if (IsA(pstmt->utilityStmt, CreateStmt))
-	{
-		/*
-		 * copy-paste with new_o_tables list from ProcessUtilitySlow in
-		 * utility.c
-		 */
-		List	   *stmts;
-		RangeVar   *table_rv = NULL;
-		bool		isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
-		bool		needCleanup;
-
-		needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
-
-		/* PG_TRY block is to ensure we call EventTriggerEndCompleteQuery */
-		PG_TRY();
-		{
-			if (isCompleteQuery)
-				EventTriggerDDLCommandStart(pstmt->utilityStmt);
-
-			stmts = transformCreateStmt((CreateStmt *) pstmt->utilityStmt, queryString);
-
-			/*
-			* ... and do it.  We can't use foreach() because we may modify the
-			* list midway through, so pick off the elements one at a time, the
-			* hard way.
-			*/
-			while (stmts != NIL)
-			{
-				Node	   *stmt = (Node *) linitial(stmts);
-
-				stmts = list_delete_first(stmts);
-
-				if (IsA(stmt, CreateStmt))
-				{
-					CreateStmt *cstmt = (CreateStmt *) stmt;
-
-					/* Remember transformed RangeVar for LIKE */
-					table_rv = cstmt->relation;
-
-					o_define_relation(cstmt, RELKIND_RELATION, queryString);
-				}
-				else if (IsA(stmt, TableLikeClause))
-				{
-					/*
-					* Do delayed processing of LIKE options.  This will result in
-					* additional sub-statements for us to process.  Those should
-					* get done before any remaining actions, so prepend them to
-					* "stmts".
-					*/
-					TableLikeClause *like = (TableLikeClause *) stmt;
-					List	   *morestmts;
-
-					Assert(table_rv != NULL);
-
-					morestmts = expandTableLikeClause(table_rv, like);
-					stmts = list_concat(morestmts, stmts);
-				}
-				else
-				{
-					/*
-					* Recurse for anything else.  Note the recursive call will
-					* stash the objects so created into our event trigger
-					* context.
-					*/
-					PlannedStmt *wrapper;
-
-					wrapper = makeNode(PlannedStmt);
-					wrapper->commandType = CMD_UTILITY;
-					wrapper->canSetTag = false;
-					wrapper->utilityStmt = stmt;
-					wrapper->stmt_location = pstmt->stmt_location;
-					wrapper->stmt_len = pstmt->stmt_len;
-
-					ProcessUtility(wrapper,
-								   queryString,
-#if PG_VERSION_NUM >= 140000
-								   readOnlyTree,
-#endif
-								   PROCESS_UTILITY_SUBCOMMAND,
-								   params,
-								   NULL,
-								   None_Receiver,
-								   NULL);
-				}
-
-				if (stmts != NIL)
-					CommandCounterIncrement();
-			}
-
-			if (isCompleteQuery)
-			{
-				EventTriggerSQLDrop(pstmt->utilityStmt);
-				EventTriggerDDLCommandEnd(pstmt->utilityStmt);
-			}
-		}
-		PG_FINALLY();
-		{
-			if (needCleanup)
-				EventTriggerEndCompleteQuery();
-		}
-		PG_END_TRY();
-		call_next = false;
-	}
 	else if (IsA(pstmt->utilityStmt, RenameStmt))
 	{
 		RenameStmt *stmt = (RenameStmt *) pstmt->utilityStmt;
@@ -944,34 +772,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									context, params, env,
 									dest, qc);
 	}
-}
-
-static void
-orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
-						  ScanDirection direction,
-						  uint64 count,
-						  bool execute_once)
-{
-	if (queryDesc->dest->mydest == DestIntoRel)
-	{
-		/* "into" has same offset in o_data_receiver as in DR_intorel */
-		IntoClause	   *into = ((o_data_receiver *) queryDesc->dest)->into;
-		bool			orioledb;
-
-		if (into->accessMethod)
-			orioledb = (strcmp(into->accessMethod, "orioledb") == 0);
-		else
-			orioledb = (strcmp(default_table_access_method, "orioledb") == 0);
-		if (orioledb && queryDesc->dest->receiveSlot != o_intorel_receive)
-		{
-			pfree(queryDesc->dest);
-			queryDesc->dest = OCreateIntoRelDestReceiver(into);
-		}
-	}
-	if (prev_ExecutorRun_hook)
-		(*prev_ExecutorRun_hook) (queryDesc, direction, count, execute_once);
-	else
-		standard_ExecutorRun(queryDesc, direction, count, execute_once);
 }
 
 static void
@@ -1340,6 +1140,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				oids.relnode = rel->rd_node.relNode;
 				tupdesc = RelationGetDescr(rel);
 
+				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 				o_table = o_table_tableam_create(oids, tupdesc);
 				o_opclass_cache_add_table(o_table);
 				o_tables_add(o_table, oxid, csn);
@@ -1351,19 +1152,30 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				Relation	tbl = NULL;
 
 				/* This is faster than dependency scan */
+#if PG_VERSION_NUM >= 150000
+				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
+												'_') + 1);
+#else
 				tbl_oid = pg_strtouint64(strrchr(rel->rd_rel->relname.data,
 												 '_') + 1, NULL, 0);
+#endif
 
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					ORelOids	oids,
-								toastOids,
-							*treeOids;
-					OTable	   *o_table;
-					int			numTreeOids;
-					CommitSeqNo	csn;
-					OXid		oxid;
+					ORelOids		oids,
+									toastOids,
+								   *treeOids;
+					OTable		   *o_table;
+					int				numTreeOids;
+					CommitSeqNo		csn;
+					OXid			oxid;
+					ORelOptions	   *options;
+					OCompress		compress = default_compress,
+									primary_compress = default_primary_compress,
+									toast_compress = default_toast_compress;
+
+					options = (ORelOptions *) tbl->rd_options;
 
 					Assert(tbl->rd_node.dbNode == MyDatabaseId);
 					oids.datoid = MyDatabaseId;
@@ -1375,7 +1187,48 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					o_table = o_tables_get(oids);
 					o_table->toast_oids = toastOids;
-					o_table->toast_compress = InvalidOCompress;
+
+					if (options)
+					{
+						if (options->compress_offset > 0)
+						{
+							char   *str;
+
+							str = (char *)(((Pointer) options) +
+										   options->compress_offset);
+							if (str)
+								compress = o_parse_compress(str);
+						}
+						if (options->primary_compress_offset > 0)
+						{
+							char   *str;
+
+							str = (char *)(((Pointer) options) +
+										   options->primary_compress_offset);
+							if (str)
+								primary_compress = o_parse_compress(str);
+						}
+						if (options->toast_compress_offset > 0)
+						{
+							char   *str;
+
+							str = (char *)(((Pointer) options) +
+										   options->toast_compress_offset);
+							if (str)
+								toast_compress = o_parse_compress(str);
+						}
+					}
+
+					if (OCompressIsValid(compress))
+					{
+						if (!OCompressIsValid(primary_compress))
+							primary_compress = compress;
+						if (!OCompressIsValid(toast_compress))
+							toast_compress = compress;
+					}
+					o_table->default_compress = compress;
+					o_table->toast_compress = toast_compress;
+					o_table->primary_compress = primary_compress;
 
 					fill_current_oxid_csn(&oxid, &csn);
 					o_tables_update(o_table, oxid, csn);
@@ -1383,6 +1236,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					treeOids = o_table_make_index_oids(o_table, &numTreeOids);
 					add_undo_create_relnode(oids, treeOids, numTreeOids);
+					LWLockRelease(&checkpoint_state->oTablesAddLock);
 					pfree(treeOids);
 				}
 				if (tbl)
@@ -1680,381 +1534,85 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		old_objectaccess_hook(access, classId, objectId, subId, arg);
 }
 
-static ObjectAddress
-o_define_relation(CreateStmt *cstmt, char relkind, const char *queryString)
+int16
+o_parse_compress(const char *value)
 {
-	ObjectAddress address;
-	ObjectAddress secondaryObject = InvalidObjectAddress;
-	OCompress	compress = default_compress,
-				primary_compress = default_primary_compress,
-				toast_compress = default_toast_compress;
-	Datum		toast_options;
-	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-	bool		orioledb;
-	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
-	OXid		oxid = InvalidOXid;
-	int 		old_max_parallel_maintenance_workers;
+	const char *ptr = value;
+	int16		result = 0;
+	bool		neg = false;
+	bool		invalid_syntax = false;
+	bool		out_of_range = false;
 
-	if (cstmt->accessMethod)
-		orioledb = (strcmp(cstmt->accessMethod, "orioledb") == 0);
-	else
-		orioledb = (strcmp(default_table_access_method, "orioledb") == 0);
+	/* skip leading spaces */
+	while (likely(*ptr) && isspace((unsigned char)*ptr))
+		ptr++;
 
-	if (orioledb)
+	/* handle sign */
+	if (*ptr == '-')
 	{
-		cstmt->options = extract_compress_rel_option(cstmt->options,
-													 "compress",
-													 &compress);
-		cstmt->options = extract_compress_rel_option(cstmt->options,
-													 "primary_compress",
-													 &primary_compress);
-		cstmt->options = extract_compress_rel_option(cstmt->options,
-													 "toast_compress",
-													 &toast_compress);
-		validate_compress(compress, "Default");
-		validate_compress(primary_compress, "Primary index");
-		validate_compress(toast_compress, "TOAST");
-		LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+		ptr++;
+		neg = true;
 	}
+	else if (*ptr == '+')
+		ptr++;
 
-	/* Create the table itself */
-	address = DefineRelation(cstmt, relkind, InvalidOid, NULL,
-							 queryString);
-	EventTriggerCollectSimpleCommand(address, secondaryObject, (Node *) cstmt);
+	/* require at least one digit */
+	if (unlikely(!isdigit((unsigned char)*ptr)))
+		invalid_syntax = true;
 
-	/*
-	 * Let NewRelationCreateToastTable decide if this one needs a secondary
-	 * relation too.
-	 */
-	CommandCounterIncrement();
-
-	/*
-	 * parse and validate reloptions for the toast table
-	 */
-	toast_options = transformRelOptions((Datum) 0,
-										cstmt->options,
-										"toast",
-										validnsps,
-										true,
-										false);
-	(void) heap_reloptions(RELKIND_TOASTVALUE,
-						   toast_options,
-						   true);
-
-	if (orioledb)
+	if (!invalid_syntax)
 	{
-		old_max_parallel_maintenance_workers =
-			max_parallel_maintenance_workers;
-		max_parallel_maintenance_workers = 0;
-	}
-	NewRelationCreateToastTable(address.objectId,
-								toast_options);
-	if (orioledb)
-		max_parallel_maintenance_workers =
-			old_max_parallel_maintenance_workers;
-
-	/*
-	 * orioledb table have no need in PostgreSQL TOAST and this calls have no
-	 * sense for us (see needs_toast_table(rel) check inside
-	 * create_toast_table()), but call NewRelationCreateToastTable() always
-	 * gets AccessExclusiveLock on the relation. So we just skip it.
-	 */
-
-	if (!OXidIsValid(oxid))
-		fill_current_oxid_csn(&oxid, &csn);
-
-	if (orioledb)
-	{
-		Relation	rel;
-		ORelOids	oids,
-				   *treeOids;
-		OTable	   *o_table;
-		int			numTreeOids;
-
-		rel = table_open(address.objectId, AccessShareLock);
-		Assert(rel->rd_node.dbNode == MyDatabaseId);
-		oids.datoid = MyDatabaseId;
-		oids.reloid = rel->rd_id;
-		oids.relnode = rel->rd_node.relNode;
-		o_table = o_tables_get(oids);
-		Assert(o_table);
-
-		if (OCompressIsValid(compress))
+		/* process digits */
+		while (*ptr && isdigit((unsigned char)*ptr))
 		{
-			if (!OCompressIsValid(primary_compress))
-				primary_compress = compress;
-			if (!OCompressIsValid(toast_compress))
-				toast_compress = compress;
+			int8 digit = (*ptr++ - '0');
+
+			if (unlikely(pg_mul_s16_overflow(result, 10, &result)) ||
+				unlikely(pg_sub_s16_overflow(result, digit, &result)))
+				out_of_range = true;
 		}
-		o_table->default_compress = compress;
-		o_table->toast_compress = toast_compress;
-		o_table->primary_compress = primary_compress;
 
-		o_indices_update(o_table, TOASTIndexNumber, oxid, csn);
-		o_tables_update(o_table, oxid, csn);
-		o_tables_after_update(o_table, oxid, csn);
-		LWLockRelease(&checkpoint_state->oTablesAddLock);
-
-		treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-		add_undo_create_relnode(oids, treeOids, numTreeOids);
-		pfree(treeOids);
-
-		table_close(rel, AccessShareLock);
-	}
-
-	return address;
-}
-
-/*
- * o_create_ctas_internal
- *
- * Internal utility used for the creation of the definition of a relation
- * created via CREATE TABLE AS or a materialized view.  Caller needs to
- * provide a list of attributes (ColumnDef nodes).
- */
-static ObjectAddress
-o_create_ctas_internal(List *attrList, IntoClause *into)
-{
-	CreateStmt *cstmt = makeNode(CreateStmt);
-	bool		is_matview;
-	char		relkind;
-	ObjectAddress intoRelationAddr;
-
-	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
-	is_matview = (into->viewQuery != NULL);
-	relkind = is_matview ? RELKIND_MATVIEW : RELKIND_RELATION;
-
-	/*
-	 * Create the target relation by faking up a CREATE TABLE parsetree and
-	 * passing it to DefineRelation.
-	 */
-	cstmt->relation = into->rel;
-	cstmt->tableElts = attrList;
-	cstmt->inhRelations = NIL;
-	cstmt->ofTypename = NULL;
-	cstmt->constraints = NIL;
-	cstmt->options = into->options;
-	cstmt->oncommit = into->onCommit;
-	cstmt->tablespacename = into->tableSpaceName;
-	cstmt->if_not_exists = false;
-	cstmt->accessMethod = into->accessMethod;
-
-	intoRelationAddr = o_define_relation(cstmt, relkind, NULL);
-
-	/* Create the "view" part of a materialized view. */
-	if (is_matview)
-	{
-		/* StoreViewQuery scribbles on tree, so make a copy */
-		Query	   *query = (Query *) copyObject(into->viewQuery);
-
-		StoreViewQuery(intoRelationAddr.objectId, query, false);
-		CommandCounterIncrement();
-	}
-
-	return intoRelationAddr;
-}
-
-/*
- * o_intorel_startup --- executor startup
- */
-static void
-o_intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
-{
-	o_data_receiver *myState = (o_data_receiver *) self;
-	IntoClause *into = myState->into;
-	bool		is_matview;
-	List	   *attrList;
-	ObjectAddress intoRelationAddr;
-	Relation	intoRelationDesc;
-	ListCell   *lc;
-	int			attnum;
-
-	Assert(into != NULL);		/* else somebody forgot to set it */
-
-	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
-	is_matview = (into->viewQuery != NULL);
-
-	/*
-	 * Build column definitions using "pre-cooked" type and collation info. If
-	 * a column name list was specified in CREATE TABLE AS, override the
-	 * column names derived from the query.  (Too few column names are OK, too
-	 * many are not.)
-	 */
-	attrList = NIL;
-	lc = list_head(into->colNames);
-	for (attnum = 0; attnum < typeinfo->natts; attnum++)
-	{
-		Form_pg_attribute attribute = TupleDescAttr(typeinfo, attnum);
-		ColumnDef  *col;
-		char	   *colname;
-
-		if (lc)
+		if (!out_of_range)
 		{
-			colname = strVal(lfirst(lc));
-			lc = lnext(into->colNames, lc);
+			/* allow trailing whitespace, but not other trailing chars */
+			while (*ptr != '\0' && isspace((unsigned char)*ptr))
+				ptr++;
+
+			if (unlikely(*ptr != '\0'))
+				invalid_syntax = true;
+
+			if (!invalid_syntax)
+			{
+				if (!neg)
+				{
+					/* could fail if input is most negative number */
+					if (unlikely(result == PG_INT16_MIN))
+						out_of_range = true;
+					if (!out_of_range)
+						result = -result;
+				}
+			}
 		}
+	}
+
+	if (out_of_range)
+		ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+						errmsg("value \"%s\" is out of range for type %s",
+							value, "smallint")));
+
+	if (invalid_syntax)
+	{
+		if (strcmp(value, "auto") == 0 ||
+			strcmp(value, "on") == 0 ||
+			strcmp(value, "true") == 0)
+			result = O_COMPRESS_DEFAULT;
+		else if (strcmp(value, "off") == 0)
+			result = InvalidOCompress;
 		else
-			colname = NameStr(attribute->attname);
-
-		col = makeColumnDef(colname,
-							attribute->atttypid,
-							attribute->atttypmod,
-							attribute->attcollation);
-
-		/*
-		 * It's possible that the column is of a collatable type but the
-		 * collation could not be resolved, so double-check.  (We must check
-		 * this here because DefineRelation would adopt the type's default
-		 * collation rather than complaining.)
-		 */
-		if (!OidIsValid(col->collOid) &&
-			type_is_collatable(col->typeName->typeOid))
-			ereport(ERROR,
-					(errcode(ERRCODE_INDETERMINATE_COLLATION),
-					 errmsg("no collation was derived for column \"%s\" with collatable type %s",
-							col->colname,
-							format_type_be(col->typeName->typeOid)),
-					 errhint("Use the COLLATE clause to set the collation explicitly.")));
-
-		attrList = lappend(attrList, col);
+			ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+							errmsg("invalid compression value: \"%s\"",
+								value)));
 	}
 
-	if (lc != NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("too many column names were specified")));
-
-	/*
-	 * Actually create the target table
-	 */
-	intoRelationAddr = o_create_ctas_internal(attrList, into);
-
-	/*
-	 * Finally we can open the target table
-	 */
-	intoRelationDesc = table_open(intoRelationAddr.objectId, AccessExclusiveLock);
-
-	/*
-	 * Make sure the constructed table does not have RLS enabled.
-	 *
-	 * check_enable_rls() will ereport(ERROR) itself if the user has requested
-	 * something invalid, and otherwise will return RLS_ENABLED if RLS should
-	 * be enabled here.  We don't actually support that currently, so throw
-	 * our own ereport(ERROR) if that happens.
-	 */
-	if (check_enable_rls(intoRelationAddr.objectId, InvalidOid, false) == RLS_ENABLED)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("policies not yet implemented for this command")));
-
-	/*
-	 * Tentatively mark the target as populated, if it's a matview and we're
-	 * going to fill it; otherwise, no change needed.
-	 */
-	if (is_matview && !into->skipData)
-		SetMatViewPopulatedState(intoRelationDesc, true);
-
-	/*
-	 * Fill private fields of myState for use by later routines
-	 */
-	myState->rel = intoRelationDesc;
-	myState->reladdr = intoRelationAddr;
-	myState->output_cid = GetCurrentCommandId(true);
-	myState->ti_options = TABLE_INSERT_SKIP_FSM;
-
-	/*
-	 * If WITH NO DATA is specified, there is no need to set up the state for
-	 * bulk inserts as there are no tuples to insert.
-	 */
-	if (!into->skipData)
-		myState->bistate = GetBulkInsertState();
-	else
-		myState->bistate = NULL;
-
-	myState->estate = CreateExecutorState();
-
-	/*
-	 * Valid smgr_targblock implies something already wrote to the relation.
-	 * This may be harmless, but this function hasn't planned for it.
-	 */
-	Assert(RelationGetTargetBlock(intoRelationDesc) == InvalidBlockNumber);
-}
-
-/*
- * o_intorel_receive --- receive one tuple
- */
-static bool
-o_intorel_receive(TupleTableSlot *slot, DestReceiver *self)
-{
-	o_data_receiver *myState = (o_data_receiver *) self;
-
-	/* Nothing to insert if WITH NO DATA is specified. */
-	if (!myState->into->skipData)
-	{
-		/*
-		 * Note that the input slot might not be of the type of the target
-		 * relation. That's supported by table_tuple_insert(), but slightly
-		 * less efficient than inserting with the right slot - but the
-		 * alternative would be to copy into a slot of the right type, which
-		 * would not be cheap either. This also doesn't allow accessing per-AM
-		 * data (say a tuple's xmin), but since we don't do that here...
-		 */
-		table_tuple_insert(myState->rel, slot, myState->output_cid,
-						   myState->ti_options, myState->bistate);
-	}
-
-	/* We know this is a newly created relation, so there are no indexes */
-
-	return true;
-}
-
-/*
- * o_intorel_shutdown --- executor end
- */
-static void
-o_intorel_shutdown(DestReceiver *self)
-{
-	o_data_receiver *myState = (o_data_receiver *) self;
-	IntoClause *into = myState->into;
-
-	if (!into->skipData)
-	{
-		FreeBulkInsertState(myState->bistate);
-		table_finish_bulk_insert(myState->rel, myState->ti_options);
-	}
-
-	/* close rel, but keep lock until commit */
-	table_close(myState->rel, NoLock);
-	myState->rel = NULL;
-
-	FreeExecutorState(myState->estate);
-}
-
-/*
- * o_intorel_destroy --- release DestReceiver object
- */
-static void
-o_intorel_destroy(DestReceiver *self)
-{
-	pfree(self);
-}
-
-/*
- * OCreateIntoRelDestReceiver -- create a suitable DestReceiver object
- */
-static DestReceiver *
-OCreateIntoRelDestReceiver(IntoClause *intoClause)
-{
-	o_data_receiver *self;
-
-	self = (o_data_receiver *) palloc0(sizeof(o_data_receiver));
-	self->pub.receiveSlot = o_intorel_receive;
-	self->pub.rStartup = o_intorel_startup;
-	self->pub.rShutdown = o_intorel_shutdown;
-	self->pub.rDestroy = o_intorel_destroy;
-	self->pub.mydest = DestIntoRel;
-	self->into = intoClause;
-	/* other private fields will be set during intorel_startup */
-
-	return (DestReceiver *) self;
+	return result;
 }
