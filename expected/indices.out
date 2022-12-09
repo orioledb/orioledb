@@ -5829,7 +5829,7 @@ INSERT INTO o_test_unique_as_pkey (key, val, val2)
  val2   | integer |           | not null |         | plain   |              | 
 Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
-    "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key) INCLUDE (key, val)
+    "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -5874,8 +5874,8 @@ CREATE UNIQUE INDEX o_test_unique_as_pkey_ix2
  val2   | integer |           | not null |         | plain   |              | 
 Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
-    "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key) INCLUDE (key, val)
-    "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key) INCLUDE (key, val)
+    "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
+    "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key)
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -6106,10 +6106,1160 @@ SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
      5 | XXX5
 (5 rows)
 
+CREATE TABLE o_test_reuse_multiple_indices (
+	val_1 int PRIMARY KEY,
+	val_2 text COLLATE "C" NOT NULL,
+	val_3 int,
+	val_4 int,
+	val_5 int
+) USING orioledb;
+CREATE INDEX o_test_reuse_multiple_indices_ix1
+	ON o_test_reuse_multiple_indices(val_2);
+CREATE INDEX o_test_reuse_multiple_indices_ix2
+	ON o_test_reuse_multiple_indices(val_3 DESC, val_2 DESC);
+CREATE INDEX o_test_reuse_multiple_indices_ix3
+	ON o_test_reuse_multiple_indices(val_4) INCLUDE (val_2);
+CREATE INDEX o_test_reuse_multiple_indices_ix4
+	ON o_test_reuse_multiple_indices(val_5) INCLUDE (val_1, val_2);
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+   val_1 | integer |    (null) |    false |  false        +
+   val_2 |    text |         C |    false |  false        +
+   val_3 | integer |    (null) |     true |  false        +
+   val_4 | integer |    (null) |     true |  false        +
+   val_5 | integer |    (null) |     true |  false        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_reuse_multiple_indices_pkey      +
+     Index type: primary, unique               +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: val_1              +
+ Index o_test_reuse_multiple_indices_ix1       +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_2, val_1       +
+     Leaf tuple fields: val_2, val_1           +
+ Index o_test_reuse_multiple_indices_ix2       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_3, val_2, val_1+
+     Leaf tuple fields: val_3, val_2, val_1    +
+ Index o_test_reuse_multiple_indices_ix3       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_4, val_2, val_1+
+     Leaf tuple fields: val_4, val_2, val_1    +
+ Index o_test_reuse_multiple_indices_ix4       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_5, val_1, val_2+
+     Leaf tuple fields: val_5, val_1, val_2    +
+ 
+(1 row)
+
+\d+ o_test_reuse_multiple_indices
+                       Table "public.o_test_reuse_multiple_indices"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ val_1  | integer |           | not null |         | plain    |              | 
+ val_2  | text    | C         | not null |         | extended |              | 
+ val_3  | integer |           |          |         | plain    |              | 
+ val_4  | integer |           |          |         | plain    |              | 
+ val_5  | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_reuse_multiple_indices_pkey" PRIMARY KEY, btree (val_1)
+    "o_test_reuse_multiple_indices_ix1" btree (val_2) INCLUDE (val_1)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC) INCLUDE (val_1)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2, val_1)
+    "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+
+\d+ o_test_reuse_multiple_indices_ix1
+        Index "public.o_test_reuse_multiple_indices_ix1"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_2  | text    | yes  | val_2      | extended | 
+ val_1  | integer | no   | val_1      | plain    | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix2
+        Index "public.o_test_reuse_multiple_indices_ix2"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_3  | integer | yes  | val_3      | plain    | 
+ val_2  | text    | yes  | val_2      | extended | 
+ val_1  | integer | no   | val_1      | plain    | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix3
+        Index "public.o_test_reuse_multiple_indices_ix3"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_4  | integer | yes  | val_4      | plain    | 
+ val_2  | text    | no   | val_2      | extended | 
+ val_1  | integer | no   | val_1      | plain    | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix4
+        Index "public.o_test_reuse_multiple_indices_ix4"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_5  | integer | yes  | val_5      | plain    | 
+ val_1  | integer | no   | val_1      | plain    | 
+ val_2  | text    | no   | val_2      | extended | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+INSERT INTO o_test_reuse_multiple_indices
+	SELECT v, 'XXX' || v, v * 10, v * 100, v * 1000
+		FROM generate_series(1, 5) v;
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
+							  'nue');
+                        orioledb_tbl_structure                        
+----------------------------------------------------------------------
+ Index o_test_reuse_multiple_indices_pkey contents                   +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                 +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('1', 'XXX1', '10', '100', '1000')+
+     Item 1: offset = 320, tuple = ('2', 'XXX2', '20', '200', '2000')+
+     Item 2: offset = 368, tuple = ('3', 'XXX3', '30', '300', '3000')+
+     Item 3: offset = 416, tuple = ('4', 'XXX4', '40', '400', '4000')+
+     Item 4: offset = 464, tuple = ('5', 'XXX5', '50', '500', '5000')+
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix1 contents                    +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('XXX1', '1')                     +
+     Item 1: offset = 312, tuple = ('XXX2', '2')                     +
+     Item 2: offset = 352, tuple = ('XXX3', '3')                     +
+     Item 3: offset = 392, tuple = ('XXX4', '4')                     +
+     Item 4: offset = 432, tuple = ('XXX5', '5')                     +
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix2 contents                    +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('50', 'XXX5', '5')               +
+     Item 1: offset = 312, tuple = ('40', 'XXX4', '4')               +
+     Item 2: offset = 352, tuple = ('30', 'XXX3', '3')               +
+     Item 3: offset = 392, tuple = ('20', 'XXX2', '2')               +
+     Item 4: offset = 432, tuple = ('10', 'XXX1', '1')               +
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix3 contents                    +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('100', 'XXX1', '1')              +
+     Item 1: offset = 312, tuple = ('200', 'XXX2', '2')              +
+     Item 2: offset = 352, tuple = ('300', 'XXX3', '3')              +
+     Item 3: offset = 392, tuple = ('400', 'XXX4', '4')              +
+     Item 4: offset = 432, tuple = ('500', 'XXX5', '5')              +
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix4 contents                    +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('1000', '1', 'XXX1')             +
+     Item 1: offset = 312, tuple = ('2000', '2', 'XXX2')             +
+     Item 2: offset = 352, tuple = ('3000', '3', 'XXX3')             +
+     Item 3: offset = 392, tuple = ('4000', '4', 'XXX4')             +
+     Item 4: offset = 432, tuple = ('5000', '5', 'XXX5')             +
+                                                                     +
+ Index toast: not loaded                                             +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix1
+(2 rows)
+
+SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+ val_2 
+-------
+ XXX1
+ XXX2
+ XXX3
+ XXX4
+ XXX5
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+		ORDER BY val_3 DESC;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix2
+(2 rows)
+
+SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+	ORDER BY val_3 DESC;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+     5 | XXX5  |    50
+     4 | XXX4  |    40
+     3 | XXX3  |    30
+     2 | XXX2  |    20
+     1 | XXX1  |    10
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+		ORDER BY val_4;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix3
+(2 rows)
+
+SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+	ORDER BY val_4;
+ val_1 | val_2 | val_4 
+-------+-------+-------
+     1 | XXX1  |   100
+     2 | XXX2  |   200
+     3 | XXX3  |   300
+     4 | XXX4  |   400
+     5 | XXX5  |   500
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
+		ORDER BY val_5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
+
+SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+ val_1 | val_2 | val_5 
+-------+-------+-------
+     1 | XXX1  |  1000
+     2 | XXX2  |  2000
+     3 | XXX3  |  3000
+     4 | XXX4  |  4000
+     5 | XXX5  |  5000
+(5 rows)
+
+ALTER TABLE o_test_reuse_multiple_indices
+	ALTER val_2 TYPE text COLLATE "C",
+	ALTER val_2 TYPE text COLLATE "POSIX";
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+   val_1 | integer |    (null) |    false |  false        +
+   val_2 |    text |     POSIX |    false |  false        +
+   val_3 | integer |    (null) |     true |  false        +
+   val_4 | integer |    (null) |     true |  false        +
+   val_5 | integer |    (null) |     true |  false        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_reuse_multiple_indices_pkey      +
+     Index type: primary, unique               +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: val_1              +
+ Index o_test_reuse_multiple_indices_ix3       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_4, val_2, val_1+
+     Leaf tuple fields: val_4, val_2, val_1    +
+ Index o_test_reuse_multiple_indices_ix4       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_5, val_1, val_2+
+     Leaf tuple fields: val_5, val_1, val_2    +
+ Index o_test_reuse_multiple_indices_ix1       +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_2, val_1       +
+     Leaf tuple fields: val_2, val_1           +
+ Index o_test_reuse_multiple_indices_ix2       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_3, val_2, val_1+
+     Leaf tuple fields: val_3, val_2, val_1    +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
+							  'nue');
+                        orioledb_tbl_structure                        
+----------------------------------------------------------------------
+ Index o_test_reuse_multiple_indices_pkey contents                   +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                 +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('1', 'XXX1', '10', '100', '1000')+
+     Item 1: offset = 320, tuple = ('2', 'XXX2', '20', '200', '2000')+
+     Item 2: offset = 368, tuple = ('3', 'XXX3', '30', '300', '3000')+
+     Item 3: offset = 416, tuple = ('4', 'XXX4', '40', '400', '4000')+
+     Item 4: offset = 464, tuple = ('5', 'XXX5', '50', '500', '5000')+
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix3 contents                    +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('100', 'XXX1', '1')              +
+     Item 1: offset = 312, tuple = ('200', 'XXX2', '2')              +
+     Item 2: offset = 352, tuple = ('300', 'XXX3', '3')              +
+     Item 3: offset = 392, tuple = ('400', 'XXX4', '4')              +
+     Item 4: offset = 432, tuple = ('500', 'XXX5', '5')              +
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix4 contents                    +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 272, tuple = ('1000', '1', 'XXX1')             +
+     Item 1: offset = 312, tuple = ('2000', '2', 'XXX2')             +
+     Item 2: offset = 352, tuple = ('3000', '3', 'XXX3')             +
+     Item 3: offset = 392, tuple = ('4000', '4', 'XXX4')             +
+     Item 4: offset = 432, tuple = ('5000', '5', 'XXX5')             +
+                                                                     +
+ Index o_test_reuse_multiple_indices_ix1: not loaded                 +
+ Index o_test_reuse_multiple_indices_ix2: not loaded                 +
+ Index toast: not loaded                                             +
+ 
+(1 row)
+
+\d+ o_test_reuse_multiple_indices
+                       Table "public.o_test_reuse_multiple_indices"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ val_1  | integer |           | not null |         | plain    |              | 
+ val_2  | text    | POSIX     | not null |         | extended |              | 
+ val_3  | integer |           |          |         | plain    |              | 
+ val_4  | integer |           |          |         | plain    |              | 
+ val_5  | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_reuse_multiple_indices_pkey" PRIMARY KEY, btree (val_1)
+    "o_test_reuse_multiple_indices_ix1" btree (val_2) INCLUDE (val_1)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC) INCLUDE (val_1)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2, val_1)
+    "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+
+EXPLAIN (COSTS OFF)
+	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
+
+SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
+ chr 
+-----
+ b
+ c
+ d
+ e
+ f
+(5 rows)
+
+EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=8)
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
+
+SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+ val_1 | val_5 
+-------+-------
+     1 |  1000
+     2 |  2000
+     3 |  3000
+     4 |  4000
+     5 |  5000
+(5 rows)
+
+ALTER TABLE o_test_reuse_multiple_indices ALTER val_5 TYPE char
+	USING chr(ASCII('a') + val_5 / 1000);
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+   val_1 |      integer |    (null) |    false |  false   +
+   val_2 |         text |     POSIX |    false |  false   +
+   val_3 |      integer |    (null) |     true |  false   +
+   val_4 |      integer |    (null) |     true |  false   +
+   val_5 | character(1) |   default |     true |  false   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_reuse_multiple_indices_pkey      +
+     Index type: primary, unique               +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: val_1              +
+ Index o_test_reuse_multiple_indices_ix1       +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_2, val_1       +
+     Leaf tuple fields: val_2, val_1           +
+ Index o_test_reuse_multiple_indices_ix2       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_3, val_2, val_1+
+     Leaf tuple fields: val_3, val_2, val_1    +
+ Index o_test_reuse_multiple_indices_ix3       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_4, val_2, val_1+
+     Leaf tuple fields: val_4, val_2, val_1    +
+ Index o_test_reuse_multiple_indices_ix4       +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_5, val_1, val_2+
+     Leaf tuple fields: val_5, val_1, val_2    +
+ 
+(1 row)
+
+EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=12)
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
+
+SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+ val_1 | val_5 
+-------+-------
+     1 | b
+     2 | c
+     3 | d
+     4 | e
+     5 | f
+(5 rows)
+
+\d+ o_test_reuse_multiple_indices
+                          Table "public.o_test_reuse_multiple_indices"
+ Column |     Type     | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+--------------+-----------+----------+---------+----------+--------------+-------------
+ val_1  | integer      |           | not null |         | plain    |              | 
+ val_2  | text         | POSIX     | not null |         | extended |              | 
+ val_3  | integer      |           |          |         | plain    |              | 
+ val_4  | integer      |           |          |         | plain    |              | 
+ val_5  | character(1) |           |          |         | extended |              | 
+Indexes:
+    "o_test_reuse_multiple_indices_pkey" PRIMARY KEY, btree (val_1)
+    "o_test_reuse_multiple_indices_ix1" btree (val_2) INCLUDE (val_1)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC) INCLUDE (val_1)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2, val_1)
+    "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+
+\d+ o_test_reuse_multiple_indices_ix1
+        Index "public.o_test_reuse_multiple_indices_ix1"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_2  | text    | yes  | val_2      | extended | 
+ val_1  | integer | no   | val_1      | plain    | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix2
+        Index "public.o_test_reuse_multiple_indices_ix2"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_3  | integer | yes  | val_3      | plain    | 
+ val_2  | text    | yes  | val_2      | extended | 
+ val_1  | integer | no   | val_1      | plain    | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix3
+        Index "public.o_test_reuse_multiple_indices_ix3"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_4  | integer | yes  | val_4      | plain    | 
+ val_2  | text    | no   | val_2      | extended | 
+ val_1  | integer | no   | val_1      | plain    | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix4
+          Index "public.o_test_reuse_multiple_indices_ix4"
+ Column |     Type     | Key? | Definition | Storage  | Stats target 
+--------+--------------+------+------------+----------+--------------
+ val_5  | character(1) | yes  | val_5      | extended | 
+ val_1  | integer      | no   | val_1      | plain    | 
+ val_2  | text         | no   | val_2      | extended | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix1
+(2 rows)
+
+SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+ val_2 
+-------
+ XXX1
+ XXX2
+ XXX3
+ XXX4
+ XXX5
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+		ORDER BY val_3 DESC;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix2
+(2 rows)
+
+SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+	ORDER BY val_3 DESC;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+     5 | XXX5  |    50
+     4 | XXX4  |    40
+     3 | XXX3  |    30
+     2 | XXX2  |    20
+     1 | XXX1  |    10
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+		ORDER BY val_4;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix3
+(2 rows)
+
+SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
+ val_1 | val_2 | val_4 
+-------+-------+-------
+     1 | XXX1  |   100
+     2 | XXX2  |   200
+     3 | XXX3  |   300
+     4 | XXX4  |   400
+     5 | XXX5  |   500
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
+		ORDER BY val_5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
+
+SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+ val_1 | val_2 | val_5 
+-------+-------+-------
+     1 | XXX1  | b
+     2 | XXX2  | c
+     3 | XXX3  | d
+     4 | XXX4  | e
+     5 | XXX5  | f
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass, 'nue');
+                                  orioledb_tbl_structure                                   
+-------------------------------------------------------------------------------------------
+ Index o_test_reuse_multiple_indices_pkey contents                                        +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                      +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')                +
+     Item 0: offset = 264, tuple = ('1', 'XXX1', '10', '100', 'b')                        +
+   Chunk 1: offset = 1, location = 312, hikey location = 88, hikey = ('3')                +
+     Item 1: offset = 320, tuple = ('2', 'XXX2', '20', '200', 'c')                        +
+   Chunk 2: offset = 2, location = 368, hikey location = 96, hikey = ('4')                +
+     Item 2: offset = 376, tuple = ('3', 'XXX3', '30', '300', 'd')                        +
+   Chunk 3: offset = 3, location = 424, hikey location = 104, hikey = ('5')               +
+     Item 3: offset = 432, tuple = ('4', 'XXX4', '40', '400', 'e')                        +
+   Chunk 4: offset = 4, location = 480, hikey location = 112                              +
+     Item 4: offset = 488, tuple = ('5', 'XXX5', '50', '500', 'f')                        +
+                                                                                          +
+ Index o_test_reuse_multiple_indices_ix1 contents                                         +
+ Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('XXX2', '2')        +
+     Item 0: offset = 264, tuple = ('XXX1', '1')                                          +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('XXX3', '3')       +
+     Item 1: offset = 312, tuple = ('XXX2', '2')                                          +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('XXX4', '4')       +
+     Item 2: offset = 360, tuple = ('XXX3', '3')                                          +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('XXX5', '5')       +
+     Item 3: offset = 408, tuple = ('XXX4', '4')                                          +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                              +
+     Item 4: offset = 456, tuple = ('XXX5', '5')                                          +
+                                                                                          +
+ Index o_test_reuse_multiple_indices_ix2 contents                                         +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('40', 'XXX4', '4')  +
+     Item 0: offset = 264, tuple = ('50', 'XXX5', '5')                                    +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30', 'XXX3', '3') +
+     Item 1: offset = 312, tuple = ('40', 'XXX4', '4')                                    +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('20', 'XXX2', '2') +
+     Item 2: offset = 360, tuple = ('30', 'XXX3', '3')                                    +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('10', 'XXX1', '1') +
+     Item 3: offset = 408, tuple = ('20', 'XXX2', '2')                                    +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                              +
+     Item 4: offset = 456, tuple = ('10', 'XXX1', '1')                                    +
+                                                                                          +
+ Index o_test_reuse_multiple_indices_ix3 contents                                         +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('200', 'XXX2', '2') +
+     Item 0: offset = 264, tuple = ('100', 'XXX1', '1')                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('300', 'XXX3', '3')+
+     Item 1: offset = 312, tuple = ('200', 'XXX2', '2')                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('400', 'XXX4', '4')+
+     Item 2: offset = 360, tuple = ('300', 'XXX3', '3')                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('500', 'XXX5', '5')+
+     Item 3: offset = 408, tuple = ('400', 'XXX4', '4')                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                              +
+     Item 4: offset = 456, tuple = ('500', 'XXX5', '5')                                   +
+                                                                                          +
+ Index o_test_reuse_multiple_indices_ix4 contents                                         +
+ Page 0: level = 0, maxKeyLen = 21, nVacatedBytes = 0                                     +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                      +
+     Leftmost, Rightmost                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('c', '2', 'XXX2')   +
+     Item 0: offset = 264, tuple = ('b', '1', 'XXX1')                                     +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('d', '3', 'XXX3')  +
+     Item 1: offset = 312, tuple = ('c', '2', 'XXX2')                                     +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e', '4', 'XXX4')  +
+     Item 2: offset = 360, tuple = ('d', '3', 'XXX3')                                     +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('f', '5', 'XXX5')  +
+     Item 3: offset = 408, tuple = ('e', '4', 'XXX4')                                     +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                              +
+     Item 4: offset = 456, tuple = ('f', '5', 'XXX5')                                     +
+                                                                                          +
+ Index toast: not loaded                                                                  +
+ 
+(1 row)
+
+ALTER TABLE o_test_reuse_multiple_indices
+	DROP CONSTRAINT o_test_reuse_multiple_indices_pkey;
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |         Type | Collation | Nullable | Droped   +
+   val_1 |      integer |    (null) |    false |  false   +
+   val_2 |         text |     POSIX |    false |  false   +
+   val_3 |      integer |    (null) |     true |  false   +
+   val_4 |      integer |    (null) |     true |  false   +
+   val_5 | character(1) |   default |     true |  false   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+                 orioledb_tbl_indices                 
+------------------------------------------------------
+ Index ctid_primary                                  +
+     Index type: primary, unique, ctid               +
+     Leaf tuple size: 6, non-leaf tuple size: 1      +
+     Non-leaf tuple fields: ctid                     +
+ Index o_test_reuse_multiple_indices_ix1             +
+     Index type: secondary                           +
+     Leaf tuple size: 2, non-leaf tuple size: 2      +
+     Non-leaf tuple fields: val_2, ctid              +
+     Leaf tuple fields: val_2, ctid                  +
+ Index o_test_reuse_multiple_indices_ix2             +
+     Index type: secondary                           +
+     Leaf tuple size: 3, non-leaf tuple size: 3      +
+     Non-leaf tuple fields: val_3, val_2, ctid       +
+     Leaf tuple fields: val_3, val_2, ctid           +
+ Index o_test_reuse_multiple_indices_ix3             +
+     Index type: secondary                           +
+     Leaf tuple size: 3, non-leaf tuple size: 3      +
+     Non-leaf tuple fields: val_4, val_2, ctid       +
+     Leaf tuple fields: val_4, val_2, ctid           +
+ Index o_test_reuse_multiple_indices_ix4             +
+     Index type: secondary                           +
+     Leaf tuple size: 4, non-leaf tuple size: 4      +
+     Non-leaf tuple fields: val_5, val_1, val_2, ctid+
+     Leaf tuple fields: val_5, val_1, val_2, ctid    +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix1
+(2 rows)
+
+SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+ val_2 
+-------
+ XXX1
+ XXX2
+ XXX3
+ XXX4
+ XXX5
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+		ORDER BY val_3 DESC;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index scan of: o_test_reuse_multiple_indices_ix2
+(2 rows)
+
+SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+	ORDER BY val_3 DESC;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+     5 | XXX5  |    50
+     4 | XXX4  |    40
+     3 | XXX3  |    30
+     2 | XXX2  |    20
+     1 | XXX1  |    10
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+		ORDER BY val_4;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index scan of: o_test_reuse_multiple_indices_ix3
+(2 rows)
+
+SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
+ val_1 | val_2 | val_4 
+-------+-------+-------
+     1 | XXX1  |   100
+     2 | XXX2  |   200
+     3 | XXX3  |   300
+     4 | XXX4  |   400
+     5 | XXX5  |   500
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
+		ORDER BY val_5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
+
+SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+ val_1 | val_2 | val_5 
+-------+-------+-------
+     1 | XXX1  | b
+     2 | XXX2  | c
+     3 | XXX3  | d
+     4 | XXX4  | e
+     5 | XXX5  | f
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass, 'nue');
+                                      orioledb_tbl_structure                                      
+--------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                     +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                             +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                             +
+     Leftmost, Rightmost                                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,1)')                   +
+     Item 0: offset = 264, tuple = ('(0,0)', '1', 'XXX1', '10', '100', 'b')                      +
+   Chunk 1: offset = 1, location = 320, hikey location = 88, hikey = ('(0,2)')                   +
+     Item 1: offset = 328, tuple = ('(0,1)', '2', 'XXX2', '20', '200', 'c')                      +
+   Chunk 2: offset = 2, location = 384, hikey location = 96, hikey = ('(0,3)')                   +
+     Item 2: offset = 392, tuple = ('(0,2)', '3', 'XXX3', '30', '300', 'd')                      +
+   Chunk 3: offset = 3, location = 448, hikey location = 104, hikey = ('(0,4)')                  +
+     Item 3: offset = 456, tuple = ('(0,3)', '4', 'XXX4', '40', '400', 'e')                      +
+   Chunk 4: offset = 4, location = 512, hikey location = 112                                     +
+     Item 4: offset = 520, tuple = ('(0,4)', '5', 'XXX5', '50', '500', 'f')                      +
+                                                                                                 +
+ Index o_test_reuse_multiple_indices_ix1 contents                                                +
+ Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                                            +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
+     Leftmost, Rightmost                                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('XXX2', '(0,1)')           +
+     Item 0: offset = 264, tuple = ('XXX1', '(0,0)')                                             +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('XXX3', '(0,2)')          +
+     Item 1: offset = 312, tuple = ('XXX2', '(0,1)')                                             +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('XXX4', '(0,3)')          +
+     Item 2: offset = 360, tuple = ('XXX3', '(0,2)')                                             +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('XXX5', '(0,4)')          +
+     Item 3: offset = 408, tuple = ('XXX4', '(0,3)')                                             +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                                     +
+     Item 4: offset = 456, tuple = ('XXX5', '(0,4)')                                             +
+                                                                                                 +
+ Index o_test_reuse_multiple_indices_ix2 contents                                                +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                            +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
+     Leftmost, Rightmost                                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('40', 'XXX4', '(0,3)')     +
+     Item 0: offset = 264, tuple = ('50', 'XXX5', '(0,4)')                                       +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30', 'XXX3', '(0,2)')    +
+     Item 1: offset = 312, tuple = ('40', 'XXX4', '(0,3)')                                       +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('20', 'XXX2', '(0,1)')    +
+     Item 2: offset = 360, tuple = ('30', 'XXX3', '(0,2)')                                       +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('10', 'XXX1', '(0,0)')    +
+     Item 3: offset = 408, tuple = ('20', 'XXX2', '(0,1)')                                       +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                                     +
+     Item 4: offset = 456, tuple = ('10', 'XXX1', '(0,0)')                                       +
+                                                                                                 +
+ Index o_test_reuse_multiple_indices_ix3 contents                                                +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                            +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
+     Leftmost, Rightmost                                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('200', 'XXX2', '(0,1)')    +
+     Item 0: offset = 264, tuple = ('100', 'XXX1', '(0,0)')                                      +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('300', 'XXX3', '(0,2)')   +
+     Item 1: offset = 312, tuple = ('200', 'XXX2', '(0,1)')                                      +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('400', 'XXX4', '(0,3)')   +
+     Item 2: offset = 360, tuple = ('300', 'XXX3', '(0,2)')                                      +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('500', 'XXX5', '(0,4)')   +
+     Item 3: offset = 408, tuple = ('400', 'XXX4', '(0,3)')                                      +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                                     +
+     Item 4: offset = 456, tuple = ('500', 'XXX5', '(0,4)')                                      +
+                                                                                                 +
+ Index o_test_reuse_multiple_indices_ix4 contents                                                +
+ Page 0: level = 0, maxKeyLen = 28, nVacatedBytes = 0                                            +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
+     Leftmost, Rightmost                                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('c', '2', 'XXX2', '(0,1)') +
+     Item 0: offset = 264, tuple = ('b', '1', 'XXX1', '(0,0)')                                   +
+   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('d', '3', 'XXX3', '(0,2)')+
+     Item 1: offset = 320, tuple = ('c', '2', 'XXX2', '(0,1)')                                   +
+   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e', '4', 'XXX4', '(0,3)')+
+     Item 2: offset = 376, tuple = ('d', '3', 'XXX3', '(0,2)')                                   +
+   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('f', '5', 'XXX5', '(0,4)')+
+     Item 3: offset = 432, tuple = ('e', '4', 'XXX4', '(0,3)')                                   +
+   Chunk 4: offset = 4, location = 480, hikey location = 208                                     +
+     Item 4: offset = 488, tuple = ('f', '5', 'XXX5', '(0,4)')                                   +
+                                                                                                 +
+ Index toast: not loaded                                                                         +
+ 
+(1 row)
+
+\d+ o_test_reuse_multiple_indices
+                          Table "public.o_test_reuse_multiple_indices"
+ Column |     Type     | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+--------------+-----------+----------+---------+----------+--------------+-------------
+ val_1  | integer      |           | not null |         | plain    |              | 
+ val_2  | text         | POSIX     | not null |         | extended |              | 
+ val_3  | integer      |           |          |         | plain    |              | 
+ val_4  | integer      |           |          |         | plain    |              | 
+ val_5  | character(1) |           |          |         | extended |              | 
+Indexes:
+    "o_test_reuse_multiple_indices_ix1" btree (val_2)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
+    "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+
+\d+ o_test_reuse_multiple_indices_ix1
+      Index "public.o_test_reuse_multiple_indices_ix1"
+ Column | Type | Key? | Definition | Storage  | Stats target 
+--------+------+------+------------+----------+--------------
+ val_2  | text | yes  | val_2      | extended | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix2
+        Index "public.o_test_reuse_multiple_indices_ix2"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_3  | integer | yes  | val_3      | plain    | 
+ val_2  | text    | yes  | val_2      | extended | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix3
+        Index "public.o_test_reuse_multiple_indices_ix3"
+ Column |  Type   | Key? | Definition | Storage  | Stats target 
+--------+---------+------+------------+----------+--------------
+ val_4  | integer | yes  | val_4      | plain    | 
+ val_2  | text    | no   | val_2      | extended | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
+\d+ o_test_reuse_multiple_indices_ix4
+          Index "public.o_test_reuse_multiple_indices_ix4"
+ Column |     Type     | Key? | Definition | Storage  | Stats target 
+--------+--------------+------+------------+----------+--------------
+ val_5  | character(1) | yes  | val_5      | extended | 
+ val_1  | integer      | no   | val_1      | plain    | 
+ val_2  | text         | no   | val_2      | extended | 
+btree, for table "public.o_test_reuse_multiple_indices"
+
 RESET enable_seqscan;
+-- Test that fields added when we create table with include indices
+CREATE TABLE o_test_include_like
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text,
+	val2 int
+) USING orioledb;
+CREATE INDEX o_test_include_like_ix1 ON o_test_include_like (key);
+CREATE INDEX o_test_include_like_ix2 on o_test_include_like (value);
+CREATE UNIQUE INDEX o_test_include_like_ix_include
+	ON o_test_include_like (val2) INCLUDE (value);
+SELECT orioledb_tbl_indices('o_test_include_like'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_include_like_pkey                +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+ Index o_test_include_like_ix1                 +
+     Index type: secondary                     +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+     Leaf tuple fields: key                    +
+ Index o_test_include_like_ix2                 +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, key         +
+     Leaf tuple fields: value, key             +
+ Index o_test_include_like_ix_include          +
+     Index type: secondary, unique             +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val2, value, key   +
+     Leaf tuple fields: val2, value, key       +
+ 
+(1 row)
+
+\d+ o_test_include_like
+                            Table "public.o_test_include_like"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ key    | bigint  |           | not null |         | plain    |              | 
+ value  | text    |           |          |         | extended |              | 
+ val2   | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_include_like_pkey" PRIMARY KEY, btree (key)
+    "o_test_include_like_ix1" btree (key)
+    "o_test_include_like_ix2" btree (value) INCLUDE (key)
+    "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value, key)
+
+CREATE TABLE IF NOT EXISTS o_test_include_like_like
+	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
+		USING orioledb;
+SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_include_like_like_pkey           +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+ Index o_test_include_like_like_key_idx        +
+     Index type: secondary                     +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+     Leaf tuple fields: key                    +
+ Index o_test_include_like_like_value_idx      +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, key         +
+     Leaf tuple fields: value, key             +
+ Index o_test_include_like_like_val2_idx       +
+     Index type: secondary, unique             +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val2, value, key   +
+     Leaf tuple fields: val2, value, key       +
+ 
+(1 row)
+
+\d+ o_test_include_like_like
+                          Table "public.o_test_include_like_like"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ key    | bigint  |           | not null |         | plain    |              | 
+ value  | text    |           |          |         | extended |              | 
+ val2   | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_include_like_like_pkey" PRIMARY KEY, btree (key)
+    "o_test_include_like_like_key_idx" btree (key)
+    "o_test_include_like_like_val2_idx" UNIQUE, btree (val2) INCLUDE (value, key)
+    "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
+
+DROP TABLE o_test_include_like_like;
+ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
+SELECT orioledb_tbl_indices('o_test_include_like'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_test_include_like_ix1                 +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, ctid          +
+     Leaf tuple fields: key, ctid              +
+ Index o_test_include_like_ix2                 +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, ctid        +
+     Leaf tuple fields: value, ctid            +
+ Index o_test_include_like_ix_include          +
+     Index type: secondary, unique             +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val2, value, ctid  +
+     Leaf tuple fields: val2, value, ctid      +
+ 
+(1 row)
+
+\d+ o_test_include_like
+                            Table "public.o_test_include_like"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ key    | bigint  |           | not null |         | plain    |              | 
+ value  | text    |           |          |         | extended |              | 
+ val2   | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_include_like_ix1" btree (key)
+    "o_test_include_like_ix2" btree (value)
+    "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+
+CREATE TABLE IF NOT EXISTS o_test_include_like_like
+	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
+		USING orioledb;
+SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_test_include_like_like_key_idx        +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, ctid          +
+     Leaf tuple fields: key, ctid              +
+ Index o_test_include_like_like_value_idx      +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, ctid        +
+     Leaf tuple fields: value, ctid            +
+ Index o_test_include_like_like_val2_idx       +
+     Index type: secondary, unique             +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val2, value, ctid  +
+     Leaf tuple fields: val2, value, ctid      +
+ 
+(1 row)
+
+\d+ o_test_include_like_like
+                          Table "public.o_test_include_like_like"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ key    | bigint  |           | not null |         | plain    |              | 
+ value  | text    |           |          |         | extended |              | 
+ val2   | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_include_like_like_key_idx" btree (key)
+    "o_test_include_like_like_val2_idx" UNIQUE, btree (val2) INCLUDE (value)
+    "o_test_include_like_like_value_idx" btree (value)
+
+DROP TABLE o_test_include_like_like;
+-- Test that fields also added when we create table like postgres table
+CREATE TABLE pg_test_include_like
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text,
+	val2 int
+) USING heap;
+CREATE INDEX pg_test_include_like_ix1 ON pg_test_include_like (key);
+CREATE INDEX pg_test_include_like_ix2 on pg_test_include_like (value);
+CREATE UNIQUE INDEX pg_test_include_like_ix_include
+	ON pg_test_include_like (val2) INCLUDE (value);
+\d+ pg_test_include_like
+                            Table "public.pg_test_include_like"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ key    | bigint  |           | not null |         | plain    |              | 
+ value  | text    |           |          |         | extended |              | 
+ val2   | integer |           |          |         | plain    |              | 
+Indexes:
+    "pg_test_include_like_pkey" PRIMARY KEY, btree (key)
+    "pg_test_include_like_ix1" btree (key)
+    "pg_test_include_like_ix2" btree (value)
+    "pg_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+
+CREATE TABLE IF NOT EXISTS o_test_include_like_like
+	(LIKE pg_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
+		USING orioledb;
+SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_include_like_like_pkey           +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+ Index o_test_include_like_like_key_idx        +
+     Index type: secondary                     +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: key                +
+     Leaf tuple fields: key                    +
+ Index o_test_include_like_like_value_idx      +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: value, key         +
+     Leaf tuple fields: value, key             +
+ Index o_test_include_like_like_val2_idx       +
+     Index type: secondary, unique             +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val2, value, key   +
+     Leaf tuple fields: val2, value, key       +
+ 
+(1 row)
+
+\d+ o_test_include_like_like
+                          Table "public.o_test_include_like_like"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ key    | bigint  |           | not null |         | plain    |              | 
+ value  | text    |           |          |         | extended |              | 
+ val2   | integer |           |          |         | plain    |              | 
+Indexes:
+    "o_test_include_like_like_pkey" PRIMARY KEY, btree (key)
+    "o_test_include_like_like_key_idx" btree (key)
+    "o_test_include_like_like_val2_idx" UNIQUE, btree (val2) INCLUDE (value, key)
+    "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
+
+DROP TABLE o_test_include_like_like;
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 32 other objects
+NOTICE:  drop cascades to 34 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -6142,3 +7292,5 @@ drop cascades to table o_test_partial_idx_update
 drop cascades to table o_test_unique_as_pkey
 drop cascades to table o_test_renames_as_ix
 drop cascades to table o_test_subexpr_collate
+drop cascades to table o_test_reuse_multiple_indices
+drop cascades to table o_test_include_like

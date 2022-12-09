@@ -26,7 +26,6 @@ CREATE TABLE o_tableam1
 
 -- not supported
 CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
-CREATE INDEX o_tableam1_ix_include ON o_tableam1 (key) INCLUDE (value);
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);

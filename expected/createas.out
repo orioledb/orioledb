@@ -444,6 +444,36 @@ SELECT * FROM o_test_matview ORDER BY quantity2;
       100 |       3 | b         |     6
 (2 rows)
 
+CREATE MATERIALIZED VIEW o_test_matview_no_data
+	(order_id, item_id, quantity, price) USING orioledb
+	AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)),
+			   (100, 3, 1, nextval('o_matview_seq'::regclass)))
+	WITH NO DATA;
+SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
+	WHERE relname = 'o_test_matview_no_data';
+        relname         
+------------------------
+ o_test_matview_no_data
+(1 row)
+
+SELECT * FROM o_test_matview_no_data;
+ERROR:  materialized view "o_test_matview_no_data" has not been populated
+HINT:  Use the REFRESH MATERIALIZED VIEW command.
+REFRESH MATERIALIZED VIEW o_test_matview_no_data;
+SELECT * FROM o_test_matview_no_data;
+ order_id | item_id | quantity | price 
+----------+---------+----------+-------
+      100 |       1 |        4 |     7
+      100 |       3 |        1 |     8
+(2 rows)
+
+DROP MATERIALIZED VIEW o_test_matview_no_data;
+SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
+	WHERE relname = 'o_test_matview_no_data';
+ relname 
+---------
+(0 rows)
+
 DROP SEQUENCE o_matview_seq CASCADE;
 NOTICE:  drop cascades to materialized view o_test_matview
 DROP FUNCTION query_to_text;

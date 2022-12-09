@@ -1291,7 +1291,11 @@ orioledb_error_cleanup_hook(void)
 	btree_io_error_cleanup();
 	seq_scans_cleanup();
 	cleanup_saved_undo_locations();
-	alter_column_reuse = false;
+	if (drop_index_list)
+	{
+		list_free_deep(drop_index_list);
+		drop_index_list = NIL;
+	}
 }
 
 static void
@@ -1325,23 +1329,21 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 				foreach(lc, rel->indexlist)
 				{
 					IndexOptInfo *info = lfirst_node(IndexOptInfo, lc);
-					Relation	index = index_open(info->indexoid, NoLock);
 					bool		hasbitmap;
 
 					hasbitmap = info->indexoid != primary->oids.reloid &&
-						(info->ncolumns - info->nkeycolumns) <= 1;
-					for (i = info->nkeycolumns;
-						 hasbitmap && i < info->ncolumns; i++)
+								primary->nFields <= 1;
+					for (i = 0;
+						 hasbitmap && i < primary->nFields; i++)
 					{
-						Oid			typeoid = index->rd_att->attrs[i].atttypid;
+						Oid			typeoid = primary->fields[i].inputtype;
 						bool		valid = typeoid == INT4OID ||
-						typeoid == INT8OID ||
-						typeoid == TIDOID;
+											typeoid == INT8OID ||
+											typeoid == TIDOID;
 
 						hasbitmap = hasbitmap && valid;
 					}
 					info->amhasgetbitmap = hasbitmap;
-					index_close(index, NoLock);
 				}
 			}
 		}

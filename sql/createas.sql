@@ -154,6 +154,23 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY quantity2;
 SELECT * FROM o_test_matview ORDER BY quantity2;
 
+CREATE MATERIALIZED VIEW o_test_matview_no_data
+	(order_id, item_id, quantity, price) USING orioledb
+	AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)),
+			   (100, 3, 1, nextval('o_matview_seq'::regclass)))
+	WITH NO DATA;
+
+SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
+	WHERE relname = 'o_test_matview_no_data';
+
+SELECT * FROM o_test_matview_no_data;
+REFRESH MATERIALIZED VIEW o_test_matview_no_data;
+SELECT * FROM o_test_matview_no_data;
+DROP MATERIALIZED VIEW o_test_matview_no_data;
+
+SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
+	WHERE relname = 'o_test_matview_no_data';
+
 DROP SEQUENCE o_matview_seq CASCADE;
 DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;

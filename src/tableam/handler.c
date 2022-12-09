@@ -1421,18 +1421,17 @@ static bool
 orioledb_define_index_validate(Relation rel, IndexStmt *stmt,
 							   void **arg)
 {
-	alter_column_reuse = false;
 	o_define_index_validate(rel, stmt, (ODefineIndexContext **) arg);
 	return true;
 }
 
 static bool
 orioledb_define_index(Relation rel, Oid indoid, bool reindex,
-					  bool skip_constraint_checks, void *arg)
+					  bool skip_constraint_checks, bool skip_build, void *arg)
 {
 	if (!is_in_indexes_rebuild())
 		o_define_index(rel, indoid, reindex, skip_constraint_checks,
-					   (ODefineIndexContext *) arg);
+					   skip_build, (ODefineIndexContext *) arg);
 	return true;
 }
 

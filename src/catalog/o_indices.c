@@ -277,18 +277,11 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 
 	if (tableIndex)
 	{
-		if (!fillPrimary)
-		{
-			MemoryContext mcxt = OGetIndexContext(index);
-			MemoryContext old_mcxt = MemoryContextSwitchTo(mcxt);
+		int	end = tableIndex->nfields;
 
-			index->predicate = list_copy_deep(tableIndex->predicate);
-			if (index->predicate)
-				index->predicate_str = pstrdup(tableIndex->predicate_str);
-			index->expressions = list_copy_deep(tableIndex->expressions);
-			MemoryContextSwitchTo(old_mcxt);
-		}
-		for (i = 0; i < tableIndex->nfields; i++)
+		if (!fillPrimary)
+			end -= tableIndex->npkeyfields;
+		for (i = 0; i < end; i++)
 		{
 			int			attnum = tableIndex->fields[i].attnum;
 			int			k;
@@ -325,9 +318,11 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 static OIndex *
 make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 {
-	OTableIndex *primary = NULL;
-	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	int			j;
+	OTableIndex		*primary = NULL;
+	OIndex		   *result = (OIndex *) palloc0(sizeof(OIndex));
+	int				j;
+	MemoryContext	mcxt;
+	MemoryContext	old_mcxt;
 
 	if (table->has_primary)
 	{
@@ -341,7 +336,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->tableOids = table->oids;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
-	result->nLeafFields = tableIndex->nfields;
+	result->nLeafFields = tableIndex->nfields - tableIndex->npkeyfields;
 	if (table->has_primary)
 		result->nLeafFields += primary->nfields;
 	else
@@ -353,6 +348,13 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 														 result->nNonLeafFields);
 
 	j = 0;
+	mcxt = OGetIndexContext(result);
+	old_mcxt = MemoryContextSwitchTo(mcxt);
+	result->predicate = list_copy_deep(tableIndex->predicate);
+	if (result->predicate)
+		result->predicate_str = pstrdup(tableIndex->predicate_str);
+	result->expressions = list_copy_deep(tableIndex->expressions);
+	MemoryContextSwitchTo(old_mcxt);
 	add_index_fields(result, table, tableIndex, &j, false);
 	Assert(j <= tableIndex->nfields);
 	result->nKeyFields = j;

@@ -329,8 +329,12 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	int				keyno;
 	Datum			datum;
 	oidvector	   *indclass;
-	oidvector	   *indcollation;
 	bool			isnull;
+	OTableIndex	   *primary = NULL;
+	int				pkey_start = index->nfields - index->npkeyfields;
+
+	if (o_table->has_primary)
+		primary = &o_table->indices[PrimaryIndexNumber];
 
 	index->index_mctx = NULL;
 	mcxt = OGetIndexContext(index);
@@ -367,18 +371,11 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	Assert(!isnull);
 	indclass = (oidvector *) DatumGetPointer(datum);
 
-	/* Extract indcollation from the pg_index tuple */
-	datum = SysCacheGetAttr(INDEXRELID, index_rel->rd_indextuple,
-							Anum_pg_index_indcollation, &isnull);
-	Assert(!isnull);
-	indcollation = (oidvector *) DatumGetPointer(datum);
-
 	ix_exprfield_num = 0;
-	for (keyno = 0; keyno < index_rel->rd_index->indnkeyatts; keyno++)
+	for (keyno = 0; keyno < index->nfields; keyno++)
 	{
 		AttrNumber			attnum = index_rel->rd_index->indkey.values[keyno];
 		OTableIndexField   *ix_field;
-		int16				opt = index_rel->rd_indoption[keyno];
 
 		ix_field = &index->fields[keyno];
 		if (AttributeNumberIsValid(attnum))
@@ -440,19 +437,51 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 
 			ix_field->attnum = EXPR_ATTNUM;
 		}
-		ix_field->collation = indcollation->values[keyno];
-		ix_field->opclass = indclass->values[keyno];
-		ix_field->ordering = SORTBY_DEFAULT;
-		ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
-		if (opt & INDOPTION_DESC)
+
+		if (keyno >= pkey_start &&
+			o_table->has_primary && index->type != oIndexPrimary)
 		{
-			ix_field->ordering = SORTBY_DESC;
-			if ((opt & INDOPTION_NULLS_FIRST) == 0)
-				ix_field->nullsOrdering = SORTBY_NULLS_LAST;
+			OTableIndexField *primary_field;
+
+			primary_field = &primary->fields[keyno - pkey_start];
+			ix_field->collation = primary_field->collation;
+			ix_field->opclass = primary_field->opclass;
+			ix_field->ordering = primary_field->ordering;
+			ix_field->nullsOrdering = primary_field->nullsOrdering;
 		}
-		else if (opt & INDOPTION_NULLS_FIRST)
+		else if (keyno >= index->nkeyfields)
 		{
-			ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
+			OTableField	   *table_field = &o_table->fields[attnum - 1];
+
+			/*
+			 * Included columns have no collation, no opclass and no ordering
+			 * options.
+			 */
+			ix_field->collation = InvalidOid;
+			ix_field->opclass = GetDefaultOpClass(table_field->typid,
+												  BTREE_AM_OID);
+			ix_field->ordering = SORTBY_DEFAULT;
+			ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
+		}
+		else
+		{
+			int16	opt = index_rel->rd_indoption[keyno];
+
+			ix_field->collation = index_rel->rd_indcollation[keyno];
+			ix_field->opclass = indclass->values[keyno];
+
+			ix_field->ordering = SORTBY_DEFAULT;
+			ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
+			if (opt & INDOPTION_DESC)
+			{
+				ix_field->ordering = SORTBY_DESC;
+				if ((opt & INDOPTION_NULLS_FIRST) == 0)
+					ix_field->nullsOrdering = SORTBY_NULLS_LAST;
+			}
+			else if (opt & INDOPTION_NULLS_FIRST)
+			{
+				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
+			}
 		}
 	}
 }
@@ -794,6 +823,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 		{
 			bool		result;
 
+			Assert(old_table);
 			if (!reuse)
 			{
 				elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
@@ -817,6 +847,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 		{
 			bool		result PG_USED_FOR_ASSERTS_ONLY;
 
+			Assert(new_table);
 			if (!reuse)
 			{
 				elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",

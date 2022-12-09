@@ -1284,7 +1284,192 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
 SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
 
+CREATE TABLE o_test_reuse_multiple_indices (
+	val_1 int PRIMARY KEY,
+	val_2 text COLLATE "C" NOT NULL,
+	val_3 int,
+	val_4 int,
+	val_5 int
+) USING orioledb;
+
+CREATE INDEX o_test_reuse_multiple_indices_ix1
+	ON o_test_reuse_multiple_indices(val_2);
+CREATE INDEX o_test_reuse_multiple_indices_ix2
+	ON o_test_reuse_multiple_indices(val_3 DESC, val_2 DESC);
+CREATE INDEX o_test_reuse_multiple_indices_ix3
+	ON o_test_reuse_multiple_indices(val_4) INCLUDE (val_2);
+CREATE INDEX o_test_reuse_multiple_indices_ix4
+	ON o_test_reuse_multiple_indices(val_5) INCLUDE (val_1, val_2);
+
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+
+\d+ o_test_reuse_multiple_indices
+\d+ o_test_reuse_multiple_indices_ix1
+\d+ o_test_reuse_multiple_indices_ix2
+\d+ o_test_reuse_multiple_indices_ix3
+\d+ o_test_reuse_multiple_indices_ix4
+
+INSERT INTO o_test_reuse_multiple_indices
+	SELECT v, 'XXX' || v, v * 10, v * 100, v * 1000
+		FROM generate_series(1, 5) v;
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
+							  'nue');
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+		ORDER BY val_3 DESC;
+SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+	ORDER BY val_3 DESC;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+		ORDER BY val_4;
+SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+	ORDER BY val_4;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
+		ORDER BY val_5;
+SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+
+ALTER TABLE o_test_reuse_multiple_indices
+	ALTER val_2 TYPE text COLLATE "C",
+	ALTER val_2 TYPE text COLLATE "POSIX";
+
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
+							  'nue');
+\d+ o_test_reuse_multiple_indices
+
+EXPLAIN (COSTS OFF)
+	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
+SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
+EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+ALTER TABLE o_test_reuse_multiple_indices ALTER val_5 TYPE char
+	USING chr(ASCII('a') + val_5 / 1000);
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+
+\d+ o_test_reuse_multiple_indices
+\d+ o_test_reuse_multiple_indices_ix1
+\d+ o_test_reuse_multiple_indices_ix2
+\d+ o_test_reuse_multiple_indices_ix3
+\d+ o_test_reuse_multiple_indices_ix4
+
+SET enable_seqscan = off;
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+		ORDER BY val_3 DESC;
+SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+	ORDER BY val_3 DESC;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+		ORDER BY val_4;
+SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
+		ORDER BY val_5;
+SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass, 'nue');
+
+ALTER TABLE o_test_reuse_multiple_indices
+	DROP CONSTRAINT o_test_reuse_multiple_indices_pkey;
+
+SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
+SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+		ORDER BY val_3 DESC;
+SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
+	ORDER BY val_3 DESC;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
+		ORDER BY val_4;
+SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
+		ORDER BY val_5;
+SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+
+SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass, 'nue');
+
+\d+ o_test_reuse_multiple_indices
+\d+ o_test_reuse_multiple_indices_ix1
+\d+ o_test_reuse_multiple_indices_ix2
+\d+ o_test_reuse_multiple_indices_ix3
+\d+ o_test_reuse_multiple_indices_ix4
+
 RESET enable_seqscan;
+
+-- Test that fields added when we create table with include indices
+CREATE TABLE o_test_include_like
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text,
+	val2 int
+) USING orioledb;
+
+CREATE INDEX o_test_include_like_ix1 ON o_test_include_like (key);
+CREATE INDEX o_test_include_like_ix2 on o_test_include_like (value);
+CREATE UNIQUE INDEX o_test_include_like_ix_include
+	ON o_test_include_like (val2) INCLUDE (value);
+
+SELECT orioledb_tbl_indices('o_test_include_like'::regclass);
+\d+ o_test_include_like
+
+CREATE TABLE IF NOT EXISTS o_test_include_like_like
+	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
+		USING orioledb;
+SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
+\d+ o_test_include_like_like
+DROP TABLE o_test_include_like_like;
+
+ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
+SELECT orioledb_tbl_indices('o_test_include_like'::regclass);
+\d+ o_test_include_like
+
+CREATE TABLE IF NOT EXISTS o_test_include_like_like
+	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
+		USING orioledb;
+SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
+\d+ o_test_include_like_like
+DROP TABLE o_test_include_like_like;
+
+-- Test that fields also added when we create table like postgres table
+CREATE TABLE pg_test_include_like
+(
+	key int8 NOT NULL PRIMARY KEY,
+	value text,
+	val2 int
+) USING heap;
+
+CREATE INDEX pg_test_include_like_ix1 ON pg_test_include_like (key);
+CREATE INDEX pg_test_include_like_ix2 on pg_test_include_like (value);
+CREATE UNIQUE INDEX pg_test_include_like_ix_include
+	ON pg_test_include_like (val2) INCLUDE (value);
+\d+ pg_test_include_like
+
+CREATE TABLE IF NOT EXISTS o_test_include_like_like
+	(LIKE pg_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
+		USING orioledb;
+SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
+\d+ o_test_include_like_like
+DROP TABLE o_test_include_like_like;
 
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

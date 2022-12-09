@@ -61,6 +61,7 @@
 #include "optimizer/optimizer.h"
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
+#include "parser/parse_collate.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
@@ -89,7 +90,7 @@ UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
 static bool		isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 
-bool	alter_column_reuse = false;
+List	*drop_index_list = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -887,6 +888,48 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 	relation_close(depRel, AccessShareLock);
 }
 
+static bool
+ATColumnChangeRequiresRewrite(Node *expr, AttrNumber varattno)
+{
+	Assert(expr != NULL);
+
+	for (;;)
+	{
+		/* only one varno, so no need to check that */
+		if (IsA(expr, Var) && ((Var *) expr)->varattno == varattno)
+			return false;
+		else if (IsA(expr, RelabelType))
+			expr = (Node *) ((RelabelType *) expr)->arg;
+		else if (IsA(expr, CoerceToDomain))
+		{
+			CoerceToDomain *d = (CoerceToDomain *) expr;
+
+			if (DomainHasConstraints(d->resulttype))
+				return true;
+			expr = (Node *) d->arg;
+		}
+		else if (IsA(expr, FuncExpr))
+		{
+			FuncExpr   *f = (FuncExpr *) expr;
+
+			switch (f->funcid)
+			{
+				case F_TIMESTAMPTZ_TIMESTAMP:
+				case F_TIMESTAMP_TIMESTAMPTZ:
+					if (TimestampTimestampTzRequiresRewrite())
+						return true;
+					else
+						expr = linitial(f->args);
+					break;
+				default:
+					return true;
+			}
+		}
+		else
+			return true;
+	}
+}
+
 static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
@@ -971,7 +1014,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX &&
-					 drop_arg->dropflags != PERFORM_DELETION_OF_RELATION)
+					 !(drop_arg->dropflags & PERFORM_DELETION_OF_RELATION))
 			{
 				/*
 				 * dropflags == PERFORM_DELETION_OF_RELATION ignored, to
@@ -988,17 +1031,30 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OTableDescr *descr = relation_get_descr(tbl);
 
 					Assert(descr != NULL);
-					ix_num = o_find_ix_num_by_name(descr, rel->rd_rel->relname.data);
+					ix_num = o_find_ix_num_by_name(descr,
+												   rel->rd_rel->relname.data);
 					if (ix_num != InvalidIndexNumber)
 					{
+#if PG_VERSION_NUM >= 150000
+						String  *relname;
+#else
+						Value   *relname;
+#endif
+
 						if (descr->indices[ix_num]->primaryIsCtid)
 							ix_num--;
 						relation_close(rel, AccessShareLock);
 						is_open = false;
 
-						if (!alter_column_reuse)
+						relname = makeString(rel->rd_rel->relname.data);
+						if (!(drop_arg->dropflags &
+							  PERFORM_DELETION_INTERNAL) ||
+							list_member(drop_index_list, relname))
+						{
+							drop_index_list = list_delete(drop_index_list,
+														  relname);
 							o_index_drop(tbl, ix_num);
-						alter_column_reuse = false;
+						}
 					}
 				}
 				relation_close(tbl, AccessShareLock);
@@ -1377,10 +1433,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OTableField			old_field;
 					OTableField		   *field;
 					Form_pg_attribute	attr;
-					bool				rewrite;
+					bool				rewrite = false;
 					CommitSeqNo			csn;
 					OXid				oxid;
 					int					ix_num;
+					bool				changed;
 
 					old_field = o_table->fields[subId - 1];
 					CommandCounterIncrement();
@@ -1388,17 +1445,39 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					attr = &rel->rd_att->attrs[subId - 1];
 					orioledb_attr_to_field(field, attr);
 
-					rewrite = !can_coerce_type(1, &old_field.typid,
-											   &field->typid,
-											   COERCION_ASSIGNMENT);
+					changed = old_field.typid != field->typid ||
+							  old_field.collation != field->collation;
+
+					/* code from ATPrepAlterColumnType */
+					if (changed)
+					{
+						ParseState	   *pstate = make_parsestate(NULL);
+						Node		   *transform;
+
+						transform = (Node *) makeVar(1, subId, old_field.typid,
+													 old_field.typmod,
+													 old_field.collation, 0);
+						transform = coerce_to_target_type(pstate,
+														  transform,
+														  exprType(transform),
+														  field->typid,
+														  field->typmod,
+														  COERCION_EXPLICIT,
+														  COERCE_IMPLICIT_CAST,
+														  -1);
+						if (transform != NULL)
+						{
+							assign_expr_collations(pstate, transform);
+							transform = (Node *) expression_planner(
+													(Expr *) transform);
+							if (ATColumnChangeRequiresRewrite(transform,
+															  subId))
+								rewrite = true;
+						}
+					}
 
 					if (!rewrite)
 					{
-						alter_column_reuse = old_field.typid ==
-												 field->typid &&
-											 old_field.collation ==
-												 field->collation;
-
 						fill_current_oxid_csn(&oxid, &csn);
 						o_tables_update(o_table, oxid, csn);
 						o_tables_after_update(o_table, oxid, csn);
@@ -1411,12 +1490,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							ctid_off = o_table->has_primary ? 0 : 1;
 							index = &o_table->indices[ix_num];
 
-							for (field_num = 0; field_num < index->nfields;
+							for (field_num = 0; field_num < index->nkeyfields;
 								 field_num++)
 							{
-								if ((index->type == oIndexPrimary) ||
-									(index->fields[field_num].attnum ==
-									 subId - 1))
+								bool has_field;
+								has_field = index->fields[field_num].attnum ==
+											subId - 1;
+								if (index->type == oIndexPrimary || has_field)
 								{
 									o_indices_update(o_table,
 													 ix_num + ctid_off,
@@ -1425,7 +1505,20 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 									o_add_invalidate_undo_item(
 										index->oids,
 										O_INVALIDATE_OIDS_ON_ABORT);
-									break;
+								}
+								if (changed && has_field)
+								{
+#if PG_VERSION_NUM >= 150000
+									String	   *ix_name;
+#else
+									Value	   *ix_name;
+#endif
+
+									ix_name =
+										makeString(pstrdup(index->name.data));
+									drop_index_list =
+										list_append_unique(drop_index_list,
+														   ix_name);
 								}
 							}
 						}

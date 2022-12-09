@@ -67,6 +67,10 @@ typedef struct
 	OIndexType	type;
 	OCompress	compress;
 	uint8		nfields;
+	/* number of index fields */
+	uint8		nkeyfields;
+	/* number of primary fields added after index fields and included fields */
+	uint8		npkeyfields;
 	OTableIndexField fields[INDEX_MAX_KEYS];
 	uint8		nexprfields;
 	OTableField *exprfields;
