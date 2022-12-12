@@ -88,7 +88,9 @@ static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
-static bool		isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
+#ifdef USE_ASSERT_CHECKING
+bool			first_ExecutorStart = true;
+#endif
 
 List	*drop_index_list = NIL;
 
@@ -347,17 +349,10 @@ orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags)
 	MemoryContext		oldcxt;
 
 #ifdef USE_ASSERT_CHECKING
-	{
-		uint32	depth;
-		bool	top_level = isTopLevel;
-
-		isTopLevel = false;
-		depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth,
-												   (Datum) 0));
-		if (top_level && depth == 0)
-			Assert(saved_undo_locations == NIL &&
-				   saved_undo_location == InvalidUndoLocation);
-	}
+	if (first_ExecutorStart)
+		Assert(saved_undo_locations == NIL &&
+			   saved_undo_location == InvalidUndoLocation);
+	first_ExecutorStart = false;
 #endif
 
 	lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
@@ -387,7 +382,12 @@ orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
 		saved_undo_location = *(UndoLocation *) lfirst(last);
 	}
 	else
+	{
 		saved_undo_location = InvalidUndoLocation;
+#ifdef USE_ASSERT_CHECKING
+		first_ExecutorStart = true;
+#endif
+	}
 
 	if (prev_ExecutorEnd)
 		return prev_ExecutorEnd(queryDesc);
@@ -407,6 +407,9 @@ cleanup_saved_undo_locations()
 		saved_undo_locations = list_delete_last(saved_undo_locations);
 	}
 	saved_undo_location = InvalidUndoLocation;
+#ifdef USE_ASSERT_CHECKING
+	first_ExecutorStart = true;
+#endif
 }
 
 static bool
@@ -438,10 +441,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						 struct QueryCompletion *qc)
 {
 	bool		call_next = true;
-
-#ifdef USE_ASSERT_CHECKING
-	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
-#endif
 
 #if PG_VERSION_NUM >= 140000
 	/* copied from standard_ProcessUtility */
