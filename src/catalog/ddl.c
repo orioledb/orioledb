@@ -425,136 +425,6 @@ is_alter_table_partition(PlannedStmt *pstmt)
 	return false;
 }
 
-#if PG_VERSION_NUM < 140000
-#define objtype relkind
-#endif
-
-/*
- * Common RangeVarGetRelid callback for rename, set schema, and alter table
- * processing.
- */
-static void
-RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid, Oid oldrelid,
-								 void *arg)
-{
-	Node	   *stmt = (Node *) arg;
-	ObjectType	reltype;
-	HeapTuple	tuple;
-	Form_pg_class classform;
-	AclResult	aclresult;
-	char		relkind;
-
-	tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-	if (!HeapTupleIsValid(tuple))
-		return;					/* concurrently dropped */
-	classform = (Form_pg_class) GETSTRUCT(tuple);
-	relkind = classform->relkind;
-
-	/* Must own relation. */
-	if (!pg_class_ownercheck(relid, GetUserId()))
-		aclcheck_error(ACLCHECK_NOT_OWNER, get_relkind_objtype(get_rel_relkind(relid)), rv->relname);
-
-	/* No system table modifications unless explicitly allowed. */
-	if (!allowSystemTableMods && IsSystemClass(relid, classform))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						rv->relname)));
-
-	/*
-	 * Extract the specified relation type from the statement parse tree.
-	 *
-	 * Also, for ALTER .. RENAME, check permissions: the user must (still)
-	 * have CREATE rights on the containing namespace.
-	 */
-	if (IsA(stmt, RenameStmt))
-	{
-		aclresult = pg_namespace_aclcheck(classform->relnamespace,
-										  GetUserId(), ACL_CREATE);
-		if (aclresult != ACLCHECK_OK)
-			aclcheck_error(aclresult, OBJECT_SCHEMA,
-						   get_namespace_name(classform->relnamespace));
-		reltype = ((RenameStmt *) stmt)->renameType;
-	}
-	else if (IsA(stmt, AlterObjectSchemaStmt))
-		reltype = ((AlterObjectSchemaStmt *) stmt)->objectType;
-
-	else if (IsA(stmt, AlterTableStmt))
-		reltype = ((AlterTableStmt *) stmt)->objtype;
-	else
-	{
-		elog(ERROR, "unrecognized node type: %d", (int) nodeTag(stmt));
-		reltype = OBJECT_TABLE; /* placate compiler */
-	}
-
-	/*
-	 * For compatibility with prior releases, we allow ALTER TABLE to be used
-	 * with most other types of relations (but not composite types). We allow
-	 * similar flexibility for ALTER INDEX in the case of RENAME, but not
-	 * otherwise.  Otherwise, the user must select the correct form of the
-	 * command for the relation at issue.
-	 */
-	if (reltype == OBJECT_SEQUENCE && relkind != RELKIND_SEQUENCE)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a sequence", rv->relname)));
-
-	if (reltype == OBJECT_VIEW && relkind != RELKIND_VIEW)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a view", rv->relname)));
-
-	if (reltype == OBJECT_MATVIEW && relkind != RELKIND_MATVIEW)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a materialized view", rv->relname)));
-
-	if (reltype == OBJECT_FOREIGN_TABLE && relkind != RELKIND_FOREIGN_TABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a foreign table", rv->relname)));
-
-	if (reltype == OBJECT_TYPE && relkind != RELKIND_COMPOSITE_TYPE)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a composite type", rv->relname)));
-
-	if (reltype == OBJECT_INDEX && relkind != RELKIND_INDEX &&
-		relkind != RELKIND_PARTITIONED_INDEX
-		&& !IsA(stmt, RenameStmt))
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not an index", rv->relname)));
-
-	/*
-	 * Don't allow ALTER TABLE on composite types. We want people to use ALTER
-	 * TYPE for that.
-	 */
-	if (reltype != OBJECT_TYPE && relkind == RELKIND_COMPOSITE_TYPE)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is a composite type", rv->relname),
-				 errhint("Use ALTER TYPE instead.")));
-
-	/*
-	 * Don't allow ALTER TABLE .. SET SCHEMA on relations that can't be moved
-	 * to a different schema, such as indexes and TOAST tables.
-	 */
-	if (IsA(stmt, AlterObjectSchemaStmt) &&
-		relkind != RELKIND_RELATION &&
-		relkind != RELKIND_VIEW &&
-		relkind != RELKIND_MATVIEW &&
-		relkind != RELKIND_SEQUENCE &&
-		relkind != RELKIND_FOREIGN_TABLE &&
-		relkind != RELKIND_PARTITIONED_TABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a table, view, materialized view, sequence, or foreign table",
-						rv->relname)));
-
-	ReleaseSysCache(tuple);
-}
-
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
@@ -585,6 +455,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		AlterTableStmt	   *atstmt = (AlterTableStmt *) pstmt->utilityStmt;
 		Oid					relid;
 		LOCKMODE			lockmode;
+		ObjectType			objtype;
+
+#if PG_VERSION_NUM < 140000
+		objtype = atstmt->relkind;
+#else
+		objtype = atstmt->objtype;
+#endif
 
 		/*
 		 * Figure out lock mode, and acquire lock.  This also does
@@ -595,8 +472,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		lockmode = AlterTableGetLockLevel(atstmt->cmds);
 		relid = AlterTableLookupRelation(atstmt, lockmode);
 
-		if (OidIsValid(relid) &&
-			atstmt->objtype == OBJECT_TABLE &&
+		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
 			lockmode == AccessExclusiveLock)
 		{
 			Relation rel = table_open(relid, lockmode);
@@ -638,121 +514,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				}
 			}
 			table_close(rel, lockmode);
-		}
-	}
-	else if (IsA(pstmt->utilityStmt, RenameStmt))
-	{
-		RenameStmt *stmt = (RenameStmt *) pstmt->utilityStmt;
-
-		if (stmt->renameType == OBJECT_INDEX)
-		{
-			bool is_index_stmt = stmt->renameType == OBJECT_INDEX;
-			Oid relid;
-			Relation idx;
-
-			/*
-			 * Grab an exclusive lock on the target table, index, sequence, view,
-			 * materialized view, or foreign table, which we will NOT release until
-			 * end of transaction.
-			 *
-			 * Lock level used here should match RenameRelationInternal, to avoid lock
-			 * escalation.  However, because ALTER INDEX can be used with any relation
-			 * type, we mustn't believe without verification.
-			 */
-			for (;;)
-			{
-				LOCKMODE lockmode;
-				char relkind;
-				bool obj_is_index;
-
-				lockmode = is_index_stmt ? ShareUpdateExclusiveLock : AccessExclusiveLock;
-
-				relid = RangeVarGetRelidExtended(stmt->relation, lockmode,
-												 stmt->missing_ok ? RVR_MISSING_OK : 0,
-												 RangeVarCallbackForAlterRelation,
-												 (void *)stmt);
-
-				if (!OidIsValid(relid))
-				{
-					ereport(NOTICE,
-							(errmsg("relation \"%s\" does not exist, skipping",
-									stmt->relation->relname)));
-					return;
-				}
-
-				/*
-				 * We allow mismatched statement and object types (e.g., ALTER INDEX
-				 * to rename a table), but we might've used the wrong lock level.  If
-				 * that happens, retry with the correct lock level.  We don't bother
-				 * if we already acquired AccessExclusiveLock with an index, however.
-				 */
-				relkind = get_rel_relkind(relid);
-				obj_is_index = (relkind == RELKIND_INDEX ||
-								relkind == RELKIND_PARTITIONED_INDEX);
-				if (obj_is_index || is_index_stmt == obj_is_index)
-					break;
-
-				UnlockRelationOid(relid, lockmode);
-				is_index_stmt = obj_is_index;
-			}
-			idx = relation_openrv(stmt->relation, AccessExclusiveLock);
-			if (idx->rd_rel->relkind == RELKIND_INDEX)
-			{
-				Relation	tbl = relation_open(idx->rd_index->indrelid,
-												AccessShareLock);
-
-				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
-					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
-					is_orioledb_rel(tbl))
-				{
-					OTable	   *o_table;
-					ORelOids	table_oids = {MyDatabaseId, tbl->rd_rel->oid,
-											  tbl->rd_node.relNode};
-
-					o_table = o_tables_get(table_oids);
-					if (o_table == NULL)
-					{
-						elog(NOTICE, "orioledb table %s not found",
-							 RelationGetRelationName(tbl));
-					}
-					else
-					{
-						int			ix_num;
-						CommitSeqNo csn;
-						OXid		oxid;
-						ORelOids	idx_oids = {MyDatabaseId, idx->rd_rel->oid,
-												idx->rd_node.relNode};
-
-						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
-						{
-							OTableIndex *index = &o_table->indices[ix_num];
-
-							if (ORelOidsIsEqual(index->oids, idx_oids))
-							{
-								namestrcpy(&index->name, stmt->newname);
-								break;
-							}
-						}
-						Assert(ix_num < o_table->nindices);
-						fill_current_oxid_csn(&oxid, &csn);
-						o_tables_update(o_table, oxid, csn);
-						o_indices_update(o_table, ix_num, oxid, csn);
-						o_invalidate_oids(idx_oids);
-						o_add_invalidate_undo_item(idx_oids,
-												   O_INVALIDATE_OIDS_ON_ABORT);
-						if (!ORelOidsIsEqual(idx_oids, table_oids))
-						{
-							o_invalidate_oids(table_oids);
-							o_add_invalidate_undo_item(table_oids,
-													   O_INVALIDATE_OIDS_ON_ABORT);
-						}
-						AcceptInvalidationMessages();
-						o_table_free(o_table);
-					}
-				}
-				relation_close(tbl, AccessShareLock);
-			}
-			relation_close(idx, AccessExclusiveLock);
 		}
 	}
 
@@ -1579,6 +1340,64 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				orioledb_free_rd_amcache(old_rel);
 				orioledb_free_rd_amcache(rel);
 				relation_close(old_rel, NoLock);
+			}
+			else if (rel->rd_rel->relkind == RELKIND_INDEX)
+			{
+				Relation	tbl = relation_open(rel->rd_index->indrelid,
+												AccessShareLock);
+
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+					is_orioledb_rel(tbl))
+				{
+					OTable	   *o_table;
+					ORelOids	table_oids = {MyDatabaseId, tbl->rd_rel->oid,
+											  tbl->rd_node.relNode};
+
+					o_table = o_tables_get(table_oids);
+					if (o_table == NULL)
+					{
+						elog(NOTICE, "orioledb table %s not found",
+							 RelationGetRelationName(tbl));
+					}
+					else
+					{
+						int			ix_num;
+						CommitSeqNo csn;
+						OXid		oxid;
+						ORelOids	idx_oids = {MyDatabaseId,
+												rel->rd_rel->oid,
+												rel->rd_node.relNode};
+
+						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+						{
+							OTableIndex *index = &o_table->indices[ix_num];
+
+							if (ORelOidsIsEqual(index->oids, idx_oids))
+							{
+								CommandCounterIncrement();
+								namestrcpy(&index->name,
+										   rel->rd_rel->relname.data);
+								break;
+							}
+						}
+						Assert(ix_num < o_table->nindices);
+						fill_current_oxid_csn(&oxid, &csn);
+						o_tables_update(o_table, oxid, csn);
+						o_indices_update(o_table, ix_num, oxid, csn);
+						o_invalidate_oids(idx_oids);
+						o_add_invalidate_undo_item(idx_oids,
+												   O_INVALIDATE_OIDS_ON_ABORT);
+						if (!ORelOidsIsEqual(idx_oids, table_oids))
+						{
+							o_invalidate_oids(table_oids);
+							o_add_invalidate_undo_item(table_oids,
+													   O_INVALIDATE_OIDS_ON_ABORT);
+						}
+						o_table_free(o_table);
+					}
+				}
+				relation_close(tbl, AccessShareLock);
 			}
 			relation_close(rel, AccessShareLock);
 		}
