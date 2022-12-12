@@ -199,51 +199,6 @@ o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
 	}
 }
 
-static List *
-extract_compress_rel_option(List *defs, char *option, int *value)
-{
-	bool		founded = false;
-	int			i;
-
-	i = 0;
-	while (i < list_length(defs))
-	{
-		DefElem    *def = (DefElem *) list_nth(defs, i);
-
-		if (strcmp(def->defname, option) == 0)
-		{
-			if (def->arg == NULL)
-				*value = O_COMPRESS_DEFAULT;
-			else if (!IsA(def->arg, Integer))
-				elog(ERROR, "Option %s must be integer value.", option);
-			else
-				*value = intVal(def->arg);
-			founded = true;
-		}
-
-		if (founded)
-		{
-			defs = list_delete_nth_cell(defs, i);
-			break;
-		}
-		i++;
-	}
-
-	return defs;
-}
-
-static void
-validate_compress(OCompress compress, char *prefix)
-{
-	OCompress	max_compress = o_compress_max_lvl();
-
-	if (compress < -1 || compress > max_compress)
-	{
-		elog(ERROR, "%s compression level must be between %d and %d",
-			 prefix, -1, max_compress);
-	}
-}
-
 void
 o_define_index_validate(Relation rel, IndexStmt *stmt,
 						ODefineIndexContext **arg)
@@ -261,7 +216,6 @@ o_define_index_validate(Relation rel, IndexStmt *stmt,
 	*arg = &context;
 
 	context.oldNode = stmt->oldNode;
-	context.compress = InvalidOCompress;
 
 	if (!reuse)
 	{
@@ -275,15 +229,6 @@ o_define_index_validate(Relation rel, IndexStmt *stmt,
 
 		if (stmt->tableSpace != NULL)
 			elog(ERROR, "tablespaces aren't supported");
-
-		stmt->options = extract_compress_rel_option(stmt->options,
-													"compress",
-													&context.compress);
-		validate_compress(context.compress, "Index");
-
-		if (stmt->options != NIL)
-			elog(ERROR, "orioledb tables indices support "
-						"only \"compress\" option.");
 
 		o_table = o_tables_get(oids);
 		if (o_table == NULL)
@@ -437,12 +382,24 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	OCompress		compress = InvalidOCompress;
 	int16			indnatts;
 	int16			indnkeyatts;
+	OBTOptions	   *options;
 
 	index_rel = index_open(indoid, AccessShareLock);
 	if (context)
-	{
 		reuse = OidIsValid(context->oldNode);
-		compress = context->compress;
+
+	options = (OBTOptions *) index_rel->rd_options;
+
+	if (options)
+	{
+		if (options->compress_offset > 0)
+		{
+			char   *str;
+
+			str = (char *)(((Pointer) options) + options->compress_offset);
+			if (str)
+				compress = o_parse_compress(str);
+		}
 	}
 
 	if (index_rel->rd_index->indisprimary)

@@ -21,7 +21,6 @@
 
 typedef struct ODefineIndexContext {
 	Oid			oldNode;
-	OCompress	compress;
 } ODefineIndexContext;
 
 extern void o_define_index_validate(Relation rel, IndexStmt *stmt,

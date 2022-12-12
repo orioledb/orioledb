@@ -1610,6 +1610,13 @@ validate_toast_compress(const char *value)
 		validate_compress(o_parse_compress(value), "TOAST");
 }
 
+static void
+validate_index_compress(const char *value)
+{
+	if (value)
+		validate_compress(o_parse_compress(value), "Index");
+}
+
 #if PG_VERSION_NUM >= 140000
 /* values from StdRdOptIndexCleanup */
 static relopt_enum_elt_def StdRdOptIndexCleanupValues[] =
@@ -1847,6 +1854,55 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
 }
 
+/*
+ * Option parser for anything that uses StdRdOptions.
+ */
+static bytea *
+orioledb_btoptions(Datum reloptions, bool validate, relopt_kind kind)
+{
+	static bool				relopts_set = false;
+	static local_relopts	relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext	oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(OBTOptions));
+
+		/* Options from default_reloptions */
+		add_local_int_reloption(&relopts, "fillfactor",
+								"Packs btree index pages only to "
+								"this percentage",
+								BTREE_DEFAULT_FILLFACTOR, BTREE_MIN_FILLFACTOR,
+								100,
+								offsetof(OBTOptions, bt_options) +
+									offsetof(BTOptions, fillfactor));
+		add_local_real_reloption(&relopts, "vacuum_cleanup_index_scale_factor",
+								 "Deprecated B-Tree parameter.",
+								 -1, 0.0, 1e10,
+								 offsetof(OBTOptions, bt_options) +
+								 offsetof(BTOptions,
+										  vacuum_cleanup_index_scale_factor));
+		add_local_bool_reloption(&relopts, "deduplicate_items",
+								 "Enables \"deduplicate items\" feature for "
+								 "this btree index",
+								 true,
+								 offsetof(OBTOptions, bt_options) +
+									 offsetof(BTOptions, deduplicate_items));
+
+		/* Options for orioledb tables */
+		add_local_string_reloption(&relopts, "compress",
+								   "Compression level of a particular index",
+								   NULL, validate_index_compress, NULL,
+								   offsetof(OBTOptions, compress_offset));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
+}
+
 static bytea *
 orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 {
@@ -1869,6 +1925,9 @@ orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 		case RELKIND_MATVIEW:
 			return orioledb_default_reloptions(reloptions, validate,
 											   RELOPT_KIND_HEAP);
+		case RELKIND_INDEX:
+			/* Checking of other indexam-s required if their support added */
+			return orioledb_btoptions(reloptions, validate, RELOPT_KIND_BTREE);
 		default:
 			/* other relkinds are not supported */
 			return NULL;

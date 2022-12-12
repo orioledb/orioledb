@@ -13,6 +13,7 @@
 #ifndef __ORIOLEDB_H__
 #define __ORIOLEDB_H__
 
+#include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/xact.h"
 #include "access/xlog.h"
@@ -239,6 +240,13 @@ typedef struct ORelOptions
 	int				primary_compress_offset;
 	int				toast_compress_offset;
 } ORelOptions;
+
+typedef struct OBTOptions
+{
+	int32			vl_len_;	/* varlena header (do not touch directly!) */
+	BTOptions		bt_options;
+	int				compress_offset;
+} OBTOptions;
 
 extern int16 o_parse_compress(const char *value);
 extern void o_invalidate_oids(ORelOids oids);
