@@ -321,7 +321,7 @@ void
 o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 {
 	OTableIndex	   *index = &o_table->indices[ix_num];
-	ListCell	   *index_expr_elem = list_head(index_rel->rd_indexprs);
+	ListCell	   *index_expr_elem;
 	int				ix_exprfield_num;
 	ListCell	   *lc;
 	MemoryContext	mcxt,
@@ -339,6 +339,9 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	index->index_mctx = NULL;
 	mcxt = OGetIndexContext(index);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
+	RelationGetIndexExpressions(index_rel);
+	RelationGetIndexPredicate(index_rel);
+	index_expr_elem = list_head(index_rel->rd_indexprs);
 	if (index_rel->rd_indexprs != NIL)
 	{
 		index->nexprfields = list_length(index_rel->rd_indexprs);

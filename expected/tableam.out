@@ -1517,6 +1517,16 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
 (1 row)
 
 DROP TABLE o_test_expression;
+-- test expressions on tmp table
+CREATE TEMP TABLE o_test_expression_tmp
+(
+	key int8 NOT NULL,
+	value text
+) USING orioledb;
+CREATE INDEX o_test_expression_tmp_ix1 ON o_test_expression_tmp ((key * 100));
+CREATE INDEX o_test_expression_tmp_ix2 ON o_test_expression_tmp ((value::int));
+CREATE INDEX o_test_expression_tmp_ix3 ON o_test_expression_tmp ((value || 'WOW'));
+DROP TABLE o_test_expression_tmp;
 -- create table with primary key
 CREATE TABLE o_tableam3
 (
