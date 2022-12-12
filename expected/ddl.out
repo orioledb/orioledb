@@ -633,21 +633,21 @@ SELECT * FROM o_ddl_check;
   7 |  2 |    |   
 (7 rows)
 
-SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nuebc');
+SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nue');
                        orioledb_tbl_structure                        
 ---------------------------------------------------------------------
  Index o_ddl_check_pkey contents                                    +
- Page 0: level = 0, maxKeyLen = 8, csn = FROZEN, nVacatedBytes = 0  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: csn = 0, offset = 272, tuple = ('1', '2', null, '5')   +
-     Item 1: csn = 1, offset = 320, tuple = ('2', '2', null, '3')   +
-     Item 2: csn = 2, offset = 368, tuple = ('3', '2', null, '2')   +
-     Item 3: csn = 3, offset = 416, tuple = ('4', '1', null, '4')   +
-     Item 4: csn = 4, offset = 464, tuple = ('5', '2', null, '3')   +
-     Item 5: csn = 5, offset = 512, tuple = ('6', '2', null, null)  +
-     Item 6: csn = 6, offset = 552, tuple = ('7', '2', null, null)  +
+     Item 0: offset = 272, tuple = ('1', '2', null, '5')            +
+     Item 1: offset = 320, tuple = ('2', '2', null, '3')            +
+     Item 2: offset = 368, tuple = ('3', '2', null, '2')            +
+     Item 3: offset = 416, tuple = ('4', '1', null, '4')            +
+     Item 4: offset = 464, tuple = ('5', '2', null, '3')            +
+     Item 5: offset = 512, tuple = ('6', '2', null, null)           +
+     Item 6: offset = 552, tuple = ('7', '2', null, null)           +
                                                                     +
  Index toast: not loaded                                            +
  

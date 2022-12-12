@@ -198,7 +198,7 @@ INSERT INTO o_ddl_check VALUES (6, 2, NULL, NULL);
 INSERT INTO o_ddl_check VALUES (7, 2, NULL, NULL);
 
 SELECT * FROM o_ddl_check;
-SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nuebc');
+SELECT orioledb_tbl_structure('o_ddl_check'::regclass, 'nue');
 
 DROP TABLE o_ddl_check;
 
