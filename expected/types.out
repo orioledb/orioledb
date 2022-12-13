@@ -1134,6 +1134,19 @@ select * from o_test_inherits_alter_type_child;
  32 | one
 (1 row)
 
+CREATE DOMAIN o_test_domain_1 AS TEXT NOT NULL;
+CREATE table o_test_domain_check (
+    val_1 int,
+    val_2 int
+)USING orioledb;
+INSERT INTO o_test_domain_check VALUES (1, 2);
+ALTER TABLE o_test_domain_check ADD COLUMN val_3 o_test_domain_1;
+ERROR:  domain o_test_domain_1 does not allow null values
+CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
+ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
+ERROR:  value for domain o_test_domain_2 violates check constraint "o_test_domain_2_check"
+DROP DOMAIN o_test_domain_1;
+DROP DOMAIN o_test_domain_2;
 DROP TYPE record_type_non_altered CASCADE;
 NOTICE:  drop cascades to column key of table o_test_record_type_alter
 DROP TYPE record_type_renamed CASCADE;
@@ -1145,7 +1158,7 @@ drop cascades to column location of table o_test_record_type
 DROP TYPE custom_range CASCADE;
 NOTICE:  drop cascades to column area of table o_test_custom_range
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table o_test_record_type
 drop cascades to table o_test_range
 drop cascades to table o_test_custom_range
@@ -1159,3 +1172,4 @@ drop cascades to table o_test_record_type_alter2
 drop cascades to table o_test_alter_coercible
 drop cascades to table o_test_inherits_alter_type
 drop cascades to table o_test_inherits_alter_type_child
+drop cascades to table o_test_domain_check

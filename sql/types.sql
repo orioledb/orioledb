@@ -419,6 +419,18 @@ alter table o_test_inherits_alter_type
 select * from o_test_inherits_alter_type;
 select * from o_test_inherits_alter_type_child;
 
+CREATE DOMAIN o_test_domain_1 AS TEXT NOT NULL;
+CREATE table o_test_domain_check (
+    val_1 int,
+    val_2 int
+)USING orioledb;
+INSERT INTO o_test_domain_check VALUES (1, 2);
+ALTER TABLE o_test_domain_check ADD COLUMN val_3 o_test_domain_1;
+CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
+ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
+DROP DOMAIN o_test_domain_1;
+DROP DOMAIN o_test_domain_2;
+
 DROP TYPE record_type_non_altered CASCADE;
 DROP TYPE record_type_renamed CASCADE;
 DROP TYPE coordinates CASCADE;
