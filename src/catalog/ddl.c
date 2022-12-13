@@ -491,6 +491,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					case AT_AddInherit:
 					case AT_DropInherit:
 					case AT_CookedColumnDefault:
+					case AT_AddIdentity:
+					case AT_SetIdentity:
+					case AT_DropIdentity:
 						break;
 					default:
 						ereport(ERROR,
