@@ -52,7 +52,6 @@
 #include "tuple/slot.h"
 #include "utils/sampling.h"
 #include "utils/stopevent.h"
-#include "tableam/handler.h"
 
 #include "miscadmin.h"
 #if PG_VERSION_NUM >= 140000
@@ -83,7 +82,6 @@ struct BTreeSeqScan
 
 	bool		initialized;
 	bool		checkpointNumberSet;
-
 	CommitSeqNo snapshotCsn;
 	OBTreeFindPageContext context;
 	OFixedKey	prevHikey;
@@ -1025,6 +1023,13 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 
 	if (poscan)
 	{
+		/*
+		 * Scan worker numbers are assigned by the order of workers init of
+		 * local seqscan. In case of call seqscan in an index build worker,
+		 * the numbers of scan workers, and who is a scan leader is not
+		 * related to index build leader (who merges workers sort results
+		 * after all workers completed their scans).
+		 */
 		SpinLockAcquire(&poscan->workerStart);
 		for (scan->workerNumber = 0; poscan->worker_active[scan->workerNumber] == true; scan->workerNumber++)
 		{
@@ -1042,7 +1047,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		}
 		SpinLockRelease(&poscan->workerStart);
 
-		elog(DEBUG3, "make_btree_seq_scan_internal. %s %d started", poscan ? "Parallel worker" : "Worker", scan->workerNumber);
+		elog(DEBUG3, "init_btree_seq_scan. %s %d started", poscan ? "Parallel worker" : "Worker", scan->workerNumber);
 	}
 	else
 	{
@@ -1112,6 +1117,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 	scan->dsmSeg = NULL;
 	scan->initialized = false;
 	scan->checkpointNumberSet = false;
+	scan->haveHistImg = false;
+	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
 
@@ -1121,6 +1128,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 BTreeSeqScan *
 make_btree_seq_scan(BTreeDescr *desc, CommitSeqNo csn, void *poscan)
 {
+	o_btree_load_shmem(desc);
 	return make_btree_seq_scan_internal(desc, csn, NULL, NULL, NULL, poscan);
 }
 
@@ -1128,6 +1136,7 @@ BTreeSeqScan *
 make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
 					   BTreeSeqScanCallbacks *cb, void *arg)
 {
+	o_btree_load_shmem(desc);
 	return make_btree_seq_scan_internal(desc, csn, cb, arg, NULL, NULL);
 }
 

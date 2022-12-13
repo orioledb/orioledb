@@ -54,8 +54,11 @@ extern uint64 recovery_queue_data_size;
 #define RECOVERY_TOAST_CONSISTENT ((uint16) 1 << 10)
 #define RECOVERY_SAVEPOINT ((uint16) 1 << 11)
 #define RECOVERY_ROLLBACK_TO_SAVEPOINT ((uint16) 1 << 12)
+#define RECOVERY_WORKER_PARALLEL_INDEX_BUILD ((uint16) 1 << 13)
+#define RECOVERY_LEADER_PARALLEL_INDEX_BUILD ((uint16) 1 << 14)
 #define RECOVERY_MODIFY (RECOVERY_INSERT | RECOVERY_DELETE | RECOVERY_UPDATE)
 #define RECOVERY_QUEUE_BUF_SIZE (8 * 1024)
+
 
 typedef struct
 {
@@ -74,6 +77,23 @@ typedef struct
 	RecoveryMsgHeader header;
 	XLogRecPtr	ptr;
 } RecoveryMsgPtr;
+
+typedef struct
+{
+	RecoveryMsgHeader header;
+	Size		o_table_size;
+	char		o_table_serialized[FLEXIBLE_ARRAY_MEMBER];
+} RecoveryMsgIdxBuild;
+
+typedef struct
+{
+	RecoveryMsgHeader header;
+	ORelOids	oids;
+	OIndexNumber ix_num;
+	Oid			ix_oid;
+	Oid			ix_relnode;
+	int			nindices;
+} RecoveryOidsMsgIdxBuild;
 
 typedef struct
 {
@@ -113,6 +133,7 @@ typedef struct
 
 extern bool toast_consistent;
 extern pg_atomic_uint32 *worker_finish_count;
+extern pg_atomic_uint32 *idx_worker_finish_count;
 extern pg_atomic_uint32 *worker_ptrs_changes;
 extern RecoveryWorkerPtrs *worker_ptrs;
 extern pg_atomic_uint64 *recovery_ptr;

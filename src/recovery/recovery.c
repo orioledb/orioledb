@@ -51,6 +51,27 @@
 #include "utils/typcache.h"
 
 /*
+ * Recovery worker state in pool.
+ */
+typedef struct
+{
+	/* Pointer to the worker queue */
+	shm_mq_handle *queue;
+	char		queue_buf[RECOVERY_QUEUE_BUF_SIZE];
+	int			queue_buf_len;
+	/* Current oids */
+	ORelOids	oids;
+	/* Current oxid */
+	OXid		oxid;
+	/* Current index type */
+	OIndexType	type;
+	/* Handle for the worker */
+	BackgroundWorkerHandle *handle;
+} RecoveryWorkerState;
+
+static RecoveryWorkerState *workers_pool;
+
+/*
  * Recovery transaction state.
  */
 typedef struct
@@ -93,24 +114,6 @@ typedef struct
 	dlist_node	node;
 } CheckpointUndoStack;
 
-/*
- * Recovery worker state in pool.
- */
-typedef struct
-{
-	/* Pointer to the worker queue */
-	shm_mq_handle *queue;
-	char		queue_buf[RECOVERY_QUEUE_BUF_SIZE];
-	int			queue_buf_len;
-	/* Current oids */
-	ORelOids	oids;
-	/* Current oxid */
-	OXid		oxid;
-	/* Current index type */
-	OIndexType	type;
-	/* Handle for the worker */
-	BackgroundWorkerHandle *handle;
-} RecoveryWorkerState;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
@@ -179,9 +182,6 @@ static dlist_head finished_list;
  */
 static dlist_head joint_commit_list;
 
-/* Pool of recovery workers and oxid hash for it */
-static RecoveryWorkerState *workers_pool;
-
 /* orioledb checkpoint number from which we start recovery */
 static uint32 startup_chkp_num;
 
@@ -212,6 +212,7 @@ Pointer		recovery_first_queue = NULL;
  * GUC value, number of recovery workers.
  */
 int			recovery_pool_size_guc;
+int			recovery_idx_pool_size_guc;
 
 /*
  * GUC value, size of a single recovery queue.
@@ -237,6 +238,7 @@ OXid		recovery_xmin = InvalidOXid;
  * Number of successfully finished recovery workers.
  */
 pg_atomic_uint32 *worker_finish_count;
+pg_atomic_uint32 *idx_worker_finish_count;
 pg_atomic_uint32 *worker_ptrs_changes;
 RecoveryWorkerPtrs *worker_ptrs;
 pg_atomic_uint64 *recovery_ptr;
@@ -244,29 +246,25 @@ pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
 bool	   *recovery_single_process;
 
-
 static void update_run_xmin(void);
 static void free_run_xmin(void);
 static bool need_flush_undo_pos(int worker_id);
 static void flush_current_undo_stack(void);
 static void o_handle_startup_proc_interrupts_hook(void);
-static void abort_recovery(RecoveryWorkerState *workers_pool, int num_workers);
-static void worker_wait_shutdown(RecoveryWorkerState *worker);
+static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
 static void replay_container(Pointer ptr, Pointer endPtr,
 							 bool single, XLogRecPtr xlogRecPtr);
 
-static inline void worker_send_msg(int worker_id, Pointer msg, uint64 msg_size);
 static void worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
 							   OTuple tuple, int tuple_len);
-static void workers_send_finish(void);
 static void workers_send_oxid_finish(XLogRecPtr ptr, bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
 static void workers_synchronize(XLogRecPtr csn, bool send_synchronize);
 static void workers_notify_toast_consistent(void);
-static inline void worker_queue_flush(int worker_id);
+static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
 static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
 												OTuple tup,
@@ -285,14 +283,17 @@ recovery_shmem_needs(void)
 	Size		size = 0;
 
 	size = add_size(size, mul_size(CACHELINEALIGN(recovery_queue_size_guc),
-								   recovery_pool_size_guc));
+								   recovery_pool_size_guc + recovery_idx_pool_size_guc));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
+	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(RecoveryUndoLocFlush)));
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs),
-												  recovery_pool_size_guc + 1)));
+												  recovery_pool_size_guc + recovery_idx_pool_size_guc + 1)));
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3)));
+	size = add_size(size, CACHELINEALIGN(_o_index_parallel_estimate_shared(0)));
+	size = add_size(size, CACHELINEALIGN(tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1)));
 
 	return size;
 }
@@ -308,12 +309,15 @@ recovery_shmem_init(Pointer ptr, bool found)
 {
 	recovery_first_queue = ptr;
 	ptr += mul_size(CACHELINEALIGN(recovery_queue_size_guc),
-					recovery_pool_size_guc);
+					recovery_pool_size_guc + recovery_idx_pool_size_guc);
 
 	recovery_single_process = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
 
 	worker_finish_count = (pg_atomic_uint32 *) ptr;
+	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
+
+	idx_worker_finish_count = (pg_atomic_uint32 *) ptr;
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
 
 	worker_ptrs_changes = (pg_atomic_uint32 *) ptr;
@@ -323,13 +327,19 @@ recovery_shmem_init(Pointer ptr, bool found)
 	ptr += CACHELINEALIGN(sizeof(RecoveryUndoLocFlush));
 
 	worker_ptrs = (RecoveryWorkerPtrs *) ptr;
-	ptr += CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs), recovery_pool_size_guc));
+	ptr += CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs), recovery_pool_size_guc + recovery_idx_pool_size_guc));
 
 	recovery_ptr = (pg_atomic_uint64 *) ptr;
 	recovery_main_retain_ptr = recovery_ptr + 1;
 	recovery_finished_list_ptr = recovery_ptr + 2;
 
 	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3));
+
+	recovery_oidxshared = (oIdxShared *) ptr;
+	ptr += CACHELINEALIGN(_o_index_parallel_estimate_shared(0));
+
+	recovery_sharedsort = (Sharedsort *) ptr;
+	ptr += CACHELINEALIGN(tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1));
 
 	recovery_queue_data_size = recovery_queue_size_guc;
 
@@ -344,9 +354,10 @@ recovery_shmem_init(Pointer ptr, bool found)
 		SpinLockInit(&recovery_undo_loc_flush->exitLock);
 
 		pg_atomic_init_u32(worker_finish_count, 0);
+		pg_atomic_init_u32(idx_worker_finish_count, 0);
 		pg_atomic_init_u32(worker_ptrs_changes, 0);
 
-		for (i = 0; i < recovery_pool_size_guc; i++)
+		for (i = 0; i < recovery_pool_size_guc + recovery_idx_pool_size_guc; i++)
 		{
 			shm_mq_create(GET_WORKER_QUEUE(i), recovery_queue_size_guc);
 			pg_atomic_init_u64(&worker_ptrs[i].commitPtr, InvalidXLogRecPtr);
@@ -356,6 +367,10 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
+
+		ConditionVariableInit(&recovery_oidxshared->recoverycv);
+		recovery_oidxshared->recoveryidxbuild = false;
+		recovery_oidxshared->recoveryidxbuild_modify = false;
 	}
 }
 
@@ -430,7 +445,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
 			if (!recovery_single && worker_id < 0)
-				state->used_by = palloc0(recovery_pool_size_guc * sizeof(bool));
+				state->used_by = palloc0((recovery_pool_size_guc + recovery_idx_pool_size_guc) * sizeof(bool));
 			else
 				state->used_by = NULL;
 		}
@@ -491,11 +506,25 @@ apply_xids_branches(void)
 }
 
 void
+idx_workers_shutdown(void)
+{
+	int			i;
+
+	workers_send_finish(true);
+	for (i = index_build_first_worker; i <= index_build_last_worker; i++)
+	{
+		worker_wait_shutdown(&workers_pool[i]);
+	}
+
+	if (pg_atomic_read_u32(idx_worker_finish_count) != index_build_workers)
+		elog(ERROR, "orioledb recovery idx worker died.");
+}
+
+void
 o_recovery_start_hook(void)
 {
 	RecoveryWorkerState *state;
-	int			i,
-				num_workers = recovery_pool_size_guc;
+	int			i;
 	bool		recovery_single;
 
 	before_shmem_exit(recovery_on_proc_exit, (Datum) -1);
@@ -514,9 +543,11 @@ o_recovery_start_hook(void)
 
 	if (!recovery_single)
 	{
-		workers_pool = palloc0(sizeof(RecoveryWorkerState) * num_workers);
+		int			finish = recovery_idx_pool_size_guc ? index_build_leader : recovery_last_worker;
 
-		for (i = 0; i < num_workers; i++)
+		workers_pool = palloc0(sizeof(RecoveryWorkerState) * (finish + 1));
+
+		for (i = recovery_first_worker; i <= finish; i++)
 		{
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
@@ -532,7 +563,7 @@ o_recovery_start_hook(void)
 				/*
 				 * Not enough slots for background workers.
 				 */
-				abort_recovery(workers_pool, recovery_pool_size_guc);
+				abort_recovery(workers_pool, false);
 
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
@@ -542,7 +573,7 @@ o_recovery_start_hook(void)
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
 		}
-		for (i = 0; i < num_workers; i++)
+		for (i = 0; i <= recovery_last_worker; i++)
 		{
 			if (shm_mq_wait_for_attach(workers_pool[i].queue) != SHM_MQ_SUCCESS)
 				elog(ERROR, "unable to attach recovery workers to shm queue");
@@ -591,7 +622,7 @@ orioledb_redo(XLogReaderState *record)
 
 	if (unexpected_worker_detach)
 	{
-		abort_recovery(workers_pool, recovery_pool_size_guc);
+		abort_recovery(workers_pool, false);
 		elog(ERROR, "orioledb recovery worker detached unexpectedly.");
 	}
 }
@@ -629,7 +660,7 @@ o_recovery_logicalmsg_redo_hook(XLogReaderState *record)
 
 			if (unexpected_worker_detach)
 			{
-				abort_recovery(workers_pool, recovery_pool_size_guc);
+				abort_recovery(workers_pool, false);
 				elog(ERROR, "orioledb recovery worker detached unexpectedly.");
 			}
 		}
@@ -642,14 +673,14 @@ o_recovery_finish_hook(bool cleanup)
 {
 	RecoveryWorkerState *state;
 	int			i,
-				num_workers = recovery_pool_size_guc;
+				num_workers = recovery_idx_pool_size_guc ? recovery_pool_size_guc + 1 : recovery_pool_size_guc;
 	bool		recovery_single;
 
 	recovery_single = *recovery_single_process;
 
 	if (!recovery_single)
 	{
-		workers_send_finish();
+		workers_send_finish(false);
 		for (i = 0; i < num_workers; i++)
 		{
 			worker_wait_shutdown(&workers_pool[i]);
@@ -793,6 +824,8 @@ void
 recovery_init(int worker_id)
 {
 	HASHCTL		ctl;
+	RecoveryWorkerState *state;
+	int			i;
 
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(OXid);
@@ -824,6 +857,49 @@ recovery_init(int worker_id)
 
 	if (worker_id < 0)
 		recovery_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
+
+	if (worker_id == index_build_leader)
+	{
+		workers_pool = palloc0(sizeof(RecoveryWorkerState) * (recovery_idx_pool_size_guc + recovery_pool_size_guc));
+
+		for (i = index_build_first_worker; i <= index_build_last_worker; i++)
+		{
+			state = &workers_pool[i];
+			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
+			state->type = oIndexInvalid;
+			state->oids.datoid = InvalidOid;
+			state->oids.reloid = InvalidOid;
+			state->oids.relnode = InvalidOid;
+			state->oxid = InvalidOXid;
+
+			workers_pool[i].handle = recovery_worker_register(i);
+
+			/*
+			 * (BackgroundWorkerHandle *)
+			 * &recovery_oidxshared->worker_handle[i];
+			 */
+			if (workers_pool[i].handle == NULL)
+			{
+				/*
+				 * Not enough slots for background workers.
+				 */
+				abort_recovery(workers_pool, true);
+
+				ereport(ERROR,
+						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+						 errmsg("unable to start recovery workers"),
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_workers_number value.")));
+			}
+			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
+			state->queue_buf_len = 0;
+		}
+
+		for (i = index_build_first_worker; i <= index_build_last_worker; i++)
+		{
+			if (shm_mq_wait_for_attach(workers_pool[i].queue) != SHM_MQ_SUCCESS)
+				elog(ERROR, "unable to attach recovery workers to shm queue");
+		}
+	}
 
 	HandleStartupProcInterrupts_hook = o_handle_startup_proc_interrupts_hook;
 }
@@ -993,7 +1069,8 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->o_tables_meta_locked = false;
 			cur_state->checkpoint_xid = false;
 			if (worker_id < 0 && !*recovery_single_process)
-				cur_state->used_by = palloc0(recovery_pool_size_guc * sizeof(bool));
+				cur_state->used_by = palloc0((recovery_pool_size_guc + recovery_idx_pool_size_guc) *
+											 sizeof(bool));
 			else
 				cur_state->used_by = NULL;
 		}
@@ -1722,11 +1799,25 @@ o_handle_startup_proc_interrupts_hook(void)
 }
 
 static void
-abort_recovery(RecoveryWorkerState *workers_pool, int num_workers)
+abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool)
 {
 	int			i;
+	int			start,
+				finish;
 
-	for (i = 0; i < num_workers; i++)
+	if (send_to_idx_pool)
+	{
+		Assert(recovery_idx_pool_size_guc);
+		start = index_build_first_worker;
+		finish = index_build_last_worker;
+	}
+	else
+	{
+		start = 0;
+		finish = recovery_idx_pool_size_guc ? index_build_leader : recovery_last_worker;
+	}
+
+	for (i = start; i <= finish; i++)
 	{
 		if (workers_pool[i].queue != NULL)
 			shm_mq_detach(workers_pool[i].queue);
@@ -1745,7 +1836,7 @@ abort_recovery(RecoveryWorkerState *workers_pool, int num_workers)
  * WaitForBackgroundWorkerShutdown() does not work in this context. We need
  * an analog.
  */
-static void
+void
 worker_wait_shutdown(RecoveryWorkerState *worker)
 {
 	BgwHandleStatus status;
@@ -1912,6 +2003,41 @@ clean_workers_oids(void)
 	}
 }
 
+#if PG_VERSION_NUM >= 140000
+static void
+recovery_send_oids(ORelOids oids, OIndexNumber ix_num, Oid ix_oid, Oid ix_relnode, int nindices, bool send_to_leader)
+{
+	RecoveryOidsMsgIdxBuild *msg;
+	int			i;
+
+	Assert(!(*recovery_single_process));
+	Assert(ORelOidsIsValid(oids));
+	msg = palloc0(sizeof(RecoveryOidsMsgIdxBuild));
+	msg->header.type = send_to_leader ? RECOVERY_LEADER_PARALLEL_INDEX_BUILD : RECOVERY_WORKER_PARALLEL_INDEX_BUILD;
+	memcpy(&msg->oids, &oids, sizeof(ORelOids));
+	msg->ix_num = ix_num;
+	msg->ix_oid = ix_oid;
+	msg->ix_relnode = ix_relnode;
+	msg->nindices = nindices;
+	Assert(o_tables_get(msg->oids) != NULL);
+
+	if (send_to_leader)
+	{
+		worker_send_msg(index_build_leader, (Pointer) msg, sizeof(RecoveryOidsMsgIdxBuild));
+		worker_queue_flush(index_build_leader);
+	}
+	else
+	{
+		for (i = index_build_first_worker; i <= index_build_last_worker; i++)
+		{
+			worker_send_msg(i, (Pointer) msg, sizeof(RecoveryOidsMsgIdxBuild));
+			worker_queue_flush(i);
+		}
+	}
+	pfree(msg);
+}
+#endif
+
 static void
 handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 {
@@ -1987,7 +2113,40 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
 												 new_o_table->indices[ix_num].oids.relnode);
 				o_tables_meta_unlock_no_wal();
-				build_secondary_index(new_o_table, &tmp_descr, ix_num);
+
+				Assert(is_recovery_in_progress());
+#if PG_VERSION_NUM >= 140000
+
+				/*
+				 * In main recovery worker send message to main index creation
+				 * worker in dedicated recovery workers pool and exit
+				 */
+				if (!*recovery_single_process)
+				{
+					/*
+					 * If other index build is in progress, wait until it
+					 * finishes
+					 */
+					while (recovery_oidxshared->recoveryidxbuild)
+						ConditionVariableSleep(&recovery_oidxshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+
+					ConditionVariableCancelSleep();
+
+					/* Prevent rel modify during index build */
+					SpinLockAcquire(&recovery_oidxshared->mutex);
+					recovery_oidxshared->recoveryidxbuild_modify = true;
+					recovery_oidxshared->recoveryidxbuild = true;
+					SpinLockRelease(&recovery_oidxshared->mutex);
+
+					/* Send recovery message to become a leader */
+					recovery_send_oids(oids, ix_num, new_o_table->indices[ix_num].oids.datoid,
+									   new_o_table->indices[ix_num].oids.relnode, nindices, true);
+				}
+				else
+					build_secondary_index(new_o_table, &tmp_descr, ix_num, false);
+#else
+				build_secondary_index(new_o_table, &tmp_descr, ix_num, false);
+#endif
 			}
 			o_free_tmp_table_descr(&tmp_descr);
 		}
@@ -2353,11 +2512,13 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 /*
  * Sends the message to a worker.
  */
-static inline void
+void
 worker_send_msg(int worker_id, Pointer msg, uint64 msg_size)
 {
 	RecoveryWorkerState *state = &workers_pool[worker_id];
 
+	Assert(workers_pool);
+	Assert(state);
 	if ((RECOVERY_QUEUE_BUF_SIZE - state->queue_buf_len) < msg_size)
 		worker_queue_flush(worker_id);
 
@@ -2455,14 +2616,28 @@ worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
 /*
  * Sends recovery finish message to all workers in the pool.
  */
-static void
-workers_send_finish(void)
+void
+workers_send_finish(bool send_to_idx_pool)
 {
 	RecoveryMsgEmpty finish_msg;
 	RecoveryWorkerState *state;
 	int			i;
+	int			start,
+				finish;
 
-	for (i = 0; i < recovery_pool_size_guc; i++)
+	if (send_to_idx_pool)
+	{
+		Assert(recovery_idx_pool_size_guc);
+		start = index_build_first_worker;
+		finish = index_build_last_worker;
+	}
+	else
+	{
+		start = 0;
+		finish = recovery_idx_pool_size_guc ? index_build_leader : recovery_last_worker;
+	}
+
+	for (i = start; i <= finish; i++)
 	{
 		state = &workers_pool[i];
 
@@ -2657,7 +2832,7 @@ workers_notify_toast_consistent(void)
 /*
  * Flushes a queue buffer to the queue.
  */
-static inline void
+void
 worker_queue_flush(int worker_id)
 {
 	RecoveryWorkerState *state = &workers_pool[worker_id];

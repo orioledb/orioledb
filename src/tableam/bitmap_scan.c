@@ -358,7 +358,6 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 				   MemoryContext cxt)
 {
 	OBitmapScan *scan = palloc0(sizeof(OBitmapScan));
-	BTreeDescr *primary;
 
 	scan->typeoid = typeoid;
 	scan->csn = csn;
@@ -367,9 +366,7 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	scan->tbl_desc = relation_get_descr(rel);
 	bitmap_state->scan = scan;
 	scan->saved_bitmap = o_exec_bitmapqual(bitmap_state, bitmapqualplanstate);
-	primary = &GET_PRIMARY(scan->tbl_desc)->desc;
-	o_btree_load_shmem(primary);
-	scan->seq_scan = make_btree_seq_scan_cb(primary, scan->csn,
+	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->tbl_desc)->desc, scan->csn,
 											&bitmap_seq_scan_callbacks, scan);
 	return scan;
 }

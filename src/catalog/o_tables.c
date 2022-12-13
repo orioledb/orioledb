@@ -98,8 +98,6 @@ static void o_tables_foreach_callback(ORelOids oids, void *arg);
 static void o_tables_drop_all_callback(ORelOids oids, void *arg);
 static void o_table_oids_array_callback(ORelOids oids, void *arg);
 static inline void o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool checkpoint);
-static Pointer serialize_o_table(OTable *o_table, int *size);
-static OTable *deserialize_o_table(Pointer data, Size length);
 
 static BTreeDescr *
 oTablesGetBTreeDesc(void *arg)
@@ -1564,7 +1562,7 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	o_serialize_node((Node *) o_table_index->expressions, str);
 }
 
-static Pointer
+Pointer
 serialize_o_table(OTable *o_table, int *size)
 {
 	StringInfoData str;

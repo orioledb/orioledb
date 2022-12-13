@@ -176,6 +176,10 @@ extern void o_tables_foreach_oids(OTablesOidsCallback callback,
 								  CommitSeqNo csn,
 								  void *arg);
 
+Pointer		serialize_o_table(OTable *o_table, int *size);
+
+OTable	   *deserialize_o_table(Pointer data, Size length);
+
 /*
  * We can't use relation_open/LockRelationId locks to protect relations that
  * belong to other database.

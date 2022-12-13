@@ -14,6 +14,7 @@
 #define __RECOVERY_H__
 
 #include "btree/btree.h"
+#include "recovery/internal.h"
 
 extern void o_recovery_start_hook(void);
 #if PG_VERSION_NUM >= 150000
@@ -28,7 +29,11 @@ extern Size recovery_shmem_needs(void);
 extern void recovery_shmem_init(Pointer ptr, bool found);
 extern bool is_recovery_process(void);
 extern CommitSeqNo recovery_map_oxid_csn(OXid oxid, bool *found);
+extern void worker_send_msg(int worker_id, Pointer msg, uint64 msg_size);
+extern void worker_queue_flush(int worker_id);
+extern void idx_workers_shutdown(void);
 
+extern void workers_send_finish(bool send_to_idx_pool);
 extern void update_proc_retain_undo_location(int worker_id);
 
 static inline bool
@@ -40,6 +45,7 @@ is_recovery_in_progress(void)
 extern XLogRecPtr recovery_get_current_ptr(void);
 extern Size recovery_queue_size_guc;
 extern int	recovery_pool_size_guc;
+extern int	recovery_idx_pool_size_guc;
 extern OXid recovery_oxid;
 
 typedef struct BTreeDescr BTreeDescr;
@@ -51,5 +57,6 @@ extern OTuple recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *alloca
 
 extern void recovery_cleanup_old_files(uint32 max_chkp_num,
 									   bool before_recovery);
+
 
 #endif							/* __RECOVERY_H__ */

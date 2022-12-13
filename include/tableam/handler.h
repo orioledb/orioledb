@@ -136,6 +136,7 @@ extern void table_descr_dec_refcnt(OTableDescr *descr);
 
 extern Size orioledb_parallelscan_estimate(Relation rel);
 extern Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan);
+extern Size orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan);
 extern void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
 
 
