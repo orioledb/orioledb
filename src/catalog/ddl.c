@@ -88,9 +88,6 @@ static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
-#ifdef USE_ASSERT_CHECKING
-bool			first_ExecutorStart = true;
-#endif
 
 List	*drop_index_list = NIL;
 
@@ -348,13 +345,6 @@ orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags)
 	UndoLocation	   *cur_undo_location;
 	MemoryContext		oldcxt;
 
-#ifdef USE_ASSERT_CHECKING
-	if (first_ExecutorStart)
-		Assert(saved_undo_locations == NIL &&
-			   saved_undo_location == InvalidUndoLocation);
-	first_ExecutorStart = false;
-#endif
-
 	lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 	cur_undo_location = (UndoLocation *) palloc0(sizeof(UndoLocation));
@@ -373,9 +363,16 @@ orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
 {
 	ListCell   *last;
 
-	last = list_tail(saved_undo_locations);
-	pfree(lfirst(last));
-	saved_undo_locations = list_delete_last(saved_undo_locations);
+	/*
+	 * cleanup_saved_undo_locations can be called before the ExecutorEnd of the * paired ExecutorStart
+	 */
+	if (saved_undo_locations != NIL)
+	{
+		last = list_tail(saved_undo_locations);
+		pfree(lfirst(last));
+		saved_undo_locations = list_delete_last(saved_undo_locations);
+	}
+
 	if (saved_undo_locations != NIL)
 	{
 		last = list_tail(saved_undo_locations);
@@ -384,9 +381,6 @@ orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
 	else
 	{
 		saved_undo_location = InvalidUndoLocation;
-#ifdef USE_ASSERT_CHECKING
-		first_ExecutorStart = true;
-#endif
 	}
 
 	if (prev_ExecutorEnd)
@@ -407,9 +401,6 @@ cleanup_saved_undo_locations()
 		saved_undo_locations = list_delete_last(saved_undo_locations);
 	}
 	saved_undo_location = InvalidUndoLocation;
-#ifdef USE_ASSERT_CHECKING
-	first_ExecutorStart = true;
-#endif
 }
 
 static bool
