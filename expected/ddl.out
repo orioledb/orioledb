@@ -1208,10 +1208,33 @@ SELECT * FROM o_test_opcoptions_reset;
 (1 row)
 
 COMMIT;
+CREATE TABLE o_test_generated (
+	a int,
+	b int GENERATED ALWAYS AS (a * 2) STORED
+)USING orioledb;
+INSERT INTO o_test_generated VALUES (1), (2);
+SELECT * FROM o_test_generated;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 4
+(2 rows)
+
+CREATE TABLE o_test_generated_like (
+	LIKE o_test_generated INCLUDING GENERATED
+)USING orioledb;
+INSERT INTO o_test_generated_like VALUES (5), (6);
+SELECT * FROM o_test_generated_like;
+ a | b  
+---+----
+ 5 | 10
+ 6 | 12
+(2 rows)
+
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 11 other objects
+NOTICE:  drop cascades to 13 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1223,3 +1246,5 @@ drop cascades to table o_test_inherits_2
 drop cascades to table o_test
 drop cascades to table o_test_child
 drop cascades to table o_test_opcoptions_reset
+drop cascades to table o_test_generated
+drop cascades to table o_test_generated_like

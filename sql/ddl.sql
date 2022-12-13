@@ -411,5 +411,20 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_opcoptions_reset;
 SELECT * FROM o_test_opcoptions_reset;
 COMMIT;
 
+CREATE TABLE o_test_generated (
+	a int,
+	b int GENERATED ALWAYS AS (a * 2) STORED
+)USING orioledb;
+
+INSERT INTO o_test_generated VALUES (1), (2);
+SELECT * FROM o_test_generated;
+
+CREATE TABLE o_test_generated_like (
+	LIKE o_test_generated INCLUDING GENERATED
+)USING orioledb;
+
+INSERT INTO o_test_generated_like VALUES (5), (6);
+SELECT * FROM o_test_generated_like;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
