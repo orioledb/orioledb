@@ -630,12 +630,12 @@ class MergeIntoTest(BaseTest):
 			CREATE TABLE o_test_1(
 				val_1 int,
 				val_2 int
-			)USING orioledb;
+			) USING orioledb;
 
 			CREATE TABLE o_test_2(
 				val_3 text,
 				val_4 text
-			)USING orioledb;
+			) USING orioledb;
 
 			INSERT INTO o_test_1(val_1, val_2)
 				(SELECT val_1, val_1 * 100 FROM generate_series (1, 5) val_1);
@@ -682,30 +682,28 @@ class MergeIntoTest(BaseTest):
 		con1.close()
 		con2.close()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 100), (2, 200),
-			(3, 300), (4, 400), (5, 500), (None, 333),(None, 333), (None, 333),
-			 (None, 333), (None, 333),(None, 333), (None, 333),
-			  (None, 333), (None, 333),(None, 333), (None, 333),
-			  (None, 333)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1 ORDER BY val_1"),
+			[(1, 100), (2, 200), (None, 333),(None, 333), (None, 333),
+			 (None, 333), (None, 333),(None, 333), (None, 333), (None, 333),
+			 (None, 333),(None, 333), (None, 333),(None, 333)])
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_2"), [
-			(None,None), (None,None), (None,None), (None,None), (None,None),
-			(None,None), (None,None), (None,None), (None,None), (None,None),
-			(None,None), (None,None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_2 ORDER BY val_3"),
+			[(3, 600), (4, 800), (5, 1000), (6, 1200), (7, 1400), (8, 1600),
+			 (None,None), (None,None), (None,None), (None,None), (None,None),
+			 (None,None)])
 
 		node.stop(['-m', 'immediate'])
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 100), (2, 200),
-			(3, 300), (4, 400), (5, 500), (None, 333),(None, 333), (None, 333),
-			 (None, 333), (None, 333),(None, 333), (None, 333),
-			  (None, 333), (None, 333),(None, 333), (None, 333),
-			  (None, 333)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1 ORDER BY val_1"),
+			[(1, 100), (2, 200), (None, 333),(None, 333), (None, 333),
+			 (None, 333), (None, 333),(None, 333), (None, 333), (None, 333),
+			 (None, 333),(None, 333), (None, 333),(None, 333)])
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_2"), [
-			(None,None), (None,None), (None,None), (None,None), (None,None),
-			(None,None), (None,None), (None,None), (None,None), (None,None),
-			(None,None), (None,None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_2 ORDER BY val_3"),
+			[(3, 600), (4, 800), (5, 1000), (6, 1200), (7, 1400), (8, 1600),
+			 (None,None), (None,None), (None,None), (None,None), (None,None),
+			 (None,None)])
 
 		node.stop()
 
