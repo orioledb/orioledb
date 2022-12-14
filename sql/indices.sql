@@ -1493,5 +1493,31 @@ COMMIT;
 SELECT orioledb_tbl_structure('o_test_partial_unique'::regclass, 'nue');
 SELECT orioledb_tbl_indices('o_test_partial_unique'::regclass);
 
+CREATE TABLE o_test_unique_expr (
+    val_1 int4,
+    val_2 text,
+    val_3 int,
+    val_4 int
+) USING orioledb;
+
+CREATE UNIQUE INDEX o_test_unique_expr_ix1 ON o_test_unique_expr(val_1);
+CREATE UNIQUE INDEX o_test_unique_expr_ix2 ON o_test_unique_expr(lower(val_2));
+CREATE UNIQUE INDEX o_test_unique_expr_ix3 ON o_test_unique_expr(abs(val_3),
+																 val_4);
+
+SELECT orioledb_tbl_indices('o_test_unique_expr'::regclass);
+
+INSERT INTO o_test_unique_expr VALUES (1, 'a', 1, 1);
+SELECT * FROM o_test_unique_expr;
+
+INSERT INTO o_test_unique_expr VALUES (2, 'a', 1, 1);
+SELECT * FROM o_test_unique_expr;
+
+INSERT INTO o_test_unique_expr VALUES (2, 'b', 2, 1);
+SELECT * FROM o_test_unique_expr;
+
+INSERT INTO o_test_unique_expr VALUES (3, 'c', 2, 1);
+SELECT * FROM o_test_unique_expr;
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

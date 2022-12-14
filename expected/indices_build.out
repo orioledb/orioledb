@@ -19524,8 +19524,8 @@ ERROR:  could not create unique index "o_indices6_idx1"
 DETAIL:  Duplicate keys exist.
 CREATE UNIQUE INDEX o_indices6_idx2 ON o_indices6 (val2); -- success
 INSERT INTO o_indices6 VALUES (1501, 3000, 4001); -- fail
-ERROR:  duplicate key value violates unique constraint "o_indices6"
-DETAIL:  Key ('4001') already exists
+ERROR:  duplicate key value violates unique constraint "o_indices6_idx2"
+DETAIL:  Key (val2)=('4001') already exists.
 SELECT orioledb_tbl_indices('o_indices6'::regclass);
               orioledb_tbl_indices              
 ------------------------------------------------

@@ -1548,22 +1548,55 @@ is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 static void
 o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 {
-	bool		ctid = id->primaryIsCtid;
-	bool		primary = id->desc.type == oIndexPrimary;
+	bool			is_ctid = id->primaryIsCtid;
+	bool			is_primary = id->desc.type == oIndexPrimary;
 
-	if (primary && ctid)
+	if (is_primary && is_ctid)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
 						errmsg("ctid index key duplicate.")));
 	}
 	else
 	{
+		StringInfo	str = makeStringInfo();
+		int			i,
+					j;
+		int			nfields;
+
+		nfields = id->nFields;
+		if (!is_primary)
+		{
+			nfields -= id->nPrimaryFields;
+			for (i = 0; i < nfields; i++)
+			{
+				for (j = 0; j < id->nPrimaryFields; j++)
+				{
+					AttrNumber attnum = id->primaryFieldsAttnums[j];
+					if (i == attnum)
+					{
+						nfields--;
+						break;
+					}
+				}
+			}
+		}
+
+		appendStringInfo(str, "(");
+		for (i = 0; i < nfields; i++)
+		{
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			appendStringInfo(str, "%s",
+							 id->nonLeafTupdesc->attrs[i].attname.data);
+		}
+		appendStringInfo(str, ")=");
+		appendStringInfoIndexKey(str, slot, id);
 		ereport(ERROR,
 				(errcode(ERRCODE_UNIQUE_VIOLATION),
-				 errmsg("duplicate key value violates unique constraint \"%s\"",
-						RelationGetRelationName(rel)),
-				 errdetail("Key %s already exists",
-						   tss_orioledb_print_idx_key(slot, id)),
-				 errtableconstraint(rel, id->desc.type == oIndexPrimary ? "pk" : "sk")));
+				 errmsg("duplicate key value violates unique "
+				 		"constraint \"%s\"", id->name.data),
+				 errdetail("Key %s already exists.", str->data),
+				 errtableconstraint(rel, id->desc.type == oIndexPrimary ?
+											"pk" : "sk")));
 	}
 }

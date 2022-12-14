@@ -106,8 +106,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 3000),
 	repeat('x', 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('1') already exists.
 -- fails t2 is index field
 INSERT INTO o_test1 VALUES
 (
@@ -122,8 +122,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 3000),
 	repeat('x', 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('1') already exists.
 -- fails t3 is index field
 INSERT INTO o_test1 VALUES
 (
@@ -138,8 +138,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 3000),
 	repeat('x', 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('1') already exists.
 -- fails t5 is index field
 INSERT INTO o_test1 VALUES
 (
@@ -154,8 +154,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 3000),
 	repeat('x', 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('1') already exists.
 -- fails t6 is index field
 INSERT INTO o_test1 VALUES
 (
@@ -170,8 +170,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 3000),
 	repeat('x', 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('1') already exists.
 -----
 --- Test compression inside primary index tuples. Do not TOASTed.
 -----
@@ -458,8 +458,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 10),
 	generate_string(1, 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('1') already exists.
 INSERT INTO o_test1 VALUES
 (
 	2,
@@ -469,8 +469,8 @@ INSERT INTO o_test1 VALUES
 	repeat('x', 10),
 	generate_string(1, 3000)
 );
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('xxxxxxxxxx') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_unique"
+DETAIL:  Key (t4)=('xxxxxxxxxx') already exists.
 INSERT INTO o_test1 VALUES
 (
 	2,
@@ -481,11 +481,11 @@ INSERT INTO o_test1 VALUES
 	generate_string(2, 3000)
 );
 UPDATE o_test1 SET t4 = repeat('y', 10) WHERE id = 1;
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('yyyyyyyyyy') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_unique"
+DETAIL:  Key (t4)=('yyyyyyyyyy') already exists.
 UPDATE o_test1 SET id = 2 WHERE id = 1;
-ERROR:  duplicate key value violates unique constraint "o_test1"
-DETAIL:  Key ('2') already exists
+ERROR:  duplicate key value violates unique constraint "o_test1_pkey"
+DETAIL:  Key (id)=('2') already exists.
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
                                           orioledb_tbl_structure                                           
 -----------------------------------------------------------------------------------------------------------

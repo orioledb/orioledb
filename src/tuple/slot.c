@@ -892,42 +892,59 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 	}
 }
 
-char *
-tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id)
+void
+appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 {
-	StringInfoData buf;
 	int			i;
+	ListCell   *indexpr_item = list_head(id->expressions_state);
 
 	slot_getallattrs(slot);
 
-	initStringInfo(&buf);
-	appendStringInfo(&buf, "(");
+	appendStringInfo(str, "(");
 	for (i = 0; i < id->nUniqueFields; i++)
 	{
 		Datum		value;
 		bool		isnull;
 		int			attnum = id->fields[i].tableAttnum;
 
-		value = get_tbl_att(slot, attnum, id->primaryIsCtid,
-							&isnull, NULL);
+		if (attnum != EXPR_ATTNUM)
+			value = get_tbl_att(slot, attnum, id->primaryIsCtid,
+								&isnull, NULL);
+		else
+		{
+			value = get_idx_expr_att(slot, id,
+									 (ExprState *) lfirst(indexpr_item),
+									 &isnull);
+			indexpr_item = lnext(id->expressions_state, indexpr_item);
+		}
 
 		if (i != 0)
-			appendStringInfo(&buf, ", ");
+			appendStringInfo(str, ", ");
 		if (isnull)
-			appendStringInfo(&buf, "null");
+			appendStringInfo(str, "null");
 		else
 		{
 			Oid			typoutput;
 			bool		typisvarlena;
-			char	   *str;
+			char	   *res;
 
 			getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
 							  &typoutput, &typisvarlena);
-			str = OidOutputFunctionCall(typoutput, value);
-			appendStringInfo(&buf, "'%s'", str);
+			res = OidOutputFunctionCall(typoutput, value);
+			appendStringInfo(str, "'%s'", res);
 		}
 	}
-	appendStringInfo(&buf, ")");
+	appendStringInfo(str, ")");
+}
+
+char *
+tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+	appendStringInfoIndexKey(&buf, slot, id);
+
 	return buf.data;
 }
 

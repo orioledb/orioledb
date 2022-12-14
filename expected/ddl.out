@@ -34,8 +34,8 @@ ERROR:  null value in column "f2" of relation "o_ddl_check" violates not-null co
 DETAIL:  Failing row contains (2, null, 3).
 -- Fails, because of unique constraint
 INSERT INTO o_ddl_check VALUES ('ABC1', '2', '3');
-ERROR:  duplicate key value violates unique constraint "o_ddl_check"
-DETAIL:  Key ('ABC1') already exists
+ERROR:  duplicate key value violates unique constraint "o_ddl_check_pkey"
+DETAIL:  Key (f1)=('ABC1') already exists.
 INSERT INTO o_ddl_check VALUES ('ABC2', 'ABC4', NULL);
 INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
 SELECT * FROM o_ddl_check;

@@ -155,11 +155,11 @@ INSERT INTO o_test_ioc5 VALUES (1, 2, 3, 4, 5, 6, 7, 8) ON CONFLICT (id3, id4) D
 ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
 INSERT INTO o_test_ioc5 VALUES (9, 9, 9, 4, 5, 9, 9, 9) ON CONFLICT (id4, id5) DO NOTHING;
 INSERT INTO o_test_ioc5 VALUES (9, 9, 9, 4, 9, 9, 9, 9) ON CONFLICT (id4, id5) DO NOTHING;
-ERROR:  duplicate key value violates unique constraint "o_test_ioc5"
-DETAIL:  Key ('4') already exists
+ERROR:  duplicate key value violates unique constraint "o_test_ioc5_uniq1"
+DETAIL:  Key (id4)=('4') already exists.
 INSERT INTO o_test_ioc5 VALUES (9, 9, 9, 9, 5, 9, 9, 9) ON CONFLICT (id4, id5) DO NOTHING;
-ERROR:  duplicate key value violates unique constraint "o_test_ioc5"
-DETAIL:  Key ('5') already exists
+ERROR:  duplicate key value violates unique constraint "o_test_ioc5_uniq3"
+DETAIL:  Key (id5)=('5') already exists.
 INSERT INTO o_test_ioc5 VALUES (1, 2, 3, 4, 5, 6, 7, 8) ON CONFLICT (id5, id6) DO NOTHING;
 ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
 INSERT INTO o_test_ioc5 VALUES (9, 9, 9, 9, 9, 6, 7, 9) ON CONFLICT (id6, id7) DO NOTHING;

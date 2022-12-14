@@ -2351,8 +2351,8 @@ CREATE TABLE o_tableam7
 RESET default_table_access_method;
 INSERT INTO o_tableam7 SELECT i, 100 - i FROM generate_series(1, 100, 1) AS i;
 UPDATE o_tableam7 SET id = id - 5 WHERE value < 99;
-ERROR:  duplicate key value violates unique constraint "o_tableam7"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_tableam7_pkey"
+DETAIL:  Key (id)=('1') already exists.
 SELECT * FROM o_tableam7 ORDER BY id;
  id  | value 
 -----+-------
@@ -4010,8 +4010,8 @@ WITH inserted AS (
 			FROM generate_series(1,100) ID) tmp
 			GROUP BY t) returning *)
 SELECT substr(t, 6) FROM inserted;
-ERROR:  duplicate key value violates unique constraint "o_tableam_snapshot_check"
-DETAIL:  Key ('abcdef36') already exists
+ERROR:  duplicate key value violates unique constraint "o_tableam_snapshot_check_pkey"
+DETAIL:  Key (t)=('abcdef36') already exists.
 DROP TABLE heap_table;
 CREATE TABLE o_test_add_column
 (

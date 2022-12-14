@@ -456,12 +456,12 @@ SELECT * FROM o_test55 WHERE key = 1;
 
 -- fails, secondary unique index contains key = 1
 INSERT INTO o_test55 VALUES (1, 3);
-ERROR:  duplicate key value violates unique constraint "o_test55"
-DETAIL:  Key ('1') already exists
+ERROR:  duplicate key value violates unique constraint "o_test55_uniq"
+DETAIL:  Key (key)=('1') already exists.
 -- fails, primary index contains value = 2;
 INSERT INTO o_test55 VALUES (3, 2);
-ERROR:  duplicate key value violates unique constraint "o_test55"
-DETAIL:  Key ('2') already exists
+ERROR:  duplicate key value violates unique constraint "o_test55_pkey"
+DETAIL:  Key (value)=('2') already exists.
 -- success
 INSERT INTO o_test55 VALUES (3, 4);
 ANALYZE o_test55;
@@ -527,12 +527,12 @@ SELECT * FROM o_test56 WHERE value = 3;
 
 -- fails, primary index contains key = 3;
 UPDATE o_test56 SET key = 3 WHERE value = 1;
-ERROR:  duplicate key value violates unique constraint "o_test56"
-DETAIL:  Key ('3') already exists
+ERROR:  duplicate key value violates unique constraint "o_test56_pkey"
+DETAIL:  Key (key)=('3') already exists.
 -- fails, secondary unique index contains value = 3;
 UPDATE o_test56 SET value = 3 WHERE value = 1;
-ERROR:  duplicate key value violates unique constraint "o_test56"
-DETAIL:  Key ('3') already exists
+ERROR:  duplicate key value violates unique constraint "o_test56_uniq"
+DETAIL:  Key (value)=('3') already exists.
 -- success
 UPDATE o_test56 SET value = 2 WHERE value = 3;
 UPDATE o_test56 SET key = 2 WHERE key = 1;
@@ -7348,9 +7348,78 @@ SELECT orioledb_tbl_indices('o_test_partial_unique'::regclass);
  
 (1 row)
 
+CREATE TABLE o_test_unique_expr (
+    val_1 int4,
+    val_2 text,
+    val_3 int,
+    val_4 int
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_unique_expr_ix1 ON o_test_unique_expr(val_1);
+CREATE UNIQUE INDEX o_test_unique_expr_ix2 ON o_test_unique_expr(lower(val_2));
+CREATE UNIQUE INDEX o_test_unique_expr_ix3 ON o_test_unique_expr(abs(val_3),
+																 val_4);
+SELECT orioledb_tbl_indices('o_test_unique_expr'::regclass);
+                orioledb_tbl_indices                
+----------------------------------------------------
+ Index ctid_primary                                +
+     Index type: primary, unique, ctid             +
+     Leaf tuple size: 5, non-leaf tuple size: 1    +
+     Non-leaf tuple fields: ctid                   +
+ Index o_test_unique_expr_ix1                      +
+     Index type: secondary, unique                 +
+     Leaf tuple size: 2, non-leaf tuple size: 2    +
+     Non-leaf tuple fields: val_1, ctid            +
+     Leaf tuple fields: val_1, ctid                +
+ Index o_test_unique_expr_ix2                      +
+     Index type: secondary, unique                 +
+     Leaf tuple size: 2, non-leaf tuple size: 2    +
+     Non-leaf tuple fields: lower(val_2), ctid     +
+     Leaf tuple fields: lower(val_2), ctid         +
+ Index o_test_unique_expr_ix3                      +
+     Index type: secondary, unique                 +
+     Leaf tuple size: 3, non-leaf tuple size: 3    +
+     Non-leaf tuple fields: abs(val_3), val_4, ctid+
+     Leaf tuple fields: abs(val_3), val_4, ctid    +
+ 
+(1 row)
+
+INSERT INTO o_test_unique_expr VALUES (1, 'a', 1, 1);
+SELECT * FROM o_test_unique_expr;
+ val_1 | val_2 | val_3 | val_4 
+-------+-------+-------+-------
+     1 | a     |     1 |     1
+(1 row)
+
+INSERT INTO o_test_unique_expr VALUES (2, 'a', 1, 1);
+ERROR:  duplicate key value violates unique constraint "o_test_unique_expr_ix2"
+DETAIL:  Key (lower(val_2))=('a') already exists.
+SELECT * FROM o_test_unique_expr;
+ val_1 | val_2 | val_3 | val_4 
+-------+-------+-------+-------
+     1 | a     |     1 |     1
+(1 row)
+
+INSERT INTO o_test_unique_expr VALUES (2, 'b', 2, 1);
+SELECT * FROM o_test_unique_expr;
+ val_1 | val_2 | val_3 | val_4 
+-------+-------+-------+-------
+     1 | a     |     1 |     1
+     2 | b     |     2 |     1
+(2 rows)
+
+INSERT INTO o_test_unique_expr VALUES (3, 'c', 2, 1);
+ERROR:  duplicate key value violates unique constraint "o_test_unique_expr_ix3"
+DETAIL:  Key (abs(val_3), val_4)=('2', '1') already exists.
+SELECT * FROM o_test_unique_expr;
+ val_1 | val_2 | val_3 | val_4 
+-------+-------+-------+-------
+     1 | a     |     1 |     1
+     2 | b     |     2 |     1
+(2 rows)
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 35 other objects
+NOTICE:  drop cascades to 36 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -7386,3 +7455,4 @@ drop cascades to table o_test_subexpr_collate
 drop cascades to table o_test_reuse_multiple_indices
 drop cascades to table o_test_include_like
 drop cascades to table o_test_partial_unique
+drop cascades to table o_test_unique_expr
