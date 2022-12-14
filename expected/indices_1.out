@@ -7249,9 +7249,100 @@ Indexes:
     "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
 
 DROP TABLE o_test_include_like_like;
+CREATE TABLE o_test_partial_unique(
+    val_1 int4,
+    val_2 text
+)USING orioledb;
+INSERT INTO o_test_partial_unique VALUES (25, 'ac');
+INSERT INTO o_test_partial_unique VALUES (26, 'bc');
+INSERT INTO o_test_partial_unique VALUES (27, 'C');
+INSERT INTO o_test_partial_unique VALUES (25, 'dc');
+SELECT orioledb_tbl_structure('o_test_partial_unique'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('(0,1)', '25', 'ac')            +
+     Item 1: offset = 304, tuple = ('(0,2)', '26', 'bc')            +
+     Item 2: offset = 344, tuple = ('(0,3)', '27', 'C')             +
+     Item 3: offset = 384, tuple = ('(0,4)', '25', 'dc')            +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
+	WHERE val_2 LIKE '%c';
+ERROR:  could not create unique index "o_test_partial_unique_ix"
+DETAIL:  Duplicate keys exist.
+DELETE FROM o_test_partial_unique WHERE val_2 = 'dc';
+CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
+	WHERE val_2 LIKE '%c';
+BEGIN;
+	SET LOCAL enable_seqscan = off;
+	EXPLAIN SELECT val_2 FROM o_test_partial_unique WHERE val_2 LIKE '%c';
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial_unique  (cost=0.12..8.14 rows=1 width=32)
+   Forward index scan of: o_test_partial_unique_ix
+(2 rows)
+
+	SELECT val_2 FROM o_test_partial_unique WHERE val_2 LIKE '%c';
+ val_2 
+-------
+ ac
+ bc
+(2 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_partial_unique'::regclass, 'nue');
+                               orioledb_tbl_structure                                
+-------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 40                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                         +
+     Item 0: offset = 264, tuple = ('(0,1)', '25', 'ac')                            +
+     Item 1: offset = 304, tuple = ('(0,2)', '26', 'bc')                            +
+     Item 2: offset = 344, tuple = ('(0,3)', '27', 'C')                             +
+     Item 3: deleted, offset = 384, tuple = ('(0,4)', '25', 'dc')                   +
+                                                                                    +
+ Index o_test_partial_unique_ix contents                                            +
+ Page 0: level = 0, maxKeyLen = 10, nVacatedBytes = 0                               +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                 +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('26', '(0,2)')+
+     Item 0: offset = 264, tuple = ('25', '(0,1)')                                  +
+   Chunk 1: offset = 1, location = 296, hikey location = 80                         +
+     Item 1: offset = 304, tuple = ('26', '(0,2)')                                  +
+                                                                                    +
+ Index toast: not loaded                                                            +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_partial_unique'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_test_partial_unique_ix                +
+     Index type: secondary, unique             +
+     Predicate: (val_2 ~~ '%c'::text)          +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_1, ctid        +
+     Leaf tuple fields: val_1, ctid            +
+ 
+(1 row)
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 34 other objects
+NOTICE:  drop cascades to 35 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -7286,3 +7377,4 @@ drop cascades to table o_test_renames_as_ix
 drop cascades to table o_test_subexpr_collate
 drop cascades to table o_test_reuse_multiple_indices
 drop cascades to table o_test_include_like
+drop cascades to table o_test_partial_unique

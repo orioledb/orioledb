@@ -1471,5 +1471,27 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
 \d+ o_test_include_like_like
 DROP TABLE o_test_include_like_like;
 
+CREATE TABLE o_test_partial_unique(
+    val_1 int4,
+    val_2 text
+)USING orioledb;
+INSERT INTO o_test_partial_unique VALUES (25, 'ac');
+INSERT INTO o_test_partial_unique VALUES (26, 'bc');
+INSERT INTO o_test_partial_unique VALUES (27, 'C');
+INSERT INTO o_test_partial_unique VALUES (25, 'dc');
+SELECT orioledb_tbl_structure('o_test_partial_unique'::regclass, 'nue');
+CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
+	WHERE val_2 LIKE '%c';
+DELETE FROM o_test_partial_unique WHERE val_2 = 'dc';
+CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
+	WHERE val_2 LIKE '%c';
+BEGIN;
+	SET LOCAL enable_seqscan = off;
+	EXPLAIN SELECT val_2 FROM o_test_partial_unique WHERE val_2 LIKE '%c';
+	SELECT val_2 FROM o_test_partial_unique WHERE val_2 LIKE '%c';
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_partial_unique'::regclass, 'nue');
+SELECT orioledb_tbl_indices('o_test_partial_unique'::regclass);
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
