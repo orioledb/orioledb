@@ -1292,10 +1292,125 @@ SELECT * FROM o_test_add_identity;
     | Z
 (9 rows)
 
+CREATE TABLE o_test_generated_null (
+    val_1 text,
+    val_2 int GENERATED ALWAYS AS (1 + COALESCE(val_3::text, '0')::int) STORED,
+	val_3 int DEFAULT 5
+) USING orioledb;
+\d+ o_test_generated_null
+                                                             Table "public.o_test_generated_null"
+ Column |  Type   | Collation | Nullable |                                  Default                                   | Storage  | Stats target | Description 
+--------+---------+-----------+----------+----------------------------------------------------------------------------+----------+--------------+-------------
+ val_1  | text    |           |          |                                                                            | extended |              | 
+ val_2  | integer |           |          | generated always as (1 + COALESCE(val_3::text, '0'::text)::integer) stored | plain    |              | 
+ val_3  | integer |           |          | 5                                                                          | plain    |              | 
+
+INSERT INTO o_test_generated_null (val_1, val_3) VALUES (1, NULL);
+INSERT INTO o_test_generated_null (val_1, val_3) VALUES (NULL, NULL);
+SELECT orioledb_tbl_structure('o_test_generated_null'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '1', null)        +
+     Item 1: offset = 312, tuple = ('(0,2)', null, '1', null)       +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+SELECT * FROM o_test_generated_null;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+ 1     |     1 |      
+       |     1 |      
+(2 rows)
+
+CREATE TABLE o_test_null_hasdef (
+	val_1	int DEFAULT 1,
+	val_2	text,
+	val_3	text DEFAULT 'a'
+) USING orioledb;
+INSERT INTO o_test_null_hasdef VALUES (3);
+INSERT INTO o_test_null_hasdef VALUES (4, NULL);
+INSERT INTO o_test_null_hasdef VALUES (5, 'b', NULL);
+INSERT INTO o_test_null_hasdef VALUES (6, NULL, NULL);
+SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('(0,1)', '3', null, 'a')        +
+     Item 1: offset = 312, tuple = ('(0,2)', '4', null, 'a')        +
+     Item 2: offset = 360, tuple = ('(0,3)', '5', 'b', null)        +
+     Item 3: offset = 408, tuple = ('(0,4)', '6', null, null)       +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+SELECT * FROM o_test_null_hasdef;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+     3 |       | a
+     4 |       | a
+     5 | b     | 
+     6 |       | 
+(4 rows)
+
+CREATE VIEW test_view_1 AS SELECT * FROM o_test_null_hasdef;
+CREATE rule test_view_1 AS
+	ON INSERT TO test_view_1
+	  DO INSTEAD INSERT INTO o_test_null_hasdef SELECT new.*;
+INSERT INTO test_view_1 VALUES (7);
+SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('(0,1)', '3', null, 'a')        +
+     Item 1: offset = 320, tuple = ('(0,2)', '4', null, 'a')        +
+     Item 2: offset = 368, tuple = ('(0,3)', '5', 'b', null)        +
+     Item 3: offset = 416, tuple = ('(0,4)', '6', null, null)       +
+     Item 4: offset = 464, tuple = ('(0,5)', '7', null, null)       +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+SELECT * FROM test_view_1;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+     3 |       | a
+     4 |       | a
+     5 | b     | 
+     6 |       | 
+     7 |       | 
+(5 rows)
+
+SELECT * FROM o_test_null_hasdef;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+     3 |       | a
+     4 |       | a
+     5 | b     | 
+     6 |       | 
+     7 |       | 
+(5 rows)
+
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 15 other objects
+NOTICE:  drop cascades to 18 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1311,3 +1426,6 @@ drop cascades to table o_test_generated
 drop cascades to table o_test_generated_like
 drop cascades to table o_test_add_identity_exist
 drop cascades to table o_test_add_identity
+drop cascades to table o_test_generated_null
+drop cascades to table o_test_null_hasdef
+drop cascades to view test_view_1

@@ -457,5 +457,41 @@ ALTER TABLE o_test_add_identity
 INSERT INTO o_test_add_identity (b) VALUES ('X'), ('Y'), ('Z');
 SELECT * FROM o_test_add_identity;
 
+CREATE TABLE o_test_generated_null (
+    val_1 text,
+    val_2 int GENERATED ALWAYS AS (1 + COALESCE(val_3::text, '0')::int) STORED,
+	val_3 int DEFAULT 5
+) USING orioledb;
+\d+ o_test_generated_null
+INSERT INTO o_test_generated_null (val_1, val_3) VALUES (1, NULL);
+INSERT INTO o_test_generated_null (val_1, val_3) VALUES (NULL, NULL);
+SELECT orioledb_tbl_structure('o_test_generated_null'::regclass, 'nue');
+SELECT * FROM o_test_generated_null;
+
+CREATE TABLE o_test_null_hasdef (
+	val_1	int DEFAULT 1,
+	val_2	text,
+	val_3	text DEFAULT 'a'
+) USING orioledb;
+
+INSERT INTO o_test_null_hasdef VALUES (3);
+INSERT INTO o_test_null_hasdef VALUES (4, NULL);
+INSERT INTO o_test_null_hasdef VALUES (5, 'b', NULL);
+INSERT INTO o_test_null_hasdef VALUES (6, NULL, NULL);
+SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
+SELECT * FROM o_test_null_hasdef;
+
+CREATE VIEW test_view_1 AS SELECT * FROM o_test_null_hasdef;
+
+CREATE rule test_view_1 AS
+	ON INSERT TO test_view_1
+	  DO INSTEAD INSERT INTO o_test_null_hasdef SELECT new.*;
+
+INSERT INTO test_view_1 VALUES (7);
+
+SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
+SELECT * FROM test_view_1;
+SELECT * FROM o_test_null_hasdef;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;

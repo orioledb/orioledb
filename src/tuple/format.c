@@ -510,10 +510,8 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	{
 		if (isnull[i - off])
 		{
-			if (i < spec->natts)
-				fixedFormat = false;
+			fixedFormat = false;
 			hasnull = true;
-			break;
 		}
 		else if (i >= spec->natts)
 			fixedFormat = false;
@@ -567,10 +565,8 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	{
 		if (isnull[i - attOff])
 		{
-			if (i < spec->natts)
-				fixedFormat = false;
+			fixedFormat = false;
 			hasnull = true;
-			break;
 		}
 		else if (i >= spec->natts)
 			fixedFormat = false;
