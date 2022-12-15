@@ -26,4 +26,20 @@ INSERT INTO o_test1 (SELECT id, id || 'val' FROM generate_series(1001, 2000, 1) 
 INSERT INTO o_test1 (SELECT id, id || 'val' FROM generate_series(11, 1000, 1) id);
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
+CREATE TABLE o_test_is_null_assert (
+	key int not null,
+	val int,
+	val2 int,
+	filler char(84)
+) USING orioledb;
+ALTER TABLE o_test_is_null_assert ADD PRIMARY KEY (key);
+INSERT INTO o_test_is_null_assert (key,val,val2) VALUES (2, 0, 0);
+BEGIN;
+SELECT * FROM o_test_is_null_assert WHERE key = 2 ORDER BY key;
+SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
+UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
+UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
+SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;

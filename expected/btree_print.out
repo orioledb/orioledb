@@ -3533,7 +3533,56 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
  
 (1 row)
 
+CREATE TABLE o_test_is_null_assert (
+	key int not null,
+	val int,
+	val2 int,
+	filler char(84)
+) USING orioledb;
+ALTER TABLE o_test_is_null_assert ADD PRIMARY KEY (key);
+INSERT INTO o_test_is_null_assert (key,val,val2) VALUES (2, 0, 0);
+BEGIN;
+SELECT * FROM o_test_is_null_assert WHERE key = 2 ORDER BY key;
+ key | val | val2 | filler 
+-----+-----+------+--------
+   2 |   0 |    0 | 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_is_null_assert_pkey contents                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('2', '0', '0', null)            +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
+UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
+SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
+                                    orioledb_tbl_structure                                     
+-----------------------------------------------------------------------------------------------
+ Index o_test_is_null_assert_pkey contents                                                    +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                          +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                          +
+     Leftmost, Rightmost                                                                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                   +
+     Item 0: mode = noKeyUpdate, undoLocation = 1, offset = 264, tuple = ('2', '0', '0', null)+
+       Undo item: mode = noKeyUpdate, undoLocation = 0, tuple = ('2', '0', '0', null)         +
+       Undo item: tuple = ('2', '0', '0', null)                                               +
+                                                                                              +
+ Index toast: not loaded                                                                      +
+ 
+(1 row)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table o_print_evicted
 drop cascades to table o_test1
+drop cascades to table o_test_is_null_assert
