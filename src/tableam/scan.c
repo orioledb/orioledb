@@ -108,7 +108,7 @@ static CustomPathMethods o_path_methods =
 	.PlanCustomPath = o_plan_custom_path
 };
 
-static CustomScanMethods o_scan_methods =
+CustomScanMethods o_scan_methods =
 {
 	"o_scan",
 	o_create_custom_scan_state

@@ -83,7 +83,7 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM seq_scan_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
 SELECT * FROM seq_scan_test WHERE i < 1000 OR i > 13000 ORDER BY i,id LIMIT 20;
 
-SET max_parallel_workers_per_gather = 0;
+RESET max_parallel_workers_per_gather;
 RESET min_parallel_table_scan_size;
 RESET min_parallel_index_scan_size;
 RESET parallel_setup_cost;
@@ -91,5 +91,23 @@ RESET parallel_tuple_cost;
 RESET enable_seqscan;
 RESET enable_bitmapscan;
 RESET enable_indexscan;
+
+CREATE TABLE o_test_o_scan_register (
+	val_1 TEXT PRIMARY KEY,
+	val_2 DECIMAL NOT NULL
+) USING orioledb;
+
+INSERT INTO o_test_o_scan_register (val_1, val_2) VALUES ('A', 0), ('B', 0);
+
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SET LOCAL force_parallel_mode = on;
+
+EXPLAIN (COSTS OFF) SELECT val_1, val_2 FROM o_test_o_scan_register
+    WHERE val_1 IN ('A', 'B') ORDER BY val_1;
+
+SELECT val_1, val_2 FROM o_test_o_scan_register
+    WHERE val_1 IN ('A', 'B') ORDER BY val_1;
+COMMIT;
+
 DROP FUNCTION pseudo_random;
 DROP EXTENSION orioledb CASCADE;

@@ -573,6 +573,8 @@ _PG_init(void)
 	/* Register custom deTOAST function */
 	register_o_detoast_func(o_detoast);
 
+	RegisterCustomScanMethods(&o_scan_methods);
+
 	/* Setup the required hooks. */
 #if PG_VERSION_NUM >= 150000
 	prev_shmem_request_hook = shmem_request_hook;

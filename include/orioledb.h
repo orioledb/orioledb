@@ -18,6 +18,7 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "common/int.h"
+#include "nodes/extensible.h"
 #include "port/atomics.h"
 #include "storage/bufpage.h"
 #include "storage/fd.h"
@@ -288,5 +289,8 @@ extern void orioledb_setup_ddl_hooks(void);
 extern UndoLocation saved_undo_location;
 extern void cleanup_saved_undo_locations(void);
 extern List	*drop_index_list;
+
+/* scan.c */
+extern CustomScanMethods o_scan_methods;
 
 #endif							/* __ORIOLEDB_H__ */
