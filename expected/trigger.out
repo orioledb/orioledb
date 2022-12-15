@@ -146,6 +146,29 @@ SELECT * FROM o_test_4;
      5 | 105
 (5 rows)
 
+CREATE TABLE o_test_copy_trigger (
+	val_1 serial,
+	val_2 int,
+	val_3 text,
+	val_4 text,
+	val_5 text
+) USING orioledb;
+CREATE FUNCTION func_1 () RETURNS TRIGGER
+AS $$
+BEGIN
+	NEW.val_5 := 'abc'::text;
+	return NEW;
+END; $$ LANGUAGE plpgsql;
+CREATE TRIGGER trig_1 BEFORE INSERT ON o_test_copy_trigger
+	FOR EACH ROW EXECUTE PROCEDURE func_1();
+COPY o_test_copy_trigger (val_1, val_2, val_3, val_4, val_5) from stdin;
+SELECT * FROM o_test_copy_trigger;
+ val_1 | val_2 | val_3 | val_4 | val_5 
+-------+-------+-------+-------+-------
+  9999 |       | \N    | NN    | abc
+ 10000 |    21 | 31    | 41    | abc
+(2 rows)
+
 DROP FUNCTION func_trig_o_test_1 CASCADE;
 NOTICE:  drop cascades to trigger trig_o_test_1 on table o_test_1
 DROP FUNCTION func_trig_o_test_2 CASCADE;
@@ -155,8 +178,9 @@ NOTICE:  drop cascades to trigger trig_o_test_3 on table o_test_3
 DROP FUNCTION func_trig_o_test_4 CASCADE;
 NOTICE:  drop cascades to trigger trig_1 on table o_test_4
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_test_1
 drop cascades to table o_test_2
 drop cascades to table o_test_3
 drop cascades to table o_test_4
+drop cascades to table o_test_copy_trigger

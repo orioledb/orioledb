@@ -89,6 +89,31 @@ SELECT * FROM o_test_4;
 UPDATE o_test_4 SET val_1 = val_1;
 SELECT * FROM o_test_4;
 
+CREATE TABLE o_test_copy_trigger (
+	val_1 serial,
+	val_2 int,
+	val_3 text,
+	val_4 text,
+	val_5 text
+) USING orioledb;
+
+CREATE FUNCTION func_1 () RETURNS TRIGGER
+AS $$
+BEGIN
+	NEW.val_5 := 'abc'::text;
+	return NEW;
+END; $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trig_1 BEFORE INSERT ON o_test_copy_trigger
+	FOR EACH ROW EXECUTE PROCEDURE func_1();
+
+COPY o_test_copy_trigger (val_1, val_2, val_3, val_4, val_5) from stdin;
+9999	\N	\\N	\NN	\N
+10000	21	31	41	51
+\.
+
+SELECT * FROM o_test_copy_trigger;
+
 DROP FUNCTION func_trig_o_test_1 CASCADE;
 DROP FUNCTION func_trig_o_test_2 CASCADE;
 DROP FUNCTION func_trig_o_test_3 CASCADE;
