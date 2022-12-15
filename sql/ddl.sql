@@ -493,5 +493,13 @@ SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
 SELECT * FROM test_view_1;
 SELECT * FROM o_test_null_hasdef;
 
+CREATE TABLE o_test_float_default (
+  val_1 int DEFAULT 1,
+  val_2 text DEFAULT 'a',
+  val_3 float8 DEFAULT 1.1
+)USING orioledb;
+INSERT INTO o_test_float_default VALUES (2, null, 2.0);
+SELECT * FROM o_test_float_default;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
