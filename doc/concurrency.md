@@ -30,7 +30,7 @@ Step 4 depicts the removal of the rightlink from page 2 to page 3.  If a concurr
 Page eviction
 -------------
 
-Page eviction is forbidden for the page with a rightlink or without a downlink from the parent.  Generally, both source and target of rightlink are forbidden.  Therefore page eviction does not have to deal with rightlinks.  Righlinks can connect only in-memory pages.  Consider the page eviction process in the pictures below.
+Page eviction is forbidden for the page with a rightlink or without a downlink from the parent.  Generally, both source and target of rightlink are forbidden.  Therefore page eviction does not have to deal with rightlinks.  Rightlinks can connect only in-memory pages.  Consider the page eviction process in the pictures below.
 
 Step 1 depicts the initial state of part of the tree comprising parent page 1 and child page 2.  Page 2 is locked and should be evicted.  At this point evicting process should find and lock the parent page 1 using the page 2 hikey to find it.
 
