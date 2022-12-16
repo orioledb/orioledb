@@ -11,11 +11,11 @@ OrioleDB keeps enough undo log to fulfill the following requirements:
 
 The picture below illustrates the filling of the undo circular buffer.  The retain location is the minimal position where we must keep undo records to fulfill the requirements.  The arrows between the undo records illustrate the insertion order, not the actual links.
 
-![Undo circilar buffer](images/undo_buffer_1.svg)
+![Undo circular buffer](images/undo_buffer_1.svg)
 
 Once we reach the end of the circular buffer, we start from the beginning if the retain location allows us to do this without the wraparound.  Unless we need to retain too many undo records, we may store all of them in the circular buffer.
 
-![Undo circilar buffer wraparound](images/undo_buffer_2.svg)
+![Undo circular buffer wraparound](images/undo_buffer_2.svg)
 
 Once we need to add a new undo record, but the corresponding space is still occupied by retained undo records, we need to write some undo records to undo files.  The picture below shows undo log split between the circular buffer and undo file.  The records before written location are kept in undo files, and the records after written location are kept in the circular buffer.  If we don't need to retain much of undo log (for instance, some long-running transaction was finished), we may switch back to the storage of the whole undo log in the circular buffer.
 
