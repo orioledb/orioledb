@@ -32,7 +32,7 @@ The main memory page could refer to both main memory and storage pages.  However
 
 In order to implement this scheme, we have to sacrifice rightlinks.  That would be too complex (and slow?) to toggle downlinks and rightlinks between in-memory and storage pointers.
 
-Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits.  Righlink exists only between splitting a new page and insertion downlink to the parent.  Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function).  Stepping tree pages right and left become more complex too.  Instead of using rightlinks (and leftlinks) one have to find siblings from parent (see find_right_page() and find_left_page()).  However, this complexity is more than justified by better vertical scalability.
+Technically, OrioleDB B-trees still contain rightlinks, but they have only temporary usage during page splits.  Rightlink exists only between splitting a new page and insertion downlink to the parent.  Therefore, if the completed split happens concurrently with locating a tree page, one must retry from the parent (see find_page() function).  Stepping tree pages right and left become more complex too.  Instead of using rightlinks (and leftlinks) one have to find siblings from parent (see find_right_page() and find_left_page()).  However, this complexity is more than justified by better vertical scalability.
 
 See [concurrency algorithms in OrioleDB B-tree](concurrency.md) for details.
 
@@ -47,11 +47,11 @@ There is a `state` atomic variable in a page header.  This atomic variable provi
 2.  Exclusive locker may upgrade his lock to block page readers.  Once readers are blocked, the locker may start modification of page contents.
 3.  Tracking change count for page contents.  Thanks to that, one may copy part of the page (or do some computations) and check that page was not changed concurrently (and retry if it was).
 
-See `src/btree/page_state.c` for defailts.
+See `src/btree/page_state.c` for details.
 
 The tuples on the page are split into chunks.  There is also an area of high keys, where each chunk has an associated high key.  The high key of the last chunk is simultaneously the high key of the page.  Thank this, if one needs a particular tuple on the page, he does not need to copy the whole page.  It is enough to copy the high keys area, find the appropriate page chunk, and copy it.  `PartialPageState` structure is responsible for tracking partially read pages.
 
-![Page strucutre](images/page_structure.svg)
+![Page structure](images/page_structure.svg)
 
 In the future, we plan to get rid co copying in the majority of page access patterns and implement vectorization for faster search within the page.
 
