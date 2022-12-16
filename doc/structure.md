@@ -24,7 +24,7 @@ LICENSE -- defines PostgreSQL-licence for the project
 Makefile -- defines make targets
 README.md -- main documentation entrypoint
 docker-entrypoint.sh -- entrypoint file for Docker images
-orioledb--1.0.sql -- script for definition of extesnion SQL-level objects
+orioledb--1.0.sql -- script for definition of extension SQL-level objects
 orioledb.control -- extension control file
 orioledb_isolation.conf -- configuration file used during isolation tests
 orioledb_regression.conf -- configuration file used during regression tests
