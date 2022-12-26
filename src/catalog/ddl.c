@@ -363,16 +363,9 @@ orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
 {
 	ListCell   *last;
 
-	/*
-	 * cleanup_saved_undo_locations can be called before the ExecutorEnd of the * paired ExecutorStart
-	 */
-	if (saved_undo_locations != NIL)
-	{
-		last = list_tail(saved_undo_locations);
-		pfree(lfirst(last));
-		saved_undo_locations = list_delete_last(saved_undo_locations);
-	}
-
+	last = list_tail(saved_undo_locations);
+	pfree(lfirst(last));
+	saved_undo_locations = list_delete_last(saved_undo_locations);
 	if (saved_undo_locations != NIL)
 	{
 		last = list_tail(saved_undo_locations);

@@ -1207,6 +1207,7 @@ undo_xact_callback(XactEvent event, void *arg)
 		}
 
 		free_retained_undo_location();
+		cleanup_saved_undo_locations();
 	}
 }
 
