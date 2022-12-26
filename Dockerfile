@@ -119,6 +119,7 @@ RUN set -eux; \
 		--with-llvm \
 		--with-lz4 \
 	|| cat config.log ); \
+	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	make -j "$(nproc)"; \
 	make -C contrib -j "$(nproc)"; \
 	make -C contrib/orioledb -j "$(nproc)"; \
