@@ -698,9 +698,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					return false;
 				}
 
+				SpinLockAcquire(&poscan->intpageAccess);
 				curPage->imgReadCsn = scan->context.imgReadCsn;
 				curPage->offset = BTREE_PAGE_LOCATOR_GET_OFFSET(curPage->img, &loc);
 				curPage->status = OParallelScanPageValid;
+				SpinLockRelease(&poscan->intpageAccess);
 				LWLockRelease(&poscan->intpageLoad);
 
 				if (scan->iter)
@@ -732,9 +734,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 &nextPage->startOffset);
 				Assert(loaded);
 
+				SpinLockAcquire(&poscan->intpageAccess);
 				nextPage->imgReadCsn = scan->context.imgReadCsn;
 				nextPage->offset = BTREE_PAGE_LOCATOR_GET_OFFSET(nextPage->img, &loc);
 				nextPage->status = OParallelScanPageValid;
+				SpinLockRelease(&poscan->intpageAccess);
 				LWLockRelease(&poscan->intpageLoad);
 
 				if (scan->iter)
