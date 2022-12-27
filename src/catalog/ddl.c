@@ -88,8 +88,8 @@ static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 UndoLocation	saved_undo_location = InvalidUndoLocation;
 static List	   *saved_undo_locations = NIL; /* list of UndoLocation* */
-
-List	*drop_index_list = NIL;
+static bool		isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
+List		   *drop_index_list = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -345,6 +345,33 @@ orioledb_ExecutorStart_hook(QueryDesc *queryDesc, int eflags)
 	UndoLocation	   *cur_undo_location;
 	MemoryContext		oldcxt;
 
+	/*
+	 * Don't do anything for read-only queries.  Especially helpful for cursors,
+	 * which could be many in-progress at the same time.
+	 */
+	if (queryDesc->operation == CMD_SELECT &&
+		queryDesc->plannedstmt->rowMarks == NIL)
+	{
+		if (prev_ExecutorStart)
+			return prev_ExecutorStart(queryDesc, eflags);
+		else
+			return standard_ExecutorStart(queryDesc, eflags);
+	}
+
+#ifdef USE_ASSERT_CHECKING
+	{
+		uint32	depth;
+		bool	top_level = isTopLevel;
+
+		isTopLevel = false;
+		depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth,
+												   (Datum) 0));
+		if (top_level && depth == 0)
+			Assert(saved_undo_locations == NIL &&
+				   saved_undo_location == InvalidUndoLocation);
+	}
+#endif
+
 	lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 	cur_undo_location = (UndoLocation *) palloc0(sizeof(UndoLocation));
@@ -362,6 +389,16 @@ static void
 orioledb_ExecutorEnd_hook(QueryDesc *queryDesc)
 {
 	ListCell   *last;
+
+	/* See comment in orioledb_ExecutorStart_hook() */
+	if (queryDesc->operation == CMD_SELECT &&
+		queryDesc->plannedstmt->rowMarks == NIL)
+	{
+		if (prev_ExecutorStart)
+			return prev_ExecutorEnd(queryDesc);
+		else
+			return standard_ExecutorEnd(queryDesc);
+	}
 
 	last = list_tail(saved_undo_locations);
 	pfree(lfirst(last));
@@ -425,6 +462,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						 struct QueryCompletion *qc)
 {
 	bool		call_next = true;
+
+#ifdef USE_ASSERT_CHECKING
+	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
+#endif
 
 #if PG_VERSION_NUM >= 140000
 	/* copied from standard_ProcessUtility */

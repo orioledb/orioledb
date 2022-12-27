@@ -839,6 +839,13 @@ ALTER TABLE o_test_add_column
   ADD COLUMN j int4 not null default pseudo_random(2, nextval('o_test_j_seq')) * 20000;
 ROLLBACK;
 
+BEGIN;
+DECLARE a CURSOR FOR SELECT ctid, * FROM o_test_add_column;
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+   UPDATE o_test_add_column SET i = -i
+      WHERE CURRENT OF a RETURNING *;
+COMMIT;
+
 DROP TABLE o_test_add_column;
 DROP FUNCTION pseudo_random(bigint, bigint);
 
