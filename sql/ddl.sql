@@ -501,5 +501,18 @@ CREATE TABLE o_test_float_default (
 INSERT INTO o_test_float_default VALUES (2, null, 2.0);
 SELECT * FROM o_test_float_default;
 
+CREATE TABLE o_test_tableoid (
+  val_1 int PRIMARY KEY,
+  val_2 bool GENERATED ALWAYS
+    AS (tableoid = 'o_test_tableoid'::regclass) STORED
+) USING orioledb;
+
+INSERT INTO o_test_tableoid VALUES (1), (2);
+
+ALTER TABLE o_test_tableoid ADD COLUMN
+  val_3 regclass GENERATED ALWAYS AS (tableoid) STORED;
+
+SELECT * FROM o_test_tableoid;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
