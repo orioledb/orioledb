@@ -1207,7 +1207,8 @@ undo_xact_callback(XactEvent event, void *arg)
 		}
 
 		free_retained_undo_location();
-		cleanup_saved_undo_locations();
+
+		saved_undo_location = InvalidUndoLocation;
 	}
 }
 
@@ -1367,10 +1368,12 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
 			update_subxact_undo_location_on_commit(parentSubid);
+			saved_undo_location = InvalidUndoLocation;
 			break;
 		case SUBXACT_EVENT_ABORT_SUB:
 			rollback_to_savepoint(UndoStackFull, parentSubid, true);
 			add_rollback_to_savepoint_wal_record(parentSubid);
+			saved_undo_location = InvalidUndoLocation;
 			break;
 		default:
 			break;
