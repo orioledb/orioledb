@@ -16,6 +16,7 @@
 
 #include "orioledb.h"
 
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
@@ -1124,6 +1125,9 @@ undo_xact_callback(XactEvent event, void *arg)
 	 */
 	ea_counters = NULL;
 
+	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
+		seq_scans_cleanup();
+
 	if (!OXidIsValid(oxid))
 	{
 		switch (event)
@@ -1207,7 +1211,6 @@ undo_xact_callback(XactEvent event, void *arg)
 		}
 
 		free_retained_undo_location();
-
 		saved_undo_location = InvalidUndoLocation;
 	}
 }

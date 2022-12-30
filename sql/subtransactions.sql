@@ -400,4 +400,18 @@ BEGIN;
 	RELEASE three;
 COMMIT;
 
+BEGIN;
+
+-- Check subtransaction vs cursors
+CREATE TABLE o_test_1(
+    val_1 int
+) USING orioledb;
+INSERT INTO o_test_1 VALUES (10);
+DECLARE abc CURSOR for SELECT * FROM o_test_1;
+SAVEPOINT s1;
+FETCH FROM abc;
+ROLLBACK TO s1;
+FETCH FROM abc;
+ROLLBACK;
+
 DROP EXTENSION orioledb CASCADE;
