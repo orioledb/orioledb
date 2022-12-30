@@ -7417,9 +7417,13 @@ SELECT * FROM o_test_unique_expr;
      2 | b     |     2 |     1
 (2 rows)
 
+CREATE TABLE o_test_reindex_empty (
+  val_1 int PRIMARY KEY
+) USING orioledb;
+REINDEX INDEX o_test_reindex_empty_pkey;
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 36 other objects
+NOTICE:  drop cascades to 37 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -7456,3 +7460,4 @@ drop cascades to table o_test_reuse_multiple_indices
 drop cascades to table o_test_include_like
 drop cascades to table o_test_partial_unique
 drop cascades to table o_test_unique_expr
+drop cascades to table o_test_reindex_empty

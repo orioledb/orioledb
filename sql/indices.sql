@@ -1519,5 +1519,11 @@ SELECT * FROM o_test_unique_expr;
 INSERT INTO o_test_unique_expr VALUES (3, 'c', 2, 1);
 SELECT * FROM o_test_unique_expr;
 
+CREATE TABLE o_test_reindex_empty (
+  val_1 int PRIMARY KEY
+) USING orioledb;
+
+REINDEX INDEX o_test_reindex_empty_pkey;
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
