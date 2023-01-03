@@ -1469,10 +1469,82 @@ SELECT * FROM o_test_generated_alter_type;
      3 |     6
 (2 rows)
 
+CREATE TABLE o_test_alter_change_byval (
+    val_1 int
+) USING orioledb;
+INSERT INTO o_test_alter_change_byval VALUES (1);
+ALTER TABLE o_test_alter_change_byval ADD COLUMN val_2 float8 DEFAULT 0.1;
+SELECT * FROM o_test_alter_change_byval;
+ val_1 | val_2 
+-------+-------
+     1 |   0.1
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', null)             +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+ALTER TABLE o_test_alter_change_byval ALTER COLUMN val_2 SET DEFAULT 0.2;
+INSERT INTO o_test_alter_change_byval VALUES (2);
+SELECT * FROM o_test_alter_change_byval;
+ val_1 | val_2 
+-------+-------
+     1 |   0.1
+     2 |   0.2
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', null)             +
+     Item 1: offset = 296, tuple = ('(0,2)', '2', '0.2')            +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+ALTER TABLE o_test_alter_change_byval ALTER val_2 TYPE text USING val_2::text;
+SELECT * FROM o_test_alter_change_byval;
+ val_1 | val_2 
+-------+-------
+     1 | 0.1
+     2 | 0.2
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '0.1')            +
+     Item 1: offset = 304, tuple = ('(0,2)', '2', '0.2')            +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 21 other objects
+NOTICE:  drop cascades to 22 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1494,3 +1566,4 @@ drop cascades to view test_view_1
 drop cascades to table o_test_float_default
 drop cascades to table o_test_tableoid
 drop cascades to table o_test_generated_alter_type
+drop cascades to table o_test_alter_change_byval

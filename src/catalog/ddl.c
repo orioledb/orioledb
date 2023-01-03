@@ -597,42 +597,42 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	{
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
-	}
 
-	while (!rewrite)
-	{
-		/* only one varno, so no need to check that */
-		if (IsA(expr, Var) && ((Var *) expr)->varattno == subId)
-			break;
-		else if (IsA(expr, RelabelType))
-			expr = (Node *) ((RelabelType *) expr)->arg;
-		else if (IsA(expr, CoerceToDomain))
+		while (!rewrite)
 		{
-			CoerceToDomain *d = (CoerceToDomain *) expr;
-
-			if (DomainHasConstraints(d->resulttype))
-				rewrite = true;
-			expr = (Node *) d->arg;
-		}
-		else if (IsA(expr, FuncExpr))
-		{
-			FuncExpr   *f = (FuncExpr *) expr;
-
-			switch (f->funcid)
+			/* only one varno, so no need to check that */
+			if (IsA(expr, Var) && ((Var *) expr)->varattno == subId)
+				break;
+			else if (IsA(expr, RelabelType))
+				expr = (Node *) ((RelabelType *) expr)->arg;
+			else if (IsA(expr, CoerceToDomain))
 			{
-				case F_TIMESTAMPTZ_TIMESTAMP:
-				case F_TIMESTAMP_TIMESTAMPTZ:
-					if (TimestampTimestampTzRequiresRewrite())
-						rewrite = true;
-					else
-						expr = linitial(f->args);
-					break;
-				default:
+				CoerceToDomain *d = (CoerceToDomain *) expr;
+
+				if (DomainHasConstraints(d->resulttype))
 					rewrite = true;
+				expr = (Node *) d->arg;
 			}
+			else if (IsA(expr, FuncExpr))
+			{
+				FuncExpr   *f = (FuncExpr *) expr;
+
+				switch (f->funcid)
+				{
+					case F_TIMESTAMPTZ_TIMESTAMP:
+					case F_TIMESTAMP_TIMESTAMPTZ:
+						if (TimestampTimestampTzRequiresRewrite())
+							rewrite = true;
+						else
+							expr = linitial(f->args);
+						break;
+					default:
+						rewrite = true;
+				}
+			}
+			else
+				rewrite = true;
 		}
-		else
-			rewrite = true;
 	}
 	return rewrite;
 }
@@ -1092,6 +1092,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					fill_current_oxid_csn(&oxid, &csn);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
+					o_table->fields[subId - 1] = old_field;
 					o_table_free(o_table);
 				}
 			}
@@ -1201,6 +1202,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 						}
 					}
+					o_table->fields[subId - 1] = old_field;
 					o_table_free(o_table);
 				}
 			}

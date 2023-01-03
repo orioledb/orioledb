@@ -526,5 +526,21 @@ SELECT orioledb_tbl_structure('o_test_generated_alter_type'::regclass, 'nue');
 ALTER TABLE o_test_generated_alter_type ALTER COLUMN val_3 TYPE numeric;
 SELECT * FROM o_test_generated_alter_type;
 
+CREATE TABLE o_test_alter_change_byval (
+    val_1 int
+) USING orioledb;
+
+INSERT INTO o_test_alter_change_byval VALUES (1);
+ALTER TABLE o_test_alter_change_byval ADD COLUMN val_2 float8 DEFAULT 0.1;
+SELECT * FROM o_test_alter_change_byval;
+SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
+ALTER TABLE o_test_alter_change_byval ALTER COLUMN val_2 SET DEFAULT 0.2;
+INSERT INTO o_test_alter_change_byval VALUES (2);
+SELECT * FROM o_test_alter_change_byval;
+SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
+ALTER TABLE o_test_alter_change_byval ALTER val_2 TYPE text USING val_2::text;
+SELECT * FROM o_test_alter_change_byval;
+SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
