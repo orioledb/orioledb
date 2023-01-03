@@ -62,7 +62,6 @@
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
-#include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
 #include "storage/ipc.h"
@@ -581,15 +580,30 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 }
 
 static bool
-ATColumnChangeRequiresRewrite(Node *expr, AttrNumber varattno)
+ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
+							  int subId)
 {
-	Assert(expr != NULL);
+	ParseState	   *pstate = make_parsestate(NULL);
+	Node		   *expr;
+	bool			rewrite = false;
 
-	for (;;)
+	/* code from ATPrepAlterColumnType */
+	expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
+						    old_field->collation, 0);
+	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
+								 field->typmod, COERCION_EXPLICIT,
+								 COERCE_IMPLICIT_CAST, -1);
+	if (expr != NULL)
+	{
+		assign_expr_collations(pstate, expr);
+		expr = (Node *) expression_planner((Expr *) expr);
+	}
+
+	while (!rewrite)
 	{
 		/* only one varno, so no need to check that */
-		if (IsA(expr, Var) && ((Var *) expr)->varattno == varattno)
-			return false;
+		if (IsA(expr, Var) && ((Var *) expr)->varattno == subId)
+			break;
 		else if (IsA(expr, RelabelType))
 			expr = (Node *) ((RelabelType *) expr)->arg;
 		else if (IsA(expr, CoerceToDomain))
@@ -597,7 +611,7 @@ ATColumnChangeRequiresRewrite(Node *expr, AttrNumber varattno)
 			CoerceToDomain *d = (CoerceToDomain *) expr;
 
 			if (DomainHasConstraints(d->resulttype))
-				return true;
+				rewrite = true;
 			expr = (Node *) d->arg;
 		}
 		else if (IsA(expr, FuncExpr))
@@ -609,17 +623,18 @@ ATColumnChangeRequiresRewrite(Node *expr, AttrNumber varattno)
 				case F_TIMESTAMPTZ_TIMESTAMP:
 				case F_TIMESTAMP_TIMESTAMPTZ:
 					if (TimestampTimestampTzRequiresRewrite())
-						return true;
+						rewrite = true;
 					else
 						expr = linitial(f->args);
 					break;
 				default:
-					return true;
+					rewrite = true;
 			}
 		}
 		else
-			return true;
+			rewrite = true;
 	}
+	return rewrite;
 }
 
 static void
@@ -652,7 +667,6 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 
 	saved_undo_location = prevSavedLocation;
 }
-
 
 static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
@@ -1032,17 +1046,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		if (rel != NULL && (rel->rd_rel->relkind == RELKIND_RELATION) &&
 			(subId != 0) && is_orioledb_rel(rel))
 		{
-			OTableField				   *field;
-			Form_pg_attribute			attr;
-			OTable					   *o_table;
-			ORelOids					oids = {MyDatabaseId,
-												rel->rd_rel->oid,
-												rel->rd_node.relNode};
-			Node					   *defaultexpr;
-			AttrMissing				   *attrmiss = NULL;
-			AttrMissing					attrmiss_temp;
-			CommitSeqNo					csn;
-			OXid						oxid;
+			Form_pg_attribute		attr;
+			OTable				   *o_table;
+			ORelOids				oids = {MyDatabaseId,
+											rel->rd_rel->oid,
+											rel->rd_node.relNode};
+			CommitSeqNo				csn;
+			OXid					oxid;
 
 			o_table = o_tables_get(oids);
 			if (o_table == NULL)
@@ -1053,72 +1063,37 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			}
 			else
 			{
-				bool missing_before;
+				OTableField		old_field;
+				OTableField	   *field;
+				bool			changed;
+				bool			rewrite = false;
 
-				fill_current_oxid_csn(&oxid, &csn);
-				attr = &rel->rd_att->attrs[subId - 1];
-				missing_before = attr->atthasmissing;
+				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
 				field = &o_table->fields[subId - 1];
 				attr = &rel->rd_att->attrs[subId - 1];
 				orioledb_attr_to_field(field, attr);
 
-				if (attr->atthasdef)
-					defaultexpr = build_column_default(rel, attr->attnum);
-				else
-					defaultexpr = NULL;
+				changed = old_field.typid != field->typid ||
+						  old_field.collation != field->collation;
 
-				if (!missing_before && attr->atthasmissing)
+				if (changed)
 				{
-					Datum					missingval;
-					Expr				   *expr2;
-					ParseNamespaceItem	   *nsitem;
-					ParseState			   *pstate;
-					EState				   *estate = NULL;
-					ExprContext			   *econtext;
-					ExprState			   *exprState;
-					MemoryContext			tbl_cxt;
-					MemoryContext			oldcxt;
-					bool					missingIsNull = true;
-
-					pstate = make_parsestate(NULL);
-					pstate->p_sourcetext = NULL;
-					nsitem = addRangeTableEntryForRelation(pstate,
-															rel,
-															AccessShareLock,
-															NULL,
-															false,
-															true);
-					addNSItemToQuery(pstate, nsitem, true, true, true);
-
-					expr2 = expression_planner((Expr *) defaultexpr);
-
-					tbl_cxt = OGetTableContext(o_table);
-					oldcxt = MemoryContextSwitchTo(tbl_cxt);
-					estate = CreateExecutorState();
-					exprState = ExecPrepareExpr(expr2, estate);
-					econtext = GetPerTupleExprContext(estate);
-
-					missingval = ExecEvalExpr(exprState, econtext,
-												&missingIsNull);
-
-					FreeExecutorState(estate);
-					free_parsestate(pstate);
-
-					attrmiss_temp.am_value = datumCopy(missingval,
-														field->byval,
-														field->typlen);
-					MemoryContextSwitchTo(oldcxt);
-					attrmiss_temp.am_present = true;
-					attrmiss = &attrmiss_temp;
-					defaultexpr = (Node *) expr2;
+					if (ATColumnChangeRequiresRewrite(&old_field, field,
+													  subId))
+						rewrite = true;
 				}
-				o_table_fill_constr(o_table, subId - 1, attrmiss,
-									(Expr *) defaultexpr);
 
-				o_tables_update(o_table, oxid, csn);
-				o_tables_after_update(o_table, oxid, csn);
-				o_table_free(o_table);
+				if (!rewrite)
+				{
+					o_table_fill_constr(o_table, rel, subId - 1,
+										&old_field, field);
+
+					fill_current_oxid_csn(&oxid, &csn);
+					o_tables_update(o_table, oxid, csn);
+					o_tables_after_update(o_table, oxid, csn);
+					o_table_free(o_table);
+				}
 			}
 		}
 		relation_close(rel, AccessShareLock);
@@ -1172,32 +1147,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					changed = old_field.typid != field->typid ||
 							  old_field.collation != field->collation;
 
-					/* code from ATPrepAlterColumnType */
 					if (changed)
 					{
-						ParseState	   *pstate = make_parsestate(NULL);
-						Node		   *transform;
-
-						transform = (Node *) makeVar(1, subId, old_field.typid,
-													 old_field.typmod,
-													 old_field.collation, 0);
-						transform = coerce_to_target_type(pstate,
-														  transform,
-														  exprType(transform),
-														  field->typid,
-														  field->typmod,
-														  COERCION_EXPLICIT,
-														  COERCE_IMPLICIT_CAST,
-														  -1);
-						if (transform != NULL)
-						{
-							assign_expr_collations(pstate, transform);
-							transform = (Node *) expression_planner(
-													(Expr *) transform);
-							if (ATColumnChangeRequiresRewrite(transform,
-															  subId))
-								rewrite = true;
-						}
+						if (ATColumnChangeRequiresRewrite(&old_field, field,
+														  subId))
+							rewrite = true;
 					}
 
 					if (!rewrite)

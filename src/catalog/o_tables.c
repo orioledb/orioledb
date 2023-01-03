@@ -41,6 +41,7 @@
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
+#include "parser/parse_relation.h"
 #include "pgstat.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -517,29 +518,77 @@ o_table_resize_constr(OTable *o_table)
 }
 
 void
-o_table_fill_constr(OTable *o_table, int i, AttrMissing *attrmiss,
-					Expr *defval)
+o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
+					OTableField *old_field, OTableField *field)
 {
-	OTableField	   *field = &o_table->fields[i];
 	MemoryContext	oldcxt;
 	MemoryContext	tbl_cxt;
+	AttrMissing		attrmiss_temp;
+	Node		   *defaultexpr;
+	AttrMissing	   *attrmiss = NULL;
+
+	if (field->hasdef)
+		defaultexpr = build_column_default(rel, fieldnum + 1);
+	else
+		defaultexpr = NULL;
+
+	if (!old_field->hasmissing && field->hasmissing)
+	{
+		Datum					missingval;
+		Expr				   *expr2;
+		ParseNamespaceItem	   *nsitem;
+		ParseState			   *pstate;
+		EState				   *estate = NULL;
+		ExprContext			   *econtext;
+		ExprState			   *exprState;
+		MemoryContext			tbl_cxt;
+		MemoryContext			oldcxt;
+		bool					missingIsNull = true;
+
+		pstate = make_parsestate(NULL);
+		pstate->p_sourcetext = NULL;
+		nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
+											   NULL, false, true);
+		addNSItemToQuery(pstate, nsitem, true, true, true);
+
+		expr2 = expression_planner((Expr *) defaultexpr);
+
+		tbl_cxt = OGetTableContext(o_table);
+		oldcxt = MemoryContextSwitchTo(tbl_cxt);
+		estate = CreateExecutorState();
+		exprState = ExecPrepareExpr(expr2, estate);
+		econtext = GetPerTupleExprContext(estate);
+
+		missingval = ExecEvalExpr(exprState, econtext,
+									&missingIsNull);
+
+		FreeExecutorState(estate);
+		free_parsestate(pstate);
+
+		attrmiss_temp.am_value = datumCopy(missingval, field->byval,
+										   field->typlen);
+		MemoryContextSwitchTo(oldcxt);
+		attrmiss_temp.am_present = true;
+		attrmiss = &attrmiss_temp;
+		defaultexpr = (Node *) expr2;
+	}
 
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
 	if (attrmiss)
 	{
-		o_table->missing[i].am_present = field->hasmissing &&
-										 attrmiss->am_present;
-		if (o_table->missing[i].am_present)
-			o_table->missing[i].am_value = datumCopy(attrmiss->am_value,
-													 field->byval,
-													 field->typlen);
+		o_table->missing[fieldnum].am_present = field->hasmissing &&
+												attrmiss->am_present;
+		if (o_table->missing[fieldnum].am_present)
+			o_table->missing[fieldnum].am_value = datumCopy(attrmiss->am_value,
+															field->byval,
+															field->typlen);
 		else
-			o_table->missing[i].am_value = 0;
+			o_table->missing[fieldnum].am_value = 0;
 	}
 
-	o_table->defvals[i] = copyObject(defval);
+	o_table->defvals[fieldnum] = copyObject((Expr *) defaultexpr);
 	MemoryContextSwitchTo(oldcxt);
 }
 

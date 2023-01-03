@@ -514,5 +514,17 @@ ALTER TABLE o_test_tableoid ADD COLUMN
 
 SELECT * FROM o_test_tableoid;
 
+CREATE TABLE o_test_generated_alter_type (
+    val_1 int,
+    val_3 int GENERATED ALWAYS AS (val_1 * 2) STORED
+)USING orioledb;
+
+INSERT INTO o_test_generated_alter_type (val_1) VALUES (1), (3);
+SELECT * FROM o_test_generated_alter_type;
+SELECT orioledb_tbl_structure('o_test_generated_alter_type'::regclass, 'nue');
+
+ALTER TABLE o_test_generated_alter_type ALTER COLUMN val_3 TYPE numeric;
+SELECT * FROM o_test_generated_alter_type;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;

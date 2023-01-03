@@ -221,8 +221,8 @@ extern void o_table_fill_oids(OTable *oTable, Relation rel,
 extern void o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table);
 
 extern void o_table_resize_constr(OTable *o_table);
-extern void o_table_fill_constr(OTable *o_table, int i,
-								AttrMissing *attrmiss, Expr *defval);
+extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
+								OTableField *old_field, OTableField *field);
 extern void o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table,
 								  OIndexDescr *descr);
 extern char *o_get_type_name(Oid typid, int32 typmod);
