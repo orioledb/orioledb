@@ -27,11 +27,24 @@ typedef struct
 	NameData	name;
 	bool		primaryIsCtid;
 	OCompress	compress;
+	/* number of fields added using INCLUDE command explicitly */
+	/* pkey fields added implicitly in o_o_define_index_validate not counted */
+	uint16		nIncludedFields;
 	uint16		nLeafFields;
 	uint16		nNonLeafFields;
+	/* TOAST index: pkey field amount, excluding included fields,
+	 * including 2 fields: attnum and offset
+	 * Primary index: amount of uniq fields in index
+	 * Unique index: field amount, excluding included and pkey fields
+	 * Regular index: all field amount
+	 */
 	uint16		nUniqueFields;
+	/* non-TOAST index: field amount, excluding included and pkey fields */
+	/* TOAST index: pkey field amount, excluding included fields */
 	uint16		nKeyFields;
+	/* size of primaryFieldsAttnums */
 	uint16		nPrimaryFields;
+	/* where primary key fields located in index tuple */
 	AttrNumber	primaryFieldsAttnums[INDEX_MAX_KEYS];
 	OTableField *leafFields;
 	OTableIndexField *nonLeafFields;

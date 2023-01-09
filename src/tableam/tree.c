@@ -624,29 +624,32 @@ o_idx_cmp_tuples(OIndexDescr *id,
 	n = id->nonLeafTupdesc->natts;
 	for (i = 0; i < n; i++)
 	{
-		OIndexField *field = &id->fields[i];
-		int			cmp = 0;
-
-		attnum1 = OIndexKeyAttnumToTupleAttnum(keyType1, id, i + 1);
-		value1 = o_fastgetattr(*tuple1, attnum1, tupdesc1, spec1, &isnull1);
-		attnum2 = OIndexKeyAttnumToTupleAttnum(keyType2, id, i + 1);
-		value2 = o_fastgetattr(*tuple2, attnum2, tupdesc2, spec2, &isnull2);
-
-		if (!isnull1 && !isnull2)
+		if (!OIgnoreColumn(id, i))
 		{
-			cmp = o_call_comparator(field->comparator, value1, value2);
-			if (!field->ascending)
-				cmp = -cmp;
-		}
-		else if (isnull1 && isnull2)
-			cmp = 0;
-		else if (isnull1)
-			cmp = field->nullfirst ? -1 : 1;
-		else if (isnull2)
-			cmp = field->nullfirst ? 1 : -1;
+			OIndexField *field = &id->fields[i];
+			int			cmp = 0;
 
-		if (cmp != 0)
-			return cmp;
+			attnum1 = OIndexKeyAttnumToTupleAttnum(keyType1, id, i + 1);
+			value1 = o_fastgetattr(*tuple1, attnum1, tupdesc1, spec1, &isnull1);
+			attnum2 = OIndexKeyAttnumToTupleAttnum(keyType2, id, i + 1);
+			value2 = o_fastgetattr(*tuple2, attnum2, tupdesc2, spec2, &isnull2);
+
+			if (!isnull1 && !isnull2)
+			{
+				cmp = o_call_comparator(field->comparator, value1, value2);
+				if (!field->ascending)
+					cmp = -cmp;
+			}
+			else if (isnull1 && isnull2)
+				cmp = 0;
+			else if (isnull1)
+				cmp = field->nullfirst ? -1 : 1;
+			else if (isnull2)
+				cmp = field->nullfirst ? 1 : -1;
+
+			if (cmp != 0)
+				return cmp;
+		}
 	}
 	return 0;
 }
@@ -689,19 +692,22 @@ o_idx_cmp_key_bound_to_tuple(OIndexDescr *id,
 
 	for (i = 0; i < n; i++)
 	{
-		uint8		flags = key1->keys[i].flags;
-		int			cmp;
+		if (!OIgnoreColumn(id, i))
+		{
+			uint8		flags = key1->keys[i].flags;
+			int			cmp;
 
-		if (flags & O_VALUE_BOUND_UNBOUNDED)
-			return (flags & O_VALUE_BOUND_LOWER) ? -1 : 1;
+			if (flags & O_VALUE_BOUND_UNBOUNDED)
+				return (flags & O_VALUE_BOUND_LOWER) ? -1 : 1;
 
-		attnum = OIndexKeyAttnumToTupleAttnum(keyType2, id, i + 1);
-		value = o_fastgetattr(*tuple2, attnum, tupdesc, spec, &isnull);
+			attnum = OIndexKeyAttnumToTupleAttnum(keyType2, id, i + 1);
+			value = o_fastgetattr(*tuple2, attnum, tupdesc, spec, &isnull);
 
-		cmp = o_idx_cmp_range_key_to_value(&key1->keys[i], &id->fields[i],
-										   value, isnull);
-		if (cmp != 0)
-			return cmp;
+			cmp = o_idx_cmp_range_key_to_value(&key1->keys[i], &id->fields[i],
+											   value, isnull);
+			if (cmp != 0)
+				return cmp;
+		}
 	}
 
 	if (keyType1 == BTreeKeyUniqueLowerBound)

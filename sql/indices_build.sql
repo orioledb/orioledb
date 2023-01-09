@@ -538,6 +538,155 @@ SELECT * FROM o_test_add_serial ORDER BY a DESC;
 SELECT * FROM o_test_add_serial;
 SELECT * FROM o_test_add_serial ORDER BY a DESC;
 
+CREATE TABLE o_test_pkey_mixed_build
+(
+	f1 int,
+	f2 int,
+	f3 int,
+	i1 int,
+	i2 int,
+	pk1 int,
+	pk2 int,
+	pk3 int,
+	pk4 int
+) USING orioledb;
+\d+ o_test_pkey_mixed_build
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+
+INSERT INTO o_test_pkey_mixed_build
+	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v, 4 * 10 ^ v, 5 * 10 ^ v,
+		   6 * 10 ^ v, 7 * 10 ^ v, 8 * 10 ^ v, 9 * 10 ^ v FROM
+		   generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
+
+ALTER TABLE o_test_pkey_mixed_build ADD PRIMARY KEY (pk1, pk2, pk3, pk4);
+
+CREATE INDEX o_test_pkey_mixed_build_ix1
+	ON o_test_pkey_mixed_build (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2);
+\d+ o_test_pkey_mixed_build
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+
+CREATE UNIQUE INDEX o_test_pkey_mixed_build_uniq1
+	ON o_test_pkey_mixed_build (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2);
+\d+ o_test_pkey_mixed_build
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+
+CREATE INDEX o_test_pkey_mixed_build_ix3
+	ON o_test_pkey_mixed_build (f3, f2, pk4, f1, pk4) INCLUDE (pk3);
+\d+ o_test_pkey_mixed_build
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f3 f2 pk4 f1 pk3 pk1 pk2
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+
+CREATE INDEX o_test_pkey_mixed_build_ix4
+	ON o_test_pkey_mixed_build (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2);
+\d+ o_test_pkey_mixed_build
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f3 f2 pk4 f1 pk3 pk1 pk2
+-- i1 f1 pk4 f2 pk3 i2 pk1 pk2
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build;
+SELECT * FROM o_test_pkey_mixed_build;
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
+SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
+SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
+SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
+SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
+
+CREATE TABLE o_test_pkey_include_box_build
+(
+	pk1 int,
+	pk2 box,
+	f2 int
+) USING orioledb;
+\d+ o_test_pkey_include_box_build
+SELECT orioledb_tbl_indices('o_test_pkey_include_box_build'::regclass);
+
+INSERT INTO o_test_pkey_include_box_build
+	SELECT 1 * 10 ^ v, box(point(2 * 10 ^ v, 3 * 10 ^ v),
+						   point(4 * 10 ^ v, 5 * 10 ^ v)),
+		   6 * 10 ^ v FROM generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
+
+ALTER TABLE o_test_pkey_include_box_build ADD PRIMARY KEY (pk1) INCLUDE (pk2);
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
+SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
+
+CREATE TABLE o_test_include_box_build (
+	val_1 int,
+	val_4 box
+) USING orioledb;
+INSERT INTO o_test_include_box_build
+	SELECT 1 * 10 ^ v, box(point(2 * 10 ^ v, 3 * 10 ^ v),
+						   point(4 * 10 ^ v, 5 * 10 ^ v))
+		FROM generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
+
+CREATE UNIQUE INDEX o_test_include_box_build_ix1
+	ON o_test_include_box_build (val_1) INCLUDE (val_4);
+\d+ o_test_include_box_build
+SELECT orioledb_tbl_indices('o_test_include_box_build'::regclass);
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box_build ORDER BY val_1;
+SELECT * FROM o_test_include_box_build ORDER BY val_1;
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
+
+CREATE TABLE o_test_include_box_with_pkey_build (
+	val_1 int,
+	val_2 int,
+	val_3 int,
+	val_4 box
+) USING orioledb;
+\d+ o_test_include_box_with_pkey_build
+SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
+
+INSERT INTO o_test_include_box_with_pkey_build
+	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v,
+		   box(point(4 * 10 ^ v, 5 * 10 ^ v), point(6 * 10 ^ v, 7 * 10 ^ v))
+		FROM generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
+							  'nue');
+
+ALTER TABLE o_test_include_box_with_pkey_build ADD PRIMARY KEY (val_1);
+CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix1
+	ON o_test_include_box_with_pkey (val_2) INCLUDE (val_4);
+CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix2
+	ON o_test_include_box_with_pkey_build (val_3);
+\d+ o_test_include_box_with_pkey_build
+SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
+SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
+SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
+SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
+							  'nue');
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices_build CASCADE;
 RESET search_path;

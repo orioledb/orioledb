@@ -120,6 +120,8 @@ struct OIndexDescr
 
 	/* Description of the index fields */
 	int			nFields;
+	int			nKeyFields;
+	int			nIncludedFields;
 	OIndexField fields[INDEX_MAX_KEYS];
 
 	/*
@@ -149,6 +151,10 @@ struct OIndexDescr
 		((index)->index_mctx = AllocSetContextCreate(TopMemoryContext, \
 													 "OIndexContext", \
 													 ALLOCSET_DEFAULT_SIZES)))
+
+#define OIgnoreColumn(descr, attnum) \
+	((descr->desc.type != oIndexToast) && (attnum >= descr->nKeyFields) && \
+	 (attnum < (descr->nKeyFields + descr->nIncludedFields)))
 
 struct OTableDescr
 {

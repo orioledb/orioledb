@@ -1585,31 +1585,10 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 	else
 	{
 		StringInfo	str = makeStringInfo();
-		int			i,
-					j;
-		int			nfields;
-
-		nfields = id->nFields;
-		if (!is_primary)
-		{
-			nfields -= id->nPrimaryFields;
-			for (i = 0; i < nfields; i++)
-			{
-				for (j = 0; j < id->nPrimaryFields; j++)
-				{
-					AttrNumber	attnum = id->primaryFieldsAttnums[j];
-
-					if (i == attnum)
-					{
-						nfields--;
-						break;
-					}
-				}
-			}
-		}
+		int			i;
 
 		appendStringInfo(str, "(");
-		for (i = 0; i < nfields; i++)
+		for (i = 0; i < id->nKeyFields; i++)
 		{
 			if (i != 0)
 				appendStringInfo(str, ", ");

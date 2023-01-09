@@ -373,8 +373,8 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	ix_exprfield_num = 0;
 	for (keyno = 0; keyno < index->nfields; keyno++)
 	{
-		AttrNumber	attnum = index_rel->rd_index->indkey.values[keyno];
-		OTableIndexField *ix_field;
+		AttrNumber			attnum = index_rel->rd_index->indkey.values[keyno];
+		OTableIndexField   *ix_field;
 
 		ix_field = &index->fields[keyno];
 		if (AttributeNumberIsValid(attnum))
@@ -439,17 +439,46 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 
 		if (keyno >= index->nkeyfields)
 		{
-			OTableField *table_field = &o_table->fields[attnum - 1];
 
-			/*
-			 * Included columns have no collation, no opclass and no ordering
-			 * options.
-			 */
-			ix_field->collation = InvalidOid;
-			ix_field->opclass = GetDefaultOpClass(table_field->typid,
-												  BTREE_AM_OID);
-			ix_field->ordering = SORTBY_DEFAULT;
-			ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
+			OTableIndex		   *primary = NULL;
+			bool				pk_member = false;
+			OTableIndexField   *primary_field = NULL;
+			int					pk_field;
+
+			if (o_table->has_primary)
+			{
+				primary = &o_table->indices[PrimaryIndexNumber];
+
+				for (pk_field = 0; pk_field < primary->nfields; pk_field++)
+				{
+					primary_field = &primary->fields[pk_field];
+
+					if (primary_field->attnum == ix_field->attnum)
+					{
+						pk_member = true;
+						break;
+					}
+				}
+			}
+
+			if (pk_member)
+			{
+				ix_field->collation = primary_field->collation;
+				ix_field->opclass = primary_field->opclass;
+				ix_field->ordering = primary_field->ordering;
+				ix_field->nullsOrdering = primary_field->nullsOrdering;
+			}
+			else
+			{
+				/*
+				* Included columns have no collation, no opclass and no
+				* ordering options.
+				*/
+				ix_field->collation = InvalidOid;
+				ix_field->opclass = InvalidOid;
+				ix_field->ordering = SORTBY_DEFAULT;
+				ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
+			}
 		}
 		else
 		{

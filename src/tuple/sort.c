@@ -17,6 +17,7 @@
 #include "tableam/descr.h"
 #include "tuple/format.h"
 #include "tuple/sort.h"
+#include "tuple/toast.h"
 
 #include "catalog/pg_collation_d.h"
 #include "catalog/pg_opclass_d.h"
@@ -302,16 +303,20 @@ tuplesort_begin_orioledb_index(OIndexDescr *idx,
 
 	for (i = 0; i < key_fields; i++)
 	{
-		SortSupport sortKey = &sortKeys[i];
+		if (!OIgnoreColumn(idx, i))
+		{
+			SortSupport sortKey = &sortKeys[i];
 
-		sortKey->ssup_cxt = CurrentMemoryContext;
-		sortKey->ssup_collation = idx->fields[i].collation;
-		sortKey->ssup_nulls_first = idx->fields[i].nullfirst;
-		sortKey->ssup_attno = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, idx, i + 1);
-		sortKey->abbreviate = (i == 0);
-		sortKey->ssup_reverse = !idx->fields[i].ascending;
-		/* FIXME: no abbrev converter yet */
-		o_finish_sort_support_function(idx->fields[i].comparator, sortKey);
+			sortKey->ssup_cxt = CurrentMemoryContext;
+			sortKey->ssup_collation = idx->fields[i].collation;
+			sortKey->ssup_nulls_first = idx->fields[i].nullfirst;
+			sortKey->ssup_attno =
+				OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, idx, i + 1);
+			sortKey->abbreviate = (i == 0);
+			sortKey->ssup_reverse = !idx->fields[i].ascending;
+			/* FIXME: no abbrev converter yet */
+			o_finish_sort_support_function(idx->fields[i].comparator, sortKey);
+		}
 	}
 
 	state = tuplesort_begin_custom(idx->leafTupdesc, idx->unique,
@@ -341,9 +346,11 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 	SortSupport sortKey;
 	SortSupport sortKeys;
 
-	key_fields = primary->nonLeafTupdesc->natts;
+	key_fields = primary->nKeyFields;
 
-	sortKeys = (SortSupport) palloc0((key_fields + 2) * sizeof(SortSupportData));
+	sortKeys = (SortSupport)
+		palloc0((key_fields + TOAST_NON_LEAF_FIELDS_NUM) *
+				sizeof(SortSupportData));
 	arg = (OIndexBuildSortArg *) palloc0(sizeof(OIndexBuildSortArg));
 	arg->id = primary;
 
