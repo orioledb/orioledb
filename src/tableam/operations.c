@@ -406,6 +406,12 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 			ExecProject(rinfo->ri_onConflict->oc_ProjInfo);
 			confl_slot = rinfo->ri_onConflict->oc_ProjSlot;
 
+			if (confl_slot->tts_ops != descr->newTuple->tts_ops)
+			{
+				ExecCopySlot(descr->newTuple, confl_slot);
+				confl_slot = descr->newTuple;
+			}
+
 			ExecMaterializeSlot(confl_slot);
 
 			STOPEVENT(STOPEVENT_IOC_BEFORE_UPDATE, NULL);
@@ -424,6 +430,16 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 
 			get_keys_from_ps(scan_slot, GET_PRIMARY(descr),
 							 NULL, &old_pkey);
+
+			if (rel->rd_rel->relispartition &&
+				!ExecPartitionCheck(rinfo, confl_slot, estate, false))
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("invalid ON UPDATE specification"),
+						errdetail("The result tuple would appear in a "
+								  "different partition than the original "
+								  "tuple.")));
+
 
 			mres = o_tbl_update(descr, confl_slot, estate, &old_pkey,
 								rel, oxid, csn,

@@ -1,0 +1,360 @@
+CREATE EXTENSION orioledb;
+CREATE SCHEMA partition;
+SET SESSION search_path = 'partition';
+CREATE TABLE o_test_partition_on_conflict_range (
+  val_1 int,
+  val_2 int
+) PARTITION BY RANGE(val_1);
+CREATE TABLE o_test_partition_on_conflict_range_child (
+  val_2 int,
+  val_1 int NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX ON o_test_partition_on_conflict_range (val_1);
+ALTER TABLE o_test_partition_on_conflict_range
+	ATTACH PARTITION o_test_partition_on_conflict_range_child
+		FOR VALUES FROM (0) TO (20);
+EXPLAIN (COSTS OFF)
+	INSERT INTO o_test_partition_on_conflict_range
+		VALUES (1, 2) ON CONFLICT (val_1)
+			DO UPDATE SET val_1 = excluded.val_1 * 10;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Insert on o_test_partition_on_conflict_range
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: o_test_partition_on_conflict_range_val_1_idx
+   ->  Result
+(4 rows)
+
+INSERT INTO o_test_partition_on_conflict_range VALUES (0, 1);
+INSERT INTO o_test_partition_on_conflict_range
+	VALUES (1, 2) ON CONFLICT (val_1)
+		DO UPDATE SET val_1 = excluded.val_1 * 10;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_on_conflict_range;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Seq Scan on o_test_partition_on_conflict_range_child o_test_partition_on_conflict_range
+(1 row)
+
+SELECT * FROM o_test_partition_on_conflict_range;
+ val_1 | val_2 
+-------+-------
+     0 |     1
+     1 |     2
+(2 rows)
+
+SELECT * FROM o_test_partition_on_conflict_range_child;
+ val_2 | val_1 
+-------+-------
+     1 |     0
+     2 |     1
+(2 rows)
+
+INSERT INTO o_test_partition_on_conflict_range
+	VALUES (1, 2) ON CONFLICT (val_1)
+		DO UPDATE SET val_1 = excluded.val_1 * 100;
+ERROR:  invalid ON UPDATE specification
+DETAIL:  The result tuple would appear in a different partition than the original tuple.
+INSERT INTO o_test_partition_on_conflict_range
+	VALUES (1, 2) ON CONFLICT (val_1)
+		DO UPDATE SET val_1 = excluded.val_1 * 10;
+SELECT * FROM o_test_partition_on_conflict_range;
+ val_1 | val_2 
+-------+-------
+     0 |     1
+    10 |     2
+(2 rows)
+
+SELECT * FROM o_test_partition_on_conflict_range_child;
+ val_2 | val_1 
+-------+-------
+     1 |     0
+     2 |    10
+(2 rows)
+
+DELETE FROM o_test_partition_on_conflict_range WHERE val_1 = 10;
+SELECT * FROM o_test_partition_on_conflict_range;
+ val_1 | val_2 
+-------+-------
+     0 |     1
+(1 row)
+
+SELECT * FROM o_test_partition_on_conflict_range_child;
+ val_2 | val_1 
+-------+-------
+     1 |     0
+(1 row)
+
+CREATE TABLE o_test_partition_on_conflict_list (
+	a int UNIQUE,
+	b char(2)
+) PARTITION BY LIST (a);
+CREATE TABLE o_test_partition_on_conflict_list_child (
+	a int UNIQUE,
+	b char(2)
+) USING orioledb;
+ALTER TABLE o_test_partition_on_conflict_list
+	ATTACH PARTITION o_test_partition_on_conflict_list_child
+		FOR VALUES IN (3);
+INSERT INTO o_test_partition_on_conflict_list VALUES (3, 'a') ON CONFLICT (a)
+	DO UPDATE SET b = excluded.b;
+SELECT * FROM o_test_partition_on_conflict_list;
+ a | b  
+---+----
+ 3 | a 
+(1 row)
+
+INSERT INTO o_test_partition_on_conflict_list VALUES (3, 'a') ON CONFLICT (a)
+	DO UPDATE SET b = excluded.b || 'c';
+SELECT * FROM o_test_partition_on_conflict_list;
+ a | b  
+---+----
+ 3 | ac
+(1 row)
+
+DELETE FROM o_test_partition_on_conflict_list WHERE a = 3;
+SELECT * FROM o_test_partition_on_conflict_list;
+ a | b 
+---+---
+(0 rows)
+
+CREATE TABLE o_test_cross_partition_update (
+  val_1 int,
+  val_2 int
+) PARTITION BY RANGE(val_1);
+CREATE TABLE o_test_cross_partition_update_child (
+  val_2 int,
+  val_1 int NOT NULL
+) USING orioledb;
+CREATE TABLE o_test_cross_partition_update_child2 (
+  val_2 int,
+  val_1 int NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX ON o_test_cross_partition_update (val_1);
+ALTER TABLE o_test_cross_partition_update
+	ATTACH PARTITION o_test_cross_partition_update_child
+		FOR VALUES FROM (0) TO (10);
+ALTER TABLE o_test_cross_partition_update
+	ATTACH PARTITION o_test_cross_partition_update_child2
+		FOR VALUES FROM (10) TO (20);
+INSERT INTO o_test_cross_partition_update
+	SELECT v, v * 10 FROM generate_series(0, 19) v;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_cross_partition_update;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on o_test_cross_partition_update_child o_test_cross_partition_update_1
+   ->  Seq Scan on o_test_cross_partition_update_child2 o_test_cross_partition_update_2
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_cross_partition_update_child;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on o_test_cross_partition_update_child
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_cross_partition_update_child2;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on o_test_cross_partition_update_child2
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_cross_partition_update
+	WHERE val_1 BETWEEN 0 AND 5;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_cross_partition_update_child o_test_cross_partition_update
+   Bitmap heap scan
+   Recheck Cond: ((val_1 >= 0) AND (val_1 <= 5))
+   ->  Bitmap Index Scan on o_test_cross_partition_update_child_val_1_idx
+         Index Cond: ((val_1 >= 0) AND (val_1 <= 5))
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_cross_partition_update
+	WHERE val_1 BETWEEN 10 AND 15;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_cross_partition_update_child2 o_test_cross_partition_update
+   Bitmap heap scan
+   Recheck Cond: ((val_1 >= 10) AND (val_1 <= 15))
+   ->  Bitmap Index Scan on o_test_cross_partition_update_child2_val_1_idx
+         Index Cond: ((val_1 >= 10) AND (val_1 <= 15))
+(5 rows)
+
+SELECT * FROM o_test_cross_partition_update;
+ val_1 | val_2 
+-------+-------
+     0 |     0
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+     6 |    60
+     7 |    70
+     8 |    80
+     9 |    90
+    10 |   100
+    11 |   110
+    12 |   120
+    13 |   130
+    14 |   140
+    15 |   150
+    16 |   160
+    17 |   170
+    18 |   180
+    19 |   190
+(20 rows)
+
+SELECT * FROM o_test_cross_partition_update_child;
+ val_2 | val_1 
+-------+-------
+     0 |     0
+    10 |     1
+    20 |     2
+    30 |     3
+    40 |     4
+    50 |     5
+    60 |     6
+    70 |     7
+    80 |     8
+    90 |     9
+(10 rows)
+
+SELECT * FROM o_test_cross_partition_update_child2;
+ val_2 | val_1 
+-------+-------
+   100 |    10
+   110 |    11
+   120 |    12
+   130 |    13
+   140 |    14
+   150 |    15
+   160 |    16
+   170 |    17
+   180 |    18
+   190 |    19
+(10 rows)
+
+SELECT * FROM o_test_cross_partition_update WHERE val_1 BETWEEN 0 AND 5;
+ val_1 | val_2 
+-------+-------
+     0 |     0
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+(6 rows)
+
+SELECT * FROM o_test_cross_partition_update WHERE val_1 BETWEEN 10 AND 15;
+ val_1 | val_2 
+-------+-------
+    10 |   100
+    11 |   110
+    12 |   120
+    13 |   130
+    14 |   140
+    15 |   150
+(6 rows)
+
+DELETE FROM o_test_cross_partition_update WHERE val_1 BETWEEN 10 AND 15;
+SELECT * FROM o_test_cross_partition_update;
+ val_1 | val_2 
+-------+-------
+     0 |     0
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+     6 |    60
+     7 |    70
+     8 |    80
+     9 |    90
+    16 |   160
+    17 |   170
+    18 |   180
+    19 |   190
+(14 rows)
+
+SELECT * FROM o_test_cross_partition_update_child;
+ val_2 | val_1 
+-------+-------
+     0 |     0
+    10 |     1
+    20 |     2
+    30 |     3
+    40 |     4
+    50 |     5
+    60 |     6
+    70 |     7
+    80 |     8
+    90 |     9
+(10 rows)
+
+SELECT * FROM o_test_cross_partition_update_child2;
+ val_2 | val_1 
+-------+-------
+   160 |    16
+   170 |    17
+   180 |    18
+   190 |    19
+(4 rows)
+
+UPDATE o_test_cross_partition_update
+	SET val_1 = val_1 + 10 WHERE val_1 BETWEEN 0 AND 5;
+SELECT * FROM o_test_cross_partition_update;
+ val_1 | val_2 
+-------+-------
+     6 |    60
+     7 |    70
+     8 |    80
+     9 |    90
+    16 |   160
+    17 |   170
+    18 |   180
+    19 |   190
+    10 |     0
+    11 |    10
+    12 |    20
+    13 |    30
+    14 |    40
+    15 |    50
+(14 rows)
+
+SELECT * FROM o_test_cross_partition_update_child;
+ val_2 | val_1 
+-------+-------
+    60 |     6
+    70 |     7
+    80 |     8
+    90 |     9
+(4 rows)
+
+SELECT * FROM o_test_cross_partition_update_child2;
+ val_2 | val_1 
+-------+-------
+   160 |    16
+   170 |    17
+   180 |    18
+   190 |    19
+     0 |    10
+    10 |    11
+    20 |    12
+    30 |    13
+    40 |    14
+    50 |    15
+(10 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
+drop cascades to table o_test_partition_on_conflict_list_child
+drop cascades to table o_test_cross_partition_update_child
+drop cascades to table o_test_cross_partition_update_child2
+DROP SCHEMA partition CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table o_test_partition_on_conflict_range
+drop cascades to table o_test_partition_on_conflict_list
+drop cascades to table o_test_cross_partition_update
+RESET search_path;

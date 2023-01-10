@@ -89,6 +89,7 @@ REGRESSCHECKS = btree_sys_check \
 				opclass \
 				parallel_scan \
 				partial \
+				partition \
 				primary_key \
 				row_level_locks \
 				subquery \

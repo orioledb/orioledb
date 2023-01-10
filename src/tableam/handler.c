@@ -366,18 +366,29 @@ orioledb_tuple_insert_on_conflict(ModifyTableState *mstate,
 								  ResultRelInfo *rinfo,
 								  TupleTableSlot *slot)
 {
-	OTableDescr *descr;
-	OTuple		tup;
-	Relation	rel = rinfo->ri_RelationDesc;
-	OnConflictAction on_conflict = ((ModifyTable *) mstate->ps.plan)->onConflictAction;
-	OFDWState  *state = (OFDWState *) rinfo->ri_FdwState;
-	OIndexDescr *id;
+	OTableDescr		   *descr;
+	OTuple				tup;
+	Relation			rel = rinfo->ri_RelationDesc;
+	OnConflictAction	on_conflict;
+	OFDWState		   *state = (OFDWState *) rinfo->ri_FdwState;
+	OIndexDescr		   *id;
+	OIndexNumber		ix_num;
+
+	on_conflict = ((ModifyTable *) mstate->ps.plan)->onConflictAction;
 
 	o_check_constraints(rinfo, slot, estate);
 
 	descr = relation_get_descr(rel);
 	Assert(descr);
 	id = GET_PRIMARY(descr);
+
+	if (slot->tts_ops != descr->newTuple->tts_ops)
+	{
+		ExecCopySlot(descr->newTuple, slot);
+		slot = descr->newTuple;
+	}
+
+	Assert(slot->tts_ops == &TTSOpsOrioleDB);
 
 	if (id->primaryIsCtid)
 	{
@@ -392,10 +403,9 @@ orioledb_tuple_insert_on_conflict(ModifyTableState *mstate,
 								RelationGetRelationName(rel),
 								false);
 
-	slot = o_tbl_insert_on_conflict(mstate, estate, rinfo,
-									descr, slot,
-									on_conflict,
-									get_ix_num_by_oid(descr, state->conflictIxOid));
+	ix_num = get_ix_num_by_oid(descr, state->conflictIxOid);
+	slot = o_tbl_insert_on_conflict(mstate, estate, rinfo, descr, slot,
+									on_conflict, ix_num);
 
 	return slot;
 }
@@ -1360,39 +1370,42 @@ orioledb_init_modify(ModifyTableState *mstate, ResultRelInfo *rinfo)
 	ModifyTable *node = (ModifyTable *) mstate->ps.plan;
 	OFDWState  *state;
 
-	state = (OFDWState *) palloc0(sizeof(OFDWState));
-	rinfo->ri_FdwState = state;
-	state->conflictIxOid = InvalidOid;
-
-	if (mstate->operation == CMD_INSERT &&
-		node->onConflictAction != ONCONFLICT_NONE)
+	if (!rinfo->ri_FdwState)
 	{
-		List	   *arbiterIndexes;
-		Oid			arbiterOid;
-		int			i;
+		state = (OFDWState *) palloc0(sizeof(OFDWState));
+		rinfo->ri_FdwState = state;
+		state->conflictIxOid = InvalidOid;
 
-		arbiterIndexes = rinfo->ri_onConflictArbiterIndexes;
-
-		if (arbiterIndexes == NIL)
+		if (mstate->operation == CMD_INSERT &&
+			node->onConflictAction != ONCONFLICT_NONE)
 		{
-			state->conflictIxOid = InvalidOid;
-		}
-		else
-		{
-			arbiterOid = list_nth_oid(arbiterIndexes, 0);
+			List	   *arbiterIndexes;
+			Oid			arbiterOid;
+			int			i;
 
-			for (i = 0; i < descr->nIndices; i++)
+			arbiterIndexes = rinfo->ri_onConflictArbiterIndexes;
+
+			if (arbiterIndexes == NIL)
 			{
-				if (descr->indices[i]->oids.reloid == arbiterOid)
+				state->conflictIxOid = InvalidOid;
+			}
+			else
+			{
+				arbiterOid = list_nth_oid(arbiterIndexes, 0);
+
+				for (i = 0; i < descr->nIndices; i++)
 				{
-					state->conflictIxOid = arbiterOid;
-					break;
+					if (descr->indices[i]->oids.reloid == arbiterOid)
+					{
+						state->conflictIxOid = arbiterOid;
+						break;
+					}
 				}
 			}
-		}
 
-		if (state->conflictIxOid < 0)
-			elog(ERROR, "Arbiter index isn't matched");
+			if (state->conflictIxOid < 0)
+				elog(ERROR, "Arbiter index isn't matched");
+		}
 	}
 }
 
