@@ -200,7 +200,7 @@ o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
 }
 
 void
-o_define_index_validate(Relation rel, IndexStmt *stmt,
+o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 						ODefineIndexContext **arg)
 {
 	int							nattrs;
@@ -248,7 +248,7 @@ o_define_index_validate(Relation rel, IndexStmt *stmt,
 
 		/* check index fields number */
 		nattrs = list_length(stmt->indexParams);
-		if (ix_type == oIndexPrimary)
+		if (ix_type == oIndexPrimary && !skip_build)
 		{
 			if (o_table->nindices > 0)
 			{
@@ -422,6 +422,9 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			 (unsigned) oids.relnode);
 	}
 	o_table = old_o_table;
+
+	if (!reuse && skip_build)
+		return;
 
 	if (!reuse)
 	{

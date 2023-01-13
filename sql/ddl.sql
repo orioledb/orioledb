@@ -542,5 +542,39 @@ ALTER TABLE o_test_alter_change_byval ALTER val_2 TYPE text USING val_2::text;
 SELECT * FROM o_test_alter_change_byval;
 SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
 
+CREATE TABLE o_test_pkey_alter_type (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_pkey_alter_type
+	SELECT v, v * 10 FROM generate_series(1, 5) v;
+
+ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
+CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+
+ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE int4;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+
+ALTER TABLE o_test_pkey_alter_type ALTER val_2 TYPE text USING val_2 || 'ROR';
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+
+ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE text USING val_1 || 'BOB';
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+RESET enable_seqscan;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;

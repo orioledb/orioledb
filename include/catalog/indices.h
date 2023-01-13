@@ -24,6 +24,7 @@ typedef struct ODefineIndexContext {
 } ODefineIndexContext;
 
 extern void o_define_index_validate(Relation rel, IndexStmt *stmt,
+									bool skip_build,
 									ODefineIndexContext **arg);
 extern void o_define_index(Relation rel, Oid indoid, bool reindex,
 						   bool skip_constraint_checks, bool skip_build,

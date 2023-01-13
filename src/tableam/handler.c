@@ -1418,10 +1418,11 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 }
 
 static bool
-orioledb_define_index_validate(Relation rel, IndexStmt *stmt,
+orioledb_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 							   void **arg)
 {
-	o_define_index_validate(rel, stmt, (ODefineIndexContext **) arg);
+	o_define_index_validate(rel, stmt, skip_build,
+							(ODefineIndexContext **) arg);
 	return true;
 }
 

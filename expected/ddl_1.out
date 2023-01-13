@@ -1542,10 +1542,265 @@ SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
  
 (1 row)
 
+CREATE TABLE o_test_pkey_alter_type (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+INSERT INTO o_test_pkey_alter_type
+	SELECT v, v * 10 FROM generate_series(1, 5) v;
+ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
+CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_alter_type
+   Forward index scan of: o_test_pkey_alter_type_pkey
+(2 rows)
+
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_alter_type
+   Forward index only scan of: o_test_pkey_alter_type_ix1
+(2 rows)
+
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+ val_1 | val_2 
+-------+-------
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+                              orioledb_tbl_structure                              
+----------------------------------------------------------------------------------
+ Index o_test_pkey_alter_type_pkey contents                                      +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                             +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean             +
+     Leftmost, Rightmost                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')       +
+     Item 0: offset = 264, tuple = ('1', '10')                                   +
+   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('3')       +
+     Item 1: offset = 296, tuple = ('2', '20')                                   +
+   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('4')       +
+     Item 2: offset = 328, tuple = ('3', '30')                                   +
+   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('5')      +
+     Item 3: offset = 360, tuple = ('4', '40')                                   +
+   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
+     Item 4: offset = 392, tuple = ('5', '50')                                   +
+                                                                                 +
+ Index o_test_pkey_alter_type_ix1 contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                             +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean             +
+     Leftmost, Rightmost                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20', '2') +
+     Item 0: offset = 264, tuple = ('10', '1')                                   +
+   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('30', '3') +
+     Item 1: offset = 296, tuple = ('20', '2')                                   +
+   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('40', '4') +
+     Item 2: offset = 328, tuple = ('30', '3')                                   +
+   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('50', '5')+
+     Item 3: offset = 360, tuple = ('40', '4')                                   +
+   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
+     Item 4: offset = 392, tuple = ('50', '5')                                   +
+                                                                                 +
+ Index toast: not loaded                                                         +
+ 
+(1 row)
+
+ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE int4;
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+(5 rows)
+
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+ val_1 | val_2 
+-------+-------
+     1 |    10
+     2 |    20
+     3 |    30
+     4 |    40
+     5 |    50
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+                              orioledb_tbl_structure                              
+----------------------------------------------------------------------------------
+ Index o_test_pkey_alter_type_pkey contents                                      +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                             +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean             +
+     Leftmost, Rightmost                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')       +
+     Item 0: offset = 264, tuple = ('1', '10')                                   +
+   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('3')       +
+     Item 1: offset = 296, tuple = ('2', '20')                                   +
+   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('4')       +
+     Item 2: offset = 328, tuple = ('3', '30')                                   +
+   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('5')      +
+     Item 3: offset = 360, tuple = ('4', '40')                                   +
+   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
+     Item 4: offset = 392, tuple = ('5', '50')                                   +
+                                                                                 +
+ Index o_test_pkey_alter_type_ix1 contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                             +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean             +
+     Leftmost, Rightmost                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20', '2') +
+     Item 0: offset = 264, tuple = ('10', '1')                                   +
+   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('30', '3') +
+     Item 1: offset = 296, tuple = ('20', '2')                                   +
+   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('40', '4') +
+     Item 2: offset = 328, tuple = ('30', '3')                                   +
+   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('50', '5')+
+     Item 3: offset = 360, tuple = ('40', '4')                                   +
+   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
+     Item 4: offset = 392, tuple = ('50', '5')                                   +
+                                                                                 +
+ Index toast: not loaded                                                         +
+ 
+(1 row)
+
+ALTER TABLE o_test_pkey_alter_type ALTER val_2 TYPE text USING val_2 || 'ROR';
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     1 | 10ROR
+     2 | 20ROR
+     3 | 30ROR
+     4 | 40ROR
+     5 | 50ROR
+(5 rows)
+
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+ val_1 | val_2 
+-------+-------
+     1 | 10ROR
+     2 | 20ROR
+     3 | 30ROR
+     4 | 40ROR
+     5 | 50ROR
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+                               orioledb_tbl_structure                                
+-------------------------------------------------------------------------------------
+ Index o_test_pkey_alter_type_pkey contents                                         +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')          +
+     Item 0: offset = 264, tuple = ('1', '10ROR')                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 88, hikey = ('3')          +
+     Item 1: offset = 312, tuple = ('2', '20ROR')                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 96, hikey = ('4')          +
+     Item 2: offset = 360, tuple = ('3', '30ROR')                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 104, hikey = ('5')         +
+     Item 3: offset = 408, tuple = ('4', '40ROR')                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 112                        +
+     Item 4: offset = 456, tuple = ('5', '50ROR')                                   +
+                                                                                    +
+ Index o_test_pkey_alter_type_ix1 contents                                          +
+ Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                               +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20ROR', '2') +
+     Item 0: offset = 264, tuple = ('10ROR', '1')                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30ROR', '3')+
+     Item 1: offset = 312, tuple = ('20ROR', '2')                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('40ROR', '4')+
+     Item 2: offset = 360, tuple = ('30ROR', '3')                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('50ROR', '5')+
+     Item 3: offset = 408, tuple = ('40ROR', '4')                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                        +
+     Item 4: offset = 456, tuple = ('50ROR', '5')                                   +
+                                                                                    +
+ Index toast: not loaded                                                            +
+ 
+(1 row)
+
+ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE text USING val_1 || 'BOB';
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+ 1BOB  | 10ROR
+ 2BOB  | 20ROR
+ 3BOB  | 30ROR
+ 4BOB  | 40ROR
+ 5BOB  | 50ROR
+(5 rows)
+
+SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
+ val_1 | val_2 
+-------+-------
+ 1BOB  | 10ROR
+ 2BOB  | 20ROR
+ 3BOB  | 30ROR
+ 4BOB  | 40ROR
+ 5BOB  | 50ROR
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
+                                 orioledb_tbl_structure                                 
+----------------------------------------------------------------------------------------
+ Index o_test_pkey_alter_type_pkey contents                                            +
+ Page 0: level = 0, maxKeyLen = 13, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2BOB')          +
+     Item 0: offset = 264, tuple = ('1BOB', '10ROR')                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 96, hikey = ('3BOB')          +
+     Item 1: offset = 312, tuple = ('2BOB', '20ROR')                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 112, hikey = ('4BOB')         +
+     Item 2: offset = 360, tuple = ('3BOB', '30ROR')                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 128, hikey = ('5BOB')         +
+     Item 3: offset = 408, tuple = ('4BOB', '40ROR')                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 144                           +
+     Item 4: offset = 456, tuple = ('5BOB', '50ROR')                                   +
+                                                                                       +
+ Index o_test_pkey_alter_type_ix1 contents                                             +
+ Page 0: level = 0, maxKeyLen = 19, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20ROR', '2BOB') +
+     Item 0: offset = 264, tuple = ('10ROR', '1BOB')                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30ROR', '3BOB')+
+     Item 1: offset = 312, tuple = ('20ROR', '2BOB')                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('40ROR', '4BOB')+
+     Item 2: offset = 360, tuple = ('30ROR', '3BOB')                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('50ROR', '5BOB')+
+     Item 3: offset = 408, tuple = ('40ROR', '4BOB')                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                           +
+     Item 4: offset = 456, tuple = ('50ROR', '5BOB')                                   +
+                                                                                       +
+ Index toast: not loaded                                                               +
+ 
+(1 row)
+
+RESET enable_seqscan;
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 22 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1568,3 +1823,4 @@ drop cascades to table o_test_float_default
 drop cascades to table o_test_tableoid
 drop cascades to table o_test_generated_alter_type
 drop cascades to table o_test_alter_change_byval
+drop cascades to table o_test_pkey_alter_type
