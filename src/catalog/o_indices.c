@@ -296,6 +296,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 			{
 				if (fillPrimary)
 					index->primaryFieldsAttnums[index->nPrimaryFields++] = k + 1;
+				else
+					index->nKeyFields--;
 				continue;
 			}
 
@@ -404,7 +406,7 @@ make_toast_o_index(OTable *table)
 	result->compress = table->toast_compress;
 	if (table->has_primary)
 	{
-		result->nLeafFields = primary->nkeyfields;
+		result->nLeafFields = primary->nfields;
 		result->nNonLeafFields = primary->nkeyfields;
 		result->nKeyFields = primary->nkeyfields;
 	}

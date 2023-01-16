@@ -134,7 +134,7 @@ tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr)
 
 			att = TupleDescAttr(slot->tts_tupleDescriptor,
 								attnum - 1 - ctid_off);
-			if (att->attlen < 0)
+			if (!slot->tts_isnull[attindex] && att->attlen < 0)
 			{
 				Assert(!VARATT_IS_EXTERNAL(slot->tts_values[attindex]));
 				Assert(!VARATT_IS_COMPRESSED(slot->tts_values[attindex]));

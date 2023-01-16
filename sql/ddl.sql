@@ -577,6 +577,68 @@ SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
 SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
 RESET enable_seqscan;
 
+CREATE TABLE o_test_duplicate_key_fields (
+	val_1 int
+) USING orioledb;
+
+CREATE INDEX o_test_duplicate_key_fields_ix1
+	ON o_test_duplicate_key_fields (val_1, val_1) INCLUDE (val_1);
+
+INSERT INTO o_test_duplicate_key_fields SELECT generate_series(1, 5);
+
+SELECT orioledb_tbl_indices('o_test_duplicate_key_fields'::regclass);
+SELECT orioledb_tbl_structure('o_test_duplicate_key_fields'::regclass, 'nue');
+
+SET enable_seqscan = off;
+SELECT * FROM o_test_duplicate_key_fields ORDER BY val_1;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_duplicate_key_fields ORDER BY val_1;
+RESET enable_seqscan;
+
+CREATE TABLE o_test_pkey_fields_same_as_index (
+	val_1 int,
+	val_2 int,
+	val_3 int,
+	UNIQUE (val_1, val_3)
+) USING orioledb;
+SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
+
+INSERT INTO o_test_pkey_fields_same_as_index
+	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v FROM generate_series(0, 2) v;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
+SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;;
+
+ALTER TABLE o_test_pkey_fields_same_as_index ADD PRIMARY KEY (val_1, val_3);
+SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
+SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
+
+ALTER TABLE o_test_pkey_fields_same_as_index
+	DROP CONSTRAINT o_test_pkey_fields_same_as_index_pkey;
+SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
+SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
+
+CREATE TABLE o_test_null_pkey_field (
+	val_1 text,
+	val_2 text,
+	val_3 text
+) USING orioledb;
+
+ALTER TABLE o_test_null_pkey_field ADD COLUMN val_10 text;
+
+INSERT INTO o_test_null_pkey_field
+	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v
+		FROM generate_series(0, 2) v;
+
+ALTER TABLE o_test_null_pkey_field ADD PRIMARY KEY (val_1, val_3, val_10);
+SELECT orioledb_tbl_indices('o_test_null_pkey_field'::regclass);
+SELECT orioledb_tbl_structure('o_test_null_pkey_field'::regclass, 'nue');
+SELECT * FROM o_test_null_pkey_field;
+
 CREATE TABLE o_test_included_ix_name (
 	a int,
 	b int,
