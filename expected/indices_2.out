@@ -7094,7 +7094,7 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
      Leaf tuple size: 2, non-leaf tuple size: 2+
      Non-leaf tuple fields: value, key         +
      Leaf tuple fields: value, key             +
- Index o_test_include_like_like_val2_idx       +
+ Index o_test_include_like_like_val2_value_idx +
      Index type: secondary, unique             +
      Leaf tuple size: 3, non-leaf tuple size: 3+
      Non-leaf tuple fields: val2, value, key   +
@@ -7112,7 +7112,7 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
 Indexes:
     "o_test_include_like_like_pkey" PRIMARY KEY, btree (key)
     "o_test_include_like_like_key_idx" btree (key)
-    "o_test_include_like_like_val2_idx" UNIQUE, btree (val2) INCLUDE (value, key)
+    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value, key)
     "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
 
 DROP TABLE o_test_include_like_like;
@@ -7174,7 +7174,7 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
      Leaf tuple size: 2, non-leaf tuple size: 2+
      Non-leaf tuple fields: value, ctid        +
      Leaf tuple fields: value, ctid            +
- Index o_test_include_like_like_val2_idx       +
+ Index o_test_include_like_like_val2_value_idx +
      Index type: secondary, unique             +
      Leaf tuple size: 3, non-leaf tuple size: 3+
      Non-leaf tuple fields: val2, value, ctid  +
@@ -7191,7 +7191,7 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
  val2   | integer |           |          |         | plain    |              | 
 Indexes:
     "o_test_include_like_like_key_idx" btree (key)
-    "o_test_include_like_like_val2_idx" UNIQUE, btree (val2) INCLUDE (value)
+    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
 
 DROP TABLE o_test_include_like_like;
@@ -7239,7 +7239,7 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
      Leaf tuple size: 2, non-leaf tuple size: 2+
      Non-leaf tuple fields: value, key         +
      Leaf tuple fields: value, key             +
- Index o_test_include_like_like_val2_idx       +
+ Index o_test_include_like_like_val2_value_idx +
      Index type: secondary, unique             +
      Leaf tuple size: 3, non-leaf tuple size: 3+
      Non-leaf tuple fields: val2, value, key   +
@@ -7257,7 +7257,7 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
 Indexes:
     "o_test_include_like_like_pkey" PRIMARY KEY, btree (key)
     "o_test_include_like_like_key_idx" btree (key)
-    "o_test_include_like_like_val2_idx" UNIQUE, btree (val2) INCLUDE (value, key)
+    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value, key)
     "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
 
 DROP TABLE o_test_include_like_like;

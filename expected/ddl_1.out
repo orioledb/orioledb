@@ -1797,10 +1797,177 @@ SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
 (1 row)
 
 RESET enable_seqscan;
+CREATE TABLE o_test_included_ix_name (
+	a int,
+	b int,
+	c int,
+	d int
+) USING orioledb;
+ALTER TABLE o_test_included_ix_name ADD PRIMARY KEY (d);
+\d o_test_included_ix_name
+      Table "public.o_test_included_ix_name"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+ d      | integer |           | not null | 
+Indexes:
+    "o_test_included_ix_name_pkey" PRIMARY KEY, btree (d)
+
+CREATE INDEX ON o_test_included_ix_name (a, b) INCLUDE (a, c);
+\d o_test_included_ix_name
+      Table "public.o_test_included_ix_name"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+ d      | integer |           | not null | 
+Indexes:
+    "o_test_included_ix_name_pkey" PRIMARY KEY, btree (d)
+    "o_test_included_ix_name_a_b_a1_c_idx" btree (a, b) INCLUDE (a, c, d)
+
+CREATE TABLE o_test_add_pkey_empty_index (
+	a int,
+	b int,
+	c int,
+	d int
+) USING orioledb;
+CREATE INDEX ON o_test_add_pkey_empty_index (a, b);
+\d o_test_add_pkey_empty_index
+    Table "public.o_test_add_pkey_empty_index"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+ d      | integer |           |          | 
+Indexes:
+    "o_test_add_pkey_empty_index_a_b_idx" btree (a, b)
+
+SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_test_add_pkey_empty_index_a_b_idx     +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: a, b, ctid         +
+     Leaf tuple fields: a, b, ctid             +
+ 
+(1 row)
+
+ALTER TABLE o_test_add_pkey_empty_index ADD PRIMARY KEY (d);
+\d o_test_add_pkey_empty_index
+    Table "public.o_test_add_pkey_empty_index"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+ d      | integer |           | not null | 
+Indexes:
+    "o_test_add_pkey_empty_index_pkey" PRIMARY KEY, btree (d)
+    "o_test_add_pkey_empty_index_a_b_idx" btree (a, b) INCLUDE (d)
+
+SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_pkey_empty_index_pkey        +
+     Index type: primary, unique               +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: d                  +
+ Index o_test_add_pkey_empty_index_a_b_idx     +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: a, b, d            +
+     Leaf tuple fields: a, b, d                +
+ 
+(1 row)
+
+INSERT INTO o_test_add_pkey_empty_index
+	SELECT v, v*10, v*100, v*1000 FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF) SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_add_pkey_empty_index
+   Forward index only scan of: o_test_add_pkey_empty_index_a_b_idx
+(2 rows)
+
+SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
+ a | b  |  d   
+---+----+------
+ 1 | 10 | 1000
+ 2 | 20 | 2000
+ 3 | 30 | 3000
+ 4 | 40 | 4000
+ 5 | 50 | 5000
+(5 rows)
+
+SELECT orioledb_tbl_structure('o_test_add_pkey_empty_index'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_add_pkey_empty_index_pkey contents                    +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('1', '10', '100', '1000')       +
+     Item 1: offset = 304, tuple = ('2', '20', '200', '2000')       +
+     Item 2: offset = 336, tuple = ('3', '30', '300', '3000')       +
+     Item 3: offset = 368, tuple = ('4', '40', '400', '4000')       +
+     Item 4: offset = 400, tuple = ('5', '50', '500', '5000')       +
+                                                                    +
+ Index o_test_add_pkey_empty_index_a_b_idx contents                 +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('1', '10', '1000')              +
+     Item 1: offset = 304, tuple = ('2', '20', '2000')              +
+     Item 2: offset = 336, tuple = ('3', '30', '3000')              +
+     Item 3: offset = 368, tuple = ('4', '40', '4000')              +
+     Item 4: offset = 400, tuple = ('5', '50', '5000')              +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+\d o_test_add_pkey_empty_index
+    Table "public.o_test_add_pkey_empty_index"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+ b      | integer |           |          | 
+ c      | integer |           |          | 
+ d      | integer |           | not null | 
+Indexes:
+    "o_test_add_pkey_empty_index_pkey" PRIMARY KEY, btree (d)
+    "o_test_add_pkey_empty_index_a_b_idx" btree (a, b) INCLUDE (d)
+
+SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_pkey_empty_index_pkey        +
+     Index type: primary, unique               +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: d                  +
+ Index o_test_add_pkey_empty_index_a_b_idx     +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: a, b, d            +
+     Leaf tuple fields: a, b, d                +
+ 
+(1 row)
+
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 23 other objects
+NOTICE:  drop cascades to 25 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1824,3 +1991,5 @@ drop cascades to table o_test_tableoid
 drop cascades to table o_test_generated_alter_type
 drop cascades to table o_test_alter_change_byval
 drop cascades to table o_test_pkey_alter_type
+drop cascades to table o_test_included_ix_name
+drop cascades to table o_test_add_pkey_empty_index

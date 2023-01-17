@@ -576,5 +576,36 @@ SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
 SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
 RESET enable_seqscan;
 
+CREATE TABLE o_test_included_ix_name (
+	a int,
+	b int,
+	c int,
+	d int
+) USING orioledb;
+ALTER TABLE o_test_included_ix_name ADD PRIMARY KEY (d);
+\d o_test_included_ix_name
+CREATE INDEX ON o_test_included_ix_name (a, b) INCLUDE (a, c);
+\d o_test_included_ix_name
+
+CREATE TABLE o_test_add_pkey_empty_index (
+	a int,
+	b int,
+	c int,
+	d int
+) USING orioledb;
+CREATE INDEX ON o_test_add_pkey_empty_index (a, b);
+\d o_test_add_pkey_empty_index
+SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
+ALTER TABLE o_test_add_pkey_empty_index ADD PRIMARY KEY (d);
+\d o_test_add_pkey_empty_index
+SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
+INSERT INTO o_test_add_pkey_empty_index
+	SELECT v, v*10, v*100, v*1000 FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF) SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
+SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
+SELECT orioledb_tbl_structure('o_test_add_pkey_empty_index'::regclass, 'nue');
+\d o_test_add_pkey_empty_index
+SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
