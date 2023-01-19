@@ -277,11 +277,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 
 	if (tableIndex)
 	{
-		int	end = tableIndex->nfields;
 
-		if (!fillPrimary)
-			end -= tableIndex->npkeyfields;
-		for (i = 0; i < end; i++)
+		for (i = 0; i < tableIndex->nfields; i++)
 		{
 			int			attnum = tableIndex->fields[i].attnum;
 			int			k;
@@ -336,7 +333,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->tableOids = table->oids;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
-	result->nLeafFields = tableIndex->nfields - tableIndex->npkeyfields;
+	result->nLeafFields = tableIndex->nfields;
 	if (table->has_primary)
 		result->nLeafFields += primary->nfields;
 	else

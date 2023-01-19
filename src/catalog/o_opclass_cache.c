@@ -114,12 +114,8 @@ o_opclass_cache_add_table(OTable *o_table)
 		{
 			OTableIndex	   *index = &o_table->indices[cur_ix];
 			int				cur_field;
-			int				pkey_start = index->nfields;
 
-			if (index->type != oIndexPrimary)
-				pkey_start -= index->npkeyfields;
-
-			for (cur_field = 0; cur_field < pkey_start; cur_field++)
+			for (cur_field = 0; cur_field < index->nfields; cur_field++)
 			{
 				o_opclass_cache_add_if_needed(datoid,
 											  index->fields[cur_field].opclass,

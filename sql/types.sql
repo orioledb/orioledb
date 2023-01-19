@@ -270,8 +270,12 @@ INSERT INTO o_test_record_type_alter (key)
 SELECT * FROM o_test_record_type_alter;
 
 CREATE INDEX o_test_record_type_alter_idx1 ON o_test_record_type_alter (val4);
-SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc' ORDER BY val4;
+SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc' ORDER BY val4;
 SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
+RESET enable_seqscan;
 
 ALTER TABLE o_test_record_type_alter ADD PRIMARY KEY (key);
 SELECT * FROM o_test_record_type_alter;

@@ -39,19 +39,19 @@ SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
 ANALYZE o_tableam1;
-SELECT * FROM o_tableam1;
 
-SELECT * FROM o_tableam1 WHERE key = 5;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1;
-EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
-SELECT * FROM o_tableam1 ORDER BY key DESC;
+SELECT * FROM o_tableam1;
 SET enable_seqscan = off;
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
+SELECT * FROM o_tableam1 WHERE key = 5;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 ORDER BY key DESC;
+SELECT * FROM o_tableam1 ORDER BY key DESC;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
-RESET enable_seqscan;
 SELECT * FROM o_tableam1 WHERE value = '5text';
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
 SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
+RESET enable_seqscan;
 
 TRUNCATE o_tableam1;
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(11, 20) as id);
@@ -204,19 +204,22 @@ CREATE OR REPLACE FUNCTION smart_explain(sql TEXT) RETURNS SETOF TEXT AS $$
 LANGUAGE plpgsql;
 
 SET enable_seqscan = off;
-SELECT smart_explain(
-'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
-	WHERE (key * 100) BETWEEN 100 AND 1000;');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+		WHERE (key * 100) BETWEEN 100 AND 1000;
+$$);
 SELECT (key * 100) FROM o_test_expression
 	WHERE (key * 100) BETWEEN 100 AND 1000;
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) SELECT (value || \'WOW\') FROM o_test_expression
-	WHERE (value || \'WOW\') BETWEEN \'6\' AND \'9\';');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
+		WHERE (value || 'WOW') BETWEEN '6' AND '9';
+$$);
 SELECT (value || 'WOW') FROM o_test_expression
 	WHERE (value || 'WOW') BETWEEN '6' AND '9';
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) SELECT (value || \'WOW\') FROM o_test_expression
-	WHERE UPPER(value) BETWEEN \'6\' AND \'9\';');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
+		WHERE UPPER(value) BETWEEN '6' AND '9';
+$$);
 SELECT (value || 'WOW') FROM o_test_expression
 	WHERE UPPER(value) BETWEEN '6' AND '9';
 EXPLAIN (COSTS off) SELECT * FROM o_test_expression
@@ -235,12 +238,15 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
 ALTER TABLE o_test_expression DROP CONSTRAINT o_test_expression_pkey;
 ANALYZE o_test_expression;
 SET enable_bitmapscan = off;
-SELECT smart_explain(
-'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
-	WHERE (key * 100) BETWEEN 100 AND 1000;');
+SET enable_seqscan = off;
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+		WHERE (key * 100) BETWEEN 100 AND 1000;
+$$);
 SELECT (key * 100) FROM o_test_expression
 	WHERE (key * 100) BETWEEN 100 AND 1000;
 RESET enable_bitmapscan;
+RESET enable_seqscan;
 
 SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
 
@@ -290,9 +296,9 @@ ANALYZE o_tableam4;
 
 SELECT * FROM o_tableam4;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam4;
+SET enable_seqscan = off;
 SELECT * FROM o_tableam4 WHERE key = 5;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE key = 5;
-SET enable_seqscan = off;
 SELECT * FROM o_tableam4 WHERE value = 5;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE value = 5;
 RESET enable_seqscan;
@@ -318,6 +324,7 @@ ANALYZE o_tableam5;
 SELECT id FROM o_tableam5;
 EXPLAIN (COSTS off) SELECT id FROM o_tableam5;
 SELECT id FROM o_tableam5 ORDER BY id DESC;
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT id FROM o_tableam5
 	WHERE id > 0 ORDER BY id DESC;
 SELECT id FROM o_tableam5 ORDER BY val;
@@ -331,7 +338,6 @@ CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
 	END $$
 LANGUAGE plpgsql;
 
-SET enable_seqscan = off;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_tableam5
@@ -378,13 +384,20 @@ CREATE INDEX o_tableam_update1_ix ON o_tableam_update1 (val);
 INSERT INTO o_tableam_update1 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
 ANALYZE o_tableam_update1;
 
-SELECT smart_explain(
-'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;');
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'1text\' RETURNING *;');
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'2text\' RETURNING val;');
-
+SELECT smart_explain($$
+	EXPLAIN (COSTS off)
+		UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
+$$);
+SELECT smart_explain($$
+	EXPLAIN (COSTS off)
+		UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text'
+			RETURNING *;
+$$);
+SELECT smart_explain($$
+	EXPLAIN (COSTS off)
+		UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '2text'
+			RETURNING val;
+$$);
 
 UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
 UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text' RETURNING *;

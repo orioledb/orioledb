@@ -525,7 +525,17 @@ SELECT * FROM o_test_record_type_alter;
 (15 rows)
 
 CREATE INDEX o_test_record_type_alter_idx1 ON o_test_record_type_alter (val4);
-SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc' ORDER BY val4;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Custom Scan (o_scan) on o_test_record_type_alter
+   Forward index scan of: o_test_record_type_alter_idx1
+   Conds: (val4 = 'abc'::text)
+(3 rows)
+
+SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc' ORDER BY val4;
    key   | val | val3 | val4 
 ---------+-----+------+------
  (1,2)   |   5 |   18 | abc
@@ -595,6 +605,7 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
  
 (1 row)
 
+RESET enable_seqscan;
 ALTER TABLE o_test_record_type_alter ADD PRIMARY KEY (key);
 SELECT * FROM o_test_record_type_alter;
    key   | val | val3 | val4 

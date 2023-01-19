@@ -266,9 +266,9 @@ CREATE INDEX o_test61_reg2 ON o_test61(value);
 SELECT orioledb_tbl_indices('o_test61'::regclass);
 INSERT INTO o_test61 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test61;
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
 SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
-SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test61 WHERE value BETWEEN 250 and 260;
 SELECT * FROM o_test61 WHERE value BETWEEN 250 and 260;
 RESET enable_seqscan;
@@ -1524,6 +1524,19 @@ CREATE TABLE o_test_reindex_empty (
 ) USING orioledb;
 
 REINDEX INDEX o_test_reindex_empty_pkey;
+
+CREATE TABLE o_test_drop_included_pkey_field (
+    val_1 int,
+    val_2 int,
+    val_3 int,
+    val_4 int NULL,
+    PRIMARY KEY (val_4, val_2)
+) USING orioledb;
+CREATE INDEX o_test_drop_included_pkey_field_ix1
+	ON o_test_drop_included_pkey_field (val_1);
+\d o_test_drop_included_pkey_field
+ALTER TABLE o_test_drop_included_pkey_field DROP COLUMN val_4;
+\d o_test_drop_included_pkey_field
 
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

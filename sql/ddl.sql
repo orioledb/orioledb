@@ -266,6 +266,8 @@ SELECT * FROM o_test_add_column;
 -- Test that default fields not recalculated
 SELECT * FROM o_test_add_column;
 
+DROP SEQUENCE o_test_j_seq CASCADE;
+
 CREATE TABLE o_test_multiple_analyzes (
     aid integer NOT NULL PRIMARY KEY
 ) USING orioledb;

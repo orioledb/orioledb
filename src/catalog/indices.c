@@ -63,16 +63,6 @@ typedef struct NewColumnValue
 
 bool		in_indexes_rebuild = false;
 
-static void add_primary_fields(Relation indexRelation, OIndexDescr *idx_descr,
-							   OTableIndex *index, OTable *o_table,
-							   Relation pg_attribute, Form_pg_class class_form,
-							   Form_pg_index index_form, Relation pg_index,
-							   HeapTuple *index_tuple);
-static void remove_primary_fields(Form_pg_index index_form,
-								  Form_pg_class class_form, Oid reloid,
-								  Relation pg_attribute,
-								  OTableIndex *table_index);
-
 bool
 is_in_indexes_rebuild(void)
 {
@@ -292,104 +282,6 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 			List   *allIndexParams;
 			List   *indexColNames;
 
-			if (ix_type != oIndexPrimary && o_table->has_primary &&
-				stmt->indexIncludingParams)
-			{
-				int				npkeyfields;
-				int				nfields;
-				int				nkeyfields;
-				int				i;
-				ListCell	   *lc;
-				OTableIndex	   *primary;
-				Bitmapset	   *pkfields = NULL;
-
-				allIndexParams = list_concat_copy(stmt->indexParams,
-												  stmt->indexIncludingParams);
-
-				primary = &o_table->indices[PrimaryIndexNumber];
-
-				npkeyfields = primary->nfields;
-				nfields = list_length(allIndexParams);
-				nkeyfields = list_length(stmt->indexParams);
-				foreach(lc, allIndexParams)
-				{
-					int				pknum;
-					int				fieldnum;
-					AttrNumber		attnum;
-					bool			pkey_started = false;
-					IndexElem	   *elem = lfirst(lc);
-
-					if (!elem->expr)
-					{
-						fieldnum = foreach_current_index(lc);
-						attnum = o_table_fieldnum(o_table, elem->name);
-						for (pknum = 0; pknum < primary->nfields; pknum++)
-						{
-							OTableIndexField *pkfield;
-
-							pkfield = &primary->fields[pknum];
-
-							if (AttributeNumberIsValid(attnum) &&
-								attnum == pkfield->attnum)
-							{
-								OTableField *table_field;
-								Oid opclass;
-
-								table_field =
-									o_table_field_by_name(o_table, elem->name);
-
-								opclass = ResolveOpClass(elem->opclass,
-														 table_field->typid,
-														 "btree",
-														 BTREE_AM_OID);
-
-								if ((opclass == pkfield->opclass) &&
-									!bms_is_member(attnum, pkfields))
-								{
-									pkfields = bms_add_member(pkfields,
-															  attnum);
-
-									if ((fieldnum >= nkeyfields) &&
-										((nfields - fieldnum) == npkeyfields))
-										pkey_started = true;
-									else
-										npkeyfields--;
-									break;
-								}
-							}
-						}
-					}
-					if (pkey_started)
-						break;
-				}
-				bms_free(pkfields);
-
-				for (i = npkeyfields; i > 0; i--)
-				{
-					int				pknum;
-					IndexElem	   *elem;
-					bool			member = false;
-
-					elem = llast(stmt->indexIncludingParams);
-
-					for (pknum = 0; pknum < primary->nfields; pknum++)
-					{
-						OTableIndexField   *pk_field = &primary->fields[i];
-						AttrNumber			attnum;
-
-						attnum = o_table_fieldnum(o_table, elem->name);
-						if (attnum == pk_field->attnum)
-						{
-							member = true;
-							break;
-						}
-					}
-					if (!member)
-						break;
-					stmt->indexIncludingParams =
-						list_delete_last(stmt->indexIncludingParams);
-				}
-			}
 			allIndexParams = list_concat_copy(stmt->indexParams,
 											  stmt->indexIncludingParams);
 			indexColNames = ChooseIndexColumnNames(allIndexParams);
@@ -402,144 +294,9 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 											stmt->isconstraint);
 		}
 
-		/*
-		 * Add primary key fields, because otherwise, when planning a query with a
-		 * where clause consisting only of index fields and primary key fields, an
-		 * index-only scan is not selected.
-		 */
-		if (ix_type != oIndexPrimary && o_table->has_primary)
-		{
-			int i;
-			int nfields;
-
-			nfields = o_table->indices[PrimaryIndexNumber].nfields;
-
-			for (i = 0; i < nfields; i++)
-			{
-				OTableIndexField   *pk_field;
-				OTableField		   *table_field;
-				bool				member = false;
-				ListCell		   *lc;
-
-				pk_field = &o_table->indices[PrimaryIndexNumber].fields[i];
-				table_field = &o_table->fields[pk_field->attnum];
-
-				foreach(lc, stmt->indexParams)
-				{
-					IndexElem *elem = lfirst(lc);
-
-					if (!elem->expr &&
-						strcmp(elem->name, table_field->name.data) == 0)
-					{
-						member = true;
-						break;
-					}
-				}
-
-				if (!member)
-				{
-					foreach(lc, stmt->indexIncludingParams)
-					{
-						IndexElem *elem = lfirst(lc);
-
-						if (strcmp(elem->name,
-									table_field->name.data) == 0)
-						{
-							member = true;
-							break;
-						}
-					}
-				}
-
-				if (!member)
-				{
-					IndexElem   *iparam = makeNode(IndexElem);
-
-					iparam->name = pstrdup(table_field->name.data);
-					iparam->expr = NULL;
-					iparam->indexcolname = NULL;
-					iparam->collation = NIL;
-					iparam->opclass = NIL;
-					iparam->opclassopts = NIL;
-
-					stmt->indexIncludingParams =
-						lappend(stmt->indexIncludingParams, iparam);
-				}
-			}
-		}
-
 		/* check index fields */
 		o_validate_index_elements(o_table, ix_type,
 								  stmt->indexParams, stmt->whereClause);
-	}
-}
-
-static void
-o_update_pg_atttributes(OTable *o_table, OTable *old_o_table,
-						OIndexNumber ix_num, OTableDescr *descr)
-{
-	OTableIndex	   *table_index = &o_table->indices[ix_num];
-	int				ctid_off = o_table->has_primary ? 0 : 1;
-	OIndexDescr	   *idx_descr = descr->indices[ix_num + ctid_off];
-
-	if (table_index->type != oIndexPrimary)
-	{
-		Relation		indexRelation;
-		Oid				reloid;
-		Relation		pg_class;
-		Relation		pg_index;
-		Relation		pg_attribute;
-		Form_pg_class	class_form;
-		Form_pg_index	index_form;
-		HeapTuple		class_tuple,
-						index_tuple;
-
-		indexRelation = index_open(table_index->oids.reloid,
-								   AccessExclusiveLock);
-		reloid = RelationGetRelid(indexRelation);
-
-		pg_class = table_open(RelationRelationId, RowExclusiveLock);
-		class_tuple = SearchSysCacheCopy1(RELOID,
-										  ObjectIdGetDatum(reloid));
-		if (!HeapTupleIsValid(class_tuple))
-			elog(ERROR, "could not find pg_class for relation %u",
-				 reloid);
-		class_form = (Form_pg_class)GETSTRUCT(class_tuple);
-
-		pg_index = table_open(IndexRelationId, RowExclusiveLock);
-		index_tuple = SearchSysCacheCopy1(INDEXRELID,
-										  ObjectIdGetDatum(reloid));
-		if (!HeapTupleIsValid(index_tuple))
-			elog(ERROR, "could not find pg_index for relation %u",
-				 reloid);
-		index_form = (Form_pg_index)GETSTRUCT(index_tuple);
-
-		pg_attribute = table_open(AttributeRelationId,
-								  RowExclusiveLock);
-
-		if (o_table->has_primary)
-			add_primary_fields(indexRelation, idx_descr, table_index,
-							   o_table, pg_attribute, class_form,
-							   index_form, pg_index, &index_tuple);
-		else
-		{
-			OTableIndex *old_table_index;
-			old_table_index = &old_o_table->indices[ix_num + 1];
-			remove_primary_fields(index_form, class_form,
-								  reloid, pg_attribute,
-								  old_table_index);
-		}
-
-		CatalogTupleUpdate(pg_class, &class_tuple->t_self,
-						   class_tuple);
-		CatalogTupleUpdate(pg_index, &index_tuple->t_self,
-						   index_tuple);
-		heap_freetuple(class_tuple);
-		heap_freetuple(index_tuple);
-		table_close(pg_attribute, RowExclusiveLock);
-		table_close(pg_class, RowExclusiveLock);
-		table_close(pg_index, RowExclusiveLock);
-		index_close(indexRelation, AccessExclusiveLock);
 	}
 }
 
@@ -691,41 +448,6 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			index->type = ix_type;
 			index->nfields = indnatts;
 			index->nkeyfields = indnkeyatts;
-			index->npkeyfields = 0;
-			if (ix_type != oIndexPrimary && o_table->has_primary)
-			{
-				int				pknum;
-				OTableIndex	   *primary;
-
-				primary = &o_table->indices[PrimaryIndexNumber];
-				for (pknum = 0; pknum < primary->nfields; pknum++)
-				{
-					OTableIndexField   *pkfield = &primary->fields[pknum];
-					int					fieldnum;
-					bool				member = false;
-					int					pkey_start = index->nfields;
-
-					for (fieldnum = 0; fieldnum < pkey_start; fieldnum++)
-					{
-						AttrNumber		attnum;
-
-						attnum = index_rel->rd_index->indkey.values[fieldnum];
-						if (AttributeNumberIsValid(attnum) &&
-							attnum == pkfield->attnum + 1)
-						{
-							member = true;
-							break;
-						}
-						pkey_start--;
-					}
-
-					if (!member)
-						index->npkeyfields++;
-				}
-			} else if (ix_type == oIndexPrimary)
-			{
-				index->npkeyfields = indnatts;
-			}
 
 			if (OCompressIsValid(compress))
 				index->compress = compress;
@@ -789,57 +511,10 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 			if (index->type == oIndexPrimary)
 			{
-				int	new_ix;
 				Assert(old_o_table);
 
-				for (new_ix = 0; new_ix < o_table->nindices; new_ix++)
-				{
-					OTableIndex	   *new_index = &o_table->indices[new_ix];
-					if (new_index->type != oIndexPrimary)
-					{
-						int	pknum;
-
-						new_index->npkeyfields = 0;
-
-						for (pknum = 0; pknum < index->nfields; pknum++)
-						{
-							OTableIndexField *pkfield = &index->fields[pknum];
-							int fieldnum;
-							bool member = false;
-
-							for (fieldnum = 0; fieldnum < new_index->nfields; fieldnum++)
-							{
-								OTableIndexField *field = &new_index->fields[fieldnum];
-								if (field->attnum == pkfield->attnum)
-								{
-									member = true;
-									break;
-								}
-							}
-
-							if (!member)
-								new_index->npkeyfields++;
-						}
-
-						new_index->nfields += new_index->npkeyfields;
-					}
-				}
 				o_fill_tmp_table_descr(&tmpDescr, o_table);
 				rebuild_indices(old_o_table, old_descr, o_table, &tmpDescr);
-
-				if (!is_recovery_in_progress())
-				{
-					int i;
-
-					for (i = 0; i < o_table->nindices; i++)
-					{
-						o_update_pg_atttributes(o_table, old_o_table, i,
-												&tmpDescr);
-					}
-
-					/* Make the updated catalog row versions visible */
-					CommandCounterIncrement();
-				}
 				o_free_tmp_table_descr(&tmpDescr);
 			}
 			else
@@ -848,55 +523,6 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 				build_secondary_index(o_table, &tmpDescr, ix_num);
 				o_free_tmp_table_descr(&tmpDescr);
 			}
-		}
-		else if (index->type == oIndexPrimary && !is_recovery_in_progress())
-		{
-			OTableDescr	tmpDescr;
-			int			i;
-
-			for (i = 0; i < o_table->nindices; i++)
-			{
-				OTableIndex	   *new_index = &o_table->indices[i];
-				if (new_index->type != oIndexPrimary)
-				{
-					int	pknum;
-
-					new_index->npkeyfields = 0;
-
-					for (pknum = 0; pknum < index->nfields; pknum++)
-					{
-						OTableIndexField *pkfield = &index->fields[pknum];
-						int fieldnum;
-						bool member = false;
-
-						for (fieldnum = 0; fieldnum < new_index->nfields; fieldnum++)
-						{
-							OTableIndexField *field = &new_index->fields[fieldnum];
-							if (field->attnum == pkfield->attnum)
-							{
-								member = true;
-								break;
-							}
-						}
-
-						if (!member)
-							new_index->npkeyfields++;
-					}
-
-					new_index->nfields += new_index->npkeyfields;
-				}
-			}
-
-			o_fill_tmp_table_descr(&tmpDescr, o_table);
-
-			for (i = 0; i < o_table->nindices; i++)
-			{
-				o_update_pg_atttributes(o_table, old_o_table, i,
-										&tmpDescr);
-			}
-			/* Make the updated catalog row versions visible */
-			CommandCounterIncrement();
-			o_free_tmp_table_descr(&tmpDescr);
 		}
 	}
 
@@ -1044,144 +670,6 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 	}
 }
 
-static void
-add_primary_fields(Relation indexRelation, OIndexDescr *idx_descr,
-				   OTableIndex *index, OTable *o_table, Relation pg_attribute,
-				   Form_pg_class class_form, Form_pg_index index_form,
-				   Relation pg_index, HeapTuple *index_tuple)
-{
-	Oid			reloid = RelationGetRelid(indexRelation);
-	int2vector *indkey;
-	int attnum;
-	Datum values[Natts_pg_index] = {0};
-	bool nulls[Natts_pg_index] = {0};
-	bool replaces[Natts_pg_index] = {0};
-	HeapTuple old_index_tuple;
-	int nsupport;
-	int indkey_ix;
-	int pkey_start = index->nfields - index->npkeyfields;
-
-	for (attnum = 0; attnum < index->npkeyfields; attnum++)
-	{
-		FormData_pg_attribute attribute;
-#if PG_VERSION_NUM >= 140000
-		FormData_pg_attribute *aattr[] = {&attribute};
-		TupleDesc tupdesc;
-#endif
-		OIndexField *idx_field = &idx_descr->fields[pkey_start + attnum];
-		OTableField *table_field = &o_table->fields[idx_field->tableAttnum - 1];
-
-		attribute.attrelid = reloid;
-		namestrcpy(&(attribute.attname), table_field->name.data);
-
-		attribute.atttypid = table_field->typid;
-		attribute.attstattarget = 0;
-		attribute.attlen = table_field->typlen;
-		attribute.attnum = pkey_start + attnum + 1;
-		attribute.attndims = table_field->ndims;
-		attribute.atttypmod = table_field->typmod;
-		attribute.attbyval = table_field->byval;
-		attribute.attalign = table_field->align;
-		attribute.attstorage = table_field->storage;
-#if PG_VERSION_NUM >= 140000
-		attribute.attcompression = table_field->compression;
-#endif
-		attribute.attnotnull = table_field->notnull;
-		attribute.atthasdef = false;
-		attribute.atthasmissing = false;
-		attribute.attidentity = '\0';
-		attribute.attgenerated = '\0';
-		attribute.attisdropped = false;
-		attribute.attislocal = true;
-		attribute.attinhcount = 0;
-		attribute.attcollation = table_field->collation;
-
-#if PG_VERSION_NUM >= 140000
-		tupdesc = CreateTupleDesc(lengthof(aattr),
-								  (FormData_pg_attribute **) &aattr);
-		InsertPgAttributeTuples(pg_attribute, tupdesc, reloid, NULL, NULL);
-#else
-		InsertPgAttributeTuple(pg_attribute, &attribute, (Datum)0, NULL);
-#endif
-	}
-
-	if (indexRelation->rd_opcoptions)
-	{
-		int relatt;
-		for (relatt = 0; relatt < class_form->relnatts; relatt++)
-		{
-			if (indexRelation->rd_opcoptions[relatt])
-				pfree(indexRelation->rd_opcoptions[relatt]);
-		}
-		pfree(indexRelation->rd_opcoptions);
-		indexRelation->rd_opcoptions = NULL;
-	}
-
-	if (indexRelation->rd_support)
-		pfree(indexRelation->rd_support);
-	if (indexRelation->rd_supportinfo)
-		pfree(indexRelation->rd_supportinfo);
-
-	class_form->relnatts += index->npkeyfields;
-	index_form->indnatts += index->npkeyfields;
-
-	nsupport = index_form->indnatts *
-			   indexRelation->rd_indam->amsupport;
-	indexRelation->rd_support = (RegProcedure *)
-		MemoryContextAllocZero(indexRelation->rd_indexcxt,
-							   nsupport * sizeof(RegProcedure));
-	indexRelation->rd_supportinfo = (FmgrInfo *)
-		MemoryContextAllocZero(indexRelation->rd_indexcxt,
-							   nsupport * sizeof(FmgrInfo));
-
-	indkey = buildint2vector(NULL, index_form->indnatts);
-	for (indkey_ix = 0; indkey_ix < pkey_start; indkey_ix++)
-	{
-		indkey->values[indkey_ix] = index_form->indkey.values[indkey_ix];
-	}
-	for (indkey_ix = 0; indkey_ix < index->npkeyfields; indkey_ix++)
-	{
-		OIndexField *idx_field = &idx_descr->fields[pkey_start + indkey_ix];
-
-		indkey->values[pkey_start + indkey_ix] = idx_field->tableAttnum;
-	}
-
-	replaces[Anum_pg_index_indkey - 1] = true;
-	values[Anum_pg_index_indkey - 1] = PointerGetDatum(indkey);
-
-	old_index_tuple = *index_tuple;
-	*index_tuple = heap_modify_tuple(old_index_tuple,
-									 RelationGetDescr(pg_index), values,
-									 nulls, replaces);
-	heap_freetuple(old_index_tuple);
-}
-
-static void
-remove_primary_fields(Form_pg_index index_form, Form_pg_class class_form,
-					  Oid reloid, Relation pg_attribute,
-					  OTableIndex *table_index)
-{
-	int attnum;
-	int pkey_start = table_index->nfields - table_index->npkeyfields;
-
-	for (attnum = 0; attnum < table_index->npkeyfields; attnum++)
-	{
-		HeapTuple attr_tuple;
-
-		attr_tuple = SearchSysCacheCopy2(ATTNUM, ObjectIdGetDatum(reloid),
-										 Int16GetDatum(pkey_start +
-													   attnum + 1));
-
-		if (!HeapTupleIsValid(attr_tuple))
-			elog(ERROR, "could not find pg_attribute for "
-						"relation %u",
-				 reloid);
-
-		CatalogTupleDelete(pg_attribute, &attr_tuple->t_self);
-	}
-	class_form->relnatts = pkey_start;
-	index_form->indnatts = pkey_start;
-}
 
 void
 rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
@@ -1348,7 +836,6 @@ drop_primary_index(Relation rel, OTable *o_table)
 	OTable		   *old_o_table;
 	OTableDescr		tmp_descr;
 	OTableDescr	   *old_descr;
-	int				ix_num;
 
 	Assert(o_table->indices[PrimaryIndexNumber].type == oIndexPrimary);
 
@@ -1363,24 +850,10 @@ drop_primary_index(Relation rel, OTable *o_table)
 	o_table->has_primary = false;
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 
-	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
-	{
-		OTableIndex	   *index = &o_table->indices[ix_num];
-		if (index->type != oIndexPrimary)
-			index->nfields -= index->npkeyfields;
-		index->npkeyfields = 0;
-	}
-
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 
 	o_fill_tmp_table_descr(&tmp_descr, o_table);
 	rebuild_indices(old_o_table, old_descr, o_table, &tmp_descr);
-	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
-	{
-		o_update_pg_atttributes(o_table, old_o_table, ix_num, &tmp_descr);
-	}
-	/* Make the updated catalog row versions visible */
-	CommandCounterIncrement();
 	o_free_tmp_table_descr(&tmp_descr);
 
 	recreate_o_table(old_o_table, o_table);

@@ -331,11 +331,6 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	Datum			datum;
 	oidvector	   *indclass;
 	bool			isnull;
-	OTableIndex	   *primary = NULL;
-	int				pkey_start = index->nfields - index->npkeyfields;
-
-	if (o_table->has_primary)
-		primary = &o_table->indices[PrimaryIndexNumber];
 
 	index->index_mctx = NULL;
 	mcxt = OGetIndexContext(index);
@@ -442,18 +437,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			ix_field->attnum = EXPR_ATTNUM;
 		}
 
-		if (keyno >= pkey_start &&
-			o_table->has_primary && index->type != oIndexPrimary)
-		{
-			OTableIndexField *primary_field;
-
-			primary_field = &primary->fields[keyno - pkey_start];
-			ix_field->collation = primary_field->collation;
-			ix_field->opclass = primary_field->opclass;
-			ix_field->ordering = primary_field->ordering;
-			ix_field->nullsOrdering = primary_field->nullsOrdering;
-		}
-		else if (keyno >= index->nkeyfields)
+		if (keyno >= index->nkeyfields)
 		{
 			OTableField	   *table_field = &o_table->fields[attnum - 1];
 

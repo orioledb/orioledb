@@ -111,6 +111,7 @@ SELECT SUM(key)  FROM o_explain WHERE val2 > 0;
 SELECT SUM(val1) FROM o_explain WHERE val2 > 0;
 SELECT SUM(val2) FROM o_explain WHERE val2 > 0; -- check sum
 
+SET enable_seqscan = off;
 -- uses only secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
@@ -153,6 +154,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					AND val2 < 1000; $$) as t;
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
 
+RESET enable_seqscan;
+
 DROP TABLE o_explain;
 CREATE TABLE o_explain (
 	key integer NOT NULL,
@@ -172,8 +175,8 @@ SELECT SUM(val2) FROM o_explain WHERE val2 > 0; -- check sum
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT SUM(s.val2) FROM (
-						SELECT val2 FROM o_explain 
-							WHERE val2 > 0 AND val2 < 1000 
+						SELECT val2 FROM o_explain
+							WHERE val2 > 0 AND val2 < 1000
 							ORDER BY val2
 					) s; $$) as t;
 -- uses secondary index, primary key is stored in secondary index
@@ -334,12 +337,12 @@ CREATE TABLE o_explain_json (
 ) USING orioledb;
 
 INSERT INTO o_explain_json(val_1) VALUES (1), (2);
-SELECT explain_as_json($$ 
+SELECT explain_as_json($$
 		   EXPLAIN (FORMAT json, BUFFERS, ANALYZE)
 			   SELECT * FROM o_explain_json ORDER BY val_1;
 	   $$)->0->'Plan'->'Actual Rows';
 DELETE FROM o_explain_json;
-SELECT explain_as_json($$ 
+SELECT explain_as_json($$
 		   EXPLAIN (FORMAT json, BUFFERS, ANALYZE)
 			   SELECT * FROM o_explain_json ORDER BY val_1;
 	   $$)->0->'Plan'->'Actual Rows';

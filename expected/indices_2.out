@@ -827,6 +827,7 @@ SELECT orioledb_tbl_indices('o_test61'::regclass);
 
 INSERT INTO o_test61 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test61;
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
                 QUERY PLAN                
 ------------------------------------------
@@ -850,7 +851,6 @@ SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
  110 |   210
 (10 rows)
 
-SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test61 WHERE value BETWEEN 250 and 260;
                   QUERY PLAN                  
 ----------------------------------------------
@@ -5930,7 +5930,7 @@ CREATE INDEX o_test_renames_idx ON o_test_renames (val);
  val    | integer |           |          | 
 Indexes:
     "o_test_renames_pkey" PRIMARY KEY, btree (key)
-    "o_test_renames_idx" btree (val) INCLUDE (key)
+    "o_test_renames_idx" btree (val)
 
 SELECT orioledb_table_description('o_test_renames'::regclass);
                 orioledb_table_description                 
@@ -5957,7 +5957,6 @@ SELECT description FROM orioledb_table WHERE reloid = 'o_test_renames'::regclass
  Column |  Type   | Key? | Definition 
 --------+---------+------+------------
  val    | integer | yes  | val
- key    | bigint  | no   | key
 btree, for table "public.o_test_renames"
 
 SELECT orioledb_tbl_indices('o_test_renames'::regclass);
@@ -5995,7 +5994,7 @@ ALTER TABLE o_test_renames_idx RENAME TO o_test_renames_idx_as_tbl;
  val    | integer |           |          | 
 Indexes:
     "o_test_renames_pkey" PRIMARY KEY, btree (key)
-    "o_test_renames_idx_as_tbl" btree (val) INCLUDE (key)
+    "o_test_renames_idx_as_tbl" btree (val)
 
 \d o_test_renames_idx
 ALTER INDEX o_test_renames RENAME TO o_test_renames_as_ix;
@@ -6008,7 +6007,7 @@ ALTER INDEX o_test_renames RENAME TO o_test_renames_as_ix;
  val    | integer |           |          | 
 Indexes:
     "o_test_renames_pkey" PRIMARY KEY, btree (key)
-    "o_test_renames_idx_as_tbl" btree (val) INCLUDE (key)
+    "o_test_renames_idx_as_tbl" btree (val)
 
 ALTER TABLE o_test_renames_as_ix RENAME COLUMN o_test_renames_idx_as_tbl TO val2;
 ERROR:  column "o_test_renames_idx_as_tbl" does not exist
@@ -6020,7 +6019,7 @@ ERROR:  column "o_test_renames_idx_as_tbl" does not exist
  val    | integer |           |          | 
 Indexes:
     "o_test_renames_pkey" PRIMARY KEY, btree (key)
-    "o_test_renames_idx_as_tbl" btree (val) INCLUDE (key)
+    "o_test_renames_idx_as_tbl" btree (val)
 
 CREATE TABLE o_test_subexpr_collate (
     val_1 int PRIMARY KEY,
@@ -6178,17 +6177,16 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
  val_5  | integer |           |          |         | plain    |              | 
 Indexes:
     "o_test_reuse_multiple_indices_pkey" PRIMARY KEY, btree (val_1)
-    "o_test_reuse_multiple_indices_ix1" btree (val_2) INCLUDE (val_1)
-    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC) INCLUDE (val_1)
-    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2, val_1)
+    "o_test_reuse_multiple_indices_ix1" btree (val_2)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
 
 \d+ o_test_reuse_multiple_indices_ix1
-        Index "public.o_test_reuse_multiple_indices_ix1"
- Column |  Type   | Key? | Definition | Storage  | Stats target 
---------+---------+------+------------+----------+--------------
- val_2  | text    | yes  | val_2      | extended | 
- val_1  | integer | no   | val_1      | plain    | 
+      Index "public.o_test_reuse_multiple_indices_ix1"
+ Column | Type | Key? | Definition | Storage  | Stats target 
+--------+------+------+------------+----------+--------------
+ val_2  | text | yes  | val_2      | extended | 
 btree, for table "public.o_test_reuse_multiple_indices"
 
 \d+ o_test_reuse_multiple_indices_ix2
@@ -6197,7 +6195,6 @@ btree, for table "public.o_test_reuse_multiple_indices"
 --------+---------+------+------------+----------+--------------
  val_3  | integer | yes  | val_3      | plain    | 
  val_2  | text    | yes  | val_2      | extended | 
- val_1  | integer | no   | val_1      | plain    | 
 btree, for table "public.o_test_reuse_multiple_indices"
 
 \d+ o_test_reuse_multiple_indices_ix3
@@ -6206,7 +6203,6 @@ btree, for table "public.o_test_reuse_multiple_indices"
 --------+---------+------+------------+----------+--------------
  val_4  | integer | yes  | val_4      | plain    | 
  val_2  | text    | no   | val_2      | extended | 
- val_1  | integer | no   | val_1      | plain    | 
 btree, for table "public.o_test_reuse_multiple_indices"
 
 \d+ o_test_reuse_multiple_indices_ix4
@@ -6461,9 +6457,9 @@ SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
  val_5  | integer |           |          |         | plain    |              | 
 Indexes:
     "o_test_reuse_multiple_indices_pkey" PRIMARY KEY, btree (val_1)
-    "o_test_reuse_multiple_indices_ix1" btree (val_2) INCLUDE (val_1)
-    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC) INCLUDE (val_1)
-    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2, val_1)
+    "o_test_reuse_multiple_indices_ix1" btree (val_2)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
 
 EXPLAIN (COSTS OFF)
@@ -6575,17 +6571,16 @@ SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
  val_5  | character(1) |           |          |         | extended |              | 
 Indexes:
     "o_test_reuse_multiple_indices_pkey" PRIMARY KEY, btree (val_1)
-    "o_test_reuse_multiple_indices_ix1" btree (val_2) INCLUDE (val_1)
-    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC) INCLUDE (val_1)
-    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2, val_1)
+    "o_test_reuse_multiple_indices_ix1" btree (val_2)
+    "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
+    "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
 
 \d+ o_test_reuse_multiple_indices_ix1
-        Index "public.o_test_reuse_multiple_indices_ix1"
- Column |  Type   | Key? | Definition | Storage  | Stats target 
---------+---------+------+------------+----------+--------------
- val_2  | text    | yes  | val_2      | extended | 
- val_1  | integer | no   | val_1      | plain    | 
+      Index "public.o_test_reuse_multiple_indices_ix1"
+ Column | Type | Key? | Definition | Storage  | Stats target 
+--------+------+------+------------+----------+--------------
+ val_2  | text | yes  | val_2      | extended | 
 btree, for table "public.o_test_reuse_multiple_indices"
 
 \d+ o_test_reuse_multiple_indices_ix2
@@ -6594,7 +6589,6 @@ btree, for table "public.o_test_reuse_multiple_indices"
 --------+---------+------+------------+----------+--------------
  val_3  | integer | yes  | val_3      | plain    | 
  val_2  | text    | yes  | val_2      | extended | 
- val_1  | integer | no   | val_1      | plain    | 
 btree, for table "public.o_test_reuse_multiple_indices"
 
 \d+ o_test_reuse_multiple_indices_ix3
@@ -6603,7 +6597,6 @@ btree, for table "public.o_test_reuse_multiple_indices"
 --------+---------+------+------------+----------+--------------
  val_4  | integer | yes  | val_4      | plain    | 
  val_2  | text    | no   | val_2      | extended | 
- val_1  | integer | no   | val_1      | plain    | 
 btree, for table "public.o_test_reuse_multiple_indices"
 
 \d+ o_test_reuse_multiple_indices_ix4
@@ -7071,8 +7064,8 @@ SELECT orioledb_tbl_indices('o_test_include_like'::regclass);
 Indexes:
     "o_test_include_like_pkey" PRIMARY KEY, btree (key)
     "o_test_include_like_ix1" btree (key)
-    "o_test_include_like_ix2" btree (value) INCLUDE (key)
-    "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value, key)
+    "o_test_include_like_ix2" btree (value)
+    "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7112,8 +7105,8 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
 Indexes:
     "o_test_include_like_like_pkey" PRIMARY KEY, btree (key)
     "o_test_include_like_like_key_idx" btree (key)
-    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value, key)
-    "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
+    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
+    "o_test_include_like_like_value_idx" btree (value)
 
 DROP TABLE o_test_include_like_like;
 ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
@@ -7257,8 +7250,8 @@ SELECT orioledb_tbl_indices('o_test_include_like_like'::regclass);
 Indexes:
     "o_test_include_like_like_pkey" PRIMARY KEY, btree (key)
     "o_test_include_like_like_key_idx" btree (key)
-    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value, key)
-    "o_test_include_like_like_value_idx" btree (value) INCLUDE (key)
+    "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
+    "o_test_include_like_like_value_idx" btree (value)
 
 DROP TABLE o_test_include_like_like;
 CREATE TABLE o_test_partial_unique(
@@ -7425,9 +7418,41 @@ CREATE TABLE o_test_reindex_empty (
   val_1 int PRIMARY KEY
 ) USING orioledb;
 REINDEX INDEX o_test_reindex_empty_pkey;
+CREATE TABLE o_test_drop_included_pkey_field (
+    val_1 int,
+    val_2 int,
+    val_3 int,
+    val_4 int NULL,
+    PRIMARY KEY (val_4, val_2)
+) USING orioledb;
+CREATE INDEX o_test_drop_included_pkey_field_ix1
+	ON o_test_drop_included_pkey_field (val_1);
+\d o_test_drop_included_pkey_field
+  Table "public.o_test_drop_included_pkey_field"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ val_1  | integer |           |          | 
+ val_2  | integer |           | not null | 
+ val_3  | integer |           |          | 
+ val_4  | integer |           | not null | 
+Indexes:
+    "o_test_drop_included_pkey_field_pkey" PRIMARY KEY, btree (val_4, val_2)
+    "o_test_drop_included_pkey_field_ix1" btree (val_1)
+
+ALTER TABLE o_test_drop_included_pkey_field DROP COLUMN val_4;
+\d o_test_drop_included_pkey_field
+  Table "public.o_test_drop_included_pkey_field"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ val_1  | integer |           |          | 
+ val_2  | integer |           | not null | 
+ val_3  | integer |           |          | 
+Indexes:
+    "o_test_drop_included_pkey_field_ix1" btree (val_1)
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 37 other objects
+NOTICE:  drop cascades to 38 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -7465,3 +7490,4 @@ drop cascades to table o_test_include_like
 drop cascades to table o_test_partial_unique
 drop cascades to table o_test_unique_expr
 drop cascades to table o_test_reindex_empty
+drop cascades to table o_test_drop_included_pkey_field

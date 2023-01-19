@@ -32,6 +32,7 @@
 #include "executor/nodeModifyTable.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/cost.h"
 #include "optimizer/optimizer.h"
@@ -205,7 +206,7 @@ transform_path(Path *src_path, OTableDescr *descr)
 }
 
 bool
-orioledb_set_plain_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
+orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 									 RangeTblEntry *rte)
 {
 	bool		result = true;
@@ -217,20 +218,96 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel
 
 		if (is_orioledb_rel(relation))
 		{
-			ListCell   *lc;
-			IndexClauseSet rclauseset;
+			ListCell	   *lc;
+			int				i;
+			int				nfields;
+			ORelOids		oids = {MyDatabaseId, relation->rd_rel->oid,
+									relation->rd_node.relNode};
+			OTable		   *o_table;
 
-			foreach(lc, rel->indexlist)
+			o_table = o_tables_get(oids);
+
+			Assert(o_table);
+
+			if (o_table->has_primary)
 			{
-				IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
+				/*
+				 * Additional pkey fields are added to index target list
+				 * so that the index only scan is selected
+				 */
+				nfields = o_table->indices[PrimaryIndexNumber].nfields;
 
-				if (index->indpred != NIL && !index->predOK)
-					continue;
+				for (i = 0; i < nfields; i++)
+				{
+					OTableIndexField   *pk_field;
+					ListCell		   *lc;
 
-				MemSet(&rclauseset, 0, sizeof(rclauseset));
-				match_restriction_clauses_to_index(rootPageBlkno, index, &rclauseset);
+					pk_field = &o_table->indices[PrimaryIndexNumber].fields[i];
 
-				result = !rclauseset.nonempty;
+					foreach(lc, rel->indexlist)
+					{
+						IndexOptInfo   *index = (IndexOptInfo *) lfirst(lc);
+						int				col;
+						bool			member = false;
+
+						for (col = 0; col < index->ncolumns; col++)
+						{
+							if (pk_field->attnum + 1 == index->indexkeys[col])
+							{
+								member = true;
+								break;
+							}
+						}
+
+						if (!member)
+						{
+							Expr						   *indexvar;
+							const FormData_pg_attribute	   *att_tup;
+
+							index->ncolumns++;
+							index->indexkeys = (int *)
+								repalloc(index->indexkeys,
+										 sizeof(int) * index->ncolumns);
+							index->indexkeys[index->ncolumns - 1] =
+								pk_field->attnum + 1;
+							index->canreturn = (bool *)
+								repalloc(index->canreturn,
+										 sizeof(bool) * index->ncolumns);
+							index->canreturn[index->ncolumns - 1] = true;
+
+							att_tup = TupleDescAttr(relation->rd_att,
+													pk_field->attnum);
+
+							indexvar = (Expr *) makeVar(index->rel->relid,
+														pk_field->attnum + 1,
+														att_tup->atttypid,
+														att_tup->atttypmod,
+														att_tup->attcollation,
+														0);
+
+							index->indextlist =
+								lappend(index->indextlist,
+										makeTargetEntry(indexvar,
+														index->ncolumns,
+														NULL,
+														false));
+						}
+					}
+				}
+
+				foreach(lc, rel->indexlist)
+				{
+					IndexClauseSet		rclauseset;
+					IndexOptInfo	   *index = (IndexOptInfo *) lfirst(lc);
+
+					if (index->indpred != NIL && !index->predOK)
+						continue;
+
+					MemSet(&rclauseset, 0, sizeof(rclauseset));
+					match_restriction_clauses_to_index(root, index, &rclauseset);
+
+					result = !rclauseset.nonempty;
+				}
 			}
 		}
 		relation_close(relation, NoLock);

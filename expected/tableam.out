@@ -69,6 +69,12 @@ SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
 ANALYZE o_tableam1;
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1;
+       QUERY PLAN       
+------------------------
+ Seq Scan on o_tableam1
+(1 row)
+
 SELECT * FROM o_tableam1;
  key | value  
 -----+--------
@@ -94,18 +100,7 @@ SELECT * FROM o_tableam1;
   20 | 20text
 (20 rows)
 
-SELECT * FROM o_tableam1 WHERE key = 5;
- key | value 
------+-------
-   5 | 5text
-(1 row)
-
-EXPLAIN (COSTS off) SELECT * FROM o_tableam1;
-       QUERY PLAN       
-------------------------
- Seq Scan on o_tableam1
-(1 row)
-
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
                QUERY PLAN                
 -----------------------------------------
@@ -113,6 +108,19 @@ EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
    Forward index scan of: o_tableam1_ix1
    Conds: (key = 5)
 (3 rows)
+
+SELECT * FROM o_tableam1 WHERE key = 5;
+ key | value 
+-----+-------
+   5 | 5text
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_tableam1 ORDER BY key DESC;
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Backward index scan of: o_tableam1_ix1
+(2 rows)
 
 SELECT * FROM o_tableam1 ORDER BY key DESC;
  key | value  
@@ -139,14 +147,6 @@ SELECT * FROM o_tableam1 ORDER BY key DESC;
    1 | 1text
 (20 rows)
 
-SET enable_seqscan = off;
-EXPLAIN (COSTS off) SELECT * FROM o_tableam1 ORDER BY key DESC;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_tableam1
-   Backward index scan of: o_tableam1_ix1
-(2 rows)
-
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
                QUERY PLAN                
 -----------------------------------------
@@ -155,7 +155,6 @@ EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
    Conds: (value = '5text'::text)
 (3 rows)
 
-RESET enable_seqscan;
 SELECT * FROM o_tableam1 WHERE value = '5text';
  key | value 
 -----+-------
@@ -177,6 +176,7 @@ SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
    5 | 5text
 (1 row)
 
+RESET enable_seqscan;
 TRUNCATE o_tableam1;
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(11, 20) as id);
 SELECT * FROM o_tableam1;
@@ -1012,9 +1012,10 @@ CREATE OR REPLACE FUNCTION smart_explain(sql TEXT) RETURNS SETOF TEXT AS $$
 	END $$
 LANGUAGE plpgsql;
 SET enable_seqscan = off;
-SELECT smart_explain(
-'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
-	WHERE (key * 100) BETWEEN 100 AND 1000;');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+		WHERE (key * 100) BETWEEN 100 AND 1000;
+$$);
                          smart_explain                         
 ---------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
@@ -1038,9 +1039,10 @@ SELECT (key * 100) FROM o_test_expression
      1000
 (10 rows)
 
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) SELECT (value || \'WOW\') FROM o_test_expression
-	WHERE (value || \'WOW\') BETWEEN \'6\' AND \'9\';');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
+		WHERE (value || 'WOW') BETWEEN '6' AND '9';
+$$);
                                        smart_explain                                        
 --------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
@@ -1057,9 +1059,10 @@ SELECT (value || 'WOW') FROM o_test_expression
  8textWOW
 (3 rows)
 
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) SELECT (value || \'WOW\') FROM o_test_expression
-	WHERE UPPER(value) BETWEEN \'6\' AND \'9\';');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
+		WHERE UPPER(value) BETWEEN '6' AND '9';
+$$);
                              smart_explain                              
 ------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
@@ -1416,9 +1419,11 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
 ALTER TABLE o_test_expression DROP CONSTRAINT o_test_expression_pkey;
 ANALYZE o_test_expression;
 SET enable_bitmapscan = off;
-SELECT smart_explain(
-'EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
-	WHERE (key * 100) BETWEEN 100 AND 1000;');
+SET enable_seqscan = off;
+SELECT smart_explain($$
+	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
+		WHERE (key * 100) BETWEEN 100 AND 1000;
+$$);
                        smart_explain                       
 -----------------------------------------------------------
  Custom Scan (o_scan) on o_test_expression
@@ -1436,6 +1441,7 @@ SELECT (key * 100) FROM o_test_expression
 (3 rows)
 
 RESET enable_bitmapscan;
+RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
                                   orioledb_tbl_structure                                   
 -------------------------------------------------------------------------------------------
@@ -1655,6 +1661,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_tableam4;
  Seq Scan on o_tableam4
 (1 row)
 
+SET enable_seqscan = off;
 SELECT * FROM o_tableam4 WHERE key = 5;
  key | value | value2 
 -----+-------+--------
@@ -1669,7 +1676,6 @@ EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE key = 5;
    Conds: (key = 5)
 (3 rows)
 
-SET enable_seqscan = off;
 SELECT * FROM o_tableam4 WHERE value = 5;
  key | value | value2 
 -----+-------+--------
@@ -1765,6 +1771,7 @@ SELECT id FROM o_tableam5 ORDER BY id DESC;
   1
 (10 rows)
 
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT id FROM o_tableam5
 	WHERE id > 0 ORDER BY id DESC;
                     QUERY PLAN                    
@@ -1811,7 +1818,6 @@ CREATE OR REPLACE FUNCTION query_to_text(sql TEXT) RETURNS SETOF TEXT AS $$
 		RETURN QUERY EXECUTE sql;
 	END $$
 LANGUAGE plpgsql;
-SET enable_seqscan = off;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_tableam5
@@ -1937,8 +1943,10 @@ CREATE TABLE o_tableam_update1
 CREATE INDEX o_tableam_update1_ix ON o_tableam_update1 (val);
 INSERT INTO o_tableam_update1 (SELECT id, id || 'text', id || 'text2' FROM generate_series(1, 10) as id);
 ANALYZE o_tableam_update1;
-SELECT smart_explain(
-'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off)
+		UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
+$$);
                      smart_explain                     
 -------------------------------------------------------
  Update on o_tableam_update1
@@ -1947,8 +1955,11 @@ SELECT smart_explain(
          Conds: (id > 5)
 (4 rows)
 
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'1text\' RETURNING *;');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off)
+		UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text'
+			RETURNING *;
+$$);
                     smart_explain                    
 -----------------------------------------------------
  Update on o_tableam_update1
@@ -1957,8 +1968,11 @@ E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'1
          Conds: (val = '1text'::text)
 (4 rows)
 
-SELECT smart_explain(
-E'EXPLAIN (COSTS off) UPDATE o_tableam_update1 SET id = id + 100 WHERE val = \'2text\' RETURNING val;');
+SELECT smart_explain($$
+	EXPLAIN (COSTS off)
+		UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '2text'
+			RETURNING val;
+$$);
                     smart_explain                    
 -----------------------------------------------------
  Update on o_tableam_update1
@@ -4025,7 +4039,6 @@ $$ LANGUAGE sql;
 INSERT INTO o_test_add_column (i)
   SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
 CREATE SEQUENCE o_test_j_seq;
-ERROR:  relation "o_test_j_seq" already exists
 BEGIN;
 ALTER TABLE o_test_add_column
   ADD COLUMN j int4 not null default pseudo_random(2, nextval('o_test_j_seq')) * 20000;
