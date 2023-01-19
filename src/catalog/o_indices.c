@@ -261,12 +261,15 @@ make_primary_o_index(OTable *table)
 	for (i = 0; i < result->nNonLeafFields; i++)
 	{
 		if (find_existing_field(result, j, &tableIndex->fields[i]) >= 0)
+		{
+			result->nKeyFields--;
 			continue;
+		}
 
 		result->nonLeafFields[j++] = tableIndex->fields[i];
 	}
 	Assert(j <= result->nNonLeafFields);
-	result->nUniqueFields = j;
+	result->nUniqueFields = result->nKeyFields;
 	result->nNonLeafFields = j;
 
 	return result;

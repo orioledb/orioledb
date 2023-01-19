@@ -1757,6 +1757,16 @@ SELECT * FROM o_test_row_searchkey
 		ORDER BY val_1, val_2;
 RESET enable_seqscan;
 
+CREATE TABLE o_test_duplicate_error (
+	val_1 int,
+	val_2 int,
+	val_3 int,
+	val_4 int,
+	PRIMARY KEY (val_1,val_2) INCLUDE (val_3,val_4)
+) USING orioledb;
+INSERT INTO o_test_duplicate_error VALUES (1, 2, 3, 4);
+INSERT INTO o_test_duplicate_error VALUES (1, 2, 5, 6);
+
 CREATE TABLE o_test_drop_add_primary (
 	val_1 int,
 	val_2 int,

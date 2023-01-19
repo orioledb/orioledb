@@ -8285,6 +8285,17 @@ SELECT * FROM o_test_row_searchkey
 (7 rows)
 
 RESET enable_seqscan;
+CREATE TABLE o_test_duplicate_error (
+	val_1 int,
+	val_2 int,
+	val_3 int,
+	val_4 int,
+	PRIMARY KEY (val_1,val_2) INCLUDE (val_3,val_4)
+) USING orioledb;
+INSERT INTO o_test_duplicate_error VALUES (1, 2, 3, 4);
+INSERT INTO o_test_duplicate_error VALUES (1, 2, 5, 6);
+ERROR:  duplicate key value violates unique constraint "o_test_duplicate_error_pkey"
+DETAIL:  Key (val_1, val_2)=('1', '2') already exists.
 CREATE TABLE o_test_drop_add_primary (
 	val_1 int,
 	val_2 int,
@@ -8359,7 +8370,7 @@ SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 45 other objects
+NOTICE:  drop cascades to 46 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8403,6 +8414,7 @@ drop cascades to table o_test_include_box
 drop cascades to table o_test_include_box_with_pkey
 drop cascades to table o_test_drop_included_pkey_field
 drop cascades to table o_test_row_searchkey
+drop cascades to table o_test_duplicate_error
 drop cascades to table o_test_drop_add_primary
 drop cascades to table o_test_add_drop_pkey_same_trx
 DROP SCHEMA indices CASCADE;
