@@ -2219,7 +2219,7 @@ SELECT * FROM o_test_empty;
 (0 rows)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 28 other objects
+NOTICE:  drop cascades to 29 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes

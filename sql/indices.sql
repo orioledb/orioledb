@@ -1805,6 +1805,17 @@ SELECT * FROM o_test_add_drop_pkey_same_trx;
 SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
 COMMIT;
 
+CREATE TABLE o_test_unique_ix_duplicate (
+	c1 int,
+	c2 int,
+	c3 int,
+	c4 int
+) USING orioledb;
+INSERT INTO o_test_unique_ix_duplicate VALUES (1, 2, 3, 4);
+INSERT INTO o_test_unique_ix_duplicate VALUES (1, 2, 5, 6);
+CREATE UNIQUE INDEX o_test_unique_ix_duplicate_uniq1
+	ON o_test_unique_ix_duplicate USING btree (c1, c2) INCLUDE (c3, c4);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;

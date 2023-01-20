@@ -8365,8 +8365,20 @@ SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
 (2 rows)
 
 COMMIT;
+CREATE TABLE o_test_unique_ix_duplicate (
+	c1 int,
+	c2 int,
+	c3 int,
+	c4 int
+) USING orioledb;
+INSERT INTO o_test_unique_ix_duplicate VALUES (1, 2, 3, 4);
+INSERT INTO o_test_unique_ix_duplicate VALUES (1, 2, 5, 6);
+CREATE UNIQUE INDEX o_test_unique_ix_duplicate_uniq1
+	ON o_test_unique_ix_duplicate USING btree (c1, c2) INCLUDE (c3, c4);
+ERROR:  could not create unique index "o_test_unique_ix_duplicate_uniq1"
+DETAIL:  Duplicate keys exist.
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 46 other objects
+NOTICE:  drop cascades to 47 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8413,6 +8425,7 @@ drop cascades to table o_test_row_searchkey
 drop cascades to table o_test_duplicate_error
 drop cascades to table o_test_drop_add_primary
 drop cascades to table o_test_add_drop_pkey_same_trx
+drop cascades to table o_test_unique_ix_duplicate
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)
