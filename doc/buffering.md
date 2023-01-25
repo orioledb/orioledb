@@ -3,7 +3,7 @@ Undo log storage
 
 OrioleDB can store the undo log in files, but it also provides in-memory buffering.  Buffering is designed to provide the fastest access to the most recent undo records.  The total size of undo buffers is controlled by `orioledb.undo_buffers` GUC parameter.  This size is split into two halves, one for the circular buffer and another for block buffers.
 
-OrioleDB keeps enough undo log to fulfill the following requirements:
+OrioleDB keeps as many of undo log records as to fulfill the following requirements:
 
  * rollback any in-progress transactions;
  * serve any existing snapshots;
@@ -13,9 +13,9 @@ The picture below illustrates the filling of the undo circular buffer.  The reta
 
 ![Undo circular buffer](images/undo_buffer_1.svg)
 
-Once we reach the end of the circular buffer, we start from the beginning if the retain location allows us to do this without the wraparound.  Unless we need to retain too many undo records, we may store all of them in the circular buffer.
+Once we reach the end of the circular buffer, we start from the beginning if the retain location allows us to do this without overwriting required undo records. Unless we need to retain too many undo records, we may store all of them in the circular buffer.
 
-![Undo circular buffer wraparound](images/undo_buffer_2.svg)
+![Undo circular buffer overflow](images/undo_buffer_2.svg)
 
 Once we need to add a new undo record, but the corresponding space is still occupied by retained undo records, we need to write some undo records to undo files.  The picture below shows undo log split between the circular buffer and undo file.  The records before written location are kept in undo files, and the records after written location are kept in the circular buffer.  If we don't need to retain much of undo log (for instance, some long-running transaction was finished), we may switch back to the storage of the whole undo log in the circular buffer.
 
