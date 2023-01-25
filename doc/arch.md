@@ -111,7 +111,7 @@ Some undo records include both tuple header and tuple body (update record), whil
 
 Besides a presence in row versions chains, undo records are also present in transaction chains.  If the transaction aborts, the corresponding chain is traversed to replay all the undo records.
 
-The snapshot of undo log is written out during checkpointing.  We need this because, during recovery, we might need to rollback some of the transactions that were in progress during checkpointing.  Besides checkpointing, we do not have to write the undo log to the storage expects when it does not fit to corresponding shared memory.
+The snapshot of undo log is written out during checkpointing.  We need this because, during recovery, we might need to rollback some of the transactions that were in progress during checkpointing.  Besides checkpointing, we do not have to write the undo log to the storage except when it does not fit to corresponding shared memory.
 
 Sometimes we need to replay only part of the transaction chain.  For instance, OrioleDB's implementation of `ROLLBACK TO SAVEPOINT` replays the transaction's undo log chain to the given point.  Aborting speculative insertions during `INSERT ... ON CONFLICT ...` works the same way.  However, once we replay some part of the transaction undo the chain, we might still need it during recovery because corresponding data could be (partially) checkpointed before replay.  In order to track this, we add special `branch` undo records, which gives recovery a possibility to walk already replayed branches.
 
