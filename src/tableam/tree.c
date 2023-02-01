@@ -475,22 +475,39 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 
 /* fills secondary index key bound from primary index tuple */
 void
-o_fill_secondary_key_bound(BTreeDescr *primary,
-						   BTreeDescr *secondary,
-						   OTuple tuple, OBTreeKeyBound *bound)
+o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
+						   OTuple tuple, TupleTableSlot *slot,
+						   OBTreeKeyBound *bound)
 {
-	OIndexDescr *pt = o_get_tree_def(primary),
-			   *st = o_get_tree_def(secondary);
-	int			i,
-				attnum;
-	bool		isnull;
+	OIndexDescr	   *pt = o_get_tree_def(primary),
+				   *st = o_get_tree_def(secondary);
+	int				i,
+					attnum;
+	bool			isnull;
+	ListCell	   *indexpr_item = list_head(st->expressions_state);
 
 	bound->nkeys = st->nonLeafTupdesc->natts;
 	for (i = 0; i < st->nonLeafTupdesc->natts; i++)
 	{
 		attnum = st->fields[i].tableAttnum;
-		bound->keys[i].value = o_fastgetattr(tuple, attnum, pt->leafTupdesc, &pt->leafSpec, &isnull);
-		bound->keys[i].type = pt->leafTupdesc->attrs[attnum - 1].atttypid;
+		if (attnum != EXPR_ATTNUM)
+		{
+			bound->keys[i].value = o_fastgetattr(tuple, attnum,
+												 pt->leafTupdesc,
+												 &pt->leafSpec, &isnull);
+			bound->keys[i].type = pt->leafTupdesc->attrs[attnum - 1].atttypid;
+		}
+		else
+		{
+			ExprState   *expr_state = (ExprState *) lfirst(indexpr_item);
+
+			st->econtext->ecxt_scantuple = slot;
+			bound->keys[i].value = ExecEvalExprSwitchContext(expr_state,
+															 st->econtext,
+															 &isnull);
+			bound->keys[i].type = st->nonLeafTupdesc->attrs[i].atttypid;
+			indexpr_item = lnext(st->expressions_state, indexpr_item);
+		}
 		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
@@ -869,12 +886,15 @@ o_idx_cmp(BTreeDescr *desc,
 
 	for (i = 0; i < n; i++)
 	{
-		cmp = o_idx_cmp_value_bounds(&key1->keys[i],
-									 &key2->keys[i],
-									 &id->fields[i],
-									 NULL);
-		if (cmp)
-			return cmp;
+		if (!OIgnoreColumn(id, i))
+		{
+			cmp = o_idx_cmp_value_bounds(&key1->keys[i],
+										 &key2->keys[i],
+										 &id->fields[i],
+										 NULL);
+			if (cmp)
+				return cmp;
+		}
 	}
 #endif
 

@@ -22,8 +22,10 @@ extern void index_btree_desc_init(BTreeDescr *desc, OCompress compress,
 								  OXid createOxid, void *arg);
 extern void o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 							 BTreeKeyType keyType, OBTreeKeyBound *bound);
-extern void o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
-									   OTuple tuple, OBTreeKeyBound *bound);
+extern void o_fill_secondary_key_bound(BTreeDescr *primary,
+									   BTreeDescr *secondary,
+									   OTuple tuple, TupleTableSlot *slot,
+									   OBTreeKeyBound *bound);
 extern void o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 										  OTuple tup, OBTreeKeyBound *bound);
 extern int	o_idx_cmp_value_bounds(OBTreeValueBound *bound1,

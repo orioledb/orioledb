@@ -1816,6 +1816,51 @@ INSERT INTO o_test_unique_ix_duplicate VALUES (1, 2, 5, 6);
 CREATE UNIQUE INDEX o_test_unique_ix_duplicate_uniq1
 	ON o_test_unique_ix_duplicate USING btree (c1, c2) INCLUDE (c3, c4);
 
+CREATE TABLE o_test_expr_index_on_conflict(
+	val_1 text NOT NULL,
+	val_2 text
+)USING orioledb;
+
+CREATE UNIQUE INDEX
+	ON o_test_expr_index_on_conflict(lower(val_1));
+
+INSERT INTO o_test_expr_index_on_conflict(val_1, val_2)
+	VALUES('AaBb', 'insert1') ON CONFLICT (lower(val_1))
+		DO UPDATE set val_1 = EXCLUDED.val_1;
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_expr_index_on_conflict ORDER BY lower(val_1);
+SELECT * FROM o_test_expr_index_on_conflict ORDER BY lower(val_1);
+
+INSERT INTO o_test_expr_index_on_conflict(val_1, val_2)
+	VALUES('AABB', 'insert2') ON CONFLICT (lower(val_1))
+		DO UPDATE set val_1 = EXCLUDED.val_1;
+
+SELECT * FROM o_test_expr_index_on_conflict ORDER BY lower(val_1);
+
+CREATE TABLE o_test_expr_include_index(
+	val_1 text NOT NULL,
+	val_2 text
+)USING orioledb;
+
+CREATE UNIQUE INDEX ON o_test_expr_include_index(lower(val_1)) INCLUDE (val_2);
+
+INSERT INTO o_test_expr_include_index(val_1, val_2)
+	VALUES('AaBb', 'insert1') ON CONFLICT (lower(val_1))
+		DO UPDATE set val_1 = EXCLUDED.val_1;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_expr_include_index ORDER BY lower(val_1);
+SELECT * FROM o_test_expr_include_index ORDER BY lower(val_1);
+
+INSERT INTO o_test_expr_include_index(val_1, val_2)
+	VALUES('AABB', 'insert2') ON CONFLICT (lower(val_1))
+		DO UPDATE set val_1 = EXCLUDED.val_1;
+
+SELECT * FROM o_test_expr_include_index ORDER BY lower(val_1);
+RESET enable_seqscan;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;

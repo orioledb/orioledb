@@ -375,7 +375,8 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 
 				o_fill_secondary_key_bound(&primary_td->desc,
 										   &conflict_td->desc,
-										   primary_tup, &key);
+										   primary_tup, slot,
+										   &key);
 				sstup = ((OTableSlot *) scan_slot)->tuple;
 				if (o_idx_cmp(&conflict_td->desc,
 							  &sstup, BTreeKeyLeafTuple,
@@ -1258,8 +1259,11 @@ o_insert_on_conflict_wait_callback(BTreeDescr *descr,
 	if (descr->type != oIndexPrimary || !ioc_arg->copyPrimaryOxid)
 		return OBTreeCallbackActionXidWait;
 
-	o_fill_secondary_key_bound(descr, td, *newtup, &new_sec_key);
-	o_fill_secondary_key_bound(descr, td, tup, &old_sec_key);
+	o_fill_secondary_key_bound(descr, td, *newtup,
+							   (TupleTableSlot *) ioc_arg->newSlot,
+							   &new_sec_key);
+	o_fill_secondary_key_bound(descr, td, tup, ioc_arg->scanSlot,
+							   &old_sec_key);
 
 	if (o_idx_cmp(td, (Pointer) &new_sec_key, BTreeKeyBound,
 				  (Pointer) &old_sec_key, BTreeKeyBound) == 0)
