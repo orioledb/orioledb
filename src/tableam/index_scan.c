@@ -61,39 +61,99 @@ init_index_scan_state(OScanState *ostate, Relation index,
 }
 
 static bool
-is_tuple_valid(OTuple tup, OIndexDescr *id, ScanDirection scanDir,
-			   OBTreeKeyRange *range)
+row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
+					   bool low)
 {
-	int			i;
-	OBTreeKeyBound *low = &range->low;
-	OBTreeKeyBound *high = &range->high;
+	int		rowkeynum;
+	bool	valid = true;
+
+	for (rowkeynum = 0; rowkeynum < row_key->nkeys; rowkeynum++)
+	{
+		OBTreeValueBound *subkey1 = &row_key->keys[rowkeynum];
+		uint8 flags = subkey1->flags;
+		int keynum = row_key->keynums[rowkeynum];
+
+		if (!(flags & O_VALUE_BOUND_UNBOUNDED))
+		{
+			int		attnum;
+			bool	isnull;
+			Datum	value;
+			int		cmp;
+			int		valid_cmp;
+
+			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
+												  id, keynum + 1);
+			value = o_fastgetattr(tup, attnum, id->leafTupdesc,
+								  &id->leafSpec, &isnull);
+			cmp = o_idx_cmp_range_key_to_value(subkey1,
+											   &id->fields[keynum],
+											   value, isnull);
+
+			valid_cmp = low ? cmp > 0 : cmp < 0;
+
+			if (valid_cmp)
+				valid = false;
+			else if (!valid_cmp && cmp != 0 && rowkeynum < row_key->nkeys - 1)
+				break;
+		}
+		if (!valid)
+			break;
+	}
+
+	return valid;
+}
+
+static bool
+is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range)
+{
+	int					i;
+	OBTreeKeyBound	   *low = &range->low;
+	OBTreeKeyBound	   *high = &range->high;
+	bool				valid = true;
+	int					keynum;
 
 	Assert(low->nkeys == high->nkeys);
 
-	for (i = 0; i < low->nkeys; i++)
+	for (i = 0; valid && i < low->nkeys; i++)
 	{
-		int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1);
-		bool		isnull;
-		Datum		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
-										  &id->leafSpec, &isnull);
+		int		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
+													  id, i + 1);
+		bool	isnull;
+		Datum	value = o_fastgetattr(tup, attnum, id->leafTupdesc,
+									  &id->leafSpec, &isnull);
 
 		if (!(low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
 			if (o_idx_cmp_range_key_to_value(&low->keys[i],
 											 &id->fields[i],
 											 value, isnull) > 0)
-				return false;
+				valid = false;
 		}
 
-		if (!(high->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
+		if (valid && !(high->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
 			if (o_idx_cmp_range_key_to_value(&high->keys[i],
 											 &id->fields[i],
 											 value, isnull) < 0)
-				return false;
+				valid = false;
 		}
 	}
-	return true;
+
+	for (keynum = 0; valid && keynum < low->n_row_keys; keynum++)
+	{
+		if (!row_key_tuple_is_valid(&low->row_keys[keynum],
+									tup, id, true))
+			valid = false;
+	}
+
+	for (keynum = 0; valid && keynum < high->n_row_keys; keynum++)
+	{
+		if (!row_key_tuple_is_valid(&high->row_keys[keynum],
+									tup, id, false))
+			valid = false;
+	}
+
+	return valid;
 }
 
 static bool
@@ -194,7 +254,6 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 				else
 				{
 					tup_is_valid = is_tuple_valid(tup, indexDescr,
-												  ostate->scanDir,
 												  &ostate->curKeyRange);
 					if (tup_is_valid)
 						tup_fetched = true;

@@ -1538,5 +1538,89 @@ CREATE INDEX o_test_drop_included_pkey_field_ix1
 ALTER TABLE o_test_drop_included_pkey_field DROP COLUMN val_4;
 \d o_test_drop_included_pkey_field
 
+CREATE TABLE o_test_row_searchkey (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1, val_2)
+) USING orioledb;
+
+INSERT INTO o_test_row_searchkey
+	SELECT v % 5, (20 - v) % 6 FROM generate_series(1, 20) v;
+SELECT * FROM o_test_row_searchkey ORDER BY val_1, val_2;
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+			  val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+		  val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
+			  val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
+		  val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+			  (val_1 > 1 OR (val_1 = 1 AND val_2 > 2))
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+		  (val_1 > 1 OR (val_1 = 1 AND val_2 > 2))
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
+		ORDER BY val_1, val_2;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
+			  (val_1 > 1 OR (val_1 = 1 AND val_2 >= 2))
+			ORDER BY val_1, val_2;
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
+		  (val_1 > 1 OR (val_1 = 1 AND val_2 >= 2))
+		ORDER BY val_1, val_2;
+RESET enable_seqscan;
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

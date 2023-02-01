@@ -1018,6 +1018,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 * If comparator isn't cached, then look for comparator with sort support
 	 * function.
 	 */
+	Assert(OidIsValid(lefttype));
+	Assert(OidIsValid(righttype));
 	leftBaseTypeOid = getBaseType(lefttype);
 	rightBaseTypeOid = getBaseType(righttype);
 	procOid = get_opfamily_proc(opfamily, leftBaseTypeOid, rightBaseTypeOid, BTSORTSUPPORT_PROC);

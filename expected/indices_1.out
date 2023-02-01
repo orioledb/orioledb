@@ -7438,9 +7438,247 @@ ALTER TABLE o_test_drop_included_pkey_field DROP COLUMN val_4;
 Indexes:
     "o_test_drop_included_pkey_field_ix1" btree (val_1)
 
+CREATE TABLE o_test_row_searchkey (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1, val_2)
+) USING orioledb;
+INSERT INTO o_test_row_searchkey
+	SELECT v % 5, (20 - v) % 6 FROM generate_series(1, 20) v;
+SELECT * FROM o_test_row_searchkey ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     0 |     0
+     0 |     3
+     0 |     4
+     0 |     5
+     1 |     1
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     0
+     2 |     1
+     2 |     2
+     2 |     3
+     3 |     0
+     3 |     1
+     3 |     2
+     3 |     5
+     4 |     0
+     4 |     1
+     4 |     4
+     4 |     5
+(20 rows)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     1
+     2 |     2
+(6 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+			  val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: ((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3)))
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((val_1 > 0) AND (val_2 > 0))
+(4 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+		  val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     1
+     2 |     2
+(6 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     1
+     2 |     2
+     2 |     3
+(7 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
+			  val_1 > 0 AND val_2 > 0
+			ORDER BY val_1, val_2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: ((val_1 < 2) OR ((val_1 = 2) AND ((val_2 < 3) OR (val_2 = 3))))
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((val_1 > 0) AND (val_2 > 0))
+(4 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
+		  val_1 > 0 AND val_2 > 0
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     1
+     2 |     2
+     2 |     3
+(7 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
+			ORDER BY val_1, val_2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     3
+     1 |     4
+     2 |     0
+     2 |     1
+     2 |     2
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+			  (val_1 > 1 OR (val_1 = 1 AND val_2 > 2))
+			ORDER BY val_1, val_2;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2))))
+   Forward index only scan of: o_test_row_searchkey_pkey
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
+		  (val_1 > 1 OR (val_1 = 1 AND val_2 > 2))
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     3
+     1 |     4
+     2 |     0
+     2 |     1
+     2 |     2
+(5 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
+			ORDER BY val_1, val_2;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     0
+     2 |     1
+     2 |     2
+     2 |     3
+(7 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey
+		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
+			  (val_1 > 1 OR (val_1 = 1 AND val_2 >= 2))
+			ORDER BY val_1, val_2;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 <= 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2))))
+   Forward index only scan of: o_test_row_searchkey_pkey
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey
+	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
+		  (val_1 > 1 OR (val_1 = 1 AND val_2 >= 2))
+		ORDER BY val_1, val_2;
+ val_1 | val_2 
+-------+-------
+     1 |     2
+     1 |     3
+     1 |     4
+     2 |     0
+     2 |     1
+     2 |     2
+     2 |     3
+(7 rows)
+
+RESET enable_seqscan;
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 38 other objects
+NOTICE:  drop cascades to 39 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -7479,3 +7717,4 @@ drop cascades to table o_test_partial_unique
 drop cascades to table o_test_unique_expr
 drop cascades to table o_test_reindex_empty
 drop cascades to table o_test_drop_included_pkey_field
+drop cascades to table o_test_row_searchkey

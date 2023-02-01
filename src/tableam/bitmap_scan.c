@@ -199,6 +199,8 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 
 	ostate.curKeyRangeIsLoaded = false;
 	ostate.curKeyRange.empty = true;
+	ostate.curKeyRange.low.n_row_keys = 0;
+	ostate.curKeyRange.high.n_row_keys = 0;
 
 	o_btree_load_shmem(&indexDescr->desc);
 	do

@@ -511,6 +511,8 @@ o_create_custom_scan_state(CustomScan *cscan)
 		ix_plan_state->ostate.iterator = NULL;
 		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
 		ix_plan_state->ostate.curKeyRange.empty = true;
+		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
+		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
 
 		if (IsA(custom_plan, IndexScan))
 		{
@@ -753,13 +755,16 @@ o_rescan_custom_scan(CustomScanState *node)
 
 		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
 		ix_plan_state->ostate.curKeyRange.empty = true;
+		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
+		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
 		ix_plan_state->ostate.iterator = NULL;
 		ix_plan_state->ostate.scandesc = NULL;
 	}
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
-		OBitmapHeapPlanState *bitmap_state =
-		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+		OBitmapHeapPlanState *bitmap_state;
+
+		bitmap_state = (OBitmapHeapPlanState *) ocstate->o_plan_state;
 
 		if (bitmap_state->scan)
 			o_free_bitmap_scan(bitmap_state->scan);
@@ -782,8 +787,9 @@ o_end_custom_scan(CustomScanState *node)
 
 	if (ocstate->o_plan_state->type == O_IndexPlan)
 	{
-		OIndexPlanState *ix_plan_state =
-		(OIndexPlanState *) ocstate->o_plan_state;
+		OIndexPlanState *ix_plan_state;
+
+		ix_plan_state = (OIndexPlanState *) ocstate->o_plan_state;
 
 		if (ix_plan_state->ostate.iterator != NULL)
 			btree_iterator_free(ix_plan_state->ostate.iterator);
