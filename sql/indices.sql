@@ -1861,6 +1861,26 @@ INSERT INTO o_test_expr_include_index(val_1, val_2)
 SELECT * FROM o_test_expr_include_index ORDER BY lower(val_1);
 RESET enable_seqscan;
 
+CREATE TABLE o_test_equal_but_binary_not_equal(
+  val_1 float4,
+  val_2 int,
+  PRIMARY KEY (val_1)
+)USING orioledb;
+
+SELECT 'NaN'::float4 = '-NaN'::float4;
+SELECT '0'::float4 = '-0'::float4;
+
+INSERT INTO o_test_equal_but_binary_not_equal VALUES ('NaN', 2);
+INSERT INTO o_test_equal_but_binary_not_equal VALUES ('0', 4);
+SELECT orioledb_tbl_structure('o_test_equal_but_binary_not_equal'::regclass,
+							  'nue');
+UPDATE o_test_equal_but_binary_not_equal
+	SET val_1 = '-NaN', val_2 = 3 WHERE val_1 = 'NaN';
+UPDATE o_test_equal_but_binary_not_equal
+	SET val_1 = '-0', val_2 = 3 WHERE val_1 = '0';
+SELECT orioledb_tbl_structure('o_test_equal_but_binary_not_equal'::regclass,
+							  'nue');
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;

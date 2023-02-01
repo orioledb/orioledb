@@ -1382,13 +1382,51 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 	idx_tup = tts_orioledb_make_key(newSlot, descr);
 
 #ifdef USE_ASSERT_CHECKING
-	old_idx_tup = tts_orioledb_make_key(oldSlot, descr);
-	o_tuple_set_version(&primary->nonLeafSpec, &old_idx_tup, o_tuple_get_version(idx_tup));
-	/* old_idx_tup and new_idx_tup are equals */
-	Assert(o_tuple_size(old_idx_tup, &primary->nonLeafSpec) == o_tuple_size(idx_tup, &primary->nonLeafSpec));
-	Assert(old_idx_tup.formatFlags == idx_tup.formatFlags);
-	Assert(memcmp(old_idx_tup.data, idx_tup.data, o_tuple_size(old_idx_tup, &primary->nonLeafSpec)) == 0);
-	pfree(old_idx_tup.data);
+	{
+		int	natts;
+
+		old_idx_tup = tts_orioledb_make_key(oldSlot, descr);
+		o_tuple_set_version(&primary->nonLeafSpec, &old_idx_tup,
+							o_tuple_get_version(idx_tup));
+		/* old_idx_tup and idx_tup are equal */
+		Assert(o_tuple_size(old_idx_tup, &primary->nonLeafSpec) ==
+			   o_tuple_size(idx_tup, &primary->nonLeafSpec));
+		Assert(old_idx_tup.formatFlags == idx_tup.formatFlags);
+		/*
+		 * Cannot use simple memcmp(old_idx_tup.data, idx_tup.data, ...)
+		 * because of included fields and also equality of
+		 * such special values as '0.0' and '-0.0' for float
+		 */
+		if (old_idx_tup.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT)
+			natts = primary->nonLeafSpec.natts;
+		else
+			natts = primary->nonLeafTupdesc->natts;
+		for (i = 0; i < natts; i++)
+		{
+			if (!OIgnoreColumn(primary, i))
+			{
+				Datum			old_value;
+				Datum			new_value;
+				bool			isnull;
+				OIndexField	   *pkfield = &primary->fields[i];
+				int				cmp;
+
+				old_value = o_fastgetattr(old_idx_tup, i + 1,
+										  primary->nonLeafTupdesc,
+										  &primary->nonLeafSpec, &isnull);
+				Assert(!isnull);
+				new_value = o_fastgetattr(idx_tup, i + 1,
+										  primary->nonLeafTupdesc,
+										  &primary->nonLeafSpec, &isnull);
+				Assert(!isnull);
+
+				cmp = o_call_comparator(pkfield->comparator,
+										old_value, new_value);
+				Assert(cmp == 0);
+			}
+		}
+		pfree(old_idx_tup.data);
+	}
 #endif
 
 	for (i = 0; i < descr->ntoastable; i++)
