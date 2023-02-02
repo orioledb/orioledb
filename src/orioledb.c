@@ -182,6 +182,7 @@ _PG_init(void)
 {
 	Size		main_buffers_count;
 	int			i;
+	int			min_pool_size;
 
 	if (!process_shared_preload_libraries_in_progress)
 		return;
@@ -192,6 +193,8 @@ _PG_init(void)
 	/* See InitializeMaxBackends(), InitProcGlobal() */
 	max_procs = MaxConnections + autovacuum_max_workers + 2 +
 		max_worker_processes + max_wal_senders + NUM_AUXILIARY_PROCS;
+
+	min_pool_size = Max(PPOOL_MIN_SIZE_BLCKS, max_procs * 4);
 
 	DefineCustomBoolVariable("orioledb.debug_disable_pools_limit",
 							 "Disables pools minimal limit for debug.",
@@ -208,8 +211,8 @@ _PG_init(void)
 							"Size of orioledb engine shared buffers for main data.",
 							NULL,
 							&main_buffers_guc,
-							8192,
-							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE_BLCKS,
+							Max(8192, min_pool_size),
+							debug_disable_pools_limit ? 1 : min_pool_size,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -221,8 +224,8 @@ _PG_init(void)
 							"Size of orioledb engine shared buffers for free extents BTrees.",
 							NULL,
 							&free_tree_buffers_guc,
-							PPOOL_MIN_SIZE_BLCKS,
-							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE_BLCKS,
+							min_pool_size,
+							debug_disable_pools_limit ? 1 : min_pool_size,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -234,8 +237,8 @@ _PG_init(void)
 							"Size of orioledb engine shared buffers for free extents BTrees.",
 							NULL,
 							&catalog_buffers_guc,
-							PPOOL_MIN_SIZE_BLCKS,
-							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE_BLCKS,
+							min_pool_size,
+							debug_disable_pools_limit ? 1 : min_pool_size,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -247,8 +250,8 @@ _PG_init(void)
 							"Size of orioledb engine undo log buffers.",
 							NULL,
 							&undo_buffers_guc,
-							128,
-							128,
+							Max(128, 4 * max_procs),
+							4 * max_procs,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
