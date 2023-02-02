@@ -1634,6 +1634,7 @@ CREATE UNIQUE INDEX o_test_drop_add_primary_ix1
 	ON o_test_drop_add_primary (val_1, val_2) INCLUDE (val_3, val_1);
 ALTER TABLE o_test_drop_add_primary ADD PRIMARY KEY (val_4);
 \d o_test_drop_add_primary
+TRUNCATE TABLE o_test_drop_add_primary;
 
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

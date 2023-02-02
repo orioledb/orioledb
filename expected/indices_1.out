@@ -7699,6 +7699,7 @@ Indexes:
     "o_test_drop_add_primary_pkey" PRIMARY KEY, btree (val_4)
     "o_test_drop_add_primary_ix1" UNIQUE, btree (val_1, val_2) INCLUDE (val_3, val_1)
 
+TRUNCATE TABLE o_test_drop_add_primary;
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 40 other objects
