@@ -1377,6 +1377,12 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			rollback_to_savepoint(UndoStackFull, parentSubid, true);
 			add_rollback_to_savepoint_wal_record(parentSubid);
 			saved_undo_location = InvalidUndoLocation;
+			/*
+			 * It might happen that we've released some row-level locks.  Some
+			 * waiters must be woken up.  We currently can't distinguish them
+			 * and just wake up everybody.
+			 */
+			oxid_notify_all();
 			break;
 		default:
 			break;

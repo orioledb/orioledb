@@ -1285,6 +1285,7 @@ jsonb_push_string_key(JsonbParseState **state, const char *key,
 static void
 orioledb_error_cleanup_hook(void)
 {
+	GET_CUR_PROCDATA()->waitingForOxid = false;
 	release_all_page_locks();
 	ppool_release_all_pages();
 	release_undo_size(UndoReserveTxn);

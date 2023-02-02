@@ -1,0 +1,46 @@
+Parsed test spec with 2 sessions
+
+starting permutation: savepoint_1 update_1 select_2_key_share rollback_1 select_1_key_share commit_2 commit_1
+step savepoint_1: SAVEPOINT f;
+step update_1: UPDATE o_test_1 SET val_1 = 2;
+step select_2_key_share: SELECT * FROM o_test_1 FOR KEY SHARE; <waiting ...>
+step rollback_1: ROLLBACK TO f;
+step select_2_key_share: <... completed>
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step select_1_key_share: SELECT * FROM o_test_1 FOR KEY SHARE;
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step commit_2: COMMIT;
+step commit_1: COMMIT;
+
+starting permutation: select_1_key_share savepoint_1 select_1_no_key_update select_2_no_key_update rollback_1 commit_1 commit_2
+step select_1_key_share: SELECT * FROM o_test_1 FOR KEY SHARE;
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step savepoint_1: SAVEPOINT f;
+step select_1_no_key_update: SELECT * FROM o_test_1 FOR NO KEY UPDATE;
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step select_2_no_key_update: SELECT * FROM o_test_1 FOR NO KEY UPDATE; <waiting ...>
+step rollback_1: ROLLBACK TO f;
+step select_2_no_key_update: <... completed>
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step commit_1: COMMIT;
+step commit_2: COMMIT;

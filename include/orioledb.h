@@ -112,6 +112,7 @@ typedef struct
 	LocalTransactionId lastLXid;
 	LWLock		undoStackLocationsFlushLock;
 	bool		flushUndoLocations;
+	bool		waitingForOxid;
 	pg_atomic_uint64 xmin;
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];

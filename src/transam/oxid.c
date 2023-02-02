@@ -19,6 +19,8 @@
 #include "utils/o_buffers.h"
 
 #include "access/transam.h"
+#include "access/twophase.h"
+#include "miscadmin.h"
 #include "storage/lmgr.h"
 #include "storage/sinvaladt.h"
 #include "storage/procsignal.h"
@@ -67,6 +69,99 @@ oxid_shmem_needs(void)
 	return size;
 }
 
+#define NLOCKENTS() \
+	mul_size(max_locks_per_xact, add_size(MaxBackends, max_prepared_xacts))
+
+static HTAB *LockMethodLockHash;
+static HTAB *LockMethodProcLockHash;
+
+/*
+ * Compute the hash code associated with a PROCLOCKTAG.
+ *
+ * Because we want to use just one set of partition locks for both the
+ * LOCK and PROCLOCK hash tables, we have to make sure that PROCLOCKs
+ * fall into the same partition number as their associated LOCKs.
+ * dynahash.c expects the partition number to be the low-order bits of
+ * the hash code, and therefore a PROCLOCKTAG's hash code must have the
+ * same low-order bits as the associated LOCKTAG's hash code.  We achieve
+ * this with this specialized hash function.
+ */
+static uint32
+proclock_hash(const void *key, Size keysize)
+{
+	const PROCLOCKTAG *proclocktag = (const PROCLOCKTAG *) key;
+	uint32		lockhash;
+	Datum		procptr;
+
+	Assert(keysize == sizeof(PROCLOCKTAG));
+
+	/* Look into the associated LOCK object, and compute its hash code */
+	lockhash = LockTagHashCode(&proclocktag->myLock->tag);
+
+	/*
+	 * To make the hash code also depend on the PGPROC, we xor the proc
+	 * struct's address into the hash code, left-shifted so that the
+	 * partition-number bits don't change.  Since this is only a hash, we
+	 * don't care if we lose high-order bits of the address; use an
+	 * intermediate variable to suppress cast-pointer-to-int warnings.
+	 */
+	procptr = PointerGetDatum(proclocktag->myProc);
+	lockhash ^= ((uint32) procptr) << LOG2_NUM_LOCK_PARTITIONS;
+
+	return lockhash;
+}
+
+/*
+ * Get access to lock system hashes in the shared memory.
+ */
+static void
+init_lock_hashes(void)
+{
+	HASHCTL		info;
+	long		init_table_size,
+				max_table_size;
+
+	/*
+	 * Compute init/max size to request for lock hashtables.  Note these
+	 * calculations must agree with LockShmemSize!
+	 */
+	max_table_size = NLOCKENTS();
+	init_table_size = max_table_size / 2;
+
+	/*
+	 * Allocate hash table for LOCK structs.  This stores per-locked-object
+	 * information.
+	 */
+	info.keysize = sizeof(LOCKTAG);
+	info.entrysize = sizeof(LOCK);
+	info.num_partitions = NUM_LOCK_PARTITIONS;
+
+	LockMethodLockHash = ShmemInitHash("LOCK hash",
+									   init_table_size,
+									   max_table_size,
+									   &info,
+									   HASH_ELEM | HASH_BLOBS | HASH_PARTITION);
+
+	/* Assume an average of 2 holders per lock */
+	max_table_size *= 2;
+	init_table_size *= 2;
+
+	/*
+	 * Allocate hash table for PROCLOCK structs.  This stores
+	 * per-lock-per-holder information.
+	 */
+	info.keysize = sizeof(PROCLOCKTAG);
+	info.entrysize = sizeof(PROCLOCK);
+	info.hash = proclock_hash;
+	info.num_partitions = NUM_LOCK_PARTITIONS;
+
+	LockMethodProcLockHash = ShmemInitHash("PROCLOCK hash",
+										   init_table_size,
+										   max_table_size,
+										   &info,
+										   HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+}
+
 void
 oxid_init_shmem(Pointer ptr, bool found)
 {
@@ -94,6 +189,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 	}
 	LWLockRegisterTranche(xid_meta->xidMapTrancheId,
 						  "OXidMapWriteTranche");
+
+	init_lock_hashes();
 }
 
 /*
@@ -287,6 +384,7 @@ wait_for_oxid(OXid oxid)
 	CommitSeqNo csn;
 	XidVXidMapElement *vxidElem;
 	VirtualTransactionId vxid;
+	bool		result;
 
 	csn = map_oxid_csn(oxid);
 
@@ -309,7 +407,11 @@ wait_for_oxid(OXid oxid)
 	}
 
 	Assert(VirtualTransactionIdIsValid(vxid));
-	return VirtualXactLock(vxid, true);
+	GET_CUR_PROCDATA()->waitingForOxid = true;
+	result = VirtualXactLock(vxid, true);
+	GET_CUR_PROCDATA()->waitingForOxid = false;
+
+	return result;
 }
 
 /*
@@ -348,7 +450,8 @@ oxid_notify(OXid oxid)
 		proc->waitLock->tag.locktag_field3 == tag.locktag_field3 &&
 		proc->waitLock->tag.locktag_field4 == tag.locktag_field4 &&
 		proc->waitLock->tag.locktag_lockmethodid == tag.locktag_lockmethodid &&
-		proc->waitLock->tag.locktag_type == tag.locktag_type)
+		proc->waitLock->tag.locktag_type == tag.locktag_type &&
+		oProcData[proc->pgprocno].waitingForOxid)
 	{
 		/*
 		 * It's a hack. We can not just release lock because VirtualXactLock()
@@ -370,6 +473,130 @@ oxid_notify(OXid oxid)
 		LWLockRelease(partitionLock);
 	}
 	VirtualXactLock(vxid, true);
+}
+
+/*
+ * Compute the hash code associated with a PROCLOCKTAG, given the hashcode
+ * for its underlying LOCK.
+ *
+ * We use this just to avoid redundant calls of LockTagHashCode().
+ */
+static inline uint32
+ProcLockHashCode(const PROCLOCKTAG *proclocktag, uint32 hashcode)
+{
+	uint32		lockhash = hashcode;
+	Datum		procptr;
+
+	/*
+	 * This must match proclock_hash()!
+	 */
+	procptr = PointerGetDatum(proclocktag->myProc);
+	lockhash ^= ((uint32) procptr) << LOG2_NUM_LOCK_PARTITIONS;
+
+	return lockhash;
+}
+
+/*
+ * Notify oxid_notify_all() callers who are waiting for current process.
+ */
+void
+oxid_notify_all(void)
+{
+	PGPROC	   *proc;
+	LOCKTAG		tag;
+	VirtualTransactionId vxid;
+	LWLock	   *partitionLock;
+	LOCK	   *lock;
+	PROCLOCK   *proclock;
+	PROCLOCKTAG proclocktag;
+	uint32		hashcode;
+	uint32		proclock_hashcode;
+	List	   *procs = NIL;
+	ListCell   *lc;
+	PROC_QUEUE *waitQueue;
+	int			queue_size;
+
+	vxid.localTransactionId = MyProc->lxid;
+	vxid.backendId = MyBackendId;
+
+	/* ensure that it is waiting for us */
+	SET_LOCKTAG_VIRTUALTRANSACTION(tag, vxid);
+
+	hashcode = LockTagHashCode(&tag);
+	partitionLock = LockHashPartitionLock(hashcode);
+
+	LWLockAcquire(partitionLock, LW_EXCLUSIVE);
+
+	/* Find the lock object */
+	lock = (LOCK *) hash_search_with_hash_value(LockMethodLockHash,
+												(void *) &tag,
+												hashcode,
+												HASH_FIND,
+												NULL);
+	if (!lock)
+	{
+		/* Must be granted with fast path */
+		LWLockRelease(partitionLock);
+		return;
+	}
+
+	/*
+	 * Re-find the proclock object (ditto).
+	 */
+	proclocktag.myLock = lock;
+	proclocktag.myProc = MyProc;
+
+	proclock_hashcode = ProcLockHashCode(&proclocktag, hashcode);
+
+	proclock = (PROCLOCK *) hash_search_with_hash_value(LockMethodProcLockHash,
+														(void *) &proclocktag,
+														proclock_hashcode,
+														HASH_FIND,
+														NULL);
+	if (!proclock)
+		elog(PANIC, "failed to re-find shared proclock object");
+
+	waitQueue = &(lock->waitProcs);
+	queue_size = waitQueue->size;
+
+	Assert(queue_size >= 0);
+
+	proc = (PGPROC *) waitQueue->links.next;
+
+	while (queue_size-- > 0)
+	{
+		if (
+	#if PG_VERSION_NUM >= 140000
+			proc->waitStatus == PROC_WAIT_STATUS_WAITING &&
+	#else
+			proc->waitStatus == STATUS_WAITING &&
+	#endif
+			proc->waitLock->tag.locktag_field1 == tag.locktag_field1 &&
+			proc->waitLock->tag.locktag_field2 == tag.locktag_field2 &&
+			proc->waitLock->tag.locktag_field3 == tag.locktag_field3 &&
+			proc->waitLock->tag.locktag_field4 == tag.locktag_field4 &&
+			proc->waitLock->tag.locktag_lockmethodid == tag.locktag_lockmethodid &&
+			proc->waitLock->tag.locktag_type == tag.locktag_type &&
+			oProcData[proc->pgprocno].waitingForOxid)
+		{
+			procs = lappend(procs, proc);
+		}
+
+		proc = (PGPROC *) proc->links.next;
+	}
+
+	foreach (lc, procs)
+	{
+		proc = lfirst(lc);
+		RemoveFromWaitQueue(proc, hashcode);
+		proc->waitStatus = STATUS_OK;
+		SendProcSignal(proc->pid, PROCSIG_NOTIFY_INTERRUPT, proc->backendId);
+	}
+
+	LWLockRelease(partitionLock);
+	VirtualXactLock(vxid, true);
+
+	list_free(procs);
 }
 
 /*
