@@ -483,20 +483,24 @@ o_table_resize_constr(OTable *o_table)
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
-	if (!o_table->missing)
-		o_table->missing = palloc0(o_table->nfields * sizeof(AttrMissing));
-	else
-		o_table->missing = repalloc(o_table->missing,
-									o_table->nfields * sizeof(AttrMissing));
-	o_table->missing[o_table->nfields - 1].am_present = false;
-	o_table->missing[o_table->nfields - 1].am_value = 0;
+	if (o_table->nfields > 0)
+	{
+		if (!o_table->missing)
+			o_table->missing = palloc0(o_table->nfields * sizeof(AttrMissing));
+		else
+			o_table->missing = repalloc(o_table->missing,
+										o_table->nfields *
+											sizeof(AttrMissing));
+		o_table->missing[o_table->nfields - 1].am_present = false;
+		o_table->missing[o_table->nfields - 1].am_value = 0;
 
-	if (!o_table->defvals)
-		o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
-	else
-		o_table->defvals = repalloc(o_table->defvals,
-									o_table->nfields * sizeof(Expr *));
-	o_table->defvals[o_table->nfields - 1] = NULL;
+		if (!o_table->defvals)
+			o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
+		else
+			o_table->defvals = repalloc(o_table->defvals,
+										o_table->nfields * sizeof(Expr *));
+		o_table->defvals[o_table->nfields - 1] = NULL;
+	}
 
 	MemoryContextSwitchTo(oldcxt);
 }
@@ -1039,21 +1043,11 @@ o_table_free(OTable *table)
 {
 	int			i;
 
-	for (i = 0; i < table->nfields; i++)
-	{
-		if (table->missing[i].am_present && !table->fields[i].byval)
-			pfree(DatumGetPointer(table->missing[i].am_value));
-	}
-	pfree(table->missing);
 	for (i = 0; i < table->nindices; i++)
 	{
 		if (table->indices[i].index_mctx)
 			MemoryContextDelete(table->indices[i].index_mctx);
 	}
-
-	if (table->indices)
-		pfree(table->indices);
-	pfree(table->fields);
 	if (table->tbl_mctx)
 		MemoryContextDelete(table->tbl_mctx);
 	pfree(table);
@@ -1575,16 +1569,21 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 OTable *
 deserialize_o_table(Pointer data, Size length)
 {
-	Pointer		ptr = data;
-	OTable	   *o_table;
-	int			len;
-	int			i;
+	Pointer			ptr = data;
+	OTable		   *o_table;
+	int				len;
+	int				i;
+	MemoryContext	oldcxt;
+	MemoryContext	tbl_cxt;
 
 	o_table = (OTable *) palloc0(sizeof(OTable));
 	len = offsetof(OTable, indices);
 	Assert((ptr - data) + len <= length);
 	memcpy(o_table, ptr, len);
 	ptr += len;
+
+	tbl_cxt = OGetTableContext(o_table);
+	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
 	len = o_table->nindices * sizeof(OTableIndex);
 	o_table->indices = (OTableIndex *) palloc0(len);
@@ -1623,6 +1622,7 @@ deserialize_o_table(Pointer data, Size length)
 		o_table->defvals[i] = stringToNode(defval_str);
 		pfree(defval_str);
 	}
+	MemoryContextSwitchTo(oldcxt);
 
 	Assert(ptr - data == length);
 	return o_table;

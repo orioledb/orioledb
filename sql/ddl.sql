@@ -609,5 +609,13 @@ SELECT orioledb_tbl_structure('o_test_add_pkey_empty_index'::regclass, 'nue');
 \d o_test_add_pkey_empty_index
 SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
 
+CREATE TABLE o_test_empty() USING orioledb;
+\d o_test_empty
+SELECT orioledb_table_description('o_test_empty'::regclass);
+SELECT * FROM o_test_empty;
+SELECT orioledb_tbl_structure('o_test_empty'::regclass, 'nue');
+TRUNCATE o_test_empty;
+SELECT * FROM o_test_empty;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;

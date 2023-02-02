@@ -1966,9 +1966,45 @@ SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
  
 (1 row)
 
+CREATE TABLE o_test_empty() USING orioledb;
+\d o_test_empty
+          Table "public.o_test_empty"
+ Column | Type | Collation | Nullable | Default 
+--------+------+-----------+----------+---------
+
+SELECT orioledb_table_description('o_test_empty'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column | Type | Collation | Nullable | Droped           +
+ 
+(1 row)
+
+SELECT * FROM o_test_empty;
+--
+(0 rows)
+
+SELECT orioledb_tbl_structure('o_test_empty'::regclass, 'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+TRUNCATE o_test_empty;
+SELECT * FROM o_test_empty;
+--
+(0 rows)
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 25 other objects
+NOTICE:  drop cascades to 26 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1994,3 +2030,4 @@ drop cascades to table o_test_alter_change_byval
 drop cascades to table o_test_pkey_alter_type
 drop cascades to table o_test_included_ix_name
 drop cascades to table o_test_add_pkey_empty_index
+drop cascades to table o_test_empty
