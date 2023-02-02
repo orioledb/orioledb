@@ -1636,5 +1636,30 @@ ALTER TABLE o_test_drop_add_primary ADD PRIMARY KEY (val_4);
 \d o_test_drop_add_primary
 TRUNCATE TABLE o_test_drop_add_primary;
 
+CREATE TYPE type_1 AS (
+	a int,
+	b int
+);
+CREATE TABLE o_test_add_drop_pkey_same_trx (
+	val_1 type_1 NOT NULL,
+	val_2 int NOT NULL DEFAULT 5,
+	val_3 text DEFAULT 'abc'
+) USING orioledb;
+CREATE INDEX o_test_add_drop_pkey_same_trx_idx1
+	ON o_test_add_drop_pkey_same_trx (val_2, val_3);
+INSERT INTO o_test_add_drop_pkey_same_trx VALUES ((1, 2)), ((2, 3));
+INSERT INTO o_test_add_drop_pkey_same_trx VALUES ((3, 4), 6, 'def');
+SELECT * FROM o_test_add_drop_pkey_same_trx;
+SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
+BEGIN;
+ALTER TABLE o_test_add_drop_pkey_same_trx
+    ADD CONSTRAINT o_test_add_drop_pkey_same_trx_pkey PRIMARY KEY (val_1);
+ALTER TABLE o_test_add_drop_pkey_same_trx
+	DROP CONSTRAINT o_test_add_drop_pkey_same_trx_pkey;
+SELECT * FROM o_test_add_drop_pkey_same_trx;
+SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
+COMMIT;
+DROP TYPE type_1 CASCADE;
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

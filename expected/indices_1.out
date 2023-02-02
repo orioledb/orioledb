@@ -7700,9 +7700,60 @@ Indexes:
     "o_test_drop_add_primary_ix1" UNIQUE, btree (val_1, val_2) INCLUDE (val_3, val_1)
 
 TRUNCATE TABLE o_test_drop_add_primary;
+CREATE TYPE type_1 AS (
+	a int,
+	b int
+);
+CREATE TABLE o_test_add_drop_pkey_same_trx (
+	val_1 type_1 NOT NULL,
+	val_2 int NOT NULL DEFAULT 5,
+	val_3 text DEFAULT 'abc'
+) USING orioledb;
+CREATE INDEX o_test_add_drop_pkey_same_trx_idx1
+	ON o_test_add_drop_pkey_same_trx (val_2, val_3);
+INSERT INTO o_test_add_drop_pkey_same_trx VALUES ((1, 2)), ((2, 3));
+INSERT INTO o_test_add_drop_pkey_same_trx VALUES ((3, 4), 6, 'def');
+SELECT * FROM o_test_add_drop_pkey_same_trx;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+ (1,2) |     5 | abc
+ (2,3) |     5 | abc
+ (3,4) |     6 | def
+(3 rows)
+
+SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
+ val_1 | val_2 | val_3 
+-------+-------+-------
+ (1,2) |     5 | abc
+ (2,3) |     5 | abc
+(2 rows)
+
+BEGIN;
+ALTER TABLE o_test_add_drop_pkey_same_trx
+    ADD CONSTRAINT o_test_add_drop_pkey_same_trx_pkey PRIMARY KEY (val_1);
+ALTER TABLE o_test_add_drop_pkey_same_trx
+	DROP CONSTRAINT o_test_add_drop_pkey_same_trx_pkey;
+SELECT * FROM o_test_add_drop_pkey_same_trx;
+ val_1 | val_2 | val_3 
+-------+-------+-------
+ (1,2) |     5 | abc
+ (2,3) |     5 | abc
+ (3,4) |     6 | def
+(3 rows)
+
+SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
+ val_1 | val_2 | val_3 
+-------+-------+-------
+ (1,2) |     5 | abc
+ (2,3) |     5 | abc
+(2 rows)
+
+COMMIT;
+DROP TYPE type_1 CASCADE;
+NOTICE:  drop cascades to column val_1 of table o_test_add_drop_pkey_same_trx
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 40 other objects
+NOTICE:  drop cascades to 41 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -7743,3 +7794,4 @@ drop cascades to table o_test_reindex_empty
 drop cascades to table o_test_drop_included_pkey_field
 drop cascades to table o_test_row_searchkey
 drop cascades to table o_test_drop_add_primary
+drop cascades to table o_test_add_drop_pkey_same_trx
