@@ -1622,5 +1622,18 @@ SELECT * FROM o_test_row_searchkey
 		ORDER BY val_1, val_2;
 RESET enable_seqscan;
 
+CREATE TABLE o_test_drop_add_primary (
+	val_1 int,
+	val_2 int,
+	val_3 int,
+	val_4 int,
+	CONSTRAINT const1 PRIMARY KEY (val_4)
+) USING orioledb;
+ALTER TABLE o_test_drop_add_primary DROP CONSTRAINT const1;
+CREATE UNIQUE INDEX o_test_drop_add_primary_ix1
+	ON o_test_drop_add_primary (val_1, val_2) INCLUDE (val_3, val_1);
+ALTER TABLE o_test_drop_add_primary ADD PRIMARY KEY (val_4);
+\d o_test_drop_add_primary
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
