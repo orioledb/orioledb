@@ -572,7 +572,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 	/*
 	 * Remove redundant row-level locks if any.
 	 */
-	if (haveRedundantRowLocks)
+	if (haveRedundantRowLocks &&
+		!(context->action == BTreeOperationLock && context->isAlreadyLocked))
 	{
 		remove_redundant_row_locks(tuphdr, &context->conflictTupHdr,
 								   &context->conflictUndoLocation,

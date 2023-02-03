@@ -505,3 +505,27 @@ key|value|uniq
  10|   10|  10
 (10 rows)
 
+
+starting permutation: s1_begin s2_begin s1_select_update_skip_locked s1_select_update_skip_locked s2_select_update_skip_locked s1_commit s2_commit
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_select_update_skip_locked: SELECT * FROM rll_test ORDER BY key FOR UPDATE SKIP LOCKED LIMIT 1;
+key|value|uniq
+---+-----+----
+  1|    1|   1
+(1 row)
+
+step s1_select_update_skip_locked: SELECT * FROM rll_test ORDER BY key FOR UPDATE SKIP LOCKED LIMIT 1;
+key|value|uniq
+---+-----+----
+  1|    1|   1
+(1 row)
+
+step s2_select_update_skip_locked: SELECT * FROM rll_test ORDER BY key FOR UPDATE SKIP LOCKED LIMIT 1;
+key|value|uniq
+---+-----+----
+  2|    2|   2
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_commit: COMMIT;
