@@ -4095,5 +4095,18 @@ SELECT * FROM o_ctid_test;
      0
 (1 row)
 
+BEGIN;
+SAVEPOINT x;
+CREATE TABLE o_test_1 (val_1 int) USING orioledb;
+INSERT INTO o_test_1 VALUES (1);
+DECLARE c1 CURSOR FOR SELECT * FROM o_test_1;
+FETCH FROM c1;
+ val_1 
+-------
+     1
+(1 row)
+
+ROLLBACK TO x;
+COMMIT;
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;

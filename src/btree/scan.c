@@ -1625,13 +1625,14 @@ seq_scans_cleanup(void)
 	while (!dlist_is_empty(&listOfScans))
 	{
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
-		BTreeMetaPage *metaPageBlkno;
+		BTreeDescr *desc = scan->desc;
+		BTreeMetaPage *metaPage;
 
-		if (scan->checkpointNumberSet)
+		if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
 		{
-			metaPageBlkno = BTREE_GET_META(scan->desc);
+			metaPage = BTREE_GET_META(desc);
 
-			(void) pg_atomic_fetch_sub_u32(&metaPageBlkno->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+			(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
 		}
 		dlist_delete(&scan->listNode);
 		if (scan->dsmSeg)

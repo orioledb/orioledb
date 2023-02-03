@@ -889,5 +889,14 @@ SELECT count(*) FROM o_ctid_test;
 DELETE FROM o_ctid_test WHERE val_1 != 0;
 SELECT * FROM o_ctid_test;
 
+BEGIN;
+SAVEPOINT x;
+CREATE TABLE o_test_1 (val_1 int) USING orioledb;
+INSERT INTO o_test_1 VALUES (1);
+DECLARE c1 CURSOR FOR SELECT * FROM o_test_1;
+FETCH FROM c1;
+ROLLBACK TO x;
+COMMIT;
+
 DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
