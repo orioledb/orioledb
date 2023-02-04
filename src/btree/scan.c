@@ -1613,7 +1613,7 @@ seq_scans_cleanup(void)
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
 		BTreeMetaPage *metaPageBlkno;
 
-		if (!scan->poscan && scan->initialized)
+		if (scan->initialized)
 		{
 			metaPageBlkno = BTREE_GET_META(scan->desc);
 
