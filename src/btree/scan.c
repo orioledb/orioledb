@@ -82,6 +82,7 @@ struct BTreeSeqScan
 	char		histImg[ORIOLEDB_BLCKSZ];
 
 	bool		initialized;
+	bool		checkpointNumberSet;
 
 	CommitSeqNo snapshotCsn;
 	OBTreeFindPageContext context;
@@ -960,8 +961,7 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	return true;
 }
 
-static inline
-bool
+static inline bool
 single_leaf_page_rel(BTreeSeqScan *scan)
 {
 	if (scan->poscan)
@@ -971,58 +971,14 @@ single_leaf_page_rel(BTreeSeqScan *scan)
 }
 
 static void
-init_btree_seq_scan(BTreeSeqScan *scan)
+init_checkpoit_number(BTreeSeqScan *scan)
 {
-	ParallelOScanDesc poscan = scan->poscan;
-	BlockSampler sampler = scan->sampler;
-	BTreeDescr *desc = scan->desc;
-	BTreeMetaPage *metaPage;
 	uint32		checkpointNumberBefore,
 				checkpointNumberAfter;
 	bool		checkpointConcurrent;
+	BTreeMetaPage *metaPage;
+	BTreeDescr *desc = scan->desc;
 
-
-	if (poscan)
-	{
-		SpinLockAcquire(&poscan->workerStart);
-		for (scan->workerNumber = 0; poscan->worker_active[scan->workerNumber] == true; scan->workerNumber++)
-		{
-		}
-
-		poscan->worker_active[scan->workerNumber] = true;
-		poscan->nworkers = scan->workerNumber + 1;
-		/* leader */
-		if (scan->workerNumber == 0)
-		{
-			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));
-			poscan->flags |= O_PARALLEL_LEADER_STARTED;
-			scan->isLeader = true;
-		}
-		SpinLockRelease(&poscan->workerStart);
-
-		elog(DEBUG3, "make_btree_seq_scan_internal. %s %d started", poscan ? "Parallel worker" : "Worker", scan->workerNumber);
-	}
-	else
-	{
-		scan->workerNumber = -1;
-		scan->isLeader = true;
-	}
-
-	if (sampler)
-	{
-		scan->needSampling = true;
-		if (BlockSampler_HasMore(scan->sampler))
-			scan->samplingNext = BlockSampler_Next(scan->sampler);
-		else
-			scan->samplingNext = InvalidBlockNumber;
-	}
-	else
-	{
-		scan->needSampling = false;
-		scan->samplingNext = InvalidBlockNumber;
-	}
-
-	o_btree_load_shmem(desc);
 	metaPage = BTREE_GET_META(scan->desc);
 
 	START_CRIT_SECTION();
@@ -1044,12 +1000,65 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		if (checkpointNumberAfter == checkpointNumberBefore)
 		{
 			scan->checkpointNumber = checkpointNumberBefore;
+			scan->checkpointNumberSet = true;
 			break;
 		}
 		(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[checkpointNumberBefore % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
 		checkpointNumberBefore = checkpointNumberAfter;
 	}
 	END_CRIT_SECTION();
+}
+
+static void
+init_btree_seq_scan(BTreeSeqScan *scan)
+{
+	ParallelOScanDesc poscan = scan->poscan;
+	BlockSampler sampler = scan->sampler;
+	BTreeDescr *desc = scan->desc;
+
+	o_btree_load_shmem(desc);
+
+	if (poscan)
+	{
+		SpinLockAcquire(&poscan->workerStart);
+		for (scan->workerNumber = 0; poscan->worker_active[scan->workerNumber] == true; scan->workerNumber++)
+		{
+		}
+
+		poscan->worker_active[scan->workerNumber] = true;
+		poscan->nworkers = scan->workerNumber + 1;
+		/* leader */
+		if (scan->workerNumber == 0)
+		{
+			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));
+			poscan->flags |= O_PARALLEL_LEADER_STARTED;
+			scan->isLeader = true;
+			init_checkpoit_number(scan);
+		}
+		SpinLockRelease(&poscan->workerStart);
+
+		elog(DEBUG3, "make_btree_seq_scan_internal. %s %d started", poscan ? "Parallel worker" : "Worker", scan->workerNumber);
+	}
+	else
+	{
+		scan->workerNumber = -1;
+		scan->isLeader = true;
+		init_checkpoit_number(scan);
+	}
+
+	if (sampler)
+	{
+		scan->needSampling = true;
+		if (BlockSampler_HasMore(scan->sampler))
+			scan->samplingNext = BlockSampler_Next(scan->sampler);
+		else
+			scan->samplingNext = InvalidBlockNumber;
+	}
+	else
+	{
+		scan->needSampling = false;
+		scan->samplingNext = InvalidBlockNumber;
+	}
 
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 
@@ -1097,6 +1106,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 	scan->sampler = sampler;
 	scan->dsmSeg = NULL;
 	scan->initialized = false;
+	scan->checkpointNumberSet = false;
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
 
@@ -1586,11 +1596,15 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 void
 free_btree_seq_scan(BTreeSeqScan *scan)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(scan->desc);
+	BTreeDescr *desc = scan->desc;
 
 	START_CRIT_SECTION();
 	dlist_delete(&scan->listNode);
-	(void) pg_atomic_fetch_sub_u32(&metaPageBlkno->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+	if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
+	{
+		BTreeMetaPage *metaPage = BTREE_GET_META(scan->desc);
+		(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+	}
 	END_CRIT_SECTION();
 
 	if (scan->dsmSeg)
@@ -1613,7 +1627,7 @@ seq_scans_cleanup(void)
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
 		BTreeMetaPage *metaPageBlkno;
 
-		if (scan->initialized)
+		if (scan->checkpointNumberSet)
 		{
 			metaPageBlkno = BTREE_GET_META(scan->desc);
 
