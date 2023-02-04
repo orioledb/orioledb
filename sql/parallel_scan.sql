@@ -109,5 +109,21 @@ SELECT val_1, val_2 FROM o_test_o_scan_register
     WHERE val_1 IN ('A', 'B') ORDER BY val_1;
 COMMIT;
 
+CREATE FUNCTION func_1(int, int) RETURNS int LANGUAGE SQL
+AS
+'select pg_advisory_xact_lock_shared($1); select 1;'
+PARALLEL SAFE;
+
+CREATE TABLE o_test_1 USING orioledb
+AS SELECT val_1 FROM generate_series(1, 1000) val_1;
+
+SET parallel_setup_cost = 0;
+SET min_parallel_table_scan_size = 0;
+SET parallel_leader_participation = off;
+SELECT sum(func_1(1,val_1)) FROM o_test_1;
+
+DROP FUNCTION func_1(int, int);
+DROP TABLE o_test_1;
+
 DROP FUNCTION pseudo_random;
 DROP EXTENSION orioledb CASCADE;
