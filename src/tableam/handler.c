@@ -1209,10 +1209,7 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 	ItemPointerSetOffsetNumber(&scan->iptr, FirstOffsetNumber);
 
 	if (descr)
-	{
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 		scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, scan->csn, parallel_scan);
-	}
 
 	return &scan->rs_base;
 }

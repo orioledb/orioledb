@@ -81,6 +81,8 @@ struct BTreeSeqScan
 	char		leafImg[ORIOLEDB_BLCKSZ];
 	char		histImg[ORIOLEDB_BLCKSZ];
 
+	bool		initialized;
+
 	CommitSeqNo snapshotCsn;
 	OBTreeFindPageContext context;
 	OFixedKey	prevHikey;
@@ -968,17 +970,17 @@ single_leaf_page_rel(BTreeSeqScan *scan)
 		return scan->isSingleLeafPage;
 }
 
-static BTreeSeqScan *
-make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
-							 BTreeSeqScanCallbacks *cb, void *arg,
-							 BlockSampler sampler, ParallelOScanDesc poscan)
+static void
+init_btree_seq_scan(BTreeSeqScan *scan)
 {
-	BTreeSeqScan *scan = (BTreeSeqScan *) MemoryContextAlloc(btree_seqscan_context,
-															 sizeof(BTreeSeqScan));
+	ParallelOScanDesc poscan = scan->poscan;
+	BlockSampler sampler = scan->sampler;
+	BTreeDescr *desc = scan->desc;
+	BTreeMetaPage *metaPage;
 	uint32		checkpointNumberBefore,
 				checkpointNumberAfter;
 	bool		checkpointConcurrent;
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+
 
 	if (poscan)
 	{
@@ -1006,6 +1008,77 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 		scan->isLeader = true;
 	}
 
+	if (sampler)
+	{
+		scan->needSampling = true;
+		if (BlockSampler_HasMore(scan->sampler))
+			scan->samplingNext = BlockSampler_Next(scan->sampler);
+		else
+			scan->samplingNext = InvalidBlockNumber;
+	}
+	else
+	{
+		scan->needSampling = false;
+		scan->samplingNext = InvalidBlockNumber;
+	}
+
+	o_btree_load_shmem(desc);
+	metaPage = BTREE_GET_META(scan->desc);
+
+	START_CRIT_SECTION();
+
+	/*
+	 * Get the checkpoint number for the scan.  There is race condition with
+	 * concurrent switching tree to the next checkpoint.  So, we have to
+	 * workaround this with recheck-retry loop,
+	 */
+	checkpointNumberBefore = get_cur_checkpoint_number(&desc->oids,
+													   desc->type,
+													   &checkpointConcurrent);
+	while (true)
+	{
+		(void) pg_atomic_fetch_add_u32(&metaPage->numSeqScans[checkpointNumberBefore % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+		checkpointNumberAfter = get_cur_checkpoint_number(&desc->oids,
+														  desc->type,
+														  &checkpointConcurrent);
+		if (checkpointNumberAfter == checkpointNumberBefore)
+		{
+			scan->checkpointNumber = checkpointNumberBefore;
+			break;
+		}
+		(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[checkpointNumberBefore % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+		checkpointNumberBefore = checkpointNumberAfter;
+	}
+	END_CRIT_SECTION();
+
+	O_TUPLE_SET_NULL(scan->nextKey.tuple);
+
+	init_page_find_context(&scan->context, desc, scan->snapshotCsn,
+						   BTREE_PAGE_FIND_IMAGE |
+						   BTREE_PAGE_FIND_KEEP_LOKEY |
+						   BTREE_PAGE_FIND_READ_CSN);
+	clear_fixed_key(&scan->prevHikey);
+	clear_fixed_key(&scan->keyRangeHigh);
+	clear_fixed_key(&scan->keyRangeLow);
+	scan->isSingleLeafPage = false;
+	if (!iterate_internal_page(scan) && !single_leaf_page_rel(scan))
+	{
+		switch_to_disk_scan(scan);
+		if (!load_next_disk_leaf_page(scan))
+			scan->status = BTreeSeqScanFinished;
+	}
+
+	scan->initialized = true;
+}
+
+static BTreeSeqScan *
+make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
+							 BTreeSeqScanCallbacks *cb, void *arg,
+							 BlockSampler sampler, ParallelOScanDesc poscan)
+{
+	BTreeSeqScan *scan = (BTreeSeqScan *) MemoryContextAlloc(btree_seqscan_context,
+															 sizeof(BTreeSeqScan));
+
 	scan->poscan = poscan;
 	scan->desc = desc;
 	scan->snapshotCsn = csn;
@@ -1023,62 +1096,9 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 	scan->samplingNumber = 0;
 	scan->sampler = sampler;
 	scan->dsmSeg = NULL;
-	if (sampler)
-	{
-		scan->needSampling = true;
-		if (BlockSampler_HasMore(scan->sampler))
-			scan->samplingNext = BlockSampler_Next(scan->sampler);
-		else
-			scan->samplingNext = InvalidBlockNumber;
-	}
-	else
-	{
-		scan->needSampling = false;
-		scan->samplingNext = InvalidBlockNumber;
-	}
+	scan->initialized = false;
 
-	O_TUPLE_SET_NULL(scan->nextKey.tuple);
-
-	START_CRIT_SECTION();
 	dlist_push_tail(&listOfScans, &scan->listNode);
-
-	/*
-	 * Get the checkpoint number for the scan.  There is race condition with
-	 * concurrent switching tree to the next checkpoint.  So, we have to
-	 * workaround this with recheck-retry loop,
-	 */
-	checkpointNumberBefore = get_cur_checkpoint_number(&desc->oids,
-													   desc->type,
-													   &checkpointConcurrent);
-	while (true)
-	{
-		(void) pg_atomic_fetch_add_u32(&metaPageBlkno->numSeqScans[checkpointNumberBefore % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
-		checkpointNumberAfter = get_cur_checkpoint_number(&desc->oids,
-														  desc->type,
-														  &checkpointConcurrent);
-		if (checkpointNumberAfter == checkpointNumberBefore)
-		{
-			scan->checkpointNumber = checkpointNumberBefore;
-			break;
-		}
-		(void) pg_atomic_fetch_sub_u32(&metaPageBlkno->numSeqScans[checkpointNumberBefore % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
-		checkpointNumberBefore = checkpointNumberAfter;
-	}
-	END_CRIT_SECTION();
-
-	init_page_find_context(&scan->context, desc, csn, BTREE_PAGE_FIND_IMAGE |
-						   BTREE_PAGE_FIND_KEEP_LOKEY |
-						   BTREE_PAGE_FIND_READ_CSN);
-	clear_fixed_key(&scan->prevHikey);
-	clear_fixed_key(&scan->keyRangeHigh);
-	clear_fixed_key(&scan->keyRangeLow);
-	scan->isSingleLeafPage = false;
-	if (!iterate_internal_page(scan) && !single_leaf_page_rel(scan))
-	{
-		switch_to_disk_scan(scan);
-		if (!load_next_disk_leaf_page(scan))
-			scan->status = BTreeSeqScanFinished;
-	}
 
 	return scan;
 }
@@ -1432,6 +1452,9 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 {
 	OTuple		tuple;
 
+	if (!scan->initialized)
+		init_btree_seq_scan(scan);
+
 	if (scan->status == BTreeSeqScanInMemory ||
 		scan->status == BTreeSeqScanDisk)
 	{
@@ -1539,6 +1562,9 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 {
 	OTuple		tuple;
 
+	if (!scan->initialized)
+		init_btree_seq_scan(scan);
+
 	if (scan->status == BTreeSeqScanInMemory ||
 		scan->status == BTreeSeqScanDisk)
 	{
@@ -1587,7 +1613,7 @@ seq_scans_cleanup(void)
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
 		BTreeMetaPage *metaPageBlkno;
 
-		if (!scan->poscan)
+		if (!scan->poscan && scan->initialized)
 		{
 			metaPageBlkno = BTREE_GET_META(scan->desc);
 
