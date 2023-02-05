@@ -666,8 +666,8 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 		int			i;
 
 		if (!recovery)
-			o_tables_rel_lock_extended(&oids, AccessExclusiveLock, false);
-		o_tables_rel_lock_extended(&oids, AccessExclusiveLock, true);
+			o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, false);
+		o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, true);
 		CacheInvalidateRelcacheByDbidRelid(datoid, reloid);
 		o_invalidate_oids(oids);
 		if (!recovery)
@@ -677,15 +677,14 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 		for (i = 0; i < dropNumTreeOids; i++)
 		{
 			if (!recovery)
-				o_tables_rel_lock_extended(&dropTreeOids[i], AccessExclusiveLock, false);
-			o_tables_rel_lock_extended(&dropTreeOids[i], AccessExclusiveLock, true);
+				o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, false);
+			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
 			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);
 			o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, true);
 		}
-		AcceptInvalidationMessages();
 	}
 
 	if (OidIsValid(remainRelnode))

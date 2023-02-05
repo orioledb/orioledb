@@ -1156,6 +1156,20 @@ o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 }
 
 void
+o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
+									bool checkpoint)
+{
+	LOCKTAG		locktag;
+
+	o_tables_rel_fill_locktag(&locktag, oids, lockmode, checkpoint);
+
+	if (lockmode == AccessExclusiveLock && checkpoint)
+		locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
+
+	LockAcquire(&locktag, lockmode, false, false);
+}
+
+void
 o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 {
 	LOCKTAG		locktag;
