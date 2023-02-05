@@ -981,9 +981,10 @@ oxid_get_csn(OXid oxid)
 void
 fill_current_oxid_csn(OXid *oxid, CommitSeqNo *csn)
 {
-	Snapshot	snapshot = GetActiveSnapshot();
-
-	*csn = snapshot->snapshotcsn;
+	if (ActiveSnapshotSet())
+		*csn = GetActiveSnapshot()->snapshotcsn;
+	else
+		*csn = COMMITSEQNO_INPROGRESS;
 	*oxid = get_current_oxid();
 }
 
