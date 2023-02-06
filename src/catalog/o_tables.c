@@ -321,16 +321,16 @@ o_deparse_expression(char *expr_str, Oid relid)
 void
 o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 {
-	OTableIndex	   *index = &o_table->indices[ix_num];
-	ListCell	   *index_expr_elem;
-	int				ix_exprfield_num;
-	ListCell	   *lc;
-	MemoryContext	mcxt,
-					old_mcxt;
-	int				keyno;
-	Datum			datum;
-	oidvector	   *indclass;
-	bool			isnull;
+	OTableIndex *index = &o_table->indices[ix_num];
+	ListCell   *index_expr_elem;
+	int			ix_exprfield_num;
+	ListCell   *lc;
+	MemoryContext mcxt,
+				old_mcxt;
+	int			keyno;
+	Datum		datum;
+	oidvector  *indclass;
+	bool		isnull;
 
 	index->index_mctx = NULL;
 	mcxt = OGetIndexContext(index);
@@ -373,8 +373,8 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	ix_exprfield_num = 0;
 	for (keyno = 0; keyno < index->nfields; keyno++)
 	{
-		AttrNumber			attnum = index_rel->rd_index->indkey.values[keyno];
-		OTableIndexField   *ix_field;
+		AttrNumber	attnum = index_rel->rd_index->indkey.values[keyno];
+		OTableIndexField *ix_field;
 
 		ix_field = &index->fields[keyno];
 		if (AttributeNumberIsValid(attnum))
@@ -385,11 +385,11 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		else
 		{
 			/* Expressional index */
-			Node		   *indexkey;
-			HeapTuple		tuple;
-			Form_pg_type	typeTup;
-			OTableField	   *exprField;
-			Oid				field_typeid;
+			Node	   *indexkey;
+			HeapTuple	tuple;
+			Form_pg_type typeTup;
+			OTableField *exprField;
+			Oid			field_typeid;
 
 			Assert(index_rel->rd_indexprs);
 			indexkey = lfirst(index_expr_elem);
@@ -439,7 +439,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 
 		if (keyno >= index->nkeyfields)
 		{
-			OTableField	   *table_field = &o_table->fields[attnum - 1];
+			OTableField *table_field = &o_table->fields[attnum - 1];
 
 			/*
 			 * Included columns have no collation, no opclass and no ordering
@@ -453,7 +453,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		}
 		else
 		{
-			int16	opt = index_rel->rd_indoption[keyno];
+			int16		opt = index_rel->rd_indoption[keyno];
 
 			ix_field->collation = index_rel->rd_indcollation[keyno];
 			ix_field->opclass = indclass->values[keyno];
@@ -477,8 +477,8 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 void
 o_table_resize_constr(OTable *o_table)
 {
-	MemoryContext	oldcxt;
-	MemoryContext	tbl_cxt;
+	MemoryContext oldcxt;
+	MemoryContext tbl_cxt;
 
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
@@ -490,7 +490,7 @@ o_table_resize_constr(OTable *o_table)
 		else
 			o_table->missing = repalloc(o_table->missing,
 										o_table->nfields *
-											sizeof(AttrMissing));
+										sizeof(AttrMissing));
 		o_table->missing[o_table->nfields - 1].am_present = false;
 		o_table->missing[o_table->nfields - 1].am_value = 0;
 
@@ -509,11 +509,11 @@ void
 o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 					OTableField *old_field, OTableField *field)
 {
-	MemoryContext	oldcxt;
-	MemoryContext	tbl_cxt;
-	AttrMissing		attrmiss_temp;
-	Node		   *defaultexpr;
-	AttrMissing	   *attrmiss = NULL;
+	MemoryContext oldcxt;
+	MemoryContext tbl_cxt;
+	AttrMissing attrmiss_temp;
+	Node	   *defaultexpr;
+	AttrMissing *attrmiss = NULL;
 
 	if (field->hasdef)
 		defaultexpr = build_column_default(rel, fieldnum + 1);
@@ -522,16 +522,16 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 
 	if (!old_field->hasmissing && field->hasmissing)
 	{
-		Datum					missingval;
-		Expr				   *expr2;
-		ParseNamespaceItem	   *nsitem;
-		ParseState			   *pstate;
-		EState				   *estate = NULL;
-		ExprContext			   *econtext;
-		ExprState			   *exprState;
-		MemoryContext			tbl_cxt;
-		MemoryContext			oldcxt;
-		bool					missingIsNull = true;
+		Datum		missingval;
+		Expr	   *expr2;
+		ParseNamespaceItem *nsitem;
+		ParseState *pstate;
+		EState	   *estate = NULL;
+		ExprContext *econtext;
+		ExprState  *exprState;
+		MemoryContext tbl_cxt;
+		MemoryContext oldcxt;
+		bool		missingIsNull = true;
 
 		pstate = make_parsestate(NULL);
 		pstate->p_sourcetext = NULL;
@@ -548,7 +548,7 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 		econtext = GetPerTupleExprContext(estate);
 
 		missingval = ExecEvalExpr(exprState, econtext,
-									&missingIsNull);
+								  &missingIsNull);
 
 		FreeExecutorState(estate);
 		free_parsestate(pstate);
@@ -567,7 +567,7 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 	if (attrmiss)
 	{
 		o_table->missing[fieldnum].am_present = field->hasmissing &&
-												attrmiss->am_present;
+			attrmiss->am_present;
 		if (o_table->missing[fieldnum].am_present)
 			o_table->missing[fieldnum].am_value = datumCopy(attrmiss->am_value,
 															field->byval,
@@ -664,10 +664,10 @@ o_table_fields_make_tupdesc(OTableField *fields, int nfields)
 void
 o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 {
-	MemoryContext	oldcxt;
-	MemoryContext	idx_cxt;
-	int				i;
-	int				ctid_off;
+	MemoryContext oldcxt;
+	MemoryContext idx_cxt;
+	int			i;
+	int			ctid_off;
 
 	idx_cxt = OGetIndexContext(descr);
 	oldcxt = MemoryContextSwitchTo(idx_cxt);
@@ -691,7 +691,7 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 		{
 			tupdesc_miss->am_value =
 				datumCopy(o_table->missing[i].am_value, field->byval,
-							field->typlen);
+						  field->typlen);
 		}
 	}
 	MemoryContextSwitchTo(oldcxt);
@@ -817,13 +817,13 @@ static void
 o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 					  OXid oxid, CommitSeqNo csn)
 {
-	OTableIndexOidsKey	   *old_keys = NULL;
-	OTableIndexOidsKey	   *new_keys = NULL;
-	int						old_keys_num = 0,
-							new_keys_num = 0,
-							i = 0,
-							j = 0;
-	bool					reuse = false;
+	OTableIndexOidsKey *old_keys = NULL;
+	OTableIndexOidsKey *new_keys = NULL;
+	int			old_keys_num = 0,
+				new_keys_num = 0,
+				i = 0,
+				j = 0;
+	bool		reuse = false;
 
 	old_keys = o_table_make_index_keys(old_table, &old_keys_num);
 	new_keys = o_table_make_index_keys(new_table, &new_keys_num);
@@ -867,13 +867,13 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			if (!reuse)
 			{
 				elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
-					old_keys[i].type,
-					old_keys[i].oids.datoid,
-					old_keys[i].oids.reloid,
-					old_keys[i].oids.relnode,
-					old_table->oids.datoid,
-					old_table->oids.reloid,
-					old_table->oids.relnode);
+					 old_keys[i].type,
+					 old_keys[i].oids.datoid,
+					 old_keys[i].oids.reloid,
+					 old_keys[i].oids.relnode,
+					 old_table->oids.datoid,
+					 old_table->oids.reloid,
+					 old_table->oids.relnode);
 
 				result = o_indices_del(old_table, old_keys[i].ixNum,
 									   oxid, csn);
@@ -891,13 +891,13 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			if (!reuse)
 			{
 				elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
-					new_keys[j].type,
-					new_keys[j].oids.datoid,
-					new_keys[j].oids.reloid,
-					new_keys[j].oids.relnode,
-					new_table->oids.datoid,
-					new_table->oids.reloid,
-					new_table->oids.relnode);
+					 new_keys[j].type,
+					 new_keys[j].oids.datoid,
+					 new_keys[j].oids.reloid,
+					 new_keys[j].oids.relnode,
+					 new_table->oids.datoid,
+					 new_table->oids.reloid,
+					 new_table->oids.relnode);
 
 				result = o_indices_add(new_table, new_keys[j].ixNum,
 									   oxid, csn);
@@ -1281,6 +1281,7 @@ describe_table(ORelOids oids)
 		if (orioledb_table_description_compress)
 		{
 			const char *compression = "";
+
 			if (CompressionMethodIsValid(field->compression))
 				compression = GetCompressionMethodName(field->compression);
 			appendStringInfo(&buf, "| %11s ", compression);
@@ -1538,7 +1539,7 @@ serialize_o_table(OTable *o_table, int *size)
 		appendBinaryStringInfo(&str, (Pointer) &o_table->missing[i].am_present,
 							   sizeof(bool));
 		buf = palloc(field_size);
-		buf_start = buf;	/* copied because datumSerialize moves buf ptr */
+		buf_start = buf;		/* copied because datumSerialize moves buf ptr */
 		datumSerialize(o_table->missing[i].am_value,
 					   !o_table->missing[i].am_present,
 					   o_table->fields[i].byval,
@@ -1583,12 +1584,12 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 OTable *
 deserialize_o_table(Pointer data, Size length)
 {
-	Pointer			ptr = data;
-	OTable		   *o_table;
-	int				len;
-	int				i;
-	MemoryContext	oldcxt;
-	MemoryContext	tbl_cxt;
+	Pointer		ptr = data;
+	OTable	   *o_table;
+	int			len;
+	int			i;
+	MemoryContext oldcxt;
+	MemoryContext tbl_cxt;
 
 	o_table = (OTable *) palloc0(sizeof(OTable));
 	len = offsetof(OTable, indices);

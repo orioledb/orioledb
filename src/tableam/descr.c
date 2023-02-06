@@ -472,8 +472,8 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	o_sys_cache_search_datoid = o_table->oids.datoid;
 	if (o_table->defvals)
 	{
-		int		i;
-		int		ctid_off = o_table->has_primary ? 0 : 1;
+		int			i;
+		int			ctid_off = o_table->has_primary ? 0 : 1;
 
 		descr->defvals_exprstate = palloc0(sizeof(ExprState *) *
 										   (o_table->nfields + ctid_off));
@@ -1334,6 +1334,7 @@ recreate_table_descr_by_oids(ORelOids oids)
 	if (found)
 	{
 		OIndexDescr *indexDescr;
+
 		indexDescr = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
 		if (found)
 			index_descr_delete_from_hash(indexDescr);

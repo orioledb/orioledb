@@ -39,8 +39,8 @@ o_fill_row_key_bound(OBTreeKeyBound *bound,
 					 bool first_subkey, bool last_subkey,
 					 AttrNumber subattnum, uint8 flags)
 {
-	OBtreeRowKeyBound	   *rowkey;
-	OBTreeValueBound	   *result;
+	OBtreeRowKeyBound *rowkey;
+	OBTreeValueBound *result;
 
 	if (first_subkey)
 	{
@@ -51,7 +51,7 @@ o_fill_row_key_bound(OBTreeKeyBound *bound,
 		else
 			bound->row_keys = repalloc(bound->row_keys,
 									   sizeof(OBtreeRowKeyBound) *
-										   bound->n_row_keys);
+									   bound->n_row_keys);
 	}
 	rowkey = &bound->row_keys[bound->n_row_keys - 1];
 	if (first_subkey)
@@ -65,9 +65,9 @@ o_fill_row_key_bound(OBTreeKeyBound *bound,
 	else
 	{
 		rowkey->keys = repalloc(rowkey->keys, sizeof(OBTreeValueBound) *
-												  rowkey->nkeys);
+								rowkey->nkeys);
 		rowkey->keynums = repalloc(rowkey->keynums, sizeof(int) *
-														rowkey->nkeys);
+								   rowkey->nkeys);
 	}
 	result = &rowkey->keys[rowkey->nkeys - 1];
 	rowkey->keynums[rowkey->nkeys - 1] = subattnum;
@@ -127,11 +127,11 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 				if (key->sk_flags & SK_SEARCHNULL)
 				{
 					low.flags = O_VALUE_BOUND_LOWER |
-								O_VALUE_BOUND_INCLUSIVE |
-								O_VALUE_BOUND_NULL;
+						O_VALUE_BOUND_INCLUSIVE |
+						O_VALUE_BOUND_NULL;
 					high.flags = O_VALUE_BOUND_UPPER |
-								 O_VALUE_BOUND_INCLUSIVE |
-								 O_VALUE_BOUND_NULL;
+						O_VALUE_BOUND_INCLUSIVE |
+						O_VALUE_BOUND_NULL;
 				}
 				else
 				{
@@ -181,18 +181,18 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		}
 		else if (key->sk_flags & SK_ROW_HEADER)
 		{
-			ScanKeyData	   *subkey;
-			bool			first_subkey = true;
-			bool			last_subkey = false;
+			ScanKeyData *subkey;
+			bool		first_subkey = true;
+			bool		last_subkey = false;
 
 			subkey = (ScanKey) DatumGetPointer(key->sk_argument);
 
 			while (!last_subkey)
 			{
-				AttrNumber			subattnum;
-				OIndexField		   *subfield;
-				OBTreeValueBound   *sublow = NULL;
-				OBTreeValueBound   *subhigh = NULL;
+				AttrNumber	subattnum;
+				OIndexField *subfield;
+				OBTreeValueBound *sublow = NULL;
+				OBTreeValueBound *subhigh = NULL;
 
 				last_subkey = subkey->sk_flags & SK_ROW_END;
 

@@ -112,8 +112,8 @@ o_opclass_cache_add_table(OTable *o_table)
 
 		for (cur_ix = 0; cur_ix < o_table->nindices; cur_ix++)
 		{
-			OTableIndex	   *index = &o_table->indices[cur_ix];
-			int				cur_field;
+			OTableIndex *index = &o_table->indices[cur_ix];
+			int			cur_field;
 
 			for (cur_field = 0; cur_field < index->nfields; cur_field++)
 			{

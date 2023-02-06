@@ -98,7 +98,7 @@ typedef struct
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
 	Expr	  **defvals;
 	uint32		version;		/* not serialized in serialize_o_table */
-	MemoryContext	tbl_mctx; /* not serialized in serialize_o_table */
+	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
 } OTable;
 
 #define OGetTableContext(table) \
@@ -155,7 +155,7 @@ extern bool o_tables_update_without_oids_indexes(OTable *table, OXid oxid,
 												 CommitSeqNo csn);
 
 /* Invalidates descriptors after o_tables_update */
-void o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
+void		o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
 
 /* Free memory of OTable struct */
 extern void o_table_free(OTable *table);

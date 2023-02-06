@@ -43,17 +43,17 @@ typedef struct
 
 typedef struct OBtreeRowKeyBound
 {
-	int					nkeys;
-	int				   *keynums;
-	OBTreeValueBound   *keys;
+	int			nkeys;
+	int		   *keynums;
+	OBTreeValueBound *keys;
 } OBtreeRowKeyBound;
 
 typedef struct
 {
-	int						nkeys;
-	OBTreeValueBound		keys[INDEX_MAX_KEYS];
-	int						n_row_keys;
-	OBtreeRowKeyBound	   *row_keys;
+	int			nkeys;
+	OBTreeValueBound keys[INDEX_MAX_KEYS];
+	int			n_row_keys;
+	OBtreeRowKeyBound *row_keys;
 } OBTreeKeyBound;
 
 typedef struct

@@ -435,10 +435,10 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 				!ExecPartitionCheck(rinfo, confl_slot, estate, false))
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("invalid ON UPDATE specification"),
-						errdetail("The result tuple would appear in a "
-								  "different partition than the original "
-								  "tuple.")));
+						 errmsg("invalid ON UPDATE specification"),
+						 errdetail("The result tuple would appear in a "
+								   "different partition than the original "
+								   "tuple.")));
 
 
 			mres = o_tbl_update(descr, confl_slot, estate, &old_pkey,
@@ -1564,8 +1564,8 @@ is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 static void
 o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 {
-	bool			is_ctid = id->primaryIsCtid;
-	bool			is_primary = id->desc.type == oIndexPrimary;
+	bool		is_ctid = id->primaryIsCtid;
+	bool		is_primary = id->desc.type == oIndexPrimary;
 
 	if (is_primary && is_ctid)
 	{
@@ -1587,7 +1587,8 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 			{
 				for (j = 0; j < id->nPrimaryFields; j++)
 				{
-					AttrNumber attnum = id->primaryFieldsAttnums[j];
+					AttrNumber	attnum = id->primaryFieldsAttnums[j];
+
 					if (i == attnum)
 					{
 						nfields--;
@@ -1610,9 +1611,9 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNIQUE_VIOLATION),
 				 errmsg("duplicate key value violates unique "
-				 		"constraint \"%s\"", id->name.data),
+						"constraint \"%s\"", id->name.data),
 				 errdetail("Key %s already exists.", str->data),
 				 errtableconstraint(rel, id->desc.type == oIndexPrimary ?
-											"pk" : "sk")));
+									"pk" : "sk")));
 	}
 }

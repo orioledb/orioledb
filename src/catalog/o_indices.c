@@ -315,11 +315,11 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 static OIndex *
 make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 {
-	OTableIndex		*primary = NULL;
-	OIndex		   *result = (OIndex *) palloc0(sizeof(OIndex));
-	int				j;
-	MemoryContext	mcxt;
-	MemoryContext	old_mcxt;
+	OTableIndex *primary = NULL;
+	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
+	int			j;
+	MemoryContext mcxt;
+	MemoryContext old_mcxt;
 
 	if (table->has_primary)
 	{

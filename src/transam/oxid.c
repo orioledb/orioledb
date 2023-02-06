@@ -566,11 +566,11 @@ oxid_notify_all(void)
 	while (queue_size-- > 0)
 	{
 		if (
-	#if PG_VERSION_NUM >= 140000
+#if PG_VERSION_NUM >= 140000
 			proc->waitStatus == PROC_WAIT_STATUS_WAITING &&
-	#else
+#else
 			proc->waitStatus == STATUS_WAITING &&
-	#endif
+#endif
 			proc->waitLock->tag.locktag_field1 == tag.locktag_field1 &&
 			proc->waitLock->tag.locktag_field2 == tag.locktag_field2 &&
 			proc->waitLock->tag.locktag_field3 == tag.locktag_field3 &&
@@ -585,7 +585,7 @@ oxid_notify_all(void)
 		proc = (PGPROC *) proc->links.next;
 	}
 
-	foreach (lc, procs)
+	foreach(lc, procs)
 	{
 		proc = lfirst(lc);
 		RemoveFromWaitQueue(proc, hashcode);
@@ -984,7 +984,7 @@ fill_current_oxid_csn(OXid *oxid, CommitSeqNo *csn)
 	if (XactIsoLevel == XACT_SERIALIZABLE)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("orioledb does not support SERIALIZABLE isolation level")),
+				 errmsg("orioledb does not support SERIALIZABLE isolation level")),
 				errdetail("Stay tuned, it will be added in future releases."));
 
 	if (ActiveSnapshotSet())

@@ -84,9 +84,9 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 
-UndoLocation	saved_undo_location = InvalidUndoLocation;
-static bool		isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
-List		   *drop_index_list = NIL;
+UndoLocation saved_undo_location = InvalidUndoLocation;
+static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
+List	   *drop_index_list = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -378,10 +378,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
 	{
-		AlterTableStmt	   *atstmt = (AlterTableStmt *) pstmt->utilityStmt;
-		Oid					relid;
-		LOCKMODE			lockmode;
-		ObjectType			objtype;
+		AlterTableStmt *atstmt = (AlterTableStmt *) pstmt->utilityStmt;
+		Oid			relid;
+		LOCKMODE	lockmode;
+		ObjectType	objtype;
 
 #if PG_VERSION_NUM < 140000
 		objtype = atstmt->relkind;
@@ -390,10 +390,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 #endif
 
 		/*
-		 * Figure out lock mode, and acquire lock.  This also does
-		 * basic permissions checks, so that we won't wait for a
-		 * lock on (for example) a relation on which we have no
-		 * permissions.
+		 * Figure out lock mode, and acquire lock.  This also does basic
+		 * permissions checks, so that we won't wait for a lock on (for
+		 * example) a relation on which we have no permissions.
 		 */
 		lockmode = AlterTableGetLockLevel(atstmt->cmds);
 		relid = AlterTableLookupRelation(atstmt, lockmode);
@@ -401,7 +400,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
 			lockmode == AccessExclusiveLock)
 		{
-			Relation rel = table_open(relid, lockmode);
+			Relation	rel = table_open(relid, lockmode);
+
 			if (is_orioledb_rel(rel))
 			{
 				ListCell   *lc;
@@ -413,33 +413,33 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					/* make checks */
 					switch (cmd->subtype)
 					{
-					case AT_AlterColumnType:
-					case AT_AddIndex:
-					case AT_AddColumn:
-					case AT_DropColumn:
-					case AT_ColumnDefault:
-					case AT_AddConstraint:
-					case AT_DropConstraint:
-					case AT_GenericOptions:
-					case AT_SetNotNull:
-					case AT_ChangeOwner:
-					case AT_DropNotNull:
-					case AT_AddInherit:
-					case AT_DropInherit:
-					case AT_CookedColumnDefault:
-					case AT_AddIdentity:
-					case AT_SetIdentity:
-					case AT_DropIdentity:
-						break;
-					default:
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									errmsg("unsupported alter table subcommand")),
-								errdetail("Subcommand \"%s\" is not "
-											"supported on OrioleDB tables yet. "
-											"Please send a bug report.",
-											deparse_alter_table_cmd_subtype(cmd)));
-						break;
+						case AT_AlterColumnType:
+						case AT_AddIndex:
+						case AT_AddColumn:
+						case AT_DropColumn:
+						case AT_ColumnDefault:
+						case AT_AddConstraint:
+						case AT_DropConstraint:
+						case AT_GenericOptions:
+						case AT_SetNotNull:
+						case AT_ChangeOwner:
+						case AT_DropNotNull:
+						case AT_AddInherit:
+						case AT_DropInherit:
+						case AT_CookedColumnDefault:
+						case AT_AddIdentity:
+						case AT_SetIdentity:
+						case AT_DropIdentity:
+							break;
+						default:
+							ereport(ERROR,
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("unsupported alter table subcommand")),
+									errdetail("Subcommand \"%s\" is not "
+											  "supported on OrioleDB tables yet. "
+											  "Please send a bug report.",
+											  deparse_alter_table_cmd_subtype(cmd)));
+							break;
 					}
 				}
 			}
@@ -583,13 +583,13 @@ static bool
 ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 							  int subId)
 {
-	ParseState	   *pstate = make_parsestate(NULL);
-	Node		   *expr;
-	bool			rewrite = false;
+	ParseState *pstate = make_parsestate(NULL);
+	Node	   *expr;
+	bool		rewrite = false;
 
 	/* code from ATPrepAlterColumnType */
 	expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
-						    old_field->collation, 0);
+							old_field->collation, 0);
 	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
 								 field->typmod, COERCION_EXPLICIT,
 								 COERCE_IMPLICIT_CAST, -1);
@@ -643,14 +643,14 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 						  uint64 count,
 						  bool execute_once)
 {
-	UndoLocation		prevSavedLocation = saved_undo_location;
+	UndoLocation prevSavedLocation = saved_undo_location;
 
 	saved_undo_location = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 
 #ifdef USE_ASSERT_CHECKING
 	{
-		uint32	depth;
-		bool	top_level = isTopLevel;
+		uint32		depth;
+		bool		top_level = isTopLevel;
 
 		isTopLevel = false;
 		depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth,
@@ -705,8 +705,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				ORelOids   *treeOids;
 				int			numTreeOids;
 				ORelOids	oids = {MyDatabaseId,
-									objectId,
-									rel->rd_node.relNode};
+					objectId,
+				rel->rd_node.relNode};
 
 				fill_current_oxid_csn(&oxid, &csn);
 				Assert(relation_get_descr(rel) != NULL);
@@ -724,14 +724,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTable	   *o_table;
 				OTableField *o_field = NULL;
 				ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid,
-									rel->rd_node.relNode};
+				rel->rd_node.relNode};
 
 				o_table = o_tables_get(oids);
 				if (o_table == NULL)
 				{
 					/* table does not exist */
 					elog(NOTICE, "orioledb table \"%s\" not found",
-						RelationGetRelationName(rel));
+						 RelationGetRelationName(rel));
 				}
 				else
 				{
@@ -739,7 +739,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					if (o_field && !o_field->droped)
 					{
-						CommitSeqNo	csn;
+						CommitSeqNo csn;
 						OXid		oxid;
 
 						o_field->droped = true;
@@ -755,8 +755,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 !(drop_arg->dropflags & PERFORM_DELETION_OF_RELATION))
 			{
 				/*
-				 * dropflags == PERFORM_DELETION_OF_RELATION ignored, to
-				 * not drop indices when whole table dropped
+				 * dropflags == PERFORM_DELETION_OF_RELATION ignored, to not
+				 * drop indices when whole table dropped
 				 */
 				Relation	tbl = relation_open(rel->rd_index->indrelid,
 												AccessShareLock);
@@ -774,9 +774,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					if (ix_num != InvalidIndexNumber)
 					{
 #if PG_VERSION_NUM >= 150000
-						String  *relname;
+						String	   *relname;
 #else
-						Value   *relname;
+						Value	   *relname;
 #endif
 
 						if (descr->indices[ix_num]->primaryIsCtid)
@@ -878,14 +878,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 					 (subId != 0) && is_orioledb_rel(rel))
 			{
-				OTableField			   *field;
-				Form_pg_attribute		attr;
-				OTable				   *o_table;
-				ORelOids				oids = {MyDatabaseId,
-												rel->rd_rel->oid,
-												rel->rd_node.relNode};
-				CommitSeqNo				csn;
-				OXid					oxid;
+				OTableField *field;
+				Form_pg_attribute attr;
+				OTable	   *o_table;
+				ORelOids	oids = {MyDatabaseId,
+					rel->rd_rel->oid,
+				rel->rd_node.relNode};
+				CommitSeqNo csn;
+				OXid		oxid;
 
 				o_table = o_tables_get(oids);
 				if (o_table == NULL)
@@ -900,9 +900,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_table->nfields++;
 					o_table->fields = repalloc(o_table->fields,
 											   o_table->nfields *
-												   sizeof(OTableField));
+											   sizeof(OTableField));
 					memset(&o_table->fields[o_table->nfields - 1], 0,
-						sizeof(OTableField));
+						   sizeof(OTableField));
 
 					CommandCounterIncrement();
 					field = &o_table->fields[o_table->nfields - 1];
@@ -923,7 +923,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				ORelOids	oids;
 				TupleDesc	tupdesc;
 				OTable	   *o_table;
-				CommitSeqNo	csn = COMMITSEQNO_INPROGRESS;
+				CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
 				OXid		oxid = InvalidOXid;
 
 				fill_current_oxid_csn(&oxid, &csn);
@@ -957,17 +957,17 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					ORelOids		oids,
-									toastOids,
-								   *treeOids;
-					OTable		   *o_table;
-					int				numTreeOids;
-					CommitSeqNo		csn;
-					OXid			oxid;
-					ORelOptions	   *options;
-					OCompress		compress = default_compress,
-									primary_compress = default_primary_compress,
-									toast_compress = default_toast_compress;
+					ORelOids	oids,
+								toastOids,
+							   *treeOids;
+					OTable	   *o_table;
+					int			numTreeOids;
+					CommitSeqNo csn;
+					OXid		oxid;
+					ORelOptions *options;
+					OCompress	compress = default_compress,
+								primary_compress = default_primary_compress,
+								toast_compress = default_toast_compress;
 
 					options = (ORelOptions *) tbl->rd_options;
 
@@ -986,28 +986,28 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						if (options->compress_offset > 0)
 						{
-							char   *str;
+							char	   *str;
 
-							str = (char *)(((Pointer) options) +
-										   options->compress_offset);
+							str = (char *) (((Pointer) options) +
+											options->compress_offset);
 							if (str)
 								compress = o_parse_compress(str);
 						}
 						if (options->primary_compress_offset > 0)
 						{
-							char   *str;
+							char	   *str;
 
-							str = (char *)(((Pointer) options) +
-										   options->primary_compress_offset);
+							str = (char *) (((Pointer) options) +
+											options->primary_compress_offset);
 							if (str)
 								primary_compress = o_parse_compress(str);
 						}
 						if (options->toast_compress_offset > 0)
 						{
-							char   *str;
+							char	   *str;
 
-							str = (char *)(((Pointer) options) +
-										   options->toast_compress_offset);
+							str = (char *) (((Pointer) options) +
+											options->toast_compress_offset);
 							if (str)
 								toast_compress = o_parse_compress(str);
 						}
@@ -1046,13 +1046,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		if (rel != NULL && (rel->rd_rel->relkind == RELKIND_RELATION) &&
 			(subId != 0) && is_orioledb_rel(rel))
 		{
-			Form_pg_attribute		attr;
-			OTable				   *o_table;
-			ORelOids				oids = {MyDatabaseId,
-											rel->rd_rel->oid,
-											rel->rd_node.relNode};
-			CommitSeqNo				csn;
-			OXid					oxid;
+			Form_pg_attribute attr;
+			OTable	   *o_table;
+			ORelOids	oids = {MyDatabaseId,
+				rel->rd_rel->oid,
+			rel->rd_node.relNode};
+			CommitSeqNo csn;
+			OXid		oxid;
 
 			o_table = o_tables_get(oids);
 			if (o_table == NULL)
@@ -1063,10 +1063,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			}
 			else
 			{
-				OTableField		old_field;
-				OTableField	   *field;
-				bool			changed;
-				bool			rewrite = false;
+				OTableField old_field;
+				OTableField *field;
+				bool		changed;
+				bool		rewrite = false;
 
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
@@ -1075,7 +1075,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				orioledb_attr_to_field(field, attr);
 
 				changed = old_field.typid != field->typid ||
-						  old_field.collation != field->collation;
+					old_field.collation != field->collation;
 
 				if (changed)
 				{
@@ -1116,10 +1116,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 					 (subId != 0) && is_orioledb_rel(rel))
 			{
-				OTable *o_table;
-				ORelOids oids = {MyDatabaseId,
-								 rel->rd_rel->oid,
-								 rel->rd_node.relNode};
+				OTable	   *o_table;
+				ORelOids	oids = {MyDatabaseId,
+					rel->rd_rel->oid,
+				rel->rd_node.relNode};
 
 				o_table = o_tables_get(oids);
 				if (o_table == NULL)
@@ -1130,14 +1130,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 				else
 				{
-					OTableField			old_field;
-					OTableField		   *field;
-					Form_pg_attribute	attr;
-					bool				rewrite = false;
-					CommitSeqNo			csn;
-					OXid				oxid;
-					int					ix_num;
-					bool				changed;
+					OTableField old_field;
+					OTableField *field;
+					Form_pg_attribute attr;
+					bool		rewrite = false;
+					CommitSeqNo csn;
+					OXid		oxid;
+					int			ix_num;
+					bool		changed;
 
 					old_field = o_table->fields[subId - 1];
 					CommandCounterIncrement();
@@ -1146,7 +1146,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					orioledb_attr_to_field(field, attr);
 
 					changed = old_field.typid != field->typid ||
-							  old_field.collation != field->collation;
+						old_field.collation != field->collation;
 
 					if (changed)
 					{
@@ -1162,9 +1162,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_tables_after_update(o_table, oxid, csn);
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
-							int				field_num;
-							int				ctid_off;
-							OTableIndex	   *index;
+							int			field_num;
+							int			ctid_off;
+							OTableIndex *index;
 
 							ctid_off = o_table->has_primary ? 0 : 1;
 							index = &o_table->indices[ix_num];
@@ -1172,9 +1172,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							for (field_num = 0; field_num < index->nkeyfields;
 								 field_num++)
 							{
-								bool has_field;
+								bool		has_field;
+
 								has_field = index->fields[field_num].attnum ==
-											subId - 1;
+									subId - 1;
 								if (index->type == oIndexPrimary || has_field)
 								{
 									o_indices_update(o_table,
@@ -1182,8 +1183,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 													 oxid, csn);
 									o_invalidate_oids(index->oids);
 									o_add_invalidate_undo_item(
-										index->oids,
-										O_INVALIDATE_OIDS_ON_ABORT);
+															   index->oids,
+															   O_INVALIDATE_OIDS_ON_ABORT);
 								}
 								if (changed && has_field)
 								{
@@ -1215,7 +1216,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							new_oids;
 				OTable	   *old_o_table,
 						   *new_o_table;
-				CommitSeqNo	csn;
+				CommitSeqNo csn;
 				OXid		oxid;
 
 				old_rel = relation_open(rel->rd_rel->relrewrite, NoLock);
@@ -1228,7 +1229,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					/* it does not exist */
 					elog(ERROR, "orioledb table \"%s\" not found",
-						RelationGetRelationName(old_rel));
+						 RelationGetRelationName(old_rel));
 				}
 
 				new_oids.datoid = MyDatabaseId;
@@ -1239,7 +1240,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					/* it does not exist */
 					elog(ERROR, "orioledb table \"%s\" not found",
-						RelationGetRelationName(rel));
+						 RelationGetRelationName(rel));
 				}
 
 
@@ -1271,7 +1272,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					OTable	   *o_table;
 					ORelOids	table_oids = {MyDatabaseId, tbl->rd_rel->oid,
-											  tbl->rd_node.relNode};
+					tbl->rd_node.relNode};
 
 					o_table = o_tables_get(table_oids);
 					if (o_table == NULL)
@@ -1285,8 +1286,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						CommitSeqNo csn;
 						OXid		oxid;
 						ORelOids	idx_oids = {MyDatabaseId,
-												rel->rd_rel->oid,
-												rel->rd_node.relNode};
+							rel->rd_rel->oid,
+						rel->rd_node.relNode};
 
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
@@ -1375,7 +1376,7 @@ o_parse_compress(const char *value)
 	bool		out_of_range = false;
 
 	/* skip leading spaces */
-	while (likely(*ptr) && isspace((unsigned char)*ptr))
+	while (likely(*ptr) && isspace((unsigned char) *ptr))
 		ptr++;
 
 	/* handle sign */
@@ -1388,15 +1389,15 @@ o_parse_compress(const char *value)
 		ptr++;
 
 	/* require at least one digit */
-	if (unlikely(!isdigit((unsigned char)*ptr)))
+	if (unlikely(!isdigit((unsigned char) *ptr)))
 		invalid_syntax = true;
 
 	if (!invalid_syntax)
 	{
 		/* process digits */
-		while (*ptr && isdigit((unsigned char)*ptr))
+		while (*ptr && isdigit((unsigned char) *ptr))
 		{
-			int8 digit = (*ptr++ - '0');
+			int8		digit = (*ptr++ - '0');
 
 			if (unlikely(pg_mul_s16_overflow(result, 10, &result)) ||
 				unlikely(pg_sub_s16_overflow(result, digit, &result)))
@@ -1406,7 +1407,7 @@ o_parse_compress(const char *value)
 		if (!out_of_range)
 		{
 			/* allow trailing whitespace, but not other trailing chars */
-			while (*ptr != '\0' && isspace((unsigned char)*ptr))
+			while (*ptr != '\0' && isspace((unsigned char) *ptr))
 				ptr++;
 
 			if (unlikely(*ptr != '\0'))
@@ -1429,7 +1430,7 @@ o_parse_compress(const char *value)
 	if (out_of_range)
 		ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
 						errmsg("value \"%s\" is out of range for type %s",
-							value, "smallint")));
+							   value, "smallint")));
 
 	if (invalid_syntax)
 	{
@@ -1442,7 +1443,7 @@ o_parse_compress(const char *value)
 		else
 			ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
 							errmsg("invalid compression value: \"%s\"",
-								value)));
+								   value)));
 	}
 
 	return result;

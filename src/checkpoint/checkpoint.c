@@ -3510,7 +3510,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			}
 			else
 			{
-				OTuple	levelNextKey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
+				OTuple		levelNextKey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
+
 				cmp = o_btree_cmp(descr,
 								  &key, BTreeKeyNonLeafKey,
 								  &levelNextKey,
@@ -3855,7 +3856,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		}
 		else if (!tuple_processed)
 		{
-			OTuple	levelNextKey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
+			OTuple		levelNextKey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
+
 			cmp = o_btree_cmp(descr, &levelHikey, BTreeKeyNonLeafKey,
 							  &levelNextKey, BTreeKeyNonLeafKey);
 			Assert(cmp >= 0);

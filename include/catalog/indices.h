@@ -19,7 +19,8 @@
 
 #include "catalog/o_tables.h"
 
-typedef struct ODefineIndexContext {
+typedef struct ODefineIndexContext
+{
 	Oid			oldNode;
 } ODefineIndexContext;
 

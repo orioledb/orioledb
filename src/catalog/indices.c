@@ -59,7 +59,7 @@ typedef struct NewColumnValue
 	Expr	   *expr;			/* expression to compute */
 	ExprState  *exprstate;		/* execution state */
 	bool		is_generated;	/* is it a GENERATED expression? */
-} NewColumnValue;
+}			NewColumnValue;
 
 bool		in_indexes_rebuild = false;
 
@@ -96,11 +96,11 @@ assign_new_oids(OTable *oTable, Relation rel)
 	{
 		in_indexes_rebuild = true;
 #if PG_VERSION_NUM >= 140000
-	params.options = 0;
-	params.tablespaceOid = InvalidOid;
-	reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, &params);
+		params.options = 0;
+		params.tablespaceOid = InvalidOid;
+		reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, &params);
 #else
-	reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, 0);
+		reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, 0);
 #endif
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}
@@ -203,15 +203,15 @@ void
 o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 						ODefineIndexContext **arg)
 {
-	int							nattrs;
-	Oid							myrelid = RelationGetRelid(rel);
-	ORelOids					oids = {MyDatabaseId,
-										myrelid,
-										rel->rd_node.relNode};
-	OIndexType					ix_type;
-	static ODefineIndexContext	context;
-	OTable					   *o_table;
-	bool						reuse = OidIsValid(stmt->oldNode);
+	int			nattrs;
+	Oid			myrelid = RelationGetRelid(rel);
+	ORelOids	oids = {MyDatabaseId,
+		myrelid,
+	rel->rd_node.relNode};
+	OIndexType	ix_type;
+	static ODefineIndexContext context;
+	OTable	   *o_table;
+	bool		reuse = OidIsValid(stmt->oldNode);
 
 	*arg = &context;
 
@@ -234,8 +234,8 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 		if (o_table == NULL)
 		{
 			elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
-				(unsigned) oids.datoid, (unsigned) oids.reloid,
-				(unsigned) oids.relnode);
+				 (unsigned) oids.datoid, (unsigned) oids.reloid,
+				 (unsigned) oids.relnode);
 		}
 
 		/* check index type */
@@ -252,8 +252,8 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 		{
 			if (o_table->nindices > 0)
 			{
-				int nattrs_max = 0,
-					ix;
+				int			nattrs_max = 0,
+							ix;
 
 				if (o_table->has_primary)
 					elog(ERROR, "table already has primary index");
@@ -279,8 +279,8 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 
 		if (stmt->idxname == NULL)
 		{
-			List   *allIndexParams;
-			List   *indexColNames;
+			List	   *allIndexParams;
+			List	   *indexColNames;
 
 			allIndexParams = list_concat_copy(stmt->indexParams,
 											  stmt->indexIncludingParams);
@@ -305,22 +305,22 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			   bool skip_constraint_checks, bool skip_build,
 			   ODefineIndexContext *context)
 {
-	Relation		index_rel;
-	OTable		   *old_o_table = NULL;
-	OTable		   *new_o_table;
-	OTable		   *o_table;
-	OIndexNumber	ix_num;
-	OTableIndex	   *index;
-	OTableDescr	   *old_descr = NULL;
-	bool			reuse = false;
-	bool			is_build = false;
-	Oid				myrelid = RelationGetRelid(rel);
-	ORelOids		oids = {MyDatabaseId, myrelid, rel->rd_node.relNode};
-	OIndexType		ix_type;
-	OCompress		compress = InvalidOCompress;
-	int16			indnatts;
-	int16			indnkeyatts;
-	OBTOptions	   *options;
+	Relation	index_rel;
+	OTable	   *old_o_table = NULL;
+	OTable	   *new_o_table;
+	OTable	   *o_table;
+	OIndexNumber ix_num;
+	OTableIndex *index;
+	OTableDescr *old_descr = NULL;
+	bool		reuse = false;
+	bool		is_build = false;
+	Oid			myrelid = RelationGetRelid(rel);
+	ORelOids	oids = {MyDatabaseId, myrelid, rel->rd_node.relNode};
+	OIndexType	ix_type;
+	OCompress	compress = InvalidOCompress;
+	int16		indnatts;
+	int16		indnkeyatts;
+	OBTOptions *options;
 
 	index_rel = index_open(indoid, AccessShareLock);
 	if (context)
@@ -332,9 +332,9 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	{
 		if (options->compress_offset > 0)
 		{
-			char   *str;
+			char	   *str;
 
-			str = (char *)(((Pointer) options) + options->compress_offset);
+			str = (char *) (((Pointer) options) + options->compress_offset);
 			if (str)
 				compress = o_parse_compress(str);
 		}
@@ -368,7 +368,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	{
 		if (reindex)
 		{
-			int	i;
+			int			i;
 
 			ix_num = InvalidIndexNumber;
 			for (i = 0; i < o_table->nindices; i++)
@@ -377,7 +377,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 					ix_num = i;
 			}
 			reindex = ix_num != InvalidIndexNumber &&
-					  ix_num < o_table->nindices;
+				ix_num < o_table->nindices;
 		}
 
 		if (reindex)
@@ -392,7 +392,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 				if (old_o_table == NULL)
 				{
 					elog(FATAL, "orioledb table does not exists "
-								"for oids = %u, %u, %u",
+						 "for oids = %u, %u, %u",
 						 oids.datoid, oids.reloid, oids.relnode);
 				}
 				o_table = old_o_table;
@@ -405,9 +405,9 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			ORelOids	primary_oids;
 
 			primary_oids = ix_type == oIndexPrimary ||
-						   !old_o_table->has_primary ?
-							   old_o_table->oids :
-							   old_o_table->indices[PrimaryIndexNumber].oids;
+				!old_o_table->has_primary ?
+				old_o_table->oids :
+				old_o_table->indices[PrimaryIndexNumber].oids;
 			is_build = tbl_data_exists(&primary_oids);
 
 			/* Rebuild, assign new oids */
@@ -421,7 +421,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 			if (ix_type == oIndexPrimary)
 			{
-				ix_num = 0; /* place first */
+				ix_num = 0;		/* place first */
 				o_table->has_primary = true;
 				o_table->primary_init_nfields = o_table->nfields;
 			}
@@ -431,7 +431,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			}
 			o_table->indices = (OTableIndex *)
 				repalloc(o_table->indices, sizeof(OTableIndex) *
-											(o_table->nindices + 1));
+						 (o_table->nindices + 1));
 
 			/* move indices if needed */
 			if (ix_type == oIndexPrimary && o_table->nindices > 0)
@@ -463,7 +463,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	}
 	else
 	{
-		int	i;
+		int			i;
 
 		ix_num = InvalidIndexNumber;
 		for (i = 0; i < o_table->nindices; i++)
@@ -529,7 +529,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	if (!reuse && index->type == oIndexPrimary)
 	{
 		CommitSeqNo csn;
-		OXid oxid;
+		OXid		oxid;
 
 		Assert(old_o_table);
 		fill_current_oxid_csn(&oxid, &csn);
@@ -675,19 +675,19 @@ void
 rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				OTable *o_table, OTableDescr *descr)
 {
-	BTreeIterator		   *iter;
-	OIndexDescr			   *primary,
-						   *idx;
-	Tuplesortstate		  **sortstates;
-	Tuplesortstate		   *toastSortState;
-	TupleTableSlot		   *primarySlot;
-	int						i;
-	Relation				tableRelation;
-	double					heap_tuples,
-						   *index_tuples;
-	uint64					ctid;
-	CheckpointFileHeader   *fileHeaders;
-	CheckpointFileHeader	toastFileHeader;
+	BTreeIterator *iter;
+	OIndexDescr *primary,
+			   *idx;
+	Tuplesortstate **sortstates;
+	Tuplesortstate *toastSortState;
+	TupleTableSlot *primarySlot;
+	int			i;
+	Relation	tableRelation;
+	double		heap_tuples,
+			   *index_tuples;
+	uint64		ctid;
+	CheckpointFileHeader *fileHeaders;
+	CheckpointFileHeader toastFileHeader;
 
 	primary = GET_PRIMARY(old_descr);
 	o_btree_load_shmem(&primary->desc);
@@ -833,9 +833,9 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 static void
 drop_primary_index(Relation rel, OTable *o_table)
 {
-	OTable		   *old_o_table;
-	OTableDescr		tmp_descr;
-	OTableDescr	   *old_descr;
+	OTable	   *old_o_table;
+	OTableDescr tmp_descr;
+	OTableDescr *old_descr;
 
 	Assert(o_table->indices[PrimaryIndexNumber].type == oIndexPrimary);
 

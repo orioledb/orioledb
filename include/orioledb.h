@@ -204,7 +204,7 @@ extern int	default_compress;
 extern int	default_primary_compress;
 extern int	default_toast_compress;
 #if PG_VERSION_NUM >= 140000
-extern bool	orioledb_table_description_compress;
+extern bool orioledb_table_description_compress;
 #endif
 
 #define GET_CUR_PROCDATA() \
@@ -236,18 +236,18 @@ typedef int OCompress;
 typedef uint16 OCompressHeader;
 typedef struct ORelOptions
 {
-	int32			vl_len_;	/* varlena header (do not touch directly!) */
-	StdRdOptions	std_options;
-	int				compress_offset;
-	int				primary_compress_offset;
-	int				toast_compress_offset;
+	int32		vl_len_;		/* varlena header (do not touch directly!) */
+	StdRdOptions std_options;
+	int			compress_offset;
+	int			primary_compress_offset;
+	int			toast_compress_offset;
 } ORelOptions;
 
 typedef struct OBTOptions
 {
-	int32			vl_len_;	/* varlena header (do not touch directly!) */
-	BTOptions		bt_options;
-	int				compress_offset;
+	int32		vl_len_;		/* varlena header (do not touch directly!) */
+	BTOptions	bt_options;
+	int			compress_offset;
 } OBTOptions;
 
 extern int16 o_parse_compress(const char *value);
@@ -288,7 +288,7 @@ typedef struct OIndexDescr OIndexDescr;
 /* ddl.c */
 extern void orioledb_setup_ddl_hooks(void);
 extern UndoLocation saved_undo_location;
-extern List	*drop_index_list;
+extern List *drop_index_list;
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;

@@ -1316,7 +1316,7 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 	{
 		/* Evade parallel scan of OrioleDB's tables */
 		rel->rel_parallel_workers = RelationGetParallelWorkers(relation, -1);
-		if(rel->rel_parallel_workers > 0)
+		if (rel->rel_parallel_workers > 0)
 			elog(WARNING, "Rel parallel workers = %d", rel->rel_parallel_workers);
 
 		if (relation->rd_rel->relhasindex)
@@ -1336,14 +1336,14 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 					bool		hasbitmap;
 
 					hasbitmap = info->indexoid != primary->oids.reloid &&
-								primary->nFields <= 1;
+						primary->nFields <= 1;
 					for (i = 0;
 						 hasbitmap && i < primary->nFields; i++)
 					{
 						Oid			typeoid = primary->fields[i].inputtype;
 						bool		valid = typeoid == INT4OID ||
-											typeoid == INT8OID ||
-											typeoid == TIDOID;
+						typeoid == INT8OID ||
+						typeoid == TIDOID;
 
 						hasbitmap = hasbitmap && valid;
 					}

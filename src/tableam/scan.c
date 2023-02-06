@@ -218,12 +218,12 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 
 		if (is_orioledb_rel(relation))
 		{
-			ListCell	   *lc;
-			int				i;
-			int				nfields;
-			ORelOids		oids = {MyDatabaseId, relation->rd_rel->oid,
-									relation->rd_node.relNode};
-			OTable		   *o_table;
+			ListCell   *lc;
+			int			i;
+			int			nfields;
+			ORelOids	oids = {MyDatabaseId, relation->rd_rel->oid,
+			relation->rd_node.relNode};
+			OTable	   *o_table;
 
 			o_table = o_tables_get(oids);
 
@@ -232,23 +232,23 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 			if (o_table->has_primary)
 			{
 				/*
-				 * Additional pkey fields are added to index target list
-				 * so that the index only scan is selected
+				 * Additional pkey fields are added to index target list so
+				 * that the index only scan is selected
 				 */
 				nfields = o_table->indices[PrimaryIndexNumber].nfields;
 
 				for (i = 0; i < nfields; i++)
 				{
-					OTableIndexField   *pk_field;
-					ListCell		   *lc;
+					OTableIndexField *pk_field;
+					ListCell   *lc;
 
 					pk_field = &o_table->indices[PrimaryIndexNumber].fields[i];
 
 					foreach(lc, rel->indexlist)
 					{
-						IndexOptInfo   *index = (IndexOptInfo *) lfirst(lc);
-						int				col;
-						bool			member = false;
+						IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
+						int			col;
+						bool		member = false;
 
 						for (col = 0; col < index->ncolumns; col++)
 						{
@@ -261,8 +261,8 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 
 						if (!member)
 						{
-							Expr						   *indexvar;
-							const FormData_pg_attribute	   *att_tup;
+							Expr	   *indexvar;
+							const FormData_pg_attribute *att_tup;
 
 							index->ncolumns++;
 							index->indexkeys = (int *)
@@ -297,8 +297,8 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 
 				foreach(lc, rel->indexlist)
 				{
-					IndexClauseSet		rclauseset;
-					IndexOptInfo	   *index = (IndexOptInfo *) lfirst(lc);
+					IndexClauseSet rclauseset;
+					IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
 
 					if (index->indpred != NIL && !index->predOK)
 						continue;

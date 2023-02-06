@@ -64,22 +64,22 @@ static bool
 row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 					   bool low)
 {
-	int		rowkeynum;
-	bool	valid = true;
+	int			rowkeynum;
+	bool		valid = true;
 
 	for (rowkeynum = 0; rowkeynum < row_key->nkeys; rowkeynum++)
 	{
 		OBTreeValueBound *subkey1 = &row_key->keys[rowkeynum];
-		uint8 flags = subkey1->flags;
-		int keynum = row_key->keynums[rowkeynum];
+		uint8		flags = subkey1->flags;
+		int			keynum = row_key->keynums[rowkeynum];
 
 		if (!(flags & O_VALUE_BOUND_UNBOUNDED))
 		{
-			int		attnum;
-			bool	isnull;
-			Datum	value;
-			int		cmp;
-			int		valid_cmp;
+			int			attnum;
+			bool		isnull;
+			Datum		value;
+			int			cmp;
+			int			valid_cmp;
 
 			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
 												  id, keynum + 1);
@@ -106,21 +106,21 @@ row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 static bool
 is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range)
 {
-	int					i;
-	OBTreeKeyBound	   *low = &range->low;
-	OBTreeKeyBound	   *high = &range->high;
-	bool				valid = true;
-	int					keynum;
+	int			i;
+	OBTreeKeyBound *low = &range->low;
+	OBTreeKeyBound *high = &range->high;
+	bool		valid = true;
+	int			keynum;
 
 	Assert(low->nkeys == high->nkeys);
 
 	for (i = 0; valid && i < low->nkeys; i++)
 	{
-		int		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
-													  id, i + 1);
-		bool	isnull;
-		Datum	value = o_fastgetattr(tup, attnum, id->leafTupdesc,
-									  &id->leafSpec, &isnull);
+		int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
+														  id, i + 1);
+		bool		isnull;
+		Datum		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
+										  &id->leafSpec, &isnull);
 
 		if (!(low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{

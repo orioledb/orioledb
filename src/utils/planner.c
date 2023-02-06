@@ -772,16 +772,16 @@ o_collect_function(Node *node, void *context)
 			break;
 		case T_CoerceViaIO:
 			{
-				XLogRecPtr		cur_lsn;
-				Oid				datoid;
-				CoerceViaIO	   *iocoerce = (CoerceViaIO *) node;
-				OClassArg		arg = {.sys_table = true};
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				CoerceViaIO *iocoerce = (CoerceViaIO *) node;
+				OClassArg	arg = {.sys_table = true};
 
 				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 				o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
 											(Pointer) &arg);
 				o_type_cache_add_if_needed(datoid,
-										   exprType((Node *)iocoerce->arg),
+										   exprType((Node *) iocoerce->arg),
 										   cur_lsn, NULL);
 			}
 			break;

@@ -395,7 +395,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 	}
 	else
 	{
-		int		workersReportedCount;
+		int			workersReportedCount;
 
 		SpinLockAcquire(&poscan->workerBeginDisk);
 		if (!(poscan->flags & O_PARALLEL_DISK_SCAN_STARTED))
@@ -486,7 +486,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 			{
 				index = pg_atomic_fetch_add_u64(&poscan->downlinkIndex, scan->downlinksCount);
 				memcpy((Pointer) dsm_segment_address(scan->dsmSeg) + index * sizeof(scan->diskDownlinks[0]),
-						scan->diskDownlinks, scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
+					   scan->diskDownlinks, scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
 				index += scan->downlinksCount;
 			}
 			LWLockRelease(&poscan->downlinksPublish);
@@ -1603,6 +1603,7 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 	if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
 	{
 		BTreeMetaPage *metaPage = BTREE_GET_META(scan->desc);
+
 		(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
 	}
 	END_CRIT_SECTION();
