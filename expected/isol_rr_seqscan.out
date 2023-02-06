@@ -172,7 +172,7 @@ id|t
 
 step s1_commit: COMMIT;
 step s2_delete: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s2_select: SELECT * FROM o_iso_rr;
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
 step s2_rollback: ROLLBACK;
@@ -252,7 +252,7 @@ step s1_delete10:
 	WHERE id = 10; <waiting ...>
 step s2_commit: COMMIT;
 step s1_delete10: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert1 s1_begin s1_select s2_begin s2_delete s2_commit s1_delete11 s1_delete10 s1_rollback
@@ -329,7 +329,7 @@ step s1_delete11:
 step s1_delete10: 
 	DELETE FROM o_iso_rr
 	WHERE id = 10;
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert1 s1_begin s2_begin s2_delete s2_commit s1_select s1_delete11 s1_delete10 s1_rollback
@@ -1459,7 +1459,7 @@ id|t
 
 step s1_commit: COMMIT;
 step s2_delete: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s2_select20: 
 	SELECT * FROM o_iso_rr WHERE id BETWEEN -10 and 10;
 	SELECT * FROM o_iso_rr WHERE id > -11 and id < 11;
@@ -1519,7 +1519,7 @@ step s1_delete10:
 	WHERE id = 10; <waiting ...>
 step s2_commit: COMMIT;
 step s1_delete10: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert1 s1_begin s1_select20 s2_begin s2_delete s2_commit s1_delete11 s1_delete10 s1_rollback
@@ -1574,7 +1574,7 @@ step s1_delete11:
 step s1_delete10: 
 	DELETE FROM o_iso_rr
 	WHERE id = 10;
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert1 s1_begin s2_begin s2_delete s2_commit s1_select20 s1_delete11 s1_delete10 s1_rollback
@@ -2188,7 +2188,7 @@ count
 
 step s1_commit: COMMIT;
 step s2_delete_big: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s2_count: SELECT count(*) FROM o_iso_rr;
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
 step s2_rollback: ROLLBACK;
@@ -2219,7 +2219,7 @@ step s1_delete100:
 	WHERE id BETWEEN 100 and 140; <waiting ...>
 step s2_commit: COMMIT;
 step s1_delete100: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert_big1 s1_begin s1_count s2_begin s2_delete_big s2_commit s1_delete150 s1_delete100 s1_rollback
@@ -2247,7 +2247,7 @@ step s1_delete150:
 step s1_delete100: 
 	DELETE FROM o_iso_rr
 	WHERE id BETWEEN 100 and 140;
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big s2_commit s1_count s1_delete150 s1_delete100 s1_rollback
@@ -2951,7 +2951,7 @@ count
 
 step s1_commit: COMMIT;
 step s2_delete_big: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s2_count200: 
 	SELECT count(*) FROM o_iso_rr WHERE id BETWEEN 0 and 200;
 	SELECT count(*) FROM o_iso_rr WHERE id > -1 and id < 201;
@@ -2993,7 +2993,7 @@ step s1_delete100:
 	WHERE id BETWEEN 100 and 140; <waiting ...>
 step s2_commit: COMMIT;
 step s1_delete100: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert_big1 s1_begin s1_count200 s2_begin s2_delete_big s2_commit s1_delete150 s1_delete100 s1_rollback
@@ -3030,7 +3030,7 @@ step s1_delete150:
 step s1_delete100: 
 	DELETE FROM o_iso_rr
 	WHERE id BETWEEN 100 and 140;
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s1_rollback: ROLLBACK;
 
 starting permutation: s1_insert_big1 s1_begin s2_begin s2_delete_big s2_commit s1_count200 s1_delete150 s1_delete100 s1_rollback
@@ -3423,7 +3423,7 @@ count
 
 step s1_commit: COMMIT;
 step s2_delete_big_end: <... completed>
-ERROR:  could not serialize access due to concurrent update
+ERROR:  could not serialize access due to concurrent delete
 step s2_count200_end: 
 	SELECT count(*) FROM o_iso_rr WHERE id BETWEEN 301 and 500;
 	SELECT count(*) FROM o_iso_rr WHERE id > 300 and id < 501;

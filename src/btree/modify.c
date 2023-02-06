@@ -563,9 +563,14 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 		if (csn >= context->opCsn)
 		{
-			ereport(ERROR,
-					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					 errmsg("could not serialize access due to concurrent update")));
+			if (tuphdr->deleted)
+				ereport(ERROR,
+						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+						errmsg("could not serialize access due to concurrent delete")));
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+						errmsg("could not serialize access due to concurrent update")));
 		}
 	}
 
