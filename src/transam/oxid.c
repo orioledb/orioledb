@@ -981,6 +981,12 @@ oxid_get_csn(OXid oxid)
 void
 fill_current_oxid_csn(OXid *oxid, CommitSeqNo *csn)
 {
+	if (XactIsoLevel == XACT_SERIALIZABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("orioledb does not support SERIALIZABLE isolation level")),
+				errdetail("Stay tuned, it will be added in future releases."));
+
 	if (ActiveSnapshotSet())
 		*csn = GetActiveSnapshot()->snapshotcsn;
 	else
