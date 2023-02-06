@@ -1881,6 +1881,38 @@ UPDATE o_test_equal_but_binary_not_equal
 SELECT orioledb_tbl_structure('o_test_equal_but_binary_not_equal'::regclass,
 							  'nue');
 
+CREATE TABLE o_test_pkey_include_same_fields
+(
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1) INCLUDE (val_2, val_2)
+) USING orioledb;
+CREATE INDEX o_test_pkey_include_same_fields_ix1
+	ON o_test_pkey_include_same_fields (val_1) INCLUDE (val_2, val_2);
+\d+ o_test_pkey_include_same_fields
+SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
+
+INSERT INTO o_test_pkey_include_same_fields VALUES (1, 1);
+SELECT * FROM o_test_pkey_include_same_fields;
+EXPLAIN (COSTS OFF)
+	UPDATE o_test_pkey_include_same_fields SET val_2 = 2 WHERE val_1 = 1;
+UPDATE o_test_pkey_include_same_fields SET val_2 = 2 WHERE val_1 = 1;
+SELECT * FROM o_test_pkey_include_same_fields;
+
+CREATE TABLE o_test_include_same_as_pkey
+(
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1) INCLUDE (val_1)
+) USING orioledb;
+CREATE INDEX o_test_include_same_as_pkey_ix1
+	ON o_test_include_same_as_pkey (val_1) INCLUDE (val_1);
+INSERT INTO o_test_include_same_as_pkey VALUES (1, 1);
+SELECT * FROM o_test_include_same_as_pkey;
+EXPLAIN (COSTS OFF)
+	UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
+UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;

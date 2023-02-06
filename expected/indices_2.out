@@ -8503,8 +8503,93 @@ SELECT orioledb_tbl_structure('o_test_equal_but_binary_not_equal'::regclass,
  
 (1 row)
 
+CREATE TABLE o_test_pkey_include_same_fields
+(
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1) INCLUDE (val_2, val_2)
+) USING orioledb;
+CREATE INDEX o_test_pkey_include_same_fields_ix1
+	ON o_test_pkey_include_same_fields (val_1) INCLUDE (val_2, val_2);
+\d+ o_test_pkey_include_same_fields
+                     Table "indices.o_test_pkey_include_same_fields"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ val_1  | integer |           | not null |         | plain   |              | 
+ val_2  | integer |           |          |         | plain   |              | 
+Indexes:
+    "o_test_pkey_include_same_fields_pkey" PRIMARY KEY, btree (val_1) INCLUDE (val_2, val_2)
+    "o_test_pkey_include_same_fields_ix1" btree (val_1) INCLUDE (val_2, val_2)
+
+SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_pkey_include_same_fields_pkey    +
+     Index type: primary, unique               +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: val_1              +
+ Index o_test_pkey_include_same_fields_ix1     +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_1, val_2       +
+     Leaf tuple fields: val_1, val_2           +
+ 
+(1 row)
+
+INSERT INTO o_test_pkey_include_same_fields VALUES (1, 1);
+SELECT * FROM o_test_pkey_include_same_fields;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	UPDATE o_test_pkey_include_same_fields SET val_2 = 2 WHERE val_1 = 1;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Update on o_test_pkey_include_same_fields
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_pkey_include_same_fields
+               Forward index scan of: o_test_pkey_include_same_fields_ix1
+               Conds: (val_1 = 1)
+(5 rows)
+
+UPDATE o_test_pkey_include_same_fields SET val_2 = 2 WHERE val_1 = 1;
+SELECT * FROM o_test_pkey_include_same_fields;
+ val_1 | val_2 
+-------+-------
+     1 |     2
+(1 row)
+
+CREATE TABLE o_test_include_same_as_pkey
+(
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1) INCLUDE (val_1)
+) USING orioledb;
+CREATE INDEX o_test_include_same_as_pkey_ix1
+	ON o_test_include_same_as_pkey (val_1) INCLUDE (val_1);
+INSERT INTO o_test_include_same_as_pkey VALUES (1, 1);
+SELECT * FROM o_test_include_same_as_pkey;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Update on o_test_include_same_as_pkey
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_include_same_as_pkey
+               Forward index scan of: o_test_include_same_as_pkey_ix1
+               Conds: (val_1 = 1)
+(5 rows)
+
+UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 50 other objects
+NOTICE:  drop cascades to 52 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8555,6 +8640,8 @@ drop cascades to table o_test_unique_ix_duplicate
 drop cascades to table o_test_expr_index_on_conflict
 drop cascades to table o_test_expr_include_index
 drop cascades to table o_test_equal_but_binary_not_equal
+drop cascades to table o_test_pkey_include_same_fields
+drop cascades to table o_test_include_same_as_pkey
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)

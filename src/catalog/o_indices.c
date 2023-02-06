@@ -262,7 +262,10 @@ make_primary_o_index(OTable *table)
 	{
 		if (find_existing_field(result, j, &tableIndex->fields[i]) >= 0)
 		{
-			result->nKeyFields--;
+			if (i < result->nKeyFields)
+				result->nKeyFields--;
+			else
+				result->nIncludedFields--;
 			continue;
 		}
 
@@ -299,8 +302,10 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 			{
 				if (fillPrimary)
 					index->primaryFieldsAttnums[index->nPrimaryFields++] = k + 1;
-				else
+				else if (i < index->nKeyFields)
 					index->nKeyFields--;
+				else
+					index->nIncludedFields--;
 				continue;
 			}
 
