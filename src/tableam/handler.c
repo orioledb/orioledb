@@ -575,9 +575,10 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 			return TM_Deleted;
 
 #if PG_VERSION_NUM >= 140000
-		(void) ExecGetUpdateNewTuple(rinfo,
-									 epqslot,
-									 mres.oldTuple);
+#if PG_VERSION_NUM >= 150000
+		if (!rinfo->ri_matchedMergeAction)
+#endif
+			(void) ExecGetUpdateNewTuple(rinfo, epqslot, mres.oldTuple);
 #else
 		slot = ExecFilterJunk(mstate->ps.state->es_result_relation_info->ri_junkFilter,
 							  epqslot);
