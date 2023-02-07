@@ -102,6 +102,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
 				  btree_print_backend_id \
 				  fkeys \
+				  included \
 				  insert_fails \
 				  ioc_deadlock \
 				  ioc_lost_update \

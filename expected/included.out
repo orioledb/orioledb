@@ -1,0 +1,36 @@
+Parsed test spec with 2 sessions
+
+starting permutation: begin_1 begin_2 insert_1 commit_1 insert_2 commit_2 select_1
+step begin_1: BEGIN;
+step begin_2: BEGIN;
+step insert_1: INSERT INTO o_test_1(val_1, val_2) 
+				  VALUES(1, 'a')
+				  ON CONFLICT DO NOTHING;
+step commit_1: COMMIT;
+step insert_2: INSERT INTO o_test_1(val_1, val_2) 
+				  VALUES(1, 'b'), (1, 'c') 
+				  ON CONFLICT DO NOTHING;
+step commit_2: COMMIT;
+step select_1: SELECT * FROM o_test_1;
+val_1|val_2
+-----+-----
+    1|a    
+(1 row)
+
+
+starting permutation: begin_1 begin_2 insert_1_uniq insert_2_uniq abort_1 select_2 commit_2
+step begin_1: BEGIN;
+step begin_2: BEGIN;
+step insert_1_uniq: INSERT INTO o_test_1(val_1, val_2) 
+					   VALUES(1, 'Ab') 
+					   ON CONFLICT (lower(val_2)) DO UPDATE 
+					   SET val_2 = EXCLUDED.val_2;
+step insert_2_uniq: INSERT INTO o_test_1(val_1, val_2) 
+					   VALUES(2, 'aB') 
+					   ON CONFLICT (lower(val_2)) DO UPDATE 
+					   SET val_2 = EXCLUDED.val_2; <waiting ...>
+step abort_1: ABORT;
+step insert_2_uniq: <... completed>
+step select_2: SELECT * FROM o_test_2;
+ERROR:  relation "o_test_2" does not exist
+step commit_2: COMMIT;

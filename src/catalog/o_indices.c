@@ -243,7 +243,7 @@ make_primary_o_index(OTable *table)
 	else
 		result->compress = table->primary_compress;
 	result->nLeafFields = table->nfields;
-	result->nNonLeafFields = tableIndex->nfields;
+	result->nNonLeafFields = tableIndex->nkeyfields;
 	result->nPrimaryFields = 0;
 
 	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
@@ -270,23 +270,28 @@ make_primary_o_index(OTable *table)
 
 static void
 add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
-				 bool fillPrimary)
+				 uint16 *nKeyFields, bool fillPrimary)
 {
 	int			i;
 	int			expr_field = 0;
 
 	if (tableIndex)
 	{
+		int		nFields = fillPrimary ? tableIndex->nkeyfields : tableIndex->nfields;
 
-		for (i = 0; i < tableIndex->nfields; i++)
+		for (i = 0; i < nFields; i++)
 		{
 			int			attnum = tableIndex->fields[i].attnum;
 			int			k;
 
+			if (i == tableIndex->nkeyfields && nKeyFields)
+				(*nKeyFields) = *j;
+
 			k = find_existing_field(index, *j, &tableIndex->fields[i]);
 			if (k >= 0)
 			{
-				index->primaryFieldsAttnums[index->nPrimaryFields++] = k + 1;
+				if (fillPrimary)
+					index->primaryFieldsAttnums[index->nPrimaryFields++] = k + 1;
 				continue;
 			}
 
@@ -300,6 +305,9 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 				index->primaryFieldsAttnums[index->nPrimaryFields++] = *j + 1;
 			(*j)++;
 		}
+
+		if (i == tableIndex->nkeyfields && nKeyFields)
+			(*nKeyFields) = *j;
 	}
 	else
 	{
@@ -309,6 +317,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 		if (fillPrimary)
 			index->primaryFieldsAttnums[index->nPrimaryFields++] = *j + 1;
 		(*j)++;
+		if (nKeyFields)
+			(*nKeyFields) = 1;
 	}
 }
 
@@ -352,10 +362,9 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 		result->predicate_str = pstrdup(tableIndex->predicate_str);
 	result->expressions = list_copy_deep(tableIndex->expressions);
 	MemoryContextSwitchTo(old_mcxt);
-	add_index_fields(result, table, tableIndex, &j, false);
+	add_index_fields(result, table, tableIndex, &j, &result->nKeyFields, false);
 	Assert(j <= tableIndex->nfields);
-	result->nKeyFields = j;
-	add_index_fields(result, table, primary, &j, true);
+	add_index_fields(result, table, primary, &j, NULL, true);
 	Assert(j <= result->nLeafFields);
 	result->nLeafFields = result->nNonLeafFields = j;
 
@@ -405,7 +414,7 @@ make_toast_o_index(OTable *table)
 														 result->nNonLeafFields);
 
 	j = 0;
-	add_index_fields(result, table, primary, &j, true);
+	add_index_fields(result, table, primary, &j, NULL, true);
 	make_builtin_field(&result->leafFields[j], &result->nonLeafFields[j],
 					   INT2OID, "attnum", FirstLowInvalidHeapAttributeNumber,
 					   INT2_BTREE_OPS_OID);
