@@ -958,6 +958,8 @@ static bool
 page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 				  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo)
 {
+	(void) page_locator_find_real_item(p, NULL, locator);
+
 	while (BTREE_PAGE_LOCATOR_IS_VALID(p, locator))
 	{
 		int			cmp;

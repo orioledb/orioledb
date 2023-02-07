@@ -401,7 +401,7 @@ o_idx_unique_hash(BTreeDescr *desc, OTuple tuple)
 
 	hash = hash_combine_mix((Pointer) &desc->oids, sizeof(desc->oids), hash);
 
-	for (i = 0; i < idx->nFields; i++)
+	for (i = 0; i < idx->nUniqueFields; i++)
 	{
 		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, idx, i + 1);
 		hash = hash_combine_mix_field(tupdesc, spec, tuple, attnum, hash);
@@ -677,9 +677,15 @@ o_idx_cmp_key_bound_to_tuple(OIndexDescr *id,
 		spec = &id->nonLeafSpec;
 	}
 	if (keyType1 == BTreeKeyBound)
+	{
 		n = id->nonLeafTupdesc->natts;
+	}
 	else
+	{
+		Assert(keyType1 == BTreeKeyUniqueLowerBound ||
+			   keyType1 == BTreeKeyUniqueUpperBound);
 		n = id->nUniqueFields;
+	}
 
 	for (i = 0; i < n; i++)
 	{
