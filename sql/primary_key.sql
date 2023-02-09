@@ -1,3 +1,5 @@
+CREATE SCHEMA primary_key;
+SET SESSION search_path = 'primary_key';
 CREATE EXTENSION orioledb;
 
 -- Test for integer primary key
@@ -347,11 +349,11 @@ RESET enable_seqscan;
 
 -- Test null clauses in index scan
 create table o_test_null_clauses (
-	id bigint PRIMARY KEY, 
+	id bigint PRIMARY KEY,
 	val int
 ) USING orioledb;
 CREATE INDEX ON o_test_null_clauses(val);
-INSERT INTO o_test_null_clauses 
+INSERT INTO o_test_null_clauses
 	SELECT id, id + 2 val FROM generate_series(1, 10) id;
 INSERT INTO o_test_null_clauses VALUES (11, NULL), (12, NULL);
 SET enable_bitmapscan = off;
@@ -387,3 +389,5 @@ EXPLAIN (COSTS off) select max(id) from o_test_null_clauses;
 select max(id) from o_test_null_clauses;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA primary_key CASCADE;
+RESET search_path;

@@ -1,3 +1,5 @@
+CREATE SCHEMA createas;
+SET SESSION search_path = 'createas';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
@@ -171,6 +173,6 @@ DROP MATERIALIZED VIEW o_test_matview_no_data;
 SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
 	WHERE relname = 'o_test_matview_no_data';
 
-DROP SEQUENCE o_matview_seq CASCADE;
-DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA createas CASCADE;
+RESET search_path;

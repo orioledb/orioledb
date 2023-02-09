@@ -1,3 +1,5 @@
+CREATE SCHEMA trigger;
+SET SESSION search_path = 'trigger';
 CREATE EXTENSION IF NOT EXISTS orioledb;
 
 CREATE TABLE o_test_1 (
@@ -114,8 +116,6 @@ COPY o_test_copy_trigger (val_1, val_2, val_3, val_4, val_5) from stdin;
 
 SELECT * FROM o_test_copy_trigger;
 
-DROP FUNCTION func_trig_o_test_1 CASCADE;
-DROP FUNCTION func_trig_o_test_2 CASCADE;
-DROP FUNCTION func_trig_o_test_3 CASCADE;
-DROP FUNCTION func_trig_o_test_4 CASCADE;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA trigger CASCADE;
+RESET search_path;

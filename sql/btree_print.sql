@@ -1,4 +1,6 @@
 -- print evicted tree
+CREATE SCHEMA btree_print;
+SET SESSION search_path = 'btree_print';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_print_evicted (
@@ -43,3 +45,5 @@ SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
 COMMIT;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA btree_print CASCADE;
+RESET search_path;

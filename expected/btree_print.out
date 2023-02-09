@@ -1,4 +1,6 @@
 -- print evicted tree
+CREATE SCHEMA btree_print;
+SET SESSION search_path = 'btree_print';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_print_evicted (
        id integer NOT NULL,
@@ -3586,3 +3588,5 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table o_print_evicted
 drop cascades to table o_test1
 drop cascades to table o_test_is_null_assert
+DROP SCHEMA btree_print CASCADE;
+RESET search_path;

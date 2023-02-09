@@ -1,3 +1,5 @@
+CREATE SCHEMA explain;
+SET SESSION search_path = 'explain';
 CREATE EXTENSION orioledb;
 
 ----
@@ -347,6 +349,6 @@ SELECT explain_as_json($$
 			   SELECT * FROM o_explain_json ORDER BY val_1;
 	   $$)->0->'Plan'->'Actual Rows';
 
-DROP FUNCTION explain_as_json;
-DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA explain CASCADE;
+RESET search_path;

@@ -1,3 +1,5 @@
+CREATE SCHEMA foreign_keys;
+SET SESSION search_path = 'foreign_keys';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_test_text(
        id integer NOT NULL,
@@ -14,7 +16,7 @@ CREATE TABLE o_test(
        id integer NOT NULL,
        val text NOT NULL,
        PRIMARY KEY(id),
-       UNIQUE(id, val)       
+       UNIQUE(id, val)
 ) USING orioledb;
 CREATE TABLE o_test_child(
        id integer NOT NULL,
@@ -105,13 +107,13 @@ UPDATE o_test_child_compose SET o_test_ID = 10 where id = 1;
 ERROR:  insert or update on table "o_test_child_compose" violates foreign key constraint "o_test_child_compose_o_test_id_o_test_val_fkey"
 DETAIL:  Key (o_test_id, o_test_val)=(10, neo) is not present in table "o_test".
 -- fail delete
-DELETE FROM o_test where id = 1; 
+DELETE FROM o_test where id = 1;
 ERROR:  update or delete on table "o_test" violates foreign key constraint "o_test_child_o_test_id_fkey" on table "o_test_child"
 DETAIL:  Key (id)=(1) is still referenced from table "o_test_child".
 DELETE FROM o_test where id = 3;
 ERROR:  update or delete on table "o_test" violates foreign key constraint "o_test_child_upd_o_test_id_fkey" on table "o_test_child_upd"
 DETAIL:  Key (id)=(3) is still referenced from table "o_test_child_upd".
--- correct delete 
+-- correct delete
 DELETE FROM o_test_child where o_test_ID = 1;
 DELETE FROM o_test where id = 1;
 DELETE FROM o_test where id = 4;
@@ -155,7 +157,7 @@ SELECT * FROM o_test_child_compose;
   2 |         5 | gogo
 (2 rows)
 
--- correct delete 
+-- correct delete
 DELETE FROM o_test where id = 6 or id = 7;
 SELECT * FROM o_test_child_compose;
  id | o_test_id | o_test_val 
@@ -172,3 +174,5 @@ drop cascades to table o_test_child
 drop cascades to table o_test_child_del
 drop cascades to table o_test_child_upd
 drop cascades to table o_test_child_compose
+DROP SCHEMA foreign_keys CASCADE;
+RESET search_path;

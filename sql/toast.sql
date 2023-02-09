@@ -1,6 +1,8 @@
 -----
 -- do not init TOAST table if table does not consists non-index keys varlens
 -----
+CREATE SCHEMA toast;
+SET SESSION search_path = 'toast';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_test1 (
        id integer NOT NULL,
@@ -470,3 +472,5 @@ SELECT key, length(val), pg_column_size(val), substring(val for 30),
 	   substr(val, 30, 10) from o_test_substr WHERE key = 3;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA toast CASCADE;
+RESET search_path;

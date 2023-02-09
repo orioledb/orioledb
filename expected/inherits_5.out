@@ -1,3 +1,5 @@
+CREATE SCHEMA inherits;
+SET SESSION search_path = 'inherits';
 CREATE EXTENSION orioledb;
 CREATE TABLE p_stock (
 	item_id int
@@ -692,7 +694,7 @@ explain (verbose, costs off)
 update some_tab set a = a + 1 where false;
                         QUERY PLAN                        
 ----------------------------------------------------------
- Update on public.some_tab
+ Update on inherits.some_tab
    ->  Result
          Output: (some_tab.a + 1), NULL::oid, NULL::bytea
          One-Time Filter: false
@@ -703,7 +705,7 @@ explain (verbose, costs off)
 update some_tab set a = a + 1 where false returning b, a;
                         QUERY PLAN                        
 ----------------------------------------------------------
- Update on public.some_tab
+ Update on inherits.some_tab
    Output: some_tab.b, some_tab.a
    ->  Result
          Output: (some_tab.a + 1), NULL::oid, NULL::bytea
@@ -819,7 +821,7 @@ select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg
 -- Test that child does not inherit NO INHERIT constraints
 create table c1 () inherits (p1) USING orioledb;
 \d p1
-                 Table "public.p1"
+                Table "inherits.p1"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  ff1    | integer |           |          | 
@@ -829,7 +831,7 @@ Check constraints:
 Number of child tables: 1 (Use \d+ to list them.)
 
 \d c1
-                 Table "public.c1"
+                Table "inherits.c1"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  ff1    | integer |           |          | 
@@ -865,7 +867,7 @@ select NULL::derived::base;
 explain (verbose on, costs off) select row(i, b)::more_derived::derived::base from more_derived;
                 QUERY PLAN                 
 -------------------------------------------
- Seq Scan on public.more_derived
+ Seq Scan on inherits.more_derived
    Output: (ROW(i, b)::more_derived)::base
 (2 rows)
 
@@ -1022,7 +1024,7 @@ ERROR:  new row for relation "c1" violates check constraint "p2_f2_check"
 DETAIL:  Failing row contains (1, -1, 2).
 create table c2(f3 int) inherits(p1,p2) USING orioledb;
 \d c2
-                 Table "public.c2"
+                Table "inherits.c2"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  f1     | integer |           |          | 
@@ -1038,7 +1040,7 @@ NOTICE:  merging multiple inherited definitions of column "f1"
 NOTICE:  merging multiple inherited definitions of column "f2"
 NOTICE:  merging multiple inherited definitions of column "f3"
 \d c3
-                 Table "public.c3"
+                Table "inherits.c3"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  f1     | integer |           |          | 
@@ -1060,7 +1062,7 @@ create table pp1 (f1 int) USING orioledb;
 create table cc1 (f2 text, f3 int) inherits (pp1) USING orioledb;
 alter table pp1 add column a1 int check (a1 > 0);
 \d cc1
-                Table "public.cc1"
+               Table "inherits.cc1"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  f1     | integer |           |          | 
@@ -1075,7 +1077,7 @@ create table cc2(f4 float) inherits(pp1,cc1) USING orioledb;
 NOTICE:  merging multiple inherited definitions of column "f1"
 NOTICE:  merging multiple inherited definitions of column "a1"
 \d cc2
-                     Table "public.cc2"
+                    Table "inherits.cc2"
  Column |       Type       | Collation | Nullable | Default 
 --------+------------------+-----------+----------+---------
  f1     | integer          |           |          | 
@@ -1092,7 +1094,7 @@ alter table pp1 add column a2 int check (a2 > 0);
 NOTICE:  merging definition of column "a2" for child "cc2"
 NOTICE:  merging constraint "pp1_a2_check" with inherited definition
 \d cc2
-                     Table "public.cc2"
+                    Table "inherits.cc2"
  Column |       Type       | Collation | Nullable | Default 
 --------+------------------+-----------+----------+---------
  f1     | integer          |           |          | 
@@ -1123,7 +1125,7 @@ ALTER TABLE inhts RENAME aa TO aaa;      -- to be failed
 ERROR:  cannot rename inherited column "aa"
 ALTER TABLE inhts RENAME d TO dd;
 \d+ inhts
-                                   Table "public.inhts"
+                                  Table "inherits.inhts"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  aa     | integer |           |          |         | plain   |              | 
@@ -1142,7 +1144,7 @@ NOTICE:  merging multiple inherited definitions of column "aa"
 NOTICE:  merging multiple inherited definitions of column "b"
 ALTER TABLE inht1 RENAME aa TO aaa;
 \d+ inht4
-                                   Table "public.inht4"
+                                  Table "inherits.inht4"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  aaa    | integer |           |          |         | plain   |              | 
@@ -1159,7 +1161,7 @@ ALTER TABLE inht1 RENAME aaa TO aaaa;
 ALTER TABLE inht1 RENAME b TO bb;                -- to be failed
 ERROR:  cannot rename inherited column "b"
 \d+ inhts
-                                   Table "public.inhts"
+                                  Table "inherits.inhts"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  aaaa   | integer |           |          |         | plain   |              | 
@@ -1206,7 +1208,7 @@ drop cascades to table inht4
 CREATE TABLE test_constraints (id int, val1 varchar, val2 int, UNIQUE(val1, val2)) USING orioledb;
 CREATE TABLE test_constraints_inh () INHERITS (test_constraints) USING orioledb;
 \d+ test_constraints
-                                   Table "public.test_constraints"
+                                  Table "inherits.test_constraints"
  Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+---------+----------+--------------+-------------
  id     | integer           |           |          |         | plain    |              | 
@@ -1218,7 +1220,7 @@ Child tables: test_constraints_inh
 
 ALTER TABLE ONLY test_constraints DROP CONSTRAINT test_constraints_val1_val2_key;
 \d+ test_constraints
-                                   Table "public.test_constraints"
+                                  Table "inherits.test_constraints"
  Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+---------+----------+--------------+-------------
  id     | integer           |           |          |         | plain    |              | 
@@ -1227,7 +1229,7 @@ ALTER TABLE ONLY test_constraints DROP CONSTRAINT test_constraints_val1_val2_key
 Child tables: test_constraints_inh
 
 \d+ test_constraints_inh
-                                 Table "public.test_constraints_inh"
+                                Table "inherits.test_constraints_inh"
  Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+---------+----------+--------------+-------------
  id     | integer           |           |          |         | plain    |              | 
@@ -1242,7 +1244,7 @@ CREATE TABLE test_primary_constraints(id int PRIMARY KEY) USING orioledb;
 CREATE TABLE test_foreign_constraints(id1 int REFERENCES test_primary_constraints(id)) USING orioledb;
 CREATE TABLE test_foreign_constraints_inh () INHERITS (test_foreign_constraints) USING orioledb;
 \d+ test_primary_constraints
-                         Table "public.test_primary_constraints"
+                        Table "inherits.test_primary_constraints"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  id     | integer |           | not null |         | plain   |              | 
@@ -1252,7 +1254,7 @@ Referenced by:
     TABLE "test_foreign_constraints" CONSTRAINT "test_foreign_constraints_id1_fkey" FOREIGN KEY (id1) REFERENCES test_primary_constraints(id)
 
 \d+ test_foreign_constraints
-                         Table "public.test_foreign_constraints"
+                        Table "inherits.test_foreign_constraints"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  id1    | integer |           |          |         | plain   |              | 
@@ -1262,14 +1264,14 @@ Child tables: test_foreign_constraints_inh
 
 ALTER TABLE test_foreign_constraints DROP CONSTRAINT test_foreign_constraints_id1_fkey;
 \d+ test_foreign_constraints
-                         Table "public.test_foreign_constraints"
+                        Table "inherits.test_foreign_constraints"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  id1    | integer |           |          |         | plain   |              | 
 Child tables: test_foreign_constraints_inh
 
 \d+ test_foreign_constraints_inh
-                       Table "public.test_foreign_constraints_inh"
+                      Table "inherits.test_foreign_constraints_inh"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  id1    | integer |           |          |         | plain   |              | 
@@ -1423,13 +1425,13 @@ explain (verbose, costs off) select * from matest0 order by 1-id;
    ->  Result
          Output: matest0.id, matest0.name, (1 - matest0.id)
          ->  Append
-               ->  Seq Scan on public.matest0 matest0_1
+               ->  Seq Scan on inherits.matest0 matest0_1
                      Output: matest0_1.id, matest0_1.name
-               ->  Seq Scan on public.matest1 matest0_2
+               ->  Seq Scan on inherits.matest1 matest0_2
                      Output: matest0_2.id, matest0_2.name
-               ->  Seq Scan on public.matest2 matest0_3
+               ->  Seq Scan on inherits.matest2 matest0_3
                      Output: matest0_3.id, matest0_3.name
-               ->  Seq Scan on public.matest3 matest0_4
+               ->  Seq Scan on inherits.matest3 matest0_4
                      Output: matest0_4.id, matest0_4.name
 (14 rows)
 
@@ -1445,18 +1447,18 @@ select * from matest0 order by 1-id;
 (6 rows)
 
 explain (verbose, costs off) select min(1-id) from matest0;
-                    QUERY PLAN                    
---------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Aggregate
    Output: min((1 - matest0.id))
    ->  Append
-         ->  Seq Scan on public.matest0 matest0_1
+         ->  Seq Scan on inherits.matest0 matest0_1
                Output: matest0_1.id
-         ->  Seq Scan on public.matest1 matest0_2
+         ->  Seq Scan on inherits.matest1 matest0_2
                Output: matest0_2.id
-         ->  Seq Scan on public.matest2 matest0_3
+         ->  Seq Scan on inherits.matest2 matest0_3
                Output: matest0_3.id
-         ->  Seq Scan on public.matest3 matest0_4
+         ->  Seq Scan on inherits.matest3 matest0_4
                Output: matest0_4.id
 (11 rows)
 
@@ -1476,22 +1478,22 @@ explain (verbose, costs off) select * from matest0 order by 1-id;
    Sort Key: ((1 - matest0.id))
    ->  Result
          Output: matest0_1.id, matest0_1.name, (1 - matest0_1.id)
-         ->  Custom Scan (o_scan) on public.matest0 matest0_1
+         ->  Custom Scan (o_scan) on inherits.matest0 matest0_1
                Output: matest0_1.id, matest0_1.name
                Forward index scan of: matest0i
    ->  Result
          Output: matest0_2.id, matest0_2.name, (1 - matest0_2.id)
-         ->  Custom Scan (o_scan) on public.matest1 matest0_2
+         ->  Custom Scan (o_scan) on inherits.matest1 matest0_2
                Output: matest0_2.id, matest0_2.name
                Forward index scan of: matest1i
    ->  Sort
          Output: matest0_3.id, matest0_3.name, ((1 - matest0_3.id))
          Sort Key: ((1 - matest0_3.id))
-         ->  Seq Scan on public.matest2 matest0_3
+         ->  Seq Scan on inherits.matest2 matest0_3
                Output: matest0_3.id, matest0_3.name, (1 - matest0_3.id)
    ->  Result
          Output: matest0_4.id, matest0_4.name, (1 - matest0_4.id)
-         ->  Custom Scan (o_scan) on public.matest3 matest0_4
+         ->  Custom Scan (o_scan) on inherits.matest3 matest0_4
                Output: matest0_4.id, matest0_4.name
                Forward index scan of: matest3i
 (22 rows)
@@ -1508,8 +1510,8 @@ select * from matest0 order by 1-id;
 (6 rows)
 
 explain (verbose, costs off) select min(1-id) from matest0;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
  Result
    Output: $0
    InitPlan 1 (returns $0)
@@ -1521,13 +1523,13 @@ explain (verbose, costs off) select min(1-id) from matest0;
                        Sort Key: ((1 - matest0.id))
                        ->  Result
                              Output: matest0_1.id, (1 - matest0_1.id)
-                             ->  Custom Scan (o_scan) on public.matest0 matest0_1
+                             ->  Custom Scan (o_scan) on inherits.matest0 matest0_1
                                    Output: matest0_1.id
                                    Forward index only scan of: matest0i
                                    Conds: (((1 - matest0_1.id)) IS NOT NULL)
                        ->  Result
                              Output: matest0_2.id, (1 - matest0_2.id)
-                             ->  Custom Scan (o_scan) on public.matest1 matest0_2
+                             ->  Custom Scan (o_scan) on inherits.matest1 matest0_2
                                    Output: matest0_2.id
                                    Forward index only scan of: matest1i
                                    Conds: (((1 - matest0_2.id)) IS NOT NULL)
@@ -1536,13 +1538,13 @@ explain (verbose, costs off) select min(1-id) from matest0;
                              Sort Key: ((1 - matest0_3.id))
                              ->  Result
                                    Output: matest0_3.id, (1 - matest0_3.id)
-                                   ->  Custom Scan (o_scan) on public.matest2 matest0_3
+                                   ->  Custom Scan (o_scan) on inherits.matest2 matest0_3
                                          Output: matest0_3.id
                                          Filter: ((1 - matest0_3.id) IS NOT NULL)
                                          Forward index only scan of: matest2_pkey
                        ->  Result
                              Output: matest0_4.id, (1 - matest0_4.id)
-                             ->  Custom Scan (o_scan) on public.matest3 matest0_4
+                             ->  Custom Scan (o_scan) on inherits.matest3 matest0_4
                                    Output: matest0_4.id
                                    Forward index only scan of: matest3i
                                    Conds: (((1 - matest0_4.id)) IS NOT NULL)
@@ -2268,3 +2270,13 @@ drop cascades to table c_star
 drop cascades to table d_star
 drop cascades to table e_star
 drop cascades to table f_star
+DROP SCHEMA inherits CASCADE;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table foo
+drop cascades to table foo2
+drop cascades to table bar
+drop cascades to table bar2
+drop cascades to table parent1
+drop cascades to table parent2
+drop cascades to table childtab
+RESET search_path;

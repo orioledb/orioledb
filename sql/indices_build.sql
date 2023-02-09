@@ -1,3 +1,5 @@
+CREATE SCHEMA indices_build;
+SET SESSION search_path = 'indices_build';
 CREATE EXTENSION orioledb;
 
 -- Index build with primary key
@@ -536,5 +538,6 @@ SELECT * FROM o_test_add_serial ORDER BY a DESC;
 SELECT * FROM o_test_add_serial;
 SELECT * FROM o_test_add_serial ORDER BY a DESC;
 
-DROP FUNCTION generate_string;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA indices_build CASCADE;
+RESET search_path;

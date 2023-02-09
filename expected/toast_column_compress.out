@@ -1,3 +1,5 @@
+CREATE SCHEMA toast_column_compress;
+SET SESSION search_path = 'toast_column_compress';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_test_2 (
 	key int,
@@ -106,7 +108,7 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 (1 row)
 
 \d+ o_test_matview
-                                 Materialized view "public.o_test_matview"
+                         Materialized view "toast_column_compress.o_test_matview"
   Column  |  Type   | Collation | Nullable | Default | Storage  | Compression | Stats target | Description 
 ----------+---------+-----------+----------+---------+----------+-------------+--------------+-------------
  order_id | integer |           |          |         | plain    |             |              | 
@@ -145,7 +147,7 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 (1 row)
 
 \d+ o_test_matview
-                                 Materialized view "public.o_test_matview"
+                         Materialized view "toast_column_compress.o_test_matview"
   Column  |  Type   | Collation | Nullable | Default | Storage  | Compression | Stats target | Description 
 ----------+---------+-----------+----------+---------+----------+-------------+--------------+-------------
  order_id | integer |           |          |         | plain    |             |              | 
@@ -161,7 +163,10 @@ View definition:
 
 SET orioledb.table_description_compress = false;
 \set HIDE_TOAST_COMPRESSION true
-DROP SEQUENCE o_matview_seq CASCADE;
-NOTICE:  drop cascades to materialized view o_test_matview
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to table o_test_2
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table o_test_2
+drop cascades to materialized view o_test_matview
+DROP SCHEMA toast_column_compress CASCADE;
+NOTICE:  drop cascades to sequence o_matview_seq
+RESET search_path;

@@ -6,6 +6,8 @@
 -- create tables with base variations of indexes
 
 -- ctid is primary index
+CREATE SCHEMA indices;
+SET SESSION search_path = 'indices';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test50
@@ -1659,7 +1661,8 @@ ALTER TABLE o_test_add_drop_pkey_same_trx
 SELECT * FROM o_test_add_drop_pkey_same_trx;
 SELECT * FROM o_test_add_drop_pkey_same_trx WHERE val_3 = 'abc';
 COMMIT;
-DROP TYPE type_1 CASCADE;
 
-DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA indices CASCADE;
+RESET search_path;
+

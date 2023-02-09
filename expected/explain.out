@@ -1,3 +1,5 @@
+CREATE SCHEMA explain;
+SET SESSION search_path = 'explain';
 CREATE EXTENSION orioledb;
 ----
 -- EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) test
@@ -601,10 +603,10 @@ CREATE TABLE o_test_explain_verbose_rowid (
 INSERT INTO o_test_explain_verbose_rowid VALUES (1, 1);
 EXPLAIN (VERBOSE, COSTS OFF)
 	UPDATE o_test_explain_verbose_rowid SET val_2 = 10;
-                      QUERY PLAN                       
--------------------------------------------------------
- Update on public.o_test_explain_verbose_rowid
-   ->  Seq Scan on public.o_test_explain_verbose_rowid
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Update on explain.o_test_explain_verbose_rowid
+   ->  Seq Scan on explain.o_test_explain_verbose_rowid
          Output: 10, rowid
 (3 rows)
 
@@ -1433,11 +1435,15 @@ SELECT explain_as_json($$
  0
 (1 row)
 
-DROP FUNCTION explain_as_json;
-DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table o_explain
 drop cascades to table o_test_explain_verbose_rowid
 drop cascades to table o_explain_formats
 drop cascades to table o_explain_json
+DROP SCHEMA explain CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function generate_string(integer,integer)
+drop cascades to function query_to_text(text)
+drop cascades to function explain_as_json(text)
+RESET search_path;

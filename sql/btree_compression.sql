@@ -1,3 +1,5 @@
+CREATE SCHEMA btree_compression;
+SET SESSION search_path = 'btree_compression';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test1
@@ -78,3 +80,5 @@ SELECT regexp_replace
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA btree_compression CASCADE;
+RESET search_path;

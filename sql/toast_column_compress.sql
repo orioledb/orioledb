@@ -1,3 +1,5 @@
+CREATE SCHEMA toast_column_compress;
+SET SESSION search_path = 'toast_column_compress';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_2 (
@@ -49,5 +51,6 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 SET orioledb.table_description_compress = false;
 \set HIDE_TOAST_COMPRESSION true
 
-DROP SEQUENCE o_matview_seq CASCADE;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA toast_column_compress CASCADE;
+RESET search_path;

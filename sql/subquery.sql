@@ -1,3 +1,5 @@
+CREATE SCHEMA subquery;
+SET SESSION search_path = 'subquery';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_subquery
@@ -148,5 +150,6 @@ WITH o_test_subquery_all AS (
     ORDER BY val2
 ) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
 
-DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA subquery CASCADE;
+RESET search_path;

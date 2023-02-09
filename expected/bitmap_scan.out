@@ -1,3 +1,5 @@
+CREATE SCHEMA bitmap_scan;
+SET SESSION search_path = 'bitmap_scan';
 CREATE EXTENSION orioledb;
 CREATE TABLE bitmap_test
 (
@@ -1859,9 +1861,6 @@ SELECT COUNT(*) FROM bitmap_test
 DROP TABLE bitmap_test_seq;
 DROP TABLE bti;
 DROP TABLE btj;
-DROP FUNCTION test_const_high_int;
-DROP FUNCTION bitmap_test_high;
-DROP FUNCTION bitmap_test_low;
 SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
@@ -3629,9 +3628,6 @@ SELECT COUNT(*) FROM bitmap_test_ctid
 DROP TABLE bitmap_test_ctid_seq;
 DROP TABLE bti;
 DROP TABLE btj;
-DROP FUNCTION test_const_high_ctid;
-DROP FUNCTION bitmap_test_ctid_high;
-DROP FUNCTION bitmap_test_ctid_low;
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_ctid WHERE i < 100;
                       QUERY PLAN                       
 -------------------------------------------------------
@@ -3944,8 +3940,6 @@ SELECT * FROM bitmap_test_complex WHERE val < '13!';
  11 |   5 |   2 | 11!
 (2 rows)
 
-DROP FUNCTION pseudo_random;
-DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table bitmap_test
@@ -3956,3 +3950,16 @@ drop cascades to table bitmap_test_ctid
 drop cascades to table bitmap_test_multi
 drop cascades to table bitmap_test_multi_inval
 drop cascades to table bitmap_test_complex
+DROP SCHEMA bitmap_scan CASCADE;
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
+drop cascades to function query_to_text(text)
+drop cascades to function bitmap_test_high(integer)
+drop cascades to function bitmap_test_low(integer)
+drop cascades to function test_const_high_int()
+drop cascades to function bitmap_test_ctid_high(tid)
+drop cascades to function bitmap_test_ctid_low(tid)
+drop cascades to function test_const_high_ctid()
+drop cascades to sequence bitmap_test_multi_inval_id2_seq
+drop cascades to function smart_explain(text)
+RESET search_path;

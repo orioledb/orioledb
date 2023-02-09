@@ -1,3 +1,5 @@
+CREATE SCHEMA foreign_keys;
+SET SESSION search_path = 'foreign_keys';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_text(
@@ -18,7 +20,7 @@ CREATE TABLE o_test(
        id integer NOT NULL,
        val text NOT NULL,
        PRIMARY KEY(id),
-       UNIQUE(id, val)       
+       UNIQUE(id, val)
 ) USING orioledb;
 
 CREATE TABLE o_test_child(
@@ -99,10 +101,10 @@ UPDATE o_test_child_compose SET o_test_val = 'xxxx' where id = 1;
 UPDATE o_test_child_compose SET o_test_ID = 10 where id = 1;
 
 -- fail delete
-DELETE FROM o_test where id = 1; 
+DELETE FROM o_test where id = 1;
 DELETE FROM o_test where id = 3;
 
--- correct delete 
+-- correct delete
 DELETE FROM o_test_child where o_test_ID = 1;
 DELETE FROM o_test where id = 1;
 DELETE FROM o_test where id = 4;
@@ -123,8 +125,10 @@ SELECT * FROM o_test_child_upd;
 SELECT * FROM o_test_child_del;
 SELECT * FROM o_test_child_compose;
 
--- correct delete 
+-- correct delete
 DELETE FROM o_test where id = 6 or id = 7;
 SELECT * FROM o_test_child_compose;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA foreign_keys CASCADE;
+RESET search_path;

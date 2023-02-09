@@ -1,4 +1,5 @@
-SET client_min_messages TO 'warning';
+CREATE SCHEMA tableam;
+SET SESSION search_path = 'tableam';
 CREATE EXTENSION orioledb;
 SELECT orioledb_version();
     orioledb_version     
@@ -2651,7 +2652,6 @@ CREATE TABLE o_tableam_join1
 	PRIMARY KEY (id)
 ) USING orioledb;
 INSERT INTO o_tableam_join1 (id, val) SELECT i, i||'!' FROM generate_series(1,30,2) AS i;
-DROP TABLE IF EXISTS heap_table;
 CREATE TABLE heap_table (id integer PRIMARY KEY, ids integer[]);
 INSERT INTO heap_table (id, ids)
 SELECT i, ARRAY[ (i*3+1)%30, (i*7+3)%30, (i*11+7)%30 ]
@@ -4051,7 +4051,6 @@ EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
 ERROR:  cursor "a" is not positioned on a row
 COMMIT;
 DROP TABLE o_test_add_column;
-DROP FUNCTION pseudo_random(bigint, bigint);
 CREATE TABLE o_heap_test
 (
 	key int8 NOT NULL PRIMARY KEY,
@@ -4123,5 +4122,28 @@ SELECT * FROM o_test_2;
 (5 rows)
 
 COMMIT;
-DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to table o_tableam6
+drop cascades to table o_tableam_join1
+drop cascades to table o_tableam_cte_base
+drop cascades to table o_tableam_cte_primary_idx
+drop cascades to table o_tableam_ctid
+drop cascades to table o_tableam_multicolumn_idx
+drop cascades to table o_tableam_multicolumn_same_idx
+drop cascades to table o_tableam_ioc
+drop cascades to table o_tableam_explain_1
+drop cascades to table o_tableam_explain_2
+drop cascades to table o_tableam_snapshot_check
+drop cascades to table o_ctid_test
+drop cascades to view db_o_tables
+drop cascades to view db_o_indices
+DROP SCHEMA tableam CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to function plpgsql_func_test(bigint)
+drop cascades to function boolfunc_test(bigint)
+drop cascades to function smart_explain(text)
+drop cascades to function query_to_text(text)
+drop cascades to function pseudo_random(bigint,bigint)
+drop cascades to sequence o_test_j_seq
+RESET search_path;

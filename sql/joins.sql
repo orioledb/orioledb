@@ -1,3 +1,5 @@
+CREATE SCHEMA joins;
+SET SESSION search_path = 'joins';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_joins1
@@ -134,3 +136,6 @@ RESET enable_hashjoin;
 DROP TABLE o_joins2;
 DROP TABLE o_joins1;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA joins CASCADE;
+RESET search_path;
+

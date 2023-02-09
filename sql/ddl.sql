@@ -1,3 +1,5 @@
+CREATE SCHEMA ddl;
+SET SESSION search_path = 'ddl';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_ddl_check
@@ -266,8 +268,6 @@ SELECT * FROM o_test_add_column;
 -- Test that default fields not recalculated
 SELECT * FROM o_test_add_column;
 
-DROP SEQUENCE o_test_j_seq CASCADE;
-
 CREATE TABLE o_test_multiple_analyzes (
     aid integer NOT NULL PRIMARY KEY
 ) USING orioledb;
@@ -395,7 +395,6 @@ $$ language plpgsql;
 SELECT func_1(1);
 SELECT func_1(2);
 SELECT func_1(3);
-DROP FUNCTION func_1 CASCADE;
 
 CREATE TABLE o_test_opcoptions_reset (
 	val_1 int NOT NULL,
@@ -617,5 +616,6 @@ SELECT orioledb_tbl_structure('o_test_empty'::regclass, 'nue');
 TRUNCATE o_test_empty;
 SELECT * FROM o_test_empty;
 
-DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA ddl CASCADE;
+RESET search_path;

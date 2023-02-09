@@ -1,3 +1,5 @@
+CREATE SCHEMA row_level_locks;
+SET SESSION search_path = 'row_level_locks';
 CREATE EXTENSION orioledb;
 CREATE TABLE rll_test
 (
@@ -564,3 +566,8 @@ DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table trigger_test
 drop cascades to table rll_test2
+DROP SCHEMA row_level_locks CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function update_trg_func()
+drop cascades to function delete_trg_func()
+RESET search_path;

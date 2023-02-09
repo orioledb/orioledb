@@ -1,7 +1,8 @@
 --
 -- Tests for (sub)transactions
 --
-SET client_min_messages TO 'warning';
+CREATE SCHEMA subtransactions;
+SET SESSION search_path = 'subtransactions';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_subtrans (
 	id integer NOT NULL,
@@ -771,3 +772,6 @@ FETCH FROM abc;
 
 ROLLBACK;
 DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to table o_subtrans
+DROP SCHEMA subtransactions CASCADE;
+RESET search_path;

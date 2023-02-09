@@ -1,4 +1,6 @@
 -- INSERT .. ON CONFLICT
+CREATE SCHEMA ioc;
+SET SESSION search_path = 'ioc';
 CREATE EXTENSION orioledb;
 ---
 -- easy cases
@@ -320,3 +322,5 @@ drop cascades to table o_test_ioc3
 drop cascades to table o_test_ioc4
 drop cascades to table o_test_ioc5
 drop cascades to table o_test_ioc6
+DROP SCHEMA ioc CASCADE;
+RESET search_path;

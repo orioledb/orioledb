@@ -1,3 +1,5 @@
+CREATE SCHEMA bitmap_scan;
+SET SESSION search_path = 'bitmap_scan';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE bitmap_test
@@ -605,9 +607,6 @@ SELECT COUNT(*) FROM bitmap_test
 DROP TABLE bitmap_test_seq;
 DROP TABLE bti;
 DROP TABLE btj;
-DROP FUNCTION test_const_high_int;
-DROP FUNCTION bitmap_test_high;
-DROP FUNCTION bitmap_test_low;
 
 SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
@@ -1227,9 +1226,6 @@ SELECT COUNT(*) FROM bitmap_test_ctid
 DROP TABLE bitmap_test_ctid_seq;
 DROP TABLE bti;
 DROP TABLE btj;
-DROP FUNCTION test_const_high_ctid;
-DROP FUNCTION bitmap_test_ctid_high;
-DROP FUNCTION bitmap_test_ctid_low;
 
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_ctid WHERE i < 100;
 SELECT count(*) FROM bitmap_test_ctid WHERE i < 100;
@@ -1367,6 +1363,6 @@ SELECT * FROM bitmap_test_complex WHERE val IN ('13!', 'b');
 EXPLAIN (COSTS OFF) SELECT * FROM bitmap_test_complex WHERE val < '13!';
 SELECT * FROM bitmap_test_complex WHERE val < '13!';
 
-DROP FUNCTION pseudo_random;
-DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA bitmap_scan CASCADE;
+RESET search_path;

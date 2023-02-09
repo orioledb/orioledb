@@ -1,5 +1,7 @@
 -- INSERT .. ON CONFLICT
 
+CREATE SCHEMA ioc;
+SET SESSION search_path = 'ioc';
 CREATE EXTENSION orioledb;
 
 ---
@@ -217,3 +219,5 @@ RETURNING *;
 SELECT * FROM o_test_ioc6;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA ioc CASCADE;
+RESET search_path;

@@ -1,3 +1,5 @@
+CREATE SCHEMA inherits;
+SET SESSION search_path = 'inherits';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE p_stock (
@@ -908,3 +910,5 @@ SELECT relname, reltoastrelid <> 0 AS has_toast_table
 SELECT class, aa, a FROM a_star*;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA inherits CASCADE;
+RESET search_path;

@@ -1,5 +1,5 @@
-SET client_min_messages TO 'warning';
-
+CREATE SCHEMA tableam;
+SET SESSION search_path = 'tableam';
 CREATE EXTENSION orioledb;
 
 SELECT orioledb_version();
@@ -548,7 +548,6 @@ CREATE TABLE o_tableam_join1
 
 INSERT INTO o_tableam_join1 (id, val) SELECT i, i||'!' FROM generate_series(1,30,2) AS i;
 
-DROP TABLE IF EXISTS heap_table;
 CREATE TABLE heap_table (id integer PRIMARY KEY, ids integer[]);
 INSERT INTO heap_table (id, ids)
 SELECT i, ARRAY[ (i*3+1)%30, (i*7+3)%30, (i*11+7)%30 ]
@@ -860,7 +859,6 @@ EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
 COMMIT;
 
 DROP TABLE o_test_add_column;
-DROP FUNCTION pseudo_random(bigint, bigint);
 
 CREATE TABLE o_heap_test
 (
@@ -905,5 +903,6 @@ CREATE TEMPORARY TABLE o_test_2 (val_1, val_2) USING orioledb
 SELECT * FROM o_test_2;
 COMMIT;
 
-DROP FUNCTION smart_explain;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA tableam CASCADE;
+RESET search_path;

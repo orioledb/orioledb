@@ -1,3 +1,5 @@
+CREATE SCHEMA btree_sys_check;
+SET SESSION search_path = 'btree_sys_check';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test(
@@ -190,3 +192,5 @@ SELECT orioledb_sys_tree_structure(9999);
 SELECT orioledb_sys_tree_check(-1111);
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA btree_sys_check CASCADE;
+RESET search_path;

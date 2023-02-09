@@ -1,3 +1,5 @@
+CREATE SCHEMA indices_build;
+SET SESSION search_path = 'indices_build';
 CREATE EXTENSION orioledb;
 -- Index build with primary key
 CREATE TABLE o_indices0
@@ -22716,7 +22718,6 @@ CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
 				''), 1, length)
 		FROM generate_series(1, (length + 20) / 21) i; $$
 LANGUAGE SQL;
-ERROR:  function "generate_string" already exists with same argument types
 CREATE TABLE o_indices8
 (
 	key integer NOT NULL,
@@ -23563,7 +23564,7 @@ SELECT * FROM o_test_default_volatile;
 (3 rows)
 
 \d+ o_test_default_volatile
-                                              Table "public.o_test_default_volatile"
+                                           Table "indices_build.o_test_default_volatile"
  Column |  Type   | Collation | Nullable |                     Default                      | Storage | Stats target | Description 
 --------+---------+-----------+----------+--------------------------------------------------+---------+--------------+-------------
  a      | integer |           |          |                                                  | plain   |              | 
@@ -23638,7 +23639,7 @@ CREATE TABLE o_test_add_serial (
 INSERT INTO o_test_add_serial VALUES (1), (2), (3);
 ALTER TABLE o_test_add_serial ADD COLUMN b serial;
 \d+ o_test_add_serial
-                                               Table "public.o_test_add_serial"
+                                            Table "indices_build.o_test_add_serial"
  Column |  Type   | Collation | Nullable |                   Default                    | Storage | Stats target | Description 
 --------+---------+-----------+----------+----------------------------------------------+---------+--------------+-------------
  a      | integer |           |          |                                              | plain   |              | 
@@ -23678,7 +23679,6 @@ SELECT * FROM o_test_add_serial ORDER BY a DESC;
   1 | 1
 (6 rows)
 
-DROP FUNCTION generate_string;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 15 other objects
 DETAIL:  drop cascades to table o_indices0
@@ -23696,3 +23696,8 @@ drop cascades to table o_indices9
 drop cascades to table o_indices10
 drop cascades to table o_test_default_volatile
 drop cascades to table o_test_add_serial
+DROP SCHEMA indices_build CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function generate_string(integer,integer)
+drop cascades to sequence o_test_default_volatile_seq
+RESET search_path;

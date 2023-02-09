@@ -1,3 +1,5 @@
+CREATE SCHEMA btree_sys_check;
+SET SESSION search_path = 'btree_sys_check';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_test(
 	id integer NOT NULL,
@@ -414,3 +416,5 @@ ERROR:  Value num must be in the range from 1 to 16
 SELECT orioledb_sys_tree_check(-1111);
 ERROR:  Value num must be in the range from 1 to 16
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA btree_sys_check CASCADE;
+RESET search_path;

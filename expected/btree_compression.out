@@ -1,3 +1,5 @@
+CREATE SCHEMA btree_compression;
+SET SESSION search_path = 'btree_compression';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_test1
 (
@@ -6930,3 +6932,5 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table o_test1
+DROP SCHEMA btree_compression CASCADE;
+RESET search_path;

@@ -1,3 +1,5 @@
+CREATE SCHEMA types;
+SET SESSION search_path = 'types';
 CREATE EXTENSION orioledb;
 CREATE TYPE coordinates AS (
 	x int,
@@ -165,7 +167,6 @@ INSERT INTO pg_test_cid_record VALUES (ROW('2'::cid));
 ERROR:  could not identify a comparison function for type cid
 COMMIT;
 DROP TABLE pg_test_cid_record;
-DROP TYPE pg_rec;
 CREATE TYPE o_rec AS (br cid);
 CREATE TABLE o_test_cid_record
 (
@@ -181,7 +182,6 @@ LINE 1: INSERT INTO o_test_cid_record VALUES (ROW('1'::cid));
 INSERT INTO o_test_cid_record VALUES (ROW('2'::cid));
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
-DROP TYPE o_rec;
 CREATE TABLE pg_test_xid_array
 (
 	arr xid[] NOT NULL,
@@ -1156,18 +1156,6 @@ ERROR:  domain o_test_domain_1 does not allow null values
 CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
 ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
 ERROR:  value for domain o_test_domain_2 violates check constraint "o_test_domain_2_check"
-DROP DOMAIN o_test_domain_1;
-DROP DOMAIN o_test_domain_2;
-DROP TYPE record_type_non_altered CASCADE;
-NOTICE:  drop cascades to column key of table o_test_record_type_alter
-DROP TYPE record_type_renamed CASCADE;
-NOTICE:  drop cascades to column val5 of table o_test_record_type_alter
-DROP TYPE coordinates CASCADE;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to column locations of table o_test_array
-drop cascades to column location of table o_test_record_type
-DROP TYPE custom_range CASCADE;
-NOTICE:  drop cascades to column area of table o_test_custom_range
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table o_test_record_type
@@ -1184,3 +1172,14 @@ drop cascades to table o_test_alter_coercible
 drop cascades to table o_test_inherits_alter_type
 drop cascades to table o_test_inherits_alter_type_child
 drop cascades to table o_test_domain_check
+DROP SCHEMA types CASCADE;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to type coordinates
+drop cascades to type custom_range
+drop cascades to type pg_rec
+drop cascades to type o_rec
+drop cascades to type record_type_non_altered
+drop cascades to type record_type_renamed
+drop cascades to type o_test_domain_1
+drop cascades to type o_test_domain_2
+RESET search_path;

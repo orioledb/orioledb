@@ -1,3 +1,5 @@
+CREATE SCHEMA trigger;
+SET SESSION search_path = 'trigger';
 CREATE EXTENSION IF NOT EXISTS orioledb;
 CREATE TABLE o_test_1 (
 	val_1 int,
@@ -169,14 +171,6 @@ SELECT * FROM o_test_copy_trigger;
  10000 |    21 | 31    | 41    | abc
 (2 rows)
 
-DROP FUNCTION func_trig_o_test_1 CASCADE;
-NOTICE:  drop cascades to trigger trig_o_test_1 on table o_test_1
-DROP FUNCTION func_trig_o_test_2 CASCADE;
-NOTICE:  drop cascades to trigger trig_o_test_2 on table o_test_2
-DROP FUNCTION func_trig_o_test_3 CASCADE;
-NOTICE:  drop cascades to trigger trig_o_test_3 on table o_test_3
-DROP FUNCTION func_trig_o_test_4 CASCADE;
-NOTICE:  drop cascades to trigger trig_1 on table o_test_4
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_test_1
@@ -184,3 +178,11 @@ drop cascades to table o_test_2
 drop cascades to table o_test_3
 drop cascades to table o_test_4
 drop cascades to table o_test_copy_trigger
+DROP SCHEMA trigger CASCADE;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function func_trig_o_test_1()
+drop cascades to function func_trig_o_test_2()
+drop cascades to function func_trig_o_test_3()
+drop cascades to function func_trig_o_test_4()
+drop cascades to function func_1()
+RESET search_path;

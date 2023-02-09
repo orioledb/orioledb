@@ -1,3 +1,5 @@
+CREATE SCHEMA createas;
+SET SESSION search_path = 'createas';
 CREATE EXTENSION orioledb;
 CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
 	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
@@ -413,7 +415,7 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 (1 row)
 
 \d+ o_test_matview
-                          Materialized view "public.o_test_matview"
+                         Materialized view "createas.o_test_matview"
   Column   |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
 -----------+---------+-----------+----------+---------+----------+--------------+-------------
  order_id  | integer |           |          |         | plain    |              | 
@@ -474,11 +476,8 @@ SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
 ---------
 (0 rows)
 
-DROP SEQUENCE o_matview_seq CASCADE;
-NOTICE:  drop cascades to materialized view o_test_matview
-DROP FUNCTION query_to_text;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table o_test_create_as
 drop cascades to table o_test_create_as_less_atts
 drop cascades to table o_test_create_as_no_atts
@@ -487,3 +486,9 @@ drop cascades to table o_test_create_as_no_data
 drop cascades to table tbl_into
 drop cascades to table tbl_as_nodata
 drop cascades to table tbl_as_data
+drop cascades to materialized view o_test_matview
+DROP SCHEMA createas CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function query_to_text(text)
+drop cascades to sequence o_matview_seq
+RESET search_path;

@@ -1,6 +1,6 @@
-CREATE EXTENSION orioledb;
 CREATE SCHEMA partition;
 SET SESSION search_path = 'partition';
+CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_partition_on_conflict_range (
   val_1 int,

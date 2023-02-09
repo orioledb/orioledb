@@ -1,3 +1,5 @@
+CREATE SCHEMA types;
+SET SESSION search_path = 'types';
 CREATE EXTENSION orioledb;
 
 CREATE TYPE coordinates AS (
@@ -111,7 +113,6 @@ INSERT INTO pg_test_cid_record VALUES (ROW('1'::cid));
 INSERT INTO pg_test_cid_record VALUES (ROW('2'::cid));
 COMMIT;
 DROP TABLE pg_test_cid_record;
-DROP TYPE pg_rec;
 
 CREATE TYPE o_rec AS (br cid);
 CREATE TABLE o_test_cid_record
@@ -123,7 +124,6 @@ BEGIN;
 INSERT INTO o_test_cid_record VALUES (ROW('1'::cid));
 INSERT INTO o_test_cid_record VALUES (ROW('2'::cid));
 COMMIT;
-DROP TYPE o_rec;
 
 CREATE TABLE pg_test_xid_array
 (
@@ -432,11 +432,7 @@ INSERT INTO o_test_domain_check VALUES (1, 2);
 ALTER TABLE o_test_domain_check ADD COLUMN val_3 o_test_domain_1;
 CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
 ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
-DROP DOMAIN o_test_domain_1;
-DROP DOMAIN o_test_domain_2;
 
-DROP TYPE record_type_non_altered CASCADE;
-DROP TYPE record_type_renamed CASCADE;
-DROP TYPE coordinates CASCADE;
-DROP TYPE custom_range CASCADE;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA types CASCADE;
+RESET search_path;

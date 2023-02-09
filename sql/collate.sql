@@ -1,4 +1,6 @@
 -- Check for collation support
+CREATE SCHEMA collate_schema;
+SET SESSION search_path = 'collate_schema';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_collate (
@@ -37,3 +39,5 @@ EXPLAIN (COSTS off) SELECT * FROM o_collate WHERE t >= 'y' COLLATE "en-x-icu";
 SELECT * FROM o_collate WHERE t >= 'y' COLLATE "en-x-icu";
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA collate_schema CASCADE;
+RESET search_path;

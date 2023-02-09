@@ -1,3 +1,5 @@
+CREATE SCHEMA row_level_locks;
+SET SESSION search_path = 'row_level_locks';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE rll_test
@@ -146,3 +148,5 @@ UPDATE rll_test2 SET spacer = repeat('c', 1000) WHERE key > 1;
 SELECT * FROM rll_test2 WHERE key = 1 FOR UPDATE;
 
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA row_level_locks CASCADE;
+RESET search_path;

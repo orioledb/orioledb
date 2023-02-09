@@ -1,3 +1,5 @@
+CREATE SCHEMA parallel_scan;
+SET SESSION search_path = 'parallel_scan';
 CREATE EXTENSION orioledb;
 
 SET min_parallel_table_scan_size = 1;
@@ -122,8 +124,6 @@ SET min_parallel_table_scan_size = 0;
 SET parallel_leader_participation = off;
 SELECT sum(func_1(1,val_1)) FROM o_test_1;
 
-DROP FUNCTION func_1(int, int);
-DROP TABLE o_test_1;
-
-DROP FUNCTION pseudo_random;
 DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA parallel_scan CASCADE;
+RESET search_path;
