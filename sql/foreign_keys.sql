@@ -129,6 +129,39 @@ SELECT * FROM o_test_child_compose;
 DELETE FROM o_test where id = 6 or id = 7;
 SELECT * FROM o_test_child_compose;
 
+CREATE TABLE o_test_1 (
+    val_1 int NOT NULL
+)USING orioledb;
+
+CREATE TABLE o_test_2 (
+    val_2 int,
+    PRIMARY KEY(val_1),
+    UNIQUE(val_1, val_2)
+) INHERITS (o_test_1) USING orioledb;
+
+INSERT INTO o_test_2 (val_1)
+    VALUES (1), (2), (3);
+
+UPDATE o_test_2 SET val_1 = val_1 * 4;
+
+DELETE FROM o_test_2;
+
+CREATE TABLE o_test_3 (
+    val_3 int,
+    val_4 int,
+    FOREIGN KEY (val_3, val_4)
+    REFERENCES o_test_2 (val_1, val_2)
+)USING orioledb;
+
+INSERT INTO o_test_2 (val_1, val_2)
+    VALUES (1, 1), (2, 2), (3, 1);
+
+INSERT INTO o_test_3 (val_3, val_4)
+    VALUES (3, 1), (3, 1);
+
+UPDATE o_test_2 SET val_1 = val_1 * 4;
+UPDATE o_test_2 SET val_1 = val_1 * 4 WHERE val_1 < 3;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA foreign_keys CASCADE;
 RESET search_path;

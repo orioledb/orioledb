@@ -572,6 +572,8 @@ o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 		Assert((bound1->flags & O_VALUE_BOUND_NULL) || isnull);
 		if ((bound1->flags & O_VALUE_BOUND_NULL) && isnull)
 			return (bound1->flags & O_VALUE_BOUND_INCLUSIVE) ? 0 : cmp_inclusive(bound1->flags);
+		else if (isnull)
+			return field->nullfirst ? 1 : -1;
 		else
 			return field->nullfirst ? -1 : 1;
 	}
