@@ -1226,7 +1226,8 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location();
 
 	while ((!xactIsFinished || chainHasLocks) &&
-		   undoLocation >= retainedUndoLocation)
+		   undoLocation >= retainedUndoLocation &&
+		   UndoLocationIsValid(undoLocation))
 	{
 		/*
 		 * We should be able to find at CSN-record or invalid undo location

@@ -535,6 +535,15 @@ NOTICE:  old: (1, abc), new: (1, def)
 DELETE FROM trigger_test WHERE id = 1;
 NOTICE:  old: (1, def)
 NOTICE:  old: (1, def)
+BEGIN;
+INSERT INTO trigger_test VALUES (2, 'a');
+UPDATE trigger_test SET value = 'b' WHERE id = 2;
+NOTICE:  old: (2, a), new: (2, b)
+NOTICE:  old: (2, a), new: (2, b)
+DELETE FROM trigger_test WHERE id = 2;
+NOTICE:  old: (2, b)
+NOTICE:  old: (2, b)
+COMMIT;
 CREATE TABLE rll_test2
 (
 	key int8 not null,

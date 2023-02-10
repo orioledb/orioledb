@@ -128,6 +128,12 @@ INSERT INTO trigger_test VALUES (1, 'abc');
 UPDATE trigger_test SET value = 'def' WHERE id = 1;
 DELETE FROM trigger_test WHERE id = 1;
 
+BEGIN;
+INSERT INTO trigger_test VALUES (2, 'a');
+UPDATE trigger_test SET value = 'b' WHERE id = 2;
+DELETE FROM trigger_test WHERE id = 2;
+COMMIT;
+
 CREATE TABLE rll_test2
 (
 	key int8 not null,
