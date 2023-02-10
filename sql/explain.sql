@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS o_explain (
 	PRIMARY KEY(key)
 ) USING orioledb;
 
+-- Add byteain to pg_proc cache to keep ANALYZE BUFFERS consistent during runs
+SELECT query_to_text($$ SELECT 'FOO'::bytea; $$);
+
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					INSERT INTO o_explain (
@@ -64,6 +67,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT count(*)
 					FROM o_explain; $$) as t;
+
+-- Add text_ops to pg_amop cache to keep ANALYZE BUFFERS consistent during runs
+SELECT * FROM o_explain WHERE val = 'A' ORDER BY val LIMIT 1;
 
 -- uses TOAST to fetch values
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
