@@ -903,6 +903,15 @@ CREATE TEMPORARY TABLE o_test_2 (val_1, val_2) USING orioledb
 SELECT * FROM o_test_2;
 COMMIT;
 
+CREATE TABLE o_test_1 (
+	val_1 int4,
+	val_2 text
+) USING orioledb;
+INSERT INTO o_test_1 VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e');
+CREATE UNIQUE INDEX o_test_1_val_2_idx ON o_test_1 (val_2);
+INSERT INTO o_test_1 VALUES (6, 'e');
+DROP TABLE o_test_1;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

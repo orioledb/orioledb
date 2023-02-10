@@ -4122,6 +4122,16 @@ SELECT * FROM o_test_2;
 (5 rows)
 
 COMMIT;
+CREATE TABLE o_test_1 (
+	val_1 int4,
+	val_2 text
+) USING orioledb;
+INSERT INTO o_test_1 VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e');
+CREATE UNIQUE INDEX o_test_1_val_2_idx ON o_test_1 (val_2);
+INSERT INTO o_test_1 VALUES (6, 'e');
+ERROR:  duplicate key value violates unique constraint "o_test_1_val_2_idx"
+DETAIL:  Key (val_2)=('e') already exists.
+DROP TABLE o_test_1;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table o_tableam6
