@@ -126,7 +126,8 @@ mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
 	OInMemoryBlkno childPageNumbers[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	uint32		childPageChangeCounts[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			childPagesCount;
-	int			i;
+	int			i,
+				ionum;
 
 	if (!get_page_children(blkno, pageChangeCount,
 						   childPageNumbers, childPageChangeCounts,
@@ -135,7 +136,11 @@ mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
 
 	page_block_reads(blkno);
 	header->flags |= O_BTREE_FLAG_PRE_CLEANUP;
+	ionum = O_GET_IN_MEMORY_PAGEDESC(blkno)->ionum;
 	unlock_page(blkno);
+
+	if (ionum >= 0)
+		wait_for_io_completion(ionum);
 
 	for (i = 0; i < childPagesCount; i++)
 		mark_page_pre_cleanup(childPageNumbers[i],
