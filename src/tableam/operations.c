@@ -789,11 +789,13 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		if (result.success)
 			result.action = BTreeOperationUpdate;
 	}
-	else if (modify_result == OBTreeModifyResultFound)
+	else if (modify_result == OBTreeModifyResultFound ||
+			 modify_result == OBTreeModifyResultNotFound)
 	{
 		/* primary key or condition was changed by concurrent transaction */
 		result.success = true;
 		result.oldTuple = NULL;
+		result.action = BTreeOperationUpdate;
 	}
 	else
 	{
@@ -853,6 +855,14 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 		result.success = true;
 		result.oldTuple = arg->scanSlot;
 		result.action = BTreeOperationLock;
+		return result;
+	}
+	else if (modify_result == OBTreeModifyResultNotFound)
+	{
+		result.success = true;
+		result.oldTuple = NULL;
+		result.action = BTreeOperationDelete;
+		result.failedIxNum = PrimaryIndexNumber;
 		return result;
 	}
 	else if (modify_result != OBTreeModifyResultDeleted)

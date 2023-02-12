@@ -985,3 +985,39 @@ id|val
 20|  1
 (19 rows)
 
+
+starting permutation: s1_begin s2_begin s1_delete_pk_id s2_update_pk_val s1_commit s2_commit
+step s1_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_delete_pk_id: DELETE FROM o_isorc_pk WHERE id = 1;
+step s2_update_pk_val: UPDATE o_isorc_pk SET val = val + 1 WHERE val = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update_pk_val: <... completed>
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin s2_begin s1_delete_pk_id s2_update_pk_id s1_commit s2_commit
+step s1_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_delete_pk_id: DELETE FROM o_isorc_pk WHERE id = 1;
+step s2_update_pk_id: UPDATE o_isorc_pk SET id = id + 1 WHERE val = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update_pk_id: <... completed>
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin s2_begin s1_update_pk_val s2_update_pk_val s1_commit s2_commit
+step s1_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_update_pk_val: UPDATE o_isorc_pk SET val = val + 1 WHERE id = 1;
+step s2_update_pk_val: UPDATE o_isorc_pk SET val = val + 1 WHERE val = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update_pk_val: <... completed>
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin s2_begin s1_update_pk_val s2_delete_pk_val s1_commit s2_commit
+step s1_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_begin: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_update_pk_val: UPDATE o_isorc_pk SET val = val + 1 WHERE id = 1;
+step s2_delete_pk_val: DELETE FROM o_isorc_pk WHERE val = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_delete_pk_val: <... completed>
+step s2_commit: COMMIT;

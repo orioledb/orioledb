@@ -6,14 +6,18 @@ setup
 		id int8 NOT NULL,
 		val int8 NOT NULL
 	) USING orioledb;
-	TRUNCATE o_isorc;
 	INSERT INTO o_isorc SELECT id, 1 FROM generate_series(1, 20) id;
+
+	CREATE TABLE IF NOT EXISTS o_isorc_pk (
+		id int8 NOT NULL,
+		val int8 NOT NULL
+	) USING orioledb;
+	INSERT INTO o_isorc_pk SELECT id, id FROM generate_series(1, 20) id;
 
 	CREATE TABLE IF NOT EXISTS o_isorc_toast (
 		id int8 NOT NULL,
 		val text NOT NULL
 	) USING orioledb;
-	TRUNCATE o_isorc_toast;
 	INSERT INTO o_isorc_toast SELECT id, 'test' FROM generate_series(1, 5) id;
 
 	CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
@@ -27,8 +31,10 @@ setup
 
 teardown
 {
-    DROP TABLE o_isorc;
-    DROP FUNCTION generate_string;
+	DROP TABLE o_isorc;
+	DROP TABLE o_isorc_pk;
+	DROP TABLE o_isorc_toast;
+	DROP FUNCTION generate_string;
 }
 
 session "s1"
@@ -47,6 +53,9 @@ step "s1_update_toast2" { UPDATE o_isorc_toast SET val = val || generate_string(
 
 step "s1_select" { SELECT * FROM o_isorc; }
 step "s1_select1" { SELECT * FROM o_isorc WHERE id = 1; }
+
+step "s1_delete_pk_id" { DELETE FROM o_isorc_pk WHERE id = 1; }
+step "s1_update_pk_val" { UPDATE o_isorc_pk SET val = val + 1 WHERE id = 1; }
 
 step "s1_commit" { COMMIT; }
 step "s1_rollback" { ROLLBACK; }
@@ -78,6 +87,10 @@ step "s2_delete12" { DELETE FROM o_isorc WHERE val BETWEEN 1 and 2; }
 
 step "s2_select" { SELECT * FROM o_isorc; }
 step "s2_select1" { SELECT * FROM o_isorc WHERE id = 1; }
+
+step "s2_delete_pk_val" { DELETE FROM o_isorc_pk WHERE val = 1; }
+step "s2_update_pk_id" { UPDATE o_isorc_pk SET id = id + 1 WHERE val = 1; }
+step "s2_update_pk_val" { UPDATE o_isorc_pk SET val = val + 1 WHERE val = 1; }
 
 step "s2_commit" { COMMIT; }
 
@@ -119,3 +132,11 @@ permutation "s1_begin" "s2_begin" "s1_update2_byid" "s2_update_id2" "s1_rollback
 # Concurrent update test: delete
 permutation "s1_begin" "s2_begin" "s1_update1_byid" "s2_delete1_val1" "s1_commit"  "s2_commit" "s1_select"
 permutation "s1_begin" "s2_begin" "s1_update1_byid" "s2_delete1_val1" "s1_rollback"  "s2_commit" "s1_select"
+
+# Concurrent delete tests
+permutation "s1_begin" "s2_begin" "s1_delete_pk_id" "s2_update_pk_val" "s1_commit"  "s2_commit"
+permutation "s1_begin" "s2_begin" "s1_delete_pk_id" "s2_update_pk_id" "s1_commit"  "s2_commit"
+
+# Concurrent qual change tests
+permutation "s1_begin" "s2_begin" "s1_update_pk_val" "s2_update_pk_val" "s1_commit"  "s2_commit"
+permutation "s1_begin" "s2_begin" "s1_update_pk_val" "s2_delete_pk_val" "s1_commit"  "s2_commit"
