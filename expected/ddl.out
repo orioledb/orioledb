@@ -2218,8 +2218,41 @@ SELECT * FROM o_test_empty;
 --
 (0 rows)
 
+BEGIN;
+CREATE TABLE o_test_multiple_set_type_same_trx (
+	val_1 int,
+	val_3 int
+) USING orioledb;
+SELECT * FROM o_test_multiple_set_type_same_trx;
+ val_1 | val_3 
+-------+-------
+(0 rows)
+
+CREATE UNIQUE INDEX o_test_multiple_set_type_same_trx_ix1
+	ON o_test_multiple_set_type_same_trx (val_1);
+SELECT * FROM o_test_multiple_set_type_same_trx ORDER BY val_1;
+ val_1 | val_3 
+-------+-------
+(0 rows)
+
+INSERT INTO o_test_multiple_set_type_same_trx
+	SELECT x, 3*x FROM generate_series(1,10) AS x;
+ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_1 TYPE bigint;
+ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_3 TYPE bigint;
+COMMIT;
+\d o_test_multiple_set_type_same_trx
+  Table "ddl.o_test_multiple_set_type_same_trx"
+ Column |  Type  | Collation | Nullable | Default 
+--------+--------+-----------+----------+---------
+ val_1  | bigint |           |          | 
+ val_3  | bigint |           |          | 
+Indexes:
+    "o_test_multiple_set_type_same_trx_ix1" UNIQUE, btree (val_1)
+
+DROP FUNCTION pseudo_random CASCADE;
+NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 29 other objects
+NOTICE:  drop cascades to 30 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -2249,10 +2282,10 @@ drop cascades to table o_test_null_pkey_field
 drop cascades to table o_test_included_ix_name
 drop cascades to table o_test_add_pkey_empty_index
 drop cascades to table o_test_empty
+drop cascades to table o_test_multiple_set_type_same_trx
 DROP SCHEMA ddl CASCADE;
-NOTICE:  drop cascades to 4 other objects
-DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
-drop cascades to sequence o_test_j_seq
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to sequence o_test_j_seq
 drop cascades to function query_to_text(text)
 drop cascades to function func_1(integer)
 RESET search_path;

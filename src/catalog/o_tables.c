@@ -1755,11 +1755,16 @@ void
 o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table)
 {
 	ORelOids	temp_oids = old_o_table->oids;
+	ORelOids	temp_toast_oids = old_o_table->toast_oids;
 
 	old_o_table->oids.datoid = new_o_table->oids.datoid;
 	old_o_table->oids.reloid = new_o_table->oids.reloid;
+	old_o_table->toast_oids.datoid = new_o_table->toast_oids.datoid;
+	old_o_table->toast_oids.reloid = new_o_table->toast_oids.reloid;
 	new_o_table->oids.datoid = temp_oids.datoid;
 	new_o_table->oids.reloid = temp_oids.reloid;
+	new_o_table->toast_oids.datoid = temp_toast_oids.datoid;
+	new_o_table->toast_oids.reloid = temp_toast_oids.reloid;
 
 	new_o_table->default_compress = old_o_table->default_compress;
 	new_o_table->primary_compress = old_o_table->primary_compress;

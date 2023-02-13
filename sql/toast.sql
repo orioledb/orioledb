@@ -471,6 +471,24 @@ SELECT key, length(val), pg_column_size(val), substring(val for 30),
 SELECT key, length(val), pg_column_size(val), substring(val for 30),
 	   substr(val, 30, 10) from o_test_substr WHERE key = 3;
 
+BEGIN;
+CREATE TABLE o_test_toast_rewrite (
+	id integer NOT NULL,
+	t text NOT NULL
+) USING orioledb;
+INSERT INTO o_test_toast_rewrite VALUES
+	(1, generate_string(1, 3000)),
+	(2, generate_string(2, 3000));
+SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
+SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
+ALTER TABLE o_test_toast_rewrite ADD PRIMARY KEY (id);
+SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
+SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
+ALTER TABLE o_test_toast_rewrite ALTER id TYPE bigint USING id * 10;
+SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
+SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast CASCADE;
 RESET search_path;

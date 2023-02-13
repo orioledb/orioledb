@@ -1099,8 +1099,123 @@ SELECT key, length(val), pg_column_size(val), substring(val for 30),
    3 |   8449 |           8449 | {c4ca4238a0b923820dcc509a6f758 | 849b,c81e7
 (1 row)
 
+BEGIN;
+CREATE TABLE o_test_toast_rewrite (
+	id integer NOT NULL,
+	t text NOT NULL
+) USING orioledb;
+INSERT INTO o_test_toast_rewrite VALUES
+	(1, generate_string(1, 3000)),
+	(2, generate_string(2, 3000));
+SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
+ id |        substr        
+----+----------------------
+  1 | 551e8b15be547418fbf5
+  2 | 420cf95170c6ba2f9564
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
+                                            orioledb_tbl_structure                                             
+---------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                          +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                          +
+     Leftmost, Rightmost                                                                                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                   +
+     Item 0: mode = update, offset = 264, tuple = ('(0,1)', '1', TOASTed)                                     +
+     Item 1: mode = update, offset = 312, tuple = ('(0,2)', '2', TOASTed)                                     +
+                                                                                                              +
+ Index toast contents                                                                                         +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                            +
+     Leftmost, Rightmost                                                                                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,1)'), attnum 3, offset 2657)   +
+     Item 0: mode = update, offset = 264, tuple = (PK: ('(0,1)'), attnum 3, offset 0, data_length 2657)       +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,2)'), attnum 3, offset 0)     +
+     Item 1: mode = update, offset = 2976, tuple = (PK: ('(0,1)'), attnum 3, offset 2657, data_length 347)    +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('(0,2)'), attnum 3, offset 2657) +
+     Item 2: mode = update, offset = 3376, tuple = (PK: ('(0,2)'), attnum 3, offset 0, data_length 2657)      +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                                 +
+     Item 3: mode = update, offset = 6088, tuple = (PK: ('(0,2)'), attnum 3, offset 2657, data_length 347)    +
+                                                                                                              +
+ 
+(1 row)
+
+ALTER TABLE o_test_toast_rewrite ADD PRIMARY KEY (id);
+SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
+ id |        substr        
+----+----------------------
+  1 | 551e8b15be547418fbf5
+  2 | 420cf95170c6ba2f9564
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
+                                          orioledb_tbl_structure                                          
+----------------------------------------------------------------------------------------------------------
+ Index o_test_toast_rewrite_pkey contents                                                                +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('2')                               +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                        +
+   Chunk 1: offset = 1, location = 304, hikey location = 72                                              +
+     Item 1: offset = 312, tuple = ('2', TOASTed)                                                        +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, offset 2657)  +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, offset 0, data_length 2657)                     +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('2'), attnum 2, offset 2657) +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, offset 2657, data_length 347)                  +
+     Item 2: offset = 3368, tuple = (PK: ('2'), attnum 2, offset 0, data_length 2657)                    +
+   Chunk 2: offset = 3, location = 6072, hikey location = 104                                            +
+     Item 3: offset = 6080, tuple = (PK: ('2'), attnum 2, offset 2657, data_length 347)                  +
+                                                                                                         +
+ 
+(1 row)
+
+ALTER TABLE o_test_toast_rewrite ALTER id TYPE bigint USING id * 10;
+SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
+ id |        substr        
+----+----------------------
+ 10 | 551e8b15be547418fbf5
+ 20 | 420cf95170c6ba2f9564
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
+                                          orioledb_tbl_structure                                           
+-----------------------------------------------------------------------------------------------------------
+ Index o_test_toast_rewrite_pkey contents                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                      +
+     Leftmost, Rightmost                                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('20')                               +
+     Item 0: offset = 264, tuple = ('10', TOASTed)                                                        +
+   Chunk 1: offset = 1, location = 312, hikey location = 72                                               +
+     Item 1: offset = 320, tuple = ('20', TOASTed)                                                        +
+                                                                                                          +
+ Index toast contents                                                                                     +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
+     Leftmost, Rightmost                                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('10'), attnum 2, offset 2650)  +
+     Item 0: offset = 264, tuple = (PK: ('10'), attnum 2, offset 0, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 88, hikey = (PK: ('20'), attnum 2, offset 2650) +
+     Item 1: offset = 2968, tuple = (PK: ('10'), attnum 2, offset 2650, data_length 354)                  +
+     Item 2: offset = 3368, tuple = (PK: ('20'), attnum 2, offset 0, data_length 2650)                    +
+   Chunk 2: offset = 3, location = 6064, hikey location = 104                                             +
+     Item 3: offset = 6072, tuple = (PK: ('20'), attnum 2, offset 2650, data_length 354)                  +
+                                                                                                          +
+ 
+(1 row)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to table o_test_substr
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table o_test_substr
+drop cascades to table o_test_toast_rewrite
 DROP SCHEMA toast CASCADE;
 NOTICE:  drop cascades to function generate_string(integer,integer)
 RESET search_path;

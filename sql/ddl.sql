@@ -678,6 +678,31 @@ SELECT orioledb_tbl_structure('o_test_empty'::regclass, 'nue');
 TRUNCATE o_test_empty;
 SELECT * FROM o_test_empty;
 
+BEGIN;
+CREATE TABLE o_test_multiple_set_type_same_trx (
+	val_1 int,
+	val_3 int
+) USING orioledb;
+
+SELECT * FROM o_test_multiple_set_type_same_trx;
+
+CREATE UNIQUE INDEX o_test_multiple_set_type_same_trx_ix1
+	ON o_test_multiple_set_type_same_trx (val_1);
+
+SELECT * FROM o_test_multiple_set_type_same_trx ORDER BY val_1;
+
+INSERT INTO o_test_multiple_set_type_same_trx
+	SELECT x, 3*x FROM generate_series(1,10) AS x;
+
+ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_1 TYPE bigint;
+
+ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_3 TYPE bigint;
+
+COMMIT;
+
+\d o_test_multiple_set_type_same_trx
+
+DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
