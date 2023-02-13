@@ -195,12 +195,6 @@ class IndicesBuildTest(BaseTest):
 		node.poll_query_until("SELECT orioledb_has_retained_undo();",
 									expected = False)
 
-	def catchup_orioledb(self, replica):
-		# wait for synchronization
-		replica.catchup()
-		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
-								 expected = True)
-
 	def test_index_build_replication(self):
 		with self.node as master:
 			master.start()

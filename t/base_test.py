@@ -116,6 +116,12 @@ class BaseTest(unittest.TestCase):
 	def get_pg_version():
 		return int(re.match(r'\d+', get_pg_version())[0])
 
+	def catchup_orioledb(self, replica):
+		# wait for synchronization
+		replica.catchup()
+		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+								 expected = True)
+
 # execute SQL query Thread for PostgreSql node's connection
 class ThreadQueryExecutor(Thread):
 	def __init__(self, connection, sql_query):
