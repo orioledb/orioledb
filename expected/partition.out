@@ -346,15 +346,45 @@ SELECT * FROM o_test_cross_partition_update_child2;
     50 |    15
 (10 rows)
 
+CREATE TABLE o_test_1 (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1, val_2)
+) USING orioledb;
+CREATE TABLE o_test_2 (
+	val_1 int,
+	val_2 int
+) PARTITION BY RANGE (val_1, val_2);
+CREATE TABLE o_test_3 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+ALTER TABLE o_test_2
+	ATTACH PARTITION o_test_3 FOR
+		VALUES FROM (0, 0) TO (10, 10);
+ALTER TABLE o_test_2
+	ADD FOREIGN KEY (val_1, val_2)
+		REFERENCES o_test_1;
+INSERT INTO o_test_1
+	VALUES (5, 6);
+INSERT INTO o_test_2
+	VALUES (5, 6);
+UPDATE o_test_1 SET val_2 = 7;
+ERROR:  update or delete on table "o_test_1" violates foreign key constraint "o_test_2_val_1_val_2_fkey" on table "o_test_2"
+DETAIL:  Key (val_1, val_2)=(5, 6) is still referenced from table "o_test_2".
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
 drop cascades to table o_test_cross_partition_update_child
 drop cascades to table o_test_cross_partition_update_child2
+drop cascades to table o_test_1
+drop cascades to constraint o_test_2_val_1_val_2_fkey on table o_test_2
+drop cascades to table o_test_3
 DROP SCHEMA partition CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range
 drop cascades to table o_test_partition_on_conflict_list
 drop cascades to table o_test_cross_partition_update
+drop cascades to table o_test_2
 RESET search_path;

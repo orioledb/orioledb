@@ -2251,8 +2251,24 @@ SELECT class, aa, a FROM a_star*;
  f     |    | 
 (50 rows)
 
+CREATE TABLE o_test_1 (
+  val_1 int PRIMARY KEY
+) USING orioledb;
+CREATE TABLE o_test_2 (
+  CHECK (val_1 >= 0 AND val_1 < 10)
+) INHERITS (o_test_1);
+CREATE RULE rule_test_1 AS ON INSERT TO o_test_1
+	WHERE new.val_1 >= 0 AND new.val_1 < 10
+	  DO INSTEAD INSERT INTO o_test_2 VALUES (new.val_1);
+CREATE RULE rule_test_2  AS ON UPDATE TO o_test_1
+	WHERE old.val_1 >= 0 AND old.val_1 < 10
+	DO INSTEAD UPDATE o_test_2 SET val_1 = new.val_1
+	WHERE val_1 = old.val_1;
+INSERT INTO o_test_1
+  SELECT * FROM generate_series(5,19,1) a;
+UPDATE o_test_1 SET val_1 = 4 WHERE val_1 = 5;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 19 other objects
 DETAIL:  drop cascades to table p_stock
 drop cascades to table c_stock
 drop cascades to table a
@@ -2270,6 +2286,8 @@ drop cascades to table c_star
 drop cascades to table d_star
 drop cascades to table e_star
 drop cascades to table f_star
+drop cascades to table o_test_1
+drop cascades to table o_test_2
 DROP SCHEMA inherits CASCADE;
 NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table foo

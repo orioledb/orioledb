@@ -119,6 +119,37 @@ SELECT * FROM o_test_cross_partition_update;
 SELECT * FROM o_test_cross_partition_update_child;
 SELECT * FROM o_test_cross_partition_update_child2;
 
+CREATE TABLE o_test_1 (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY (val_1, val_2)
+) USING orioledb;
+
+CREATE TABLE o_test_2 (
+	val_1 int,
+	val_2 int
+) PARTITION BY RANGE (val_1, val_2);
+
+CREATE TABLE o_test_3 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+ALTER TABLE o_test_2
+	ATTACH PARTITION o_test_3 FOR
+		VALUES FROM (0, 0) TO (10, 10);
+
+ALTER TABLE o_test_2
+	ADD FOREIGN KEY (val_1, val_2)
+		REFERENCES o_test_1;
+
+INSERT INTO o_test_1
+	VALUES (5, 6);
+
+INSERT INTO o_test_2
+	VALUES (5, 6);
+
+UPDATE o_test_1 SET val_2 = 7;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;
 RESET search_path;
