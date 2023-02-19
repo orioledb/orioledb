@@ -213,7 +213,7 @@ orioledb_fetch_row_version(Relation relation,
 										 fetch_row_version_callback,
 										 &version);
 
-	if (deleted && COMMITSEQNO_IS_INPROGRESS(tupleCsn))
+	if (deleted && COMMITSEQNO_IS_INPROGRESS(tupleCsn) && snapshot != SnapshotAny)
 		return true;
 
 	if (O_TUPLE_IS_NULL(tuple))
@@ -305,7 +305,7 @@ orioledb_get_row_ref_type(Relation rel)
 	return ROW_REF_ROWID;
 }
 
-static void
+static TupleTableSlot *
 orioledb_tableam_tuple_insert(Relation relation, TupleTableSlot *slot,
 							  CommandId cid, int options,
 							  BulkInsertState bistate)
@@ -316,7 +316,7 @@ orioledb_tableam_tuple_insert(Relation relation, TupleTableSlot *slot,
 
 	descr = relation_get_descr(relation);
 	fill_current_oxid_csn(&oxid, &csn);
-	o_tbl_insert(descr, relation, slot, oxid, csn);
+	return o_tbl_insert(descr, relation, slot, oxid, csn);
 }
 
 static void

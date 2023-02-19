@@ -141,7 +141,7 @@ static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBou
 static void o_report_duplicate(Relation rel, OIndexDescr *id,
 							   TupleTableSlot *slot);
 
-void
+TupleTableSlot *
 o_tbl_insert(OTableDescr *descr, Relation relation,
 			 TupleTableSlot *slot, OXid oxid, CommitSeqNo csn)
 {
@@ -190,6 +190,8 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	o_toast_insert_values(relation, descr, slot, oxid, csn);
 
 	o_wal_insert(&primary->desc, tup);
+
+	return slot;
 }
 
 OBTreeModifyResult

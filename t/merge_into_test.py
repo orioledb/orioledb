@@ -201,9 +201,7 @@ class MergeIntoTest(BaseTest):
 			WHEN NOT MATCHED THEN
 				INSERT (val_2) VALUES (333)
 			WHEN MATCHED THEN
-				UPDATE SET val_2 = val_1 + val_2
-			WHEN MATCHED THEN
-				DELETE;
+				UPDATE SET val_2 = val_1 + val_2;
 
 			INSERT INTO o_test_2(val_4)
 				(SELECT val_4 FROM generate_series (1, 5) val_4);
@@ -267,9 +265,7 @@ class MergeIntoTest(BaseTest):
 				USING o_test_2 s
 				ON t.val_1 = s.val_3
 				WHEN MATCHED THEN
-					DELETE
-				WHEN MATCHED THEN
-					UPDATE SET val_2 = val_1 + val_2;
+					DELETE;
 				""")
 		self.assertErrorMessageEquals(e, "MERGE command cannot affect " +
 										 "row a second time",
@@ -426,9 +422,7 @@ class MergeIntoTest(BaseTest):
 			WHEN NOT MATCHED THEN
 				INSERT (val_2) VALUES (333)
 			WHEN MATCHED THEN
-				DELETE
-			WHEN MATCHED THEN
-				UPDATE SET val_2 = val_1 + val_2;
+				DELETE;
 
 			CREATE TABLE o_test_3(
 					val_5 int,
@@ -459,9 +453,7 @@ class MergeIntoTest(BaseTest):
 			WHEN MATCHED THEN
 				UPDATE SET val_1 = val_1 + val_2
 			WHEN NOT MATCHED THEN
-				INSERT (val_2) VALUES (3)
-			WHEN MATCHED THEN
-				DELETE;
+				INSERT (val_2) VALUES (3);
 			""")
 
 		self.assertTblCount(2)
@@ -568,9 +560,7 @@ class MergeIntoTest(BaseTest):
 			WHEN NOT MATCHED THEN
 				INSERT (val_2) VALUES (333)
 			WHEN MATCHED THEN
-				DELETE
-			WHEN MATCHED THEN
-				UPDATE SET val_2 = val_1 + val_2;
+				DELETE;
 		""")
 		t2 = ThreadQueryExecutor(con2, """
 			INSERT INTO o_test_1(val_1, val_2)
@@ -662,9 +652,7 @@ class MergeIntoTest(BaseTest):
 			USING o_test_2 s
 			ON t.val_1 = s.val_3
 			WHEN MATCHED THEN
-				DELETE
-			WHEN MATCHED THEN
-				UPDATE SET val_2 = val_1 + val_2;
+				DELETE;
 		""")
 		t2.start()
 		con1.commit()
@@ -836,9 +824,7 @@ class MergeIntoTest(BaseTest):
 			WHEN NOT MATCHED THEN
 				INSERT (val_4) VALUES (100)
 			WHEN MATCHED THEN
-				UPDATE SET val_3 = val_2 + val_4
-			WHEN MATCHED THEN
-				DELETE;
+				UPDATE SET val_3 = val_2 + val_4;
 			""")
 
 		self.assertEqual(node.execute("SELECT * FROM o_test_1 ORDER BY val_1"),
@@ -866,9 +852,7 @@ class MergeIntoTest(BaseTest):
 			WHEN NOT MATCHED THEN
 				INSERT (val_2) VALUES (10)
 			WHEN MATCHED THEN
-				UPDATE SET val_2 = val_1 + val_2
-			WHEN MATCHED THEN
-				DELETE;
+				UPDATE SET val_2 = val_1 + val_2;
 		""")
 
 		self.assertEqual(node.execute("SELECT * FROM o_test_1 ORDER BY val_1"),

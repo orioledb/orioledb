@@ -55,17 +55,13 @@ step "s1_merge_3" { MERGE INTO o_test_1 t
                     WHEN NOT MATCHED THEN
                     INSERT (val_2) VALUES (333)
                     WHEN MATCHED THEN
-                    DELETE
-                    WHEN MATCHED THEN
-                    UPDATE SET val_2 = val_1 + val_2; }
+                    DELETE; }
 
 step "s1_merge_4" { MERGE INTO o_test_1 t
                     USING o_test_2 s
                     ON t.val_1 = s.val_3
                     WHEN MATCHED THEN
-                    DELETE
-                    WHEN MATCHED THEN
-                    UPDATE SET val_2 = val_1 + val_2; }
+                    DELETE; }
 step "s1_merge_5" {
     MERGE INTO o_test_1 t
 	USING (SELECT 1 AS val_1) s
@@ -145,25 +141,19 @@ step "s2_merge_3" { MERGE INTO o_test_1 t
                     WHEN NOT MATCHED THEN
                     INSERT (val_2) VALUES (333)
                     WHEN MATCHED THEN
-                    DELETE
-                    WHEN MATCHED THEN
-                    UPDATE SET val_2 = val_1 + val_2; }
+                    DELETE; }
 
 step "s2_merge_4" { MERGE INTO o_test_1 t
                     USING o_test_2 s
                     ON t.val_1 = s.val_3
                     WHEN MATCHED THEN
-                    DELETE
-                    WHEN MATCHED THEN
-                    UPDATE SET val_2 = val_1 + val_2; }
+                    DELETE; }
 
 step "s2_merge_5" { MERGE INTO o_test_1 t
                     USING o_test_5 s
                     ON t.val_1 = s.val_3
                     WHEN MATCHED THEN
-                    DELETE
-                    WHEN MATCHED THEN
-                    UPDATE SET val_2 = val_1 + val_2; }
+                    DELETE; }
 
 permutation "s1_begin_2" "s1_merge_1" "s2_begin_1" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 permutation "s1_begin_2" "s1_merge_2" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"

@@ -339,7 +339,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			return result;
 		}
 	}
-	else if (tupHdr.deleted)
+	else if (tupHdr.deleted && !cb)
 	{
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
