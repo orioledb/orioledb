@@ -287,7 +287,7 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 
 	if (tableIndex)
 	{
-		int		nFields = fillPrimary ? tableIndex->nkeyfields : tableIndex->nfields;
+		int			nFields = fillPrimary ? tableIndex->nkeyfields : tableIndex->nfields;
 
 		for (i = 0; i < nFields; i++)
 		{

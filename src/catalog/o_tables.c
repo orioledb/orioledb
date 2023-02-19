@@ -373,8 +373,8 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	ix_exprfield_num = 0;
 	for (keyno = 0; keyno < index->nfields; keyno++)
 	{
-		AttrNumber			attnum = index_rel->rd_index->indkey.values[keyno];
-		OTableIndexField   *ix_field;
+		AttrNumber	attnum = index_rel->rd_index->indkey.values[keyno];
+		OTableIndexField *ix_field;
 
 		ix_field = &index->fields[keyno];
 		if (AttributeNumberIsValid(attnum))
@@ -440,10 +440,10 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		if (keyno >= index->nkeyfields)
 		{
 
-			OTableIndex		   *primary = NULL;
-			bool				pk_member = false;
-			OTableIndexField   *primary_field = NULL;
-			int					pk_field;
+			OTableIndex *primary = NULL;
+			bool		pk_member = false;
+			OTableIndexField *primary_field = NULL;
+			int			pk_field;
 
 			if (o_table->has_primary)
 			{
@@ -471,9 +471,9 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			else
 			{
 				/*
-				* Included columns have no collation, no opclass and no
-				* ordering options.
-				*/
+				 * Included columns have no collation, no opclass and no
+				 * ordering options.
+				 */
 				ix_field->collation = InvalidOid;
 				ix_field->opclass = InvalidOid;
 				ix_field->ordering = SORTBY_DEFAULT;

@@ -32,11 +32,12 @@ typedef struct
 	uint16		nIncludedFields;
 	uint16		nLeafFields;
 	uint16		nNonLeafFields;
-	/* TOAST index: pkey field amount, excluding included fields,
-	 * including 2 fields: attnum and offset
-	 * Primary index: amount of uniq fields in index
-	 * Unique index: field amount, excluding included and pkey fields
-	 * Regular index: all field amount
+
+	/*
+	 * TOAST index: pkey field amount, excluding included fields, including 2
+	 * fields: attnum and offset Primary index: amount of uniq fields in index
+	 * Unique index: field amount, excluding included and pkey fields Regular
+	 * index: all field amount
 	 */
 	uint16		nUniqueFields;
 	/* non-TOAST index: field amount, excluding included and pkey fields */

@@ -479,12 +479,12 @@ o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
 						   OTuple tuple, TupleTableSlot *slot,
 						   OBTreeKeyBound *bound)
 {
-	OIndexDescr	   *pt = o_get_tree_def(primary),
-				   *st = o_get_tree_def(secondary);
-	int				i,
-					attnum;
-	bool			isnull;
-	ListCell	   *indexpr_item = list_head(st->expressions_state);
+	OIndexDescr *pt = o_get_tree_def(primary),
+			   *st = o_get_tree_def(secondary);
+	int			i,
+				attnum;
+	bool		isnull;
+	ListCell   *indexpr_item = list_head(st->expressions_state);
 
 	bound->nkeys = st->nonLeafTupdesc->natts;
 	for (i = 0; i < st->nonLeafTupdesc->natts; i++)
@@ -499,7 +499,7 @@ o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
 		}
 		else
 		{
-			ExprState   *expr_state = (ExprState *) lfirst(indexpr_item);
+			ExprState  *expr_state = (ExprState *) lfirst(indexpr_item);
 
 			st->econtext->ecxt_scantuple = slot;
 			bound->keys[i].value = ExecEvalExprSwitchContext(expr_state,

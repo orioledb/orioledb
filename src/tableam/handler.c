@@ -1633,16 +1633,36 @@ validate_index_compress(const char *value)
 /* values from StdRdOptIndexCleanup */
 static relopt_enum_elt_def StdRdOptIndexCleanupValues[] =
 {
-	{"auto", STDRD_OPTION_VACUUM_INDEX_CLEANUP_AUTO},
-	{"on", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
-	{"off", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
-	{"true", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
-	{"false", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
-	{"yes", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
-	{"no", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
-	{"1", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON},
-	{"0", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF},
-	{(const char *) NULL}		/* list terminator */
+	{
+		"auto", STDRD_OPTION_VACUUM_INDEX_CLEANUP_AUTO
+	},
+	{
+		"on", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON
+	},
+	{
+		"off", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF
+	},
+	{
+		"true", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON
+	},
+	{
+		"false", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF
+	},
+	{
+		"yes", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON
+	},
+	{
+		"no", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF
+	},
+	{
+		"1", STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON
+	},
+	{
+		"0", STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF
+	},
+	{
+		(const char *) NULL
+	}							/* list terminator */
 };
 #endif
 

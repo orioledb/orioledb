@@ -1383,7 +1383,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 
 #ifdef USE_ASSERT_CHECKING
 	{
-		int	natts;
+		int			natts;
 
 		old_idx_tup = tts_orioledb_make_key(oldSlot, descr);
 		o_tuple_set_version(&primary->nonLeafSpec, &old_idx_tup,
@@ -1392,10 +1392,11 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 		Assert(o_tuple_size(old_idx_tup, &primary->nonLeafSpec) ==
 			   o_tuple_size(idx_tup, &primary->nonLeafSpec));
 		Assert(old_idx_tup.formatFlags == idx_tup.formatFlags);
+
 		/*
 		 * Cannot use simple memcmp(old_idx_tup.data, idx_tup.data, ...)
-		 * because of included fields and also equality of
-		 * such special values as '0.0' and '-0.0' for float
+		 * because of included fields and also equality of such special values
+		 * as '0.0' and '-0.0' for float
 		 */
 		if (old_idx_tup.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT)
 			natts = primary->nonLeafSpec.natts;
@@ -1405,11 +1406,11 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 		{
 			if (!OIgnoreColumn(primary, i))
 			{
-				Datum			old_value;
-				Datum			new_value;
-				bool			isnull;
-				OIndexField	   *pkfield = &primary->fields[i];
-				int				cmp;
+				Datum		old_value;
+				Datum		new_value;
+				bool		isnull;
+				OIndexField *pkfield = &primary->fields[i];
+				int			cmp;
 
 				old_value = o_fastgetattr(old_idx_tup, i + 1,
 										  primary->nonLeafTupdesc,

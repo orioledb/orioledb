@@ -98,10 +98,10 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 			datum2 = o_fastgetattr(rtup, attno, tupDesc, spec, &isnull2);
 
 			compare = ApplySortComparator(datum1, isnull1,
-										datum2, isnull2,
-										sortKey);
+										  datum2, isnull2,
+										  sortKey);
 			if (compare != 0)
-				return compare;		/* done when we find unequal attributes */
+				return compare; /* done when we find unequal attributes */
 
 			/* they are equal, so we only need to examine one null flag */
 			if (isnull1)
