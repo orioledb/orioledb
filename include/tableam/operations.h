@@ -118,5 +118,6 @@ extern void o_check_tbl_delete_mres(OTableModifyResult mres,
 extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   TupleTableSlot *slot,
 										   ExprContext *econtext);
+extern void o_truncate_table(ORelOids oids);
 
 #endif

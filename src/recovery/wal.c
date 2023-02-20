@@ -451,3 +451,30 @@ o_wal_delete_key(BTreeDescr *desc, OTuple key)
 	if (call_pfree)
 		pfree(wal_record.data);
 }
+
+void
+add_truncate_wal_record(ORelOids oids)
+{
+	WALRecTruncate *rec;
+
+	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+
+	if (local_wal_buffer_offset == 0)
+	{
+		OXid		oxid = get_current_oxid_if_any();
+
+		Assert(oxid != InvalidOXid);
+		add_xid_wal_record(oxid);
+	}
+
+	rec = (WALRecTruncate *) (&local_wal_buffer[local_wal_buffer_offset]);
+
+	rec->recType = WAL_REC_TRUNCATE;
+	memcpy(rec->datoid, &oids.datoid, sizeof(Oid));
+	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
+	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
+
+	local_wal_buffer_offset += sizeof(*rec);
+}

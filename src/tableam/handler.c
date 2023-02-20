@@ -24,6 +24,7 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "recovery/wal.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/operations.h"
@@ -789,41 +790,13 @@ static void
 orioledb_relation_nontransactional_truncate(Relation rel)
 {
 	ORelOids	oids = {MyDatabaseId, rel->rd_rel->oid,
-	rel->rd_node.relNode},
-			   *treeOids;
-	OTable	   *o_table;
-	int			treeOidsNum;
-	int			i;
-	bool		invalidatedTable = false;
+	rel->rd_node.relNode};
 
 	if (rel->rd_rel->oid == 0 || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
 		return;
 
-	o_tables_rel_lock(&oids, AccessExclusiveLock);
-
-	o_table = o_tables_get(oids);
-	Assert(o_table != NULL);
-
-	treeOids = o_table_make_index_oids(o_table, &treeOidsNum);
-
-	for (i = 0; i < treeOidsNum; i++)
-	{
-		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, false);
-		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, true);
-		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode);
-		o_invalidate_oids(treeOids[i]);
-		if (ORelOidsIsEqual(oids, treeOids[i]))
-			invalidatedTable = true;
-		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, false);
-		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, true);
-	}
-
-	if (!invalidatedTable)
-		o_invalidate_oids(oids);
-
-	o_tables_rel_unlock(&oids, AccessExclusiveLock);
-
-	pfree(treeOids);
+	o_truncate_table(oids);
+	add_truncate_wal_record(oids);
 }
 
 static void

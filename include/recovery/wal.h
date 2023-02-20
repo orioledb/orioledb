@@ -28,6 +28,7 @@
 #define WAL_REC_SAVEPOINT	(9)
 #define WAL_REC_ROLLBACK_TO_SAVEPOINT (10)
 #define WAL_REC_JOINT_COMMIT (11)
+#define WAL_REC_TRUNCATE	(12)
 
 typedef struct
 {
@@ -90,6 +91,14 @@ typedef struct
 	uint8		xmin[sizeof(OXid)];
 } WALRecFinish;
 
+typedef struct
+{
+	uint8		recType;
+	uint8		datoid[sizeof(Oid)];
+	uint8		reloid[sizeof(Oid)];
+	uint8		relnode[sizeof(Oid)];
+} WALRecTruncate;
+
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
@@ -110,5 +119,6 @@ extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_update(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
+extern void add_truncate_wal_record(ORelOids oids);
 
 #endif							/* __WAL_H__ */

@@ -26,6 +26,7 @@
 #include "recovery/internal.h"
 #include "recovery/wal.h"
 #include "tableam/descr.h"
+#include "tableam/operations.h"
 #include "transam/undo.h"
 #include "utils/stopevent.h"
 #include "utils/syscache.h"
@@ -1948,6 +1949,22 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				pfree(new_o_table);
 			}
 
+		}
+		else if (rec_type == WAL_REC_TRUNCATE)
+		{
+			ORelOids	oids;
+
+			memcpy(&oids.datoid, ptr, sizeof(Oid));
+			ptr += sizeof(Oid);
+			memcpy(&oids.reloid, ptr, sizeof(Oid));
+			ptr += sizeof(Oid);
+			memcpy(&oids.relnode, ptr, sizeof(Oid));
+			ptr += sizeof(Oid);
+
+			if (!single)
+				workers_synchronize(xlogPtr, true);
+
+			o_truncate_table(oids);
 		}
 		else if (rec_type == WAL_REC_SAVEPOINT)
 		{

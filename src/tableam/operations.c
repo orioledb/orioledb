@@ -1612,3 +1612,39 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 									"pk" : "sk")));
 	}
 }
+
+void
+o_truncate_table(ORelOids oids)
+{
+	ORelOids   *treeOids;
+	OTable	   *o_table;
+	int			treeOidsNum;
+	int			i;
+	bool		invalidatedTable = false;
+
+	o_tables_rel_lock(&oids, AccessExclusiveLock);
+
+	o_table = o_tables_get(oids);
+	Assert(o_table != NULL);
+
+	treeOids = o_table_make_index_oids(o_table, &treeOidsNum);
+
+	for (i = 0; i < treeOidsNum; i++)
+	{
+		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, false);
+		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, true);
+		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode);
+		o_invalidate_oids(treeOids[i]);
+		if (ORelOidsIsEqual(oids, treeOids[i]))
+			invalidatedTable = true;
+		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, false);
+		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, true);
+	}
+
+	if (!invalidatedTable)
+		o_invalidate_oids(oids);
+
+	o_tables_rel_unlock(&oids, AccessExclusiveLock);
+
+	pfree(treeOids);
+}

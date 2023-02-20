@@ -1558,3 +1558,32 @@ class RecoveryTest(BaseTest):
 		node.start()
 		self.assertEqual("[(1, 'val1aaa'), (2, 'val2bbb')]", str(node.execute("SELECT * FROM o_test;")))
 		node.stop()
+
+	def test_recovery_truncate(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+		node.safe_psql("""
+			CREATE TABLE o_test_1 (
+				val_1 int PRIMARY KEY,
+				val_2 int
+			) USING orioledb;
+
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 100 FROM generate_series(1, 5) val_1);
+
+			TRUNCATE o_test_1;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		node.safe_psql("""
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 100 FROM generate_series(1, 5) val_1);
+		""")
+
+		node.stop()
