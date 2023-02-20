@@ -116,6 +116,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rightlink \
 				  rll \
 				  rll_2 \
+				  rll_deadlock \
 				  rll_subtrans \
 				  table_lock_test \
 				  uniq

@@ -38,6 +38,16 @@ typedef struct
 	LocationIndex splitKeyLen;
 } UndoPageImageHeader;
 
+/*
+ * Status of existing lock on the tuple made by the same transaction;
+ */
+typedef enum
+{
+	BTreeModifyNoLock = 1,
+	BTreeModifyWeakerLock = 2,
+	BTreeModifySameOrStrongerLock = 3
+} BTreeModifyLockStatus;
+
 /* size of image in undo log produced by page compaction  */
 #define O_COMPACT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ)
 /* max size of image in undo log produced by page split */
@@ -76,7 +86,8 @@ extern bool row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 							   RowLockMode mode,
 							   OXid my_oxid, OInMemoryBlkno blkno,
 							   UndoLocation savepointUndoLocation,
-							   bool *redundant_row_locks, bool *already_locked);
+							   bool *redundant_row_locks,
+							   BTreeModifyLockStatus *lock_status);
 extern void remove_redundant_row_locks(BTreeLeafTuphdr *tuphdr_ptr,
 									   BTreeLeafTuphdr *conflictTuphdrPtr,
 									   UndoLocation *conflictTupHdrUndoLocation,

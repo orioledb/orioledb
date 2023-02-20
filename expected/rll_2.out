@@ -993,14 +993,11 @@ key|value|uniq
 
 step s1_update: UPDATE rll_test SET value = value + 10 WHERE key = 1;
 step s2_select_update: SELECT * FROM rll_test WHERE key = 1 FOR UPDATE; <waiting ...>
-step s1_delete: DELETE FROM rll_test WHERE key = 1;
-step s1_rollbak_to_savepoint: ROLLBACK TO SAVEPOINT point_name_1;
+step s1_delete: DELETE FROM rll_test WHERE key = 1; <waiting ...>
+step s1_delete: <... completed>
 step s2_select_update: <... completed>
-key|value|uniq
----+-----+----
-  1|    1|   1
-(1 row)
-
+ERROR:  deadlock detected
+step s1_rollbak_to_savepoint: ROLLBACK TO SAVEPOINT point_name_1;
 step s1_commit: COMMIT;
 step s2_commit: COMMIT;
 

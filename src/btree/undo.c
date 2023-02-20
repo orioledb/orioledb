@@ -1020,26 +1020,29 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				   UndoLocation *conflictUndoLocation,
 				   RowLockMode mode, OXid my_oxid, OInMemoryBlkno blkno,
 				   UndoLocation savepointUndoLocation,
-				   bool *redundant_row_locks, bool *already_locked)
+				   bool *redundant_row_locks, BTreeModifyLockStatus *lock_status)
 {
 	OTupleXactInfo xactInfo;
 	bool		xactIsfinished;
 	UndoLocation undoLocation;
 	UndoLocation lastLockOnlyUndoLocation;
-	BTreeLeafTuphdr finishedTuphdr;
-	UndoLocation finishedUndoLocation;
+	BTreeLeafTuphdr curTuphdr,
+				finishedTuphdr;
+	UndoLocation curUndoLocation,
+				finishedUndoLocation;
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location();
 	bool		foundFinished;
+	bool		result = false;
 
-	finishedTuphdr = *conflictTuphdr = *pageTuphdr;
-	finishedUndoLocation = *conflictUndoLocation = InvalidUndoLocation;
+	finishedTuphdr = curTuphdr = *pageTuphdr;
+	finishedUndoLocation = curUndoLocation = InvalidUndoLocation;
 	lastLockOnlyUndoLocation = InvalidUndoLocation;
-	xactInfo = conflictTuphdr->xactInfo;
+	xactInfo = curTuphdr.xactInfo;
 	xactIsfinished = XACT_INFO_IS_FINISHED(xactInfo);
 	foundFinished = xactIsfinished;
-	undoLocation = conflictTuphdr->undoLocation;
+	undoLocation = curTuphdr.undoLocation;
 
-	while (conflictTuphdr->chainHasLocks ||
+	while (curTuphdr.chainHasLocks ||
 		   XACT_INFO_IS_LOCK_ONLY(xactInfo) ||
 		   !xactIsfinished)
 	{
@@ -1056,7 +1059,9 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				  undoLocation >= savepointUndoLocation)))
 				*redundant_row_locks = true;
 			if (XACT_INFO_GET_LOCK_MODE(xactInfo) >= mode)
-				*already_locked = true;
+				*lock_status = Max(*lock_status, BTreeModifySameOrStrongerLock);
+			else
+				*lock_status = Max(*lock_status, BTreeModifyWeakerLock);
 		}
 
 		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
@@ -1083,9 +1088,11 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				{
 					delete_record = true;
 				}
-				else
+				else if (!result || XACT_INFO_GET_OXID(conflictTuphdr->xactInfo) == my_oxid)
 				{
-					return true;
+					*conflictTuphdr = curTuphdr;
+					*conflictUndoLocation = curUndoLocation;
+					result = true;
 				}
 			}
 
@@ -1093,9 +1100,9 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			{
 				Assert(UNDO_REC_EXISTS(undoLocation));
 
-				prev_tuphdr = *conflictTuphdr;
+				prev_tuphdr = curTuphdr;
 				get_prev_leaf_header_from_undo(&prev_tuphdr, false);
-				if (!UndoLocationIsValid(*conflictUndoLocation))
+				if (!UndoLocationIsValid(curUndoLocation))
 				{
 					page_block_reads(blkno);
 					pageTuphdr->xactInfo = prev_tuphdr.xactInfo;
@@ -1108,8 +1115,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					 * Update chainHasLocks flag of the next undo records if
 					 * needed.
 					 */
-					if (XACT_INFO_IS_LOCK_ONLY(conflictTuphdr->xactInfo) &&
-						!conflictTuphdr->chainHasLocks)
+					if (XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) &&
+						!curTuphdr.chainHasLocks)
 					{
 						clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
 												   pageTuphdr,
@@ -1117,22 +1124,32 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 						lastLockOnlyUndoLocation = InvalidUndoLocation;
 					}
 
-					conflictTuphdr->xactInfo = prev_tuphdr.xactInfo;
-					conflictTuphdr->undoLocation = prev_tuphdr.undoLocation;
-					conflictTuphdr->chainHasLocks = prev_tuphdr.chainHasLocks;
-					update_leaf_header_in_undo(conflictTuphdr,
-											   *conflictUndoLocation);
+					curTuphdr.xactInfo = prev_tuphdr.xactInfo;
+					curTuphdr.undoLocation = prev_tuphdr.undoLocation;
+					curTuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
+					update_leaf_header_in_undo(&curTuphdr,
+											   curUndoLocation);
 
 				}
 			}
 		}
-		else if (!xactIsfinished &&
-				 ROW_LOCKS_CONFLICT(XACT_INFO_GET_LOCK_MODE(xactInfo), mode))
+		else if (!xactIsfinished)
 		{
-			if (XACT_INFO_GET_OXID(xactInfo) == my_oxid &&
-				XACT_INFO_GET_LOCK_MODE(xactInfo) >= mode)
-				*already_locked = true;
-			return true;
+			if (XACT_INFO_GET_OXID(xactInfo) == my_oxid)
+			{
+				if (XACT_INFO_GET_LOCK_MODE(xactInfo) >= mode)
+					*lock_status = Max(*lock_status, BTreeModifySameOrStrongerLock);
+				else
+					*lock_status = Max(*lock_status, BTreeModifyWeakerLock);
+			}
+			if (ROW_LOCKS_CONFLICT(XACT_INFO_GET_LOCK_MODE(xactInfo), mode) &&
+				(!result || (XACT_INFO_GET_OXID(conflictTuphdr->xactInfo) == my_oxid &&
+				 XACT_INFO_GET_OXID(xactInfo) != my_oxid)))
+			{
+				*conflictTuphdr = curTuphdr;
+				*conflictUndoLocation = curUndoLocation;
+				result = true;
+			}
 		}
 
 		if (!UndoLocationIsValid(undoLocation) ||
@@ -1142,7 +1159,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			 * We have reached the end of "in-progress" undo chain.  Fix tail
 			 * "chainHasLocks" flag if needed.
 			 */
-			if (conflictTuphdr->chainHasLocks)
+			if (curTuphdr.chainHasLocks)
 			{
 				clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
 										   pageTuphdr,
@@ -1150,9 +1167,12 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
 			}
 
-			*conflictTuphdr = finishedTuphdr;
-			*conflictUndoLocation = finishedUndoLocation;
-			return false;
+			if (!result)
+			{
+				*conflictTuphdr = finishedTuphdr;
+				*conflictUndoLocation = finishedUndoLocation;
+			}
+			return result;
 		}
 
 		if (!delete_record)
@@ -1169,17 +1189,17 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			if (XACT_INFO_IS_LOCK_ONLY(xactInfo))
 				lastLockOnlyUndoLocation = undoLocation;
 
-			prevChainHasLocks = conflictTuphdr->chainHasLocks;
-			get_prev_leaf_header_from_undo(conflictTuphdr, false);
+			prevChainHasLocks = curTuphdr.chainHasLocks;
+			get_prev_leaf_header_from_undo(&curTuphdr, false);
 		}
 
-		*conflictUndoLocation = undoLocation;
-		xactInfo = conflictTuphdr->xactInfo;
+		curUndoLocation = undoLocation;
+		xactInfo = curTuphdr.xactInfo;
 		xactIsfinished = XACT_INFO_IS_FINISHED(xactInfo);
-		undoLocation = conflictTuphdr->undoLocation;
+		undoLocation = curTuphdr.undoLocation;
 
 		if (prevChainHasLocks &&
-			!conflictTuphdr->chainHasLocks &&
+			!curTuphdr.chainHasLocks &&
 			!XACT_INFO_IS_LOCK_ONLY(xactInfo))
 		{
 			/*
@@ -1194,15 +1214,18 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 
 		if (!foundFinished && xactIsfinished)
 		{
-			finishedTuphdr = *conflictTuphdr;
-			finishedUndoLocation = *conflictUndoLocation;
+			finishedTuphdr = curTuphdr;
+			finishedUndoLocation = curUndoLocation;
 			foundFinished = true;
 		}
 	}
 
-	*conflictTuphdr = finishedTuphdr;
-	*conflictUndoLocation = finishedUndoLocation;
-	return false;
+	if (!result)
+	{
+		*conflictTuphdr = finishedTuphdr;
+		*conflictUndoLocation = finishedUndoLocation;
+	}
+	return result;
 }
 
 /*

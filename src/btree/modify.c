@@ -52,7 +52,7 @@ typedef struct
 	LOCKMODE	hwLockMode;
 	bool		needsUndo;
 	int			cmp;
-	bool		isAlreadyLocked;
+	BTreeModifyLockStatus lockStatus;
 	bool		pagesAreReserved;
 	bool		undoIsReserved;
 	BTreeOperationType action;
@@ -131,11 +131,10 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.opCsn = opCsn;
 	context.lockMode = _lockMode;
 	context.hwLockMode = NoLock;
-	context.isAlreadyLocked = false;
+	context.lockStatus = BTreeModifyNoLock;
 	context.action = action;
 	context.key = key;
 	context.keyType = keyType;
-	context.isAlreadyLocked = false;
 	context.savepointUndoLocation = get_subxact_undo_location();
 	context.callbackInfo = callbackInfo;
 
@@ -373,12 +372,17 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 }
 
 static void
-wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid, RowLockMode lockMode,
+wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid,
+			   RowLockMode lockMode, BTreeModifyLockStatus lockStatus,
 			   LOCKTAG *hwLockTag, LOCKMODE *hwLockMode)
 {
 	uint32		hash;
 
-	if (*hwLockMode == NoLock)
+	/*
+	 * Acquire the lock, if necessary (but skip it when we're requesting a
+	 * lock and already have one; avoids deadlock).
+	 */
+	if (*hwLockMode == NoLock && lockStatus == BTreeModifyNoLock)
 	{
 		hash = o_btree_hash(desc, tuple, BTreeKeyLeafTuple);
 
@@ -418,7 +422,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 						   &context->conflictUndoLocation,
 						   context->lockMode, context->opOxid,
 						   blkno, context->savepointUndoLocation,
-						   &haveRedundantRowLocks, &context->isAlreadyLocked))
+						   &haveRedundantRowLocks, &context->lockStatus))
 	{
 		OTupleXactInfo xactInfo = context->conflictTupHdr.xactInfo;
 		OXid		oxid = XACT_INFO_GET_OXID(xactInfo);
@@ -530,6 +534,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				if (cbAction == OBTreeCallbackActionXidWait)
 					wait_for_tuple(desc, curTuple, oxid,
 								   context->lockMode,
+								   context->lockStatus,
 								   &context->hwLockTag,
 								   &context->hwLockMode);
 				else if (cbAction == OBTreeCallbackActionXidExit)
@@ -578,7 +583,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 	 * Remove redundant row-level locks if any.
 	 */
 	if (haveRedundantRowLocks &&
-		!(context->action == BTreeOperationLock && context->isAlreadyLocked))
+		!(context->action == BTreeOperationLock &&
+		  context->lockStatus == BTreeModifySameOrStrongerLock))
 	{
 		remove_redundant_row_locks(tuphdr, &context->conflictTupHdr,
 								   &context->conflictUndoLocation,
@@ -849,7 +855,7 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 
 	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
 
-	if (context->isAlreadyLocked)
+	if (context->lockStatus == BTreeModifySameOrStrongerLock)
 	{
 		unlock_release(context, true);
 		return OBTreeModifyResultLocked;
