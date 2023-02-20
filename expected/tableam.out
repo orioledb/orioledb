@@ -2,9 +2,9 @@ CREATE SCHEMA tableam;
 SET SESSION search_path = 'tableam';
 CREATE EXTENSION orioledb;
 SELECT orioledb_version();
-    orioledb_version     
--------------------------
- OrioleDB public alpha 8
+     orioledb_version     
+--------------------------
+ OrioleDB public alpha 11
 (1 row)
 
 SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
