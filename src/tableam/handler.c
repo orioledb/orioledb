@@ -606,6 +606,7 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 			ExecConstraints(rinfo, slot, estate);
 
 		tts_orioledb_fill_key_bound(mres.oldTuple, GET_PRIMARY(descr), &old_pkey);
+		ExecMaterializeSlot(slot);
 		mres = o_tbl_update(descr, slot, estate, &old_pkey, rel,
 							oxid, marg.csn, &hint, &marg);
 		Assert(mres.action != BTreeOperationLock);

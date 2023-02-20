@@ -16,11 +16,19 @@ setup
 	END;$$ LANGUAGE plpgsql;
 	TRUNCATE rll_test;
 	INSERT INTO rll_test (SELECT i, i, i FROM generate_series(1, 10) AS i);
+
+	CREATE TABLE rll_test_text_pkey_update (
+		val_1 text PRIMARY KEY,
+		val_2 int not null
+	) USING orioledb;
+
+	INSERT INTO rll_test_text_pkey_update VALUES ('a', 600), ('b', 600);
 }
 
 teardown
 {
 	DROP TABLE rll_test;
+	DROP TABLE rll_test_text_pkey_update;
 }
 
 session "s1"
@@ -32,7 +40,9 @@ step "s1_select_key_share" { SELECT * FROM rll_test WHERE key = 1 FOR KEY SHARE;
 step "s1_select_share" { SELECT * FROM rll_test WHERE key = 1 FOR SHARE; }
 step "s1_select_update" { SELECT * FROM rll_test WHERE key = 1 FOR UPDATE; }
 step "s1_select_update_skip_locked" { SELECT * FROM rll_test ORDER BY key FOR UPDATE SKIP LOCKED LIMIT 1; }
+step "s1_select_2" { SELECT * FROM rll_test_text_pkey_update; }
 step "s1_update" { UPDATE rll_test SET value = value + 10 WHERE key = 1; }
+step "s1_update_2" { UPDATE rll_test_text_pkey_update SET val_2 = val_2 - 200 WHERE val_1 = 'a'; }
 step "s1_commit" { COMMIT; }
 step "s1_rollback" { ROLLBACK; }
 
@@ -45,6 +55,7 @@ step "s2_select_no_key_update" { SELECT * FROM rll_test WHERE key = 1 FOR NO KEY
 step "s2_select_update" { SELECT * FROM rll_test WHERE key = 1 FOR UPDATE; }
 step "s2_select_update_skip_locked" { SELECT * FROM rll_test ORDER BY key FOR UPDATE SKIP LOCKED LIMIT 1; }
 step "s2_update" { UPDATE rll_test SET value = value + 10 WHERE key = 1; }
+step "s2_update_2" { UPDATE rll_test_text_pkey_update SET val_2 = val_2 + 450 WHERE val_1 = 'a'; }
 step "s2_update_key" { UPDATE rll_test SET key = value WHERE key = 1; }
 step "s2_commit" { COMMIT; }
 
@@ -85,5 +96,9 @@ permutation "s1_trigger" "s1_begin" "s2_begin" "s1_update" "s2_update" "s1_rollb
 permutation "s1_trigger" "s1_begin" "s2_begin" "s1_update" "s2_update_key" "s1_commit"  "s2_commit" "s1_select"
 permutation "s1_trigger" "s1_begin" "s2_begin" "s1_update" "s2_update_key" "s1_rollback"  "s2_commit" "s1_select"
 
+# Concurrent update text pkey
+permutation "s1_begin" "s2_begin" "s1_update_2" "s2_update_2" "s1_commit"  "s2_commit" "s1_select_2"
+
 # Check for double locking the same row
 permutation "s1_begin" "s2_begin" "s1_select_update_skip_locked" "s1_select_update_skip_locked" "s2_select_update_skip_locked" "s1_commit"  "s2_commit"
+
