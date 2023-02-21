@@ -320,6 +320,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	OCompress	compress = InvalidOCompress;
 	int16		indnatts;
 	int16		indnkeyatts;
+	bool		relispartition;
 	OBTOptions *options;
 
 	index_rel = index_open(indoid, AccessShareLock);
@@ -349,6 +350,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 	indnatts = index_rel->rd_index->indnatts;
 	indnkeyatts = index_rel->rd_index->indnkeyatts;
+	relispartition = index_rel->rd_rel->relispartition;
 
 	index_close(index_rel, AccessShareLock);
 
@@ -411,7 +413,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			is_build = tbl_data_exists(&primary_oids);
 
 			/* Rebuild, assign new oids */
-			if (ix_type == oIndexPrimary)
+			if (ix_type == oIndexPrimary && !relispartition)
 			{
 				new_o_table = o_tables_get(oids);
 				o_table = new_o_table;

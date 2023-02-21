@@ -372,8 +372,127 @@ INSERT INTO o_test_2
 UPDATE o_test_1 SET val_2 = 7;
 ERROR:  update or delete on table "o_test_1" violates foreign key constraint "o_test_2_val_1_val_2_fkey" on table "o_test_2"
 DETAIL:  Key (val_1, val_2)=(5, 6) is still referenced from table "o_test_2".
+CREATE TABLE o_test_partition_index (
+	val_1 int,
+	val_2 int
+) PARTITION BY RANGE (val_1);
+CREATE TABLE o_test_partition_index_child1 (
+	val_1 int NOT NULL,
+	val_2 int
+) USING orioledb;
+CREATE TABLE o_test_partition_index_child2 (
+	val_1 int NOT NULL,
+	val_2 int
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_partition_index_child1_ix1
+	ON o_test_partition_index_child1 (val_1);
+ALTER TABLE o_test_partition_index ADD PRIMARY KEY (val_1);
+ALTER TABLE o_test_partition_index
+	ATTACH PARTITION o_test_partition_index_child1 FOR VALUES FROM (1) TO (6);
+ALTER TABLE o_test_partition_index
+	ATTACH PARTITION o_test_partition_index_child2 FOR VALUES FROM (6) TO (11);
+INSERT INTO o_test_partition_index SELECT v, v FROM generate_series(1, 10) v;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index ORDER BY val_1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Append
+   ->  Custom Scan (o_scan) on o_test_partition_index_child1 o_test_partition_index_1
+         Forward index scan of: o_test_partition_index_child1_pkey
+   ->  Custom Scan (o_scan) on o_test_partition_index_child2 o_test_partition_index_2
+         Forward index scan of: o_test_partition_index_child2_pkey
+(5 rows)
+
+SELECT * FROM o_test_partition_index ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+     2 |     2
+     3 |     3
+     4 |     4
+     5 |     5
+     6 |     6
+     7 |     7
+     8 |     8
+     9 |     9
+    10 |    10
+(10 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_partition_index
+		WHERE val_1 BETWEEN 2 AND 3 ORDER BY val_1;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Sort
+   Sort Key: o_test_partition_index.val_1
+   ->  Custom Scan (o_scan) on o_test_partition_index_child1 o_test_partition_index
+         Bitmap heap scan
+         Recheck Cond: ((val_1 >= 2) AND (val_1 <= 3))
+         ->  Bitmap Index Scan on o_test_partition_index_child1_ix1
+               Index Cond: ((val_1 >= 2) AND (val_1 <= 3))
+(7 rows)
+
+SELECT * FROM o_test_partition_index
+	WHERE val_1 BETWEEN 2 AND 3 ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     2 |     2
+     3 |     3
+(2 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_partition_index
+		WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partition_index_child2 o_test_partition_index
+   Forward index scan of: o_test_partition_index_child2_pkey
+   Conds: ((val_1 >= 7) AND (val_1 <= 9))
+(3 rows)
+
+SELECT * FROM o_test_partition_index WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     7 |     7
+     8 |     8
+     9 |     9
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partition_index_child1
+   Forward index scan of: o_test_partition_index_child1_pkey
+(2 rows)
+
+SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     1 |     1
+     2 |     2
+     3 |     3
+     4 |     4
+     5 |     5
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partition_index_child2
+   Forward index scan of: o_test_partition_index_child2_pkey
+(2 rows)
+
+SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
+ val_1 | val_2 
+-------+-------
+     6 |     6
+     7 |     7
+     8 |     8
+     9 |     9
+    10 |    10
+(5 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 7 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
 drop cascades to table o_test_cross_partition_update_child
@@ -381,10 +500,13 @@ drop cascades to table o_test_cross_partition_update_child2
 drop cascades to table o_test_1
 drop cascades to constraint o_test_2_val_1_val_2_fkey on table o_test_2
 drop cascades to table o_test_3
+drop cascades to table o_test_partition_index_child1
+drop cascades to table o_test_partition_index_child2
 DROP SCHEMA partition CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range
 drop cascades to table o_test_partition_on_conflict_list
 drop cascades to table o_test_cross_partition_update
 drop cascades to table o_test_2
+drop cascades to table o_test_partition_index
 RESET search_path;

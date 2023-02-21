@@ -150,6 +150,50 @@ INSERT INTO o_test_2
 	VALUES (5, 6);
 
 UPDATE o_test_1 SET val_2 = 7;
+
+
+
+CREATE TABLE o_test_partition_index (
+	val_1 int,
+	val_2 int
+) PARTITION BY RANGE (val_1);
+
+CREATE TABLE o_test_partition_index_child1 (
+	val_1 int NOT NULL,
+	val_2 int
+) USING orioledb;
+
+CREATE TABLE o_test_partition_index_child2 (
+	val_1 int NOT NULL,
+	val_2 int
+) USING orioledb;
+
+CREATE UNIQUE INDEX o_test_partition_index_child1_ix1
+	ON o_test_partition_index_child1 (val_1);
+
+ALTER TABLE o_test_partition_index ADD PRIMARY KEY (val_1);
+ALTER TABLE o_test_partition_index
+	ATTACH PARTITION o_test_partition_index_child1 FOR VALUES FROM (1) TO (6);
+ALTER TABLE o_test_partition_index
+	ATTACH PARTITION o_test_partition_index_child2 FOR VALUES FROM (6) TO (11);
+
+INSERT INTO o_test_partition_index SELECT v, v FROM generate_series(1, 10) v;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index ORDER BY val_1;
+SELECT * FROM o_test_partition_index ORDER BY val_1;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_partition_index
+		WHERE val_1 BETWEEN 2 AND 3 ORDER BY val_1;
+SELECT * FROM o_test_partition_index
+	WHERE val_1 BETWEEN 2 AND 3 ORDER BY val_1;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_partition_index
+		WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
+SELECT * FROM o_test_partition_index WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
+SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
+SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;
 RESET search_path;
