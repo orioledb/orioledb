@@ -23,12 +23,6 @@
 #include "replication/message.h"
 #include "storage/proc.h"
 
-/*
- * We can use this value because if commit begins at 0
- * than WAL does not consist any modify record.
- */
-#define INVALID_COMMIT_POS		(0)
-
 static char local_wal_buffer[LOCAL_WAL_BUFFER_SIZE];
 static int	local_wal_buffer_offset;
 static ORelOids local_oids;
@@ -152,7 +146,7 @@ wal_after_commit()
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
-	pg_atomic_write_u64(&curProcData->commitInProgressXlogLocation, INVALID_COMMIT_POS);
+	pg_atomic_write_u64(&curProcData->commitInProgressXlogLocation, OWalInvalidCommitPos);
 }
 
 void
@@ -354,11 +348,11 @@ flush_local_wal(bool commit)
 	Assert(!is_recovery_process());
 	Assert(length > 0);
 
+	if (commit)
+		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, OWalTmpCommitPos);
 	location = log_logical_wal_container(local_wal_buffer, length);
 	if (commit)
-	{
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, location);
-	}
 
 	local_wal_buffer_offset = 0;
 	local_type = oIndexInvalid;

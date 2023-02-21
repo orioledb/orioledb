@@ -544,17 +544,12 @@ add_map_cleanup_item(List *cleanup, BTreeDescr *desc)
 static inline void
 wait_finish_active_commits(XLogRecPtr redo_pos)
 {
-	uint64		location;
 	int			i;
 
 	for (i = 0; i < max_procs; i++)
 	{
-		while ((location = pg_atomic_read_u64(&oProcData[i].commitInProgressXlogLocation)) != 0)
-		{
-			if (location > redo_pos)
-				break;
+		while (pg_atomic_read_u64(&oProcData[i].commitInProgressXlogLocation) <= redo_pos)
 			pg_usleep(100);
-		}
 	}
 }
 

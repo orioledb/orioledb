@@ -23,6 +23,7 @@
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
+#include "recovery/wal.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/toast.h"
@@ -632,7 +633,7 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&oProcData[i].reservedUndoLocation, InvalidUndoLocation);
 			pg_atomic_init_u64(&oProcData[i].snapshotRetainUndoLocation, InvalidUndoLocation);
 			pg_atomic_init_u64(&oProcData[i].transactionUndoRetainLocation, InvalidUndoLocation);
-			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, 0);
+			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, OWalInvalidCommitPos);
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
 			oProcData[i].lastLXid = LXID_NORMAL_FROM - 1;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));

@@ -30,6 +30,10 @@
 #define WAL_REC_JOINT_COMMIT (11)
 #define WAL_REC_TRUNCATE	(12)
 
+/* Constants for commitInProgressXlogLocation */
+#define OWalTmpCommitPos			(0)
+#define OWalInvalidCommitPos		UINT64_MAX
+
 typedef struct
 {
 	uint8		recType;
