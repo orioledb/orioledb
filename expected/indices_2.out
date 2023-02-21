@@ -8285,6 +8285,49 @@ SELECT * FROM o_test_row_searchkey
 (7 rows)
 
 RESET enable_seqscan;
+CREATE TABLE o_test_row_searchkey_pkey_include (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1) INCLUDE(val_2)
+) USING orioledb;
+INSERT INTO o_test_row_searchkey_pkey_include
+	SELECT v, NULL FROM generate_series(1,5) v;
+SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
+							  'nue');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_row_searchkey_pkey_include_pkey contents              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('1', null)                      +
+     Item 1: offset = 312, tuple = ('2', null)                      +
+     Item 2: offset = 352, tuple = ('3', null)                      +
+     Item 3: offset = 392, tuple = ('4', null)                      +
+     Item 4: offset = 432, tuple = ('5', null)                      +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey_pkey_include
+		WHERE (val_1) < (2);
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey_pkey_include
+   Forward index only scan of: o_test_row_searchkey_pkey_include_pkey
+   Conds: (val_1 < 2)
+(3 rows)
+
+SELECT * FROM o_test_row_searchkey_pkey_include
+	WHERE (val_1) < (2);
+ val_1 | val_2 
+-------+-------
+     1 |      
+(1 row)
+
 CREATE TABLE o_test_duplicate_error (
 	val_1 int,
 	val_2 int,
@@ -8589,7 +8632,7 @@ EXPLAIN (COSTS OFF)
 
 UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 52 other objects
+NOTICE:  drop cascades to 53 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8633,6 +8676,7 @@ drop cascades to table o_test_include_box
 drop cascades to table o_test_include_box_with_pkey
 drop cascades to table o_test_drop_included_pkey_field
 drop cascades to table o_test_row_searchkey
+drop cascades to table o_test_row_searchkey_pkey_include
 drop cascades to table o_test_duplicate_error
 drop cascades to table o_test_drop_add_primary
 drop cascades to table o_test_add_drop_pkey_same_trx

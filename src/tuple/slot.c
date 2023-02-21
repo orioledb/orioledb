@@ -682,8 +682,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 
 			table_order = table_order &&
 				(o_attr->atttypid == attr->atttypid) &&
-				(strcmp(o_attr->attname.data,
-						attr->attname.data) == 0);
+				(o_attr->attnum == attr->attnum);
 		}
 		oslot->table_order = (slot->tts_tupleDescriptor->tdtypeid !=
 							  RECORDOID) ||

@@ -1757,6 +1757,24 @@ SELECT * FROM o_test_row_searchkey
 		ORDER BY val_1, val_2;
 RESET enable_seqscan;
 
+CREATE TABLE o_test_row_searchkey_pkey_include (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1) INCLUDE(val_2)
+) USING orioledb;
+
+INSERT INTO o_test_row_searchkey_pkey_include
+	SELECT v, NULL FROM generate_series(1,5) v;
+
+SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
+							  'nue');
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_row_searchkey_pkey_include
+		WHERE (val_1) < (2);
+SELECT * FROM o_test_row_searchkey_pkey_include
+	WHERE (val_1) < (2);
+
 CREATE TABLE o_test_duplicate_error (
 	val_1 int,
 	val_2 int,
