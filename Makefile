@@ -140,6 +140,7 @@ TESTGRESCHECKS_PART_1 = t/checkpointer_test.py \
 						t/toast_index_test.py
 TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
 						t/checkpoint_eviction_test.py \
+						t/checkpoint_same_trx_test.py \
 						t/checkpoint_split1_test.py \
 						t/checkpoint_split2_test.py \
 						t/checkpoint_split3_test.py \
