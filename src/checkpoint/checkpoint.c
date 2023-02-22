@@ -32,6 +32,7 @@
 #include "checkpoint/checkpoint.h"
 #include "recovery/internal.h"
 #include "recovery/recovery.h"
+#include "recovery/wal.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -4765,6 +4766,7 @@ systrees_modify_start(void)
 void
 systrees_modify_end(void)
 {
+	(void) flush_local_wal(false);
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	add_systrees_lock_undo(true);
 }

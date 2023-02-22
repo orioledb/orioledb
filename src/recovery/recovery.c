@@ -74,8 +74,10 @@ typedef struct
 	pairingheap_node retain_ph_node;
 	pairingheap_node xmin_ph_node;
 
-	/* is relnode created on the xactInfo */
+	/* is any system tree modified by oxid */
 	bool		systree_modified;
+	/* is o_tables system tree modified by oxid */
+	bool		o_tables_modified;
 	/* is provided by checkpoint xids file */
 	bool		checkpoint_xid;
 	/* is started from wal stream */
@@ -423,6 +425,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				pairingheap_add(xmin_queue, &state->xmin_ph_node);
 
 			state->systree_modified = false;
+			state->o_tables_modified = false;
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
 			if (!recovery_single && worker_id < 0)
@@ -948,6 +951,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			if (worker_id < 0)
 				pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
 			cur_state->systree_modified = false;
+			cur_state->o_tables_modified = false;
 			cur_state->checkpoint_xid = false;
 			if (worker_id < 0 && !*recovery_single_process)
 				cur_state->used_by = palloc0(recovery_pool_size_guc * sizeof(bool));
@@ -1877,7 +1881,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			ptr += sizeof(Oid);
 			recreate_table_descr_by_oids(oids);
 
-			if (sys_tree_num == SYS_TREES_O_TABLES && reachedConsistency)
+			if (cur_state->o_tables_modified && reachedConsistency)
 			{
 				OTable	   *new_o_table = NULL;
 				OTable	   *old_o_table = NULL;
@@ -2017,6 +2021,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				recovery_switch_to_oxid(oxid, -1);
 
 				cur_state->systree_modified = true;
+				if (sys_tree_num == SYS_TREES_O_TABLES)
+					cur_state->o_tables_modified = true;
 
 				if (!single)
 					workers_synchronize(xlogPtr, true);
