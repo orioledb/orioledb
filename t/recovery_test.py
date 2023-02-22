@@ -1659,3 +1659,40 @@ class RecoveryTest(BaseTest):
 		""")
 
 		node.stop()
+
+	def test_recovery_partiton(self):
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		with node.connect() as con:
+			con.execute("""
+				CREATE TABLE o_test_1 (
+					val_1 int,
+					val_2 text,
+					PRIMARY KEY (val_1)
+				) PARTITION BY RANGE (val_1);
+			""")
+			con.execute("""
+				CREATE TABLE o_test_2 (
+					val_3 int,
+					like o_test_1
+				) USING orioledb;
+			""")
+			con.execute("""
+				ALTER TABLE o_test_2 DROP COLUMN val_3;
+			""")
+			con.execute("""
+				ALTER TABLE o_test_1 ATTACH PARTITION o_test_2
+					FOR VALUES FROM (1) to (10);
+			""")
+			con.execute("""
+				INSERT INTO o_test_1 (val_2, val_1)
+					VALUES ('abc', 2), ('qwe', 4);
+			""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		node.stop()
+

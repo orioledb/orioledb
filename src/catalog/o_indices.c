@@ -244,7 +244,7 @@ make_primary_o_index(OTable *table)
 	else
 		result->compress = table->primary_compress;
 	result->nLeafFields = table->nfields;
-	result->nNonLeafFields = tableIndex->nkeyfields;
+	result->nNonLeafFields = tableIndex->nfields;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nPrimaryFields = 0;
 	result->nKeyFields = tableIndex->nkeyfields;
@@ -647,6 +647,17 @@ fillFixedFormatSpec(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 	spec->len = len;
 }
 
+static int
+attrnumber_cmp(const void *p1, const void *p2)
+{
+	AttrNumberMap n1 = *(const AttrNumberMap *) p1;
+	AttrNumberMap n2 = *(const AttrNumberMap *) p2;
+
+	if (n1.key != n2.key)
+		return n1.key > n2.key ? 1 : -1;
+	return 0;
+}
+
 void
 o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 {
@@ -787,6 +798,22 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 
 		descr->expressions_state = lappend(descr->expressions_state,
 										   expr_state);
+	}
+	if (oIndex->indexType == oIndexPrimary)
+	{
+		descr->tbl_attnums = palloc0(sizeof(AttrNumberMap) * descr->nFields);
+		for (i = 0; i < descr->nFields; i++)
+		{
+			descr->tbl_attnums[i].key = descr->fields[i].tableAttnum - 1;
+			descr->tbl_attnums[i].value = i;
+		}
+		pg_qsort(descr->tbl_attnums, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
+		for (i = 0; i < descr->nFields; i++)
+		{
+			elog(DEBUG4, "tbl_attnums[%d]: %d: %d", i,
+				 descr->tbl_attnums[i].key,
+				 descr->tbl_attnums[i].value);
+		}
 	}
 	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();

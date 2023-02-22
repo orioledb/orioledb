@@ -169,7 +169,10 @@ o_tuple_read_next_field_ptr(OTupleReaderState *state)
 	att = TupleDescAttr(state->desc, state->attnum);
 
 	if (state->hasnulls && att_isnull(state->attnum, state->bp))
+	{
+		state->attnum++;
 		return NULL;
+	}
 
 	off = o_tuple_next_field_offset(state, att);
 

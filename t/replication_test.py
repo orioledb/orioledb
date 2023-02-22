@@ -527,6 +527,40 @@ class ReplicationTest(BaseTest):
 
 					self.catchup_orioledb(replica)
 
+	def test_replication_primary_column_after_dropped(self):
+		node = self.node
+		node.start()
+		with self.node as master:
+			with self.getReplica() as replica:
+				replica.append_conf('orioledb.recovery_pool_size = 1')
+				replica.start()
+				node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE TABLE o_test_1 (
+							val_1 int,
+							val_2 int,
+							PRIMARY KEY (val_2)
+						) USING orioledb;
+					""")
+					con1.execute("ALTER TABLE o_test_1 DROP COLUMN val_1;")
+					con1.execute("INSERT INTO o_test_1 VALUES (1), (3);")
+					con1.commit()
+
+				self.assertEqual([(1,),(3,)],
+								 master.execute("""
+									SELECT * FROM o_test_1 ORDER BY val_2;
+								 """))
+
+				catchup_orioledb(replica)
+
+				self.assertEqual([(1,),(3,)],
+								 replica.execute("""
+									SELECT * FROM o_test_1 ORDER BY val_2;
+								 """))
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x

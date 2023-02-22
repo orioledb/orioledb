@@ -1408,7 +1408,6 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		{
 			if (scan->status == BTreeSeqScanInMemory)
 			{
-				elog(DEBUG4, "load_next_in_memory_leaf_page START2");
 				if (iterate_internal_page(scan))
 				{
 					if (scan->iter)

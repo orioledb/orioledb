@@ -47,7 +47,6 @@ tts_orioledb_init(TupleTableSlot *slot)
 	oslot->version = 0;
 	oslot->hint.blkno = OInvalidInMemoryBlkno;
 	oslot->hint.pageChangeCount = 0;
-	oslot->state.estate = NULL;
 }
 
 static void
@@ -173,16 +172,20 @@ alloc_to_toast_vfree_detoasted(TupleTableSlot *slot)
 static void
 tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 {
-	OTableSlot *oslot = (OTableSlot *) slot;
-	int			natts,
-				attnum,
-				ctid_off,
-				res_ctidoff;
-	OTableDescr *descr = oslot->descr;
-	Datum	   *values = slot->tts_values;
-	bool	   *isnull = slot->tts_isnull;
-	bool		hastoast = false;
-	OIndexDescr *idx;
+	OTableSlot	   *oslot = (OTableSlot *) slot;
+	int				natts,
+					attnum,
+					ctid_off,
+					res_ctidoff;
+	OTableDescr	   *descr = oslot->descr;
+	Datum		   *values = slot->tts_values;
+	bool		   *isnull = slot->tts_isnull;
+	bool			hastoast = false;
+	OIndexDescr	   *idx;
+	bool			index_order;
+	int				cur_tbl_attnum = 0;
+
+	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
 
 	if (__natts <= slot->tts_nvalid || O_TUPLE_IS_NULL(oslot->tuple))
 		return;
@@ -199,14 +202,12 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 	res_ctidoff = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
-	if (slot->tts_tupleDescriptor->tdtypeid == RECORDOID)
+	if (oslot->ixnum == PrimaryIndexNumber)
 	{
-		natts = Min(slot->tts_tupleDescriptor->natts,
-					oslot->state.desc->natts);
-	}
-	else if (oslot->ixnum == PrimaryIndexNumber)
-	{
-		natts = Min(__natts, slot->tts_tupleDescriptor->natts);
+		if (index_order)
+			natts = descr->tupdesc->natts;
+		else
+			natts = Min(__natts, descr->tupdesc->natts);
 	}
 	else
 	{
@@ -220,28 +221,39 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 		if (oslot->ixnum == PrimaryIndexNumber)
 		{
-			if (!oslot->table_order)
+			if (index_order)
 			{
-				res_attnum = idx->fields[attnum].tableAttnum - 1;
+				if (cur_tbl_attnum >= idx->nFields ||
+					attnum != idx->tbl_attnums[cur_tbl_attnum].key)
+					res_attnum = -2;
+				else
+				{
+					res_attnum = idx->tbl_attnums[cur_tbl_attnum].value;
+					cur_tbl_attnum++;
+				}
 			}
 			else
 				res_attnum = attnum;
 		}
-		else if (slot->tts_tupleDescriptor->tdtypeid == RECORDOID)
+		else if (index_order)
 		{
-			res_attnum = attnum;
+			if (GET_PRIMARY(descr)->primaryIsCtid && attnum == natts - 1)
+				res_attnum = -1;
+			else
+				res_attnum = attnum;
 		}
 		else
 		{
 			res_attnum = idx->fields[attnum].tableAttnum - 1;
 		}
 
+		Assert(res_attnum >= -2);
 		if (res_attnum >= 0)
 		{
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
 
-			if (oslot->ixnum == PrimaryIndexNumber && oslot->table_order)
+			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
 				thisatt = TupleDescAttr(slot->tts_tupleDescriptor, attnum);
 			else
 				thisatt = TupleDescAttr(idx->leafTupdesc, attnum);
@@ -250,6 +262,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			{
 				Pointer		p = DatumGetPointer(values[res_attnum]);
 
+				Assert(p);
 				if (IS_TOAST_POINTER(p))
 				{
 					Assert(oslot->ixnum == PrimaryIndexNumber);
@@ -258,7 +271,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 				}
 			}
 		}
-		else
+		else if (res_attnum == -1)
 		{
 			Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
 			bool		iptr_null;
@@ -269,6 +282,12 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			Assert(iptr_null == false);
 			Assert(memcmp(&slot->tts_tid,
 						  (ItemPointer) iptr_value, sizeof(ItemPointerData)) == 0);
+		}
+		else if (res_attnum == -2)
+		{
+			bool		dropped_null;
+
+			(void) o_tuple_read_next_field(&oslot->state, &dropped_null);
 		}
 	}
 
@@ -639,8 +658,8 @@ tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot)
 static void
 tts_orioledb_init_reader(TupleTableSlot *slot)
 {
-	OTableSlot *oslot = (OTableSlot *) slot;
-	OIndexDescr *idx = oslot->descr->indices[oslot->ixnum];
+	OTableSlot				   *oslot = (OTableSlot *) slot;
+	OIndexDescr				   *idx = oslot->descr->indices[oslot->ixnum];
 
 	o_tuple_init_reader(&oslot->state, oslot->tuple,
 						idx->leafTupdesc, &idx->leafSpec);
@@ -665,27 +684,6 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			Assert(!isnull && iptr);
 			slot->tts_tid = *iptr;
 		}
-	}
-
-	if (oslot->ixnum == PrimaryIndexNumber)
-	{
-		int			i;
-		TupleDesc	o_tdesc = oslot->state.desc;
-		TupleDesc	tdesc = slot->tts_tupleDescriptor;
-		bool		table_order = o_tdesc->natts == tdesc->natts;
-
-		for (i = 0; table_order && i < o_tdesc->natts; i++)
-		{
-			FormData_pg_attribute *o_attr = &o_tdesc->attrs[i];
-			FormData_pg_attribute *attr = &tdesc->attrs[i];
-
-			table_order = table_order &&
-				(o_attr->atttypid == attr->atttypid) &&
-				(o_attr->attnum == attr->attnum);
-		}
-		oslot->table_order = (slot->tts_tupleDescriptor->tdtypeid !=
-							  RECORDOID) ||
-			table_order || idx->primaryIsCtid;
 	}
 }
 

@@ -36,7 +36,7 @@ class BaseTest(unittest.TestCase):
 			self.basePort = int(os.getenv('TESTGRES_BASE_PORT', '20000')) + self.getTestNum() * 2
 		return self.basePort
 
-	def getReplica(self):
+	def getReplica(self) -> testgres.PostgresNode:
 		if self.replica is None:
 			replica = self.node.backup().spawn_replica('replica')
 			replica.port = self.getBasePort() + 1

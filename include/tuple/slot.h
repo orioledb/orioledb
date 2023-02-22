@@ -33,7 +33,6 @@ typedef struct OTableSlot
 	CommitSeqNo csn;
 	int			ixnum;
 	uint32		version;
-	bool		table_order;
 	OTupleReaderState state;
 	BTreeLocationHint hint;
 } OTableSlot;

@@ -71,6 +71,12 @@ typedef struct
 	OComparator *comparator;
 } OIndexField;
 
+typedef struct AttrNumberMap
+{
+	AttrNumber key;
+	AttrNumber value;
+} AttrNumberMap;
+
 /*
  * The index descriptor
  */
@@ -138,6 +144,8 @@ struct OIndexDescr
 
 	/* The maximal value of tableAttnum among the fields[] */
 	int			maxTableAttnum;
+
+	AttrNumberMap   *tbl_attnums;
 };
 
 #define OIndexKeyAttnumToTupleAttnum(keyType, idx, attnum) \

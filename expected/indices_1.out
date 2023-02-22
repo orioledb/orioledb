@@ -7757,8 +7757,8 @@ SELECT orioledb_tbl_indices('o_test_pkey_include_box'::regclass);
 ------------------------------------------------
  Index o_test_pkey_include_box_pkey            +
      Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: pk1                +
+     Leaf tuple size: 3, non-leaf tuple size: 2+
+     Non-leaf tuple fields: pk1, pk2           +
  
 (1 row)
 
@@ -7770,7 +7770,7 @@ SELECT orioledb_tbl_structure('o_test_pkey_include_box'::regclass, 'nue');
                          orioledb_tbl_structure                          
 -------------------------------------------------------------------------
  Index o_test_pkey_include_box_pkey contents                            +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                    +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 0                   +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty    +
      Leftmost, Rightmost                                                +
    Chunk 0: offset = 0, location = 256, hikey location = 64             +
@@ -8285,7 +8285,7 @@ SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
                        orioledb_tbl_structure                        
 ---------------------------------------------------------------------
  Index o_test_row_searchkey_pkey_include_pkey contents              +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
@@ -8555,8 +8555,8 @@ SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
 ------------------------------------------------
  Index o_test_pkey_include_same_fields_pkey    +
      Index type: primary, unique               +
-     Leaf tuple size: 2, non-leaf tuple size: 1+
-     Non-leaf tuple fields: val_1              +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_1, val_2       +
  Index o_test_pkey_include_same_fields_ix1     +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+

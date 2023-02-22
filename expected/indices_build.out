@@ -24119,20 +24119,20 @@ SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
 
 RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
-                           orioledb_tbl_structure                            
------------------------------------------------------------------------------
- Index o_test_pkey_include_box_build_pkey contents                          +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                        +
- state = free, datoid equal, relnode equal, ix_type = primary, clean        +
-     Leftmost, Rightmost                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10') +
-     Item 0: offset = 264, tuple = ('1', '(4,5),(2,3)', '6')                +
-   Chunk 1: offset = 1, location = 328, hikey location = 80, hikey = ('100')+
-     Item 1: offset = 336, tuple = ('10', '(40,50),(20,30)', '60')          +
-   Chunk 2: offset = 2, location = 400, hikey location = 88                 +
-     Item 2: offset = 408, tuple = ('100', '(400,500),(200,300)', '600')    +
-                                                                            +
- Index toast: not loaded                                                    +
+                                       orioledb_tbl_structure                                        
+-----------------------------------------------------------------------------------------------------
+ Index o_test_pkey_include_box_build_pkey contents                                                  +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 0                                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
+     Leftmost, Rightmost                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10', '(40,50),(20,30)')      +
+     Item 0: offset = 264, tuple = ('1', '(4,5),(2,3)', '6')                                        +
+   Chunk 1: offset = 1, location = 328, hikey location = 112, hikey = ('100', '(400,500),(200,300)')+
+     Item 1: offset = 336, tuple = ('10', '(40,50),(20,30)', '60')                                  +
+   Chunk 2: offset = 2, location = 400, hikey location = 152                                        +
+     Item 2: offset = 408, tuple = ('100', '(400,500),(200,300)', '600')                            +
+                                                                                                    +
+ Index toast: not loaded                                                                            +
  
 (1 row)
 

@@ -25,7 +25,6 @@ typedef struct
 	uint16		natts;
 	bool		hasnulls;
 	bool		slow;
-	EState	   *estate;
 } OTupleReaderState;
 
 typedef struct
