@@ -146,6 +146,7 @@ TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
 						t/checkpoint_split3_test.py \
 						t/checkpoint_update_compress_test.py \
 						t/checkpoint_update_test.py \
+						t/ddl_test.py \
 						t/eviction_full_memory_test.py \
 						t/include_indices_test.py \
 						t/indices_build_test.py \
