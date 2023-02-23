@@ -34,6 +34,8 @@ CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
 ERROR:  concurrent indexes are not supported.
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
 ERROR:  unrecognized parameter "compression"
+ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
+ERROR:  exclusion indices are not supported.
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
               orioledb_tbl_indices              
 ------------------------------------------------

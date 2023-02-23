@@ -230,6 +230,9 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 		if (stmt->tableSpace != NULL)
 			elog(ERROR, "tablespaces aren't supported");
 
+		if (stmt->excludeOpNames)
+			elog(ERROR, "exclusion indices are not supported.");
+
 		o_table = o_tables_get(oids);
 		if (o_table == NULL)
 		{
