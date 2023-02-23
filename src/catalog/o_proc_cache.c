@@ -357,9 +357,6 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 
 	fmgr_symbol(procoid, &o_proc->probin, &o_proc->prosrc);
 
-	if (!o_proc->prosrc && !o_proc->probin)
-		elog(ERROR, "function %u not found", procoid);
-
 	if (o_proc->prolang == SQLlanguageId)
 	{
 		FmgrInfo   *finfo;
@@ -2198,7 +2195,11 @@ o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid)
 		values[Anum_pg_proc_proname - 1] = NameGetDatum(&procname);
 		values[Anum_pg_proc_proowner - 1] = ObjectIdGetDatum(o_proc->proowner);
 		values[Anum_pg_proc_prolang - 1] = ObjectIdGetDatum(o_proc->prolang);
-		values[Anum_pg_proc_prosrc - 1] = CStringGetTextDatum(o_proc->prosrc);
+		if (o_proc->prosrc)
+			values[Anum_pg_proc_prosrc - 1] =
+				CStringGetTextDatum(o_proc->prosrc);
+		else
+			nulls[Anum_pg_proc_prosrc - 1] = true;
 		if (o_proc->probin)
 			values[Anum_pg_proc_probin - 1] =
 				CStringGetTextDatum(o_proc->probin);

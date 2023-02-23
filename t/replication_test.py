@@ -487,6 +487,26 @@ class ReplicationTest(BaseTest):
 				self.assertEqual(replica.execute("SELECT * FROM o_test_1"),
 								 [(1, 1), (2, 2), (3, 3)])
 
+	def test_replication_default_domain(self):
+		node = self.node
+		node.start()
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+						CREATE DOMAIN d1 int DEFAULT 1;
+						CREATE TABLE o_test_1 (
+							val_1 d1 DEFAULT 2
+						) USING orioledb;
+					""")
+
+					con1.commit()
+
+					self.catchup_orioledb(replica)
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x

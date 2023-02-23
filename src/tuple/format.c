@@ -30,8 +30,7 @@
 
 void
 o_tuple_init_reader(OTupleReaderState *state, OTuple tuple, TupleDesc desc,
-					OTupleFixedFormatSpec *spec, ExprState **defvals_exprstate,
-					EState *estate)
+					OTupleFixedFormatSpec *spec)
 {
 	Pointer		data = tuple.data;
 	OTupleHeader header = (OTupleHeader) data;
@@ -61,8 +60,6 @@ o_tuple_init_reader(OTupleReaderState *state, OTuple tuple, TupleDesc desc,
 	state->attnum = 0;
 	state->desc = desc;
 	state->slow = false;
-	state->defvals_exprstate = defvals_exprstate;
-	state->estate = estate;
 }
 
 static uint32
@@ -135,19 +132,6 @@ o_tuple_read_next_field(OTupleReaderState *state, bool *isnull)
 									isnull);
 			state->attnum++;
 			return result;
-		}
-		else if (attr->atthasdef)
-		{
-			ExprState  *attrdef_state;
-			ExprContext *econtext;
-
-			Assert(state->estate);
-			Assert(state->defvals_exprstate);
-
-			econtext = GetPerTupleExprContext(state->estate);
-			attrdef_state = state->defvals_exprstate[state->attnum];
-			state->attnum++;
-			return ExecEvalExpr(attrdef_state, econtext, isnull);
 		}
 		else
 		{
@@ -304,7 +288,7 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 			return tp + att->attcacheoff;
 	}
 
-	o_tuple_init_reader(&reader, tuple, tupleDesc, spec, NULL, NULL);
+	o_tuple_init_reader(&reader, tuple, tupleDesc, spec);
 	for (i = 0; i <= attnum; i++)
 		result = o_tuple_read_next_field_ptr(&reader);
 
@@ -395,7 +379,7 @@ o_toast_nocachegetattr(OTuple tuple,
 			return fetchatt(att, tp + att->attcacheoff);
 	}
 
-	o_tuple_init_reader(&reader, tuple, tupleDesc, spec, NULL, NULL);
+	o_tuple_init_reader(&reader, tuple, tupleDesc, spec);
 	for (i = 0; i <= attnum; i++)
 		result = o_tuple_read_next_field(&reader, &is_null);
 

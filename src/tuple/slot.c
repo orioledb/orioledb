@@ -642,9 +642,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 	OIndexDescr *idx = oslot->descr->indices[oslot->ixnum];
 
 	o_tuple_init_reader(&oslot->state, oslot->tuple,
-						idx->leafTupdesc, &idx->leafSpec,
-						oslot->descr->defvals_exprstate,
-						oslot->descr->estate);
+						idx->leafTupdesc, &idx->leafSpec);
 
 	if (idx->primaryIsCtid)
 	{

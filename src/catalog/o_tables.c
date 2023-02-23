@@ -522,13 +522,6 @@ o_table_resize_constr(OTable *o_table)
 										sizeof(AttrMissing));
 		o_table->missing[o_table->nfields - 1].am_present = false;
 		o_table->missing[o_table->nfields - 1].am_value = 0;
-
-		if (!o_table->defvals)
-			o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
-		else
-			o_table->defvals = repalloc(o_table->defvals,
-										o_table->nfields * sizeof(Expr *));
-		o_table->defvals[o_table->nfields - 1] = NULL;
 	}
 
 	MemoryContextSwitchTo(oldcxt);
@@ -604,8 +597,6 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 		else
 			o_table->missing[fieldnum].am_value = 0;
 	}
-
-	o_table->defvals[fieldnum] = copyObject((Expr *) defaultexpr);
 	MemoryContextSwitchTo(oldcxt);
 }
 
@@ -1577,9 +1568,6 @@ serialize_o_table(OTable *o_table, int *size)
 		appendBinaryStringInfo(&str, buf_start, field_size);
 	}
 
-	for (i = 0; i < o_table->nfields; i++)
-		o_serialize_string(nodeToString(o_table->defvals[i]), &str);
-
 	*size = str.len;
 	return str.data;
 }
@@ -1655,16 +1643,6 @@ deserialize_o_table(Pointer data, Size length)
 		memcpy(&miss->am_present, ptr, sizeof(bool));
 		ptr += sizeof(bool);
 		miss->am_value = datumRestore(&ptr, &isnull);
-	}
-	Assert(ptr - data <= length);
-
-	o_table->defvals = palloc0(o_table->nfields * sizeof(Expr *));
-	for (i = 0; i < o_table->nfields; i++)
-	{
-		char	   *defval_str = o_deserialize_string(&ptr);
-
-		o_table->defvals[i] = stringToNode(defval_str);
-		pfree(defval_str);
 	}
 	MemoryContextSwitchTo(oldcxt);
 

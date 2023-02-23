@@ -702,6 +702,17 @@ COMMIT;
 
 \d o_test_multiple_set_type_same_trx
 
+CREATE FUNCTION o_test_plpgsql_default_func(a int)
+RETURNS TEXT
+AS $$
+    BEGIN
+		RETURN 'WOW' || a;
+    END;
+$$ LANGUAGE plpgsql;
+CREATE TABLE o_test_plpgsql_default (
+    val_1 int DEFAULT LENGTH(o_test_plpgsql_default_func(6))
+) USING orioledb;
+
 DROP FUNCTION pseudo_random CASCADE;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;

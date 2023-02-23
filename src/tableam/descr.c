@@ -408,7 +408,6 @@ table_descr_free(OTableDescr *descr)
 		ExecDropSingleTupleTableSlot(descr->newTuple);
 	if (descr->tupdesc)
 		FreeTupleDesc(descr->tupdesc);
-	FreeExecutorState(descr->estate);
 }
 
 
@@ -439,7 +438,6 @@ o_free_tmp_table_descr(OTableDescr *descr)
 		ExecDropSingleTupleTableSlot(descr->newTuple);
 	if (descr->tupdesc)
 		FreeTupleDesc(descr->tupdesc);
-	FreeExecutorState(descr->estate);
 }
 
 
@@ -468,25 +466,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 											   &TTSOpsOrioleDB);
 	descr->newTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
-	descr->defvals_exprstate = NULL;
 	o_sys_cache_search_datoid = o_table->oids.datoid;
-	if (o_table->defvals)
-	{
-		int			i;
-		int			ctid_off = o_table->has_primary ? 0 : 1;
-
-		descr->defvals_exprstate = palloc0(sizeof(ExprState *) *
-										   (o_table->nfields + ctid_off));
-		for (i = 0; i < o_table->nfields; i++)
-		{
-			if (o_table->defvals[i])
-			{
-				descr->defvals_exprstate[i + ctid_off] =
-					ExecInitExpr(o_table->defvals[i], NULL);
-			}
-		}
-	}
-	descr->estate = CreateExecutorState();
 	MemoryContextSwitchTo(old_context);
 }
 

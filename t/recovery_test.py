@@ -1559,6 +1559,78 @@ class RecoveryTest(BaseTest):
 		self.assertEqual("[(1, 'val1aaa'), (2, 'val2bbb')]", str(node.execute("SELECT * FROM o_test;")))
 		node.stop()
 
+	def test_recovery_timestamp(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1 (
+				val_1 timestamp DEFAULT timeofday()::timestamp
+			) USING orioledb;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		node.stop()
+
+	def test_recovery_default_sql_func(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE FUNCTION foo(a INT) RETURNS TEXT
+			AS $$ SELECT 'WOW'
+			$$ LANGUAGE sql VOLATILE;
+			CREATE TABLE o_test_plpgsql_default (
+				pk INT NOT NULL PRIMARY KEY,
+				c_int INT DEFAULT LENGTH(foo(6))
+			) USING orioledb;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		node.stop()
+
+	def test_recovery_default_plpgsql_func(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE FUNCTION foo(a INT) RETURNS TEXT AS $$
+			BEGIN
+				RETURN 'WOW';
+			END;
+			$$ LANGUAGE plpgsql VOLATILE;
+			CREATE TABLE o_test_plpgsql_default (
+				pk INT NOT NULL PRIMARY KEY,
+				c_int INT DEFAULT LENGTH(foo(6))
+			) USING orioledb;
+			INSERT INTO o_test_plpgsql_default (pk) VALUES (1), (3), (8);
+		""")
+
+		self.assertEqual([(1, 3), (3, 3), (8, 3)],
+						 node.execute("""
+							SELECT * FROM o_test_plpgsql_default
+								ORDER BY pk
+						 """))
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		self.assertEqual([(1, 3), (3, 3), (8, 3)],
+						 node.execute("""
+							SELECT * FROM o_test_plpgsql_default
+								ORDER BY pk
+						 """))
+
+		node.stop()
 	def test_recovery_truncate(self):
 		node = self.node
 		node.start()

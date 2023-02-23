@@ -2249,10 +2249,20 @@ COMMIT;
 Indexes:
     "o_test_multiple_set_type_same_trx_ix1" UNIQUE, btree (val_1)
 
+CREATE FUNCTION o_test_plpgsql_default_func(a int)
+RETURNS TEXT
+AS $$
+    BEGIN
+		RETURN 'WOW' || a;
+    END;
+$$ LANGUAGE plpgsql;
+CREATE TABLE o_test_plpgsql_default (
+    val_1 int DEFAULT LENGTH(o_test_plpgsql_default_func(6))
+) USING orioledb;
 DROP FUNCTION pseudo_random CASCADE;
 NOTICE:  drop cascades to default value for column j of table o_test_add_column
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 30 other objects
+NOTICE:  drop cascades to 31 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -2283,9 +2293,11 @@ drop cascades to table o_test_included_ix_name
 drop cascades to table o_test_add_pkey_empty_index
 drop cascades to table o_test_empty
 drop cascades to table o_test_multiple_set_type_same_trx
+drop cascades to table o_test_plpgsql_default
 DROP SCHEMA ddl CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to sequence o_test_j_seq
 drop cascades to function query_to_text(text)
 drop cascades to function func_1(integer)
+drop cascades to function o_test_plpgsql_default_func(integer)
 RESET search_path;

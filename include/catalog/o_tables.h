@@ -96,7 +96,6 @@ typedef struct
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
-	Expr	  **defvals;
 	uint32		version;		/* not serialized in serialize_o_table */
 	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
 } OTable;

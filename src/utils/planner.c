@@ -283,14 +283,8 @@ o_wrap_top_funcexpr(Node *node)
 {
 	static NamedArgExpr named_arg = {.xpr = {.type = T_NamedArgExpr}};
 
-	switch (node->type)
-	{
-		case T_FuncExpr:
-			named_arg.arg = (Expr *) node;
-			return (Node *) &named_arg;
-		default:
-			return node;
-	}
+	named_arg.arg = (Expr *) node;
+	return (Node *) &named_arg;
 }
 
 /*

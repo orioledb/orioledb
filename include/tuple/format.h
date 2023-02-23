@@ -25,7 +25,6 @@ typedef struct
 	uint16		natts;
 	bool		hasnulls;
 	bool		slow;
-	ExprState **defvals_exprstate;
 	EState	   *estate;
 } OTupleReaderState;
 
@@ -174,8 +173,7 @@ typedef OTupleHeaderData *OTupleHeader;
 )
 
 extern void o_tuple_init_reader(OTupleReaderState *state, OTuple tuple,
-								TupleDesc desc, OTupleFixedFormatSpec *spec,
-								ExprState **defvals_exprstate, EState *estate);
+								TupleDesc desc, OTupleFixedFormatSpec *spec);
 extern Datum o_tuple_read_next_field(OTupleReaderState *state, bool *isnull);
 extern ItemPointer o_tuple_get_last_iptr(TupleDesc desc,
 										 OTupleFixedFormatSpec *spec,

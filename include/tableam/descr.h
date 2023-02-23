@@ -185,8 +185,6 @@ struct OTableDescr
 	int			nIndices;
 	/* number of unique trees */
 	int			nUniqueIndices;
-	ExprState **defvals_exprstate;
-	EState	   *estate;
 };
 
 typedef struct
