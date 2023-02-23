@@ -505,7 +505,6 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 {
 	BTreeDescr *desc = api->getBTreeDesc(arg);
 	int			max_length = api->getMaxChunkSize(key, arg);
-	int			i;
 	uint32		offset = 0,
 				length;
 	bool		success = true;
@@ -519,7 +518,6 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 
 	Assert(data_size > 0);
 
-	i = 0;
 	while (data_size > 0)
 	{
 		OBTreeModifyResult result;
@@ -556,7 +554,6 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 
 		offset += length;
 		data_size -= length;
-		i++;
 	}
 
 	/*

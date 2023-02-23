@@ -91,7 +91,6 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	OClass	   *o_class = (OClass *) *entry_ptr;
 	OClassArg  *carg = (OClassArg *) arg;
 	bool		sys_cache;
-	int			processed = 0;
 	Oid			classoid = DatumGetObjectId(key->keys[0]);
 
 	sys_cache = carg && !carg->column_drop && carg->sys_table;
@@ -150,12 +149,9 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 
 		process = !class_attr->attisdropped && !sys_cache;
 		if (process)
-		{
-			processed++;
 			o_composite_type_element_save(key->common.datoid,
 										  class_attr->atttypid,
 										  key->common.lsn);
-		}
 	}
 	MemoryContextSwitchTo(prev_context);
 	relation_close(rel, AccessShareLock);

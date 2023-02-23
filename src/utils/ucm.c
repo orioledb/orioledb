@@ -35,7 +35,6 @@ estimate_ucm_space(UsageCountMap *map, OInMemoryBlkno offset, OInMemoryBlkno siz
 {
 	int			n_leaf_groups;
 	int			n_leaf_vars;
-	int			n_non_leaf_levels;
 	int			n_non_leaf_vars;
 	int			n;
 
@@ -44,7 +43,6 @@ estimate_ucm_space(UsageCountMap *map, OInMemoryBlkno offset, OInMemoryBlkno siz
 	n_leaf_groups = (map->size + UCM_BRANCH_FACTOR - 1) / UCM_BRANCH_FACTOR;
 	n_leaf_vars = n_leaf_groups;
 
-	n_non_leaf_levels = 0;
 	n_non_leaf_vars = 0;
 	n = n_leaf_vars;
 	map->rootFactor = UCM_BRANCH_FACTOR;
@@ -54,7 +52,6 @@ estimate_ucm_space(UsageCountMap *map, OInMemoryBlkno offset, OInMemoryBlkno siz
 		n_non_leaf_vars *= UCM_BRANCH_FACTOR;
 		n += UCM_BRANCH_FACTOR - 1;
 		n /= UCM_BRANCH_FACTOR;
-		n_non_leaf_levels++;
 		map->rootFactor *= UCM_BRANCH_FACTOR;
 	}
 
