@@ -25,7 +25,7 @@ CREATE TABLE o_test(
 
 CREATE TABLE o_test_child(
        id integer NOT NULL,
-       o_test_ID integer NOT NULL REFERENCES o_test (id),
+       o_test_ID integer NOT NULL REFERENCES o_test (id) DEFERRABLE,
        PRIMARY KEY(id)
 ) USING orioledb;
 
@@ -75,6 +75,12 @@ COMMIT;
 
 INSERT INTO o_test_child(id, o_test_ID) VALUES (1, 1);
 INSERT INTO o_test_child(id, o_test_ID) VALUES (2, 2);
+
+BEGIN;
+SET CONSTRAINTS ALL DEFERRED;
+INSERT INTO o_test_child(id, o_test_ID) VALUES (3, 10);
+UPDATE o_test_child SET id = 4 WHERE id = 3;
+COMMIT;
 
 INSERT INTO o_test_child_upd(id, o_test_ID) VALUES (1, 3);
 

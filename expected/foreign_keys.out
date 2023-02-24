@@ -20,7 +20,7 @@ CREATE TABLE o_test(
 ) USING orioledb;
 CREATE TABLE o_test_child(
        id integer NOT NULL,
-       o_test_ID integer NOT NULL REFERENCES o_test (id),
+       o_test_ID integer NOT NULL REFERENCES o_test (id) DEFERRABLE,
        PRIMARY KEY(id)
 ) USING orioledb;
 CREATE TABLE o_test_child_del(
@@ -70,6 +70,13 @@ UPDATE o_test SET val = 'dog' WHERE id = 7;
 COMMIT;
 INSERT INTO o_test_child(id, o_test_ID) VALUES (1, 1);
 INSERT INTO o_test_child(id, o_test_ID) VALUES (2, 2);
+BEGIN;
+SET CONSTRAINTS ALL DEFERRED;
+INSERT INTO o_test_child(id, o_test_ID) VALUES (3, 10);
+UPDATE o_test_child SET id = 4 WHERE id = 3;
+COMMIT;
+ERROR:  insert or update on table "o_test_child" violates foreign key constraint "o_test_child_o_test_id_fkey"
+DETAIL:  Key (o_test_id)=(10) is not present in table "o_test".
 INSERT INTO o_test_child_upd(id, o_test_ID) VALUES (1, 3);
 INSERT INTO o_test_child_del(id, o_test_ID) VALUES (1, 4);
 INSERT INTO o_test_child_compose(id, o_test_ID, o_test_val) VALUES (1, 6, 'neo');

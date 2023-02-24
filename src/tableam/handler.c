@@ -1940,6 +1940,14 @@ orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 	}
 }
 
+static bool
+orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+
+	return COMMITSEQNO_IS_INPROGRESS(oslot->csn);
+}
+
 
 /* ------------------------------------------------------------------------
  * Definition of the orioledb table access method.
@@ -2016,7 +2024,8 @@ static const ExtendedTableAmRoutine orioledb_am_methods = {
 	.define_index_validate = orioledb_define_index_validate,
 	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table,
-	.reloptions = orioledb_reloptions
+	.reloptions = orioledb_reloptions,
+	.tuple_is_current = orioledb_tuple_is_current
 };
 
 bool
