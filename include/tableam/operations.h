@@ -64,6 +64,7 @@ typedef struct
 	UndoLocation tup_undo_location;
 	bool		deleted;
 	bool		modified;
+	bool		changingPart;
 	RowLockMode rowLockMode;
 } OModifyCallbackArg;
 

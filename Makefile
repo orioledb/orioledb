@@ -113,6 +113,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  isol_rr_seqscan \
 				  load_refind_page \
 				  merge \
+				  partition_move \
 				  rightlink \
 				  rll \
 				  rll_deadlock \

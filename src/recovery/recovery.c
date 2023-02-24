@@ -1185,6 +1185,79 @@ recovery_insert_systree_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionUpdate;
 }
 
+OBTreeModifyCallbackAction
+recovery_insert_deleted_primary_callback(BTreeDescr *descr,
+										 OTuple tup, OTuple *newtup, OXid oxid,
+										 OTupleXactInfo xactInfo,
+										 bool movedPartitions,
+										 UndoLocation location, RowLockMode *lock_mode,
+										 BTreeLocationHint *hint, void *arg)
+{
+	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+		o_tuple_get_version(tup) >= o_tuple_get_version(*newtup))
+		return OBTreeCallbackActionUndo;
+	return OBTreeCallbackActionUpdate;
+}
+
+OBTreeModifyCallbackAction
+recovery_delete_deleted_primary_callback(BTreeDescr *descr,
+										 OTuple tup, OTuple *newtup, OXid oxid,
+										 OTupleXactInfo xactInfo,
+										 bool movedPartitions,
+										 UndoLocation location,
+										 RowLockMode *lock_mode,
+										 BTreeLocationHint *hint, void *arg)
+{
+	OTuple	   *key = (OTuple *) arg;
+
+	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+		o_tuple_get_version(tup) > o_tuple_get_version(*key))
+		return OBTreeCallbackActionUndo;
+
+	return OBTreeCallbackActionDelete;
+}
+
+OBTreeModifyCallbackAction
+recovery_insert_deleted_overwrite_callback(BTreeDescr *descr,
+										   OTuple tup, OTuple *newtup, OXid oxid,
+										   OTupleXactInfo xactInfo,
+										   bool movedPartitions,
+										   UndoLocation location,
+										   RowLockMode *lock_mode,
+										   BTreeLocationHint *hint, void *arg)
+{
+	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+		return OBTreeCallbackActionUndo;
+
+	return OBTreeCallbackActionUpdate;
+}
+
+OBTreeModifyCallbackAction
+recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
+										   OTuple tup, OTuple *newtup, OXid oxid,
+										   OTupleXactInfo xactInfo,
+										   bool movedPartitions,
+										   UndoLocation location,
+										   RowLockMode *lock_mode,
+										   BTreeLocationHint *hint, void *arg)
+{
+	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+		return OBTreeCallbackActionUndo;
+
+	return OBTreeCallbackActionDelete;
+}
+
+static OBTreeModifyCallbackAction
+recovery_insert_deleted_systree_callback(BTreeDescr *descr,
+										 OTuple tup, OTuple *newtup, OXid oxid,
+										 OTupleXactInfo xactInfo,
+										 bool movedPartitions,
+										 UndoLocation location, RowLockMode *lock_mode,
+										 BTreeLocationHint *hint, void *arg)
+{
+	return OBTreeCallbackActionUpdate;
+}
+
 /*
  * Applies modify recovery record to the BTree.
  */
@@ -1200,21 +1273,36 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 	if (IS_SYS_TREE_OIDS(tree->oids))
 	{
 		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
-			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_insert_systree_callback;
+		{
+			callbackInfo.modifyCallback = recovery_insert_systree_callback;
+			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_systree_callback;
+		}
 	}
 	else if (tree->type == oIndexPrimary || tree->type == oIndexToast)
 	{
 		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
-			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_insert_primary_callback;
+		{
+			callbackInfo.modifyCallback = recovery_insert_primary_callback;
+			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_primary_callback;
+		}
 		else if (type == RECOVERY_DELETE)
-			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_delete_primary_callback;
+		{
+			callbackInfo.modifyCallback = recovery_delete_primary_callback;
+			callbackInfo.modifyDeletedCallback = recovery_delete_deleted_primary_callback;
+		}
 	}
 	else
 	{
 		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
-			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_insert_overwrite_callback;
+		{
+			callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
+			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
+		}
 		else if (type == RECOVERY_DELETE)
-			callbackInfo.modifyCallback = callbackInfo.modifyDeletedCallback = recovery_delete_overwrite_callback;
+		{
+			callbackInfo.modifyCallback = recovery_delete_overwrite_callback;
+			callbackInfo.modifyDeletedCallback = recovery_delete_deleted_overwrite_callback;
+		}
 	}
 
 	switch (type)

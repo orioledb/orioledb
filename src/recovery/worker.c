@@ -587,12 +587,12 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		if (primary)
 		{
 			callbackInfo.modifyCallback = recovery_insert_primary_callback;
-			callbackInfo.modifyDeletedCallback = recovery_insert_primary_callback;
+			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_primary_callback;
 		}
 		else
 		{
 			callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
-			callbackInfo.modifyDeletedCallback = recovery_insert_overwrite_callback;
+			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 		}
 		tts_orioledb_fill_key_bound(slot, id, &keyBound);
 		modify_result = o_btree_modify(&id->desc, BTreeOperationInsert,
@@ -783,7 +783,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 												   new_slot,
 												   tree->econtext))
 				{
-					callbackInfo.modifyDeletedCallback = recovery_insert_overwrite_callback;
+					callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 					callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
 					new_stup = tts_orioledb_make_secondary_tuple(new_slot, tree, true);
 					(void) o_btree_modify(&tree->desc, BTreeOperationInsert,

@@ -40,6 +40,7 @@ typedef struct BTreeModifyCallbackInfo
 														 OTuple *newTup,
 														 OXid oxid,
 														 OTupleXactInfo prevXactInfo,
+														 bool movedParitions,
 														 UndoLocation location,
 														 RowLockMode *lockMode,
 														 BTreeLocationHint *hint,
@@ -51,7 +52,7 @@ typedef struct BTreeModifyCallbackInfo
 extern BTreeModifyCallbackInfo nullCallbackInfo;
 
 extern bool o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple);
-extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType tupleType,
+extern bool o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 									  BTreeLocationHint *hint);
 extern OBTreeModifyResult o_btree_modify(BTreeDescr *desc,
 										 BTreeOperationType action,
@@ -63,6 +64,13 @@ extern OBTreeModifyResult o_btree_modify(BTreeDescr *desc,
 										 RowLockMode lockMode,
 										 BTreeLocationHint *hint,
 										 BTreeModifyCallbackInfo *callbackInfo);
+extern OBTreeModifyResult o_btree_delete_moved_partitions(BTreeDescr *desc,
+														  Pointer key,
+														  BTreeKeyType keyType,
+														  OXid oxid, CommitSeqNo csn,
+														  RowLockMode lockMode,
+														  BTreeLocationHint *hint,
+														  BTreeModifyCallbackInfo *callbackInfo);
 extern OBTreeModifyResult o_btree_insert_unique(BTreeDescr *desc,
 												OTuple tuple,
 												BTreeKeyType tupleType,

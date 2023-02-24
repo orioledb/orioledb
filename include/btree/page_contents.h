@@ -252,8 +252,9 @@ typedef struct
 /* Header of leaf tuple  */
 typedef struct
 {
-	OTupleXactInfo xactInfo:62,
+	OTupleXactInfo xactInfo:61,
 				deleted:1,
+				movedPartitions:1,
 				chainHasLocks:1;
 	UndoLocation undoLocation:62,
 				formatFlags:2;

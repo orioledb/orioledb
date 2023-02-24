@@ -442,6 +442,7 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	marg.rinfo = rinfo;
 	marg.epqstate = &mstate->mt_epqstate;
 	marg.scanSlot = returningSlot ? returningSlot : descr->oldTuple;
+	marg.changingPart = changingPart;
 	marg.rowLockMode = RowLockUpdate;
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, NULL, NULL);
@@ -541,6 +542,7 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	marg.rinfo = rinfo;
 	marg.epqstate = &mstate->mt_epqstate;
 	marg.scanSlot = descr->oldTuple;
+	marg.changingPart = false;
 	marg.newSlot = (OTableSlot *) slot;
 
 	/*

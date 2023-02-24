@@ -663,12 +663,24 @@ o_sys_cache_update_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionUpdate;
 }
 
+static OBTreeModifyCallbackAction
+o_sys_cache_update_deleted_callback(BTreeDescr *descr,
+									OTuple tup, OTuple *newtup, OXid oxid,
+									OTupleXactInfo xactInfo,
+									bool movedPartitions,
+									UndoLocation location,
+									RowLockMode *lock_mode, BTreeLocationHint *hint,
+									void *arg)
+{
+	return OBTreeCallbackActionUpdate;
+}
+
 
 static BTreeModifyCallbackInfo callbackInfo =
 {
 	.waitCallback = o_sys_cache_wait_callback,
 	.modifyCallback = o_sys_cache_update_callback,
-	.modifyDeletedCallback = o_sys_cache_update_callback,
+	.modifyDeletedCallback = o_sys_cache_update_deleted_callback,
 	.arg = NULL
 };
 

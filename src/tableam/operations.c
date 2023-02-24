@@ -77,6 +77,7 @@ static inline bool o_callback_is_modified(OXid oxid, CommitSeqNo csn, OTupleXact
 static OBTreeModifyCallbackAction o_insert_callback(BTreeDescr *descr,
 													OTuple tup, OTuple *newtup,
 													OXid oxid, OTupleXactInfo xactInfo,
+													bool movedParitions,
 													UndoLocation location,
 													RowLockMode *lock_mode,
 													BTreeLocationHint *hint,
@@ -91,6 +92,7 @@ static OBTreeWaitCallbackAction o_insert_on_conflict_wait_callback(BTreeDescr *d
 static OBTreeModifyCallbackAction o_insert_on_conflict_modify_deleted_callback(BTreeDescr *descr,
 																			   OTuple tup, OTuple *newtup,
 																			   OXid oxid, OTupleXactInfo xactInfo,
+																			   bool movedPartitions,
 																			   UndoLocation location,
 																			   RowLockMode *lock_mode,
 																			   BTreeLocationHint *hint,
@@ -114,6 +116,7 @@ static OBTreeModifyCallbackAction o_delete_deleted_callback(BTreeDescr *desc,
 															OTuple *newTup,
 															OXid oxid,
 															OTupleXactInfo prevXactInfo,
+															bool movedPartitions,
 															UndoLocation location,
 															RowLockMode *lockMode,
 															BTreeLocationHint *hint,
@@ -125,6 +128,14 @@ static OBTreeModifyCallbackAction o_update_callback(BTreeDescr *descr,
 													RowLockMode *lock_mode,
 													BTreeLocationHint *hint,
 													void *arg);
+static OBTreeModifyCallbackAction o_update_deleted_callback(BTreeDescr *descr,
+															OTuple tup, OTuple *newtup,
+															OXid oxid, OTupleXactInfo xactInfo,
+															bool movedPartitions,
+															UndoLocation location,
+															RowLockMode *lock_mode,
+															BTreeLocationHint *hint,
+															void *arg);
 static OBTreeWaitCallbackAction o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 													 OXid oxid, OTupleXactInfo xactInfo,
 													 UndoLocation location,
@@ -135,6 +146,12 @@ static OBTreeModifyCallbackAction o_lock_modify_callback(BTreeDescr *descr, OTup
 														 UndoLocation location,
 														 RowLockMode *lock_mode, BTreeLocationHint *hint,
 														 void *arg);
+static OBTreeModifyCallbackAction o_lock_deleted_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+														  OXid oxid, OTupleXactInfo xactInfo,
+														  bool movedPartitions,
+														  UndoLocation location,
+														  RowLockMode *lock_mode, BTreeLocationHint *hint,
+														  void *arg);
 static void get_keys_from_ps(TupleTableSlot *planSlot, OIndexDescr *id,
 							 int *junkAttrs, OBTreeKeyBound *key);
 static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
@@ -203,7 +220,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 	OTuple		nullTup;
 	BTreeModifyCallbackInfo callbackInfo = {
 		.waitCallback = o_lock_wait_callback,
-		.modifyDeletedCallback = NULL,
+		.modifyDeletedCallback = o_lock_deleted_callback,
 		.modifyCallback = o_lock_modify_callback,
 		.needsUndoForSelfCreated = false,
 		.arg = larg
@@ -426,6 +443,7 @@ o_tbl_insert_on_conflict(ModifyTableState *mstate,
 			marg.epqstate = NULL;
 			marg.scanSlot = scan_slot;
 			marg.modified = false;
+			marg.changingPart = false;
 			marg.rowLockMode = RowLockUpdate;
 			marg.newSlot = (OTableSlot *) confl_slot;
 
@@ -752,7 +770,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 	OBTreeModifyResult modify_result;
 	BTreeModifyCallbackInfo callbackInfo = {
 		.waitCallback = NULL,
-		.modifyDeletedCallback = o_update_callback,
+		.modifyDeletedCallback = o_update_deleted_callback,
 		.modifyCallback = o_update_callback,
 		.needsUndoForSelfCreated = false,
 		.arg = arg
@@ -825,7 +843,7 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 	bool		inserted;
 	BTreeModifyCallbackInfo deleteCallbackInfo = {
 		.waitCallback = NULL,
-		.modifyDeletedCallback = NULL,
+		.modifyDeletedCallback = o_delete_deleted_callback,
 		.modifyCallback = o_delete_callback,
 		.needsUndoForSelfCreated = false,
 		.arg = arg
@@ -925,11 +943,18 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key, EState *estate,
 
 	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 	O_TUPLE_SET_NULL(nullTup);
-	res = o_btree_modify(&GET_PRIMARY(descr)->desc, BTreeOperationDelete,
-						 nullTup, BTreeKeyNone,
-						 (Pointer) key, BTreeKeyBound,
-						 oxid, csn, RowLockUpdate,
-						 hint, &callbackInfo);
+
+	if (!arg->changingPart)
+		res = o_btree_modify(&GET_PRIMARY(descr)->desc, BTreeOperationDelete,
+							 nullTup, BTreeKeyNone,
+							 (Pointer) key, BTreeKeyBound,
+							 oxid, csn, RowLockUpdate,
+							 hint, &callbackInfo);
+	else
+		res = o_btree_delete_moved_partitions(&GET_PRIMARY(descr)->desc,
+											  (Pointer) key, BTreeKeyBound,
+											  oxid, csn, RowLockUpdate,
+											  hint, &callbackInfo);
 
 	slot = arg->scanSlot;
 	csn = arg->csn;
@@ -1224,9 +1249,9 @@ copy_tuple_to_slot(OTuple tup, TupleTableSlot *slot, OTableDescr *descr,
 
 static OBTreeModifyCallbackAction
 o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
-				  OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
-				  RowLockMode *lock_mode,
-				  BTreeLocationHint *hint,
+				  OXid oxid, OTupleXactInfo xactInfo,
+				  bool movedPartitions, UndoLocation location,
+				  RowLockMode *lock_mode, BTreeLocationHint *hint,
 				  void *arg)
 {
 	OTableSlot *oslot = (OTableSlot *) arg;
@@ -1281,6 +1306,7 @@ o_insert_on_conflict_modify_deleted_callback(BTreeDescr *descr,
 											 OTuple tup, OTuple *newtup,
 											 OXid oxid,
 											 OTupleXactInfo xactInfo,
+											 bool movedPartitions,
 											 UndoLocation location,
 											 RowLockMode *lock_mode,
 											 BTreeLocationHint *hint,
@@ -1387,6 +1413,7 @@ o_delete_deleted_callback(BTreeDescr *desc,
 						  OTuple *newTup,
 						  OXid oxid,
 						  OTupleXactInfo xactInfo,
+						  bool movedPartitions,
 						  UndoLocation location,
 						  RowLockMode *lockMode,
 						  BTreeLocationHint *hint,
@@ -1399,6 +1426,11 @@ o_delete_deleted_callback(BTreeDescr *desc,
 
 	if (desc->type != oIndexPrimary)
 		return OBTreeCallbackActionDelete;
+
+	if (movedPartitions)
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
 
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
@@ -1476,6 +1508,37 @@ o_update_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionLock;
 }
 
+static OBTreeModifyCallbackAction
+o_update_deleted_callback(BTreeDescr *descr,
+						  OTuple tup, OTuple *newtup,
+						  OXid oxid, OTupleXactInfo xactInfo,
+						  bool movedPartitions,
+						  UndoLocation location,
+						  RowLockMode *lock_mode,
+						  BTreeLocationHint *hint, void *arg)
+{
+	OModifyCallbackArg *o_arg = (OModifyCallbackArg *) arg;
+	bool		modified;
+
+	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
+
+	if (XACT_INFO_IS_FINISHED(xactInfo))
+		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
+	else
+	{
+		o_arg->csn = COMMITSEQNO_INPROGRESS;
+		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+		o_arg->tup_undo_location = location;
+	}
+
+	if (movedPartitions)
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+
+	return OBTreeCallbackActionDoNothing;
+}
+
 static OBTreeWaitCallbackAction
 o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 					 OXid oxid, OTupleXactInfo xactInfo, UndoLocation location,
@@ -1530,6 +1593,39 @@ o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 					   PrimaryIndexNumber, hint);
 
 	return OBTreeCallbackActionLock;
+}
+
+static OBTreeModifyCallbackAction
+o_lock_deleted_callback(BTreeDescr *descr,
+						  OTuple tup, OTuple *newtup,
+						  OXid oxid, OTupleXactInfo xactInfo,
+						  bool movedPartitions,
+						  UndoLocation location,
+						  RowLockMode *lock_mode,
+						  BTreeLocationHint *hint, void *arg)
+{
+	OLockCallbackArg *o_arg = (OLockCallbackArg *) arg;
+	bool		modified;
+
+	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
+
+	if (XACT_INFO_IS_FINISHED(xactInfo))
+	{
+		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
+	}
+	else
+	{
+		o_arg->csn = COMMITSEQNO_INPROGRESS;
+		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+		o_arg->tupUndoLocation = location;
+	}
+
+	if (movedPartitions)
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+
+	return OBTreeCallbackActionDoNothing;
 }
 
 static void

@@ -159,4 +159,33 @@ extern OBTreeModifyCallbackAction recovery_delete_overwrite_callback(BTreeDescr 
 																	 BTreeLocationHint *hint,
 																	 void *arg);
 
+extern OBTreeModifyCallbackAction recovery_insert_deleted_primary_callback(BTreeDescr *descr,
+																		   OTuple tup, OTuple *newtup,
+																		   OXid oxid, OTupleXactInfo xactInfo,
+																		   bool movedPartititons,
+																		   UndoLocation location, RowLockMode *lock_mode,
+																		   BTreeLocationHint *hint,
+																		   void *arg);
+extern OBTreeModifyCallbackAction recovery_delete_deleted_primary_callback(BTreeDescr *descr,
+																		   OTuple tup, OTuple *newtup,
+																		   OXid oxid, OTupleXactInfo xactInfo,
+																		   bool movedPartititons,
+																		   UndoLocation location, RowLockMode *lock_mode,
+																		   BTreeLocationHint *hint,
+																		   void *arg);
+extern OBTreeModifyCallbackAction recovery_insert_deleted_overwrite_callback(BTreeDescr *descr,
+																			 OTuple tup, OTuple *newtup,
+																			 OXid oxid, OTupleXactInfo xactInfo,
+																			 bool movedPartititons,
+																			 UndoLocation location, RowLockMode *lock_mode,
+																			 BTreeLocationHint *hint,
+																			 void *arg);
+extern OBTreeModifyCallbackAction recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
+																			 OTuple tup, OTuple *newtup,
+																			 OXid oxid, OTupleXactInfo xactInfo,
+																			 bool movedPartititons,
+																			 UndoLocation location, RowLockMode *lock_mode,
+																			 BTreeLocationHint *hint,
+																			 void *arg);
+
 #endif							/* __RECOVERY_INTERNAL_H__ */
