@@ -471,4 +471,9 @@ add_truncate_wal_record(ORelOids oids)
 	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
 
 	local_wal_buffer_offset += sizeof(*rec);
+
+	local_type = oIndexInvalid;
+	local_oids.datoid = InvalidOid;
+	local_oids.reloid = InvalidOid;
+	local_oids.relnode = InvalidOid;
 }

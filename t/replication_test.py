@@ -235,6 +235,26 @@ class ReplicationTest(BaseTest):
 
 				self.assertFalse(replica.execute("SELECT orioledb_has_retained_undo();")[0][0])
 
+	def test_replication_non_transactional_truncate(self):
+		node = self.node
+		node.start()
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+						CREATE TABLE o_test_1(
+							val_1 int
+						) USING orioledb;
+						INSERT INTO o_test_1 VALUES (1);
+						TRUNCATE TABLE o_test_1;
+						TRUNCATE TABLE o_test_1;
+						INSERT INTO o_test_1 VALUES (1);
+					""")
+					con1.commit()
+					catchup_orioledb(replica)
+
 	def test_replication_non_root_eviction(self):
 		with self.node as master:
 			self.node.append_conf('postgresql.conf',
