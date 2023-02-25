@@ -274,6 +274,35 @@ SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
  
 (1 row)
 
+SAVEPOINT s2;
+UPDATE rll_test SET uniq = uniq WHERE key = 1;
+SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
+                                orioledb_tbl_structure                                
+--------------------------------------------------------------------------------------
+ Index rll_test_pkey contents                                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                 +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                 +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: mode = noKeyUpdate, offset = 264, chainHasLocks, tuple = ('1', '2', '2')+
+       Undo item: mode = update, chainHasLocks, tuple = ('1', '2', '2')              +
+       Undo item: mode = noKeyUpdate, chainHasLocks, tuple = ('1', '2', '1')         +
+       Undo item: lock only, mode = share, tuple = ('1', '1', '1')                   +
+       Undo item:                                                                    +
+                                                                                     +
+ Index rll_test_uniq_key contents                                                    +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 32                               +
+ state = free, datoid equal, relnode equal, ix_type = unique, dirty                  +
+     Leftmost, Rightmost                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
+     Item 0: mode = update, deleted, offset = 264, tuple = ('1', '1')                +
+       Undo item:                                                                    +
+     Item 1: mode = update, offset = 296, tuple = ('2', '1')                         +
+                                                                                     +
+ Index toast: not loaded                                                             +
+ 
+(1 row)
+
 ROLLBACK TO s1;
 SELECT orioledb_tbl_structure('rll_test'::regclass, 'ne');
                            orioledb_tbl_structure                           

@@ -65,7 +65,7 @@ typedef struct
 	bool		deleted;
 	bool		modified;
 	bool		changingPart;
-	RowLockMode rowLockMode;
+	Bitmapset  *keyAttrs;
 } OModifyCallbackArg;
 
 typedef struct

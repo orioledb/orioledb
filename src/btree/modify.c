@@ -118,10 +118,10 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	BTreePageItemLocator loc;
 	OInMemoryBlkno blkno;
 	OBTreeModifyResult result = OBTreeModifyResultInserted;
-	OTupleXactInfo initXactInfo;
 	OTuple		curTuple;
 	BTreeLeafTuphdr *tuphdr;
 	BTreeModifyInternalContext context;
+	OXid		tupleOxid = OXidIsValid(opOxid) ? opOxid : BootstrapTransactionId;
 
 	context.tuple = _tuple;
 	context.tupleType = tupleType;
@@ -149,11 +149,6 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	/* Undo should be reserved for transactional operations */
 	Assert(OXidIsValid(opOxid) == context.undoIsReserved);
 
-	if (OXidIsValid(opOxid))
-		initXactInfo = OXID_GET_XACT_INFO(opOxid, context.lockMode, false);
-	else
-		initXactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, context.lockMode, false);
-
 retry:
 
 	context.needsUndo = true;
@@ -167,7 +162,7 @@ retry:
 	context.leafTuphdr.undoLocation = InvalidUndoLocation;
 	context.leafTuphdr.formatFlags = 0;
 	context.leafTuphdr.chainHasLocks = false;
-	context.leafTuphdr.xactInfo = initXactInfo;
+	context.leafTuphdr.xactInfo = OXID_GET_XACT_INFO(tupleOxid, context.lockMode, false);
 
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
 	loc = pageFindContext->items[pageFindContext->index].locator;
@@ -217,6 +212,7 @@ retry:
 													&context.tuple, opOxid, context.conflictTupHdr.xactInfo,
 													context.conflictTupHdr.undoLocation,
 													&context.lockMode, &cbHint, callbackInfo->arg);
+			context.leafTuphdr.xactInfo = OXID_GET_XACT_INFO(tupleOxid, context.lockMode, false);
 		}
 
 		if (cbAction == OBTreeCallbackActionUndo)
@@ -295,6 +291,7 @@ retry:
 														   context.conflictTupHdr.movedPartitions,
 														   context.conflictTupHdr.undoLocation,
 														   &context.lockMode, &cbHint, callbackInfo->arg);
+			context.leafTuphdr.xactInfo = OXID_GET_XACT_INFO(tupleOxid, context.lockMode, false);
 
 			if (cbAction == OBTreeCallbackActionUndo)
 			{

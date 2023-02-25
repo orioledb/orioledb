@@ -443,7 +443,7 @@ orioledb_tuple_delete(ModifyTableState *mstate,
 	marg.epqstate = &mstate->mt_epqstate;
 	marg.scanSlot = returningSlot ? returningSlot : descr->oldTuple;
 	marg.changingPart = changingPart;
-	marg.rowLockMode = RowLockUpdate;
+	marg.keyAttrs = NULL;
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, NULL, NULL);
 
@@ -512,9 +512,6 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	OTableModifyResult mres;
 	OModifyCallbackArg marg;
 	Relation	rel;
-	Bitmapset  *updatedAttrs;
-	Bitmapset  *keyAttrs;
-	RangeTblEntry *rte;
 	OBTreeKeyBound old_pkey;
 	OTableDescr *descr;
 	OXid		oxid;
@@ -544,25 +541,8 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 	marg.scanSlot = descr->oldTuple;
 	marg.changingPart = false;
 	marg.newSlot = (OTableSlot *) slot;
-
-	/*
-	 * Get appropriate row lock mode.
-	 *
-	 * We don't have current version of tuple at hands and it appears to be
-	 * difficult for postgres executor to bring it to us.  Fetching previous
-	 * version of tuple to get row lock mode would require additional
-	 * roundtrip. So, instead of getting row lock mode from actually updated
-	 * columns, we get it from SET clause of UPDATE command.  In the majority
-	 * of cases result should be the same.
-	 */
-	keyAttrs = RelationGetIndexAttrBitmap(rinfo->ri_RelationDesc,
-										  INDEX_ATTR_BITMAP_KEY);
-	rte = exec_rt_fetch(rinfo->ri_RangeTableIndex, mstate->ps.state);
-	updatedAttrs = rte->updatedCols;
-	if (!bms_overlap(keyAttrs, updatedAttrs))
-		marg.rowLockMode = RowLockNoKeyUpdate;
-	else
-		marg.rowLockMode = RowLockUpdate;
+	marg.keyAttrs = RelationGetIndexAttrBitmap(rinfo->ri_RelationDesc,
+											   INDEX_ATTR_BITMAP_KEY);
 
 	mres = o_tbl_update(descr, slot, estate, &old_pkey, rel,
 						oxid, snapshot->snapshotcsn, &hint, &marg);
@@ -629,6 +609,7 @@ orioledb_tuple_update(ModifyTableState *mstate, ResultRelInfo *rinfo,
 
 	o_check_tbl_update_mres(mres, descr, rel, slot);
 
+	bms_free(marg.keyAttrs);
 	Assert(mres.success);
 
 	return mres.oldTuple ? TM_Ok : TM_Deleted;

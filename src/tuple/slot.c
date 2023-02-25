@@ -24,6 +24,7 @@
 #include "catalog/pg_type_d.h"
 #include "storage/itemptr.h"
 #include "utils/expandeddatum.h"
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 
 #include "nodes/nodeFuncs.h"
@@ -1558,6 +1559,47 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 
 	pfree(idx_tup.data);
 	return result;
+}
+
+bool
+tts_orioledb_modified(TupleTableSlot *oldSlot,
+					  TupleTableSlot *newSlot,
+					  Bitmapset *attrs)
+{
+	TupleDesc tupdesc = oldSlot->tts_tupleDescriptor;
+	int		attnum,
+			maxAttr;
+
+	maxAttr = bms_prev_member(attrs, -1) + FirstLowInvalidHeapAttributeNumber - 1;
+
+	if (maxAttr < 0)
+		return false;
+
+	slot_getsomeattrs(oldSlot, maxAttr + 1);
+	slot_getsomeattrs(newSlot, maxAttr + 1);
+
+	attnum = -1;
+	while ((attnum = bms_next_member(attrs, attnum)) >= 0)
+	{
+		int			i = attnum + FirstLowInvalidHeapAttributeNumber - 1;
+		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
+		Datum		val1 = oldSlot->tts_values[i],
+					val2 = newSlot->tts_values[i];
+		bool		isnull1 = oldSlot->tts_isnull[i],
+					isnull2 = newSlot->tts_isnull[i];
+
+		Assert(i >= 0);
+
+		if (isnull1 || isnull2)
+		{
+			if (isnull1 != isnull2)
+				return true;
+		}
+
+		if (!datumIsEqual(val1, val2, att->attbyval, att->attlen))
+			return true;
+	}
+	return false;
 }
 
 void
