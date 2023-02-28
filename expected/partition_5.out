@@ -513,14 +513,15 @@ SELECT * FROM o_test_partition_pkey_update_child;
 
 EXPLAIN (COSTS OFF)
 	UPDATE o_test_partition_pkey_update SET val_1 = 3 WHERE val_1 = 1;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  Update on o_test_partition_pkey_update
    Update on o_test_partition_pkey_update_child o_test_partition_pkey_update_1
-   ->  Custom Scan (o_scan) on o_test_partition_pkey_update_child o_test_partition_pkey_update_1
-         Forward index scan of: o_test_partition_pkey_update_child_pkey
-         Conds: (val_1 = 1)
-(5 rows)
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_partition_pkey_update_child o_test_partition_pkey_update_1
+               Forward index scan of: o_test_partition_pkey_update_child_pkey
+               Conds: (val_1 = 1)
+(6 rows)
 
 UPDATE o_test_partition_pkey_update SET val_1 = 3 WHERE val_1 = 1;
 SELECT * FROM o_test_partition_pkey_update;

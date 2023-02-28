@@ -151,8 +151,6 @@ INSERT INTO o_test_2
 
 UPDATE o_test_1 SET val_2 = 7;
 
-
-
 CREATE TABLE o_test_partition_index (
 	val_1 int,
 	val_2 int
@@ -193,6 +191,28 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
 SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
 SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
+
+BEGIN;
+CREATE TABLE o_test_partition_pkey_update (
+	val_1 int PRIMARY KEY
+) PARTITION BY RANGE (val_1);
+
+CREATE TABLE o_test_partition_pkey_update_child (
+	LIKE o_test_partition_pkey_update
+) USING orioledb;
+
+ALTER TABLE o_test_partition_pkey_update
+	ATTACH PARTITION o_test_partition_pkey_update_child
+		FOR VALUES FROM (1) TO (5);
+
+SELECT * FROM o_test_partition_pkey_update;
+SELECT * FROM o_test_partition_pkey_update_child;
+EXPLAIN (COSTS OFF)
+	UPDATE o_test_partition_pkey_update SET val_1 = 3 WHERE val_1 = 1;
+UPDATE o_test_partition_pkey_update SET val_1 = 3 WHERE val_1 = 1;
+SELECT * FROM o_test_partition_pkey_update;
+SELECT * FROM o_test_partition_pkey_update_child;
+COMMIT;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;

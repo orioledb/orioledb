@@ -190,6 +190,7 @@ transform_path(Path *src_path, OTableDescr *descr)
 			if (index_descr->oids.reloid == ix_path->indexinfo->indexoid)
 				break;
 		}
+		Assert(ix_num < descr->nIndices);
 		new_path->o_path.type = O_IndexPath;
 		new_path->ix_num = ix_num;
 		new_path->scandir = ix_path->indexscandir;
