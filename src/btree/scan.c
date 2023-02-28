@@ -665,20 +665,17 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			{
 				bool		loaded;
 
+				Assert(nextPage->status == OParallelScanPageInvalid);
+
 				if (!(poscan->flags & O_PARALLEL_FIRST_PAGE_LOADED))
 				{
-					Assert(nextPage->status == OParallelScanPageInvalid);
 					clear_fixed_shmem_key(&curPage->prevHikey);
 				}
 				else
 				{
-					Assert(nextPage->status != OParallelScanPageInProgress);
-					if (O_PAGE_IS(nextPage->img, RIGHTMOST))
-					{
-						SpinLockRelease(&poscan->intpageAccess);
-						return false;
-					}
-					copy_fixed_shmem_hikey(scan->desc, &curPage->prevHikey, nextPage->img);
+					Assert(O_PAGE_IS(nextPage->img, RIGHTMOST));
+					SpinLockRelease(&poscan->intpageAccess);
+					return false;
 				}
 				curPage->status = OParallelScanPageInProgress;
 				LWLockAcquire(&poscan->intpageLoad, LW_EXCLUSIVE);
@@ -691,9 +688,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 &curPage->startOffset);
 				if (!loaded)
 				{
+					SpinLockAcquire(&poscan->intpageAccess);
 					poscan->flags |= O_PARALLEL_IS_SINGLE_LEAF_PAGE;
 					clear_fixed_key(keyRangeLow);
 					clear_fixed_key(keyRangeHigh);
+					SpinLockRelease(&poscan->intpageAccess);
 					LWLockRelease(&poscan->intpageLoad);
 					return false;
 				}
