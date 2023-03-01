@@ -297,7 +297,6 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	if (page != scan->context.img)
 	{
 		Assert(scan->poscan);
-		scan->poscan->flags |= O_PARALLEL_FIRST_PAGE_LOADED;
 		memcpy(page, scan->context.img, ORIOLEDB_BLCKSZ);
 	}
 	else
@@ -701,6 +700,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				curPage->imgReadCsn = scan->context.imgReadCsn;
 				curPage->offset = BTREE_PAGE_LOCATOR_GET_OFFSET(curPage->img, &loc);
 				curPage->status = OParallelScanPageValid;
+				poscan->flags |= O_PARALLEL_FIRST_PAGE_LOADED;
 				SpinLockRelease(&poscan->intpageAccess);
 				LWLockRelease(&poscan->intpageLoad);
 
