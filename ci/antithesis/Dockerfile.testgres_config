@@ -1,0 +1,3 @@
+FROM scratch
+
+COPY ci/antithesis/docker-compose-testgres.yml ./docker-compose.yml

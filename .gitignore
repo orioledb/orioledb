@@ -42,3 +42,4 @@ lib*.pc
 /include/utils/stopevents_defs.h
 /include/utils/stopevents_data.h
 /orioledb.typedefs
+!ci/antithesis/libvoidstar.so
