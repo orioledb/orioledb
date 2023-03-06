@@ -1,0 +1,174 @@
+name: antithesis
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      long:
+        description: '3 hours'
+        required: true
+        type: boolean
+        default: true
+
+env:
+  ANTITHESIS_REPOSITORY: https://us-central1-docker.pkg.dev
+  ORIOLEDB_REPOSITORY: us-central1-docker.pkg.dev/molten-verve-216720/orioledb-repository
+
+jobs:
+  config_build_push:
+    name: Build config docker images and push to Antithesis repository
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Antithesis Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.ANTITHESIS_REPOSITORY }}
+          username: _json_key
+          password: ${{ secrets.ANTITHESIS_JSON_KEY }}
+
+      - name: Build regression/isolation config docker image and push to Antithesis repository
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+          file: ci/antithesis/Dockerfile.regress_config
+          tags: |
+            ${{ env.ORIOLEDB_REPOSITORY }}/orioledb-config:antithesis-latest
+          build-args: |
+            PGTAG=${{ env.PGTAG }}
+
+      - name: Build testgres config docker image and push to Antithesis repository
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+          file: ci/antithesis/Dockerfile.testgres_config
+          tags: |
+            ${{ env.ORIOLEDB_REPOSITORY }}/orioledb-config:antithesis-testgres-latest
+          build-args: |
+            PGTAG=${{ env.PGTAG }}
+  app_build_push:
+    name: Build app/workload docker images and push to Antithesis repository
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: true
+      matrix:
+        pg_version: [13, 14, 15]
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v3
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' .pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to Antithesis Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.ANTITHESIS_REPOSITORY }}
+          username: _json_key
+          password: ${{ secrets.ANTITHESIS_JSON_KEY }}
+
+      - name: Build regression/isolation app docker image and push to Antithesis repository
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+          file: ci/antithesis/Dockerfile.regress_app
+          tags: |
+            ${{ env.ORIOLEDB_REPOSITORY }}/orioledb:antithesis-pg${{ matrix.pg_version }}-latest
+          build-args: |
+            PGTAG=${{ env.PGTAG }}
+
+      - name: Build regression/isolation workload docker image and push to Antithesis repository
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+          file: ci/antithesis/Dockerfile.regress_workload
+          tags: |
+            ${{ env.ORIOLEDB_REPOSITORY }}/orioledb-workload:antithesis-pg${{ matrix.pg_version }}-latest
+          build-args: |
+            PGTAG=${{ env.PGTAG }}
+
+      - name: Build testgres app/workload docker image and push to Antithesis repository
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+          file: ci/antithesis/Dockerfile.testgres_app_workload
+          tags: |
+            ${{ env.ORIOLEDB_REPOSITORY }}/orioledb:antithesis-testgres-pg${{ matrix.pg_version }}-latest
+          build-args: |
+            PGTAG=${{ env.PGTAG }}
+
+  regress_webhook:
+    name: Run regression/isolation tests with fault injection to test system resiliency
+    runs-on: ubuntu-20.04
+    needs:
+      - config_build_push
+      - app_build_push
+    strategy:
+      fail-fast: true
+      matrix:
+        pg_version: [13, 14, 15]
+    steps:
+      - name: determine endpoint
+        run: |
+          if [ '${{ inputs.long == true }}' = 'true' ]; then
+            echo "ENDPOINT='fault-tolerance-test__orioledb__network-faults__antithesis-pg'" >> $GITHUB_ENV
+          else
+            echo "ENDPOINT='fault-tolerance-test__orioledb-short__no-faults__antithesis-pg'" >> $GITHUB_ENV
+          fi
+      - name: fault-tolerance-test regress
+        run: |
+          curl -X POST https://orioledb.antithesis.com/api/v1/launch_experiment/${{ env.ENDPOINT }}${{ matrix.pg_version }}-latest -u '${{ secrets.ANTITHESIS_API_USER }}'
+  testgres_webhook:
+    name: Run randomized testgres tests without any test harness
+    runs-on: ubuntu-20.04
+    needs:
+      - config_build_push
+      - app_build_push
+    strategy:
+      fail-fast: true
+      matrix:
+        pg_version: [13, 14, 15]
+    steps:
+      - name: determine endpoint
+        run: |
+          if [ '${{ inputs.long == true }}' = 'true' ]; then
+            echo "ENDPOINT='fault-tolerance-test__orioledb__thread-pause__antithesis-testgres-pg'" >> $GITHUB_ENV
+          else
+            echo "ENDPOINT='fault-tolerance-test__orioledb-short__no-faults__antithesis-testgres-pg'" >> $GITHUB_ENV
+          fi
+      - name: fault-tolerance-test testgres
+        run: |
+          curl -X POST https://orioledb.antithesis.com/api/v1/launch_experiment/${{ env.ENDPOINT }}${{ matrix.pg_version }}-latest -u '${{ secrets.ANTITHESIS_API_USER }}'
+

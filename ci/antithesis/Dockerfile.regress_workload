@@ -1,0 +1,158 @@
+FROM debian:bullseye-slim
+
+ARG PGTAG
+
+ENV TZ=UTC
+
+RUN set -eux; \
+	apt-get update; \
+	DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y; \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+		locales \
+		tzdata \
+		gosu \
+		; \
+	localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8;
+
+ENV LANG=en_US.utf8
+
+RUN set -eux; \
+	apt-get update; \
+	DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
+	apt-get -o Dpkg::Options::="--force-confdef" \
+			-o Dpkg::Options::="--force-confold" \
+			-y install \
+				build-essential flex bison pkg-config \
+				libreadline-dev make gdb libipc-run-perl \
+				libicu-dev python3 python3-dev python3-pip \
+				python3-setuptools python3-testresources \
+				libzstd1 libzstd-dev llvm-13 clang-13 clang-tools-13 \
+				curl wget liblz4-1 liblz4-dev libuuid1 uuid-dev git \
+	;
+
+RUN set -eux; \
+	groupadd -r postgres --gid=999; \
+	useradd -r -g postgres --uid=999 --home-dir=/var/lib/postgresql --shell=/bin/bash postgres; \
+	mkdir -p /var/lib/postgresql; \
+	chown postgres:postgres /var/lib/postgresql; \
+# also create the postgres user's home directory with appropriate permissions
+# see https://github.com/docker-library/postgres/issues/274
+	mkdir -p /var/lib/postgresql; \
+	chown -R postgres:postgres /var/lib/postgresql
+
+ENV PGTAG $PGTAG
+RUN [ -z "$PGTAG" ] && echo "PGTAG is required" && exit 1 || true
+
+RUN mkdir -p /usr/src/postgresql/contrib/orioledb
+COPY . /usr/src/postgresql/contrib/orioledb
+RUN cp /usr/src/postgresql/contrib/orioledb/ci/antithesis/libvoidstar.so /usr/lib
+
+RUN set -eux; \
+	curl -o postgresql.tar.gz \
+			--header "Accept: application/vnd.github.v3.raw" \
+			--remote-name \
+			--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
+	mkdir -p /usr/src/postgresql; \
+	tar \
+		--extract \
+		--file postgresql.tar.gz \
+		--directory /usr/src/postgresql \
+		--strip-components 1 \
+	; \
+	rm postgresql.tar.gz; \
+	cd /usr/src/postgresql; \
+	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
+# explicitly update autoconf config.guess and config.sub so they support more arches/libcs
+	wget -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+# configure options taken from:
+# https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
+	( CC=clang-13 LLVM_CONFIG=llvm-config-13 CLANG=clang-13 LLVM_SYMBOLIZER=llvm-symbolizer-13 ./configure \
+		--build="$gnuArch" \
+# "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
+#		--enable-nls \
+		--enable-integer-datetimes \
+		--enable-thread-safety \
+		--enable-tap-tests \
+# skip debugging info -- we want tiny size instead
+		--enable-debug \
+		--enable-cassert \
+		--disable-rpath \
+		--with-uuid=e2fs \
+		--with-gnu-ld \
+		--with-pgport=5432 \
+		--with-system-tzdata=/usr/share/zoneinfo \
+		--prefix=/usr/local \
+		--with-includes=/usr/local/include \
+		--with-libraries=/usr/local/lib \
+		--with-icu \
+		--with-llvm \
+		--with-lz4 \
+	|| cat config.log ); \
+	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+	make -j "$(nproc)"; \
+	make -C contrib -j "$(nproc)"; \
+	make install; \
+	make -C contrib install; \
+	make -C contrib/orioledb -j "$(nproc)" CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize-coverage=trace-pc-guard" \
+                                           LDFLAGS_SL="-lvoidstar -Wl,--build-id" install; \
+	\
+	ldd contrib/orioledb/orioledb.so | grep "libvoidstar"; \
+	nm contrib/orioledb/orioledb.so | grep "sanitizer_cov_trace_pc_guard"; \
+	\
+	chown -R postgres:postgres /usr/src/postgresql; \
+	cd /; \
+	rm -rf \
+		/usr/local/share/doc \
+		/usr/local/share/man \
+	; \
+	\
+	postgres --version; \
+	pip3 install --upgrade psycopg2 six testgres; \
+	apt-get -y remove \
+				build-essential flex bison pkg-config \
+				libreadline-dev libipc-run-perl \
+				libicu-dev python3-dev python3-pip \
+				libzstd-dev \
+				curl wget liblz4-dev uuid-dev git \
+	; \
+	apt-get -y autoremove; \
+	rm -rf /var/cache/apt/archives /var/lib/apt/lists/*; \
+	apt-get clean;
+
+RUN cp /usr/src/postgresql/contrib/orioledb/ci/antithesis/entrypoint-regress-workload.sh /usr/local/bin/
+ENTRYPOINT ["entrypoint-regress-workload.sh"]
+
+RUN chmod +x /usr/local/bin/entrypoint-regress-workload.sh
+
+# We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL
+# calls "Fast Shutdown mode" wherein new connections are disallowed and any
+# in-progress transactions are aborted, allowing PostgreSQL to stop cleanly and
+# flush tables to disk, which is the best compromise available to avoid data
+# corruption.
+#
+# Users who know their applications do not keep open long-lived idle connections
+# may way to use a value of SIGTERM instead, which corresponds to "Smart
+# Shutdown mode" in which any existing sessions are allowed to finish and the
+# server stops when all sessions are terminated.
+#
+# See https://www.postgresql.org/docs/12/server-shutdown.html for more details
+# about available PostgreSQL server shutdown signals.
+#
+# See also https://www.postgresql.org/docs/12/server-start.html for further
+# justification of this as the default value, namely that the example (and
+# shipped) systemd service files use the "Fast Shutdown mode" for service
+# termination.
+#
+STOPSIGNAL SIGINT
+#
+# An additional setting that is recommended for all users regardless of this
+# value is the runtime "--stop-timeout" (or your orchestrator/runtime's
+# equivalent) for controlling how long to wait between sending the defined
+# STOPSIGNAL and sending SIGKILL (which is likely to cause data corruption).
+#
+# The default in most runtimes (such as Docker) is 10 seconds, and the
+# documentation at https://www.postgresql.org/docs/12/server-start.html notes
+# that even 90 seconds may not be long enough in many instances.
+
+CMD ["workload"]

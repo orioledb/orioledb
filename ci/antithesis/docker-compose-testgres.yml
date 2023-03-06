@@ -1,0 +1,17 @@
+version: '3.0'
+
+services:
+  primary:
+    container_name: primary
+    hostname: primary
+    restart: always
+    image: "orioledb:antithesis-testgres-pg${PG_VERSION:-14}-latest"
+
+# The subnet provided here is an example
+# An alternate /24 can be used
+networks:
+  antithesis-net:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 10.20.20.0/24

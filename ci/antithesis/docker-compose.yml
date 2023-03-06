@@ -1,0 +1,66 @@
+version: '3.0'
+
+volumes:
+  postgres-primary:
+    driver: local
+  postgres-standby:
+    driver: local
+
+services:
+  primary:
+    container_name: primary
+    hostname: primary
+    restart: always
+    image: "orioledb:antithesis-pg${PG_VERSION:-14}-latest"
+    ports:
+      - '5432:5432'
+    volumes:
+      - 'postgres-primary:/var/lib/postgresql/data'
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: mysecretpassword
+    networks:
+      antithesis-net:
+        ipv4_address: 10.20.20.2
+
+  standby:
+    hostname: standby
+    restart: always
+    image: "orioledb:antithesis-pg${PG_VERSION:-14}-latest"
+    ports:
+      - '5432'
+    volumes:
+      - 'postgres-standby:/var/lib/postgresql/data'
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: mysecretpassword
+      REPLICATE_FROM: primary
+    depends_on:
+      - primary
+    networks:
+      antithesis-net:
+        ipv4_address: 10.20.20.4
+
+  workload:
+    container_name: workload
+    hostname: workload
+    restart: always
+    image: "orioledb-workload:antithesis-pg${PG_VERSION:-14}-latest"
+    environment:
+      PGHOST: primary
+      PGUSER: postgres
+      PGPASSWORD: mysecretpassword
+    depends_on:
+      - primary
+    networks:
+      antithesis-net:
+        ipv4_address: 10.20.20.6
+
+# The subnet provided here is an example
+# An alternate /24 can be used
+networks:
+  antithesis-net:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 10.20.20.0/24
