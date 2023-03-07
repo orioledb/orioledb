@@ -117,224 +117,159 @@ orioledb_setup_ddl_hooks(void)
 	object_access_hook = orioledb_object_access_hook;
 }
 
-static const char *
-deparse_alter_table_cmd_subtype(AlterTableCmd *cmd)
-{
-	const char *strtype;
 
-	switch (cmd->subtype)
+static const char *
+alter_table_type_to_string(AlterTableType cmdtype)
+{
+	switch (cmdtype)
 	{
 		case AT_AddColumn:
-			strtype = "ADD COLUMN";
-			break;
 		case AT_AddColumnToView:
-			strtype = "ADD COLUMN TO VIEW";
-			break;
+			return "ADD COLUMN";
 		case AT_ColumnDefault:
-			strtype = "ALTER COLUMN SET DEFAULT";
-			break;
 		case AT_CookedColumnDefault:
-			strtype = "ALTER COLUMN SET DEFAULT (precooked)";
-			break;
+			return "ALTER COLUMN ... SET DEFAULT";
 		case AT_DropNotNull:
-			strtype = "DROP NOT NULL";
-			break;
+			return "ALTER COLUMN ... DROP NOT NULL";
 		case AT_SetNotNull:
-			strtype = "SET NOT NULL";
-			break;
+			return "ALTER COLUMN ... SET NOT NULL";
+		case AT_DropExpression:
+			return "ALTER COLUMN ... DROP EXPRESSION";
 		case AT_CheckNotNull:
-			strtype = "CHECK NOT NULL";
-			break;
+			return NULL;		/* not real grammar */
 		case AT_SetStatistics:
-			strtype = "SET STATS";
-			break;
+			return "ALTER COLUMN ... SET STATISTICS";
 		case AT_SetOptions:
-			strtype = "SET OPTIONS";
-			break;
+			return "ALTER COLUMN ... SET";
 		case AT_ResetOptions:
-			strtype = "RESET OPTIONS";
-			break;
+			return "ALTER COLUMN ... RESET";
 		case AT_SetStorage:
-			strtype = "SET STORAGE";
-			break;
+			return "ALTER COLUMN ... SET STORAGE";
+#if PG_VERSION_NUM >= 140000
+		case AT_SetCompression:
+			return "ALTER COLUMN ... SET COMPRESSION";
+#endif
 		case AT_DropColumn:
-			strtype = "DROP COLUMN";
-			break;
 		case AT_AddIndex:
-			strtype = "ADD INDEX";
-			break;
 		case AT_ReAddIndex:
-			strtype = "(re) ADD INDEX";
-			break;
+			return NULL;		/* not real grammar */
 		case AT_AddConstraint:
-			strtype = "ADD CONSTRAINT";
-			break;
 		case AT_ReAddConstraint:
-			strtype = "(re) ADD CONSTRAINT";
-			break;
-		case AT_AlterConstraint:
-			strtype = "ALTER CONSTRAINT";
-			break;
-		case AT_ValidateConstraint:
-			strtype = "VALIDATE CONSTRAINT";
-			break;
+		case AT_ReAddDomainConstraint:
 		case AT_AddIndexConstraint:
-			strtype = "ADD CONSTRAINT (using index)";
-			break;
+			return "ADD CONSTRAINT";
+		case AT_AlterConstraint:
+			return "ALTER CONSTRAINT";
+		case AT_ValidateConstraint:
+			return "VALIDATE CONSTRAINT";
 		case AT_DropConstraint:
-			strtype = "DROP CONSTRAINT";
-			break;
 		case AT_ReAddComment:
-			strtype = "(re) ADD COMMENT";
-			break;
+			return NULL;		/* not real grammar */
 		case AT_AlterColumnType:
-			strtype = "ALTER COLUMN SET TYPE";
-			break;
+			return "ALTER COLUMN ... SET DATA TYPE";
 		case AT_AlterColumnGenericOptions:
-			strtype = "ALTER COLUMN SET OPTIONS";
-			break;
+			return "ALTER COLUMN ... OPTIONS";
 		case AT_ChangeOwner:
-			strtype = "CHANGE OWNER";
-			break;
+			return "OWNER TO";
 		case AT_ClusterOn:
-			strtype = "CLUSTER";
-			break;
+			return "CLUSTER ON";
 		case AT_DropCluster:
-			strtype = "DROP CLUSTER";
-			break;
+			return "SET WITHOUT CLUSTER";
+#if PG_VERSION_NUM >= 150000
+		case AT_SetAccessMethod:
+			return "SET ACCESS METHOD";
+#endif
 		case AT_SetLogged:
-			strtype = "SET LOGGED";
-			break;
+			return "SET LOGGED";
 		case AT_SetUnLogged:
-			strtype = "SET UNLOGGED";
-			break;
+			return "SET UNLOGGED";
 		case AT_DropOids:
-			strtype = "DROP OIDS";
-			break;
+			return "SET WITHOUT OIDS";
 		case AT_SetTableSpace:
-			strtype = "SET TABLESPACE";
-			break;
+			return "SET TABLESPACE";
 		case AT_SetRelOptions:
-			strtype = "SET RELOPTIONS";
-			break;
+			return "SET";
 		case AT_ResetRelOptions:
-			strtype = "RESET RELOPTIONS";
-			break;
+			return "RESET";
 		case AT_ReplaceRelOptions:
-			strtype = "REPLACE RELOPTIONS";
-			break;
+			return NULL;		/* not real grammar */
 		case AT_EnableTrig:
-			strtype = "ENABLE TRIGGER";
-			break;
+			return "ENABLE TRIGGER";
 		case AT_EnableAlwaysTrig:
-			strtype = "ENABLE TRIGGER (always)";
-			break;
+			return "ENABLE ALWAYS TRIGGER";
 		case AT_EnableReplicaTrig:
-			strtype = "ENABLE TRIGGER (replica)";
-			break;
+			return "ENABLE REPLICA TRIGGER";
 		case AT_DisableTrig:
-			strtype = "DISABLE TRIGGER";
-			break;
+			return "DISABLE TRIGGER";
 		case AT_EnableTrigAll:
-			strtype = "ENABLE TRIGGER (all)";
-			break;
+			return "ENABLE TRIGGER ALL";
 		case AT_DisableTrigAll:
-			strtype = "DISABLE TRIGGER (all)";
-			break;
+			return "DISABLE TRIGGER ALL";
 		case AT_EnableTrigUser:
-			strtype = "ENABLE TRIGGER (user)";
-			break;
+			return "ENABLE TRIGGER USER";
 		case AT_DisableTrigUser:
-			strtype = "DISABLE TRIGGER (user)";
-			break;
+			return "DISABLE TRIGGER USER";
 		case AT_EnableRule:
-			strtype = "ENABLE RULE";
-			break;
+			return "ENABLE RULE";
 		case AT_EnableAlwaysRule:
-			strtype = "ENABLE RULE (always)";
-			break;
+			return "ENABLE ALWAYS RULE";
 		case AT_EnableReplicaRule:
-			strtype = "ENABLE RULE (replica)";
-			break;
+			return "ENABLE REPLICA RULE";
 		case AT_DisableRule:
-			strtype = "DISABLE RULE";
-			break;
+			return "DISABLE RULE";
 		case AT_AddInherit:
-			strtype = "ADD INHERIT";
-			break;
+			return "INHERIT";
 		case AT_DropInherit:
-			strtype = "DROP INHERIT";
-			break;
+			return "NO INHERIT";
 		case AT_AddOf:
-			strtype = "OF";
-			break;
+			return "OF";
 		case AT_DropOf:
-			strtype = "NOT OF";
-			break;
+			return "NOT OF";
 		case AT_ReplicaIdentity:
-			strtype = "REPLICA IDENTITY";
-			break;
+			return "REPLICA IDENTITY";
 		case AT_EnableRowSecurity:
-			strtype = "ENABLE ROW SECURITY";
-			break;
+			return "ENABLE ROW SECURITY";
 		case AT_DisableRowSecurity:
-			strtype = "DISABLE ROW SECURITY";
-			break;
+			return "DISABLE ROW SECURITY";
 		case AT_ForceRowSecurity:
-			strtype = "FORCE ROW SECURITY";
-			break;
+			return "FORCE ROW SECURITY";
 		case AT_NoForceRowSecurity:
-			strtype = "NO FORCE ROW SECURITY";
-			break;
+			return "NO FORCE ROW SECURITY";
 		case AT_GenericOptions:
-			strtype = "SET OPTIONS";
-			break;
+			return "OPTIONS";
 		case AT_AttachPartition:
-			strtype = "ATTACH PARTITION";
-			break;
+			return "ATTACH PARTITION";
 		case AT_DetachPartition:
-			strtype = "DETACH PARTITION";
-			break;
+			return "DETACH PARTITION";
 #if PG_VERSION_NUM >= 140000
 		case AT_DetachPartitionFinalize:
-			strtype = "DETACH PARTITION FINALIZE";
-			break;
-		case AT_ReAddStatistics:
-			strtype = "ADD STATISTICS";
-			break;
+			return "DETACH PARTITION ... FINALIZE";
 #endif
 		case AT_AddIdentity:
-			strtype = "ADD IDENTITY";
-			break;
+			return "ALTER COLUMN ... ADD IDENTITY";
 		case AT_SetIdentity:
-			strtype = "SET IDENTITY";
-			break;
+			return "ALTER COLUMN ... SET";
 		case AT_DropIdentity:
-			strtype = "DROP IDENTITY";
-			break;
-		default:
-			strtype = "unrecognized";
-			break;
+			return "ALTER COLUMN ... DROP IDENTITY";
 #if PG_VERSION_NUM < 160000
 		case AT_AddColumnRecurse:
-			strtype = "ADD COLUMN (and recurse)";
-			break;
+			return "ADD COLUMN";
 		case AT_DropColumnRecurse:
-			strtype = "DROP COLUMN (and recurse)";
-			break;
+			return "DROP COLUMN";
 		case AT_AddConstraintRecurse:
-			strtype = "ADD CONSTRAINT (and recurse)";
-			break;
+			return "ADD CONSTRAINT";
 		case AT_ValidateConstraintRecurse:
-			strtype = "VALIDATE CONSTRAINT (and recurse)";
-			break;
+			return "VALIDATE CONSTRAINT";
 		case AT_DropConstraintRecurse:
-			strtype = "DROP CONSTRAINT (and recurse)";
-			break;
+			return "DROP CONSTRAINT";
+#endif
+#if PG_VERSION_NUM >= 140000
+		case AT_ReAddStatistics:
+			return NULL;		/* not real grammar */
 #endif
 	}
 
-	return strtype;
+	return NULL;
 }
 
 static bool
@@ -432,6 +367,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_AddIdentity:
 						case AT_SetIdentity:
 						case AT_DropIdentity:
+						case AT_DropExpression:
 							break;
 						default:
 							ereport(ERROR,
@@ -440,7 +376,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									errdetail("Subcommand \"%s\" is not "
 											  "supported on OrioleDB tables yet. "
 											  "Please send a bug report.",
-											  deparse_alter_table_cmd_subtype(cmd)));
+											  alter_table_type_to_string(cmd->subtype)));
 							break;
 					}
 				}
