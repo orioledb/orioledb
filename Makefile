@@ -152,6 +152,7 @@ TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
 						t/eviction_full_memory_test.py \
 						t/include_indices_test.py \
 						t/indices_build_test.py \
+						t/parallel_test.py \
 						t/reindex_test.py \
 						t/schema_test.py \
 						t/trigger_test.py \

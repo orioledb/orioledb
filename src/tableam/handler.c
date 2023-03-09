@@ -1021,7 +1021,7 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 	/*
 	 * allocate and initialize scan descriptor
 	 */
-	scan = (OScanDesc) palloc(sizeof(OScanDescData));
+	scan = (OScanDesc) palloc0(sizeof(OScanDescData));
 
 	scan->rs_base.rs_rd = relation;
 	scan->rs_base.rs_snapshot = snapshot;
@@ -1131,15 +1131,16 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 
 	do
 	{
-		OTuple		tuple;
+		OTuple		tuple = {0};
 		BTreeLocationHint hint;
 		CommitSeqNo tupleCsn;
 
 		scan = (OScanDesc) sscan;
 		descr = relation_get_descr(scan->rs_base.rs_rd);
 
-		tuple = btree_seq_scan_getnext(scan->scan, slot->tts_mcxt,
-									   &tupleCsn, &hint);
+		if (scan->scan)
+			tuple = btree_seq_scan_getnext(scan->scan, slot->tts_mcxt,
+										   &tupleCsn, &hint);
 
 		if (O_TUPLE_IS_NULL(tuple))
 			return false;

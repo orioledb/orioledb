@@ -1464,6 +1464,7 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 {
 	OTuple		tuple;
 
+	Assert(scan);
 	if (!scan->initialized)
 		init_btree_seq_scan(scan);
 
