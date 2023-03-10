@@ -24,7 +24,6 @@ class ParallelTest(BaseTest):
 									SET LOCAL parallel_tuple_cost = 0;
 									SET LOCAL min_parallel_table_scan_size = 0;
 									SET LOCAL max_parallel_workers_per_gather = 1;
-									EXPLAIN (COSTS OFF) SELECT * FROM o_test;
 									SELECT * FROM o_test;
 								 """))
 			node.stop()
