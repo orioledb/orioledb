@@ -57,8 +57,13 @@ class BaseTest(unittest.TestCase):
 			return exc_list[-1][1]
 
 	def tearDown(self):
-		result = self.defaultTestResult()  # these 2 methods have no side effects
-		self._feedErrorsToResult(result, self._outcome.errors)
+		if hasattr(self._outcome, 'errors'):
+			# Python 3.4 - 3.10  (These two methods have no side effects)
+			result = self.defaultTestResult()  # these 2 methods have no side effects
+			self._feedErrorsToResult(result, self._outcome.errors)
+		else:
+			# Python 3.11+
+			result = self._outcome.result
 		error = self.list2reason(result.errors)
 		failure = self.list2reason(result.failures)
 		ok = not error and not failure
