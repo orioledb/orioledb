@@ -685,6 +685,8 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			slot->tts_tid = *iptr;
 		}
 	}
+
+	slot->tts_tableOid = oslot->descr->oids.reloid;
 }
 
 void

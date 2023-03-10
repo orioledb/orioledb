@@ -930,6 +930,33 @@ INSERT INTO o_test_1
   SELECT * FROM generate_series(5,19,1) a;
 
 UPDATE o_test_1 SET val_1 = 4 WHERE val_1 = 5;
+
+CREATE TABLE o_test_inherits_tableoid (
+   val_1 int,
+   val_2 int,
+   val_3 int
+) USING orioledb;
+
+CREATE TABLE o_test_inherits_tableoid_child1 ()
+   INHERITS (o_test_inherits_tableoid) USING orioledb;
+CREATE TABLE o_test_inherits_tableoid_child2 ()
+   INHERITS (o_test_inherits_tableoid) USING orioledb;
+
+INSERT INTO o_test_inherits_tableoid_child1 VALUES (1, 2, 3);
+INSERT INTO o_test_inherits_tableoid_child2 VALUES (1, 5, 6);
+
+CREATE INDEX o_test_inherits_tableoid_child1_ix1
+   ON o_test_inherits_tableoid_child1 (val_2);
+CREATE INDEX o_test_inherits_tableoid_child2_ix1
+   ON o_test_inherits_tableoid_child2 (val_2);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+   SELECT tableoid::regclass, * FROM o_test_inherits_tableoid ORDER BY val_2;
+SELECT tableoid::regclass, * FROM o_test_inherits_tableoid ORDER BY val_2;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA inherits CASCADE;
 RESET search_path;

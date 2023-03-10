@@ -2253,8 +2253,49 @@ CREATE RULE rule_test_2  AS ON UPDATE TO o_test_1
 INSERT INTO o_test_1
   SELECT * FROM generate_series(5,19,1) a;
 UPDATE o_test_1 SET val_1 = 4 WHERE val_1 = 5;
+CREATE TABLE o_test_inherits_tableoid (
+   val_1 int,
+   val_2 int,
+   val_3 int
+) USING orioledb;
+CREATE TABLE o_test_inherits_tableoid_child1 ()
+   INHERITS (o_test_inherits_tableoid) USING orioledb;
+CREATE TABLE o_test_inherits_tableoid_child2 ()
+   INHERITS (o_test_inherits_tableoid) USING orioledb;
+INSERT INTO o_test_inherits_tableoid_child1 VALUES (1, 2, 3);
+INSERT INTO o_test_inherits_tableoid_child2 VALUES (1, 5, 6);
+CREATE INDEX o_test_inherits_tableoid_child1_ix1
+   ON o_test_inherits_tableoid_child1 (val_2);
+CREATE INDEX o_test_inherits_tableoid_child2_ix1
+   ON o_test_inherits_tableoid_child2 (val_2);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+   SELECT tableoid::regclass, * FROM o_test_inherits_tableoid ORDER BY val_2;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Result
+   ->  Merge Append
+         Sort Key: o_test_inherits_tableoid.val_2
+         ->  Sort
+               Sort Key: o_test_inherits_tableoid_1.val_2
+               ->  Seq Scan on o_test_inherits_tableoid o_test_inherits_tableoid_1
+         ->  Custom Scan (o_scan) on o_test_inherits_tableoid_child1 o_test_inherits_tableoid_2
+               Forward index scan of: o_test_inherits_tableoid_child1_ix1
+         ->  Custom Scan (o_scan) on o_test_inherits_tableoid_child2 o_test_inherits_tableoid_3
+               Forward index scan of: o_test_inherits_tableoid_child2_ix1
+(10 rows)
+
+SELECT tableoid::regclass, * FROM o_test_inherits_tableoid ORDER BY val_2;
+            tableoid             | val_1 | val_2 | val_3 
+---------------------------------+-------+-------+-------
+ o_test_inherits_tableoid_child1 |     1 |     2 |     3
+ o_test_inherits_tableoid_child2 |     1 |     5 |     6
+(2 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 19 other objects
+NOTICE:  drop cascades to 22 other objects
 DETAIL:  drop cascades to table p_stock
 drop cascades to table c_stock
 drop cascades to table a
@@ -2274,6 +2315,9 @@ drop cascades to table e_star
 drop cascades to table f_star
 drop cascades to table o_test_1
 drop cascades to table o_test_2
+drop cascades to table o_test_inherits_tableoid
+drop cascades to table o_test_inherits_tableoid_child1
+drop cascades to table o_test_inherits_tableoid_child2
 DROP SCHEMA inherits CASCADE;
 NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table foo
