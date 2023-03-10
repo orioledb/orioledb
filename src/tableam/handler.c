@@ -69,6 +69,16 @@
 #include "utils/sampling.h"
 #include "utils/syscache.h"
 
+
+#if PG_VERSION_NUM < 140000
+/*
+ * RelationIsPermanent
+ *		True if relation is permanent.
+ */
+#define RelationIsPermanent(relation) \
+	((relation)->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
+#endif
+
 typedef struct OScanDescData
 {
 	TableScanDescData rs_base;	/* AM independent part of the descriptor */
