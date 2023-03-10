@@ -1,10 +1,18 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-FROM alpine:3.15
+# set ALPINE_VERSION= [ edge 3.17 3.16 3.15 3.14 3.13 ]
+ARG ALPINE_VERSION=3.17
+FROM alpine:${ALPINE_VERSION}
 
-ARG PGTAG
-ENV PGTAG $PGTAG
+ARG ALPINE_VERSION
+# Set PG_MAJOR = [ 15 14 13 ]
+ARG PG_MAJOR=14
+ENV PG_MAJOR ${PG_MAJOR}
+
+# set compiler: [ clang gcc ]
+ARG BUILD_CC_COMPILER=clang
+ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
 
 # 70 is the standard uid/gid for "postgres" in Alpine
 # https://git.alpinelinux.org/aports/tree/main/postgresql/postgresql.pre-install?h=3.12-stable
@@ -27,6 +35,27 @@ COPY . /usr/src/postgresql/contrib/orioledb
 RUN mkdir /docker-entrypoint-initdb.d
 
 RUN set -eux; \
+	\
+	PGTAG=$(grep "^$PG_MAJOR: " /usr/src/postgresql/contrib/orioledb/.pgtags | cut -d' ' -f2-) ; \
+	ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2) ; \
+	ORIOLEDB_BUILDTIME=$(date -Iseconds) ; \
+	ALPINE_VERSION=$(cat /etc/os-release | grep VERSION_ID | cut -d = -f 2 | cut -d . -f 1,2 | cut -d _ -f 1) ; \
+	\
+# To get support for all locales: IF >=Alpine3.16 THEN install icu-data-full
+# https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
+# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
+	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
+		3.16 | 3.17 | 3.18* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
+		*) : ;; \
+	esac ; \
+	\
+	echo "PG_MAJOR=$PG_MAJOR" ; \
+	echo "PGTAG=$PGTAG" ; \
+	echo "BUILD_CC_COMPILER=$BUILD_CC_COMPILER" ; \
+	echo "ORIOLEDB_VERSION=$ORIOLEDB_VERSION" ; \
+	echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
+	echo "ALPINE_VERSION=$ALPINE_VERSION" ; \
+	echo "EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES" ; \
 	\
 	apk add --no-cache --virtual .build-deps \
 		bison \
@@ -88,7 +117,7 @@ RUN set -eux; \
 	wget -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
 # configure options taken from:
 # https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
-	( CC=clang ./configure \
+	( CC=${BUILD_CC_COMPILER} ./configure \
 		--build="$gnuArch" \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
 #		--enable-nls \
@@ -118,6 +147,8 @@ RUN set -eux; \
 		--with-icu \
 		--with-llvm \
 		--with-lz4 \
+		--with-zstd \
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} alpine:${ALPINE_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	make -j "$(nproc)"; \
@@ -143,6 +174,8 @@ RUN set -eux; \
 # tzdata is optional, but only adds around 1Mb to image size and is recommended by Django documentation:
 # https://docs.djangoproject.com/en/1.10/ref/databases/#optimizing-postgresql-s-configuration
 		tzdata \
+# install extra icu packages ( >=Alpine3.16 )
+		$(EXTRA_ICU_PACKAGES)  \
 	; \
 	apk del --no-network .build-deps; \
 	cd /; \
