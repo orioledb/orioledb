@@ -1018,33 +1018,46 @@ bool
 row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				   BTreeLeafTuphdr *conflictTuphdr,
 				   UndoLocation *conflictUndoLocation,
-				   RowLockMode mode, OXid my_oxid, OInMemoryBlkno blkno,
-				   UndoLocation savepointUndoLocation,
+				   RowLockMode mode, OXid my_oxid, CommitSeqNo my_csn,
+				   OInMemoryBlkno blkno, UndoLocation savepointUndoLocation,
 				   bool *redundant_row_locks, BTreeModifyLockStatus *lock_status)
 {
 	OTupleXactInfo xactInfo;
-	bool		xactIsfinished;
+	bool		xactIsFinished;
+	bool		xactIsFinal;
+	RowLockMode	xactMode;
 	UndoLocation undoLocation;
 	UndoLocation lastLockOnlyUndoLocation;
 	BTreeLeafTuphdr curTuphdr,
-				finishedTuphdr;
+				finalTuphdr;
 	UndoLocation curUndoLocation,
-				finishedUndoLocation;
+				finalUndoLocation;
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location();
-	bool		foundFinished;
+	bool		foundFinal;
 	bool		result = false;
 
-	finishedTuphdr = curTuphdr = *pageTuphdr;
-	finishedUndoLocation = curUndoLocation = InvalidUndoLocation;
+	finalTuphdr = curTuphdr = *pageTuphdr;
+	finalUndoLocation = curUndoLocation = InvalidUndoLocation;
 	lastLockOnlyUndoLocation = InvalidUndoLocation;
 	xactInfo = curTuphdr.xactInfo;
-	xactIsfinished = XACT_INFO_IS_FINISHED(xactInfo);
-	foundFinished = xactIsfinished;
+	xactMode = XACT_INFO_GET_LOCK_MODE(xactInfo);
+	if (ROW_LOCKS_CONFLICT(xactMode, mode))
+	{
+		xactIsFinal = xactIsFinished = XACT_INFO_IS_FINISHED(xactInfo);
+	}
+	else
+	{
+		CommitSeqNo		csn = XACT_INFO_MAP_CSN(xactInfo);
+
+		xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
+		xactIsFinal = (csn < my_csn);
+	}
+	foundFinal = xactIsFinal;
 	undoLocation = curTuphdr.undoLocation;
 
 	while (curTuphdr.chainHasLocks ||
 		   XACT_INFO_IS_LOCK_ONLY(xactInfo) ||
-		   !xactIsfinished)
+		   !xactIsFinal)
 	{
 		bool		prevChainHasLocks = false;
 		bool		delete_record = false;
@@ -1053,19 +1066,19 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			XACT_INFO_GET_OXID(xactInfo) == my_oxid)
 		{
 			/* Check if there are redundant row-level locks */
-			if (XACT_INFO_GET_LOCK_MODE(xactInfo) <= mode &&
+			if (xactMode <= mode &&
 				(!UndoLocationIsValid(savepointUndoLocation) ||
 				 (UndoLocationIsValid(undoLocation) &&
 				  undoLocation >= savepointUndoLocation)))
 				*redundant_row_locks = true;
-			if (XACT_INFO_GET_LOCK_MODE(xactInfo) >= mode)
+			if (xactMode >= mode)
 				*lock_status = Max(*lock_status, BTreeModifySameOrStrongerLock);
 			else
 				*lock_status = Max(*lock_status, BTreeModifyWeakerLock);
 		}
 
 		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
-			ROW_LOCKS_CONFLICT(XACT_INFO_GET_LOCK_MODE(xactInfo), mode))
+			ROW_LOCKS_CONFLICT(xactMode, mode))
 		{
 			BTreeLeafTuphdr prev_tuphdr;
 			OXid		oxid = XACT_INFO_GET_OXID(xactInfo);
@@ -1133,16 +1146,16 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				}
 			}
 		}
-		else if (!xactIsfinished)
+		else if (!xactIsFinished)
 		{
 			if (XACT_INFO_GET_OXID(xactInfo) == my_oxid)
 			{
-				if (XACT_INFO_GET_LOCK_MODE(xactInfo) >= mode)
+				if (xactMode >= mode)
 					*lock_status = Max(*lock_status, BTreeModifySameOrStrongerLock);
 				else
 					*lock_status = Max(*lock_status, BTreeModifyWeakerLock);
 			}
-			if (ROW_LOCKS_CONFLICT(XACT_INFO_GET_LOCK_MODE(xactInfo), mode) &&
+			if (ROW_LOCKS_CONFLICT(xactMode, mode) &&
 				(!result || (XACT_INFO_GET_OXID(conflictTuphdr->xactInfo) == my_oxid &&
 				 XACT_INFO_GET_OXID(xactInfo) != my_oxid)))
 			{
@@ -1169,8 +1182,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 
 			if (!result)
 			{
-				*conflictTuphdr = finishedTuphdr;
-				*conflictUndoLocation = finishedUndoLocation;
+				*conflictTuphdr = finalTuphdr;
+				*conflictUndoLocation = finalUndoLocation;
 			}
 			return result;
 		}
@@ -1195,7 +1208,18 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 
 		curUndoLocation = undoLocation;
 		xactInfo = curTuphdr.xactInfo;
-		xactIsfinished = XACT_INFO_IS_FINISHED(xactInfo);
+		xactMode = XACT_INFO_GET_LOCK_MODE(xactInfo);
+		if (ROW_LOCKS_CONFLICT(xactMode, mode))
+		{
+			xactIsFinal = xactIsFinished = XACT_INFO_IS_FINISHED(xactInfo);
+		}
+		else
+		{
+			CommitSeqNo		csn = XACT_INFO_MAP_CSN(xactInfo);
+
+			xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
+			xactIsFinal = (csn < my_csn);
+		}
 		undoLocation = curTuphdr.undoLocation;
 
 		if (prevChainHasLocks &&
@@ -1212,18 +1236,18 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			lastLockOnlyUndoLocation = InvalidUndoLocation;
 		}
 
-		if (!foundFinished && xactIsfinished)
+		if (!foundFinal && xactIsFinal)
 		{
-			finishedTuphdr = curTuphdr;
-			finishedUndoLocation = curUndoLocation;
-			foundFinished = true;
+			finalTuphdr = curTuphdr;
+			finalUndoLocation = curUndoLocation;
+			foundFinal = true;
 		}
 	}
 
 	if (!result)
 	{
-		*conflictTuphdr = finishedTuphdr;
-		*conflictUndoLocation = finishedUndoLocation;
+		*conflictTuphdr = finalTuphdr;
+		*conflictUndoLocation = finalUndoLocation;
 	}
 	return result;
 }

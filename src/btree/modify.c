@@ -423,7 +423,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 	if (row_lock_conflicts(tuphdr,
 						   &context->conflictTupHdr,
 						   &context->conflictUndoLocation,
-						   context->lockMode, context->opOxid,
+						   context->lockMode, context->opOxid, context->opCsn,
 						   blkno, context->savepointUndoLocation,
 						   &haveRedundantRowLocks, &context->lockStatus))
 	{

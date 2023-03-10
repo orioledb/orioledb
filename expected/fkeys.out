@@ -175,3 +175,35 @@ key|fkey|ftext_val
 (1 row)
 
 step s2_commit: COMMIT;
+
+starting permutation: s1_insert0 s1_insert1_null s1_begin_rr s2_begin_rr s1_select0_no_lock s2_update0_2 s2_commit s1_update1_2 s1_commit
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1_null: INSERT INTO o_iso1 VALUES (1, NULL, NULL);
+step s1_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s1_select0_no_lock: SELECT * FROM o_iso0;
+key|value|text_val
+---+-----+--------
+  1|    2|       1
+  2|    3|       2
+  3|    4|       3
+  4|    5|       4
+  5|    6|       5
+  6|    7|       6
+(6 rows)
+
+step s2_update0_2: UPDATE o_iso0 SET value = value + 1 WHERE text_val = '1';
+step s2_commit: COMMIT;
+step s1_update1_2: UPDATE o_iso1 SET key = key + 1, fkey = 1, ftext_val = '1';
+step s1_commit: COMMIT;
+
+starting permutation: s1_insert0 s1_insert1 s1_begin_rr s2_begin_rr s2_update0_2 s1_update1_2 s2_commit s1_update1_2 s1_commit
+step s1_insert0: INSERT INTO o_iso0 SELECT i, i + 1, CAST(i as text) FROM generate_series(1, 6) AS i;
+step s1_insert1: INSERT INTO o_iso1 VALUES (1,1,'1');
+step s1_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_update0_2: UPDATE o_iso0 SET value = value + 1 WHERE text_val = '1';
+step s1_update1_2: UPDATE o_iso1 SET key = key + 1, fkey = 1, ftext_val = '1';
+step s2_commit: COMMIT;
+step s1_update1_2: UPDATE o_iso1 SET key = key + 1, fkey = 1, ftext_val = '1';
+step s1_commit: COMMIT;
