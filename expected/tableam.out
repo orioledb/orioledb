@@ -4134,8 +4134,14 @@ INSERT INTO o_test_1 VALUES (6, 'e');
 ERROR:  duplicate key value violates unique constraint "o_test_1_val_2_idx"
 DETAIL:  Key (val_2)=('e') already exists.
 DROP TABLE o_test_1;
+CREATE TEMP TABLE o_tmp_1 () USING orioledb
+    ON COMMIT DELETE ROWS;
+CREATE TABLE o_test_1 USING orioledb
+    AS SELECT * FROM generate_series(1, 1000, 1);
+SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
+REINDEX SCHEMA :temp_schema_name;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to table o_tableam6
 drop cascades to table o_tableam_join1
 drop cascades to table o_tableam_cte_base
@@ -4148,6 +4154,8 @@ drop cascades to table o_tableam_explain_1
 drop cascades to table o_tableam_explain_2
 drop cascades to table o_tableam_snapshot_check
 drop cascades to table o_ctid_test
+drop cascades to table o_tmp_1
+drop cascades to table o_test_1
 drop cascades to view db_o_tables
 drop cascades to view db_o_indices
 DROP SCHEMA tableam CASCADE;

@@ -657,11 +657,13 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 	ORelOids	oids;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_rel->oid == 0 || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
+	if (!OidIsValid(rel->rd_rel->oid) || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
 		return;
 
 	o_truncate_table(oids);
-	add_truncate_wal_record(oids);
+
+	if (RelationIsPermanent(rel))
+		add_truncate_wal_record(oids);
 }
 
 static void

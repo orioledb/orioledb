@@ -913,6 +913,16 @@ CREATE UNIQUE INDEX o_test_1_val_2_idx ON o_test_1 (val_2);
 INSERT INTO o_test_1 VALUES (6, 'e');
 DROP TABLE o_test_1;
 
+CREATE TEMP TABLE o_tmp_1 () USING orioledb
+    ON COMMIT DELETE ROWS;
+
+CREATE TABLE o_test_1 USING orioledb
+    AS SELECT * FROM generate_series(1, 1000, 1);
+
+SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
+
+REINDEX SCHEMA :temp_schema_name;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;
