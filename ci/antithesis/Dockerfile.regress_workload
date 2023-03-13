@@ -30,6 +30,8 @@ RUN set -eux; \
 				curl wget liblz4-1 liblz4-dev libuuid1 uuid-dev git \
 	;
 
+RUN mkdir /docker-entrypoint-initdb.d
+
 RUN set -eux; \
 	groupadd -r postgres --gid=999; \
 	useradd -r -g postgres --uid=999 --home-dir=/var/lib/postgresql --shell=/bin/bash postgres; \
@@ -40,12 +42,23 @@ RUN set -eux; \
 	mkdir -p /var/lib/postgresql; \
 	chown -R postgres:postgres /var/lib/postgresql
 
-ENV PGTAG $PGTAG
-RUN [ -z "$PGTAG" ] && echo "PGTAG is required" && exit 1 || true
-
 RUN mkdir -p /usr/src/postgresql/contrib/orioledb
 COPY . /usr/src/postgresql/contrib/orioledb
 RUN cp /usr/src/postgresql/contrib/orioledb/ci/antithesis/libvoidstar.so /usr/lib
+
+ENV PGTAG $PGTAG
+RUN [ -z "$PGTAG" ] && echo "PGTAG is required" && exit 1 || true
+RUN MAJORVERSION=$(echo $PGTAG | \
+				   sed 's/[^[:digit:]]\+\([[:digit:]]\+\)_.*/\1/'); \
+	EXPECTED_PATCHVERSION=$(echo $PGTAG | cut -d'_' -f2); \
+	CURRENT_PATCHVERSION=$(grep "$MAJORVERSION" \
+								/usr/src/postgresql/contrib/orioledb/.pgtags | \
+						   cut -d'_' -f2); \
+	[ $EXPECTED_PATCHVERSION -ne $CURRENT_PATCHVERSION ] && \
+		echo "patchset version in orioledb/.pgtags differs from" \
+			 "PGTAG variable for version $MAJORVERSION:" \
+			 "expected $EXPECTED_PATCHVERSION," \
+			 "got $CURRENT_PATCHVERSION" && exit 1 || true
 
 RUN set -eux; \
 	curl -o postgresql.tar.gz \
@@ -67,7 +80,12 @@ RUN set -eux; \
 	wget -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
 # configure options taken from:
 # https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
-	( CC=clang-13 LLVM_CONFIG=llvm-config-13 CLANG=clang-13 LLVM_SYMBOLIZER=llvm-symbolizer-13 ./configure \
+	( CC=clang-13 LLVM_CONFIG=llvm-config-13 CLANG=clang-13 \
+	  LLVM_SYMBOLIZER=llvm-symbolizer-13 \
+	  LDFLAGS="-lvoidstar -Wl,--build-id" \
+	  CFLAGS_SL="-fsanitize-coverage=trace-pc-guard" \
+	  LDFLAGS_SL="-lvoidstar -Wl,--build-id" \
+		./configure \
 		--build="$gnuArch" \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
 #		--enable-nls \
@@ -90,13 +108,17 @@ RUN set -eux; \
 		--with-lz4 \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+	echo '\n%.o: %.c\n\t$(CC) -c $(CFLAGS) -fsanitize-coverage=trace-pc-guard $(CPPFLAGS) -o $@ $<' >> src/Makefile.global; \
 	make -j "$(nproc)"; \
 	make -C contrib -j "$(nproc)"; \
 	make install; \
 	make -C contrib install; \
-	make -C contrib/orioledb -j "$(nproc)" CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize-coverage=trace-pc-guard" \
-                                           LDFLAGS_SL="-lvoidstar -Wl,--build-id" install; \
+	make -C contrib/orioledb -j "$(nproc)" install; \
 	\
+	ldd $(which postgres) | grep "libvoidstar"; \
+	nm $(which postgres) | grep "sanitizer_cov_trace_pc_guard"; \
+	ldd $(which psql) | grep "libvoidstar"; \
+	nm $(which psql) | grep "sanitizer_cov_trace_pc_guard"; \
 	ldd contrib/orioledb/orioledb.so | grep "libvoidstar"; \
 	nm contrib/orioledb/orioledb.so | grep "sanitizer_cov_trace_pc_guard"; \
 	\
