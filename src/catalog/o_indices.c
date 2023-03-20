@@ -808,12 +808,6 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 			descr->tbl_attnums[i].value = i;
 		}
 		pg_qsort(descr->tbl_attnums, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
-		for (i = 0; i < descr->nFields; i++)
-		{
-			elog(DEBUG4, "tbl_attnums[%d]: %d: %d", i,
-				 descr->tbl_attnums[i].key,
-				 descr->tbl_attnums[i].value);
-		}
 	}
 	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();
