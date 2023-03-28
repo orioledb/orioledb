@@ -1931,6 +1931,18 @@ EXPLAIN (COSTS OFF)
 	UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
 UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
 
+CREATE TABLE o_test_index_already_exists_skip
+(
+	val_1 int
+) USING orioledb;
+
+CREATE INDEX o_test_index_already_exists_skip_ix1
+	ON o_test_index_already_exists_skip(val_1);
+CREATE INDEX IF NOT EXISTS o_test_index_already_exists_skip_ix1
+	ON o_test_index_already_exists_skip(val_1);
+\d o_test_index_already_exists_skip
+SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;
