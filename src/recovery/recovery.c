@@ -2469,7 +2469,6 @@ static void
 workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 {
 	int			i;
-	int			j = 0;
 
 	if (send_synchronize)
 	{
@@ -2487,6 +2486,7 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 
 	for (i = 0; i < recovery_pool_size_guc && !unexpected_worker_detach; i++)
 	{
+		int		j = 0;
 		while (pg_atomic_read_u64(&worker_ptrs[i].commitPtr) < ptr &&
 			   workers_pool[i].queue)
 		{
@@ -2504,8 +2504,8 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 					break;
 				}
 			}
+			j++;
 		}
-		j++;
 	}
 }
 

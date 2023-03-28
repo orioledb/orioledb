@@ -561,6 +561,31 @@ class ReplicationTest(BaseTest):
 									SELECT * FROM o_test_1 ORDER BY val_2;
 								 """))
 
+	def test_replication_workers_synchronize_shutdown_concurrent(self):
+		node = self.node
+		node.start()
+
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TEMP TABLE o_test_1 (
+							val_1 text COLLATE "C"
+						) USING orioledb;
+
+						CREATE INDEX ON o_test_1(val_1);
+
+						INSERT INTO o_test_1
+							VALUES ('a'), ('b'), ('c'), ('d');
+					""")
+
+					con1.commit()
+
+					self.catchup_orioledb(replica)
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x
