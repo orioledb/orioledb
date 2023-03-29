@@ -735,7 +735,7 @@ val_3|val_4|val_5
 
 step s1_commit: COMMIT;
 
-starting permutation: s1_begin_2 s2_create_table s2_begin_1 s2_merge_2 s1_drop s2_commit s1_commit
+starting permutation: s1_begin_2 s2_create_table s2_begin_1 s2_merge_2 s1_drop s2_commit s1_commit s2_drop_2
 step s1_begin_2: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 step s2_create_table: CREATE TABLE o_test_4 (
                             val_11 int,
@@ -753,8 +753,9 @@ step s1_drop: DROP TABLE o_test_1; <waiting ...>
 step s2_commit: COMMIT;
 step s1_drop: <... completed>
 step s1_commit: COMMIT;
+step s2_drop_2: DROP TABLE o_test_4;
 
-starting permutation: s1_begin_1 s1_create_table_2 s1_commit s1_begin_3 s2_begin_1 s2_merge_5 s1_create_table s1_commit s2_commit
+starting permutation: s1_begin_1 s1_create_table_2 s1_commit s1_begin_3 s2_begin_1 s2_merge_5 s1_create_table s1_commit s2_commit s1_drop_2
 step s1_begin_1: BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
 step s1_create_table_2: CREATE TABLE o_test_5 (
                             val_1 int,
@@ -778,6 +779,7 @@ step s1_create_table: CREATE TABLE o_test_3 (
 ERROR:  orioledb does not support SERIALIZABLE isolation level
 step s1_commit: COMMIT;
 step s2_commit: COMMIT;
+step s1_drop_2: DROP TABLE o_test_5;
 
 starting permutation: s2_begin_1 s2_update s2_merge_4 s1_begin_3 s1_alter_drop s2_commit s1_alter_add s1_commit
 step s2_begin_1: BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
