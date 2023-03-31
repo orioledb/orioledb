@@ -1871,6 +1871,12 @@ retry:
 		bool		acquired;
 		bool		nested = false;
 
+		if (tree_is_under_checkpoint(desc))
+		{
+			unlock_page(blkno);
+			return OWalkPageSkipped;
+		}
+
 		if (!recovery)
 			acquired = o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, false);
 		else
