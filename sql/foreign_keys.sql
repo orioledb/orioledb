@@ -3,50 +3,51 @@ SET SESSION search_path = 'foreign_keys';
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_text(
-       id integer NOT NULL,
-       val text NOT NULL,
-       PRIMARY KEY(id),
-       UNIQUE(val)
+	id integer NOT NULL,
+	val text NOT NULL,
+	PRIMARY KEY(id),
+	UNIQUE(val)
 ) USING orioledb;
 
 CREATE TABLE o_test_text_child(
-       id integer NOT NULL,
-       o_test_val text NOT NULL REFERENCES o_test_text (val) ON UPDATE CASCADE,
-       PRIMARY KEY(id)
+	id integer NOT NULL,
+	o_test_val text NOT NULL REFERENCES o_test_text (val) ON UPDATE CASCADE,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 
 CREATE TABLE o_test(
-       id integer NOT NULL,
-       val text NOT NULL,
-       PRIMARY KEY(id),
-       UNIQUE(id, val)
+	id integer NOT NULL,
+	val text NOT NULL,
+	PRIMARY KEY(id),
+	UNIQUE(id, val)
 ) USING orioledb;
 
 CREATE TABLE o_test_child(
-       id integer NOT NULL,
-       o_test_ID integer NOT NULL REFERENCES o_test (id) DEFERRABLE,
-       PRIMARY KEY(id)
+	id integer NOT NULL,
+	o_test_ID integer NOT NULL REFERENCES o_test (id) DEFERRABLE,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 CREATE TABLE o_test_child_del(
-       id integer NOT NULL,
-       o_test_ID  integer NOT NULL REFERENCES o_test (id) ON DELETE CASCADE,
-       PRIMARY KEY(id)
+	id integer NOT NULL,
+	o_test_ID  integer NOT NULL REFERENCES o_test (id) ON DELETE CASCADE,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 CREATE TABLE o_test_child_upd(
-       id integer NOT NULL,
-       o_test_ID  integer NOT NULL REFERENCES o_test (id) ON UPDATE CASCADE,
-       PRIMARY KEY(id)
+	id integer NOT NULL,
+	o_test_ID  integer NOT NULL REFERENCES o_test (id) ON UPDATE CASCADE,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 CREATE TABLE o_test_child_compose(
-       id integer NOT NULL,
-       o_test_ID integer NOT NULL,
-       o_test_val text NOT NULL,
-       FOREIGN KEY(o_test_ID, o_test_val) REFERENCES o_test (id, val) ON UPDATE CASCADE ON DELETE CASCADE,
-       PRIMARY KEY(id)
+	id integer NOT NULL,
+	o_test_ID integer NOT NULL,
+	o_test_val text NOT NULL,
+	FOREIGN KEY(o_test_ID, o_test_val)
+		REFERENCES o_test (id, val) ON UPDATE CASCADE ON DELETE CASCADE,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 -- correct insert
@@ -136,37 +137,54 @@ DELETE FROM o_test where id = 6 or id = 7;
 SELECT * FROM o_test_child_compose;
 
 CREATE TABLE o_test_1 (
-    val_1 int NOT NULL
+	val_1 int NOT NULL
 )USING orioledb;
 
 CREATE TABLE o_test_2 (
-    val_2 int,
-    PRIMARY KEY(val_1),
-    UNIQUE(val_1, val_2)
+	val_2 int,
+	PRIMARY KEY(val_1),
+	UNIQUE(val_1, val_2)
 ) INHERITS (o_test_1) USING orioledb;
 
 INSERT INTO o_test_2 (val_1)
-    VALUES (1), (2), (3);
+	VALUES (1), (2), (3);
 
 UPDATE o_test_2 SET val_1 = val_1 * 4;
 
 DELETE FROM o_test_2;
 
 CREATE TABLE o_test_3 (
-    val_3 int,
-    val_4 int,
-    FOREIGN KEY (val_3, val_4)
-    REFERENCES o_test_2 (val_1, val_2)
+	val_3 int,
+	val_4 int,
+	FOREIGN KEY (val_3, val_4)
+	REFERENCES o_test_2 (val_1, val_2)
 )USING orioledb;
 
 INSERT INTO o_test_2 (val_1, val_2)
-    VALUES (1, 1), (2, 2), (3, 1);
+	VALUES (1, 1), (2, 2), (3, 1);
 
 INSERT INTO o_test_3 (val_3, val_4)
-    VALUES (3, 1), (3, 1);
+	VALUES (3, 1), (3, 1);
 
 UPDATE o_test_2 SET val_1 = val_1 * 4;
 UPDATE o_test_2 SET val_1 = val_1 * 4 WHERE val_1 < 3;
+
+BEGIN;
+
+CREATE TABLE o_test_reference_to_self_update_cascade (
+	val_1 int PRIMARY KEY,
+	val_2 int,
+	FOREIGN KEY (val_2)
+		REFERENCES o_test_reference_to_self_update_cascade (val_1)
+			ON UPDATE CASCADE
+) USING orioledb;
+
+INSERT INTO o_test_reference_to_self_update_cascade (val_1, val_2)
+	VALUES (0, 0);
+
+UPDATE o_test_reference_to_self_update_cascade SET val_1 = 3 WHERE val_1 = 0;
+
+COMMIT;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA foreign_keys CASCADE;

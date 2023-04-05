@@ -250,7 +250,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 		.waitCallback = o_lock_wait_callback,
 		.modifyDeletedCallback = o_lock_deleted_callback,
 		.modifyCallback = o_lock_modify_callback,
-		.needsUndoForSelfCreated = false,
+		.needsUndoForSelfCreated = true,
 		.arg = larg
 	};
 
