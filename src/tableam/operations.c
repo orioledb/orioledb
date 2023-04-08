@@ -425,6 +425,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			larg.rel = rel;
 			larg.descr = descr;
 			larg.oxid = oxid;
+			larg.csn = csn;
 			larg.scanSlot = lockedSlot;
 			larg.waitPolicy = LockWaitBlock;
 			larg.wouldBlock = false;
@@ -1361,9 +1362,14 @@ o_delete_deleted_callback(BTreeDescr *desc,
 		return OBTreeCallbackActionDelete;
 
 	if (movedPartitions)
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+	{
+		if (o_arg->options & TABLE_MODIFY_LOCK_UPDATED)
+			ereport(ERROR,
+					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+						errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+		o_arg->movedPartitions = true;
+		return OBTreeCallbackActionDoNothing;
+	}
 
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
@@ -1462,9 +1468,14 @@ o_update_deleted_callback(BTreeDescr *descr,
 	}
 
 	if (movedPartitions)
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+	{
+		if (o_arg->options & TABLE_MODIFY_LOCK_UPDATED)
+			ereport(ERROR,
+					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+						errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+		o_arg->movedPartitions = true;
+		return OBTreeCallbackActionDoNothing;
+	}
 
 	return OBTreeCallbackActionDoNothing;
 }

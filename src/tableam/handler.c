@@ -391,6 +391,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.scanSlot = oldSlot;
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
+	marg.movedPartitions = false;
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
 
@@ -407,6 +408,17 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	else
 	{
 		tmfd->traversed = false;
+	}
+
+	if (marg.movedPartitions)
+	{
+		tmfd->traversed = true;
+		ItemPointerSetMovedPartitions(&tmfd->ctid);
+		return TM_Updated;
+	}
+	else
+	{
+		ItemPointerSet(&tmfd->ctid, 0, FirstOffsetNumber);
 	}
 
 	if (mres.success && mres.action == BTreeOperationLock)
@@ -474,6 +486,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.scanSlot = oldSlot;
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
+	marg.movedPartitions = false;
 	marg.newSlot = (OTableSlot *) slot;
 	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
@@ -488,6 +501,17 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	}
 	else
 		tmfd->traversed = false;
+
+	if (marg.movedPartitions)
+	{
+		tmfd->traversed = true;
+		ItemPointerSetMovedPartitions(&tmfd->ctid);
+		return TM_Updated;
+	}
+	else
+	{
+		ItemPointerSet(&tmfd->ctid, 0, FirstOffsetNumber);
+	}
 
 	if (mres.success && mres.action == BTreeOperationLock)
 	{

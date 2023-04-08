@@ -64,6 +64,7 @@ typedef struct
 	bool		deleted;
 	bool		modified;
 	bool		changingPart;
+	bool		movedPartitions;
 	Bitmapset  *keyAttrs;
 	int			options;
 } OModifyCallbackArg;

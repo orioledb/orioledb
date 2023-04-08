@@ -374,8 +374,6 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	saved_root_level = root_level;
 	for (i = 0; i < saved_root_level; i++)
 	{
-		FileExtent	extent;
-
 		if (i != 0)
 			PAGE_SET_N_ONDISK(stack[i].img, BTREE_PAGE_ITEMS_COUNT(stack[i].img));
 
