@@ -568,7 +568,7 @@ o_recovery_start_hook(void)
 void
 orioledb_redo(XLogReaderState *record)
 {
-	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK PG_USED_FOR_ASSERTS_ONLY;
 	Pointer		msg_start = (Pointer) XLogRecGetData(record);
 	int			msg_len = XLogRecGetDataLen(record);
 	bool		recovery_single;

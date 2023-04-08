@@ -1211,7 +1211,6 @@ retry:
 		if (slowpath_unique_check(desc, &pageFindContext, key,
 								  opOxid, &xactInfo))
 		{
-			Page		p;
 			BTreePageItemLocator *loc = &pageFindContext.items[pageFindContext.index].locator;
 			OTuple		curTuple;
 			BTreeLocationHint cbHint = {pageFindContext.items[pageFindContext.index].blkno, pageFindContext.items[pageFindContext.index].pageChangeCount};
