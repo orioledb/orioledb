@@ -277,3 +277,12 @@
    Memcheck:Cond
    fun:PGSharedMemoryCreate
 }
+
+# pg_popcount64()
+
+{
+   pg_popcount64
+   Memcheck:Cond
+   ...
+   fun:pg_popcount64_choose
+}
