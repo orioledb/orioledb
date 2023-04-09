@@ -597,7 +597,6 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 	{
 		OTuple		primaryTup;
 		OTuple		secondaryTup;
-		MemoryContext oldContext;
 
 		primaryTup = o_btree_iterator_fetch(iter, NULL, NULL,
 											BTreeKeyNone, true, NULL);
@@ -615,11 +614,8 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 
 		if (o_is_index_predicate_satisfied(idx, primarySlot, idx->econtext))
 		{
-			oldContext = MemoryContextSwitchTo(TuplesortstateGetPublic(sortstate)->tuplecontext);
 			secondaryTup = tts_orioledb_make_secondary_tuple(primarySlot,
 															 idx, true);
-			MemoryContextSwitchTo(oldContext);
-
 			index_tuples++;
 
 			o_btree_check_size_of_tuple(o_tuple_size(secondaryTup,
@@ -732,7 +728,6 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		for (i = 0; i < descr->nIndices; i++)
 		{
 			OTuple		newTup;
-			MemoryContext oldContext;
 
 			idx = descr->indices[i];
 
@@ -742,7 +737,6 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 			index_tuples[i]++;
 
-			oldContext = MemoryContextSwitchTo(TuplesortstateGetPublic(sortstates[i])->tuplecontext);
 			if (i == 0)
 			{
 				if (idx->primaryIsCtid)
@@ -759,7 +753,6 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				newTup = tts_orioledb_make_secondary_tuple(primarySlot,
 														   idx, true);
 			}
-			MemoryContextSwitchTo(oldContext);
 			o_btree_check_size_of_tuple(o_tuple_size(newTup, &idx->leafSpec),
 										idx->name.data, true);
 			tuplesort_putotuple(sortstates[i], newTup);

@@ -459,7 +459,6 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 	{
 		OTuple		tup;
 		int			length = 0;
-		MemoryContext mctx;
 
 		if (data_size < max_length)
 		{
@@ -470,10 +469,7 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 			length = max_length;
 		}
 
-		mctx = MemoryContextSwitchTo(TuplesortstateGetPublic(sortstate)->tuplecontext);
 		tup = api->createTuple(key, data, offset, length, arg);
-		MemoryContextSwitchTo(mctx);
-
 		tuplesort_putotuple(sortstate, tup);
 
 		offset += length;

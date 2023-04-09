@@ -25,20 +25,6 @@
 
 typedef struct
 {
-	void	   *tuple;			/* the tuple itself */
-	Datum		datum1;			/* value of first key column */
-	bool		isnull1;		/* is first key column NULL? */
-	uint8		flags;
-	int			srctape;		/* source tape number */
-} OSortTuple;
-
-StaticAssertDecl(sizeof(SortTuple) == sizeof(OSortTuple) &&
-				 offsetof(SortTuple, srctape) == offsetof(OSortTuple, srctape),
-				 "OSortTuple doesn't match to SortTuple");
-
-
-typedef struct
-{
 	TupleDesc	tupDesc;
 	OIndexDescr *id;
 	bool		enforceUnique;
@@ -52,8 +38,31 @@ typedef struct
 #define SortHaveRandomAccess(state) (TuplesortstateGetPublic(state)->sortopt & TUPLESORT_RANDOMACCESS)
 #endif
 
+static void
+write_o_tuple(void *ptr, OTuple tup, int tupsize)
+{
+	Pointer		p = (Pointer) ptr;
+
+	*((uint8 *) p) = tup.formatFlags;
+	p += MAXIMUM_ALIGNOF;
+	memcpy(p, tup.data, tupsize);
+}
+
+static OTuple
+read_o_tuple(void *ptr)
+{
+	OTuple		tup;
+	Pointer		p = (Pointer) ptr;
+
+	tup.formatFlags = *((uint8 *) p);
+	p += MAXIMUM_ALIGNOF;
+	tup.data = p;
+
+	return tup;
+}
+
 static int
-comparetup_orioledb_index(const SortTuple *sa, const SortTuple *sb, Tuplesortstate *state)
+comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate *state)
 {
 	TuplesortPublic *public = TuplesortstateGetPublic(state);
 	SortSupport sortKey = public->sortKeys;
@@ -70,8 +79,6 @@ comparetup_orioledb_index(const SortTuple *sa, const SortTuple *sb, Tuplesortsta
 				isnull2;
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
-	const OSortTuple *a = (const OSortTuple *) sa;
-	const OSortTuple *b = (const OSortTuple *) sb;
 
 	/* Compare the leading sort key */
 	compare = ApplySortComparator(a->datum1, a->isnull1,
@@ -81,10 +88,8 @@ comparetup_orioledb_index(const SortTuple *sa, const SortTuple *sb, Tuplesortsta
 		return compare;
 
 	/* Compare additional sort keys */
-	ltup.data = (Pointer) a->tuple;
-	ltup.formatFlags = a->flags;
-	rtup.data = (Pointer) b->tuple;
-	rtup.formatFlags = b->flags;
+	ltup = read_o_tuple(a->tuple);
+	rtup = read_o_tuple(b->tuple);
 	tupDesc = arg->tupDesc;
 
 	if (sortKey->abbrev_converter)
@@ -169,15 +174,13 @@ writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
 {
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) TuplesortstateGetPublic(state)->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
-	OSortTuple *otup = (OSortTuple *) stup;
 #if PG_VERSION_NUM < 150000
 	LogicalTapeSet *tapeset = tuplesort_get_tapeset(state);
 #endif
 	OTuple		tuple;
 	int			tuplen;
 
-	tuple.data = (Pointer) otup->tuple;
-	tuple.formatFlags = otup->flags;
+	tuple = read_o_tuple(stup->tuple);
 	tuplen = o_tuple_size(tuple, spec) + sizeof(int) + 1;
 
 	TAPEWRITE((void *) &tuplen, sizeof(tuplen));
@@ -195,27 +198,25 @@ readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
 	uint32		tuplen = len - sizeof(int) - 1;
-	Pointer		tup = (Pointer) tuplesort_readtup_alloc(state, tuplen);
+	Pointer		tup = (Pointer) tuplesort_readtup_alloc(state, MAXIMUM_ALIGNOF + tuplen);
 	OTuple		tuple;
-	OSortTuple *otup = (OSortTuple *) stup;
 #if PG_VERSION_NUM < 150000
 	LogicalTapeSet *tapeset = tuplesort_get_tapeset(state);
 #endif
 
 	/* read in the tuple proper */
-	TAPEREAD(tup, tuplen);
-	TAPEREAD(&otup->flags, 1);
+	TAPEREAD(tup + MAXIMUM_ALIGNOF, tuplen);
+	TAPEREAD(tup, 1);
 	if (SortHaveRandomAccess(state))	/* need trailing length word? */
 		TAPEREAD(&tuplen, sizeof(tuplen));
-	otup->tuple = (void *) tup;
-	tuple.data = tup;
-	tuple.formatFlags = otup->flags;
+	stup->tuple = (void *) tup;
+	tuple = read_o_tuple(tup);
 	/* set up first-column key value */
-	otup->datum1 = o_fastgetattr(tuple,
+	stup->datum1 = o_fastgetattr(tuple,
 								 public->sortKeys[0].ssup_attno,
 								 arg->tupDesc,
 								 spec,
-								 &otup->isnull1);
+								 &stup->isnull1);
 }
 
 static void
@@ -229,17 +230,16 @@ removeabbrev_orioledb_index(Tuplesortstate *state, SortTuple *stups,
 
 	for (i = 0; i < count; i++)
 	{
-		OSortTuple *otup = (OSortTuple *) &stups[i];
+		SortTuple *stup = &stups[i];
 		OTuple	tup;
 
-		tup.data = (Pointer) otup->tuple;
-		tup.formatFlags = otup->flags;
+		tup = read_o_tuple(stup->tuple);
 
-		otup->datum1 = o_fastgetattr(tup,
+		stup->datum1 = o_fastgetattr(tup,
 									 base->sortKeys[0].ssup_attno,
 									 arg->tupDesc,
 									 spec,
-									 &otup->isnull1);
+									 &stup->isnull1);
 	}
 }
 
@@ -384,16 +384,23 @@ OTuple
 tuplesort_getotuple(Tuplesortstate *state, bool forward)
 {
 	MemoryContext oldcontext = MemoryContextSwitchTo(TuplesortstateGetPublic(state)->sortcontext);
+	SortTuple	stup;
 	OTuple		result;
-	OSortTuple	otup;
 
-	if (!tuplesort_gettuple_common(state, forward, (SortTuple *) &otup))
-		otup.tuple = NULL;
+	if (!tuplesort_gettuple_common(state, forward, &stup))
+		stup.tuple = NULL;
 
 	MemoryContextSwitchTo(oldcontext);
 
-	result.data = otup.tuple;
-	result.formatFlags = otup.flags;
+	if (stup.tuple)
+	{
+		result = read_o_tuple(stup.tuple);
+	}
+	else
+	{
+		result.data = NULL;
+		result.formatFlags = 0;
+	}
 
 	return result;
 }
@@ -405,35 +412,25 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
 	MemoryContext oldcontext = MemoryContextSwitchTo(public->sortcontext);
-	OSortTuple	otup;
+	SortTuple	stup;
+	int			tupsize;
 
 	/*
 	 * Copy the given tuple into memory we control, and decrease availMem.
 	 * Then call the common code.
 	 */
-	otup.flags = tup.formatFlags;
+	tupsize = o_tuple_size(tup, spec);
+	stup.tuple = MemoryContextAlloc(public->tuplecontext, MAXIMUM_ALIGNOF + tupsize);
+	write_o_tuple(stup.tuple, tup, tupsize);
 
-	if (GetMemoryChunkContext(tup.data) == public->tuplecontext)
-	{
-		otup.tuple = tup.data;
-	}
-	else
-	{
-		int			tupsize;
-
-		tupsize = o_tuple_size(tup, spec);
-		otup.tuple = MemoryContextAlloc(public->tuplecontext, tupsize);
-		memcpy(otup.tuple, tup.data, tupsize);
-	}
-
-	otup.datum1 = o_fastgetattr(tup,
+	stup.datum1 = o_fastgetattr(tup,
 								public->sortKeys[0].ssup_attno,
 								arg->tupDesc,
 								spec,
-								&otup.isnull1);
+								&stup.isnull1);
 
-	tuplesort_puttuple_common(state, (SortTuple *) &otup,
-					public->sortKeys->abbrev_converter && !otup.isnull1);
+	tuplesort_puttuple_common(state, &stup,
+					public->sortKeys->abbrev_converter && !stup.isnull1);
 
 	MemoryContextSwitchTo(oldcontext);
 }
