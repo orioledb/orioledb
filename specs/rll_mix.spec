@@ -37,6 +37,8 @@ step "s1_select_no_key_update" { SELECT * FROM rll_test WHERE key = 1 FOR NO KEY
 step "s1_update" { UPDATE rll_test SET value = value + 10 WHERE key = 1; }
 step "s1_update_key" { UPDATE rll_test SET key = value WHERE key = 1; }
 step "s1_delete" { DELETE FROM rll_test WHERE key = 1; }
+step "s1_ioc" { INSERT INTO rll_test VALUES (1, 20, 200)
+                    ON CONFLICT (key) DO UPDATE SET key = 1; }
 
 step "s1_savepoint" { SAVEPOINT point_name_1; }
 step "s1_rollbak_to_savepoint" { ROLLBACK TO SAVEPOINT point_name_1; }
@@ -661,5 +663,4 @@ permutation "s1_begin" "s2_begin" "s3_begin"
 "s1_select_share"
 "s3_commit"
 
-
-
+permutation "s1_begin" "s1_ioc" "s2_select_key_share" "s1_commit"

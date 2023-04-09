@@ -1707,3 +1707,16 @@ key|value|uniq
 (1 row)
 
 step s3_commit: COMMIT;
+
+starting permutation: s1_begin s1_ioc s2_select_key_share s1_commit
+step s1_begin: BEGIN;
+step s1_ioc: INSERT INTO rll_test VALUES (1, 20, 200)
+                    ON CONFLICT (key) DO UPDATE SET key = 1;
+step s2_select_key_share: SELECT * FROM rll_test WHERE key = 1 FOR KEY SHARE; <waiting ...>
+step s1_commit: COMMIT;
+step s2_select_key_share: <... completed>
+key|value|uniq
+---+-----+----
+  1|    1|   1
+(1 row)
+
