@@ -845,9 +845,6 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 			}
 			else if (!O_PAGE_IS(dest, RIGHTMOST))
 			{
-				OTuple		hikey;
-				int			cmp;
-
 				BTREE_PAGE_GET_HIKEY(hikey, dest);
 				cmp = o_btree_cmp(desc, page_hikey, BTreeKeyNonLeafKey, &hikey, BTreeKeyNonLeafKey);
 				Assert(cmp <= 0);

@@ -241,7 +241,6 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 				for (i = 0; i < nfields; i++)
 				{
 					OTableIndexField *pk_field;
-					ListCell   *lc;
 
 					pk_field = &o_table->indices[PrimaryIndexNumber].fields[i];
 

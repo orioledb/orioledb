@@ -260,8 +260,6 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 		else
 		{
 			/* check for nulls in any "earlier" bytes */
-			int			i;
-
 			for (i = 0; i < byte; i++)
 			{
 				if (bp[i] != 0xFF)
@@ -351,8 +349,6 @@ o_toast_nocachegetattr(OTuple tuple,
 		else
 		{
 			/* check for nulls in any "earlier" bytes */
-			int			i;
-
 			for (i = 0; i < byte; i++)
 			{
 				if (bp[i] != 0xFF)

@@ -568,12 +568,11 @@ o_recovery_start_hook(void)
 void
 orioledb_redo(XLogReaderState *record)
 {
-	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK PG_USED_FOR_ASSERTS_ONLY;
 	Pointer		msg_start = (Pointer) XLogRecGetData(record);
 	int			msg_len = XLogRecGetDataLen(record);
 	bool		recovery_single;
 
-	Assert(info == ORIOLEDB_XLOG_CONTAINER);
+	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER);
 	recovery_single = *recovery_single_process;
 
 	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr)

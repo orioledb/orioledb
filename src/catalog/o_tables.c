@@ -532,7 +532,7 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 					OTableField *old_field, OTableField *field)
 {
 	MemoryContext oldcxt;
-	MemoryContext tbl_cxt;
+	MemoryContext tbl_cxt = OGetTableContext(o_table);
 	AttrMissing attrmiss_temp;
 	Node	   *defaultexpr;
 	AttrMissing *attrmiss = NULL;
@@ -551,8 +551,6 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 		EState	   *estate = NULL;
 		ExprContext *econtext;
 		ExprState  *exprState;
-		MemoryContext tbl_cxt;
-		MemoryContext oldcxt;
 		bool		missingIsNull = true;
 
 		pstate = make_parsestate(NULL);
@@ -563,7 +561,6 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 
 		expr2 = expression_planner((Expr *) defaultexpr);
 
-		tbl_cxt = OGetTableContext(o_table);
 		oldcxt = MemoryContextSwitchTo(tbl_cxt);
 		estate = CreateExecutorState();
 		exprState = ExecPrepareExpr(expr2, estate);
@@ -583,7 +580,6 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 		defaultexpr = (Node *) expr2;
 	}
 
-	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
 	if (attrmiss)

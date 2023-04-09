@@ -231,6 +231,7 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 				Query	   *new_query;
 				List	   *colnames;
 				RangeTblEntry *rte;
+				ListCell   *lc3;
 
 				MemoryContextSwitchTo(oldcxt);
 				new_query = makeNode(Query);
@@ -242,9 +243,9 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 				 * subquery RTE
 				 */
 				colnames = NIL;
-				foreach(lc, query->targetList)
+				foreach(lc3, query->targetList)
 				{
-					TargetEntry *tle = (TargetEntry *) lfirst(lc);
+					TargetEntry *tle = (TargetEntry *) lfirst(lc3);
 
 					if (tle->resjunk)
 						continue;

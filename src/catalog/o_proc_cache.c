@@ -877,7 +877,6 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 	SQLFunctionCachePtr fcache;
 	List	   *queryTree_list = NIL;
 	List	   *resulttlist;
-	ListCell   *lc;
 	Datum		tmp;
 	bool		isNull;
 	XLogRecPtr	cur_lsn;
@@ -1032,6 +1031,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		{
 			Node	   *n;
 			List	   *stored_query_list;
+			ListCell   *lc;
 
 			n = stringToNode(TextDatumGetCString(tmp));
 			if (IsA(n, List))
@@ -1052,6 +1052,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		else
 		{
 			List	   *raw_parsetree_list;
+			ListCell   *lc;
 
 			raw_parsetree_list = pg_parse_query(fcache->src);
 
