@@ -187,6 +187,26 @@ SELECT regexp_replace(regexp_replace(
 		': NNN',
 		'g');
 
+-- SYS_TREES_COLLATION_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(17, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_DATABASE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(18, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
 SELECT orioledb_sys_tree_check(-1111);

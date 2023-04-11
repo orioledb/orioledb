@@ -233,12 +233,13 @@ SELECT regexp_replace(regexp_replace(
 		'g');
                                 regexp_replace                                
 ------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 320                      +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 328                      +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1336)         +
-     Item 1: deleted, offset = 1664, tuple = (((NNN, (NNN), X/X, Y), 0), 256)+
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1384)         +
+     Item 1: offset = 1712, tuple = (((NNN, (NNN), X/X, N), 0), 1272)        +
+     Item 2: deleted, offset = 3048, tuple = (((NNN, (NNN), X/X, Y), 0), 264)+
                                                                              +
  
 (1 row)
@@ -410,11 +411,51 @@ SELECT regexp_replace(regexp_replace(
  
 (1 row)
 
+-- SYS_TREES_COLLATION_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(17, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+                           regexp_replace                            
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 136) +
+                                                                    +
+ 
+(1 row)
+
+-- SYS_TREES_DATABASE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(18, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+                             regexp_replace                              
+-------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean    +
+     Leftmost, Rightmost                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64             +
+     Item 0: offset = 264, tuple = ((NNN, (NNN), X/X, N), encoding: NNN)+
+                                                                        +
+ 
+(1 row)
+
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
-ERROR:  Value num must be in the range from 1 to 16
+ERROR:  Value num must be in the range from 1 to 18
 SELECT orioledb_sys_tree_check(-1111);
-ERROR:  Value num must be in the range from 1 to 16
+ERROR:  Value num must be in the range from 1 to 18
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_sys_check CASCADE;
 RESET search_path;

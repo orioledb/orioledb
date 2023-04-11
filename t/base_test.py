@@ -16,7 +16,7 @@ import inspect
 from threading import Thread
 from testgres.enums import NodeStatus
 from testgres.consts import PG_CONF_FILE
-from testgres.utils import get_pg_version
+from testgres.utils import get_pg_version, get_pg_config
 
 class BaseTest(unittest.TestCase):
 	replica = None
@@ -120,6 +120,10 @@ class BaseTest(unittest.TestCase):
 	@staticmethod
 	def get_pg_version():
 		return int(re.match(r'\d+', get_pg_version())[0])
+
+	@staticmethod
+	def pg_with_icu():
+		return re.search(r'--with-icu', get_pg_config()["CONFIGURE"]) != None
 
 	def catchup_orioledb(self, replica):
 		# wait for synchronization

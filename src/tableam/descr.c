@@ -466,7 +466,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 											   &TTSOpsOrioleDB);
 	descr->newTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
-	o_sys_cache_search_datoid = o_table->oids.datoid;
+	o_set_sys_cache_search_datoid(o_table->oids.datoid);
 	MemoryContextSwitchTo(old_context);
 }
 
@@ -959,7 +959,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid)
 {
 	OOpclass   *opclass;
 
-	o_sys_cache_search_datoid = datoid;
+	o_set_sys_cache_search_datoid(datoid);
 	opclass = o_opclass_get(opclassoid);
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;

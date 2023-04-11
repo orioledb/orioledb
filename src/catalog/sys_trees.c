@@ -313,6 +313,31 @@ static SysTreeMeta sysTreesMeta[] =
 		.undoReserveType = UndoReserveTxn,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
+	},
+	{							/* SYS_TREES_COLLATION_CACHE */
+		.keyLength = sizeof(OSysCacheToastChunkKey1),
+		.tupleLength = -1,
+		.tupleLengthFunc = o_sys_cache_toast_chunk_length,
+		.cmpFunc = o_sys_cache_toast_cmp,
+		.keyPrint = o_sys_cache_toast_key_print,
+		.tupPrint = o_sys_cache_toast_tup_print,
+		.keyToJsonb = o_sys_cache_toast_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoReserveType = UndoReserveTxn,
+		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
+	},
+	{							/* SYS_TREES_DATABASE_CACHE */
+		.keyLength = sizeof(OSysCacheKey1),
+		.tupleLength = sizeof(ODatabase),
+		.cmpFunc = o_sys_cache_cmp,
+		.keyPrint = o_sys_cache_key_print,
+		.tupPrint = o_database_cache_tup_print,
+		.keyToJsonb = o_sys_cache_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoReserveType = UndoReserveTxn,
+		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
 	}
 };
 

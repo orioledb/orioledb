@@ -864,6 +864,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTable	   *o_table;
 				CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
 				OXid		oxid = InvalidOXid;
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
 
 				fill_current_oxid_csn(&oxid, &csn);
 
@@ -874,6 +876,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 				o_table = o_table_tableam_create(oids, tupdesc);
 				o_opclass_cache_add_table(o_table);
+
+				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+				o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
 				o_tables_add(o_table, oxid, csn);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&

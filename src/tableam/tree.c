@@ -850,7 +850,7 @@ o_idx_cmp(BTreeDescr *desc,
 				n;
 	int			cmp;
 
-	o_sys_cache_search_datoid = desc->oids.datoid;
+	o_set_sys_cache_search_datoid(desc->oids.datoid);
 
 	if (!IS_BOUND_KEY_TYPE(keyType1) || !IS_BOUND_KEY_TYPE(keyType2))
 	{

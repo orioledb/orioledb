@@ -33,6 +33,7 @@
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_authid.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
@@ -129,6 +130,8 @@ o_sys_caches_init(void)
 	o_proc_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_range_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_type_cache_init(sys_cache_cxt, sys_cache_fastcache);
+	o_collation_cache_init(sys_cache_cxt, sys_cache_fastcache);
+	o_database_cache_init(sys_cache_cxt, sys_cache_fastcache);
 }
 
 static uint32
@@ -1291,6 +1294,7 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 		case AccessMethodOperatorIndexId:
 		case AccessMethodProcedureIndexId:
 		case AuthIdOidIndexId:
+		case CollationOidIndexId:
 		case OperatorClassRelationId:
 		case OperatorOidIndexId:
 		case ProcedureOidIndexId:
@@ -1362,6 +1366,17 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 				Assert(tupdesc);
 
 				hook_tuple = o_auth_cache_search_htup(tupdesc, authoid);
+			}
+			break;
+		case CollationOidIndexId:
+			{
+				Oid			colloid;
+
+				colloid = DatumGetObjectId(v1);
+
+				Assert(tupdesc);
+
+				hook_tuple = o_collation_cache_search_htup(tupdesc, colloid);
 			}
 			break;
 		case OperatorClassRelationId:
@@ -1504,6 +1519,7 @@ o_SysCacheGetAttr_hook(CatCache *SysCache)
 		case AccessMethodOperatorIndexId:
 		case AccessMethodProcedureIndexId:
 		case AuthIdOidIndexId:
+		case CollationOidIndexId:
 		case OperatorClassRelationId:
 		case OperatorOidIndexId:
 		case ProcedureOidIndexId:

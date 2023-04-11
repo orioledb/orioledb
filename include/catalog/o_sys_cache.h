@@ -33,6 +33,7 @@
 #include "miscadmin.h"
 #include "recovery/recovery.h"
 #include "utils/catcache.h"
+#include "utils/pg_locale.h"
 #include "utils/resowner_private.h"
 
 #if PG_VERSION_NUM >= 150000
@@ -564,5 +565,34 @@ extern HeapTuple o_amproc_cache_search_htup(TupleDesc tupdesc,
 											int16 amprocnum);
 extern void o_amproc_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									 OTuple tup, Pointer arg);
+
+/* o_collation_cache.c */
+O_SYS_CACHE_DECLS(collation_cache, OCollation, 1);
+extern HeapTuple o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid);
+
+/* o_database_cache.c */
+typedef struct ODatabase
+{
+	OSysCacheKey1 key;
+	int32		encoding;
+} ODatabase;
+
+O_SYS_CACHE_DECLS(database_cache, ODatabase, 1);
+extern void o_database_cache_set_database_encoding(Oid dboid);
+extern void o_database_cache_tup_print(BTreeDescr *desc, StringInfo buf,
+									   OTuple tup, Pointer arg);
+
+static inline void
+o_set_sys_cache_search_datoid(Oid datoid)
+{
+	if (o_sys_cache_search_datoid != datoid)
+	{
+		o_sys_cache_search_datoid = datoid;
+		if (is_recovery_process())
+		{
+			o_database_cache_set_database_encoding(datoid);
+		}
+	}
+}
 
 #endif							/* __O_SYS_CACHE_H__ */

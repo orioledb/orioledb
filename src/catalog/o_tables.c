@@ -31,6 +31,7 @@
 #include "catalog/heap.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_am.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -418,6 +419,18 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			exprField->align = typeTup->typalign;
 			exprField->typmod = exprTypmod(indexkey);
 			exprField->collation = exprCollation(indexkey);
+			if (OidIsValid(exprField->collation))
+			{
+				XLogRecPtr	cur_lsn;
+				Oid			datoid;
+				OClassArg	arg = {.sys_table = true};
+
+				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+				o_class_cache_add_if_needed(datoid, CollationRelationId,
+											cur_lsn, (Pointer) &arg);
+				o_collation_cache_add_if_needed(datoid, exprField->collation,
+												cur_lsn, NULL);
+			}
 
 			ReleaseSysCache(tuple);
 
@@ -499,6 +512,18 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			{
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
+		}
+		if (OidIsValid(ix_field->collation))
+		{
+			XLogRecPtr	cur_lsn;
+			Oid			datoid;
+			OClassArg	arg = {.sys_table = true};
+
+			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+			o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn,
+										(Pointer) &arg);
+			o_collation_cache_add_if_needed(datoid, ix_field->collation,
+											cur_lsn, NULL);
 		}
 	}
 }
@@ -618,6 +643,18 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc)
 		OTableField *field = &o_table->fields[i];
 
 		orioledb_attr_to_field(field, attr);
+		if (OidIsValid(field->collation))
+		{
+			XLogRecPtr	cur_lsn;
+			Oid			datoid;
+			OClassArg	arg = {.sys_table = true};
+
+			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+			o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn,
+										(Pointer) &arg);
+			o_collation_cache_add_if_needed(datoid, field->collation, cur_lsn,
+											NULL);
+		}
 	}
 	o_table->nindices = 0;
 	o_table_resize_constr(o_table);

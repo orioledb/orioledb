@@ -32,6 +32,8 @@ OBJS = src/btree/btree.o \
 	   src/catalog/o_amproc_cache.o \
 	   src/catalog/o_class_cache.o \
 	   src/catalog/o_enum_cache.o \
+	   src/catalog/o_collation_cache.o \
+	   src/catalog/o_database_cache.o \
 	   src/catalog/o_indices.o \
 	   src/catalog/o_operator_cache.o \
 	   src/catalog/o_opclass_cache.o \
