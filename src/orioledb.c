@@ -56,7 +56,7 @@
 #include "utils/rangetypes.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-
+#include "access/twophase.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -109,12 +109,30 @@ int			default_toast_compress = InvalidOCompress;
 #if PG_VERSION_NUM >= 140000
 bool		orioledb_table_description_compress = false;
 #endif
+static int 	orioledb_attr_save_1 = 100,
+			orioledb_attr_save_2 = 1000,
+			orioledb_attr_restore_1,
+			orioledb_attr_restore_2;
+#define ORIOLEDB_PREPARED_ATTRS 2
+#undef ORIOLEDB_PREPARED_MODIFY_SYSVIEW
+
+typedef struct
+{
+	int     attr1;
+	int    	attr2;
+} prepared_xact_opaque;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
+static prepared_eval_file_hook_type prev_prepared_eval_file_hook = NULL;
+static prepared_read_file_hook_type prev_prepared_read_file_hook = NULL;
+static prepared_write_file_hook_type prev_prepared_write_file_hook = NULL;
+static prepared_eval_view_hook_type prev_prepared_eval_view_hook = NULL;
+static prepared_init_view_hook_type prev_prepared_init_view_hook = NULL;
+static prepared_fill_view_hook_type prev_prepared_fill_view_hook = NULL;
 
 /*
  * Temporary memory context for BTree operations. Helps us to avoid
@@ -164,6 +182,13 @@ static ShmemItem shmemItems[] = {
 static Size orioledb_memsize(void);
 static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
+static Size orioledb_prepared_eval_file(void);
+static void orioledb_prepared_read_file(Pointer);
+static void orioledb_prepared_write_file(Pointer);
+static void orioledb_prepared_fill_view(Datum *values, bool *nulls, int nattrs);
+static void orioledb_prepared_init_view(Pointer tupdesc, int nattrs);
+static void orioledb_prepared_eval_view(int *);
+
 static bool verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
@@ -605,6 +630,20 @@ _PG_init(void)
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
 	xact_redo_hook = o_xact_redo_hook;
+	prev_prepared_eval_file_hook = prepared_eval_file_hook;
+	prepared_eval_file_hook = orioledb_prepared_eval_file;
+	prev_prepared_write_file_hook = prepared_write_file_hook;
+	prepared_write_file_hook = orioledb_prepared_write_file;
+	prev_prepared_read_file_hook = prepared_read_file_hook;
+	prepared_read_file_hook = orioledb_prepared_read_file;
+#ifdef ORIOLEDB_PREPARED_MODIFY_SYSVIEW
+	prev_prepared_eval_view_hook = prepared_eval_view_hook;
+	prepared_eval_view_hook = orioledb_prepared_eval_view;
+	prev_prepared_init_view_hook = prepared_init_view_hook;
+	prepared_init_view_hook = orioledb_prepared_init_view;
+	prev_prepared_fill_view_hook = prepared_fill_view_hook;
+	prepared_fill_view_hook = orioledb_prepared_fill_view;
+#endif
 	orioledb_setup_syscache_hooks();
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
@@ -806,6 +845,66 @@ orioledb_shmem_startup(void)
 	if (remove_old_checkpoint_files)
 		recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
 								   false);
+}
+
+static void
+orioledb_prepared_eval_view(int *nattrs)
+{
+	/* Not reentrant */
+	Assert(*nattrs == 5);
+	*nattrs += ORIOLEDB_PREPARED_ATTRS;
+	if (prev_prepared_eval_view_hook)
+		prev_prepared_eval_view_hook(nattrs);
+}
+
+/* Add extra pg_prepared_xact attr if needed */
+static void
+orioledb_prepared_init_view(Pointer tupdesc, int nattrs)
+{
+	TupleDesc desc = (TupleDesc) tupdesc;
+	TupleDescInitEntry(desc, (AttrNumber) 6, "OrioleDb_prepared_1", INT8OID, -1, 0);
+	TupleDescInitEntry(desc, (AttrNumber) 7, "OrioleDb_prepared_2", INT8OID, -1, 0);
+	if (prev_prepared_init_view_hook)
+		prev_prepared_init_view_hook(tupdesc, nattrs);
+}
+
+static void
+orioledb_prepared_fill_view (Datum *values, bool *nulls, int nattrs)
+{
+       nulls[5] = false;
+       nulls[6] = false;
+       values[5] = orioledb_attr_save_1;
+       values[6] = orioledb_attr_save_2;
+       elog(WARNING, "Attrs stored to 2pc view %d, %d", orioledb_attr_save_1, orioledb_attr_save_2);
+	   if (prev_prepared_fill_view_hook)
+		   prev_prepared_fill_view_hook(values, nulls, nattrs);
+}
+
+static Size
+orioledb_prepared_eval_file(void)
+{
+	return sizeof(prepared_xact_opaque);
+}
+
+/* Fill prepared xact information in pg_prapared and xlog with values taken from Orioledb memory */
+static void
+orioledb_prepared_write_file(Pointer opaque)
+{
+       ((prepared_xact_opaque *) opaque)->attr1 = orioledb_attr_save_1;
+       ((prepared_xact_opaque *) opaque)->attr2 = orioledb_attr_save_2;
+       elog(WARNING, "Attrs stored to 2pc/pgxact file %d, %d", orioledb_attr_save_1, orioledb_attr_save_2);
+	   if (prev_prepared_write_file_hook)
+		   prev_prepared_write_file_hook(opaque);
+}
+
+static void
+orioledb_prepared_read_file(Pointer opaque)
+{
+       orioledb_attr_restore_1 = ((prepared_xact_opaque *) opaque)->attr1;
+       orioledb_attr_restore_2 = ((prepared_xact_opaque *) opaque)->attr2;
+       elog(WARNING, "Attrs read from to 2pc/pgxact file %d, %d", orioledb_attr_restore_1, orioledb_attr_restore_2);
+	   if (prev_prepared_read_file_hook)
+		   prev_prepared_read_file_hook(opaque);
 }
 
 uint64

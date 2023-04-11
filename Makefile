@@ -242,7 +242,7 @@ check_patchset_version:
 		false; \
 	fi
 
-$(OBJS): include/utils/stopevents_defs.h check_patchset_version
+$(OBJS): include/utils/stopevents_defs.h
 
 submake-regress:
 	$(MAKE) -C $(top_builddir)/src/test/regress all
