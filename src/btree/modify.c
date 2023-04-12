@@ -1297,6 +1297,7 @@ o_btree_delete_moved_partitions(BTreeDescr *desc, Pointer key,
 								BTreeModifyCallbackInfo *callbackInfo)
 {
 	OTuple		nullTup;
+
 	O_TUPLE_SET_NULL(nullTup);
 
 	return o_btree_normal_modify(desc, BTreeOperationDelete,

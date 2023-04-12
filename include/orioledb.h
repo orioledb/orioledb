@@ -128,31 +128,31 @@ typedef struct
 } ORelOids;
 
 #if PG_VERSION_NUM >= 160000
-	typedef RelFileLocator RelFileNode;
-	#define PG_FUNCNAME_MACRO   __func__
-	#define ORelOidsSetFromRel(oids, rel) \
+typedef RelFileLocator RelFileNode;
+#define PG_FUNCNAME_MACRO   __func__
+#define ORelOidsSetFromRel(oids, rel) \
 	do { \
 		(oids).datoid = MyDatabaseId; \
 		(oids).reloid = (rel)->rd_id; \
 		(oids).relnode = (rel)->rd_locator.relNumber; \
 	} while (0)
-	#define RelIsInMyDatabase(rel) ((rel)->rd_locator.dbOid == MyDatabaseId)
-	#define RelGetNode(rel) ((rel)->rd_locator)
-	#define RelFileNodeGetNode(node) ((node)->relNumber)
-	#define IndexStmtGetOldNode(stmt) ((stmt)->oldNumber)
-	#define RelationSetNewRelfilenode(relation, persistence) \
+#define RelIsInMyDatabase(rel) ((rel)->rd_locator.dbOid == MyDatabaseId)
+#define RelGetNode(rel) ((rel)->rd_locator)
+#define RelFileNodeGetNode(node) ((node)->relNumber)
+#define IndexStmtGetOldNode(stmt) ((stmt)->oldNumber)
+#define RelationSetNewRelfilenode(relation, persistence) \
 		RelationSetNewRelfilenumber(relation, persistence)
 #else
-	#define ORelOidsSetFromRel(oids, rel) \
+#define ORelOidsSetFromRel(oids, rel) \
 	do { \
 		(oids).datoid = MyDatabaseId; \
 		(oids).reloid = (rel)->rd_id; \
 		(oids).relnode = (rel)->rd_node.relNode; \
 	} while (0)
-	#define RelIsInMyDatabase(rel) ((rel)->rd_node.dbNode == MyDatabaseId)
-	#define RelGetNode(rel) ((rel)->rd_node)
-	#define RelFileNodeGetNode(node) ((node)->relNode)
-	#define IndexStmtGetOldNode(stmt) ((stmt)->oldNode)
+#define RelIsInMyDatabase(rel) ((rel)->rd_node.dbNode == MyDatabaseId)
+#define RelGetNode(rel) ((rel)->rd_node)
+#define RelFileNodeGetNode(node) ((node)->relNode)
+#define IndexStmtGetOldNode(stmt) ((stmt)->oldNode)
 #endif
 
 #define ORelOidsIsValid(oids) (OidIsValid((oids).datoid) && OidIsValid((oids).reloid) && OidIsValid((oids).relnode))

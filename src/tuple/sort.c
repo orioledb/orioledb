@@ -230,8 +230,8 @@ removeabbrev_orioledb_index(Tuplesortstate *state, SortTuple *stups,
 
 	for (i = 0; i < count; i++)
 	{
-		SortTuple *stup = &stups[i];
-		OTuple	tup;
+		SortTuple  *stup = &stups[i];
+		OTuple		tup;
 
 		tup = read_o_tuple(stup->tuple);
 
@@ -430,7 +430,7 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 								&stup.isnull1);
 
 	tuplesort_puttuple_common(state, &stup,
-					public->sortKeys->abbrev_converter && !stup.isnull1);
+							  public->sortKeys->abbrev_converter && !stup.isnull1);
 
 	MemoryContextSwitchTo(oldcontext);
 }

@@ -185,8 +185,8 @@ o_tuple_get_last_iptr(TupleDesc desc, OTupleFixedFormatSpec *spec,
 {
 	if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 	{
-		OTupleHeader	header = (OTupleHeader) tuple.data;
-		uint8		   *bp = (uint8 *) (tuple.data + SizeOfOTupleHeader);
+		OTupleHeader header = (OTupleHeader) tuple.data;
+		uint8	   *bp = (uint8 *) (tuple.data + SizeOfOTupleHeader);
 
 		if ((header->hasnulls) && att_isnull(desc->natts - 1, bp))
 		{

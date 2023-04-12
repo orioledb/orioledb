@@ -716,7 +716,8 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 TupleDesc
 o_table_tupdesc(OTable *o_table)
 {
-	TupleDesc tupdesc;
+	TupleDesc	tupdesc;
+
 	tupdesc = o_table_fields_make_tupdesc(o_table->fields, o_table->nfields);
 	tupdesc->tdtypeid = o_table->oids.reloid;
 	return tupdesc;

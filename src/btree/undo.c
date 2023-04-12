@@ -1022,7 +1022,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 	OTupleXactInfo xactInfo;
 	bool		xactIsFinished;
 	bool		xactIsFinal;
-	RowLockMode	xactMode;
+	RowLockMode xactMode;
 	UndoLocation undoLocation;
 	UndoLocation lastLockOnlyUndoLocation;
 	BTreeLeafTuphdr curTuphdr,
@@ -1044,7 +1044,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 	}
 	else
 	{
-		CommitSeqNo		csn = XACT_INFO_MAP_CSN(xactInfo);
+		CommitSeqNo csn = XACT_INFO_MAP_CSN(xactInfo);
 
 		xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
 		xactIsFinal = (csn < my_csn);
@@ -1154,7 +1154,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			}
 			if (ROW_LOCKS_CONFLICT(xactMode, mode) &&
 				(!result || (XACT_INFO_GET_OXID(conflictTuphdr->xactInfo) == my_oxid &&
-				 XACT_INFO_GET_OXID(xactInfo) != my_oxid)))
+							 XACT_INFO_GET_OXID(xactInfo) != my_oxid)))
 			{
 				*conflictTuphdr = curTuphdr;
 				*conflictUndoLocation = curUndoLocation;
@@ -1212,7 +1212,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		}
 		else
 		{
-			CommitSeqNo		csn = XACT_INFO_MAP_CSN(xactInfo);
+			CommitSeqNo csn = XACT_INFO_MAP_CSN(xactInfo);
 
 			xactIsFinished = !COMMITSEQNO_IS_INPROGRESS(csn);
 			xactIsFinal = (csn < my_csn);

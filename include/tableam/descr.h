@@ -73,8 +73,8 @@ typedef struct
 
 typedef struct AttrNumberMap
 {
-	AttrNumber key;
-	AttrNumber value;
+	AttrNumber	key;
+	AttrNumber	value;
 } AttrNumberMap;
 
 /*
@@ -145,7 +145,7 @@ struct OIndexDescr
 	/* The maximal value of tableAttnum among the fields[] */
 	int			maxTableAttnum;
 
-	AttrNumberMap   *tbl_attnums;
+	AttrNumberMap *tbl_attnums;
 };
 
 #define OIndexKeyAttnumToTupleAttnum(keyType, idx, attnum) \

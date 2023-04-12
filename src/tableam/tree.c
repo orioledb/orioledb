@@ -277,7 +277,7 @@ hash_combine_mix_field(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 	else
 	{
 		Assert(att->attlen == -2);
-		hash = hash_combine_mix((char *)(val_ptr),
+		hash = hash_combine_mix((char *) (val_ptr),
 								strlen((char *) (val_ptr)) + 1, hash);
 	}
 

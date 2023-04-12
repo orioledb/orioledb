@@ -172,18 +172,18 @@ alloc_to_toast_vfree_detoasted(TupleTableSlot *slot)
 static void
 tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 {
-	OTableSlot	   *oslot = (OTableSlot *) slot;
-	int				natts,
-					attnum,
-					ctid_off,
-					res_ctidoff;
-	OTableDescr	   *descr = oslot->descr;
-	Datum		   *values = slot->tts_values;
-	bool		   *isnull = slot->tts_isnull;
-	bool			hastoast = false;
-	OIndexDescr	   *idx;
-	bool			index_order;
-	int				cur_tbl_attnum = 0;
+	OTableSlot *oslot = (OTableSlot *) slot;
+	int			natts,
+				attnum,
+				ctid_off,
+				res_ctidoff;
+	OTableDescr *descr = oslot->descr;
+	Datum	   *values = slot->tts_values;
+	bool	   *isnull = slot->tts_isnull;
+	bool		hastoast = false;
+	OIndexDescr *idx;
+	bool		index_order;
+	int			cur_tbl_attnum = 0;
 
 	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
 
@@ -658,8 +658,8 @@ tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot)
 static void
 tts_orioledb_init_reader(TupleTableSlot *slot)
 {
-	OTableSlot				   *oslot = (OTableSlot *) slot;
-	OIndexDescr				   *idx = oslot->descr->indices[oslot->ixnum];
+	OTableSlot *oslot = (OTableSlot *) slot;
+	OIndexDescr *idx = oslot->descr->indices[oslot->ixnum];
 
 	o_tuple_init_reader(&oslot->state, oslot->tuple,
 						idx->leafTupdesc, &idx->leafSpec);
@@ -1566,9 +1566,9 @@ tts_orioledb_modified(TupleTableSlot *oldSlot,
 					  TupleTableSlot *newSlot,
 					  Bitmapset *attrs)
 {
-	TupleDesc tupdesc = oldSlot->tts_tupleDescriptor;
-	int		attnum,
-			maxAttr;
+	TupleDesc	tupdesc = oldSlot->tts_tupleDescriptor;
+	int			attnum,
+				maxAttr;
 
 	maxAttr = bms_prev_member(attrs, -1) + FirstLowInvalidHeapAttributeNumber - 1;
 
