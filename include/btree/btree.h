@@ -83,6 +83,14 @@ typedef enum BTreeOperationType
 	BTreeOperationDelete
 } BTreeOperationType;
 
+typedef enum BTreeLeafTupleDeletedStatus
+{
+	BTreeLeafTupleNonDeleted = 0,
+	BTreeLeafTupleDeleted = 1,
+	BTreeLeafTupleMovedPartitions = 2,
+	BTreeLeafTuplePKChanged = 3
+} BTreeLeafTupleDeletedStatus;
+
 typedef struct
 {
 	Pointer		data;

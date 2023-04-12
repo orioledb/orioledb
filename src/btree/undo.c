@@ -134,7 +134,7 @@ retry:
 
 	Assert(O_PAGE_IS(p, LEAF));
 
-	if (tuphdr->deleted)
+	if (tuphdr->deleted != BTreeLeafTupleNonDeleted)
 	{
 		OTuple		prev_tuple;
 
@@ -196,7 +196,7 @@ retry:
 			PAGE_ADD_N_VACATED(p, MAXALIGN(prev_tuplen));
 			PAGE_SUB_N_VACATED(p, MAXALIGN(tuplen));
 		}
-		if (prev_header.deleted)
+		if (prev_header.deleted != BTreeLeafTupleNonDeleted)
 			PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize + MAXALIGN(tuplen));
 
 		if (!UndoLocationIsValid(nonLockUndoLocation))

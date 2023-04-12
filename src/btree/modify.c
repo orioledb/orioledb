@@ -97,7 +97,7 @@ static OBTreeModifyResult o_btree_normal_modify(BTreeDescr *desc,
 												CommitSeqNo opCsn,
 												RowLockMode lockMode,
 												BTreeLocationHint *hint,
-												bool movedPartitions,
+												BTreeLeafTupleDeletedStatus deleted,
 												BTreeModifyCallbackInfo *callbackInfo);
 
 /*
@@ -110,7 +110,8 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 						OTuple _tuple, BTreeKeyType tupleType,
 						Pointer key, BTreeKeyType keyType,
 						OXid opOxid, CommitSeqNo opCsn,
-						RowLockMode _lockMode, bool movedPartitions,
+						RowLockMode _lockMode,
+						BTreeLeafTupleDeletedStatus deleted,
 						BTreeModifyCallbackInfo *callbackInfo)
 {
 	BTreeDescr *desc = pageFindContext->desc;
@@ -141,7 +142,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	Assert(callbackInfo);
 	Assert((action != BTreeOperationInsert) || (tupleType == BTreeKeyLeafTuple));
 	Assert((action == BTreeOperationLock) || (context.lockMode >= RowLockNoKeyUpdate));
-	Assert((!movedPartitions) || (action == BTreeOperationDelete));
+	Assert((deleted == BTreeLeafTupleNonDeleted) || (action == BTreeOperationDelete));
 
 	context.pagesAreReserved = (action != BTreeOperationDelete);
 	context.undoIsReserved = (desc->undoType != UndoReserveNone);
@@ -157,8 +158,7 @@ retry:
 		desc->createOxid == opOxid &&
 		!UndoLocationIsValid(context.savepointUndoLocation))
 		context.needsUndo = false;
-	context.leafTuphdr.deleted = false;
-	context.leafTuphdr.movedPartitions = movedPartitions;
+	context.leafTuphdr.deleted = deleted;
 	context.leafTuphdr.undoLocation = InvalidUndoLocation;
 	context.leafTuphdr.formatFlags = 0;
 	context.leafTuphdr.chainHasLocks = false;
@@ -193,7 +193,7 @@ retry:
 	if (context.cmp != 0)
 		return o_btree_modify_handle_tuple_not_found(&context);
 
-	if (!tuphdr->deleted)
+	if (tuphdr->deleted == BTreeLeafTupleNonDeleted)
 	{
 		/* Existing (non-deleted) tuple is found */
 		OBTreeModifyCallbackAction cbAction = OBTreeCallbackActionDoNothing;
@@ -272,7 +272,7 @@ retry:
 		else if (action == BTreeOperationLock)
 			return o_btree_modify_lock(&context);
 	}
-	else if (tuphdr->deleted)
+	else if (tuphdr->deleted != BTreeLeafTupleNonDeleted)
 	{
 		/*
 		 * We should have set conflictTupHdr in the (cmp == 0) branch above.
@@ -288,7 +288,7 @@ retry:
 			cbAction = callbackInfo->modifyDeletedCallback(desc, curTuple,
 														   &context.tuple, opOxid,
 														   context.conflictTupHdr.xactInfo,
-														   context.conflictTupHdr.movedPartitions,
+														   context.conflictTupHdr.deleted,
 														   context.conflictTupHdr.undoLocation,
 														   &context.lockMode, &cbHint, callbackInfo->arg);
 			context.leafTuphdr.xactInfo = OXID_GET_XACT_INFO(tupleOxid, context.lockMode, false);
@@ -340,7 +340,7 @@ retry:
 				callbackInfo->modifyDeletedCallback(desc, curTuple,
 													&context.tuple, opOxid,
 													context.conflictTupHdr.xactInfo,
-													context.conflictTupHdr.movedPartitions,
+													context.conflictTupHdr.deleted,
 													context.conflictTupHdr.undoLocation,
 													&context.lockMode, NULL,
 													callbackInfo->arg);
@@ -437,7 +437,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 (!UndoLocationIsValid(context->conflictTupHdr.undoLocation) ||
 				  context->conflictTupHdr.undoLocation < context->savepointUndoLocation)) ||
 				o_btree_needs_undo(desc, context->action, curTuple, xactInfo,
-								   tuphdr->deleted, context->tuple, context->opOxid))
+								   tuphdr->deleted != BTreeLeafTupleNonDeleted,
+								   context->tuple, context->opOxid))
 			{
 				context->needsUndo = true;
 			}
@@ -571,7 +572,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 		if (csn >= context->opCsn)
 		{
-			if (tuphdr->deleted)
+			if (tuphdr->deleted != BTreeLeafTupleNonDeleted)
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("could not serialize access due to concurrent delete")));
@@ -716,7 +717,6 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 		prevTuphdr->xactInfo = tuphdr->xactInfo;
 		prevTuphdr->undoLocation = tuphdr->undoLocation;
 		prevTuphdr->deleted = tuphdr->deleted;
-		prevTuphdr->movedPartitions = tuphdr->movedPartitions;
 		prevTuphdr->chainHasLocks = tuphdr->chainHasLocks;
 	}
 	else
@@ -759,7 +759,7 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		{
 			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
 			Assert(tuphdr != NULL);
-			stillExists = !tuphdr->deleted;
+			stillExists = (tuphdr->deleted == BTreeLeafTupleNonDeleted);
 		}
 
 		if (!stillExists)
@@ -802,7 +802,6 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		prev_tuphdr->xactInfo = tuphdr->xactInfo;
 		prev_tuphdr->undoLocation = tuphdr->undoLocation;
 		prev_tuphdr->deleted = tuphdr->deleted;
-		prev_tuphdr->movedPartitions = tuphdr->movedPartitions;
 		prev_tuphdr->chainHasLocks = tuphdr->chainHasLocks;
 	}
 	else
@@ -817,8 +816,10 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
 	tuphdr->undoLocation = undoLocation;
 	tuphdr->xactInfo = context->leafTuphdr.xactInfo;
-	tuphdr->deleted = true;
-	tuphdr->movedPartitions = context->leafTuphdr.movedPartitions;
+	if (context->leafTuphdr.deleted == BTreeLeafTupleNonDeleted)
+		tuphdr->deleted = BTreeLeafTupleDeleted;
+	else
+		tuphdr->deleted = context->leafTuphdr.deleted;
 
 	PAGE_ADD_N_VACATED(page, BTREE_PAGE_GET_ITEM_SIZE(page, &loc));
 
@@ -889,7 +890,6 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 	prev_tuphdr->xactInfo = tuphdr->xactInfo;
 	prev_tuphdr->undoLocation = tuphdr->undoLocation;
 	prev_tuphdr->deleted = tuphdr->deleted;
-	prev_tuphdr->movedPartitions = tuphdr->movedPartitions;
 	prev_tuphdr->chainHasLocks = tuphdr->chainHasLocks;
 
 	START_CRIT_SECTION();
@@ -901,7 +901,7 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 	tuphdr->xactInfo = OXID_GET_XACT_INFO(context->opOxid,
 										  context->lockMode,
 										  true);
-	tuphdr->deleted = false;
+	tuphdr->deleted = BTreeLeafTupleNonDeleted;
 
 	MARK_DIRTY(desc->ppool, blkno);
 	END_CRIT_SECTION();
@@ -932,7 +932,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 					  Pointer key, BTreeKeyType keyType,
 					  OXid opOxid, CommitSeqNo opCsn,
 					  RowLockMode lockMode, BTreeLocationHint *hint,
-					  bool movedPartitions,
+					  BTreeLeafTupleDeletedStatus deleted,
 					  BTreeModifyCallbackInfo *callbackInfo)
 {
 	OBTreeFindPageContext pageFindContext;
@@ -965,7 +965,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 
 	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
 								   key, keyType, opOxid, opCsn,
-								   lockMode, movedPartitions, callbackInfo);
+								   lockMode, deleted, callbackInfo);
 }
 
 static bool
@@ -991,7 +991,7 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 		(void) find_non_lock_only_undo_record(&tuphdr);
 		if (XACT_INFO_OXID_EQ(tuphdr.xactInfo, opOxid) || XACT_INFO_IS_FINISHED(tuphdr.xactInfo))
 		{
-			if (tuphdr.deleted)
+			if (tuphdr.deleted != BTreeLeafTupleNonDeleted)
 			{
 				BTREE_PAGE_LOCATOR_NEXT(p, locator);
 				continue;
@@ -1271,7 +1271,7 @@ retry:
 	result = o_btree_modify_internal(&pageFindContext, BTreeOperationInsert,
 									 tuple, tupleType, key,
 									 keyType, opOxid, opCsn, lockMode,
-									 false, callbackInfo);
+									 BTreeLeafTupleNonDeleted, callbackInfo);
 
 	LWLockRelease(uniqueLock);
 	return result;
@@ -1286,13 +1286,13 @@ o_btree_modify(BTreeDescr *desc, BTreeOperationType action,
 {
 	return o_btree_normal_modify(desc, action, tuple, tupleType,
 								 key, keyType, oxid, csn, lockMode,
-								 hint, false, callbackInfo);
+								 hint, BTreeLeafTupleNonDeleted, callbackInfo);
 }
 
 OBTreeModifyResult
 o_btree_delete_moved_partitions(BTreeDescr *desc, Pointer key,
 								BTreeKeyType keyType, OXid oxid,
-								CommitSeqNo csn, RowLockMode lockMode,
+								CommitSeqNo csn,
 								BTreeLocationHint *hint,
 								BTreeModifyCallbackInfo *callbackInfo)
 {
@@ -1302,8 +1302,27 @@ o_btree_delete_moved_partitions(BTreeDescr *desc, Pointer key,
 
 	return o_btree_normal_modify(desc, BTreeOperationDelete,
 								 nullTup, BTreeKeyNone,
-								 key, keyType, oxid, csn, lockMode,
-								 hint, true, callbackInfo);
+								 key, keyType, oxid, csn, RowLockUpdate,
+								 hint, BTreeLeafTupleMovedPartitions,
+								 callbackInfo);
+}
+
+OBTreeModifyResult
+o_btree_delete_pk_changed(BTreeDescr *desc, Pointer key,
+						  BTreeKeyType keyType, OXid oxid,
+						  CommitSeqNo csn,
+						  BTreeLocationHint *hint,
+						  BTreeModifyCallbackInfo *callbackInfo)
+{
+	OTuple		nullTup;
+
+	O_TUPLE_SET_NULL(nullTup);
+
+	return o_btree_normal_modify(desc, BTreeOperationDelete,
+								 nullTup, BTreeKeyNone,
+								 key, keyType, oxid, csn, RowLockUpdate,
+								 hint, BTreeLeafTuplePKChanged,
+								 callbackInfo);
 }
 
 bool
@@ -1323,7 +1342,8 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 										   get_current_oxid(),
 										   COMMITSEQNO_INPROGRESS,
 										   RowLockUpdate,
-										   NULL, false, &nullCallbackInfo);
+										   NULL, BTreeLeafTupleNonDeleted,
+										   &nullCallbackInfo);
 			o_wal_insert(desc, tuple);
 		}
 		PG_CATCH();
@@ -1342,7 +1362,8 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 									   InvalidOXid,
 									   COMMITSEQNO_INPROGRESS,
 									   RowLockUpdate,
-									   NULL, false, &nullCallbackInfo);
+									   NULL, BTreeLeafTupleNonDeleted,
+									   &nullCallbackInfo);
 	}
 
 	return (result == OBTreeModifyResultInserted);
@@ -1367,7 +1388,8 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 										   NULL, BTreeKeyNone,
 										   get_current_oxid(), COMMITSEQNO_INPROGRESS,
 										   RowLockUpdate,
-										   hint, false, &nullCallbackInfo);
+										   hint, BTreeLeafTupleNonDeleted,
+										   &nullCallbackInfo);
 			if (keyType == BTreeKeyLeafTuple)
 				o_wal_delete(desc, key);
 			else if (keyType == BTreeKeyNonLeafKey)
@@ -1388,7 +1410,8 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 									   NULL, BTreeKeyNone,
 									   InvalidOXid, COMMITSEQNO_INPROGRESS,
 									   RowLockUpdate,
-									   hint, false, &nullCallbackInfo);
+									   hint, BTreeLeafTupleNonDeleted,
+									   &nullCallbackInfo);
 	}
 
 	return (result == OBTreeModifyResultDeleted);

@@ -253,8 +253,7 @@ typedef struct
 typedef struct
 {
 	OTupleXactInfo xactInfo:61,
-				deleted:1,
-				movedPartitions:1,
+				deleted:2,
 				chainHasLocks:1;
 	UndoLocation undoLocation:62,
 				formatFlags:2;

@@ -583,18 +583,18 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
      Item 2: offset = 352, tuple = ('2', '2text')                            +
      Item 3: offset = 392, tuple = ('3', '3text')                            +
      Item 4: offset = 432, tuple = ('4', '4text')                            +
-     Item 5: deleted, offset = 472, tuple = ('5', '5text')                   +
-     Item 6: deleted, offset = 512, tuple = ('6', '6text')                   +
-     Item 7: deleted, offset = 552, tuple = ('7', '7text')                   +
+     Item 5: PK changed, offset = 472, tuple = ('5', '5text')                +
+     Item 6: PK changed, offset = 512, tuple = ('6', '6text')                +
+     Item 7: PK changed, offset = 552, tuple = ('7', '7text')                +
    Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')  +
-     Item 8: deleted, offset = 608, tuple = ('8', '8text')                   +
-     Item 9: deleted, offset = 648, tuple = ('9', '9text')                   +
-     Item 10: deleted, offset = 688, tuple = ('10', '10text')                +
-     Item 11: deleted, offset = 728, tuple = ('11', '11text')                +
-     Item 12: deleted, offset = 768, tuple = ('12', '12text')                +
-     Item 13: deleted, offset = 808, tuple = ('13', '13text')                +
-     Item 14: deleted, offset = 848, tuple = ('14', '14text')                +
-     Item 15: deleted, offset = 888, tuple = ('15', '15text')                +
+     Item 8: PK changed, offset = 608, tuple = ('8', '8text')                +
+     Item 9: PK changed, offset = 648, tuple = ('9', '9text')                +
+     Item 10: PK changed, offset = 688, tuple = ('10', '10text')             +
+     Item 11: PK changed, offset = 728, tuple = ('11', '11text')             +
+     Item 12: PK changed, offset = 768, tuple = ('12', '12text')             +
+     Item 13: PK changed, offset = 808, tuple = ('13', '13text')             +
+     Item 14: PK changed, offset = 848, tuple = ('14', '14text')             +
+     Item 15: PK changed, offset = 888, tuple = ('15', '15text')             +
    Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')+
      Item 16: offset = 944, tuple = ('16', '16text')                         +
      Item 17: offset = 984, tuple = ('17', '17text')                         +
@@ -1118,18 +1118,18 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
      Item 2: offset = 352, tuple = ('2', '2text')                                    +
      Item 3: offset = 392, tuple = ('3', '3text')                                    +
      Item 4: offset = 432, tuple = ('4', '4text')                                    +
-     Item 5: deleted, offset = 472, tuple = ('5', '5text')                           +
-     Item 6: deleted, offset = 512, tuple = ('6', '6text')                           +
-     Item 7: deleted, offset = 552, tuple = ('7', '7text')                           +
+     Item 5: PK changed, offset = 472, tuple = ('5', '5text')                        +
+     Item 6: PK changed, offset = 512, tuple = ('6', '6text')                        +
+     Item 7: PK changed, offset = 552, tuple = ('7', '7text')                        +
    Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')          +
-     Item 8: deleted, offset = 608, tuple = ('8', '8text')                           +
-     Item 9: deleted, offset = 648, tuple = ('9', '9text')                           +
-     Item 10: deleted, offset = 688, tuple = ('10', '10text')                        +
-     Item 11: deleted, offset = 728, tuple = ('11', '11text')                        +
-     Item 12: deleted, offset = 768, tuple = ('12', '12text')                        +
-     Item 13: deleted, offset = 808, tuple = ('13', '13text')                        +
-     Item 14: deleted, offset = 848, tuple = ('14', '14text')                        +
-     Item 15: deleted, offset = 888, tuple = ('15', '15text')                        +
+     Item 8: PK changed, offset = 608, tuple = ('8', '8text')                        +
+     Item 9: PK changed, offset = 648, tuple = ('9', '9text')                        +
+     Item 10: PK changed, offset = 688, tuple = ('10', '10text')                     +
+     Item 11: PK changed, offset = 728, tuple = ('11', '11text')                     +
+     Item 12: PK changed, offset = 768, tuple = ('12', '12text')                     +
+     Item 13: PK changed, offset = 808, tuple = ('13', '13text')                     +
+     Item 14: PK changed, offset = 848, tuple = ('14', '14text')                     +
+     Item 15: PK changed, offset = 888, tuple = ('15', '15text')                     +
    Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')        +
      Item 16: offset = 944, tuple = ('16', '16text')                                 +
      Item 17: offset = 984, tuple = ('17', '17text')                                 +

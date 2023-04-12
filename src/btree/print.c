@@ -360,13 +360,18 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 						btree_print_backend_id(XACT_INFO_GET_OXID(tuphdr.xactInfo), outbuf, printData);
 					}
 
-					if (tuphdr.deleted)
+					if (tuphdr.deleted != BTreeLeafTupleNonDeleted)
 					{
 						if (needsComma)
 							appendStringInfo(outbuf, ", ");
 						else
 							needsComma = true;
-						appendStringInfo(outbuf, "deleted");
+						if (tuphdr.deleted == BTreeLeafTupleDeleted)
+							appendStringInfo(outbuf, "deleted");
+						else if (tuphdr.deleted == BTreeLeafTupleMovedPartitions)
+							appendStringInfo(outbuf, "moved partitions");
+						else if (tuphdr.deleted == BTreeLeafTuplePKChanged)
+							appendStringInfo(outbuf, "PK changed");
 					}
 					needsComma |= btree_print_undo_location((UndoLocation) tuphdr.undoLocation, outbuf, printData, needsComma);
 

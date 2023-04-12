@@ -102,7 +102,7 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 
 			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, img, &loc);
 			finished = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
-			if (finished && tupHdr->deleted)
+			if (finished && tupHdr->deleted != BTreeLeafTupleNonDeleted)
 			{
 				left_count--;
 				continue;
@@ -314,9 +314,9 @@ put_tuple_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 	BTreeLeafTuphdr leaf_header = {0};
 	int			tuplesize;
 
-	leaf_header.deleted = false;
+	leaf_header.deleted = BTreeLeafTupleNonDeleted;
 	leaf_header.undoLocation = InvalidUndoLocation;
-	leaf_header.xactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, RowLockUpdate, false);;
+	leaf_header.xactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, RowLockUpdate, false);
 	tuplesize = o_btree_len(desc, tuple, OTupleLength);
 	return put_item_to_stack(desc, stack, 0,
 							 tuple, tuplesize, (Pointer) &leaf_header,

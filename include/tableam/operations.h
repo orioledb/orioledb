@@ -61,10 +61,9 @@ typedef struct
 	OXid		oxid;
 	CommitSeqNo csn;
 	UndoLocation tup_undo_location;
-	bool		deleted;
+	BTreeLeafTupleDeletedStatus deleted;
 	bool		modified;
 	bool		changingPart;
-	bool		movedPartitions;
 	Bitmapset  *keyAttrs;
 	int			options;
 } OModifyCallbackArg;

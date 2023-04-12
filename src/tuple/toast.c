@@ -490,7 +490,8 @@ o_update_callback(BTreeDescr *descr,
 static OBTreeModifyCallbackAction
 o_update_deleted_callback(BTreeDescr *descr,
 						  OTuple tup, OTuple *newtup, OXid oxid,
-						  OTupleXactInfo xactInfo, bool movedPartitions,
+						  OTupleXactInfo xactInfo,
+						  BTreeLeafTupleDeletedStatus deleted,
 						  UndoLocation location, RowLockMode *lock_mode,
 						  BTreeLocationHint *hint, void *arg)
 {

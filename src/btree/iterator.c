@@ -165,9 +165,9 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 					*outCsn = COMMITSEQNO_INPROGRESS;
 
 				if (deleted)
-					*deleted = tupHdr->deleted;
+					*deleted = (tupHdr->deleted != BTreeLeafTupleNonDeleted);
 
-				if (!tupHdr->deleted)
+				if (tupHdr->deleted == BTreeLeafTupleNonDeleted)
 				{
 					result_size = o_btree_len(desc, curTuple, OTupleLength);
 					result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
@@ -198,7 +198,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		cmp = o_btree_cmp(desc, key, kind, &curTuple, BTreeKeyLeafTuple);
 
 		if (deleted)
-			*deleted = tupHdr->deleted;
+			*deleted = (tupHdr->deleted != BTreeLeafTupleNonDeleted);
 
 		if (cmp == 0)
 			return o_find_tuple_version(desc, img, &loc, readCsn, outCsn,
@@ -315,7 +315,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			return result;
 		}
 
-		if (tupHdr.deleted || XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
+		if (tupHdr.deleted != BTreeLeafTupleNonDeleted ||
+			XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
 		{
 			get_prev_leaf_header_from_undo(&tupHdr, true);
 		}
@@ -332,14 +333,15 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 	if (COMMITSEQNO_IS_NON_DELETED(csn))
 	{
-		if (tupHdr.deleted && XACT_INFO_IS_FINISHED(tupHdr.xactInfo))
+		if (tupHdr.deleted != BTreeLeafTupleNonDeleted &&
+			XACT_INFO_IS_FINISHED(tupHdr.xactInfo))
 		{
 			O_TUPLE_SET_NULL(result);
 			MemoryContextSwitchTo(prevMctx);
 			return result;
 		}
 	}
-	else if (tupHdr.deleted && !cb)
+	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !cb)
 	{
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
@@ -879,7 +881,7 @@ btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
 				}
 			}
 
-			if (!tupHdr->deleted)
+			if (tupHdr->deleted == BTreeLeafTupleNonDeleted)
 			{
 				if (hint)
 				{

@@ -1221,7 +1221,7 @@ OBTreeModifyCallbackAction
 recovery_insert_deleted_primary_callback(BTreeDescr *descr,
 										 OTuple tup, OTuple *newtup, OXid oxid,
 										 OTupleXactInfo xactInfo,
-										 bool movedPartitions,
+										 BTreeLeafTupleDeletedStatus deleted,
 										 UndoLocation location, RowLockMode *lock_mode,
 										 BTreeLocationHint *hint, void *arg)
 {
@@ -1235,7 +1235,7 @@ OBTreeModifyCallbackAction
 recovery_delete_deleted_primary_callback(BTreeDescr *descr,
 										 OTuple tup, OTuple *newtup, OXid oxid,
 										 OTupleXactInfo xactInfo,
-										 bool movedPartitions,
+										 BTreeLeafTupleDeletedStatus deleted,
 										 UndoLocation location,
 										 RowLockMode *lock_mode,
 										 BTreeLocationHint *hint, void *arg)
@@ -1253,7 +1253,7 @@ OBTreeModifyCallbackAction
 recovery_insert_deleted_overwrite_callback(BTreeDescr *descr,
 										   OTuple tup, OTuple *newtup, OXid oxid,
 										   OTupleXactInfo xactInfo,
-										   bool movedPartitions,
+										   BTreeLeafTupleDeletedStatus deleted,
 										   UndoLocation location,
 										   RowLockMode *lock_mode,
 										   BTreeLocationHint *hint, void *arg)
@@ -1268,7 +1268,7 @@ OBTreeModifyCallbackAction
 recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
 										   OTuple tup, OTuple *newtup, OXid oxid,
 										   OTupleXactInfo xactInfo,
-										   bool movedPartitions,
+										   BTreeLeafTupleDeletedStatus deleted,
 										   UndoLocation location,
 										   RowLockMode *lock_mode,
 										   BTreeLocationHint *hint, void *arg)
@@ -1283,7 +1283,7 @@ static OBTreeModifyCallbackAction
 recovery_insert_deleted_systree_callback(BTreeDescr *descr,
 										 OTuple tup, OTuple *newtup, OXid oxid,
 										 OTupleXactInfo xactInfo,
-										 bool movedPartitions,
+										 BTreeLeafTupleDeletedStatus deleted,
 										 UndoLocation location, RowLockMode *lock_mode,
 										 BTreeLocationHint *hint, void *arg)
 {

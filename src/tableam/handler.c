@@ -391,7 +391,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.scanSlot = oldSlot;
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
-	marg.movedPartitions = false;
+	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
 
@@ -410,7 +410,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 		tmfd->traversed = false;
 	}
 
-	if (marg.movedPartitions)
+	if (marg.deleted == BTreeLeafTupleMovedPartitions)
 	{
 		tmfd->traversed = true;
 		ItemPointerSetMovedPartitions(&tmfd->ctid);
@@ -486,7 +486,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.scanSlot = oldSlot;
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
-	marg.movedPartitions = false;
+	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.newSlot = (OTableSlot *) slot;
 	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
@@ -502,7 +502,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	else
 		tmfd->traversed = false;
 
-	if (marg.movedPartitions)
+	if (marg.deleted == BTreeLeafTupleMovedPartitions)
 	{
 		tmfd->traversed = true;
 		ItemPointerSetMovedPartitions(&tmfd->ctid);
