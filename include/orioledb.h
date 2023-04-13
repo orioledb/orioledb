@@ -67,8 +67,10 @@ typedef uint32 OInMemoryBlkno;
 
 /* Undo log location */
 typedef uint64 UndoLocation;
-#define	InvalidUndoLocation		UINT64CONST(0x3FFFFFFFFFFFFFFF)
-#define UndoLocationIsValid(loc)	((loc) != InvalidUndoLocation)
+#define	InvalidUndoLocation		UINT64CONST(0x2000000000000000)
+#define	UndoLocationValueMask	UINT64CONST(0x1FFFFFFFFFFFFFFF)
+#define UndoLocationIsValid(loc)	(((loc) & InvalidUndoLocation) == 0)
+#define UndoLocationGetValue(loc)	((loc) & UndoLocationValueMask)
 
 /* Identifier for orioledb transaction */
 typedef uint64 OXid;

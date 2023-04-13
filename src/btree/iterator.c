@@ -19,6 +19,7 @@
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
+#include "catalog/sys_trees.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
@@ -290,7 +291,15 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			{
 				if (COMMITSEQNO_IS_INPROGRESS(csn))
 					break;
+
+				/*
+				 * We see the changes made by our transaction.  Exception are
+				 * changes made by current command unless we're dealing with
+				 * system tree.
+				 */
 				if (XACT_INFO_GET_OXID(xactInfo) == get_current_oxid_if_any() &&
+					(UndoLocationGetValue(tupHdr.undoLocation) <= saved_undo_location ||
+					 IS_SYS_TREE_OIDS(desc->oids)) &&
 					csn != COMMITSEQNO_MAX_NORMAL)
 					break;
 			}

@@ -688,6 +688,7 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 {
 	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
 	BTreeDescr *desc = pageFindContext->desc;
+	BTreeLeafTuphdr *leafTuphdr = &context->leafTuphdr;
 	UndoLocation undoLocation = InvalidUndoLocation;
 	OInMemoryBlkno blkno;
 	BTreePageItemLocator loc;
@@ -701,7 +702,6 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 	{
 		/* Make undo item and connect it with page tuple */
 		OTuple		curTuple;
-		BTreeLeafTuphdr *leafTuphdr = &context->leafTuphdr;
 		BTreeLeafTuphdr *prevTuphdr;
 		BTreeLeafTuphdr *tuphdr;
 
@@ -726,6 +726,7 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								BTreeOperationInsert, blkno,
 								O_PAGE_GET_CHANGE_COUNT(page),
 								&undoLocation);
+		leafTuphdr->undoLocation = InvalidUndoLocation | undoLocation;
 	}
 }
 
