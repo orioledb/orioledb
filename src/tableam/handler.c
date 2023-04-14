@@ -400,6 +400,13 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	mres = o_tbl_delete(descr, &pkey, oxid,
 						snapshot->snapshotcsn, &hint, &marg);
 
+	if (mres.self_modified)
+	{
+		tmfd->xmax = GetCurrentTransactionId();
+		tmfd->cmax = GetCurrentCommandId(true);
+		return TM_SelfModified;
+	}
+
 	if (marg.modified)
 	{
 		rowid_set_csn(GET_PRIMARY(descr), tupleid, marg.csn);
@@ -426,16 +433,8 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 
 	o_check_tbl_delete_mres(mres, descr, relation);
 
-	if (mres.self_modified)
-	{
-		tmfd->xmax = GetCurrentTransactionId();
-		tmfd->cmax = GetCurrentCommandId(true);
-	}
-	else
-	{
-		tmfd->xmax = InvalidTransactionId;
-		tmfd->cmax = InvalidCommandId;
-	}
+	tmfd->xmax = InvalidTransactionId;
+	tmfd->cmax = InvalidCommandId;
 
 	if (mres.success)
 	{
@@ -494,6 +493,13 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	mres = o_tbl_update(descr, slot, &old_pkey, relation,
 						oxid, snapshot->snapshotcsn, &hint, &marg);
 
+	if (mres.self_modified)
+	{
+		tmfd->xmax = GetCurrentTransactionId();
+		tmfd->cmax = GetCurrentCommandId(true);
+		return TM_SelfModified;
+	}
+
 	if (marg.modified)
 	{
 		rowid_set_csn(GET_PRIMARY(descr), tupleid, marg.csn);
@@ -522,18 +528,8 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 		return TM_Updated;
 	}
 
-	if (mres.self_modified)
-	{
-		tmfd->xmax = GetCurrentTransactionId();
-		tmfd->cmax = GetCurrentCommandId(true);
-		return TM_SelfModified;
-	}
-	else
-	{
-		tmfd->xmax = InvalidTransactionId;
-		tmfd->cmax = InvalidCommandId;
-	}
-
+	tmfd->xmax = InvalidTransactionId;
+	tmfd->cmax = InvalidCommandId;
 	o_check_tbl_update_mres(mres, descr, relation, slot);
 
 	bms_free(marg.keyAttrs);
