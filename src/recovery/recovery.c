@@ -1418,6 +1418,8 @@ orioledb_recovery_synchronized(PG_FUNCTION_ARGS)
 	if (ptr != recovery_get_retain_ptr())
 		PG_RETURN_BOOL(false);
 
+	WakeupRecovery();
+
 	if (ptr != pg_atomic_read_u64(recovery_finished_list_ptr))
 		PG_RETURN_BOOL(false);
 
