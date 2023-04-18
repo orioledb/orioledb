@@ -105,6 +105,7 @@ REGRESSCHECKS = btree_sys_check \
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
 				  btree_print_backend_id \
+				  concurrent_update_delete \
 				  fkeys \
 				  included \
 				  insert_fails \
