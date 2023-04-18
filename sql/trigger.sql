@@ -116,6 +116,34 @@ COPY o_test_copy_trigger (val_1, val_2, val_3, val_4, val_5) from stdin;
 
 SELECT * FROM o_test_copy_trigger;
 
+BEGIN;
+
+CREATE TABLE o_test_alter_type_after_update (
+  val_1 int PRIMARY KEY,
+  val_2 text
+) USING orioledb;
+
+CREATE FUNCTION alter_type_after_update_trigger() RETURNS TRIGGER
+AS $$
+BEGIN
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trig_1
+  AFTER UPDATE ON o_test_alter_type_after_update
+  REFERENCING OLD TABLE AS a NEW TABLE AS b
+  FOR EACH STATEMENT EXECUTE PROCEDURE alter_type_after_update_trigger();
+
+INSERT INTO o_test_alter_type_after_update VALUES (1, '1'), (2, '2'), (3, '3');
+
+ALTER TABLE o_test_alter_type_after_update
+	ALTER COLUMN val_2 TYPE int USING val_2::integer;
+
+UPDATE o_test_alter_type_after_update SET val_2 = val_2 + 1;
+
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA trigger CASCADE;
 RESET search_path;
