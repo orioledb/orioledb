@@ -214,6 +214,46 @@ SELECT * FROM o_test_partition_pkey_update;
 SELECT * FROM o_test_partition_pkey_update_child;
 COMMIT;
 
+CREATE TABLE o_test_partition_multiple_moves (
+  val_1 int,
+  val_2 int,
+  val_3 int
+) PARTITION BY LIST (val_1);
+
+CREATE TABLE o_test_partition_multiple_moves_child1 (
+  val_1 int,
+  val_2 int,
+  val_3 int
+) USING orioledb;
+
+ALTER TABLE o_test_partition_multiple_moves
+	ATTACH PARTITION o_test_partition_multiple_moves_child1 FOR VALUES IN (1);
+
+CREATE TABLE o_test_partition_multiple_moves_child2 (
+  val_1 int,
+  val_2 int,
+  val_3 int
+) USING orioledb;
+
+ALTER TABLE o_test_partition_multiple_moves
+	ATTACH PARTITION o_test_partition_multiple_moves_child2 FOR VALUES IN (2);
+
+INSERT INTO o_test_partition_multiple_moves VALUES (1, 1, 60);
+
+CREATE TABLE o_test_partition_multiple_moves_from (
+  val int
+) USING orioledb;
+
+INSERT INTO o_test_partition_multiple_moves_from VALUES (1), (1);
+
+SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
+
+UPDATE o_test_partition_multiple_moves t1 SET val_1 = 2
+	FROM o_test_partition_multiple_moves_from t4
+	WHERE t1.val_1 = t4.val AND val_1 = 1;
+
+SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;
 RESET search_path;
