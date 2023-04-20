@@ -116,6 +116,7 @@ OrioleDB is currently in the development stage.  Therefore it has the following 
  6. Row-level concurrency in OrioleDB has some [differences](row_concurrency.md).
  7. OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we doesn't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
  8. `REINDEX CONCURRENTLY` now is not supported.
+ 9. OrioleDB tables doesn't support `Sample Scans` yet.
 
 Data deletion
 -------------

@@ -353,6 +353,18 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 					IsA(path, Path) ||
 					IsA(path, BitmapHeapPath))
 				{
+					if (IsA(path, Path) && path->pathtype == T_SampleScan)
+					{
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("orioledb table \"%s\" does not "
+										"support TABLESAMPLE",
+										RelationGetRelationName(relation))),
+								errdetail("Sample scan is not supported for "
+										  "OrioleDB tables yet. Please send a "
+										  "bug report."));
+					}
+
 					if (!IsA(path, Path))
 						rel->pathlist = list_delete_nth_cell(rel->pathlist, i);
 					else

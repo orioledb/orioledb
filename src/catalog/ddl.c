@@ -510,7 +510,8 @@ reindex_concurrently_not_supported(Relation tbl)
 	ereport(ERROR,
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 			errmsg("orioledb table \"%s\" does not support "
-				   "REINDEX CONCURRENTLY", tbl->rd_rel->relname.data)),
+				   "REINDEX CONCURRENTLY",
+				   RelationGetRelationName(tbl))),
 			errdetail("REINDEX CONCURRENTLY is not supported for "
 					  "OrioleDB tables yet. Please send a bug report."));
 }
