@@ -10,7 +10,7 @@ setup
         val_6 int,
         val_7 int
     )USING orioledb;
-    
+
     INSERT INTO o_test_1(val_1, val_2, val_3, val_4, val_6, val_7)
         (SELECT val_1, val_1 + 100, val_1, val_1 + 50, val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
 
@@ -20,12 +20,12 @@ setup
         val_1 int,
         val_2 int
     )USING orioledb;
-    
+
     INSERT INTO o_test_2(val_1, val_2)
         (SELECT val_1, val_1 + 100 FROM generate_series(1, 10) AS val_1);
 
 }
- 
+
 teardown
 {
     DROP TABLE IF EXISTS o_test_1;
@@ -51,7 +51,6 @@ step "s1_alter_add" { ALTER TABLE o_test_1 ADD COLUMN val_5 int;}
 step "s1_insert" { INSERT INTO o_test_1
         (SELECT val_1, val_1 + 100 FROM generate_series(1, 10) AS val_1); }
 step "s1_vacuum" { VACUUM o_test_1; }
-step "s1_vacuum_full" { VACUUM (FULL) o_test_1; }
 step "s1_rollback" { ROLLBACK; }
 step "s1_truncate" { TRUNCATE o_test_1; }
 step "s1_drop_table_1" { DROP TABLE IF EXISTS o_test_1; }
@@ -99,7 +98,6 @@ permutation "s1_begin" "s2_begin" "s1_lock_access_exclusive_1" "s2_lock_access_s
 
 permutation "s1_begin" "s2_begin" "s1_lock_access_exclusive_1" "s2_lock_access_share_1" "s1_drop_table_1" "s1_commit" "s2_commit"
 permutation "s1_begin" "s2_begin" "s1_lock_access_exclusive_1" "s2_lock_access_share_1" "s1_alter_add" "s1_commit" "s2_commit"
-permutation "s2_begin" "s2_lock_access_exclusive_1" "s2_lock_row_share_1" "s1_vacuum_full" "s2_commit"
 permutation "s1_begin" "s2_begin" "s1_lock_access_exclusive_1" "s1_insert" "s2_lock_row_share_1" "s1_alter_rename" "s1_commit" "s2_commit"
 
 permutation "s1_begin" "s2_begin" "s2_insert" "s1_lock_access_exclusive_1" "s2_lock_row_exclusive_1" "s2_commit" "s1_truncate" "s1_commit"

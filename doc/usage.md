@@ -114,6 +114,7 @@ OrioleDB is currently in the development stage.  Therefore it has the following 
  4. OrioleDB supports just B-tree indexes.  OrioleDB roadmap contains the implementation of analogs of GiST, GIN, and BRIN.
  5. OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
  6. Row-level concurrency in OrioleDB has some [differences](row_concurrency.md).
+ 7. OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we doesn't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
 
 Data deletion
 -------------

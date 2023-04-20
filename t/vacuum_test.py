@@ -3,52 +3,46 @@ from .base_test import BaseTest
 from testgres.connection import DatabaseError
 
 class VacuumTest(BaseTest):
-	def test_2(self):
+	def test_vacuum_parallel(self):
 		node = self.node
 		node.start()
-		with self.assertRaises(DatabaseError) as e:
-			node.safe_psql("""
-				CREATE EXTENSION IF NOT EXISTS orioledb;
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
 
-				CREATE TABLE o_test_1(
-					val_1 int,
-					val_2 int
-				)USING orioledb;
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
 
-				INSERT INTO o_test_1
-					(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
-			""")
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
+		""")
 
-			con1 = node.connect(autocommit=True)
-			con1.execute("VACUUM (FULL, PARALLEL 1) o_test_1;")
-
-		self.assertErrorMessageEquals(e, "VACUUM FULL cannot be performed in parallel")
+		con1 = node.connect(autocommit=True)
+		con1.execute("VACUUM (PARALLEL 1) o_test_1;")
 		con1.close()
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 		node.stop()
 
-	def test_3(self):
+	def test_vacuum_disable_page_skipping(self):
 		node = self.node
 		node.start()
-		with self.assertRaises(DatabaseError) as e:
-			node.safe_psql("""
-				CREATE EXTENSION IF NOT EXISTS orioledb;
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
 
-				CREATE TABLE o_test_1(
-					val_1 int,
-					val_2 int
-				)USING orioledb;
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
 
-				INSERT INTO o_test_1
-					(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
-			""")
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
+		""")
 
-			con1 = node.connect(autocommit=True)
-			con1.execute("VACUUM (FULL, DISABLE_PAGE_SKIPPING) o_test_1;")
-
-		self.assertErrorMessageEquals(e, "VACUUM option DISABLE_PAGE_SKIPPING cannot be used with FULL")
+		con1 = node.connect(autocommit=True)
+		con1.execute("VACUUM (DISABLE_PAGE_SKIPPING) o_test_1;")
 		con1.close()
 		node.stop(['-m', 'immediate'])
 
@@ -212,4 +206,103 @@ class VacuumTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 
 		node.start()
+		node.stop()
+
+	def test_vacuum_full(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
+
+			CREATE TABLE pg_test_1 (
+				val_1 int,
+				val_2 int
+			) USING heap;
+
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
+			INSERT INTO pg_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
+		""")
+
+		# We doesn't break VACUUM FULL for postgres tables
+		_, _, err = node.psql("""
+			VACUUM (FULL, VERBOSE) pg_test_1;
+		""")
+		self.assertTrue(err.decode("utf-8").split("\n")[0].find("pg_test_1"))
+
+		# Simple VACUUM works for both tables
+		_, _, err = node.psql("""
+			VACUUM pg_test_1, o_test_1;
+		""")
+		self.assertEqual(err.decode("utf-8"), "")
+
+		# Error for orioledb tables
+		_, _, err = node.psql("""
+			VACUUM (FULL, VERBOSE) o_test_1;
+		""")
+		self.assertEqual(err.decode("utf-8").split("\n")[0],
+						 "ERROR:  orioledb table \"o_test_1\" does " +
+						 "not support VACUUM FULL")
+
+		# Error if at least one table is orioledb
+		_, _, err = node.psql("""
+			VACUUM (FULL, VERBOSE) pg_test_1, o_test_1;
+		""")
+		self.assertEqual(err.decode("utf-8").split("\n")[0],
+						 "ERROR:  orioledb table \"o_test_1\" does " +
+						 "not support VACUUM FULL")
+
+		# Error if no table specified
+		_, _, err = node.psql("""
+			VACUUM (FULL, VERBOSE);
+		""")
+		self.assertEqual(err.decode("utf-8").split("\n")[0],
+						 "ERROR:  orioledb table \"o_test_1\" does " +
+						 "not support VACUUM FULL")
+		node.stop()
+
+	def test_cluster(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int
+			)USING orioledb;
+
+			CREATE TABLE pg_test_1 (
+				val_1 int,
+				val_2 int
+			) USING heap;
+
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
+			INSERT INTO pg_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
+
+			CREATE INDEX o_ind_1 ON o_test_1 (val_1);
+			CREATE INDEX pg_ind_1 ON pg_test_1 (val_1);
+		""")
+
+		# We doesn't break CLUSTER for postgres tables
+		_, _, err = node.psql("""
+			CLUSTER VERBOSE pg_test_1 USING pg_ind_1;
+		""")
+		self.assertTrue(err.decode("utf-8").split("\n")[0].find("pg_test_1"))
+
+		# Error for orioledb tables
+		_, _, err = node.psql("""
+			CLUSTER VERBOSE o_test_1 USING o_ind_1;
+		""")
+		self.assertEqual(err.decode("utf-8").split("\n")[0],
+						 "ERROR:  orioledb tables does not support CLUSTER")
+
 		node.stop()

@@ -224,15 +224,6 @@ step s1_commit: COMMIT;
 step s2_lock_access_share_1: <... completed>
 step s2_commit: COMMIT;
 
-starting permutation: s2_begin s2_lock_access_exclusive_1 s2_lock_row_share_1 s1_vacuum_full s2_commit
-step s2_begin: BEGIN;
-step s2_lock_access_exclusive_1: LOCK TABLE o_test_1 IN ACCESS EXCLUSIVE MODE;
-step s2_lock_row_share_1: LOCK TABLE o_test_1 IN ROW SHARE MODE;
-step s1_vacuum_full: VACUUM (FULL) o_test_1; <waiting ...>
-step s2_commit: COMMIT;
-step s1_vacuum_full: <... completed>
-ERROR:  Not implemented: orioledb_relation_copy_for_cluster
-
 starting permutation: s1_begin s2_begin s1_lock_access_exclusive_1 s1_insert s2_lock_row_share_1 s1_alter_rename s1_commit s2_commit
 step s1_begin: BEGIN;
 step s2_begin: BEGIN;

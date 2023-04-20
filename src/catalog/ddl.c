@@ -52,6 +52,7 @@
 #include "commands/matview.h"
 #include "commands/prepare.h"
 #include "commands/tablespace.h"
+#include "commands/vacuum.h"
 #include "commands/view.h"
 #include "commands/tablecmds.h"
 #include "fmgr.h"
@@ -293,6 +294,209 @@ is_alter_table_partition(PlannedStmt *pstmt)
 	return false;
 }
 
+
+/*
+ * Given a VacuumRelation, fill in the table OID if it wasn't specified,
+ * and optionally add VacuumRelations for partitions of the table.
+ *
+ * If a VacuumRelation does not have an OID supplied and is a partitioned
+ * table, an extra entry will be added to the output for each partition.
+ * Presently, only autovacuum supplies OIDs when calling vacuum(), and
+ * it does not want us to expand partitioned tables.
+ */
+static List *
+expand_vacuum_rel(VacuumRelation *vrel, int options)
+{
+	List	   *vacrels = NIL;
+
+	/* If caller supplied OID, there's nothing we need do here. */
+	if (OidIsValid(vrel->oid))
+	{
+		vacrels = lappend(vacrels, vrel);
+	}
+	else
+	{
+		/* Process a specific relation, and possibly partitions thereof */
+		Oid			relid;
+		HeapTuple	tuple;
+		Form_pg_class classForm;
+		bool		include_parts;
+		int			rvr_opts;
+
+		/*
+		 * We transiently take AccessShareLock to protect the syscache lookup
+		 * below, as well as find_all_inheritors's expectation that the caller
+		 * holds some lock on the starting relation.
+		 */
+		rvr_opts = (options & VACOPT_SKIP_LOCKED) ? RVR_SKIP_LOCKED : 0;
+		relid = RangeVarGetRelidExtended(vrel->relation,
+										 AccessShareLock,
+										 rvr_opts,
+										 NULL, NULL);
+
+		/*
+		 * If the lock is unavailable, emit the same log statement that
+		 * vacuum_rel() and analyze_rel() would.
+		 */
+		if (!OidIsValid(relid))
+		{
+			if (options & VACOPT_VACUUM)
+				ereport(WARNING,
+						(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+						 errmsg("skipping vacuum of \"%s\" --- lock not available",
+								vrel->relation->relname)));
+			else
+				ereport(WARNING,
+						(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+						 errmsg("skipping analyze of \"%s\" --- lock not available",
+								vrel->relation->relname)));
+			return vacrels;
+		}
+
+		/*
+		 * To check whether the relation is a partitioned table and its
+		 * ownership, fetch its syscache entry.
+		 */
+		tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for relation %u", relid);
+		classForm = (Form_pg_class) GETSTRUCT(tuple);
+
+#if PG_VERSION_NUM >= 160000
+		/*
+		 * Make a returnable VacuumRelation for this rel if the user has the
+		 * required privileges.
+		 */
+		if (vacuum_is_permitted_for_relation(relid, classForm, options))
+		{
+			vacrels = lappend(vacrels, makeVacuumRelation(vrel->relation,
+														  relid,
+														  vrel->va_cols));
+		}
+#else
+		/*
+		 * Make a returnable VacuumRelation for this rel if user is a proper
+		 * owner.
+		 */
+		if (vacuum_is_relation_owner(relid, classForm, options))
+		{
+			vacrels = lappend(vacrels, makeVacuumRelation(vrel->relation,
+														  relid,
+														  vrel->va_cols));
+		}
+#endif
+
+
+		include_parts = (classForm->relkind == RELKIND_PARTITIONED_TABLE);
+		ReleaseSysCache(tuple);
+
+		/*
+		 * If it is, make relation list entries for its partitions.  Note that
+		 * the list returned by find_all_inheritors() includes the passed-in
+		 * OID, so we have to skip that.  There's no point in taking locks on
+		 * the individual partitions yet, and doing so would just add
+		 * unnecessary deadlock risk.  For this last reason we do not check
+		 * yet the ownership of the partitions, which get added to the list to
+		 * process.  Ownership will be checked later on anyway.
+		 */
+		if (include_parts)
+		{
+			List	   *part_oids = find_all_inheritors(relid, NoLock, NULL);
+			ListCell   *part_lc;
+
+			foreach(part_lc, part_oids)
+			{
+				Oid			part_oid = lfirst_oid(part_lc);
+
+				if (part_oid == relid)
+					continue;	/* ignore original table */
+
+				/*
+				 * We omit a RangeVar since it wouldn't be appropriate to
+				 * complain about failure to open one of these relations
+				 * later.
+				 */
+				vacrels = lappend(vacrels, makeVacuumRelation(NULL,
+															  part_oid,
+															  vrel->va_cols));
+			}
+		}
+
+		/*
+		 * Release lock again.  This means that by the time we actually try to
+		 * process the table, it might be gone or renamed.  In the former case
+		 * we'll silently ignore it; in the latter case we'll process it
+		 * anyway, but we must beware that the RangeVar doesn't necessarily
+		 * identify it anymore.  This isn't ideal, perhaps, but there's little
+		 * practical alternative, since we're typically going to commit this
+		 * transaction and begin a new one between now and then.  Moreover,
+		 * holding locks on multiple relations would create significant risk
+		 * of deadlock.
+		 */
+		UnlockRelationOid(relid, AccessShareLock);
+	}
+
+	return vacrels;
+}
+
+/*
+ * Construct a list of VacuumRelations for all vacuumable rels in
+ * the current database.
+ */
+static List *
+get_all_vacuum_rels(int options)
+{
+	List	   *vacrels = NIL;
+	Relation	pgclass;
+	TableScanDesc scan;
+	HeapTuple	tuple;
+
+	pgclass = table_open(RelationRelationId, AccessShareLock);
+
+	scan = table_beginscan_catalog(pgclass, 0, NULL);
+
+	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+	{
+		Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
+		Oid			relid = classForm->oid;
+
+#if PG_VERSION_NUM < 160000
+		/* check permissions of relation */
+		if (!vacuum_is_relation_owner(relid, classForm, options))
+			continue;
+#endif
+
+		/*
+		 * We include partitioned tables here; depending on which operation is
+		 * to be performed, caller will decide whether to process or ignore
+		 * them.
+		 */
+		if (classForm->relkind != RELKIND_RELATION &&
+			classForm->relkind != RELKIND_MATVIEW &&
+			classForm->relkind != RELKIND_PARTITIONED_TABLE)
+			continue;
+
+#if PG_VERSION_NUM >= 160000
+		/* check permissions of relation */
+		if (!vacuum_is_permitted_for_relation(relid, classForm, options))
+			continue;
+#endif
+
+		/*
+		 * Build VacuumRelation(s) specifying the table OIDs to be processed.
+		 * We omit a RangeVar since it wouldn't be appropriate to complain
+		 * about failure to open one of these relations later.
+		 */
+		vacrels = lappend(vacrels, makeVacuumRelation(NULL,
+													  relid,
+													  NIL));
+	}
+
+	table_endscan(scan);
+	table_close(pgclass, AccessShareLock);
+	return vacrels;
+}
+
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
@@ -403,6 +607,103 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				}
 			}
 			table_close(rel, lockmode);
+		}
+	}
+	else if (IsA(pstmt->utilityStmt, ClusterStmt))
+	{
+		ClusterStmt	   *stmt = (ClusterStmt *) pstmt->utilityStmt;
+
+		if (stmt->relation != NULL)
+		{
+			/* This is the single-relation case. */
+			Oid			tableOid;
+			Relation	rel = NULL;
+			bool		orioledb;
+
+			tableOid = RangeVarGetRelidExtended(stmt->relation,
+												AccessExclusiveLock,
+												0,
+#if PG_VERSION_NUM >= 160000
+												RangeVarCallbackMaintainsTable,
+#else
+												RangeVarCallbackOwnsTable,
+#endif
+												NULL);
+			rel = table_open(tableOid, AccessShareLock);
+			orioledb = is_orioledb_rel(rel);
+			table_close(rel, AccessShareLock);
+			if (orioledb)
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("orioledb tables does not "
+								   "support CLUSTER")),
+						 errdetail("CLUSTER makes no much sense for "
+								   "index-organized tables."));
+		}
+	}
+	else if (IsA(pstmt->utilityStmt, VacuumStmt))
+	{
+		VacuumStmt	   *vacstmt = (VacuumStmt *) pstmt->utilityStmt;
+		ListCell	   *lc;
+		bool			full = false,
+						skip_locked = false,
+						analyze = false;
+		int				options;
+
+		foreach(lc, vacstmt->options)
+		{
+			DefElem    *opt = (DefElem *) lfirst(lc);
+
+			if (strcmp(opt->defname, "full") == 0)
+				full = defGetBoolean(opt);
+			else if (strcmp(opt->defname, "skip_locked") == 0)
+				skip_locked = defGetBoolean(opt);
+			else if (strcmp(opt->defname, "analyze") == 0)
+				analyze = defGetBoolean(opt);
+		}
+		options =
+			(vacstmt->is_vacuumcmd ? VACOPT_VACUUM : VACOPT_ANALYZE) |
+			(skip_locked ? VACOPT_SKIP_LOCKED : 0) |
+			(analyze ? VACOPT_ANALYZE : 0) |
+			(full ? VACOPT_FULL : 0);
+		if (full)
+		{
+			List *relations = vacstmt->rels;
+
+			if (relations != NIL)
+			{
+				List	   *newrels = NIL;
+
+				foreach(lc, relations)
+				{
+					VacuumRelation	   *vrel = lfirst_node(VacuumRelation, lc);
+					List			   *sublist;
+
+					sublist = expand_vacuum_rel(vrel, options);
+					newrels = list_concat(newrels, sublist);
+				}
+				relations = newrels;
+			}
+			else
+				relations = get_all_vacuum_rels(options);
+			foreach(lc, relations)
+			{
+				VacuumRelation *vrel = lfirst_node(VacuumRelation, lc);
+				Relation	rel = relation_open(vrel->oid, AccessShareLock);
+				bool		orioledb = is_orioledb_rel(rel);
+
+				if (orioledb)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("orioledb table \"%s\" does not support "
+							 		"VACUUM FULL",
+									RelationGetRelationName(rel))),
+							errdetail("VACUUM FULL is not supported for "
+									  "OrioleDB tables yet. "
+									  "Please send a bug report if it is "
+									  "really necessary."));
+				relation_close(rel, AccessShareLock);
+			}
 		}
 	}
 
