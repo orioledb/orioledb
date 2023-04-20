@@ -37,16 +37,23 @@
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_attrdef.h"
+#if PG_VERSION_NUM >= 160000
+#include "catalog/pg_authid.h"
+#endif
 #include "catalog/pg_class.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
 #include "catalog/pg_inherits.h"
+#if PG_VERSION_NUM >= 160000
+#include "catalog/pg_namespace.h"
+#endif
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_type.h"
 #include "catalog/toasting.h"
 #include "commands/createas.h"
+#include "commands/dbcommands.h"
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
 #include "commands/matview.h"
@@ -498,6 +505,223 @@ get_all_vacuum_rels(int options)
 }
 
 static void
+reindex_concurrently_not_supported(Relation tbl)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			errmsg("orioledb table \"%s\" does not support "
+				   "REINDEX CONCURRENTLY", tbl->rd_rel->relname.data)),
+			errdetail("REINDEX CONCURRENTLY is not supported for "
+					  "OrioleDB tables yet. Please send a bug report."));
+}
+
+static void
+check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
+{
+	Oid			objectOid;
+	Relation	relationRelation;
+	TableScanDesc scan;
+	ScanKeyData scan_keys[1];
+	HeapTuple	tuple;
+	MemoryContext private_context;
+	MemoryContext old;
+	int			num_keys;
+	bool		concurrent_warning = false;
+
+#if PG_VERSION_NUM < 160000
+	AssertArg(objectName);
+#endif
+	Assert(objectKind == REINDEX_OBJECT_SCHEMA ||
+		   objectKind == REINDEX_OBJECT_SYSTEM ||
+		   objectKind == REINDEX_OBJECT_DATABASE);
+
+#if PG_VERSION_NUM >= 160000
+	/*
+	 * This matches the options enforced by the grammar, where the object name
+	 * is optional for DATABASE and SYSTEM.
+	 */
+	Assert(objectName || objectKind != REINDEX_OBJECT_SCHEMA);
+#endif
+
+	if (objectKind == REINDEX_OBJECT_SYSTEM)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("cannot reindex system catalogs concurrently")));
+
+	/*
+	 * Get OID of object to reindex, being the database currently being used
+	 * by session for a database or for system catalogs, or the schema defined
+	 * by caller. At the same time do permission checks that need different
+	 * processing depending on the object type.
+	 */
+	if (objectKind == REINDEX_OBJECT_SCHEMA)
+	{
+		objectOid = get_namespace_oid(objectName, false);
+
+#if PG_VERSION_NUM >= 160000
+		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()) &&
+			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+#else
+		if (!pg_namespace_ownercheck(objectOid, GetUserId()))
+#endif
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_SCHEMA,
+						   objectName);
+	}
+	else
+	{
+		objectOid = MyDatabaseId;
+
+#if PG_VERSION_NUM >= 160000
+		if (objectName && strcmp(objectName, get_database_name(objectOid)) != 0)
+#else
+		if (strcmp(objectName, get_database_name(objectOid)) != 0)
+#endif
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("can only reindex the currently open database")));
+#if PG_VERSION_NUM >= 160000
+		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()) &&
+			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
+						   get_database_name(objectOid));
+#else
+		if (!pg_database_ownercheck(objectOid, GetUserId()))
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
+						   objectName);
+#endif
+	}
+
+	/*
+	 * Create a memory context that will survive forced transaction commits we
+	 * do below.  Since it is a child of PortalContext, it will go away
+	 * eventually even if we suffer an error; there's no need for special
+	 * abort cleanup logic.
+	 */
+	private_context = AllocSetContextCreate(PortalContext,
+											"check_multiple_tables",
+											ALLOCSET_SMALL_SIZES);
+
+	/*
+	 * Define the search keys to find the objects to reindex. For a schema, we
+	 * select target relations using relnamespace, something not necessary for
+	 * a database-wide operation.
+	 */
+	if (objectKind == REINDEX_OBJECT_SCHEMA)
+	{
+		num_keys = 1;
+		ScanKeyInit(&scan_keys[0],
+					Anum_pg_class_relnamespace,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(objectOid));
+	}
+	else
+		num_keys = 0;
+
+	/*
+	 * Scan pg_class to build a list of the relations we need to reindex.
+	 *
+	 * We only consider plain relations and materialized views here (toast
+	 * rels will be processed indirectly by reindex_relation).
+	 */
+	relationRelation = table_open(RelationRelationId, AccessShareLock);
+	scan = table_beginscan_catalog(relationRelation, num_keys, scan_keys);
+	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+	{
+		Form_pg_class	classtuple = (Form_pg_class) GETSTRUCT(tuple);
+		Oid				relid = classtuple->oid;
+		Relation		tbl;
+
+		/*
+		 * Only regular tables and matviews can have indexes, so ignore any
+		 * other kind of relation.
+		 *
+		 * Partitioned tables/indexes are skipped but matching leaf partitions
+		 * are processed.
+		 */
+		if (classtuple->relkind != RELKIND_RELATION &&
+			classtuple->relkind != RELKIND_MATVIEW)
+			continue;
+
+		/* Skip temp tables of other backends; we can't reindex them at all */
+		if (classtuple->relpersistence == RELPERSISTENCE_TEMP &&
+			!isTempNamespace(classtuple->relnamespace))
+			continue;
+
+#if PG_VERSION_NUM >= 160000
+		/*
+		 * Check user/system classification.  SYSTEM processes all the
+		 * catalogs, and DATABASE processes everything that's not a catalog.
+		 */
+		if (objectKind == REINDEX_OBJECT_SYSTEM &&
+			!IsCatalogRelationOid(relid))
+			continue;
+		else if (objectKind == REINDEX_OBJECT_DATABASE &&
+				 IsCatalogRelationOid(relid))
+			continue;
+
+		/*
+		 * The table can be reindexed if the user has been granted MAINTAIN on
+		 * the table or one of its partition ancestors or the user is a
+		 * superuser, the table owner, or the database/schema owner (but in the
+		 * latter case, only if it's not a shared relation).  pg_class_aclcheck
+		 * includes the superuser case, and depending on objectKind we already
+		 * know that the user has permission to run REINDEX on this database or
+		 * schema per the permission checks at the beginning of this routine.
+		 */
+		if (classtuple->relisshared &&
+			pg_class_aclcheck(relid, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK &&
+			!has_partition_ancestor_privs(relid, GetUserId(), ACL_MAINTAIN))
+			continue;
+#else
+		/* Check user/system classification, and optionally skip */
+		if (objectKind == REINDEX_OBJECT_SYSTEM &&
+			!IsSystemClass(relid, classtuple))
+			continue;
+
+		/*
+		 * The table can be reindexed if the user is superuser, the table
+		 * owner, or the database/schema owner (but in the latter case, only
+		 * if it's not a shared relation).  pg_class_ownercheck includes the
+		 * superuser case, and depending on objectKind we already know that
+		 * the user has permission to run REINDEX on this database or schema
+		 * per the permission checks at the beginning of this routine.
+		 */
+		if (classtuple->relisshared &&
+			!pg_class_ownercheck(relid, GetUserId()))
+			continue;
+#endif
+
+		/*
+		 * Skip system tables, since index_create() would reject indexing them
+		 * concurrently (and it would likely fail if we tried).
+		 */
+		if (IsCatalogRelationOid(relid))
+		{
+			if (!concurrent_warning)
+				ereport(WARNING,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("cannot reindex system catalogs concurrently, skipping all")));
+			concurrent_warning = true;
+			continue;
+		}
+
+		/* Save the list of relation OIDs in private context */
+		old = MemoryContextSwitchTo(private_context);
+
+		tbl = relation_open(relid, AccessShareLock);
+		if (is_orioledb_rel(tbl))
+			reindex_concurrently_not_supported(tbl);
+		relation_close(tbl, AccessShareLock);
+
+		MemoryContextSwitchTo(old);
+	}
+	table_endscan(scan);
+	table_close(relationRelation, AccessShareLock);
+
+	MemoryContextDelete(private_context);
+}
+
+static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
 #if PG_VERSION_NUM >= 140000
@@ -620,15 +844,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			Relation	rel = NULL;
 			bool		orioledb;
 
-			tableOid = RangeVarGetRelidExtended(stmt->relation,
-												AccessExclusiveLock,
-												0,
-#if PG_VERSION_NUM >= 160000
-												RangeVarCallbackMaintainsTable,
-#else
-												RangeVarCallbackOwnsTable,
-#endif
-												NULL);
+			tableOid = RangeVarGetRelid(stmt->relation, AccessShareLock,
+										false);
 			rel = table_open(tableOid, AccessShareLock);
 			orioledb = is_orioledb_rel(rel);
 			table_close(rel, AccessShareLock);
@@ -703,6 +920,73 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									  "Please send a bug report if it is "
 									  "really necessary."));
 				relation_close(rel, AccessShareLock);
+			}
+		}
+	}
+	else if (IsA(pstmt->utilityStmt, ReindexStmt))
+	{
+		ReindexStmt	   *stmt = (ReindexStmt *) pstmt->utilityStmt;
+		bool			concurrently = false;
+
+#if PG_VERSION_NUM >= 140000
+		{
+			ListCell	   *lc;
+
+			foreach(lc, stmt->params)
+			{
+				DefElem    *opt = (DefElem *) lfirst(lc);
+
+				if (strcmp(opt->defname, "concurrently") == 0)
+					concurrently = defGetBoolean(opt);
+			}
+		}
+#else
+		concurrently = stmt->concurrent;
+#endif
+
+		if (concurrently)
+		{
+			switch (stmt->kind)
+			{
+				case REINDEX_OBJECT_INDEX:
+					{
+						Oid			indOid = RangeVarGetRelid(stmt->relation,
+															AccessShareLock,
+															false);
+						Relation	iRel,
+									tbl;
+
+						iRel = index_open(indOid, AccessShareLock);
+						tbl = relation_open(iRel->rd_index->indrelid,
+											AccessShareLock);
+						if (is_orioledb_rel(tbl))
+							reindex_concurrently_not_supported(tbl);
+						relation_close(tbl, AccessShareLock);
+						relation_close(iRel, AccessShareLock);
+					}
+					break;
+				case REINDEX_OBJECT_TABLE:
+					{
+						Oid			tblOid = RangeVarGetRelid(stmt->relation,
+															  AccessShareLock,
+															  false);
+						Relation	tbl;
+
+						tbl = relation_open(tblOid, AccessShareLock);
+						if (is_orioledb_rel(tbl))
+							reindex_concurrently_not_supported(tbl);
+						relation_close(tbl, AccessShareLock);
+					}
+					break;
+				case REINDEX_OBJECT_SCHEMA:
+				case REINDEX_OBJECT_SYSTEM:
+				case REINDEX_OBJECT_DATABASE:
+					check_multiple_tables(stmt->name, stmt->kind);
+					break;
+				default:
+					elog(ERROR, "unrecognized object type: %d",
+						(int) stmt->kind);
+					break;
 			}
 		}
 	}
