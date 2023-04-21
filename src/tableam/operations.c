@@ -214,6 +214,8 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 
 	o_toast_insert_values(relation, descr, slot, oxid, csn);
 
+	/* Tuple might be changes in the callback */
+	tup = tts_orioledb_form_tuple(slot, descr);
 	o_wal_insert(&primary->desc, tup);
 
 	return slot;
