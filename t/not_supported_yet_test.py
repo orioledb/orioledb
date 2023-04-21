@@ -2,6 +2,7 @@
 # coding: utf-8
 
 from .base_test import BaseTest
+from testgres.exceptions import QueryException
 
 class NotSupportedYetTest(BaseTest):
 	def test_reindex_concurrently(self):
@@ -260,3 +261,29 @@ class NotSupportedYetTest(BaseTest):
 		self.assertEqual(err.decode("utf-8").split("\n")[0],
 						 "ERROR:  orioledb table \"o_test_1\" does not "
 						 "support TABLESAMPLE")
+
+	def test_prepared_transaction(self):
+		node = self.node
+		node.append_conf(max_prepared_transactions = 2)
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+		""")
+
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				BEGIN;
+
+				CREATE TABLE o_test_1 (val_1 int) USING orioledb;
+				INSERT INTO o_test_1 SELECT generate_series(1, 5);
+				SELECT * FROM o_test_1;
+
+				PREPARE TRANSACTION 't1';
+			""")
+
+		self.assertErrorMessageEquals(e, "cannot use PREPARE TRANSACTION in "
+										 "transaction that uses "
+										 "orioledb table",
+									  "OrioleDB does not support prepared "
+									  "transactions yet.",
+									  second_title="DETAIL")

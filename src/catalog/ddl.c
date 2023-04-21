@@ -991,6 +991,29 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			}
 		}
 	}
+	else if (IsA(pstmt->utilityStmt, TransactionStmt))
+	{
+		TransactionStmt	   *tstmt = (TransactionStmt *) pstmt->utilityStmt;
+
+		if (tstmt->kind == TRANS_STMT_PREPARE)
+		{
+			ODBProcData *proc_data = GET_CUR_PROCDATA();
+			UndoLocation transactionUndoRetainLocation;
+
+			transactionUndoRetainLocation =
+				pg_atomic_read_u64(&proc_data->transactionUndoRetainLocation);
+
+			if (UndoLocationIsValid(transactionUndoRetainLocation))
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot use PREPARE TRANSACTION in "
+								   "transaction that uses orioledb table")),
+						errdetail("OrioleDB does not support prepared "
+								  "transactions yet."));
+			}
+		}
+	}
 
 	if (call_next)
 	{
