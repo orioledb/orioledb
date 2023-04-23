@@ -175,7 +175,7 @@ RUN set -eux; \
 # https://docs.djangoproject.com/en/1.10/ref/databases/#optimizing-postgresql-s-configuration
 		tzdata \
 # install extra icu packages ( >=Alpine3.16 )
-		$(EXTRA_ICU_PACKAGES)  \
+		$EXTRA_ICU_PACKAGES \
 	; \
 	apk del --no-network .build-deps; \
 	cd /; \
