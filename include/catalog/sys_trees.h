@@ -43,6 +43,11 @@
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)
 
+#define OIDS_EQ_SYS_TREE(oids, systree) \
+	((oids).datoid == SYS_TREES_DATOID && \
+	 (oids).reloid == (systree) && \
+	 (oids).relnode == (systree))
+
 #define O_OPCLASS_PROSRC_MAXLEN 512
 
 typedef struct

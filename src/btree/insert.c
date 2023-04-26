@@ -66,8 +66,7 @@ static void o_btree_split_fill_downlink_item(BTreeInsertStackItem *insert_item,
  */
 static OInMemoryBlkno o_btree_finish_root_split_internal(BTreeDescr *desc,
 														 OInMemoryBlkno left_blkno,
-														 BTreeInsertStackItem *insert_item,
-														 int reserve_kind);
+														 BTreeInsertStackItem *insert_item);
 
 /*
  * Adds a new fix split item to insert context. It modifies an insert_item.
@@ -170,8 +169,7 @@ o_btree_split_fill_downlink_item(BTreeInsertStackItem *insert_item,
 static OInMemoryBlkno
 o_btree_finish_root_split_internal(BTreeDescr *desc,
 								   OInMemoryBlkno left_blkno,
-								   BTreeInsertStackItem *insert_item,
-								   int reserve_kind)
+								   BTreeInsertStackItem *insert_item)
 {
 	BTreeNonLeafTuphdr internal_header;
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(desc->rootInfo.rootPageBlkno);
@@ -263,11 +261,15 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	copy_fixed_hikey(desc, &key, p);
 	START_CRIT_SECTION();
 	header->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
+
+	/*
+	 * Register split.  That would put back O_BTREE_FLAG_BROKEN_SPLIT on
+	 * error.
+	 */
 	btree_register_inprogress_split(left_blkno);
 	END_CRIT_SECTION();
 	unlock_page(left_blkno);
 
-	/* FIXME: put O_BTREE_FLAG_BROKEN_SPLIT back on error */
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 2);
 
 	init_page_find_context(iitem.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
@@ -389,6 +391,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 		LocationIndex newItemSize;
 		OBTreeFindPageContext *curContext = insert_item->context;
 		bool		next;
+
+		Assert(desc->ppool->numPagesReserved[reserve_kind] >= 2);
 
 		place_right = false;
 
@@ -697,7 +701,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 				blkno = o_btree_finish_root_split_internal(desc,
 														   root_split_left_blkno,
-														   insert_item, reserve_kind);
+														   insert_item);
 
 				next = true;
 			}
@@ -744,7 +748,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 void
 o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 							 OTuple tuple, LocationIndex tuplen,
-							 BTreeLeafTuphdr *tuphdr, bool replace)
+							 BTreeLeafTuphdr *tuphdr, bool replace,
+							 int reserve_kind)
 {
 	BTreeInsertStackItem insert_item;
 	MemoryContext prev_context;
@@ -765,7 +770,7 @@ o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 	insert_item.left_blkno = OInvalidInMemoryBlkno;
 	insert_item.refind = false;
 
-	o_btree_insert_item(&insert_item, PPOOL_RESERVE_INSERT);
+	o_btree_insert_item(&insert_item, reserve_kind);
 
 	if (!nested_call)
 	{

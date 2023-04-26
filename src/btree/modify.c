@@ -51,6 +51,7 @@ typedef struct
 	LOCKTAG		hwLockTag;
 	LOCKMODE	hwLockMode;
 	bool		needsUndo;
+	int			pageReserveKind;
 	int			cmp;
 	BTreeModifyLockStatus lockStatus;
 	bool		pagesAreReserved;
@@ -112,6 +113,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 						OXid opOxid, CommitSeqNo opCsn,
 						RowLockMode _lockMode,
 						BTreeLeafTupleDeletedStatus deleted,
+						int pageReserveKind,
 						BTreeModifyCallbackInfo *callbackInfo)
 {
 	BTreeDescr *desc = pageFindContext->desc;
@@ -137,6 +139,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.key = key;
 	context.keyType = keyType;
 	context.savepointUndoLocation = get_subxact_undo_location();
+	context.pageReserveKind = pageReserveKind;
 	context.callbackInfo = callbackInfo;
 
 	Assert(callbackInfo);
@@ -369,7 +372,8 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 	if (context->undoIsReserved)
 		release_undo_size(desc->undoType);
 	if (context->pagesAreReserved)
-		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT_MASK);
+		ppool_release_reserved(desc->ppool,
+							   PPOOL_KIND_GET_MASK(context->pageReserveKind));
 	if (context->hwLockMode != NoLock)
 		LockRelease(&context->hwLockTag, context->hwLockMode, false);
 }
@@ -680,7 +684,8 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	o_btree_insert_tuple_to_leaf(pageFindContext,
 								 context->tuple, tuplen,
 								 &context->leafTuphdr,
-								 context->replace);
+								 context->replace,
+								 context->pageReserveKind);
 }
 
 static void
@@ -937,6 +942,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 					  BTreeModifyCallbackInfo *callbackInfo)
 {
 	OBTreeFindPageContext pageFindContext;
+	int			pageReserveKind;
 	Jsonb	   *params = NULL;
 
 	if (STOPEVENTS_ENABLED())
@@ -953,8 +959,13 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	if (desc->undoType != UndoReserveNone)
 		(void) reserve_undo_size(desc->undoType, O_MODIFY_UNDO_RESSERVE_SIZE);
 
+	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
+		pageReserveKind = PPOOL_RESERVE_SHARED_INFO_INSERT;
+	else
+		pageReserveKind = PPOOL_RESERVE_INSERT;
+
 	if (action != BTreeOperationDelete)
-		ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_INSERT, 2);
+		ppool_reserve_pages(desc->ppool, pageReserveKind, 2);
 
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
@@ -966,7 +977,8 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 
 	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
 								   key, keyType, opOxid, opCsn,
-								   lockMode, deleted, callbackInfo);
+								   lockMode, deleted, pageReserveKind,
+								   callbackInfo);
 }
 
 static bool
@@ -1059,6 +1071,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 					  BTreeModifyCallbackInfo *callbackInfo)
 {
 	OBTreeFindPageContext pageFindContext;
+	int			pageReserveKind;
 	bool		fastpath;
 	Page		p;
 	OInMemoryBlkno blkno;
@@ -1076,7 +1089,12 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	if (desc->undoType != UndoReserveNone)
 		(void) reserve_undo_size(desc->undoType, O_MODIFY_UNDO_RESSERVE_SIZE);
 
-	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_INSERT, 2);
+	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
+		pageReserveKind = PPOOL_RESERVE_SHARED_INFO_INSERT;
+	else
+		pageReserveKind = PPOOL_RESERVE_INSERT;
+
+	ppool_reserve_pages(desc->ppool, pageReserveKind, 2);
 
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY |
@@ -1272,7 +1290,8 @@ retry:
 	result = o_btree_modify_internal(&pageFindContext, BTreeOperationInsert,
 									 tuple, tupleType, key,
 									 keyType, opOxid, opCsn, lockMode,
-									 BTreeLeafTupleNonDeleted, callbackInfo);
+									 BTreeLeafTupleNonDeleted, pageReserveKind,
+									 callbackInfo);
 
 	LWLockRelease(uniqueLock);
 	return result;
