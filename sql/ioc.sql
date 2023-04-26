@@ -218,6 +218,24 @@ RETURNING *;
 
 SELECT * FROM o_test_ioc6;
 
+CREATE TABLE o_test_ioc_change_pkey (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1)
+) USING orioledb;
+INSERT INTO o_test_ioc_change_pkey VALUES (1, 2), (2, 3);
+TABLE o_test_ioc_change_pkey;
+
+BEGIN;
+SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
+UPDATE o_test_ioc_change_pkey SET val_1 = 13 WHERE val_1 = 1;
+TABLE o_test_ioc_change_pkey;
+SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
+INSERT INTO o_test_ioc_change_pkey VALUES (1, 15) ON CONFLICT (val_1)
+	DO UPDATE SET val_1 = 3 RETURNING *;
+COMMIT;
+TABLE o_test_ioc_change_pkey;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ioc CASCADE;
 RESET search_path;

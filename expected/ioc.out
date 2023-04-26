@@ -314,13 +314,84 @@ SELECT * FROM o_test_ioc6;
    1 | -90 | -90 | -90 | 112 | 110 | 110 | 108
 (1 row)
 
+CREATE TABLE o_test_ioc_change_pkey (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1)
+) USING orioledb;
+INSERT INTO o_test_ioc_change_pkey VALUES (1, 2), (2, 3);
+TABLE o_test_ioc_change_pkey;
+ val_1 | val_2 
+-------+-------
+     1 |     2
+     2 |     3
+(2 rows)
+
+BEGIN;
+SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_ioc_change_pkey_pkey contents                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = ('1', '2')                       +
+     Item 1: offset = 288, tuple = ('2', '3')                       +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+UPDATE o_test_ioc_change_pkey SET val_1 = 13 WHERE val_1 = 1;
+TABLE o_test_ioc_change_pkey;
+ val_1 | val_2 
+-------+-------
+     2 |     3
+    13 |     2
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
+                         orioledb_tbl_structure                          
+-------------------------------------------------------------------------
+ Index o_test_ioc_change_pkey_pkey contents                             +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 24                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty    +
+     Leftmost, Rightmost                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64             +
+     Item 0: mode = update, PK changed, offset = 264, tuple = ('1', '2')+
+       Undo item:                                                       +
+     Item 1: offset = 288, tuple = ('2', '3')                           +
+     Item 2: mode = update, offset = 312, tuple = ('13', '2')           +
+                                                                        +
+ Index toast: not loaded                                                +
+ 
+(1 row)
+
+INSERT INTO o_test_ioc_change_pkey VALUES (1, 15) ON CONFLICT (val_1)
+	DO UPDATE SET val_1 = 3 RETURNING *;
+ val_1 | val_2 
+-------+-------
+     1 |    15
+(1 row)
+
+COMMIT;
+TABLE o_test_ioc_change_pkey;
+ val_1 | val_2 
+-------+-------
+     1 |    15
+     2 |     3
+    13 |     2
+(3 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 6 other objects
+NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table o_test_ioc1
 drop cascades to table o_test_ioc2
 drop cascades to table o_test_ioc3
 drop cascades to table o_test_ioc4
 drop cascades to table o_test_ioc5
 drop cascades to table o_test_ioc6
+drop cascades to table o_test_ioc_change_pkey
 DROP SCHEMA ioc CASCADE;
 RESET search_path;

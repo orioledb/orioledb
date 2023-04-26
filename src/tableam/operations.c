@@ -295,6 +295,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 	ioc_arg.desc = descr;
 	ioc_arg.oxid = oxid;
+	ioc_arg.newSlot = (OTableSlot *) slot;
 	ioc_arg.lockMode = tuple_lock_mode_to_row_lock_mode(lockmode);
 	ioc_arg.scanSlot = lockedSlot;
 
