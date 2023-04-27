@@ -125,6 +125,62 @@ SET parallel_setup_cost = 0;
 SET min_parallel_table_scan_size = 0;
 SET parallel_leader_participation = off;
 SELECT sum(func_1(1,val_1)) FROM o_test_1;
+RESET parallel_setup_cost;
+RESET min_parallel_table_scan_size;
+RESET parallel_leader_participation;
+
+BEGIN;
+CREATE TABLE o_test_parallel_bitmap_scan (
+	val_1 int
+) USING orioledb;
+CREATE INDEX ind_1 ON o_test_parallel_bitmap_scan (val_1);
+INSERT INTO o_test_parallel_bitmap_scan SELECT generate_series(1, 10);
+SET LOCAL force_parallel_mode = on;
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
+SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
+COMMIT;
+
+BEGIN;
+
+SET LOCAL force_parallel_mode = ON;
+SET LOCAL enable_seqscan = OFF;
+
+CREATE TABLE o_test_parallel_index_scan (
+	val_1 text,
+	PRIMARY KEY(val_1)
+) USING orioledb;
+
+SELECT * FROM o_test_parallel_index_scan;
+
+COMMIT;
+
+-- Wrapper function, which converts result of SQL query to the text
+CREATE OR REPLACE FUNCTION query_to_text(sql TEXT, out result text)
+	RETURNS SETOF TEXT AS $$
+	BEGIN
+		FOR result IN EXECUTE sql LOOP
+			RETURN NEXT;
+		END LOOP;
+	END $$
+LANGUAGE plpgsql;
+
+BEGIN;
+
+SET LOCAL force_parallel_mode = on;
+
+CREATE TABLE o_test_parallel_bitmap_scan_explain_buffers (
+	val_1 integer NOT NULL PRIMARY KEY
+)USING orioledb;
+
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+FROM query_to_text($$
+	EXPLAIN (ANALYZE, BUFFERS)
+		SELECT * FROM o_test_parallel_bitmap_scan_explain_buffers
+			ORDER BY val_1;
+$$) as t;
+COMMIT;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
