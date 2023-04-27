@@ -1303,7 +1303,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 	int			ionum = -1,
 				context_index;
 	BTreeNonLeafTuphdr *int_hdr = NULL;
-	uint32		parent_change_count;
+	uint32		parent_change_count = 0;
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 	bool		is_root = desc->rootInfo.rootPageBlkno == blkno;
 

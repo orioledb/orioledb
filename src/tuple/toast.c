@@ -242,7 +242,7 @@ tableGetMaxChunkSize(void *key, void *arg)
 	bool		isnull[INDEX_MAX_KEYS + TOAST_LEAF_FIELDS_NUM] = {false};
 	int			i,
 				natts;
-	bytea		data;
+	varattrib_4b data;
 	uint32		minTupleSize;
 
 	natts = primary->nonLeafTupdesc->natts;
