@@ -1696,3 +1696,31 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
+	def test_recovery_c_func_predicate(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE FUNCTION my_c_func(a int, b int)
+				RETURNS int8
+				AS 'orioledb', 'orioledb_compression_max_level'
+				LANGUAGE C STRICT IMMUTABLE;
+
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+
+			CREATE INDEX ind1 ON
+				o_test_1(val_1) WHERE (my_c_func(val_1, 1) = 0);
+
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		node.stop()
+

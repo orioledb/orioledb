@@ -142,7 +142,6 @@ TESTGRESCHECKS_PART_1 = t/checkpointer_test.py \
 						t/recovery_worker_test.py \
 						t/replication_test.py \
 						t/types_test.py \
-						t/types_2_test.py \
 						t/undo_eviction_test.py \
 						t/toast_index_test.py
 TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \

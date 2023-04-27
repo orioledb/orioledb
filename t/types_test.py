@@ -41,6 +41,8 @@ class TypesTest(BaseTest):
 			"(%d,%d)" % (total, deleted))
 
 	def test_enum_index_recovery(self):
+		enum_amount = 0
+		enumoid_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres',"""
@@ -68,22 +70,25 @@ class TypesTest(BaseTest):
 				VALUES (8, 'ecstatic');
 		""")
 
-		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 4, 0)
+		enum_amount += 1 # o_happiness
+		enumoid_amount += 4 # 'happy', 'sad', 'very happy', 'ecstatic'
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.safe_psql('postgres', "DROP TABLE o_holidays;")
 		node.safe_psql('postgres', "DROP TYPE o_happiness;")
-		self.check_total_deleted(node, 'ENUM_CACHE', 1, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 4, 0)
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 		# deleted records in o_enum_cache physically deleted during checkpoint
 		# performed after recovery
-		self.check_total_deleted(node, 'ENUM_CACHE', 1, 1)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', 4, 4)
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 1)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
 		node.stop()
 
 	def test_array_index_recovery(self):
+		type_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -93,7 +98,10 @@ class TypesTest(BaseTest):
 				PRIMARY KEY (arr)
 			) USING orioledb;
 		""")
-		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
+		type_amount += 3 # int2, int4, tid - types needed for all our tables
+		type_amount += 1 # anyarray
+		type_amount += 1 # internal - argument of sort support function
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
 		node.execute("INSERT INTO o_test VALUES ('{1, 2}');")
 		node.execute("INSERT INTO o_test VALUES ('{2, 3, 4}');")
@@ -101,11 +109,12 @@ class TypesTest(BaseTest):
 
 		node.start()
 
-		self.check_total_deleted(node, 'TYPE_CACHE', 5, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 		self.assertEqual(2, node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
 		node.stop()
 
 	def test_range_index_recovery(self):
+		range_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -133,17 +142,19 @@ class TypesTest(BaseTest):
 			DROP TYPE custom_range_removed CASCADE;
 		""")
 
-		self.check_total_deleted(node, 'RANGE_CACHE', 2, 0)
+		range_amount += 2 # custom_range, custom_range_removed
+		self.check_total_deleted(node, 'RANGE_CACHE', range_amount, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'RANGE_CACHE', 2, 1)
+		self.check_total_deleted(node, 'RANGE_CACHE', range_amount, 1)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM o_test_custom_range;")[0][0],
 			10)
 		node.stop()
 
 	def test_parallel_sys_cache_insert(self):
+		range_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -189,11 +200,13 @@ class TypesTest(BaseTest):
 					t2.join()
 					con1.commit()
 					con2.commit()
-
-		self.check_total_deleted(node, 'RANGE_CACHE', 1, 0)
+		range_amount += 1 # single custom_range
+		self.check_total_deleted(node, 'RANGE_CACHE', range_amount, 0)
 		node.stop()
 
 	def test_record_index_recovery(self):
+		class_amount = 0
+		type_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -214,8 +227,14 @@ class TypesTest(BaseTest):
 				PRIMARY KEY(location)
 			) USING orioledb;
 		""")
-		self.check_total_deleted(node, 'CLASS_CACHE', 2, 0)
-		self.check_total_deleted(node, 'TYPE_CACHE', 6, 0)
+		class_amount += 1 # coordinates
+		class_amount += 1 # pg_auth
+		type_amount += 3 # int2, int4, tid - types needed for all our tables
+		type_amount += 1 # record
+		type_amount += 1 # internal - argument of sort support function
+		type_amount += 1 # coordinates
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 		node.safe_psql('postgres', """
 			ALTER TYPE coordinates2 RENAME TO coordinates_renamed;
 			CREATE TYPE custom_type AS (a int, b float);
@@ -237,8 +256,10 @@ class TypesTest(BaseTest):
 				PRIMARY KEY(key)
 			) USING orioledb;
 		""")
-		self.check_total_deleted(node, 'CLASS_CACHE', 3, 0)
-		self.check_total_deleted(node, 'TYPE_CACHE', 7, 0)
+		class_amount += 1 # coordinates_removed
+		type_amount += 1 # coordinates_removed
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
 		node.safe_psql('postgres', """
 			CREATE TYPE custom_type_removed AS (a char, b text);
@@ -268,8 +289,10 @@ class TypesTest(BaseTest):
 					 )::coordinates_removed
 					FROM generate_series(1, 10) id;
 		""")
-		self.check_total_deleted(node, 'CLASS_CACHE', 4, 0)
-		self.check_total_deleted(node, 'TYPE_CACHE', 10, 0)
+		class_amount += 1 # custom_type_removed
+		type_amount += 3 # custom_type_removed, bpchar, text
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
 		with self.assertRaises(QueryException):
 			node.safe_psql('postgres', """
@@ -280,19 +303,21 @@ class TypesTest(BaseTest):
 				DROP CONSTRAINT o_test_record_type_removed2_pkey;
 			DROP TYPE custom_type_removed CASCADE;
 		""")
-		self.check_total_deleted(node, 'CLASS_CACHE', 4, 0)
-		self.check_total_deleted(node, 'TYPE_CACHE', 10, 0)
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'CLASS_CACHE', 4, 1)
-		self.check_total_deleted(node, 'TYPE_CACHE', 10, 1)
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 1)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 1)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM o_test_record_type;")[0][0],
 			10)
 		node.stop()
 
 	def test_record_array_index_recovery(self):
+		class_amount = 0
+		type_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -325,13 +350,20 @@ class TypesTest(BaseTest):
 		node.safe_psql('postgres', """
 			DROP TYPE coordinates_removed CASCADE;
 		""")
-		self.check_total_deleted(node, 'CLASS_CACHE', 3, 0)
-		self.check_total_deleted(node, 'TYPE_CACHE', 8, 0)
+		class_amount += 1 # coordinates
+		class_amount += 1 # coordinates_removed
+		class_amount += 1 # pg_auth
+		type_amount += 3 # int2, int4, tid - types needed for all our tables
+		type_amount += 2 # record, anyarray
+		type_amount += 1 # internal - argument of sort support function
+		type_amount += 2 # coordinates, coordinates_removed
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'CLASS_CACHE', 3, 1)
-		self.check_total_deleted(node, 'TYPE_CACHE', 8, 1)
+		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 1)
+		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 1)
 		self.assertEqual(
 			node.execute("SELECT COUNT(*) FROM o_test_array;")[0][0],
 			10)
@@ -437,6 +469,7 @@ class TypesTest(BaseTest):
 		node.stop()
 
 	def test_collation_recovery(self):
+		collation_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql('postgres', """
@@ -452,7 +485,10 @@ class TypesTest(BaseTest):
 			CREATE INDEX o_test_ix2
 				ON o_test ((val || 'U') COLLATE test_coll2);
 		""")
-		self.check_total_deleted(node, 'COLLATION_CACHE', 3, 0)
+		collation_amount += 1 # default
+		collation_amount += 1 # test_coll
+		collation_amount += 1 # test_coll2
+		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
 
 		node.execute("""
 			INSERT INTO o_test VALUES ('X', 'R'), ('A', 'T'), ('W', 'A'),
@@ -462,7 +498,7 @@ class TypesTest(BaseTest):
 
 		node.start()
 
-		self.check_total_deleted(node, 'COLLATION_CACHE', 3, 0)
+		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
 		self.assertEqual([('A', 'T'), ('C', 'N'), ('V', 'C'),
 						  ('W', 'A'), ('X', 'R')],
 						 node.execute("SELECT * FROM o_test ORDER BY key;"))
@@ -471,6 +507,7 @@ class TypesTest(BaseTest):
 	@unittest.skipIf(not BaseTest.pg_with_icu(),
 					 'postgres built without ICU support')
 	def test_collation_icu_recovery(self):
+		collation_amount = 0
 		node = self.node
 		node.start()
 		node.safe_psql("""
@@ -486,7 +523,10 @@ class TypesTest(BaseTest):
 			CREATE INDEX o_test_ix2
 				ON o_test ((val || 'U') COLLATE test_coll2);
 		""")
-		self.check_total_deleted(node, 'COLLATION_CACHE', 3, 0)
+		collation_amount += 1 # default
+		collation_amount += 1 # test_coll
+		collation_amount += 1 # test_coll2
+		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
 
 		node.execute("""
 			INSERT INTO o_test VALUES ('X', 'â'), ('A', 'T'), ('W', 'A'),
@@ -512,7 +552,7 @@ class TypesTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.check_total_deleted(node, 'COLLATION_CACHE', 3, 0)
+		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
 		plan = node.execute("""
 			SET LOCAL enable_seqscan = off;
 			EXPLAIN (COSTS OFF, FORMAT JSON)
