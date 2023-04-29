@@ -182,6 +182,24 @@ FROM query_to_text($$
 $$) as t;
 COMMIT;
 
+CREATE TABLE o_test_parallel_unique_index_scan (
+	val_1 int,
+	val_2 int,
+	UNIQUE (val_1)
+) USING orioledb;
+
+INSERT INTO o_test_parallel_unique_index_scan
+	SELECT v, v FROM generate_series(0, 2) v;
+
+BEGIN;
+SET LOCAL force_parallel_mode = on;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
+SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
+
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

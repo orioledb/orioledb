@@ -299,8 +299,9 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
 		 */
 		if (ostate->ixNum != PrimaryIndexNumber)
 		{
-			OBTreeKeyBound bound;
-			OTuple		ptup;
+			OBTreeKeyBound	bound;
+			OTuple			ptup;
+			OIndexDescr	   *primary = GET_PRIMARY(descr);
 
 			/* fetch primary index key from tuple and search raw tuple */
 			o_fill_pindex_tuple_key_bound(&id->desc, tup, &bound);
@@ -311,7 +312,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
 				hint->pageChangeCount = 0;
 			}
 
-			ptup = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+			o_btree_load_shmem(&primary->desc);
+			ptup = o_btree_find_tuple_by_key(&primary->desc,
 											 (Pointer) &bound, BTreeKeyBound,
 											 csn, tupleCsn, tupleCxt, hint);
 			pfree(tup.data);
