@@ -122,5 +122,6 @@ extern void add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids,
 								  int numTreeOids);
 extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
 									int numTreeOids);
+extern void check_pending_truncates(void);
 
 #endif							/* __BTREE_UNDO_H__ */

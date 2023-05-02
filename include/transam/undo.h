@@ -58,6 +58,10 @@ typedef struct
 	int			undoWriteTrancheId;
 	LWLock		undoWriteLock;
 	int			undoStackLocationsFlushLockTrancheId;
+
+	int			pendingTruncatesTrancheId;
+	LWLock		pendingTruncatesLock;
+	uint64		pendingTruncatesLocation;
 } UndoMeta;
 
 typedef enum

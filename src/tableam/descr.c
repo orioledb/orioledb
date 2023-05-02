@@ -761,7 +761,7 @@ o_find_shared_root_info(SharedRootInfoKey *key)
 }
 
 void
-cleanup_btree(Oid datoid, Oid relnode)
+cleanup_btree(Oid datoid, Oid relnode, bool files)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
@@ -782,7 +782,8 @@ cleanup_btree(Oid datoid, Oid relnode)
 							  shared->rootInfo.rootPageChangeCount);
 		pfree(shared);
 	}
-	cleanup_btree_files(key.datoid, key.relnode);
+	if (files)
+		cleanup_btree_files(key.datoid, key.relnode);
 }
 
 bool

@@ -29,6 +29,11 @@
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "utils/inval.h"
+#if PG_VERSION_NUM >= 140000
+#include "utils/wait_event.h"
+#else
+#include "pgstat.h"
+#endif
 
 /* Undo records */
 typedef struct
@@ -613,6 +618,143 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 	unlock_page(blkno);
 }
 
+#define PENDING_TRUNCATES_FILENAME (ORIOLEDB_DATA_DIR "/pending_truncates")
+
+static void
+add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
+{
+	File		pendingTruncatesFile;
+	uint64		offset;
+	uint64		length;
+
+	LWLockAcquire(&undo_meta->pendingTruncatesLock, LW_EXCLUSIVE);
+
+	pendingTruncatesFile = PathNameOpenFile(PENDING_TRUNCATES_FILENAME,
+											O_RDWR | O_CREAT | PG_BINARY);
+	if (pendingTruncatesFile < 0)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not open pending truncates file %s",
+							   PENDING_TRUNCATES_FILENAME)));
+
+	offset = undo_meta->pendingTruncatesLocation;
+	length = sizeof(relOids);
+
+	if (FileWrite(pendingTruncatesFile, (Pointer) &relOids, length, offset,
+				  WAIT_EVENT_BUFFILE_WRITE) != length)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not write pending truncates file %s",
+							   PENDING_TRUNCATES_FILENAME)));
+
+	offset += length;
+	length = sizeof(numTrees);
+
+	if (FileWrite(pendingTruncatesFile, (Pointer) &numTrees, length, 0,
+				  WAIT_EVENT_BUFFILE_WRITE) != length)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not write pending truncates file %s",
+							   PENDING_TRUNCATES_FILENAME)));
+
+	offset += length;
+	length = sizeof(*treeOids) * numTrees;
+
+	if (FileWrite(pendingTruncatesFile, (Pointer) &treeOids, length, 0,
+				  WAIT_EVENT_BUFFILE_WRITE) != length)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not write pending truncates file %s",
+							   PENDING_TRUNCATES_FILENAME)));
+
+	offset += length;
+	undo_meta->pendingTruncatesLocation = offset;
+
+	FileClose(pendingTruncatesFile);
+
+	LWLockRelease(&undo_meta->pendingTruncatesLock);
+}
+
+void
+check_pending_truncates(void)
+{
+	uint64		offset;
+	uint64		length;
+	uint64		maxOffset;
+	ORelOids	relOids;
+	int			numTrees;
+	ORelOids   *relNodes = NULL;
+	int			relNodesAllocated = 0;
+	File		pendingTruncatesFile;
+
+	if (have_backup_in_progress() || undo_meta->pendingTruncatesLocation == 0)
+		return;
+
+	if (!LWLockConditionalAcquire(&undo_meta->pendingTruncatesLock,
+								  LW_EXCLUSIVE))
+		return;
+
+	if (have_backup_in_progress() || undo_meta->pendingTruncatesLocation == 0)
+	{
+		LWLockRelease(&undo_meta->pendingTruncatesLock);
+		return;
+	}
+
+	pendingTruncatesFile = PathNameOpenFile(PENDING_TRUNCATES_FILENAME,
+											O_RDONLY | PG_BINARY);
+	if (pendingTruncatesFile < 0)
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not open pending truncates file %s",
+							   PENDING_TRUNCATES_FILENAME)));
+
+	offset = 0;
+	maxOffset = undo_meta->pendingTruncatesLocation;
+	while (offset < maxOffset)
+	{
+		int		i;
+
+		length = sizeof(relOids);
+		if (FileRead(pendingTruncatesFile, (Pointer) &relOids, length, offset,
+					 WAIT_EVENT_BUFFILE_READ) != length)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read pending truncates file %s",
+								PENDING_TRUNCATES_FILENAME)));
+
+		offset += length;
+		length = sizeof(numTrees);
+
+		if (FileRead(pendingTruncatesFile, (Pointer) &numTrees, length, offset,
+					 WAIT_EVENT_BUFFILE_READ) != length)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read pending truncates file %s",
+								PENDING_TRUNCATES_FILENAME)));
+
+		if (numTrees > relNodesAllocated)
+		{
+			if (!relNodes)
+				relNodes = palloc(sizeof(ORelOids) * numTrees);
+			else
+				relNodes = repalloc(relNodes, sizeof(ORelOids) * numTrees);
+			relNodesAllocated = numTrees;
+		}
+
+		offset += length;
+		length = sizeof(ORelOids) * numTrees;
+
+		if (FileRead(pendingTruncatesFile, (Pointer) relNodes, length, offset,
+					 WAIT_EVENT_BUFFILE_READ) != length)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read pending truncates file %s",
+								PENDING_TRUNCATES_FILENAME)));
+
+		for (i = 0; i < numTrees; i++)
+			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode);
+	}
+
+	undo_meta->pendingTruncatesLocation = 0;
+
+	LWLockRelease(&undo_meta->pendingTruncatesLock);
+
+	if (relNodes)
+		pfree(relNodes);
+}
+
 /*
  * Change relnode of btree.
  */
@@ -627,20 +769,31 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 				remainRelnode;
 	int			dropNumTreeOids;
 	ORelOids   *dropTreeOids;
+	bool		cleanupFiles = true;
 
 	datoid = relnode_item->datoid;
 	reloid = relnode_item->relid;
+
 	if (!abort)
 	{
-		dropRelnode = relnode_item->oldRelnode;
 		remainRelnode = relnode_item->newRelnode;
+		dropRelnode = relnode_item->oldRelnode;
 		dropTreeOids = &relnode_item->oids[0];
 		dropNumTreeOids = relnode_item->oldNumTreeOids;
+
+		if (have_backup_in_progress())
+		{
+			ORelOids	oids = {datoid, reloid, relnode_item->oldRelnode};
+			dropRelnode = InvalidOid;
+			add_pending_truncate(oids, relnode_item->oldNumTreeOids,
+								 &relnode_item->oids[0]);
+			cleanupFiles = false;
+		}
 	}
 	else
 	{
-		dropRelnode = relnode_item->newRelnode;
 		remainRelnode = relnode_item->oldRelnode;
+		dropRelnode = relnode_item->newRelnode;
 		dropTreeOids = &relnode_item->oids[relnode_item->oldNumTreeOids];
 		dropNumTreeOids = relnode_item->newNumTreeOids;
 	}
@@ -661,14 +814,14 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 
 	if (OidIsValid(dropRelnode))
 	{
-		bool		recovery = is_recovery_in_progress();
 		ORelOids	oids = {datoid, reloid, dropRelnode};
+		bool		recovery = is_recovery_in_progress();
 		int			i;
 
 		if (!recovery)
 			o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, false);
 		o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, true);
-		CacheInvalidateRelcacheByDbidRelid(datoid, reloid);
+		CacheInvalidateRelcacheByDbidRelid(oids.datoid, oids.reloid);
 		o_invalidate_oids(oids);
 		if (!recovery)
 			o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
@@ -679,7 +832,7 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 			if (!recovery)
 				o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, false);
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
-			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);
@@ -768,7 +921,7 @@ add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
 	Assert(oldOids.reloid == newOids.reloid);
 
 	add_undo_relnode(oldOids, oldTreeOids, oldNumTreeOids,
-					 newOids, newTreeOids, newNumTreeOids, false);
+					 newOids, newTreeOids, newNumTreeOids, true);
 }
 
 void

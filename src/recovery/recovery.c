@@ -2062,9 +2062,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						OTableDescr tmp_descr;
 
 						o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-						old_descr = o_fetch_table_descr(old_o_table->oids);
-						rebuild_indices(old_o_table, old_descr,
-										new_o_table, &tmp_descr);
+						if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
+						{
+							old_descr = o_fetch_table_descr(old_o_table->oids);
+							rebuild_indices(old_o_table, old_descr,
+											new_o_table, &tmp_descr);
+						}
 						o_free_tmp_table_descr(&tmp_descr);
 					}
 				}

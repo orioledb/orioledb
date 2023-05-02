@@ -150,14 +150,19 @@ undo_shmem_init(Pointer buf, bool found)
 		SpinLockInit(&undo_meta->minUndoLocationsMutex);
 		undo_meta->minUndoLocationsChangeCount = 0;
 		undo_meta->undoWriteTrancheId = LWLockNewTrancheId();
+		undo_meta->pendingTruncatesTrancheId = LWLockNewTrancheId();
 		undo_meta->undoStackLocationsFlushLockTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&undo_meta->undoWriteLock,
 						 undo_meta->undoWriteTrancheId);
+		LWLockInitialize(&undo_meta->pendingTruncatesLock,
+						 undo_meta->pendingTruncatesTrancheId);
 
 		/* Undo locations are initialized in checkpoint_shmem_init() */
 	}
 	LWLockRegisterTranche(undo_meta->undoWriteTrancheId,
 						  "OUndoWriteTranche");
+	LWLockRegisterTranche(undo_meta->pendingTruncatesTrancheId,
+						  "OPendingTruncatesTranche");
 	LWLockRegisterTranche(undo_meta->undoStackLocationsFlushLockTrancheId,
 						  "UndoStackPosFlushTranche");
 }

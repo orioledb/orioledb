@@ -1653,7 +1653,7 @@ o_truncate_table(ORelOids oids)
 	{
 		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, false);
 		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, true);
-		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode);
+		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode, true);
 		o_invalidate_oids(treeOids[i]);
 		if (ORelOidsIsEqual(oids, treeOids[i]))
 			invalidatedTable = true;

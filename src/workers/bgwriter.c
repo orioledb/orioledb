@@ -14,6 +14,7 @@
 
 #include "orioledb.h"
 
+#include "btree/undo.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
@@ -181,6 +182,8 @@ bgwriter_main(Datum main_arg)
 				if (targetLocation < minProcReservedLocation)
 					write_undo(targetLocation, minProcReservedLocation, true);
 			}
+
+			check_pending_truncates();
 
 			ResetLatch(MyLatch);
 		}

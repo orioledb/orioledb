@@ -2255,11 +2255,14 @@ perform_writeback(IOWriteBack *writeback)
 	writeback->extentsNumber = 0;
 }
 
-typedef void (*RelnodeFileCallback) (const char *filename, void *arg);
+typedef void (*RelnodeFileCallback) (const char *filename, uint32 segno,
+									 char *ext, void *arg);
 
 /*
  * Iterate all the files belonging to given (datoid, relnode) pair and call
  * the callback for each filename.
+ *
+ * Guarantees that at first we process the first data file.
  */
 static bool
 iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
@@ -2268,8 +2271,7 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 	struct dirent *file;
 	DIR		   *dir;
 	char	   *filename;
-	char		ext[5];
-	uint32		segno;
+	bool		first_file_deleted = false;
 
 	dir = opendir(ORIOLEDB_DATA_DIR);
 	if (dir == NULL)
@@ -2279,21 +2281,37 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 	{
 		uint32		file_datoid,
 					file_relnode,
-					file_chkp;
+					file_chkp = 0,
+					file_segno = 0;
+		char		file_ext[5];
+		char	   *file_ext_p = NULL;
 
-		if (sscanf(file->d_name, "%10u_%10u",
-				   &file_datoid, &file_relnode) == 2 ||
+		if ((sscanf(file->d_name, "%10u_%10u-%10u.%4s",
+					&file_datoid, &file_relnode, &file_chkp, file_ext) == 4 &&
+			 (!strcmp(file_ext, "tmp") || !strcmp(file_ext, "map")) &&
+			 (file_ext_p = file_ext)) ||
 			sscanf(file->d_name, "%10u_%10u.%10u",
-				   &file_datoid, &file_relnode, &segno) == 3 ||
-			(sscanf(file->d_name, "%10u_%10u-%10u.%4s",
-					&file_datoid, &file_relnode, &file_chkp, ext) == 4 &&
-			 (!strcmp(ext, "tmp") || !strcmp(ext, "map"))))
+				   &file_datoid, &file_relnode, &file_segno) == 3 ||
+			sscanf(file->d_name, "%10u_%10u",
+				   &file_datoid, &file_relnode) == 2)
 		{
 			if (datoid == file_datoid && relnode == file_relnode)
 			{
-				filename = psprintf(ORIOLEDB_DATA_DIR "/%s", file->d_name);
-				callback(filename, arg);
-				pfree(filename);
+				if (!first_file_deleted)
+				{
+					filename = psprintf(ORIOLEDB_DATA_DIR "/%u_%u",
+										datoid, relnode);
+					callback(filename, 0, NULL, arg);
+					pfree(filename);
+					first_file_deleted = true;
+				}
+
+				if (file_segno != 0 || file_ext_p != NULL)
+				{
+					filename = psprintf(ORIOLEDB_DATA_DIR "/%s", file->d_name);
+					callback(filename, file_segno, file_ext_p, arg);
+					pfree(filename);
+				}
 			}
 		}
 	}
@@ -2303,9 +2321,17 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 }
 
 static void
-unlink_callback(const char *filename, void *arg)
+unlink_callback(const char *filename, uint32 segno, char *ext, void *arg)
 {
-	unlink(filename);
+	/*
+	 * Recovery determines relation data presence by presence of the first
+	 * data file.  So, we durably delete the first data file to evade situation
+	 * when partially deleted file data is visible.
+	 */
+	if (segno == 0 && ext == NULL)
+		durable_unlink(filename, ERROR);
+	else
+		unlink(filename);
 }
 
 bool
@@ -2315,7 +2341,7 @@ cleanup_btree_files(Oid datoid, Oid relnode)
 }
 
 static void
-fsync_callback(const char *filename, void *arg)
+fsync_callback(const char *filename, uint32 segno, char *ext, void *arg)
 {
 	fsync_fname(filename, false);
 }
