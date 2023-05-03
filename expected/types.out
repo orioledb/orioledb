@@ -976,175 +976,6 @@ SELECT * FROM o_test_record_type_alter2;
   15 |   5 |   15 | b
 (15 rows)
 
-CREATE TABLE IF NOT EXISTS o_test_alter_coercible (
-	val_int4 int4 NOT NULL,
-	val_oid oid NOT NULL,
-	val_regconfig regconfig NOT NULL,
-	val_regproc regproc NOT NULL,
-	val_regoper regoper NOT NULL,
-	val_regoperator regoperator NOT NULL,
-	val_regrole regrole NOT NULL,
-	val_regprocedure regprocedure NOT NULL,
-	val_regcollation regcollation NOT NULL,
-	val_regnamespace regnamespace  NOT NULL,
-	val_regclass regclass NOT NULL,
-	val_regdictionary regdictionary NOT NULL,
-	val_regtype regtype NOT NULL
-) USING orioledb;
-INSERT INTO o_test_alter_coercible(val_int4, val_oid, val_regconfig,
-								   val_regproc, val_regoper, val_regoperator,
-								   val_regrole, val_regprocedure,
-								   val_regcollation, val_regnamespace,
-								   val_regclass, val_regdictionary,
-								   val_regtype)
-		VALUES(1, 2, 'simple', 'namein', '||/'::regoper, '=(integer,integer)',
-			   'pg_stat_scan_tables', 'abs(numeric)', '"C"',
-			   'information_schema', 'pg_type', 'simple', 'int2vector');
-SELECT orioledb_table_description('o_test_alter_coercible'::regclass);
-                     orioledb_table_description                      
----------------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1          +
-             Column |          Type | Collation | Nullable | Droped +
-           val_int4 |       integer |    (null) |    false |  false +
-            val_oid |           oid |    (null) |    false |  false +
-      val_regconfig |     regconfig |    (null) |    false |  false +
-        val_regproc |       regproc |    (null) |    false |  false +
-        val_regoper |       regoper |    (null) |    false |  false +
-    val_regoperator |   regoperator |    (null) |    false |  false +
-        val_regrole |       regrole |    (null) |    false |  false +
-   val_regprocedure |  regprocedure |    (null) |    false |  false +
-   val_regcollation |  regcollation |    (null) |    false |  false +
-   val_regnamespace |  regnamespace |    (null) |    false |  false +
-       val_regclass |      regclass |    (null) |    false |  false +
-  val_regdictionary | regdictionary |    (null) |    false |  false +
-        val_regtype |       regtype |    (null) |    false |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_test_alter_coercible'::regclass);
-              orioledb_tbl_indices               
--------------------------------------------------
- Index ctid_primary                             +
-     Index type: primary, unique, ctid          +
-     Leaf tuple size: 14, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid                +
- 
-(1 row)
-
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_int4 SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_oid SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regconfig SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regproc SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regoper SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regoperator SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regrole SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regprocedure SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regcollation SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regnamespace SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regclass SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regdictionary SET DATA TYPE int4;
-ALTER TABLE o_test_alter_coercible
-	ALTER COLUMN val_regtype SET DATA TYPE int4;
-SELECT orioledb_table_description('o_test_alter_coercible'::regclass);
-                  orioledb_table_description                   
----------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1    +
-             Column |    Type | Collation | Nullable | Droped +
-           val_int4 | integer |    (null) |    false |  false +
-            val_oid | integer |    (null) |    false |  false +
-      val_regconfig | integer |    (null) |    false |  false +
-        val_regproc | integer |    (null) |    false |  false +
-        val_regoper | integer |    (null) |    false |  false +
-    val_regoperator | integer |    (null) |    false |  false +
-        val_regrole | integer |    (null) |    false |  false +
-   val_regprocedure | integer |    (null) |    false |  false +
-   val_regcollation | integer |    (null) |    false |  false +
-   val_regnamespace | integer |    (null) |    false |  false +
-       val_regclass | integer |    (null) |    false |  false +
-  val_regdictionary | integer |    (null) |    false |  false +
-        val_regtype | integer |    (null) |    false |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_test_alter_coercible'::regclass);
-              orioledb_tbl_indices               
--------------------------------------------------
- Index ctid_primary                             +
-     Index type: primary, unique, ctid          +
-     Leaf tuple size: 14, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid                +
- 
-(1 row)
-
-SELECT pg_typeof(val_int4), pg_typeof(val_oid), pg_typeof(val_regconfig),
-	   pg_typeof(val_regproc), pg_typeof(val_regoper),
-	   pg_typeof(val_regoperator), pg_typeof(val_regrole),
-	   pg_typeof(val_regprocedure), pg_typeof(val_regcollation),
-	   pg_typeof(val_regnamespace), pg_typeof(val_regclass),
-	   pg_typeof(val_regdictionary), pg_typeof(val_regtype)
-	FROM o_test_alter_coercible;
- pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof | pg_typeof 
------------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------
- integer   | integer   | integer   | integer   | integer   | integer   | integer   | integer   | integer   | integer   | integer   | integer   | integer
-(1 row)
-
-SELECT val_int4, val_oid::oid, val_regconfig::regconfig,
-	   val_regproc::regproc, val_regoper::regoper,
-	   val_regoperator::regoperator, val_regrole::regrole,
-	   val_regprocedure::regprocedure, val_regcollation::regcollation,
-	   val_regnamespace::regnamespace, val_regclass::regclass,
-	   val_regdictionary::regdictionary, val_regtype::regtype
-	   FROM o_test_alter_coercible;
- val_int4 | val_oid | val_regconfig | val_regproc | val_regoper |  val_regoperator   |     val_regrole     | val_regprocedure | val_regcollation |  val_regnamespace  | val_regclass | val_regdictionary | val_regtype 
-----------+---------+---------------+-------------+-------------+--------------------+---------------------+------------------+------------------+--------------------+--------------+-------------------+-------------
-        1 |       2 | simple        | namein      | ||/         | =(integer,integer) | pg_stat_scan_tables | abs(numeric)     | "C"              | information_schema | pg_type      | simple            | int2vector
-(1 row)
-
-CREATE TABLE o_test_inherits_alter_type (
-	aa TEXT
-) USING orioledb;
-CREATE TABLE o_test_inherits_alter_type_child (
-	dd TEXT
-) INHERITS (o_test_inherits_alter_type) USING orioledb;
-insert into o_test_inherits_alter_type_child values('test','one');
-select * from o_test_inherits_alter_type;
-  aa  
-------
- test
-(1 row)
-
-select * from o_test_inherits_alter_type_child;
-  aa  | dd  
-------+-----
- test | one
-(1 row)
-
-alter table o_test_inherits_alter_type
-	alter column aa type integer using bit_length(aa);
-select * from o_test_inherits_alter_type;
- aa 
-----
- 32
-(1 row)
-
-select * from o_test_inherits_alter_type_child;
- aa | dd  
-----+-----
- 32 | one
-(1 row)
-
 CREATE DOMAIN o_test_domain_1 AS TEXT NOT NULL;
 CREATE table o_test_domain_check (
     val_1 int,
@@ -1157,7 +988,7 @@ CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
 ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
 ERROR:  value for domain o_test_domain_2 violates check constraint "o_test_domain_2_check"
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_record_type
 drop cascades to table o_test_range
 drop cascades to table o_test_custom_range
@@ -1168,9 +999,6 @@ drop cascades to table o_test_domain_index
 drop cascades to table o_test_domain_array_index
 drop cascades to table o_test_record_type_alter
 drop cascades to table o_test_record_type_alter2
-drop cascades to table o_test_alter_coercible
-drop cascades to table o_test_inherits_alter_type
-drop cascades to table o_test_inherits_alter_type_child
 drop cascades to table o_test_domain_check
 DROP SCHEMA types CASCADE;
 NOTICE:  drop cascades to 8 other objects

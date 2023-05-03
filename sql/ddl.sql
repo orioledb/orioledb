@@ -47,69 +47,6 @@ SELECT * FROM o_ddl_check;
 
 -- Fails on unknown option
 ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
-ALTER TABLE o_ddl_check ALTER f2 TYPE text;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
-
--- OK, because 'f2' isn't indexed
-ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
-
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE text;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE varchar COLLATE "POSIX";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
--- OK, because same type and collation
-ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "POSIX";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
-
--- Fails, because no default conversion
-ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
--- Fails, because wrong date format
-ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
-  USING f2::timestamp without time zone;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
-
--- OK, because expression is valid conversion to char
-ALTER TABLE o_ddl_check ALTER f2 TYPE char
-	USING substr(f2, substr(f2,4,1)::int / 2, 1);
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
-
-BEGIN;
-ALTER TABLE o_ddl_check ALTER f2 TYPE int
-	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
-ROLLBACK;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-SELECT * FROM o_ddl_check;
 
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
@@ -445,56 +382,6 @@ CREATE TABLE o_test_float_default (
 INSERT INTO o_test_float_default VALUES (2, null, 2.0);
 SELECT * FROM o_test_float_default;
 
-CREATE TABLE o_test_alter_change_byval (
-    val_1 int
-) USING orioledb;
-
-INSERT INTO o_test_alter_change_byval VALUES (1);
-ALTER TABLE o_test_alter_change_byval ADD COLUMN val_2 float8 DEFAULT 0.1;
-SELECT * FROM o_test_alter_change_byval;
-SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
-ALTER TABLE o_test_alter_change_byval ALTER COLUMN val_2 SET DEFAULT 0.2;
-INSERT INTO o_test_alter_change_byval VALUES (2);
-SELECT * FROM o_test_alter_change_byval;
-SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
-ALTER TABLE o_test_alter_change_byval ALTER val_2 TYPE text USING val_2::text;
-SELECT * FROM o_test_alter_change_byval;
-SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
-
-CREATE TABLE o_test_pkey_alter_type (
-	val_1 int,
-	val_2 int
-) USING orioledb;
-
-INSERT INTO o_test_pkey_alter_type
-	SELECT v, v * 10 FROM generate_series(1, 5) v;
-
-ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
-CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
-
-SET enable_seqscan = off;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-
-ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE int4;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-
-ALTER TABLE o_test_pkey_alter_type ALTER val_2 TYPE text USING val_2 || 'ROR';
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-
-ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE text USING val_1 || 'BOB';
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-RESET enable_seqscan;
-
 CREATE TABLE o_test_duplicate_key_fields (
 	val_1 int
 ) USING orioledb;
@@ -595,30 +482,6 @@ SELECT * FROM o_test_empty;
 SELECT orioledb_tbl_structure('o_test_empty'::regclass, 'nue');
 TRUNCATE o_test_empty;
 SELECT * FROM o_test_empty;
-
-BEGIN;
-CREATE TABLE o_test_multiple_set_type_same_trx (
-	val_1 int,
-	val_3 int
-) USING orioledb;
-
-SELECT * FROM o_test_multiple_set_type_same_trx;
-
-CREATE UNIQUE INDEX o_test_multiple_set_type_same_trx_ix1
-	ON o_test_multiple_set_type_same_trx (val_1);
-
-SELECT * FROM o_test_multiple_set_type_same_trx ORDER BY val_1;
-
-INSERT INTO o_test_multiple_set_type_same_trx
-	SELECT x, 3*x FROM generate_series(1,10) AS x;
-
-ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_1 TYPE bigint;
-
-ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_3 TYPE bigint;
-
-COMMIT;
-
-\d o_test_multiple_set_type_same_trx
 
 CREATE FUNCTION o_test_plpgsql_default_func(a int)
 RETURNS TEXT

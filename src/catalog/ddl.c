@@ -62,6 +62,8 @@
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
+#include "parser/parse_expr.h"
+#include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
 #include "storage/ipc.h"
@@ -87,6 +89,7 @@ static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 UndoLocation saved_undo_location = InvalidUndoLocation;
 static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
+static List	   *alter_type_exprs = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -105,6 +108,8 @@ static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 									  ScanDirection direction,
 									  uint64 count,
 									  bool execute_once);
+static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
+								Relation rel);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -327,6 +332,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 #endif
 
 		/*
+		 * alter_type_exprs is expected to be allocated in PortalContext so it
+		 * isn't freed by us and pointer may be invalid there
+		 */
+		alter_type_exprs = NIL;
+
+
+		/*
 		 * Figure out lock mode, and acquire lock.  This also does basic
 		 * permissions checks, so that we won't wait for a lock on (for
 		 * example) a relation on which we have no permissions.
@@ -379,6 +391,15 @@ orioledb_utility_command(PlannedStmt *pstmt,
 											  alter_table_type_to_string(cmd->subtype)));
 							break;
 					}
+
+					switch (cmd->subtype)
+					{
+						case AT_AlterColumnType:
+							o_alter_column_type(cmd, queryString, rel);
+							break;
+						default:
+							break;
+					}
 				}
 			}
 			table_close(rel, lockmode);
@@ -401,6 +422,31 @@ orioledb_utility_command(PlannedStmt *pstmt,
 #endif
 									context, params, env,
 									dest, qc);
+	}
+}
+
+static void
+o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
+{
+	ColumnDef   *def = (ColumnDef *) cmd->def;
+	if (def->raw_default)
+	{
+		Node				   *cooked_default;
+		ParseState			   *pstate;
+		ParseNamespaceItem	   *nsitem;
+		AttrNumber				attnum;
+
+		pstate = make_parsestate(NULL);
+		pstate->p_sourcetext = queryString;
+		nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
+											   NULL, false, true);
+		addNSItemToQuery(pstate, nsitem, false, true, true);
+		cooked_default = transformExpr(pstate, def->raw_default,
+									   EXPR_KIND_ALTER_COL_TRANSFORM);
+		attnum = get_attnum(RelationGetRelid(rel), cmd->name);
+		alter_type_exprs =
+			lappend(alter_type_exprs,
+					list_make2(makeInteger(attnum), cooked_default));
 	}
 }
 
@@ -523,12 +569,27 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 							  int subId)
 {
 	ParseState *pstate = make_parsestate(NULL);
-	Node	   *expr;
+	Node	   *expr = NULL;
 	bool		rewrite = false;
+	ListCell   *lc;
+
+	foreach(lc, alter_type_exprs)
+	{
+		AttrNumber attnum = intVal(linitial((List *) lfirst(lc)));
+
+		if (attnum == subId)
+		{
+			expr = (Node *) lsecond((List *) lfirst(lc));
+			break;
+		}
+	}
 
 	/* code from ATPrepAlterColumnType */
-	expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
-							old_field->collation, 0);
+	if (!expr)
+	{
+		expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
+								old_field->collation, 0);
+	}
 	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
 								 field->typmod, COERCION_EXPLICIT,
 								 COERCE_IMPLICIT_CAST, -1);

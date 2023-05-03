@@ -95,362 +95,15 @@ SELECT * FROM o_ddl_check;
 ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
 ERROR:  ALTER action OPTIONS cannot be performed on relation "o_ddl_check"
 DETAIL:  This operation is not supported for tables.
-ALTER TABLE o_ddl_check ALTER f2 TYPE text;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-      f1 |    text |         C |    false |  false        +
-      f2 |    text |   default |    false |  false        +
-      f3 | integer |    (null) |     true |  false        +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because 'f2' isn't indexed
-ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE text;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |   default |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE varchar COLLATE "POSIX";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 | character varying |     POSIX |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because same type and collation
-ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because binary compatible and collations match
-ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "POSIX";
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |     POSIX |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- Fails, because no default conversion
-ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp;
-ERROR:  column "f2" cannot be cast automatically to type timestamp without time zone
-HINT:  You might need to specify "USING f2::timestamp without time zone".
--- Fails, because wrong date format
-ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
-  USING f2::timestamp without time zone;
-ERROR:  invalid input syntax for type timestamp: "ABC2"
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |     POSIX |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  |  f2  | f3 
-------+------+----
- ABC1 | ABC2 |   
- ABC2 | ABC4 |   
- ABC3 | ABC6 |   
-(3 rows)
-
--- OK, because expression is valid conversion to char
-ALTER TABLE o_ddl_check ALTER f2 TYPE char
-	USING substr(f2, substr(f2,4,1)::int / 2, 1);
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |  false   +
-      f2 | character(1) |   default |    false |  false   +
-      f3 |      integer |    (null) |     true |  false   +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  | f2 | f3 
-------+----+----
- ABC1 | A  |   
- ABC2 | B  |   
- ABC3 | C  |   
-(3 rows)
-
-BEGIN;
-ALTER TABLE o_ddl_check ALTER f2 TYPE int
-	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-      f1 |    text |     POSIX |    false |  false        +
-      f2 | integer |    (null) |    false |  false        +
-      f3 | integer |    (null) |     true |  false        +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  | f2 | f3 
-------+----+----
- ABC1 | 10 |   
- ABC2 | 11 |   
- ABC3 | 12 |   
-(3 rows)
-
-ROLLBACK;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |  false   +
-      f2 | character(1) |   default |    false |  false   +
-      f3 |      integer |    (null) |     true |  false   +
- 
-(1 row)
-
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_ddl_check_pkey                        +
-     Index type: primary, unique               +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: f1                 +
- 
-(1 row)
-
-SELECT * FROM o_ddl_check;
-  f1  | f2 | f3 
-------+----+----
- ABC1 | A  |   
- ABC2 | B  |   
- ABC3 | C  |   
-(3 rows)
-
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |  false   +
-      f2 | character(1) |   default |     true |  false   +
-      f3 |      integer |    (null) |     true |  false   +
+                  orioledb_table_description                  
+--------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |   default |     true |  false +
+      f3 |           integer |    (null) |     true |  false +
  
 (1 row)
 
@@ -465,22 +118,22 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 (1 row)
 
 SELECT * FROM o_ddl_check;
-  f1  | f2 | f3 
-------+----+----
- ABC1 | A  |   
- ABC2 | B  |   
- ABC3 | C  |   
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
 (3 rows)
 
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |  false   +
-      f2 | character(1) |   default |    false |  false   +
-      f3 |      integer |    (null) |     true |  false   +
+                  orioledb_table_description                  
+--------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |  false +
+      f2 | character varying |   default |    false |  false +
+      f3 |           integer |    (null) |     true |  false +
  
 (1 row)
 
@@ -495,23 +148,23 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 (1 row)
 
 SELECT * FROM o_ddl_check;
-  f1  | f2 | f3 
-------+----+----
- ABC1 | A  |   
- ABC2 | B  |   
- ABC3 | C  |   
+  f1  |  f2  | f3 
+------+------+----
+ ABC1 | ABC2 |   
+ ABC2 | ABC4 |   
+ ABC3 | ABC6 |   
 (3 rows)
 
 ALTER TABLE o_ddl_check DROP f2;
 ALTER TABLE o_ddl_check DROP f1;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |   true   +
-      f2 | character(1) |   default |    false |   true   +
-      f3 |      integer |    (null) |     true |  false   +
+                  orioledb_table_description                  
+--------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1   +
+  Column |              Type | Collation | Nullable | Droped +
+      f1 |              text |         C |    false |   true +
+      f2 | character varying |   default |    false |   true +
+      f3 |           integer |    (null) |     true |  false +
  
 (1 row)
 
@@ -1297,333 +950,6 @@ SELECT * FROM o_test_float_default;
      2 |       |     2
 (1 row)
 
-CREATE TABLE o_test_alter_change_byval (
-    val_1 int
-) USING orioledb;
-INSERT INTO o_test_alter_change_byval VALUES (1);
-ALTER TABLE o_test_alter_change_byval ADD COLUMN val_2 float8 DEFAULT 0.1;
-SELECT * FROM o_test_alter_change_byval;
- val_1 | val_2 
--------+-------
-     1 |   0.1
-(1 row)
-
-SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
-                       orioledb_tbl_structure                        
----------------------------------------------------------------------
- Index ctid_primary contents                                        +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('(0,1)', '1', null)             +
-                                                                    +
- Index toast: not loaded                                            +
- 
-(1 row)
-
-ALTER TABLE o_test_alter_change_byval ALTER COLUMN val_2 SET DEFAULT 0.2;
-INSERT INTO o_test_alter_change_byval VALUES (2);
-SELECT * FROM o_test_alter_change_byval;
- val_1 | val_2 
--------+-------
-     1 |   0.1
-     2 |   0.2
-(2 rows)
-
-SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
-                       orioledb_tbl_structure                        
----------------------------------------------------------------------
- Index ctid_primary contents                                        +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('(0,1)', '1', null)             +
-     Item 1: offset = 296, tuple = ('(0,2)', '2', '0.2')            +
-                                                                    +
- Index toast: not loaded                                            +
- 
-(1 row)
-
-ALTER TABLE o_test_alter_change_byval ALTER val_2 TYPE text USING val_2::text;
-SELECT * FROM o_test_alter_change_byval;
- val_1 | val_2 
--------+-------
-     1 | 0.1
-     2 | 0.2
-(2 rows)
-
-SELECT orioledb_tbl_structure('o_test_alter_change_byval'::regclass, 'nue');
-                       orioledb_tbl_structure                        
----------------------------------------------------------------------
- Index ctid_primary contents                                        +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('(0,1)', '1', '0.1')            +
-     Item 1: offset = 304, tuple = ('(0,2)', '2', '0.2')            +
-                                                                    +
- Index toast: not loaded                                            +
- 
-(1 row)
-
-CREATE TABLE o_test_pkey_alter_type (
-	val_1 int,
-	val_2 int
-) USING orioledb;
-INSERT INTO o_test_pkey_alter_type
-	SELECT v, v * 10 FROM generate_series(1, 5) v;
-ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
-CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
-SET enable_seqscan = off;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-                      QUERY PLAN                      
-------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_alter_type
-   Forward index scan of: o_test_pkey_alter_type_pkey
-(2 rows)
-
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
- val_1 | val_2 
--------+-------
-     1 |    10
-     2 |    20
-     3 |    30
-     4 |    40
-     5 |    50
-(5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_alter_type
-   Forward index only scan of: o_test_pkey_alter_type_ix1
-(2 rows)
-
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
- val_1 | val_2 
--------+-------
-     1 |    10
-     2 |    20
-     3 |    30
-     4 |    40
-     5 |    50
-(5 rows)
-
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-                              orioledb_tbl_structure                              
-----------------------------------------------------------------------------------
- Index o_test_pkey_alter_type_pkey contents                                      +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                             +
- state = free, datoid equal, relnode equal, ix_type = primary, clean             +
-     Leftmost, Rightmost                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')       +
-     Item 0: offset = 264, tuple = ('1', '10')                                   +
-   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('3')       +
-     Item 1: offset = 296, tuple = ('2', '20')                                   +
-   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('4')       +
-     Item 2: offset = 328, tuple = ('3', '30')                                   +
-   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('5')      +
-     Item 3: offset = 360, tuple = ('4', '40')                                   +
-   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
-     Item 4: offset = 392, tuple = ('5', '50')                                   +
-                                                                                 +
- Index o_test_pkey_alter_type_ix1 contents                                       +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                             +
- state = free, datoid equal, relnode equal, ix_type = regular, clean             +
-     Leftmost, Rightmost                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20', '2') +
-     Item 0: offset = 264, tuple = ('10', '1')                                   +
-   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('30', '3') +
-     Item 1: offset = 296, tuple = ('20', '2')                                   +
-   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('40', '4') +
-     Item 2: offset = 328, tuple = ('30', '3')                                   +
-   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('50', '5')+
-     Item 3: offset = 360, tuple = ('40', '4')                                   +
-   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
-     Item 4: offset = 392, tuple = ('50', '5')                                   +
-                                                                                 +
- Index toast: not loaded                                                         +
- 
-(1 row)
-
-ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE int4;
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
- val_1 | val_2 
--------+-------
-     1 |    10
-     2 |    20
-     3 |    30
-     4 |    40
-     5 |    50
-(5 rows)
-
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
- val_1 | val_2 
--------+-------
-     1 |    10
-     2 |    20
-     3 |    30
-     4 |    40
-     5 |    50
-(5 rows)
-
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-                              orioledb_tbl_structure                              
-----------------------------------------------------------------------------------
- Index o_test_pkey_alter_type_pkey contents                                      +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                             +
- state = free, datoid equal, relnode equal, ix_type = primary, clean             +
-     Leftmost, Rightmost                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')       +
-     Item 0: offset = 264, tuple = ('1', '10')                                   +
-   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('3')       +
-     Item 1: offset = 296, tuple = ('2', '20')                                   +
-   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('4')       +
-     Item 2: offset = 328, tuple = ('3', '30')                                   +
-   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('5')      +
-     Item 3: offset = 360, tuple = ('4', '40')                                   +
-   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
-     Item 4: offset = 392, tuple = ('5', '50')                                   +
-                                                                                 +
- Index o_test_pkey_alter_type_ix1 contents                                       +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                             +
- state = free, datoid equal, relnode equal, ix_type = regular, clean             +
-     Leftmost, Rightmost                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20', '2') +
-     Item 0: offset = 264, tuple = ('10', '1')                                   +
-   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('30', '3') +
-     Item 1: offset = 296, tuple = ('20', '2')                                   +
-   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('40', '4') +
-     Item 2: offset = 328, tuple = ('30', '3')                                   +
-   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('50', '5')+
-     Item 3: offset = 360, tuple = ('40', '4')                                   +
-   Chunk 4: offset = 4, location = 384, hikey location = 112                     +
-     Item 4: offset = 392, tuple = ('50', '5')                                   +
-                                                                                 +
- Index toast: not loaded                                                         +
- 
-(1 row)
-
-ALTER TABLE o_test_pkey_alter_type ALTER val_2 TYPE text USING val_2 || 'ROR';
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
- val_1 | val_2 
--------+-------
-     1 | 10ROR
-     2 | 20ROR
-     3 | 30ROR
-     4 | 40ROR
-     5 | 50ROR
-(5 rows)
-
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
- val_1 | val_2 
--------+-------
-     1 | 10ROR
-     2 | 20ROR
-     3 | 30ROR
-     4 | 40ROR
-     5 | 50ROR
-(5 rows)
-
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-                               orioledb_tbl_structure                                
--------------------------------------------------------------------------------------
- Index o_test_pkey_alter_type_pkey contents                                         +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                +
-     Leftmost, Rightmost                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')          +
-     Item 0: offset = 264, tuple = ('1', '10ROR')                                   +
-   Chunk 1: offset = 1, location = 304, hikey location = 88, hikey = ('3')          +
-     Item 1: offset = 312, tuple = ('2', '20ROR')                                   +
-   Chunk 2: offset = 2, location = 352, hikey location = 96, hikey = ('4')          +
-     Item 2: offset = 360, tuple = ('3', '30ROR')                                   +
-   Chunk 3: offset = 3, location = 400, hikey location = 104, hikey = ('5')         +
-     Item 3: offset = 408, tuple = ('4', '40ROR')                                   +
-   Chunk 4: offset = 4, location = 448, hikey location = 112                        +
-     Item 4: offset = 456, tuple = ('5', '50ROR')                                   +
-                                                                                    +
- Index o_test_pkey_alter_type_ix1 contents                                          +
- Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                               +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                +
-     Leftmost, Rightmost                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20ROR', '2') +
-     Item 0: offset = 264, tuple = ('10ROR', '1')                                   +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30ROR', '3')+
-     Item 1: offset = 312, tuple = ('20ROR', '2')                                   +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('40ROR', '4')+
-     Item 2: offset = 360, tuple = ('30ROR', '3')                                   +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('50ROR', '5')+
-     Item 3: offset = 408, tuple = ('40ROR', '4')                                   +
-   Chunk 4: offset = 4, location = 448, hikey location = 176                        +
-     Item 4: offset = 456, tuple = ('50ROR', '5')                                   +
-                                                                                    +
- Index toast: not loaded                                                            +
- 
-(1 row)
-
-ALTER TABLE o_test_pkey_alter_type ALTER val_1 TYPE text USING val_1 || 'BOB';
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
- val_1 | val_2 
--------+-------
- 1BOB  | 10ROR
- 2BOB  | 20ROR
- 3BOB  | 30ROR
- 4BOB  | 40ROR
- 5BOB  | 50ROR
-(5 rows)
-
-SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
- val_1 | val_2 
--------+-------
- 1BOB  | 10ROR
- 2BOB  | 20ROR
- 3BOB  | 30ROR
- 4BOB  | 40ROR
- 5BOB  | 50ROR
-(5 rows)
-
-SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
-                                 orioledb_tbl_structure                                 
-----------------------------------------------------------------------------------------
- Index o_test_pkey_alter_type_pkey contents                                            +
- Page 0: level = 0, maxKeyLen = 13, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                   +
-     Leftmost, Rightmost                                                               +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2BOB')          +
-     Item 0: offset = 264, tuple = ('1BOB', '10ROR')                                   +
-   Chunk 1: offset = 1, location = 304, hikey location = 96, hikey = ('3BOB')          +
-     Item 1: offset = 312, tuple = ('2BOB', '20ROR')                                   +
-   Chunk 2: offset = 2, location = 352, hikey location = 112, hikey = ('4BOB')         +
-     Item 2: offset = 360, tuple = ('3BOB', '30ROR')                                   +
-   Chunk 3: offset = 3, location = 400, hikey location = 128, hikey = ('5BOB')         +
-     Item 3: offset = 408, tuple = ('4BOB', '40ROR')                                   +
-   Chunk 4: offset = 4, location = 448, hikey location = 144                           +
-     Item 4: offset = 456, tuple = ('5BOB', '50ROR')                                   +
-                                                                                       +
- Index o_test_pkey_alter_type_ix1 contents                                             +
- Page 0: level = 0, maxKeyLen = 19, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
-     Leftmost, Rightmost                                                               +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('20ROR', '2BOB') +
-     Item 0: offset = 264, tuple = ('10ROR', '1BOB')                                   +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30ROR', '3BOB')+
-     Item 1: offset = 312, tuple = ('20ROR', '2BOB')                                   +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('40ROR', '4BOB')+
-     Item 2: offset = 360, tuple = ('30ROR', '3BOB')                                   +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('50ROR', '5BOB')+
-     Item 3: offset = 408, tuple = ('40ROR', '4BOB')                                   +
-   Chunk 4: offset = 4, location = 448, hikey location = 176                           +
-     Item 4: offset = 456, tuple = ('50ROR', '5BOB')                                   +
-                                                                                       +
- Index toast: not loaded                                                               +
- 
-(1 row)
-
-RESET enable_seqscan;
 CREATE TABLE o_test_duplicate_key_fields (
 	val_1 int
 ) USING orioledb;
@@ -2045,37 +1371,6 @@ SELECT * FROM o_test_empty;
 --
 (0 rows)
 
-BEGIN;
-CREATE TABLE o_test_multiple_set_type_same_trx (
-	val_1 int,
-	val_3 int
-) USING orioledb;
-SELECT * FROM o_test_multiple_set_type_same_trx;
- val_1 | val_3 
--------+-------
-(0 rows)
-
-CREATE UNIQUE INDEX o_test_multiple_set_type_same_trx_ix1
-	ON o_test_multiple_set_type_same_trx (val_1);
-SELECT * FROM o_test_multiple_set_type_same_trx ORDER BY val_1;
- val_1 | val_3 
--------+-------
-(0 rows)
-
-INSERT INTO o_test_multiple_set_type_same_trx
-	SELECT x, 3*x FROM generate_series(1,10) AS x;
-ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_1 TYPE bigint;
-ALTER TABLE o_test_multiple_set_type_same_trx ALTER val_3 TYPE bigint;
-COMMIT;
-\d o_test_multiple_set_type_same_trx
-  Table "ddl.o_test_multiple_set_type_same_trx"
- Column |  Type  | Collation | Nullable | Default 
---------+--------+-----------+----------+---------
- val_1  | bigint |           |          | 
- val_3  | bigint |           |          | 
-Indexes:
-    "o_test_multiple_set_type_same_trx_ix1" UNIQUE, btree (val_1)
-
 CREATE FUNCTION o_test_plpgsql_default_func(a int)
 RETURNS TEXT
 AS $$
@@ -2087,7 +1382,7 @@ CREATE TABLE o_test_plpgsql_default (
     val_1 int DEFAULT LENGTH(o_test_plpgsql_default_func(6))
 ) USING orioledb;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 24 other objects
+NOTICE:  drop cascades to 21 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -2102,15 +1397,12 @@ drop cascades to table o_test_opcoptions_reset
 drop cascades to table o_test_null_hasdef
 drop cascades to view test_view_1
 drop cascades to table o_test_float_default
-drop cascades to table o_test_alter_change_byval
-drop cascades to table o_test_pkey_alter_type
 drop cascades to table o_test_duplicate_key_fields
 drop cascades to table o_test_pkey_fields_same_as_index
 drop cascades to table o_test_null_pkey_field
 drop cascades to table o_test_included_ix_name
 drop cascades to table o_test_add_pkey_empty_index
 drop cascades to table o_test_empty
-drop cascades to table o_test_multiple_set_type_same_trx
 drop cascades to table o_test_plpgsql_default
 DROP SCHEMA ddl CASCADE;
 NOTICE:  drop cascades to 5 other objects
