@@ -157,7 +157,7 @@ RETURNS void
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION ucm_check()
+CREATE FUNCTION orioledb_ucm_check()
 RETURNS bool
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
@@ -207,3 +207,13 @@ CREATE VIEW orioledb_table_descr AS
 
 CREATE VIEW orioledb_index_descr AS
   SELECT * FROM orioledb_get_index_descrs();
+
+CREATE FUNCTION orioledb_parallel_debug_start()
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_parallel_debug_stop()
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;

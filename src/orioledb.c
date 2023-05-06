@@ -43,6 +43,7 @@
 #include "executor/execExpr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "optimizer/optimizer.h"
 #include "optimizer/plancat.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgwriter.h"
@@ -177,7 +178,9 @@ static void orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 PG_FUNCTION_INFO_V1(orioledb_page_stats);
 PG_FUNCTION_INFO_V1(orioledb_version);
 PG_FUNCTION_INFO_V1(orioledb_commit_hash);
-PG_FUNCTION_INFO_V1(ucm_check);
+PG_FUNCTION_INFO_V1(orioledb_ucm_check);
+PG_FUNCTION_INFO_V1(orioledb_parallel_debug_start);
+PG_FUNCTION_INFO_V1(orioledb_parallel_debug_stop);
 
 #if PG_VERSION_NUM >= 150000
 static void
@@ -1176,7 +1179,7 @@ orioledb_page_stats(PG_FUNCTION_ARGS)
 }
 
 Datum
-ucm_check(PG_FUNCTION_ARGS)
+orioledb_ucm_check(PG_FUNCTION_ARGS)
 {
 	bool		result = true;
 	int			i;
@@ -1402,4 +1405,26 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 	}
 
 	table_close(relation, NoLock);
+}
+
+Datum
+orioledb_parallel_debug_start(PG_FUNCTION_ARGS)
+{
+#if PG_VERSION_NUM >= 160000
+	debug_parallel_query = DEBUG_PARALLEL_ON;
+#else
+	force_parallel_mode = FORCE_PARALLEL_ON;
+#endif
+	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_parallel_debug_stop(PG_FUNCTION_ARGS)
+{
+#if PG_VERSION_NUM >= 160000
+	debug_parallel_query = DEBUG_PARALLEL_OFF;
+#else
+	force_parallel_mode = FORCE_PARALLEL_OFF;
+#endif
+	PG_RETURN_VOID();
 }

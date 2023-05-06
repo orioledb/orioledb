@@ -363,7 +363,12 @@ CREATE TABLE o_test_o_scan_register (
 ) USING orioledb;
 INSERT INTO o_test_o_scan_register (val_1, val_2) VALUES ('A', 0), ('B', 0);
 BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 EXPLAIN (COSTS OFF) SELECT val_1, val_2 FROM o_test_o_scan_register
     WHERE val_1 IN ('A', 'B') ORDER BY val_1;
                          QUERY PLAN                         
@@ -383,6 +388,12 @@ SELECT val_1, val_2 FROM o_test_o_scan_register
  A     |     0
  B     |     0
 (2 rows)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
 
 COMMIT;
 CREATE FUNCTION func_1(int, int) RETURNS int LANGUAGE SQL
