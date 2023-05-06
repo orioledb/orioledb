@@ -2064,11 +2064,13 @@ replay_container(Pointer startPtr, Pointer endPtr,
 							old_descr = o_fetch_table_descr(old_o_table->oids);
 							rebuild_indices(old_o_table, old_descr,
 											new_o_table, &tmp_descr);
+							LWLockRelease(&checkpoint_state->oTablesAddLock);
 						}
 					}
 					else
 					{
 						build_secondary_index(new_o_table, &tmp_descr, ix_num);
+						LWLockRelease(&checkpoint_state->oTablesAddLock);
 					}
 					o_free_tmp_table_descr(&tmp_descr);
 				}
@@ -2084,6 +2086,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 							old_descr = o_fetch_table_descr(old_o_table->oids);
 							rebuild_indices(old_o_table, old_descr,
 											new_o_table, &tmp_descr);
+							LWLockRelease(&checkpoint_state->oTablesAddLock);
 						}
 						o_free_tmp_table_descr(&tmp_descr);
 					}

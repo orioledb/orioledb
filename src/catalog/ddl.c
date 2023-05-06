@@ -850,8 +850,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					o_table_resize_constr(o_table);
 
+					LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
+					LWLockRelease(&checkpoint_state->oTablesAddLock);
+
 					o_table_free(o_table);
 				}
 			}
@@ -880,6 +883,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 				o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
 				o_tables_add(o_table, oxid, csn);
+				LWLockRelease(&checkpoint_state->oTablesAddLock);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
 					 (subId == 0))
@@ -963,6 +967,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_table->primary_compress = primary_compress;
 
 					fill_current_oxid_csn(&oxid, &csn);
+
+					LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
 
