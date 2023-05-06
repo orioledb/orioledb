@@ -242,7 +242,7 @@ include/utils/stopevents_defs.h: stopevents.txt stopevents_gen.py
 ifndef ORIOLEDB_PATCHSET_VERSION
 ORIOLEDB_PATCHSET_VERSION=1
 endif
-CUR_ORIOLEDB_PATCHSET_VERSION := $(shell grep '$(MAJORVERSION)' .pgtags | cut -d'_' -f2)
+CUR_ORIOLEDB_PATCHSET_VERSION := $(shell grep '^$(MAJORVERSION):' .pgtags | cut -d'_' -f2)
 
 check_patchset_version:
 	@if [ $(CUR_ORIOLEDB_PATCHSET_VERSION) != $(ORIOLEDB_PATCHSET_VERSION) ]; then \
