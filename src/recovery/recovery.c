@@ -28,6 +28,7 @@
 #include "tableam/descr.h"
 #include "tableam/operations.h"
 #include "transam/undo.h"
+#include "utils/inval.h"
 #include "utils/stopevent.h"
 #include "utils/syscache.h"
 
@@ -1864,6 +1865,22 @@ o_indices_get_oids(Pointer tuple, ORelOids *tableOids)
 	return treeOids;
 }
 
+static void
+clean_workers_oids(void)
+{
+	int		i;
+
+	for (i = 0; i < recovery_pool_size_guc; i++)
+	{
+		RecoveryWorkerState *state = &workers_pool[i];
+
+		state->oids.datoid = InvalidOid;
+		state->oids.reloid = InvalidOid;
+		state->oids.relnode = InvalidOid;
+		state->type = oIndexInvalid;
+	}
+}
+
 /*
  * Replays a single orioledb WAL container.
  */
@@ -2075,6 +2092,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				pfree(old_o_table);
 				pfree(new_o_table);
 			}
+			if (!single)
+				clean_workers_oids();
 
 		}
 		else if (rec_type == WAL_REC_TRUNCATE)
@@ -2092,6 +2111,10 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				workers_synchronize(xlogPtr, true);
 
 			o_truncate_table(oids);
+
+			AcceptInvalidationMessages();
+			if (!single)
+				clean_workers_oids();
 		}
 		else if (rec_type == WAL_REC_SAVEPOINT)
 		{
