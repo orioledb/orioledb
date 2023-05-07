@@ -82,11 +82,11 @@ typedef struct OIndexPlanState
 
 typedef struct OCustomScanState
 {
-	CustomScanState		css;
-	bool				useEaCounters;
-	OEACallsCounters	eaCounters;
-	OXid				scan_oxid;
-	OPlanState		   *o_plan_state;
+	CustomScanState css;
+	bool		useEaCounters;
+	OEACallsCounters eaCounters;
+	OXid		scan_oxid;
+	OPlanState *o_plan_state;
 } OCustomScanState;
 
 set_rel_pathlist_hook_type old_set_rel_pathlist_hook = NULL;
@@ -602,8 +602,8 @@ o_create_custom_scan_state(CustomScan *cscan)
 void
 o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 {
-	OCustomScanState   *ocstate = (OCustomScanState *) node;
-	OXid				cur_oxid;
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OXid		cur_oxid;
 
 	cur_oxid = get_current_oxid_if_any();
 	if (!OXidIsValid(cur_oxid) && IsInParallelMode())

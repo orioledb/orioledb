@@ -707,14 +707,14 @@ check_pending_truncates(void)
 	maxOffset = undo_meta->pendingTruncatesLocation;
 	while (offset < maxOffset)
 	{
-		int		i;
+		int			i;
 
 		length = sizeof(relOids);
 		if (FileRead(pendingTruncatesFile, (Pointer) &relOids, length, offset,
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read pending truncates file %s",
-								PENDING_TRUNCATES_FILENAME)));
+								   PENDING_TRUNCATES_FILENAME)));
 
 		offset += length;
 		length = sizeof(numTrees);
@@ -723,7 +723,7 @@ check_pending_truncates(void)
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read pending truncates file %s",
-								PENDING_TRUNCATES_FILENAME)));
+								   PENDING_TRUNCATES_FILENAME)));
 
 		if (numTrees > relNodesAllocated)
 		{
@@ -741,7 +741,7 @@ check_pending_truncates(void)
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read pending truncates file %s",
-								PENDING_TRUNCATES_FILENAME)));
+								   PENDING_TRUNCATES_FILENAME)));
 
 		for (i = 0; i < numTrees; i++)
 			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode);
@@ -784,6 +784,7 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 		if (have_backup_in_progress())
 		{
 			ORelOids	oids = {datoid, reloid, relnode_item->oldRelnode};
+
 			dropRelnode = InvalidOid;
 			add_pending_truncate(oids, relnode_item->oldNumTreeOids,
 								 &relnode_item->oids[0]);

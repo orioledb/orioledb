@@ -2325,8 +2325,8 @@ unlink_callback(const char *filename, uint32 segno, char *ext, void *arg)
 {
 	/*
 	 * Recovery determines relation data presence by presence of the first
-	 * data file.  So, we durably delete the first data file to evade situation
-	 * when partially deleted file data is visible.
+	 * data file.  So, we durably delete the first data file to evade
+	 * situation when partially deleted file data is visible.
 	 */
 	if (segno == 0 && ext == NULL)
 		durable_unlink(filename, ERROR);

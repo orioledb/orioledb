@@ -799,7 +799,8 @@ o_collect_funcexpr(Node *node)
 	o_sys_caches_add_start();
 	PG_TRY();
 	{
-		bool	add_pg_proc_class = true;
+		bool		add_pg_proc_class = true;
+
 		expression_tree_walker(o_wrap_top_funcexpr(node), o_collect_function,
 							   &add_pg_proc_class);
 	}
@@ -840,10 +841,10 @@ o_collect_function_walker(Oid functionId, Oid inputcollid, List *args,
 void
 o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 {
-	FuncExpr	   *fexpr;
-	HeapTuple		procedureTuple;
-	Form_pg_proc	procedureStruct;
-	bool			add_pg_proc_class = false;
+	FuncExpr   *fexpr;
+	HeapTuple	procedureTuple;
+	Form_pg_proc procedureStruct;
+	bool		add_pg_proc_class = false;
 
 	procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(procoid));
 	if (!HeapTupleIsValid(procedureTuple))
@@ -1317,7 +1318,8 @@ plannedstatement_tree_walker(PlannedStmt *pstmt,
 void
 o_collect_functions_pstmt(PlannedStmt *pstmt)
 {
-	bool	add_pg_proc_class = true;
+	bool		add_pg_proc_class = true;
+
 	plannedstatement_tree_walker(pstmt, o_collect_function,
 								 &add_pg_proc_class);
 }

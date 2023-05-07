@@ -299,9 +299,9 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
 		 */
 		if (ostate->ixNum != PrimaryIndexNumber)
 		{
-			OBTreeKeyBound	bound;
-			OTuple			ptup;
-			OIndexDescr	   *primary = GET_PRIMARY(descr);
+			OBTreeKeyBound bound;
+			OTuple		ptup;
+			OIndexDescr *primary = GET_PRIMARY(descr);
 
 			/* fetch primary index key from tuple and search raw tuple */
 			o_fill_pindex_tuple_key_bound(&id->desc, tup, &bound);

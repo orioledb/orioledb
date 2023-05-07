@@ -1870,7 +1870,7 @@ o_indices_get_oids(Pointer tuple, ORelOids *tableOids)
 static void
 clean_workers_oids(void)
 {
-	int		i;
+	int			i;
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
 	{

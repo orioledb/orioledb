@@ -97,7 +97,7 @@ static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 UndoLocation saved_undo_location = InvalidUndoLocation;
 static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
-static List	   *alter_type_exprs = NIL;
+static List *alter_type_exprs = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -370,6 +370,7 @@ expand_vacuum_rel(VacuumRelation *vrel, int options)
 		classForm = (Form_pg_class) GETSTRUCT(tuple);
 
 #if PG_VERSION_NUM >= 160000
+
 		/*
 		 * Make a returnable VacuumRelation for this rel if the user has the
 		 * required privileges.
@@ -381,6 +382,7 @@ expand_vacuum_rel(VacuumRelation *vrel, int options)
 														  vrel->va_cols));
 		}
 #else
+
 		/*
 		 * Make a returnable VacuumRelation for this rel if user is a proper
 		 * owner.
@@ -511,7 +513,7 @@ reindex_concurrently_not_supported(Relation tbl)
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 			 errmsg("orioledb table \"%s\" does not support REINDEX CONCURRENTLY",
 					RelationGetRelationName(tbl))),
-			 errdetail("REINDEX CONCURRENTLY is not supported for OrioleDB tables yet.  This will be implemented in future."));
+			errdetail("REINDEX CONCURRENTLY is not supported for OrioleDB tables yet.  This will be implemented in future."));
 }
 
 static void
@@ -535,6 +537,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 		   objectKind == REINDEX_OBJECT_DATABASE);
 
 #if PG_VERSION_NUM >= 160000
+
 	/*
 	 * This matches the options enforced by the grammar, where the object name
 	 * is optional for DATABASE and SYSTEM.
@@ -626,9 +629,9 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 	scan = table_beginscan_catalog(relationRelation, num_keys, scan_keys);
 	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
 	{
-		Form_pg_class	classtuple = (Form_pg_class) GETSTRUCT(tuple);
-		Oid				relid = classtuple->oid;
-		Relation		tbl;
+		Form_pg_class classtuple = (Form_pg_class) GETSTRUCT(tuple);
+		Oid			relid = classtuple->oid;
+		Relation	tbl;
 
 		/*
 		 * Only regular tables and matviews can have indexes, so ignore any
@@ -647,6 +650,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 			continue;
 
 #if PG_VERSION_NUM >= 160000
+
 		/*
 		 * Check user/system classification.  SYSTEM processes all the
 		 * catalogs, and DATABASE processes everything that's not a catalog.
@@ -661,11 +665,12 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 		/*
 		 * The table can be reindexed if the user has been granted MAINTAIN on
 		 * the table or one of its partition ancestors or the user is a
-		 * superuser, the table owner, or the database/schema owner (but in the
-		 * latter case, only if it's not a shared relation).  pg_class_aclcheck
-		 * includes the superuser case, and depending on objectKind we already
-		 * know that the user has permission to run REINDEX on this database or
-		 * schema per the permission checks at the beginning of this routine.
+		 * superuser, the table owner, or the database/schema owner (but in
+		 * the latter case, only if it's not a shared relation).
+		 * pg_class_aclcheck includes the superuser case, and depending on
+		 * objectKind we already know that the user has permission to run
+		 * REINDEX on this database or schema per the permission checks at the
+		 * beginning of this routine.
 		 */
 		if (classtuple->relisshared &&
 			pg_class_aclcheck(relid, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK &&
@@ -812,8 +817,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("unsupported alter table subcommand")),
-									 errdetail("Subcommand \"%s\" is not supported on OrioleDB tables yet.  Please send a bug report.",
-											   alter_table_type_to_string(cmd->subtype)));
+									errdetail("Subcommand \"%s\" is not supported on OrioleDB tables yet.  Please send a bug report.",
+											  alter_table_type_to_string(cmd->subtype)));
 							break;
 					}
 
@@ -832,7 +837,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	}
 	else if (IsA(pstmt->utilityStmt, ClusterStmt))
 	{
-		ClusterStmt	   *stmt = (ClusterStmt *) pstmt->utilityStmt;
+		ClusterStmt *stmt = (ClusterStmt *) pstmt->utilityStmt;
 
 		if (stmt->relation != NULL)
 		{
@@ -849,18 +854,18 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (orioledb)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("orioledb tables does not support CLUSTER")),
-						 errdetail("CLUSTER makes no much sense for index-organized tables."));
+						 errmsg("orioledb tables does not support CLUSTER")),
+						errdetail("CLUSTER makes no much sense for index-organized tables."));
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, VacuumStmt))
 	{
-		VacuumStmt	   *vacstmt = (VacuumStmt *) pstmt->utilityStmt;
-		ListCell	   *lc;
-		bool			full = false,
-						skip_locked = false,
-						analyze = false;
-		int				options;
+		VacuumStmt *vacstmt = (VacuumStmt *) pstmt->utilityStmt;
+		ListCell   *lc;
+		bool		full = false,
+					skip_locked = false,
+					analyze = false;
+		int			options;
 
 		foreach(lc, vacstmt->options)
 		{
@@ -880,7 +885,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			(full ? VACOPT_FULL : 0);
 		if (full)
 		{
-			List *relations = vacstmt->rels;
+			List	   *relations = vacstmt->rels;
 
 			if (relations != NIL)
 			{
@@ -888,8 +893,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 				foreach(lc, relations)
 				{
-					VacuumRelation	   *vrel = lfirst_node(VacuumRelation, lc);
-					List			   *sublist;
+					VacuumRelation *vrel = lfirst_node(VacuumRelation, lc);
+					List	   *sublist;
 
 					sublist = expand_vacuum_rel(vrel, options);
 					newrels = list_concat(newrels, sublist);
@@ -909,19 +914,19 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("orioledb table \"%s\" does not support VACUUM FULL",
 									RelationGetRelationName(rel))),
-							 errdetail("VACUUM FULL is not supported for OrioleDB tables yet."));
+							errdetail("VACUUM FULL is not supported for OrioleDB tables yet."));
 				relation_close(rel, AccessShareLock);
 			}
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, ReindexStmt))
 	{
-		ReindexStmt	   *stmt = (ReindexStmt *) pstmt->utilityStmt;
-		bool			concurrently = false;
+		ReindexStmt *stmt = (ReindexStmt *) pstmt->utilityStmt;
+		bool		concurrently = false;
 
 #if PG_VERSION_NUM >= 140000
 		{
-			ListCell	   *lc;
+			ListCell   *lc;
 
 			foreach(lc, stmt->params)
 			{
@@ -942,8 +947,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				case REINDEX_OBJECT_INDEX:
 					{
 						Oid			indOid = RangeVarGetRelid(stmt->relation,
-															AccessShareLock,
-															false);
+															  AccessShareLock,
+															  false);
 						Relation	iRel,
 									tbl;
 
@@ -976,14 +981,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					break;
 				default:
 					elog(ERROR, "unrecognized object type: %d",
-						(int) stmt->kind);
+						 (int) stmt->kind);
 					break;
 			}
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))
 	{
-		TransactionStmt	   *tstmt = (TransactionStmt *) pstmt->utilityStmt;
+		TransactionStmt *tstmt = (TransactionStmt *) pstmt->utilityStmt;
 
 		if (tstmt->kind == TRANS_STMT_PREPARE)
 		{
@@ -997,8 +1002,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot use PREPARE TRANSACTION in transaction that uses orioledb table")),
-						 errdetail("OrioleDB does not support prepared transactions yet."));
+						 errmsg("cannot use PREPARE TRANSACTION in transaction that uses orioledb table")),
+						errdetail("OrioleDB does not support prepared transactions yet."));
 			}
 		}
 	}
@@ -1025,13 +1030,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 static void
 o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
 {
-	ColumnDef   *def = (ColumnDef *) cmd->def;
+	ColumnDef  *def = (ColumnDef *) cmd->def;
+
 	if (def->raw_default)
 	{
-		Node				   *cooked_default;
-		ParseState			   *pstate;
-		ParseNamespaceItem	   *nsitem;
-		AttrNumber				attnum;
+		Node	   *cooked_default;
+		ParseState *pstate;
+		ParseNamespaceItem *nsitem;
+		AttrNumber	attnum;
 
 		pstate = make_parsestate(NULL);
 		pstate->p_sourcetext = queryString;
@@ -1171,7 +1177,7 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 
 	foreach(lc, alter_type_exprs)
 	{
-		AttrNumber attnum = intVal(linitial((List *) lfirst(lc)));
+		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
 
 		if (attnum == subId)
 		{
