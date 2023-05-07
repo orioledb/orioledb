@@ -151,8 +151,8 @@ read_evicted_data(ORelOids oids, uint32 chkp_num)
  * To avoid concurrency problems with eviction/cleanup table this call must be
  * under AccessShareLock (See o_tables.h/o_tables_rel_lock()).
  */
-void
-o_btree_load_shmem(BTreeDescr *desc)
+static bool
+o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *sharedRootInfo = NULL;
@@ -165,11 +165,11 @@ o_btree_load_shmem(BTreeDescr *desc)
 
 	Assert(desc != NULL);
 	if (!ORelOidsIsValid(desc->oids) || IS_SYS_TREE_OIDS(desc->oids))
-		return;
+		return true;
 
 	/* easy case: shared memory is initialized */
 	if (ORootPageIsValid(desc) && OMetaPageIsValid(desc))
-		return;
+		return true;
 
 	memset(&key, 0, sizeof(SharedRootInfoKey));
 	key.datoid = desc->oids.datoid;
@@ -183,6 +183,14 @@ o_btree_load_shmem(BTreeDescr *desc)
 					  LW_EXCLUSIVE);
 		hasLock = true;
 		sharedRootInfo = o_find_shared_root_info(&key);
+	}
+
+	if (sharedRootInfo && sharedRootInfo->placeholder)
+	{
+		if (hasLock)
+			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+		pfree(sharedRootInfo);
+		return false;
 	}
 
 	if (sharedRootInfo == NULL)
@@ -249,7 +257,24 @@ o_btree_load_shmem(BTreeDescr *desc)
 		LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
 
 	Assert(sharedRootInfo != NULL);
+	Assert(!sharedRootInfo->placeholder);
 	pfree(sharedRootInfo);
+	return true;
+}
+
+void
+o_btree_load_shmem(BTreeDescr *desc)
+{
+	bool		result PG_USED_FOR_ASSERTS_ONLY;
+
+	result = o_btree_load_shmem_internal(desc, false);
+	Assert(result == true);
+}
+
+bool
+o_btree_load_shmem_checkpoint(BTreeDescr *desc)
+{
+	return o_btree_load_shmem_internal(desc, true);
 }
 
 /*
@@ -275,6 +300,7 @@ o_btree_try_use_shmem(BTreeDescr *desc)
 		if (shared == NULL)
 			return false;
 
+		Assert(!shared->placeholder);
 		Assert(OInMemoryBlknoIsValid(shared->rootInfo.rootPageBlkno));
 		Assert(OInMemoryBlknoIsValid(shared->rootInfo.metaPageBlkno));
 
@@ -656,6 +682,7 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 	int			blkno,
 				bufnum;
 
+	sharedRootInfo->placeholder = false;
 	rootInfo->rootPageBlkno = ppool_get_metapage(pool);
 	rootInfo->metaPageBlkno = ppool_get_metapage(pool);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
@@ -761,6 +788,29 @@ o_find_shared_root_info(SharedRootInfoKey *key)
 }
 
 void
+o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
+{
+	OTuple		sharedRootInfoTuple;
+	SharedRootInfo sharedRootInfo;
+	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
+
+	sharedRootInfoTuple.formatFlags = 0;
+	sharedRootInfoTuple.data = (Pointer) &sharedRootInfo;
+
+	memset(&sharedRootInfo, 0, sizeof(sharedRootInfo));
+	sharedRootInfo.key.datoid = datoid;
+	sharedRootInfo.key.relnode = relnode;
+	sharedRootInfo.placeholder = true;
+	sharedRootInfo.rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
+	sharedRootInfo.rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
+	sharedRootInfo.rootInfo.rootPageChangeCount = 0;
+
+	inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+										 sharedRootInfoTuple);
+	Assert(inserted);
+}
+
+void
 cleanup_btree(Oid datoid, Oid relnode, bool files)
 {
 	SharedRootInfoKey key;
@@ -777,9 +827,10 @@ cleanup_btree(Oid datoid, Oid relnode, bool files)
 
 		drop_result = o_drop_shared_root_info(datoid, relnode);
 		Assert(drop_result);
-		o_btree_cleanup_pages(shared->rootInfo.rootPageBlkno,
-							  shared->rootInfo.metaPageBlkno,
-							  shared->rootInfo.rootPageChangeCount);
+		if (!shared->placeholder)
+			o_btree_cleanup_pages(shared->rootInfo.rootPageBlkno,
+								  shared->rootInfo.metaPageBlkno,
+								  shared->rootInfo.rootPageChangeCount);
 		pfree(shared);
 	}
 	if (files)

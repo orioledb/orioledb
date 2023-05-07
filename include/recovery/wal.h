@@ -24,11 +24,12 @@
 #define WAL_REC_INSERT		(5)
 #define WAL_REC_UPDATE		(6)
 #define WAL_REC_DELETE		(7)
-#define WAL_REC_INVALIDATE	(8)
-#define WAL_REC_SAVEPOINT	(9)
-#define WAL_REC_ROLLBACK_TO_SAVEPOINT (10)
-#define WAL_REC_JOINT_COMMIT (11)
-#define WAL_REC_TRUNCATE	(12)
+#define WAL_REC_O_TABLES_META_LOCK (8)
+#define WAL_REC_O_TABLES_META_UNLOCK (9)
+#define WAL_REC_SAVEPOINT	(10)
+#define WAL_REC_ROLLBACK_TO_SAVEPOINT (11)
+#define WAL_REC_JOINT_COMMIT (12)
+#define WAL_REC_TRUNCATE	(13)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -61,7 +62,7 @@ typedef struct
 	uint8		reloid[sizeof(Oid)];
 	uint8		old_relnode[sizeof(Oid)];
 	uint8		new_relnode[sizeof(Oid)];
-} WALRecInvalidate;
+} WALRecOTablesUnlockMeta;
 
 typedef struct
 {
@@ -109,7 +110,8 @@ typedef struct
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);
-extern void add_invalidate_wal_record(ORelOids oids, Oid old_relnode);
+extern void add_o_tables_meta_lock_wal_record(void);
+extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
 extern bool local_wal_is_empty(void);

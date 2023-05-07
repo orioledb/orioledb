@@ -278,7 +278,7 @@ tree_structure(StringInfo buf,
 	key.relnode = td->oids.relnode;
 	sharedRootInfo = o_find_shared_root_info(&key);
 
-	if (sharedRootInfo != NULL)
+	if (sharedRootInfo != NULL && !sharedRootInfo->placeholder)
 	{
 		o_btree_load_shmem(td);
 
@@ -593,7 +593,7 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 		key.relnode = td->oids.relnode;
 		sharedRootInfo = o_find_shared_root_info(&key);
 
-		if (sharedRootInfo == NULL)
+		if (sharedRootInfo == NULL || sharedRootInfo->placeholder)
 			continue;
 		o_btree_load_shmem(td);
 

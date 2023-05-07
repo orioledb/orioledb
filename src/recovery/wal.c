@@ -254,9 +254,9 @@ add_rel_wal_record(ORelOids oids, OIndexType type)
 }
 
 void
-add_invalidate_wal_record(ORelOids oids, Oid old_relnode)
+add_o_tables_meta_lock_wal_record(void)
 {
-	WALRecInvalidate *rec;
+	WALRec *rec;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -270,12 +270,36 @@ add_invalidate_wal_record(ORelOids oids, Oid old_relnode)
 		add_xid_wal_record(oxid);
 	}
 
-	rec = (WALRecInvalidate *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
 
-	rec->recType = WAL_REC_INVALIDATE;
+	rec->recType = WAL_REC_O_TABLES_META_LOCK;
+
+	local_wal_buffer_offset += sizeof(*rec);
+}
+
+void
+add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
+{
+	WALRecOTablesUnlockMeta *rec;
+
+	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+
+	if (local_wal_buffer_offset == 0)
+	{
+		OXid		oxid = get_current_oxid_if_any();
+
+		Assert(oxid != InvalidOXid);
+		add_xid_wal_record(oxid);
+	}
+
+	rec = (WALRecOTablesUnlockMeta *) (&local_wal_buffer[local_wal_buffer_offset]);
+
+	rec->recType = WAL_REC_O_TABLES_META_UNLOCK;
 	memcpy(rec->datoid, &oids.datoid, sizeof(Oid));
 	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
-	memcpy(rec->old_relnode, &old_relnode, sizeof(Oid));
+	memcpy(rec->old_relnode, &oldRelnode, sizeof(Oid));
 	memcpy(rec->new_relnode, &oids.relnode, sizeof(Oid));
 
 	local_wal_buffer_offset += sizeof(*rec);

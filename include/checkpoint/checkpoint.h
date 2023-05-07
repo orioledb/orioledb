@@ -27,6 +27,7 @@ typedef struct
 	UndoLocation lastUndoLocation;
 	XLogRecPtr	toastConsistentPtr;
 	XLogRecPtr	replayStartPtr;
+	XLogRecPtr	sysTreesStartPtr;
 	uint64		mmapDataLength;
 	UndoLocation checkpointRetainStartLocation;
 	UndoLocation checkpointRetainEndLocation;
@@ -179,6 +180,8 @@ typedef struct
 	pg_atomic_uint32 autonomousLevel;
 	XLogRecPtr	replayStartPtr;
 	XLogRecPtr	controlReplayStartPtr;
+	XLogRecPtr	sysTreesStartPtr;
+	XLogRecPtr	controlSysTreesStartPtr;
 	XLogRecPtr	toastConsistentPtr;
 	XLogRecPtr	controlToastConsistentPtr;
 	pg_atomic_uint64 mmapDataLength;

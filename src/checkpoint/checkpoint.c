@@ -328,6 +328,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;
 		checkpoint_state->controlReplayStartPtr = control.replayStartPtr;
+		checkpoint_state->controlSysTreesStartPtr = control.sysTreesStartPtr;
 		pg_atomic_write_u64(&checkpoint_state->mmapDataLength, control.mmapDataLength);
 
 		pg_atomic_write_u64(&undo_meta->lastUsedLocation, control.lastUndoLocation);
@@ -483,7 +484,8 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		if (!indexDescr)
 			return NULL;
 		desc = &indexDescr->desc;
-		o_btree_load_shmem(desc);
+		if (!o_btree_load_shmem_checkpoint(desc))
+			return NULL;
 	}
 	else
 	{
@@ -875,6 +877,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	before_writing_xids_file(cur_chkp_num);
 	start_write_xids(cur_chkp_num);
 
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
 
 	for (sys_tree_num = 1; sys_tree_num <= SYS_TREES_NUM; sys_tree_num++)
@@ -904,7 +907,15 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		}
 	}
 
+	/*
+	 * We get start position for replay changes to system trees while holding
+	 * the oTablesMetaLock.  That guarantees that we will start recovery from
+	 * the state there is no partial changes to tables and indices system
+	 * trees.
+	 */
+	checkpoint_state->sysTreesStartPtr = GetXLogInsertRecPtr();
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
+	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 	MemoryContextSwitchTo(prev_context);
 	MemoryContextResetOnly(chkp_mem_context);
@@ -968,6 +979,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	control.lastCSN = pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo);
 	control.lastXid = pg_atomic_read_u64(&xid_meta->nextXid);
 	control.lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+	control.sysTreesStartPtr = checkpoint_state->sysTreesStartPtr;
 	control.replayStartPtr = checkpoint_state->replayStartPtr;
 	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
 	control.mmapDataLength = pg_atomic_read_u64(&checkpoint_state->mmapDataLength);
@@ -4100,8 +4112,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	MemoryContext prev_context;
 	Jsonb	   *params;
 
-	LWLockRelease(&checkpoint_state->oTablesMetaLock);
-
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 
 	if (STOPEVENTS_ENABLED())
@@ -4109,7 +4119,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	STOPEVENT(STOPEVENT_CHECKPOINT_TABLE_START, params);
 
 	descr = o_fetch_index_descr(treeOids, type, true, NULL);
-	if (descr != NULL)
+	if (descr != NULL && o_btree_load_shmem_checkpoint(&descr->desc))
 	{
 		BTreeDescr *td = &descr->desc;
 		bool		success;
@@ -4118,7 +4128,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			 type, treeOids.datoid, treeOids.reloid, treeOids.relnode,
 			 tableOids.datoid, tableOids.reloid, tableOids.relnode);
 
-		o_btree_load_shmem(td);
 		Assert(!have_locked_pages());
 		Assert(!have_retained_undo_location());
 
@@ -4127,6 +4136,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		{
 			checkpoint_state->toastConsistentPtr = GetXLogInsertRecPtr();
 		}
+
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 		if (STOPEVENTS_ENABLED())
 			params = prepare_checkpoint_tree_start_params(td);
@@ -4141,12 +4152,12 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
+
+		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 	}
 
 	MemoryContextSwitchTo(prev_context);
 	MemoryContextResetOnly(chkp_mem_context);
-
-	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 }
 
 char *

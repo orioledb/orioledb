@@ -60,6 +60,7 @@ typedef struct
 {
 	SharedRootInfoKey key;
 	BTreeRootInfo rootInfo;
+	bool		placeholder;
 } SharedRootInfo;
 
 #define O_TABLE_INVALID_VERSION UINT32_MAX

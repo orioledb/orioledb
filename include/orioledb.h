@@ -159,6 +159,8 @@ typedef RelFileLocator RelFileNode;
 
 #define ORelOidsIsValid(oids) (OidIsValid((oids).datoid) && OidIsValid((oids).reloid) && OidIsValid((oids).relnode))
 #define ORelOidsIsEqual(l, r) ((l).datoid == (r).datoid && (l).reloid == (r).reloid && (l).relnode == (r).relnode)
+#define ORelOidsSetInvalid(oids) \
+	((oids).datoid = (oids).reloid = (oids).relnode = InvalidOid)
 
 typedef struct
 {

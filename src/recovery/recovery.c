@@ -79,6 +79,8 @@ typedef struct
 	bool		systree_modified;
 	/* is o_tables system tree modified by oxid */
 	bool		o_tables_modified;
+	/* is oTablesMetaLock held by transaction */
+	bool		o_tables_meta_locked;
 	/* is provided by checkpoint xids file */
 	bool		checkpoint_xid;
 	/* is started from wal stream */
@@ -427,6 +429,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 
 			state->systree_modified = false;
 			state->o_tables_modified = false;
+			state->o_tables_meta_locked = false;
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
 			if (!recovery_single && worker_id < 0)
@@ -882,6 +885,12 @@ recovery_finish(int worker_id)
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
 	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
+		if (cur_state->o_tables_meta_locked)
+		{
+			o_tables_meta_unlock_no_wal();
+			cur_state->o_tables_meta_locked = false;
+		}
+
 		if (COMMITSEQNO_IS_INPROGRESS(cur_state->csn))
 		{
 			oxid_needs_wal_flush = cur_state->needs_wal_flush;
@@ -985,6 +994,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 				pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
 			cur_state->systree_modified = false;
 			cur_state->o_tables_modified = false;
+			cur_state->o_tables_meta_locked = false;
 			cur_state->checkpoint_xid = false;
 			if (worker_id < 0 && !*recovery_single_process)
 				cur_state->used_by = palloc0(recovery_pool_size_guc * sizeof(bool));
@@ -1101,6 +1111,12 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	cur_state->csn = csn;
 	cur_state->ptr = ptr;
+
+	if (cur_state->o_tables_meta_locked)
+	{
+		o_tables_meta_unlock_no_wal();
+		cur_state->o_tables_meta_locked = false;
+	}
 
 	oxid_needs_wal_flush = false;
 	reset_cur_undo_locations();
@@ -1883,6 +1899,127 @@ clean_workers_oids(void)
 	}
 }
 
+static void
+handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
+{
+	if (!cur_state->o_tables_meta_locked)
+	{
+		/*
+		 * It might happend that we didn't replay WAL_REC_O_TABLES_META_LOCK
+		 * wal record.  That means we've finished index build before
+		 * checkpoint of a tree was actually started.
+		 */
+		return;
+	}
+
+	if (ORelOidsIsValid(oids))
+		recreate_table_descr_by_oids(oids);
+
+	if (reachedConsistency && ORelOidsIsValid(oids))
+	{
+		OTable	   *new_o_table = NULL;
+		OTable	   *old_o_table = NULL;
+		OTableDescr *old_descr;
+		OIndexNumber ix_num;
+		uint16		nindices;
+
+		new_o_table = o_tables_get(oids);
+		Assert(new_o_table);
+
+		if (!OidIsValid(oldRelnode))
+		{
+			uint32		version = new_o_table->version - 1;
+
+			old_o_table = o_tables_get_by_oids_and_version(oids,
+														   &version);
+		}
+		else
+		{
+			ORelOids	oldOids = {oids.datoid, oids.reloid, oldRelnode};
+
+			old_o_table = o_tables_get(oldOids);
+		}
+		Assert(old_o_table);
+
+		nindices = Max(old_o_table->nindices, new_o_table->nindices);
+		for (ix_num = 0; ix_num < nindices - 1; ix_num++)
+		{
+			if (!ORelOidsIsEqual(old_o_table->indices[ix_num].oids,
+								 new_o_table->indices[ix_num].oids))
+				break;
+		}
+
+		if (new_o_table->nindices > old_o_table->nindices)
+		{
+			OTableDescr tmp_descr;
+
+			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
+			if (new_o_table->indices[ix_num].type == oIndexPrimary)
+			{
+				if (tbl_data_exists(&old_o_table->oids))
+				{
+					old_descr = o_fetch_table_descr(old_o_table->oids);
+					rebuild_indices_insert_placeholders(&tmp_descr);
+					o_tables_meta_unlock_no_wal();
+					rebuild_indices(old_o_table, old_descr,
+									new_o_table, &tmp_descr);
+				}
+				else
+				{
+					o_tables_meta_unlock_no_wal();
+				}
+			}
+			else
+			{
+				o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
+												 new_o_table->indices[ix_num].oids.relnode);
+				o_tables_meta_unlock_no_wal();
+				build_secondary_index(new_o_table, &tmp_descr, ix_num);
+			}
+			o_free_tmp_table_descr(&tmp_descr);
+		}
+		else if (new_o_table->nindices < old_o_table->nindices)
+		{
+			if (old_o_table->indices[ix_num].type == oIndexPrimary)
+			{
+				OTableDescr tmp_descr;
+
+				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
+				if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
+				{
+					old_descr = o_fetch_table_descr(old_o_table->oids);
+					rebuild_indices_insert_placeholders(&tmp_descr);
+					o_tables_meta_unlock_no_wal();
+					rebuild_indices(old_o_table, old_descr,
+									new_o_table, &tmp_descr);
+				}
+				else
+				{
+					o_tables_meta_unlock_no_wal();
+				}
+				o_free_tmp_table_descr(&tmp_descr);
+			}
+			else
+			{
+				o_tables_meta_unlock_no_wal();
+			}
+		}
+		else
+		{
+			o_tables_meta_unlock_no_wal();
+		}
+
+		pfree(old_o_table);
+		pfree(new_o_table);
+	}
+	else
+	{
+		o_tables_meta_unlock_no_wal();
+	}
+
+	cur_state->o_tables_meta_locked = false;
+}
+
 /*
  * Replays a single orioledb WAL container.
  */
@@ -1894,7 +2031,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	OIndexDescr *indexDescr = NULL;
 	OXid		oxid = InvalidOXid;
 	ORelOids	cur_oids = {0, 0, 0},
-				tmp_oids,
 			   *treeOids;
 	OffsetNumber length;
 	bool		success;
@@ -2005,101 +2141,31 @@ replay_container(Pointer startPtr, Pointer endPtr,
 												 false, NULL);
 			}
 		}
-		else if (rec_type == WAL_REC_INVALIDATE)
+		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
+		{
+			Assert(!cur_state->o_tables_meta_locked);
+			o_tables_meta_lock_no_wal();
+			cur_state->o_tables_meta_locked = true;
+		}
+		else if (rec_type == WAL_REC_O_TABLES_META_UNLOCK)
 		{
 			ORelOids	oids;
-			Oid			old_relnode;
+			Oid			oldRelnode;
 
 			memcpy(&oids.datoid, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
 			memcpy(&oids.reloid, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
-			memcpy(&old_relnode, ptr, sizeof(Oid));
+			memcpy(&oldRelnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
 			memcpy(&oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
-			recreate_table_descr_by_oids(oids);
 
-			if (cur_state->o_tables_modified && reachedConsistency)
-			{
-				OTable	   *new_o_table = NULL;
-				OTable	   *old_o_table = NULL;
-				OTableDescr *old_descr;
-				OIndexNumber ix_num;
-				uint16		nindices;
+			Assert(cur_state->o_tables_meta_locked);
+			handle_o_tables_meta_unlock(oids, oldRelnode);
 
-				new_o_table = o_tables_get(oids);
-				Assert(new_o_table);
-				if (oids.relnode == old_relnode)
-				{
-					uint32		version = new_o_table->version - 1;
-
-					old_o_table = o_tables_get_by_oids_and_version(oids,
-																   &version);
-				}
-				else
-				{
-					ORelOids	old_oids = oids;
-
-					old_oids.relnode = old_relnode;
-					old_o_table = o_tables_get(old_oids);
-				}
-				Assert(old_o_table);
-
-				nindices = Max(old_o_table->nindices, new_o_table->nindices);
-				for (ix_num = 0; ix_num < nindices - 1; ix_num++)
-				{
-					if (!ORelOidsIsEqual(old_o_table->indices[ix_num].oids,
-										 new_o_table->indices[ix_num].oids))
-						break;
-				}
-
-				if (new_o_table->nindices > old_o_table->nindices)
-				{
-					OTableDescr tmp_descr;
-
-					o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-					if (new_o_table->indices[ix_num].type == oIndexPrimary)
-					{
-						if (tbl_data_exists(&old_o_table->oids))
-						{
-							old_descr = o_fetch_table_descr(old_o_table->oids);
-							rebuild_indices(old_o_table, old_descr,
-											new_o_table, &tmp_descr);
-							LWLockRelease(&checkpoint_state->oTablesMetaLock);
-						}
-					}
-					else
-					{
-						build_secondary_index(new_o_table, &tmp_descr, ix_num);
-						LWLockRelease(&checkpoint_state->oTablesMetaLock);
-					}
-					o_free_tmp_table_descr(&tmp_descr);
-				}
-				else if (new_o_table->nindices < old_o_table->nindices)
-				{
-					if (old_o_table->indices[ix_num].type == oIndexPrimary)
-					{
-						OTableDescr tmp_descr;
-
-						o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-						if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
-						{
-							old_descr = o_fetch_table_descr(old_o_table->oids);
-							rebuild_indices(old_o_table, old_descr,
-											new_o_table, &tmp_descr);
-							LWLockRelease(&checkpoint_state->oTablesMetaLock);
-						}
-						o_free_tmp_table_descr(&tmp_descr);
-					}
-				}
-
-				pfree(old_o_table);
-				pfree(new_o_table);
-			}
 			if (!single)
 				clean_workers_oids();
-
 		}
 		else if (rec_type == WAL_REC_TRUNCATE)
 		{
@@ -2166,14 +2232,17 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			Assert(oxid != InvalidOXid);
 
-			if (sys_tree_num > 0)
+			if (sys_tree_num > 0 && xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
 			{
 				Assert(sys_tree_supports_transactions(sys_tree_num));
 				recovery_switch_to_oxid(oxid, -1);
 
 				cur_state->systree_modified = true;
 				if (sys_tree_num == SYS_TREES_O_TABLES)
+				{
+					Assert(cur_state->o_tables_meta_locked);
 					cur_state->o_tables_modified = true;
+				}
 
 				if (!single)
 					workers_synchronize(xlogPtr, true);
@@ -2184,6 +2253,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 				if (sys_tree_num == SYS_TREES_O_INDICES && success)
 				{
+					ORelOids	tmp_oids;
+
 					if (type == RECOVERY_DELETE)
 					{
 						treeOids = o_indices_get_oids(ptr, &tmp_oids);

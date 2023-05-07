@@ -808,6 +808,7 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  
 (1 row)
 
+SET enable_seqscan = OFF;
 ALTER TABLE o_test_partial DROP CONSTRAINT o_test_partial_pkey;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key > 15;
                  QUERY PLAN                  
@@ -838,6 +839,7 @@ SELECT * FROM o_test_partial WHERE key > 15;
  115 | 15text
 (16 rows)
 
+RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
                                  orioledb_tbl_structure                                  
 -----------------------------------------------------------------------------------------

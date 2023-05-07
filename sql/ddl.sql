@@ -407,6 +407,8 @@ CREATE TABLE o_test_pkey_fields_same_as_index (
 ) USING orioledb;
 SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
 
+SET enable_seqscan = off;
+
 INSERT INTO o_test_pkey_fields_same_as_index
 	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v FROM generate_series(0, 2) v;
 
@@ -426,6 +428,8 @@ SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
+
+RESET enable_seqscan;
 
 CREATE TABLE o_test_null_pkey_field (
 	val_1 text,

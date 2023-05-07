@@ -244,4 +244,9 @@ o_table_fieldnum(OTable *table, const char *name)
 
 extern void orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr);
 
+extern void o_tables_meta_lock(void);
+extern void o_tables_meta_lock_no_wal(void);
+extern void o_tables_meta_unlock(ORelOids oids, Oid oldRelnode);
+extern void o_tables_meta_unlock_no_wal(void);
+
 #endif							/* __O_TABLES_H__ */

@@ -1137,7 +1137,6 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	pfree(data);
 	o_table_free(old_table);
 
-	add_invalidate_wal_record(table->oids, table->oids.relnode);
 	return result;
 }
 
@@ -1711,7 +1710,11 @@ o_tables_drop_columns_with_type_callback(OTable *o_table, void *arg)
 	}
 
 	if (updated)
+	{
+		o_tables_meta_lock();
 		o_tables_update(o_table, drop_arg->oxid, drop_arg->csn);
+		o_tables_meta_unlock(o_table->oids, InvalidOid);
+	}
 }
 
 
@@ -1778,4 +1781,74 @@ o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table)
 	new_o_table->default_compress = old_o_table->default_compress;
 	new_o_table->primary_compress = old_o_table->primary_compress;
 	new_o_table->toast_compress = old_o_table->toast_compress;
+}
+
+static int	recovery_num_o_tables_meta_locks = 0;
+
+void
+o_tables_meta_lock(void)
+{
+	if (!is_recovery_process())
+	{
+		Assert(!LWLockHeldByMe(&checkpoint_state->oTablesMetaLock));
+		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
+
+		/* Make sure we've acquired oxid */
+		(void) get_current_oxid();
+		add_o_tables_meta_lock_wal_record();
+	}
+	else
+	{
+		if (recovery_num_o_tables_meta_locks++ == 0)
+			LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
+	}
+}
+
+void
+o_tables_meta_lock_no_wal(void)
+{
+	if (!is_recovery_process())
+	{
+		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
+	}
+	else
+	{
+		if (recovery_num_o_tables_meta_locks++ == 0)
+			LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
+	}
+}
+
+/*
+ * Release oTablesMetaLock and WAL-log the information required to replay
+ * DDL changes.
+ */
+void
+o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
+{
+	if (!is_recovery_process())
+	{
+		add_o_tables_meta_unlock_wal_record(oids, oldRelnode);
+		(void) flush_local_wal(false);
+
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
+	}
+	else
+	{
+		if (--recovery_num_o_tables_meta_locks == 0)
+			LWLockRelease(&checkpoint_state->oTablesMetaLock);
+	}
+}
+
+void
+o_tables_meta_unlock_no_wal(void)
+{
+	if (!is_recovery_process())
+	{
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
+	}
+	else
+	{
+		if (--recovery_num_o_tables_meta_locks == 0)
+			LWLockRelease(&checkpoint_state->oTablesMetaLock);
+	}
 }

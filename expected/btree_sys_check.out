@@ -71,14 +71,16 @@ SELECT regexp_replace(
 		'g');
                            regexp_replace                            
 ---------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 160              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 240              +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: deleted, offset = 264, tuple = ((NNN, NNN), NNN, NNN)  +
-     Item 1: deleted, offset = 304, tuple = ((NNN, NNN), NNN, NNN)  +
-     Item 2: deleted, offset = 344, tuple = ((NNN, NNN), NNN, NNN)  +
-     Item 3: deleted, offset = 384, tuple = ((NNN, NNN), NNN, NNN)  +
+     Item 0: deleted, offset = 272, tuple = ((NNN, NNN), NNN, NNN)  +
+     Item 1: deleted, offset = 312, tuple = ((NNN, NNN), NNN, NNN)  +
+     Item 2: deleted, offset = 352, tuple = ((NNN, NNN), NNN, NNN)  +
+     Item 3: deleted, offset = 392, tuple = ((NNN, NNN), NNN, NNN)  +
+     Item 4: deleted, offset = 432, tuple = ((NNN, NNN), NNN, NNN)  +
+     Item 5: deleted, offset = 472, tuple = ((NNN, NNN), NNN, NNN)  +
                                                                     +
  
 (1 row)

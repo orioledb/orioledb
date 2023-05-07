@@ -238,9 +238,11 @@ is_explain_analyze(PlanState *ps)
 }
 
 extern void o_btree_load_shmem(BTreeDescr *desc);
+extern bool o_btree_load_shmem_checkpoint(BTreeDescr *desc);
 extern bool o_btree_try_use_shmem(BTreeDescr *desc);
 
 extern SharedRootInfo *o_find_shared_root_info(SharedRootInfoKey *key);
+extern void o_insert_shared_root_placeholder(Oid datoid, Oid relnode);
 
 extern OComparator *o_find_comparator(Oid opfamily,
 									  Oid lefttype,

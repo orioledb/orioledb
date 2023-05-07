@@ -138,9 +138,11 @@ UPDATE o_test_partial SET key = key + 100 WHERE key BETWEEN 5 AND 15;
 
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
+SET enable_seqscan = OFF;
 ALTER TABLE o_test_partial DROP CONSTRAINT o_test_partial_pkey;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key > 15;
 SELECT * FROM o_test_partial WHERE key > 15;
+RESET enable_seqscan;
 
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
