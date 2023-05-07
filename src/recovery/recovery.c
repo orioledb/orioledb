@@ -2194,12 +2194,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						if (treeOids)
 							add_undo_create_relnode(tmp_oids, treeOids, 1);
 					}
-					else if (type == RECOVERY_UPDATE)
-					{
-						treeOids = o_indices_get_oids(ptr, &tmp_oids);
-						if (treeOids && ORelOidsIsEqual(*treeOids, tmp_oids))
-							recreate_table_descr_by_oids(*treeOids);
-					}
 				}
 			}
 
