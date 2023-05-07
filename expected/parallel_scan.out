@@ -420,7 +420,12 @@ CREATE TABLE o_test_parallel_bitmap_scan (
 ) USING orioledb;
 CREATE INDEX ind_1 ON o_test_parallel_bitmap_scan (val_1);
 INSERT INTO o_test_parallel_bitmap_scan SELECT generate_series(1, 10);
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
                            QUERY PLAN                            
@@ -442,9 +447,20 @@ SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
      4
 (1 row)
 
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
+
 COMMIT;
 BEGIN;
-SET LOCAL force_parallel_mode = ON;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 SET LOCAL enable_seqscan = OFF;
 CREATE TABLE o_test_parallel_index_scan (
 	val_1 text,
@@ -454,6 +470,12 @@ SELECT * FROM o_test_parallel_index_scan;
  val_1 
 -------
 (0 rows)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
 
 COMMIT;
 -- Wrapper function, which converts result of SQL query to the text
@@ -466,7 +488,12 @@ CREATE OR REPLACE FUNCTION query_to_text(sql TEXT, out result text)
 	END $$
 LANGUAGE plpgsql;
 BEGIN;
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 CREATE TABLE o_test_parallel_bitmap_scan_explain_buffers (
 	val_1 integer NOT NULL PRIMARY KEY
 )USING orioledb;
@@ -492,6 +519,12 @@ $$) as t;
  Execution Time: x ms
 (12 rows)
 
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
+
 COMMIT;
 CREATE TABLE o_test_parallel_unique_index_scan (
 	val_1 int,
@@ -501,7 +534,12 @@ CREATE TABLE o_test_parallel_unique_index_scan (
 INSERT INTO o_test_parallel_unique_index_scan
 	SELECT v, v FROM generate_series(0, 2) v;
 BEGIN;
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
                                  QUERY PLAN                                 
@@ -520,6 +558,12 @@ SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
      1 |     1
      2 |     2
 (3 rows)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;

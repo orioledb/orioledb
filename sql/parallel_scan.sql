@@ -135,15 +135,16 @@ CREATE TABLE o_test_parallel_bitmap_scan (
 ) USING orioledb;
 CREATE INDEX ind_1 ON o_test_parallel_bitmap_scan (val_1);
 INSERT INTO o_test_parallel_bitmap_scan SELECT generate_series(1, 10);
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
 SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
+SELECT orioledb_parallel_debug_stop();
 COMMIT;
 
 BEGIN;
 
-SET LOCAL force_parallel_mode = ON;
+SELECT orioledb_parallel_debug_start();
 SET LOCAL enable_seqscan = OFF;
 
 CREATE TABLE o_test_parallel_index_scan (
@@ -153,6 +154,7 @@ CREATE TABLE o_test_parallel_index_scan (
 
 SELECT * FROM o_test_parallel_index_scan;
 
+SELECT orioledb_parallel_debug_stop();
 COMMIT;
 
 -- Wrapper function, which converts result of SQL query to the text
@@ -167,7 +169,7 @@ LANGUAGE plpgsql;
 
 BEGIN;
 
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
 
 CREATE TABLE o_test_parallel_bitmap_scan_explain_buffers (
 	val_1 integer NOT NULL PRIMARY KEY
@@ -180,6 +182,8 @@ FROM query_to_text($$
 		SELECT * FROM o_test_parallel_bitmap_scan_explain_buffers
 			ORDER BY val_1;
 $$) as t;
+
+SELECT orioledb_parallel_debug_stop();
 COMMIT;
 
 CREATE TABLE o_test_parallel_unique_index_scan (
@@ -192,12 +196,13 @@ INSERT INTO o_test_parallel_unique_index_scan
 	SELECT v, v FROM generate_series(0, 2) v;
 
 BEGIN;
-SET LOCAL force_parallel_mode = on;
+SELECT orioledb_parallel_debug_start();
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
 SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
 
+SELECT orioledb_parallel_debug_stop();
 COMMIT;
 
 DROP EXTENSION orioledb CASCADE;
