@@ -509,11 +509,9 @@ reindex_concurrently_not_supported(Relation tbl)
 {
 	ereport(ERROR,
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			errmsg("orioledb table \"%s\" does not support "
-				   "REINDEX CONCURRENTLY",
-				   RelationGetRelationName(tbl))),
-			errdetail("REINDEX CONCURRENTLY is not supported for "
-					  "OrioleDB tables yet. Please send a bug report."));
+			 errmsg("orioledb table \"%s\" does not support REINDEX CONCURRENTLY",
+					RelationGetRelationName(tbl))),
+			 errdetail("REINDEX CONCURRENTLY is not supported for OrioleDB tables yet.  This will be implemented in future."));
 }
 
 static void
@@ -814,10 +812,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("unsupported alter table subcommand")),
-									errdetail("Subcommand \"%s\" is not "
-											  "supported on OrioleDB tables yet. "
-											  "Please send a bug report.",
-											  alter_table_type_to_string(cmd->subtype)));
+									 errdetail("Subcommand \"%s\" is not supported on OrioleDB tables yet.  Please send a bug report.",
+											   alter_table_type_to_string(cmd->subtype)));
 							break;
 					}
 
@@ -853,10 +849,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (orioledb)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("orioledb tables does not "
-								   "support CLUSTER")),
-						 errdetail("CLUSTER makes no much sense for "
-								   "index-organized tables."));
+							errmsg("orioledb tables does not support CLUSTER")),
+						 errdetail("CLUSTER makes no much sense for index-organized tables."));
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, VacuumStmt))
@@ -913,13 +907,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				if (orioledb)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("orioledb table \"%s\" does not support "
-							 		"VACUUM FULL",
+							 errmsg("orioledb table \"%s\" does not support VACUUM FULL",
 									RelationGetRelationName(rel))),
-							errdetail("VACUUM FULL is not supported for "
-									  "OrioleDB tables yet. "
-									  "Please send a bug report if it is "
-									  "really necessary."));
+							 errdetail("VACUUM FULL is not supported for OrioleDB tables yet."));
 				relation_close(rel, AccessShareLock);
 			}
 		}
@@ -1007,10 +997,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot use PREPARE TRANSACTION in "
-								   "transaction that uses orioledb table")),
-						errdetail("OrioleDB does not support prepared "
-								  "transactions yet."));
+							errmsg("cannot use PREPARE TRANSACTION in transaction that uses orioledb table")),
+						 errdetail("OrioleDB does not support prepared transactions yet."));
 			}
 		}
 	}
@@ -1148,8 +1136,7 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 				if (found)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("cannot alter type \"%s\" because index "
-									"\"%s\" uses it",
+							 errmsg("cannot alter type \"%s\" because index \"%s\" uses it",
 									RelationGetRelationName(origRelation),
 									NameStr(table->indices[i - 1].name))));
 				o_table_free(table);
