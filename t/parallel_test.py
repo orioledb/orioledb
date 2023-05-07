@@ -35,7 +35,7 @@ class ParallelTest(BaseTest):
 
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
-				SET LOCAL force_parallel_mode = on;
+				SELECT orioledb_parallel_debug_start();
 
 				CREATE OR REPLACE FUNCTION my_int_cmp(a int, b int) RETURNS int
 				AS $$
