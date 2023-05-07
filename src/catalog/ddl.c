@@ -1507,10 +1507,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					o_table_resize_constr(o_table);
 
-					LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+					LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
-					LWLockRelease(&checkpoint_state->oTablesAddLock);
+					LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 					o_table_free(o_table);
 				}
@@ -1533,14 +1533,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				ORelOidsSetFromRel(oids, rel);
 				tupdesc = RelationGetDescr(rel);
 
-				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+				LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 				o_table = o_table_tableam_create(oids, tupdesc);
 				o_opclass_cache_add_table(o_table);
 
 				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 				o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
 				o_tables_add(o_table, oxid, csn);
-				LWLockRelease(&checkpoint_state->oTablesAddLock);
+				LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
 					 (subId == 0))
@@ -1625,13 +1625,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					fill_current_oxid_csn(&oxid, &csn);
 
-					LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+					LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
 
 					treeOids = o_table_make_index_oids(o_table, &numTreeOids);
 					add_undo_create_relnode(oids, treeOids, numTreeOids);
-					LWLockRelease(&checkpoint_state->oTablesAddLock);
+					LWLockRelease(&checkpoint_state->oTablesMetaLock);
 					pfree(treeOids);
 				}
 				if (tbl)
@@ -1839,7 +1839,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 
 
-				LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+				LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 				fill_current_oxid_csn(&oxid, &csn);
 				o_tables_drop_by_oids(old_oids, oxid, csn);
 				o_tables_swap_relnodes(old_o_table, new_o_table);
@@ -1848,7 +1848,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_indices_update(new_o_table, TOASTIndexNumber, oxid, csn);
 
 				add_invalidate_wal_record(new_o_table->oids, new_oids.relnode);
-				LWLockRelease(&checkpoint_state->oTablesAddLock);
+				LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 				o_table_free(old_o_table);
 				o_table_free(new_o_table);

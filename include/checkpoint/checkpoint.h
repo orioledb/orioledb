@@ -169,8 +169,8 @@ typedef struct
 	double		dirtyPagesEstimate;
 	uint64		pagesWritten;
 	/* helps to avoid skip a new table for the checkpoint in progress */
-	int			oTablesAddTrancheId;
-	LWLock		oTablesAddLock;
+	int			oTablesMetaTrancheId;
+	LWLock		oTablesMetaLock;
 	int			oSysTreesTrancheId;
 	LWLock		oSysTreesLock;
 	int			oSharedRootInfoInsertTrancheId;

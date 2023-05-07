@@ -559,7 +559,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 		o_table_free(o_table);
 
 	if (is_build)
-		LWLockRelease(&checkpoint_state->oTablesAddLock);
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 }
 
 void
@@ -640,10 +640,10 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num)
 	tuplesort_end(sortstate);
 
 	/*
-	 * We hold oTablesAddLock till o_tables_update().  So, checkpoint number
+	 * We hold oTablesMetaLock till o_tables_update().  So, checkpoint number
 	 * in the data file will be consistent with o_tables metadata.
 	 */
-	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 
 	btree_write_file_header(&idx->desc, &fileHeader);
 
@@ -789,10 +789,10 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	tuplesort_end(toastSortState);
 
 	/*
-	 * We hold oTablesAddLock till o_tables_update().  So, checkpoint number
+	 * We hold oTablesMetaLock till o_tables_update().  So, checkpoint number
 	 * in the data file will be consistent with o_tables metadata.
 	 */
-	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 
 	for (i = 0; i < descr->nIndices; i++)
 		btree_write_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
@@ -852,7 +852,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 
 	recreate_o_table(old_o_table, o_table);
 
-	LWLockRelease(&checkpoint_state->oTablesAddLock);
+	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 }
 

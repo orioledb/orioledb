@@ -273,15 +273,15 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 
 		checkpoint_reset_stack(checkpoint_state);
 
-		checkpoint_state->oTablesAddTrancheId = LWLockNewTrancheId();
+		checkpoint_state->oTablesMetaTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oSysTreesTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oSharedRootInfoInsertTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oXidQueueTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oXidQueueFlushTrancheId = LWLockNewTrancheId();
 		checkpoint_state->copyBlknoTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oMetaTrancheId = LWLockNewTrancheId();
-		LWLockInitialize(&checkpoint_state->oTablesAddLock,
-						 checkpoint_state->oTablesAddTrancheId);
+		LWLockInitialize(&checkpoint_state->oTablesMetaLock,
+						 checkpoint_state->oTablesMetaTrancheId);
 		LWLockInitialize(&checkpoint_state->oSysTreesLock,
 						 checkpoint_state->oSysTreesTrancheId);
 		for (i = 0; i < SHARED_ROOT_INFO_INSERT_NUM_LOCKS; i++)
@@ -359,8 +359,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		startupCommitSeqNo = control.lastCSN;
 	}
 
-	LWLockRegisterTranche(checkpoint_state->oTablesAddTrancheId,
-						  "OTablesAddTranche");
+	LWLockRegisterTranche(checkpoint_state->oTablesMetaTrancheId,
+						  "OTablesMetaTranche");
 	LWLockRegisterTranche(checkpoint_state->oSysTreesTrancheId,
 						  "OSysTreesTranche");
 	LWLockRegisterTranche(checkpoint_state->copyBlknoTrancheId,
@@ -911,7 +911,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	enable_stopevents = old_enable_stopevents;
 
-	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_EXCLUSIVE);
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);
 
 	chkp_inc_changecount_before(checkpoint_state);
@@ -923,7 +923,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_state->completed = false;
 	chkp_inc_changecount_after(checkpoint_state);
 
-	LWLockRelease(&checkpoint_state->oTablesAddLock);
+	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 	/*
 	 * It might happen there is no secondary indices, but we still need to set
@@ -4100,7 +4100,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	MemoryContext prev_context;
 	Jsonb	   *params;
 
-	LWLockRelease(&checkpoint_state->oTablesAddLock);
+	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 
@@ -4146,7 +4146,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	MemoryContextSwitchTo(prev_context);
 	MemoryContextResetOnly(chkp_mem_context);
 
-	LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_EXCLUSIVE);
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 }
 
 char *

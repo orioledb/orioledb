@@ -653,12 +653,12 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		newTreeOids = o_table_make_index_oids(new_o_table, &newTreeOidsNum);
 
-		LWLockAcquire(&checkpoint_state->oTablesAddLock, LW_SHARED);
+		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
 
 		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_drop_by_oids(old_oids, oxid, csn);
 		o_tables_add(new_o_table, oxid, csn);
-		LWLockRelease(&checkpoint_state->oTablesAddLock);
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 		o_table_free(new_o_table);
 
 		orioledb_free_rd_amcache(rel);
