@@ -340,7 +340,7 @@ o_exec_fetch(OScanState *ostate, ScanState *ss, CommitSeqNo csn)
 	TupleTableSlot *slot;
 	OTuple		tuple;
 	bool		scan_primary = ostate->ixNum == PrimaryIndexNumber ||
-	!ostate->onlyCurIx;
+		!ostate->onlyCurIx;
 	MemoryContext tupleCxt = ss->ss_ScanTupleSlot->tts_mcxt;
 
 	do

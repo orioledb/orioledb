@@ -541,7 +541,7 @@ o_create_custom_scan_state(CustomScan *cscan)
 	if (plan_tag == O_IndexPlan)
 	{
 		OIndexPlanState *ix_plan_state =
-		(OIndexPlanState *) palloc0(sizeof(OIndexPlanState));
+			(OIndexPlanState *) palloc0(sizeof(OIndexPlanState));
 
 		ix_plan_state->ostate.ixNum = intVal(lthird(cscan->custom_private));
 		ix_plan_state->ostate.scanDir = intVal(lfourth(cscan->custom_private));
@@ -579,7 +579,7 @@ o_create_custom_scan_state(CustomScan *cscan)
 	else if (plan_tag == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
-		(OBitmapHeapPlanState *) palloc0(sizeof(OBitmapHeapPlanState));
+			(OBitmapHeapPlanState *) palloc0(sizeof(OBitmapHeapPlanState));
 		BitmapHeapScan *bh_scan = (BitmapHeapScan *) custom_plan;
 
 		bitmap_state->typeoid = intVal(lthird(cscan->custom_private));
@@ -622,7 +622,7 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 	if (ocstate->o_plan_state->type == O_IndexPlan)
 	{
 		OIndexPlanState *ix_plan_state =
-		(OIndexPlanState *) ocstate->o_plan_state;
+			(OIndexPlanState *) ocstate->o_plan_state;
 		OScanState *scan_state = &ix_plan_state->ostate;
 
 		scan_state->csn = estate->es_snapshot->snapshotcsn;
@@ -634,7 +634,7 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
-		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+			(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
 		bitmap_state->bitmapqualplanstate =
 			ExecInitNode(bitmap_state->bitmapqualplan, estate, eflags);
@@ -679,7 +679,7 @@ o_exec_custom_scan(CustomScanState *node)
 	if (ocstate->o_plan_state->type == O_IndexPlan)
 	{
 		OIndexPlanState *ix_plan_state =
-		(OIndexPlanState *) ocstate->o_plan_state;
+			(OIndexPlanState *) ocstate->o_plan_state;
 
 		csn = ix_plan_state->ostate.csn;
 
@@ -747,7 +747,7 @@ o_exec_custom_scan(CustomScanState *node)
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
-		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+			(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
 		if (bitmap_state->scan == NULL)
 		{
@@ -783,7 +783,7 @@ o_rescan_custom_scan(CustomScanState *node)
 	if (ocstate->o_plan_state->type == O_IndexPlan)
 	{
 		OIndexPlanState *ix_plan_state =
-		(OIndexPlanState *) ocstate->o_plan_state;
+			(OIndexPlanState *) ocstate->o_plan_state;
 
 		if (node->ss.ps.chgParam != NULL)
 		{
@@ -841,7 +841,7 @@ o_end_custom_scan(CustomScanState *node)
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
-		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+			(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
 		if (bitmap_state->bitmapqualplanstate)
 			ExecEndNode(bitmap_state->bitmapqualplanstate);
@@ -1013,7 +1013,7 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 	if (ocstate->o_plan_state->type == O_IndexPlan)
 	{
 		OIndexPlanState *ix_plan_state =
-		(OIndexPlanState *) ocstate->o_plan_state;
+			(OIndexPlanState *) ocstate->o_plan_state;
 		bool		backward = (ix_plan_state->ostate.scanDir ==
 								BackwardScanDirection);
 		char	   *direction = !backward ? "Forward" : "Backward";
@@ -1056,7 +1056,7 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
-		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+			(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
 		switch (es->format)
 		{

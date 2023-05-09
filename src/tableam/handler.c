@@ -450,7 +450,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 					  int options, TM_FailureData *tmfd,
 					  LockTupleMode *lockmode,
 #if PG_VERSION_NUM >= 160000
-					  TU_UpdateIndexes * update_indexes,
+					  TU_UpdateIndexes *update_indexes,
 #else
 					  bool *update_indexes,
 #endif

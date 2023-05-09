@@ -1393,8 +1393,8 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 					{
 						Oid			typeoid = primary->fields[i].inputtype;
 						bool		valid = typeoid == INT4OID ||
-						typeoid == INT8OID ||
-						typeoid == TIDOID;
+							typeoid == INT8OID ||
+							typeoid == TIDOID;
 
 						hasbitmap = hasbitmap && valid;
 					}

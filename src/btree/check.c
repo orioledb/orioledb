@@ -179,7 +179,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 		if (map_extents.size != 0)
 		{
 			bool		sorted = is_compressed ? is_sorted_by_len_off(&map_extents)
-			: is_sorted_by_off(&map_extents);
+				: is_sorted_by_off(&map_extents);
 
 			if (!sorted)
 			{
@@ -193,7 +193,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 		if (tmp_extents.size != 0)
 		{
 			bool		sorted = is_compressed ? is_sorted_by_len_off(&tmp_extents)
-			: is_sorted_by_off(&tmp_extents);
+				: is_sorted_by_off(&tmp_extents);
 
 			if (!sorted)
 			{

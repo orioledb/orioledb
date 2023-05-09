@@ -1732,7 +1732,7 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 	else
 	{
 		OSysCacheToastChunkKey *chunk_key =
-		((OSysCacheToastChunkKey *) ((OTuple *) p1)->data);
+			((OSysCacheToastChunkKey *) ((OTuple *) p1)->data);
 
 		key1 = &chunk_key->sys_cache_key;
 		offset1 = chunk_key->common.offset;
@@ -1762,7 +1762,7 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 	else
 	{
 		OSysCacheToastChunkKey *chunk_key =
-		((OSysCacheToastChunkKey *) ((OTuple *) p2)->data);
+			((OSysCacheToastChunkKey *) ((OTuple *) p2)->data);
 
 		key2 = &chunk_key->sys_cache_key;
 		offset2 = chunk_key->common.offset;

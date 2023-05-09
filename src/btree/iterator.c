@@ -270,8 +270,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			bool		version_check = !txIsFinished;
 			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
 			TupleFetchCallbackCheckType check_type = version_check ?
-			OTupleFetchCallbackVersionCheck :
-			OTupleFetchCallbackKeyCheck;
+				OTupleFetchCallbackVersionCheck :
+				OTupleFetchCallbackKeyCheck;
 
 			cbResult = cb(curTuple, tupOxid, csn, arg, check_type);
 

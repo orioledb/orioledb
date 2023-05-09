@@ -256,7 +256,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type)
 void
 add_o_tables_meta_lock_wal_record(void)
 {
-	WALRec *rec;
+	WALRec	   *rec;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
