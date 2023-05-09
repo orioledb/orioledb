@@ -88,11 +88,6 @@ typedef struct OScanDescData
 } OScanDescData;
 typedef OScanDescData *OScanDesc;
 
-typedef struct
-{
-	Oid			conflictIxOid;
-} OFDWState;
-
 /*
  * Operation with indices. It does not update TOAST BTree. Implementations
  * are in tableam_handler.c.
