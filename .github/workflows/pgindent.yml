@@ -1,0 +1,40 @@
+name: pgindent
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pgindent:
+    runs-on:
+     - ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [16]
+    env:
+      LLVM_VER: 12
+      CPU: ${{ matrix.cpu }}
+      CHECK_TYPE: pgindent
+      COMPILER: gcc
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v3
+        with:
+          path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v3
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+      - name: PGIndent
+        run: bash ./orioledb/ci/pgindent.sh
