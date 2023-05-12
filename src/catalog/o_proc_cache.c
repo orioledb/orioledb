@@ -297,12 +297,9 @@ O_SYS_CACHE_INIT_FUNC(proc_cache)
 {
 	Oid			keytypes[] = {OIDOID};
 
-	proc_cache = o_create_sys_cache(SYS_TREES_PROC_CACHE,
-									true, false,
-									ProcedureOidIndexId, PROCOID, 1,
-									keytypes, fastcache,
-									mcxt,
-									&proc_cache_funcs);
+	proc_cache = o_create_sys_cache(SYS_TREES_PROC_CACHE, true,
+									ProcedureOidIndexId, PROCOID, 1, keytypes,
+									0, fastcache, mcxt, &proc_cache_funcs);
 }
 
 void

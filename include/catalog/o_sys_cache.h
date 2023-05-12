@@ -48,26 +48,13 @@ extern Oid	o_sys_cache_search_datoid;
 typedef uint32 OSysCacheHashKey;	/* GetSysCacheHashValue result type */
 
 typedef struct OSysCache OSysCache;
-typedef struct OSysCacheHashTreeEntry
-{
-	OSysCache  *sys_cache;		/* If NULL only link stored */
-	Pointer		entry;
-} OSysCacheHashTreeEntry;
-typedef struct OSysCacheHashEntry
-{
-	OSysCacheHashKey key;
-	List	   *tree_entries;	/* list of OSysCacheHashTreeEntry-s that used
-								 * because we store entries for all sys caches
-								 * in same fastcache for simpler invalidation
-								 * of dependent objects */
-} OSysCacheHashEntry;
-
 
 typedef struct OSysCacheKeyCommon
 {
 	Oid			datoid;
 	XLogRecPtr	lsn;
 	bool		deleted;
+	int			dataLength;
 } OSysCacheKeyCommon;
 
 typedef struct OSysCacheKey
@@ -75,6 +62,10 @@ typedef struct OSysCacheKey
 	OSysCacheKeyCommon common;
 	Datum		keys[FLEXIBLE_ARRAY_MEMBER];
 } OSysCacheKey;
+
+#define O_KEY_GET_NAME(key, att_num) (((key)->common.dataLength == 0) ? \
+		DatumGetName((key)->keys[att_num]) : \
+		((Name) (((Pointer) (key)) + (key)->keys[att_num])))
 
 typedef struct OSysCacheBound
 {
@@ -93,7 +84,7 @@ typedef struct
 {
 	OSysCacheKeyCommon common;
 	Datum		keys[2];
-}			OSysCacheKey2;
+} OSysCacheKey2;
 
 typedef struct
 {
@@ -203,12 +194,6 @@ typedef struct OSysCacheFuncs
 	void		(*free_entry) (Pointer entry);
 
 	/*
-	 * if set it called in o_sys_cache_delete before entry update with entry
-	 * as argument
-	 */
-	void		(*delete_hook) (Pointer entry);
-
-	/*
 	 * Should be always set. Used inside o_sys_cache_add_if_needed and
 	 * o_sys_cache_update_if_needed. On add entry_ptr is NULL, entry should be
 	 * created and returned.
@@ -231,19 +216,21 @@ typedef struct OSysCacheFuncs
 											Size length);
 } OSysCacheFuncs;
 
+typedef uint32 (*O_CCHashFN) (OSysCacheKey *key, int att_num);
+
 typedef struct OSysCache
 {
 	int			sys_tree_num;
 	bool		is_toast;
-	bool		update_if_exist;
 	Oid			cc_indexoid;
 	int			cacheId;
 	int			nkeys;
+	Oid			keytypes[CATCACHE_MAXKEYS];
+	int			data_len;
 	MemoryContext mcxt;			/* context where stored entries from fast
 								 * cache */
 	HTAB	   *fast_cache;		/* contains OSysCacheHashEntry-s */
-	HTAB	   *added_hash;		/* contains OSysCacheKey4-s */
-	CCHashFN	cc_hashfunc[CATCACHE_MAXKEYS];
+	O_CCHashFN	cc_hashfunc[CATCACHE_MAXKEYS];
 	OSysCacheHashKey last_fast_cache_key;
 	Pointer		last_fast_cache_entry;
 	OSysCacheFuncs *funcs;
@@ -255,11 +242,11 @@ typedef struct OSysCache
 extern void o_sys_caches_init(void);
 
 extern OSysCache *o_create_sys_cache(int sys_tree_num, bool is_toast,
-									 bool update_if_exist,
 									 Oid cc_indexoid,	/* cacheinfo indoid */
 									 int cacheId,	/* cacheinfo array index */
 									 int nkeys,
 									 Oid *keytypes,
+									 int data_len,
 									 HTAB *fast_cache,
 									 MemoryContext mcxt,
 									 OSysCacheFuncs *funcs);
@@ -278,9 +265,9 @@ extern void custom_type_add_if_needed(Oid datoid, Oid typoid,
 extern void o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo);
 
 extern void orioledb_setup_syscache_hooks(void);
-extern void o_sys_caches_add_start(void);
-extern void o_sys_caches_add_finish(void);
 
+extern int	o_sys_cache_key_length(BTreeDescr *desc, OTuple tuple);
+extern int	o_sys_cache_tup_length(BTreeDescr *desc, OTuple tuple);
 extern int	o_sys_cache_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 							void *p2, BTreeKeyType k2);
 extern void o_sys_cache_key_print(BTreeDescr *desc, StringInfo buf,
@@ -397,38 +384,54 @@ extern void o_reset_syscache_hooks(void);
 extern bool o_is_syscache_hooks_set(void);
 
 /* o_enum_cache.c */
-typedef struct OEnum OEnum;
+
+typedef struct OEnumData
+{
+	Oid			oid;
+	float4		enumsortorder;
+} OEnumData;
+
+typedef struct
+{
+	OSysCacheKey2 key;
+	OEnumData	data;
+} OEnum;
 
 typedef struct
 {
 	OSysCacheKey1 key;
-	/* OID of owning enum type that cached in o_enum_cache */
 	Oid			enumtypid;
 } OEnumOid;
 
-O_SYS_CACHE_DECLS(enum_cache, OEnum, 1);
+O_SYS_CACHE_DECLS(enum_cache, OEnum, 2);
 O_SYS_CACHE_DECLS(enumoid_cache, OEnumOid, 1);
-extern TypeCacheEntry *o_enum_cmp_internal_hook(Oid type_id,
-												MemoryContext mcxt);
+extern void o_enum_cache_add_all(Oid datoid, Oid enum_oid,
+								 XLogRecPtr insert_lsn);
+extern HeapTuple o_enum_cache_search_htup(TupleDesc tupdesc, Oid enumtypid,
+										  Name enumlabel);
+extern void o_enum_cache_tup_print(BTreeDescr *desc, StringInfo buf,
+								   OTuple tup, Pointer arg);
+extern void o_enum_cache_delete_all(Oid datoid, Oid enum_oid);
+
+extern HeapTuple o_enumoid_cache_search_htup(TupleDesc tupdesc, Oid enum_oid);
 extern void o_enumoid_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									  OTuple tup, Pointer arg);
+
+extern void o_load_enum_cache_data_hook(TypeCacheEntry *tcache);
 
 /* o_range_cache.c */
 typedef struct
 {
 	OSysCacheKey1 key;
-	/* cached TypeCacheEntry->rngelemtype oid */
-	Oid			elem_type;
-	/* cached TypeCacheEntry->rng_collation */
-	Oid			rng_collation;
-	/* cached TypeCacheEntry->rng_cmp_proc_finfo and oid */
-	Oid			rng_cmp_oid;
+	Oid			rngsubtype;
+	Oid			rngcollation;
+	Oid			rngsubopc;
 } ORange;
 
 O_SYS_CACHE_DECLS(range_cache, ORange, 1);
-extern TypeCacheEntry *o_range_cmp_hook(FunctionCallInfo fcinfo,
-										Oid rngtypid,
-										MemoryContext mcxt);
+extern HeapTuple o_range_cache_search_htup(TupleDesc tupdesc, Oid rngtypid);
+extern void o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid,
+										XLogRecPtr insert_lsn);
 extern void o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									OTuple tup, Pointer arg);
 
@@ -443,7 +446,6 @@ typedef struct OClassArg
 } OClassArg;
 
 O_SYS_CACHE_DECLS(class_cache, OClass, 1);
-extern TupleDesc o_record_cmp_hook(Oid type_id, MemoryContext mcxt);
 extern TupleDesc o_class_cache_search_tupdesc(Oid cc_reloid);
 
 /* o_opclass_cache.c */
@@ -499,7 +501,13 @@ typedef struct OType
 	regproc		typsend;
 	Oid			typelem;
 	char		typdelim;
-	Oid			default_opclass;
+	Oid			typbasetype;
+	int32		typtypmod;
+#if PG_VERSION_NUM >= 140000
+	Oid			typsubscript;
+#endif
+	Oid			default_btree_opclass;
+	Oid			default_hash_opclass;
 } OType;
 
 O_SYS_CACHE_DECLS(type_cache, OType, 1);
@@ -508,9 +516,7 @@ extern HeapTuple o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid);
 extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 								   char *typalign, char *typstorage,
 								   Oid *typcollation);
-extern Oid	o_type_cache_default_opclass(Oid typeoid);
-extern TypeCacheEntry *o_type_elements_cmp_hook(Oid elemtype,
-												MemoryContext mcxt);
+extern Oid	o_type_cache_default_opclass(Oid typeoid, Oid am_id);
 extern void o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
 
@@ -543,12 +549,27 @@ typedef struct OAmOp
 	Oid			amoprighttype;
 } OAmOp;
 
+typedef struct OAmOpStrat
+{
+	OSysCacheKey4 key;
+	Oid			amopopr;
+} OAmOpStrat;
+
 O_SYS_CACHE_DECLS(amop_cache, OAmOp, 3);
 extern HeapTuple o_amop_cache_search_htup(TupleDesc tupdesc, Oid amopopr,
 										  char amoppurpose, Oid amopfamily);
 extern List *o_amop_cache_search_htup_list(TupleDesc tupdesc, Oid amopopr);
 extern void o_amop_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
+
+O_SYS_CACHE_DECLS(amop_strat_cache, OAmOpStrat, 4);
+extern HeapTuple o_amop_strat_cache_search_htup(TupleDesc tupdesc,
+												Oid amopfamily,
+												Oid amoplefttype,
+												Oid amoprighttype,
+												int16 amopstrategy);
+extern void o_amop_strat_cache_tup_print(BTreeDescr *desc, StringInfo buf,
+										 OTuple tup, Pointer arg);
 
 /* o_amproc_cache.c */
 typedef struct OAmProc

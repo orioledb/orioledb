@@ -654,7 +654,6 @@ _PG_init(void)
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
 	xact_redo_hook = o_xact_redo_hook;
-	orioledb_setup_syscache_hooks();
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }

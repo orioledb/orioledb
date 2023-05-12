@@ -47,11 +47,9 @@ O_SYS_CACHE_INIT_FUNC(database_cache)
 {
 	Oid			keytypes[] = {OIDOID};
 
-	database_cache = o_create_sys_cache(SYS_TREES_DATABASE_CACHE,
-										false, false,
-										DatabaseOidIndexId,
-										DATABASEOID, 1,
-										keytypes, fastcache, mcxt,
+	database_cache = o_create_sys_cache(SYS_TREES_DATABASE_CACHE, false,
+										DatabaseOidIndexId, DATABASEOID, 1,
+										keytypes, 0, fastcache, mcxt,
 										&database_cache_funcs);
 }
 

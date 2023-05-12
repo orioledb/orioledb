@@ -73,12 +73,9 @@ O_SYS_CACHE_INIT_FUNC(class_cache)
 {
 	Oid			keytypes[] = {OIDOID};
 
-	class_cache = o_create_sys_cache(SYS_TREES_CLASS_CACHE,
-									 true, true,
-									 ClassOidIndexId, RELOID, 1,
-									 keytypes, fastcache,
-									 mcxt,
-									 &class_cache_funcs);
+	class_cache = o_create_sys_cache(SYS_TREES_CLASS_CACHE, true,
+									 ClassOidIndexId, RELOID, 1, keytypes, 0,
+									 fastcache, mcxt, &class_cache_funcs);
 }
 
 void
@@ -226,23 +223,7 @@ o_class_cache_search_tupdesc(Oid cc_reloid)
 		MemoryContextSwitchTo(oldcxt);
 		memcpy(&result->attrs, o_class->attrs,
 			   o_class->natts * sizeof(FormData_pg_attribute));
+		result->tdrefcount = 0;
 	}
-	return result;
-}
-
-TupleDesc
-o_record_cmp_hook(Oid type_id, MemoryContext mcxt)
-{
-	TupleDesc	result = NULL;
-	Oid			reloid;
-	MemoryContext prev_context = MemoryContextSwitchTo(mcxt);
-
-	reloid = o_type_cache_get_typrelid(type_id);
-
-	Assert(OidIsValid(reloid));
-
-	result = o_class_cache_search_tupdesc(reloid);
-	MemoryContextSwitchTo(prev_context);
-
 	return result;
 }

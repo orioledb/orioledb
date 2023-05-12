@@ -850,20 +850,20 @@ can_fetch_from_undo(BTreeIterator *it)
 	}
 }
 
-/*
- * Iterate over leaf page tuples without considering undo log.  Deleted tuples
- * are reported as NULLs.  So, the separate `*end` flag indicates finish of
- * iterations.
- */
-OTuple
-btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
-				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint)
+static OTuple
+btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
+						   bool endInclude, bool *scanEnd,
+						   BTreeLocationHint *hint, bool deleted_as_null,
+						   BTreeLeafTuphdr **tupHdr)
 {
-	BTreeLeafTuphdr *tupHdr;
+	BTreeLeafTuphdr *localTupHdr;
 	OBTreeFindPageContext *context = &it->context;
 	Page		img = context->img;
 	OTuple		result;
 	OFixedKey	key_buf;
+
+	if (!tupHdr)
+		tupHdr = &localTupHdr;
 
 	*scanEnd = false;
 
@@ -873,7 +873,7 @@ btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
 
 		if (BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
 		{
-			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, result, context->img, loc);
+			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, context->img, loc);
 			IT_NEXT_OFFSET(it, loc);
 
 			if (end != NULL && endKind != BTreeKeyNone)
@@ -890,7 +890,8 @@ btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
 				}
 			}
 
-			if (tupHdr->deleted == BTreeLeafTupleNonDeleted)
+			if (!deleted_as_null ||
+				(*tupHdr)->deleted == BTreeLeafTupleNonDeleted)
 			{
 				if (hint)
 				{
@@ -932,6 +933,32 @@ btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
 	}
 	O_TUPLE_SET_NULL(result);
 	return result;				/* unreachable */
+}
+
+/*
+ * Iterate over leaf page tuples without considering undo log.  Deleted tuples
+ * are reported as NULLs.  So, the separate `*end` flag indicates finish of
+ * iterations.
+ */
+OTuple
+btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
+				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint)
+{
+	return btree_iterate_raw_internal(it, end, endKind, endInclude, scanEnd,
+									  hint, true, NULL);
+}
+
+/*
+ * Iterate over leaf page tuples without considering undo log. Deleted tuples
+ * also returned.
+ */
+OTuple
+btree_iterate_all(BTreeIterator *it, void *end, BTreeKeyType endKind,
+				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint,
+				  BTreeLeafTuphdr **tupHdr)
+{
+	return btree_iterate_raw_internal(it, end, endKind, endInclude, scanEnd,
+									  hint, false, tupHdr);
 }
 
 /*

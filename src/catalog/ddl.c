@@ -1462,7 +1462,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_range_cache_delete(MyDatabaseId, typeform->oid);
 				break;
 			case TYPTYPE_ENUM:
-				o_enum_cache_delete(MyDatabaseId, typeform->oid);
+				o_enum_cache_delete_all(MyDatabaseId, typeform->oid);
 				break;
 		}
 		if (typeform->typtype != TYPTYPE_BASE &&
@@ -1949,8 +1949,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		switch (tform->typtype)
 		{
 			case TYPTYPE_ENUM:
-				CommandCounterIncrement();
-				o_enum_cache_update_if_needed(MyDatabaseId, objectId, NULL);
+				{
+					XLogRecPtr	cur_lsn;
+					Oid			datoid;
+
+					CommandCounterIncrement();
+					o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+					o_enum_cache_add_all(datoid, objectId, cur_lsn);
+				}
 				break;
 
 			case TYPTYPE_COMPOSITE:

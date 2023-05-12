@@ -39,6 +39,7 @@ typedef struct
 typedef struct
 {
 	int			keyLength;
+	int			(*keyLengthFunc) (BTreeDescr *desc, OTuple tuple);
 	OBTreeKeyCmp cmpFunc;
 	int			tupleLength;
 	int			(*tupleLengthFunc) (BTreeDescr *desc, OTuple tuple);
@@ -51,6 +52,7 @@ typedef struct
 	bool		(*needs_undo) (BTreeDescr *desc, BTreeOperationType action,
 							   OTuple oldTuple, OTupleXactInfo oldXactInfo, bool oldDeleted,
 							   OTuple newTuple, OXid newOxid);
+	Pointer		extra;
 } SysTreeMeta;
 
 typedef struct
@@ -171,13 +173,14 @@ static SysTreeMeta sysTreesMeta[] =
 		.needs_undo = NULL
 	},
 	{							/* SYS_TREES_ENUM_CACHE */
-		.keyLength = sizeof(OSysCacheToastChunkKey1),
+		.keyLength = -1,
+		.keyLengthFunc = o_sys_cache_key_length,
 		.tupleLength = -1,
-		.tupleLengthFunc = o_sys_cache_toast_chunk_length,
-		.cmpFunc = o_sys_cache_toast_cmp,
-		.keyPrint = o_sys_cache_toast_key_print,
-		.tupPrint = o_sys_cache_toast_tup_print,
-		.keyToJsonb = o_sys_cache_toast_key_to_jsonb,
+		.tupleLengthFunc = o_sys_cache_tup_length,
+		.cmpFunc = o_sys_cache_cmp,
+		.keyPrint = o_sys_cache_key_print,
+		.tupPrint = o_enum_cache_tup_print,
+		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
 		.undoReserveType = UndoReserveTxn,
 		.storageType = BTreeStoragePersistence,
@@ -342,6 +345,18 @@ static SysTreeMeta sysTreesMeta[] =
 		.undoReserveType = UndoReserveTxn,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
+	},
+	{							/* SYS_TREES_AMOP_STRAT_CACHE */
+		.keyLength = sizeof(OSysCacheKey4),
+		.tupleLength = sizeof(OAmOpStrat),
+		.cmpFunc = o_sys_cache_cmp,
+		.keyPrint = o_sys_cache_key_print,
+		.tupPrint = o_amop_strat_cache_tup_print,
+		.keyToJsonb = o_sys_cache_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoReserveType = UndoReserveTxn,
+		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
 	}
 };
 
@@ -467,33 +482,54 @@ orioledb_sys_tree_check(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(result);
 }
 
+static JsonbValue *
+o_tuphdr_to_jsonb(BTreeLeafTuphdr *tupHdr, JsonbParseState **state)
+{
+	(void) pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_bool_key(state, "deleted", tupHdr->deleted);
+	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
+}
+
 /*
- * Returns amount of all rows and dead rows
+ * Returns content of sys tree as table
  */
 Datum
 orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 {
 	int			num = PG_GETARG_INT32(0);
-	int64		total = 0,
-				dead = 0;
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
 	BTreeIterator *it;
 	BTreeDescr *td;
-	HeapTuple	tuple;
-	TupleDesc	tupleDesc;
-	Datum		values[2];
-	bool		nulls[2];
+	Datum		values[1];
+	bool		nulls[1] = {false};
+	Oid			funcrettype;
 
 	check_tree_num_input(num);
 	orioledb_check_shmem();
 
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, &funcrettype, NULL) != TYPEFUNC_SCALAR)
+		elog(ERROR, "return type must be a scalar type");
+
+	/* Base data type, i.e. scalar */
+	tupdesc = CreateTemplateTupleDesc(1);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 1, NULL, funcrettype, -1, 0);
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
 	td = get_sys_tree(num);
 	o_btree_load_shmem(get_sys_tree(num));
-
-	/*
-	 * Build a tuple descriptor for our result type
-	 */
-	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
-		elog(ERROR, "return type must be a row type");
 
 	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
 								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
@@ -501,29 +537,39 @@ orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 	do
 	{
 		bool		end;
-		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
-											false, &end, NULL);
+		OTuple		key;
+		bool		allocated;
+		JsonbParseState *state = NULL;
+		Jsonb	   *res;
+		BTreeLeafTuphdr *tupHdr;
+		OTuple		tup;
 
-		if (end)
-			break;
+		tup = btree_iterate_all(it, NULL, BTreeKeyNone, false, &end, NULL,
+								&tupHdr);
+
 		if (O_TUPLE_IS_NULL(tup))
-			dead += 1;
-		total += 1;
+			break;
+
+		(void) pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		key = o_btree_tuple_make_key(td, tup, NULL, true, &allocated);
+		jsonb_push_key(&state, "tupHdr");
+		(void) o_tuphdr_to_jsonb(tupHdr, &state);
+		jsonb_push_key(&state, "key");
+		(void) o_btree_key_to_jsonb(td, key, &state);
+		res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+		if (allocated)
+			pfree(key.data);
+
+		values[0] = PointerGetDatum(res);
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values,
+							 nulls);
 	} while (true);
 
 	btree_iterator_free(it);
 
-	tupleDesc = BlessTupleDesc(tupleDesc);
+	tuplestore_donestoring(tupstore);
 
-	/*
-	 * Build and return the tuple
-	 */
-	MemSet(nulls, 0, sizeof(nulls));
-	values[0] = Int64GetDatum(total);
-	values[1] = Int64GetDatum(dead);
-	tuple = heap_form_tuple(tupleDesc, values, nulls);
-
-	PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+	return (Datum) 0;
 }
 
 bool
@@ -536,6 +582,18 @@ BTreeStorageType
 sys_tree_get_storage_type(int tree_num)
 {
 	return sysTreesMeta[tree_num - 1].storageType;
+}
+
+void
+sys_tree_set_extra(int tree_num, Pointer extra)
+{
+	sysTreesMeta[tree_num - 1].extra = extra;
+}
+
+Pointer
+sys_tree_get_extra(int tree_num)
+{
+	return sysTreesMeta[tree_num - 1].extra;
 }
 
 /*
@@ -667,27 +725,30 @@ sys_tree_len(BTreeDescr *desc, OTuple tuple, OLengthType type)
 		Assert(type == OKeyLength ||
 			   type == OTupleKeyLength ||
 			   type == OTupleKeyLengthNoVersion);
-		return meta->keyLength;
+		if (meta->keyLength > 0)
+			return meta->keyLength;
+		else
+			return meta->keyLengthFunc(desc, tuple);
 	}
 }
 
 static uint32
 sys_tree_hash(BTreeDescr *desc, OTuple tuple, BTreeKeyType kind)
 {
-	SysTreeMeta *meta = (SysTreeMeta *) desc->arg;
+	int			keyLength = sys_tree_len(desc, tuple, OTupleKeyLength);
 
-	return tag_hash(tuple.data, meta->keyLength);
+	return tag_hash(tuple.data, keyLength);
 }
 
 static OTuple
 sys_tree_tuple_make_key(BTreeDescr *desc, OTuple tuple, Pointer data,
 						bool keep_version, bool *allocated)
 {
-	SysTreeMeta *meta = (SysTreeMeta *) desc->arg;
-
 	if (data)
 	{
-		memcpy(data, tuple.data, meta->keyLength);
+		int			keyLength = sys_tree_len(desc, tuple, OTupleKeyLength);
+
+		memcpy(data, tuple.data, keyLength);
 		tuple.data = data;
 	}
 	*allocated = false;

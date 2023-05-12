@@ -1763,3 +1763,21 @@ class RecoveryTest(BaseTest):
 		"""), [('(0,1)', 3, 'b')])
 		node.stop()
 
+	def test_recovery_row_expresion_index(self):
+		node = self.node
+		node.start()
+		node.execute("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_type_1 AS (a int, b text);
+			CREATE TABLE o_test_1 (
+				val_1 int,
+				val_2 text
+			) USING orioledb;
+			CREATE INDEX ind_1 ON o_test_1((row(val_1, val_2)::o_type_1));
+		""")
+		self.assertEqual(node.execute("""
+			SELECT * FROM o_test_1;
+		"""), [])
+		node.stop(['-m', 'immediate'])
+		node.start()
+		node.stop()

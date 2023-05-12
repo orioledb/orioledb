@@ -585,12 +585,13 @@ o_collect_function(Node *node, void *context)
 	XLogRecPtr	cur_lsn;
 	Oid			datoid;
 	OClassArg	arg = {.sys_table = true};
-	bool		add_pg_proc_class = *(bool *) context;
 
 	if (node == NULL)
 		return false;
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
+								(Pointer) &arg);
 	switch (nodeTag(node))
 	{
 		case T_Aggref:
@@ -603,9 +604,8 @@ o_collect_function(Node *node, void *context)
 		case T_CoerceViaIO:
 		case T_RowCompareExpr:
 		case T_FunctionScan:
-			if (add_pg_proc_class)
-				o_class_cache_add_if_needed(datoid, ProcedureRelationId,
-											cur_lsn, (Pointer) &arg);
+			o_class_cache_add_if_needed(datoid, ProcedureRelationId,
+										cur_lsn, (Pointer) &arg);
 			break;
 		default:
 			break;
@@ -616,6 +616,8 @@ o_collect_function(Node *node, void *context)
 	switch (nodeTag(node))
 	{
 		case T_OpExpr:
+		case T_DistinctExpr:
+		case T_NullIfExpr:
 			{
 				OpExpr	   *opexpr = (OpExpr *) node;
 
@@ -623,6 +625,8 @@ o_collect_function(Node *node, void *context)
 											(Pointer) &arg);
 				o_operator_cache_add_if_needed(datoid, opexpr->opno,
 											   cur_lsn, NULL);
+				o_type_cache_add_if_needed(datoid, opexpr->opresulttype,
+										   cur_lsn, NULL);
 			}
 			break;
 		case T_Aggref:
@@ -633,8 +637,6 @@ o_collect_function(Node *node, void *context)
 				o_class_cache_add_if_needed(datoid, AggregateRelationId, cur_lsn,
 											(Pointer) &arg);
 				o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
-											(Pointer) &arg);
-				o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
 											(Pointer) &arg);
 				o_aggregate_cache_add_if_needed(datoid, aggref->aggfnoid,
 												cur_lsn, NULL);
@@ -736,8 +738,6 @@ o_collect_function(Node *node, void *context)
 				}
 			}
 			break;
-		case T_FunctionScan:
-			break;
 		case T_WindowFunc:
 			{
 				WindowFunc *window_func = (WindowFunc *) node;
@@ -746,11 +746,17 @@ o_collect_function(Node *node, void *context)
 											(Pointer) &arg);
 				o_class_cache_add_if_needed(datoid, OperatorRelationId, cur_lsn,
 											(Pointer) &arg);
-				o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
-											(Pointer) &arg);
 				o_aggregate_cache_add_if_needed(datoid, window_func->winfnoid,
 												cur_lsn, NULL);
 				o_type_cache_add_if_needed(datoid, window_func->wintype,
+										   cur_lsn, NULL);
+			}
+			break;
+		case T_FuncExpr:
+			{
+				FuncExpr   *func_expr = (FuncExpr *) node;
+
+				o_type_cache_add_if_needed(datoid, func_expr->funcresulttype,
 										   cur_lsn, NULL);
 			}
 			break;
@@ -758,8 +764,6 @@ o_collect_function(Node *node, void *context)
 			{
 				MinMaxExpr *minmaxexpr = (MinMaxExpr *) node;
 
-				o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
-											(Pointer) &arg);
 				o_type_cache_add_if_needed(datoid, minmaxexpr->minmaxtype,
 										   cur_lsn, NULL);
 			}
@@ -768,10 +772,18 @@ o_collect_function(Node *node, void *context)
 			{
 				CoerceViaIO *iocoerce = (CoerceViaIO *) node;
 
-				o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
-											(Pointer) &arg);
 				o_type_cache_add_if_needed(datoid,
 										   exprType((Node *) iocoerce->arg),
+										   cur_lsn, NULL);
+				o_type_cache_add_if_needed(datoid, iocoerce->resulttype,
+										   cur_lsn, NULL);
+			}
+			break;
+		case T_RowExpr:
+			{
+				RowExpr    *row_expr = (RowExpr *) node;
+
+				o_type_cache_add_if_needed(datoid, row_expr->row_typeid,
 										   cur_lsn, NULL);
 			}
 			break;
@@ -796,19 +808,8 @@ o_collect_funcexpr(Node *node)
 	if (!node)
 		return;
 
-	o_sys_caches_add_start();
-	PG_TRY();
-	{
-		bool		add_pg_proc_class = true;
-
-		expression_tree_walker(o_wrap_top_funcexpr(node), o_collect_function,
-							   &add_pg_proc_class);
-	}
-	PG_FINALLY();
-	{
-		o_sys_caches_add_finish();
-	}
-	PG_END_TRY();
+	expression_tree_walker(o_wrap_top_funcexpr(node), o_collect_function,
+						   NULL);
 }
 
 void
@@ -844,7 +845,6 @@ o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 	FuncExpr   *fexpr;
 	HeapTuple	procedureTuple;
 	Form_pg_proc procedureStruct;
-	bool		add_pg_proc_class = false;
 
 	procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(procoid));
 	if (!HeapTupleIsValid(procedureTuple))
@@ -863,7 +863,7 @@ o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 	fexpr->location = -1;
 
 	expression_tree_walker(o_wrap_top_funcexpr((Node *) fexpr),
-						   o_collect_function, &add_pg_proc_class);
+						   o_collect_function, NULL);
 
 	ReleaseSysCache(procedureTuple);
 }
@@ -1318,8 +1318,5 @@ plannedstatement_tree_walker(PlannedStmt *pstmt,
 void
 o_collect_functions_pstmt(PlannedStmt *pstmt)
 {
-	bool		add_pg_proc_class = true;
-
-	plannedstatement_tree_walker(pstmt, o_collect_function,
-								 &add_pg_proc_class);
+	plannedstatement_tree_walker(pstmt, o_collect_function, NULL);
 }

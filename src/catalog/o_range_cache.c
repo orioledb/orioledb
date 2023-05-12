@@ -21,6 +21,7 @@
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
 
+#include "access/hash.h"
 #include "access/htup_details.h"
 #if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
@@ -28,11 +29,14 @@
 #if PG_VERSION_NUM < 140000
 #include "catalog/indexing.h"
 #endif
+#include "catalog/pg_amproc.h"
+#include "catalog/pg_opclass.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "utils/fmgrtab.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 
@@ -57,97 +61,56 @@ O_SYS_CACHE_INIT_FUNC(range_cache)
 {
 	Oid			keytypes[] = {OIDOID};
 
-	range_cache = o_create_sys_cache(SYS_TREES_RANGE_CACHE,
-									 false, true,
-									 TypeOidIndexId, TYPEOID, 1,
-									 keytypes, fastcache,
-									 mcxt,
-									 &range_cache_funcs);
+	range_cache = o_create_sys_cache(SYS_TREES_RANGE_CACHE, false,
+									 RangeTypidIndexId, RANGETYPE, 1, keytypes,
+									 0, fastcache, mcxt, &range_cache_funcs);
 }
 
 void
 o_range_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
-	TypeCacheEntry *typcache;
+	HeapTuple	rangetup;
+	Form_pg_range rangeform;
 	ORange	   *o_range = (ORange *) *entry_ptr;
-	Oid			typoid = DatumGetObjectId(key->keys[0]);
+	MemoryContext prev_context;
+	Oid			rngtypid;
 
-	/*
-	 * find typecache entry
-	 */
-	typcache = lookup_type_cache(typoid, TYPECACHE_RANGE_INFO);
-	if (typcache->rngelemtype == NULL)
-		elog(ERROR, "type %u is not a range type", typoid);
+	rngtypid = DatumGetObjectId(key->keys[0]);
 
+	rangetup = SearchSysCache1(RANGETYPE, key->keys[0]);
+	if (!HeapTupleIsValid(rangetup))
+		elog(ERROR, "cache lookup failed for range (%u)", rngtypid);
+	rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+	prev_context = MemoryContextSwitchTo(range_cache->mcxt);
 	if (o_range == NULL)
 	{
 		o_range = palloc0(sizeof(ORange));
 		*entry_ptr = (Pointer) o_range;
 	}
 
-	custom_type_add_if_needed(key->common.datoid,
-							  typcache->rngelemtype->type_id,
+	o_range->rngsubtype = rangeform->rngsubtype;
+	o_range->rngsubopc = rangeform->rngsubopc;
+	o_range->rngcollation = rangeform->rngcollation;
+	custom_type_add_if_needed(key->common.datoid, o_range->rngsubtype,
 							  key->common.lsn);
-
-	o_type_cache_add_if_needed(key->common.datoid,
-							   typcache->rngelemtype->type_id,
+	o_type_cache_add_if_needed(key->common.datoid, o_range->rngsubtype,
 							   key->common.lsn, NULL);
-	o_range->elem_type = typcache->rngelemtype->type_id;
-	o_range->rng_collation = typcache->rng_collation;
-	o_proc_cache_validate_add(key->common.datoid,
-							  typcache->rng_cmp_proc_finfo.fn_oid,
-							  typcache->rng_collation, "comparison",
-							  "range field");
-	o_range->rng_cmp_oid = typcache->rng_cmp_proc_finfo.fn_oid;
+	o_opclass_cache_add_if_needed(key->common.datoid, o_range->rngsubopc,
+								  key->common.lsn, NULL);
+	if (OidIsValid(o_range->rngcollation))
+		o_collation_cache_add_if_needed(key->common.datoid,
+										o_range->rngcollation, key->common.lsn,
+										NULL);
+
+	MemoryContextSwitchTo(prev_context);
+	ReleaseSysCache(rangetup);
 }
 
 void
 o_range_cache_free_entry(Pointer entry)
 {
 	pfree(entry);
-}
-
-TypeCacheEntry *
-o_range_cmp_hook(FunctionCallInfo fcinfo, Oid rngtypid,
-				 MemoryContext mcxt)
-{
-	TypeCacheEntry *typcache = (TypeCacheEntry *) fcinfo->flinfo->fn_extra;
-
-	if (typcache == NULL ||
-		typcache->type_id != rngtypid)
-	{
-		XLogRecPtr	cur_lsn;
-		Oid			datoid;
-		ORange	   *o_range;
-
-		o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-		o_range = o_range_cache_search(datoid, rngtypid, cur_lsn,
-									   range_cache->nkeys);
-		if (o_range)
-		{
-			MemoryContext prev_context = MemoryContextSwitchTo(mcxt);
-
-			typcache = palloc0(sizeof(TypeCacheEntry));
-			typcache->type_id = rngtypid;
-			typcache->rngelemtype = palloc0(sizeof(TypeCacheEntry));
-			o_type_cache_fill_info(o_range->elem_type,
-								   &typcache->rngelemtype->typlen,
-								   &typcache->rngelemtype->typbyval,
-								   &typcache->rngelemtype->typalign,
-								   NULL, NULL);
-			typcache->rng_collation = o_range->rng_collation;
-
-			o_proc_cache_fill_finfo(&typcache->rng_cmp_proc_finfo,
-									o_range->rng_cmp_oid);
-
-			fcinfo->flinfo->fn_extra = (void *) typcache;
-			MemoryContextSwitchTo(prev_context);
-		}
-		else
-			typcache = NULL;
-	}
-
-	return typcache;
 }
 
 /*
@@ -161,8 +124,61 @@ o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 
 	appendStringInfo(buf, "(");
 	o_sys_cache_key_print(desc, buf, tup, arg);
-	appendStringInfo(buf, ", elem_type: %u, rng_collation: %d, "
-					 "rng_cmp_oid: %u)",
-					 o_range->elem_type, o_range->rng_collation,
-					 o_range->rng_cmp_oid);
+	appendStringInfo(buf, ", rngsubtype: %u, rngcollation: %d, "
+					 "rngsubopc: %u)",
+					 o_range->rngsubtype, o_range->rngcollation,
+					 o_range->rngsubopc);
+}
+
+HeapTuple
+o_range_cache_search_htup(TupleDesc tupdesc, Oid rngtypid)
+{
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_range] = {0};
+	bool		nulls[Natts_pg_range] = {0};
+	ORange	   *o_range;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_range =
+		o_range_cache_search(datoid, rngtypid, cur_lsn, range_cache->nkeys);
+	if (o_range)
+	{
+		values[Anum_pg_range_rngtypid - 1] = o_range->key.keys[0];
+		values[Anum_pg_range_rngcollation - 1] =
+			ObjectIdGetDatum(o_range->rngcollation);
+		values[Anum_pg_range_rngsubopc - 1] =
+			ObjectIdGetDatum(o_range->rngsubopc);
+		values[Anum_pg_range_rngsubtype - 1] =
+			ObjectIdGetDatum(o_range->rngsubtype);
+
+		result = heap_form_tuple(tupdesc, values, nulls);
+	}
+	return result;
+}
+
+void
+o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid, XLogRecPtr insert_lsn)
+{
+	ORange	   *o_range;
+	XLogRecPtr	sys_lsn;
+	Oid			sys_datoid;
+	OClassArg	class_arg = {.sys_table = true};
+	Oid			btree_opf;
+	Oid			btree_opintype;
+
+	o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
+	o_range =
+		o_range_cache_search(datoid, rngtypid, insert_lsn, range_cache->nkeys);
+	Assert(o_range);
+	o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId, sys_lsn,
+								(Pointer) &class_arg);
+	o_class_cache_add_if_needed(sys_datoid, AccessMethodProcedureRelationId,
+								sys_lsn, (Pointer) &class_arg);
+	btree_opf = get_opclass_family(o_range->rngsubopc);
+	btree_opintype = get_opclass_input_type(o_range->rngsubopc);
+	o_amproc_cache_add_if_needed(datoid, btree_opf, btree_opintype,
+								 btree_opintype, BTORDER_PROC, insert_lsn,
+								 NULL);
 }

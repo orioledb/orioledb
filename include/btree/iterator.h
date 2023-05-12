@@ -14,6 +14,7 @@
 #define __BTREE_ITERATOR_H__
 
 #include "btree.h"
+#include "btree/page_contents.h"
 
 typedef enum
 {
@@ -54,6 +55,10 @@ extern OTuple o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 extern OTuple btree_iterate_raw(BTreeIterator *it, void *end,
 								BTreeKeyType endKind, bool endInclude,
 								bool *scanEnd, BTreeLocationHint *hint);
+extern OTuple btree_iterate_all(BTreeIterator *it, void *end,
+								BTreeKeyType endKind, bool endInclude,
+								bool *scanEnd, BTreeLocationHint *hint,
+								BTreeLeafTuphdr **tupHdr);
 extern void btree_iterator_free(BTreeIterator *it);
 
 extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,

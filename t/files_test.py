@@ -185,7 +185,7 @@ class FilesTest(BaseTest):
 		old_map_files = [f for f in
 							list(chain.from_iterable(map_files.values()))
 								if f != last_xid]
-		self.assertEqual([0] * 16, old_map_files)
+		self.assertEqual([0] * 17, old_map_files)
 		self.assertEqual(['2'], [f[2] for f in tmp_files])
 
 		node.start()
@@ -197,7 +197,7 @@ class FilesTest(BaseTest):
 		old_map_files = [f for f in
 							list(chain.from_iterable(map_files.values()))
 								if f != last_xid]
-		self.assertEqual([4] * 17, old_map_files)
+		self.assertEqual([4] * 18, old_map_files)
 		self.assertEqual([], [f[2] for f in tmp_files])
 
 	def test_multiple_checkpoint_tmp_map_cleanup(self):

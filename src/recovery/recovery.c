@@ -77,8 +77,6 @@ typedef struct
 
 	/* is any system tree modified by oxid */
 	bool		systree_modified;
-	/* is o_tables system tree modified by oxid */
-	bool		o_tables_modified;
 	/* is oTablesMetaLock held by transaction */
 	bool		o_tables_meta_locked;
 	/* is provided by checkpoint xids file */
@@ -428,7 +426,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				pairingheap_add(xmin_queue, &state->xmin_ph_node);
 
 			state->systree_modified = false;
-			state->o_tables_modified = false;
 			state->o_tables_meta_locked = false;
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
@@ -993,7 +990,6 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			if (worker_id < 0)
 				pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
 			cur_state->systree_modified = false;
-			cur_state->o_tables_modified = false;
 			cur_state->o_tables_meta_locked = false;
 			cur_state->checkpoint_xid = false;
 			if (worker_id < 0 && !*recovery_single_process)
@@ -2243,10 +2239,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 				cur_state->systree_modified = true;
 				if (sys_tree_num == SYS_TREES_O_TABLES)
-				{
 					Assert(cur_state->o_tables_meta_locked);
-					cur_state->o_tables_modified = true;
-				}
 
 				if (!single)
 					workers_synchronize(xlogPtr, true);

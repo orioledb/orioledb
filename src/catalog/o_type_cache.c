@@ -24,6 +24,10 @@
 #include "catalog/indexing.h"
 #endif
 #include "catalog/pg_am.h"
+#include "catalog/pg_amop.h"
+#include "catalog/pg_amproc.h"
+#include "catalog/pg_opclass.h"
+#include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "miscadmin.h"
@@ -52,12 +56,9 @@ O_SYS_CACHE_INIT_FUNC(type_cache)
 {
 	Oid			keytypes[] = {OIDOID};
 
-	type_cache = o_create_sys_cache(SYS_TREES_TYPE_CACHE,
-									false, false,
-									TypeOidIndexId, TYPEOID, 1,
-									keytypes, fastcache,
-									mcxt,
-									&type_cache_funcs);
+	type_cache = o_create_sys_cache(SYS_TREES_TYPE_CACHE, false,
+									TypeOidIndexId, TYPEOID, 1, keytypes, 0,
+									fastcache, mcxt, &type_cache_funcs);
 }
 
 void
@@ -100,14 +101,20 @@ o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_type->typsend = typeform->typsend;
 	o_type->typelem = typeform->typelem;
 	o_type->typdelim = typeform->typdelim;
+	o_type->typbasetype = typeform->typbasetype;
+	o_type->typtypmod = typeform->typtypmod;
+#if PG_VERSION_NUM >= 140000
+	o_type->typsubscript = typeform->typsubscript;
+#endif
 
-	o_type->default_opclass = GetDefaultOpClass(typeoid, BTREE_AM_OID);
-	if (!OidIsValid(o_type->default_opclass) &&
+	o_type->default_btree_opclass = GetDefaultOpClass(typeoid, BTREE_AM_OID);
+	if (!OidIsValid(o_type->default_btree_opclass) &&
 		typeform->typtype != TYPTYPE_PSEUDO)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_FUNCTION),
 				 errmsg("could not identify a comparison function for type %s",
 						format_type_be(typeoid))));
+	o_type->default_hash_opclass = GetDefaultOpClass(typeoid, HASH_AM_OID);
 
 	if (OidIsValid(o_type->typelem))
 		o_type_cache_add_if_needed(key->common.datoid, o_type->typelem,
@@ -154,18 +161,21 @@ o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid)
 			BoolGetDatum(o_type->typispreferred);
 		values[Anum_pg_type_typisdefined - 1] =
 			BoolGetDatum(o_type->typisdefined);
-		values[Anum_pg_type_typinput - 1] =
-			ObjectIdGetDatum(o_type->typinput);
+		values[Anum_pg_type_typinput - 1] = ObjectIdGetDatum(o_type->typinput);
 		values[Anum_pg_type_typoutput - 1] =
 			ObjectIdGetDatum(o_type->typoutput);
 		values[Anum_pg_type_typreceive - 1] =
 			ObjectIdGetDatum(o_type->typreceive);
-		values[Anum_pg_type_typsend - 1] =
-			ObjectIdGetDatum(o_type->typsend);
-		values[Anum_pg_type_typelem - 1] =
-			ObjectIdGetDatum(o_type->typelem);
-		values[Anum_pg_type_typdelim - 1] =
-			CharGetDatum(o_type->typdelim);
+		values[Anum_pg_type_typsend - 1] = ObjectIdGetDatum(o_type->typsend);
+		values[Anum_pg_type_typelem - 1] = ObjectIdGetDatum(o_type->typelem);
+		values[Anum_pg_type_typdelim - 1] = CharGetDatum(o_type->typdelim);
+		values[Anum_pg_type_typbasetype - 1] =
+			ObjectIdGetDatum(o_type->typbasetype);
+		values[Anum_pg_type_typtypmod - 1] = Int32GetDatum(o_type->typtypmod);
+#if PG_VERSION_NUM >= 140000
+		values[Anum_pg_type_typsubscript - 1] =
+			ObjectIdGetDatum(o_type->typsubscript);
+#endif
 
 		nulls[Anum_pg_type_typdefault - 1] = true;
 		nulls[Anum_pg_type_typdefaultbin - 1] = true;
@@ -189,7 +199,7 @@ o_type_cache_get_typrelid(Oid typeoid)
 }
 
 Oid
-o_type_cache_default_opclass(Oid typeoid)
+o_type_cache_default_opclass(Oid typeoid, Oid am_id)
 {
 	XLogRecPtr	cur_lsn;
 	Oid			datoid;
@@ -198,7 +208,11 @@ o_type_cache_default_opclass(Oid typeoid)
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
 	Assert(o_type);
-	return o_type->default_opclass;
+	Assert(am_id == BTREE_AM_OID || am_id == HASH_AM_OID);
+	if (am_id == BTREE_AM_OID)
+		return o_type->default_btree_opclass;
+	else
+		return o_type->default_hash_opclass;
 }
 
 void
@@ -223,31 +237,6 @@ o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 		*typstorage = o_type->typstorage;
 	if (typcollation)
 		*typcollation = o_type->typcollation;
-}
-
-TypeCacheEntry *
-o_type_elements_cmp_hook(Oid elemtype, MemoryContext mcxt)
-{
-	TypeCacheEntry *typcache = NULL;
-	MemoryContext prev_context;
-	Oid			datoid;
-	Oid			opclassoid;
-	OOpclass   *o_opclass;
-
-	opclassoid = o_type_cache_default_opclass(elemtype);
-
-	o_sys_cache_set_datoid_lsn(NULL, &datoid);
-	o_opclass = o_opclass_get(opclassoid);
-
-	prev_context = MemoryContextSwitchTo(mcxt);
-	typcache = palloc0(sizeof(TypeCacheEntry));
-	typcache->type_id = elemtype;
-	o_type_cache_fill_info(elemtype, &typcache->typlen, &typcache->typbyval,
-						   &typcache->typalign, NULL, NULL);
-	o_proc_cache_fill_finfo(&typcache->cmp_proc_finfo, o_opclass->cmpOid);
-	MemoryContextSwitchTo(prev_context);
-
-	return typcache;
 }
 
 /*
@@ -278,7 +267,13 @@ o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					 ", typsend: %u"
 					 ", typelem: %u"
 					 ", typdelim: '%c'"
-					 ", default_opclass: %u"
+					 ", typbasetype: %u"
+					 ", typtypmod: %d"
+#if PG_VERSION_NUM >= 140000
+					 ", typsubscript: %u"
+#endif
+					 ", default_btree_opclass: %u"
+					 ", default_hash_opclass: %u"
 					 ")",
 					 o_type->typname.data,
 					 o_type->typlen,
@@ -297,5 +292,11 @@ o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					 o_type->typsend,
 					 o_type->typelem,
 					 o_type->typdelim,
-					 o_type->default_opclass);
+					 o_type->typbasetype,
+					 o_type->typtypmod,
+#if PG_VERSION_NUM >= 140000
+					 o_type->typsubscript,
+#endif
+					 o_type->default_btree_opclass,
+					 o_type->default_hash_opclass);
 }

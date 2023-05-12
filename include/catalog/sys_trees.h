@@ -38,7 +38,8 @@
 #define SYS_TREES_AMPROC_CACHE			(16)
 #define SYS_TREES_COLLATION_CACHE		(17)
 #define SYS_TREES_DATABASE_CACHE		(18)
-#define SYS_TREES_NUM					(18)
+#define SYS_TREES_AMOP_STRAT_CACHE		(19)
+#define SYS_TREES_NUM					(19)
 
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)
@@ -123,5 +124,7 @@ extern bool sys_tree_is_temporary(int tree_num);
 extern bool sys_tree_supports_transactions(int tree_num);
 extern PrintFunc sys_tree_key_print(BTreeDescr *desc);
 extern PrintFunc sys_tree_tup_print(BTreeDescr *desc);
+extern void sys_tree_set_extra(int tree_num, Pointer extra);
+extern Pointer sys_tree_get_extra(int tree_num);
 
 #endif							/* __SYS_TREES_H__ */

@@ -1037,8 +1037,6 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	OComparator *result;
 	OComparator comparator;
 	Oid			procOid;
-	Oid			leftBaseTypeOid;
-	Oid			rightBaseTypeOid;
 
 	/*
 	 * At first, try to find existing comparator in cache.
@@ -1052,9 +1050,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 */
 	Assert(OidIsValid(lefttype));
 	Assert(OidIsValid(righttype));
-	leftBaseTypeOid = getBaseType(lefttype);
-	rightBaseTypeOid = getBaseType(righttype);
-	procOid = get_opfamily_proc(opfamily, leftBaseTypeOid, rightBaseTypeOid, BTSORTSUPPORT_PROC);
+	procOid =
+		get_opfamily_proc(opfamily, lefttype, righttype, BTSORTSUPPORT_PROC);
 	memset(&comparator, 0, sizeof(comparator));
 	comparator.key = key;
 	if (OidIsValid(procOid))
@@ -1080,7 +1077,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 	{
-		procOid = get_opfamily_proc(opfamily, leftBaseTypeOid, rightBaseTypeOid, BTORDER_PROC);
+		procOid =
+			get_opfamily_proc(opfamily, lefttype, righttype, BTORDER_PROC);
 		if (!OidIsValid(procOid))
 		{
 			HeapTuple	tup;

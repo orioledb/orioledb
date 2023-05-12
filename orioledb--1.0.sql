@@ -85,8 +85,8 @@ RETURNS bool
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_sys_tree_rows(num integer, OUT total int, OUT dead int)
-RETURNS record
+CREATE FUNCTION orioledb_sys_tree_rows(num integer)
+RETURNS SETOF jsonb
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 

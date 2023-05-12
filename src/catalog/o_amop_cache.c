@@ -32,17 +32,29 @@
 #include "utils/syscache.h"
 
 static OSysCache *amop_cache = NULL;
+static OSysCache *amop_strat_cache = NULL;
 
 static void o_amop_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 									Pointer arg);
 static void o_amop_cache_free_entry(Pointer entry);
 
+static void o_amop_strat_cache_fill_entry(Pointer *entry_ptr,
+										  OSysCacheKey *key, Pointer arg);
+static void o_amop_strat_cache_free_entry(Pointer entry);
+
 O_SYS_CACHE_FUNCS(amop_cache, OAmOp, 3);
+O_SYS_CACHE_FUNCS(amop_strat_cache, OAmOpStrat, 4);
 
 static OSysCacheFuncs amop_cache_funcs =
 {
 	.free_entry = o_amop_cache_free_entry,
 	.fill_entry = o_amop_cache_fill_entry
+};
+
+static OSysCacheFuncs amop_strat_cache_funcs =
+{
+	.free_entry = o_amop_strat_cache_free_entry,
+	.fill_entry = o_amop_strat_cache_fill_entry
 };
 
 /*
@@ -52,12 +64,24 @@ O_SYS_CACHE_INIT_FUNC(amop_cache)
 {
 	Oid			keytypes[] = {OIDOID, CHAROID, OIDOID};
 
-	amop_cache = o_create_sys_cache(SYS_TREES_AMOP_CACHE,
-									false, false,
+	amop_cache = o_create_sys_cache(SYS_TREES_AMOP_CACHE, false,
 									AccessMethodOperatorIndexId, AMOPOPID, 3,
-									keytypes, fastcache,
-									mcxt,
+									keytypes, 0, fastcache, mcxt,
 									&amop_cache_funcs);
+}
+
+/*
+ * Initializes the type sys cache memory.
+ */
+O_SYS_CACHE_INIT_FUNC(amop_strat_cache)
+{
+	Oid			keytypes[] = {OIDOID, OIDOID, OIDOID, INT2OID};
+
+	amop_strat_cache = o_create_sys_cache(SYS_TREES_AMOP_STRAT_CACHE, false,
+										  AccessMethodStrategyIndexId,
+										  AMOPSTRATEGY, 4, keytypes, 0,
+										  fastcache, mcxt,
+										  &amop_strat_cache_funcs);
 }
 
 
@@ -106,6 +130,54 @@ o_amop_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 
 void
 o_amop_cache_free_entry(Pointer entry)
+{
+	pfree(entry);
+}
+
+void
+o_amop_strat_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
+							  Pointer arg)
+{
+	HeapTuple	amoptup;
+	Form_pg_amop amopform;
+	OAmOpStrat *o_amop_strat = (OAmOpStrat *) *entry_ptr;
+	MemoryContext prev_context;
+	Oid			amopfamily;
+	Oid			amoplefttype;
+	Oid			amoprighttype;
+	int16		amopstrategy;
+
+	amopfamily = DatumGetObjectId(key->keys[0]);
+	amoplefttype = DatumGetObjectId(key->keys[1]);
+	amoprighttype = DatumGetObjectId(key->keys[2]);
+	amopstrategy = DatumGetChar(key->keys[3]);
+
+	amoptup = SearchSysCache4(AMOPSTRATEGY, key->keys[0], key->keys[1],
+							  key->keys[2], key->keys[3]);
+	if (!HeapTupleIsValid(amoptup))
+		elog(ERROR, "cache lookup failed for amop strategy (%u, %u, %u, %u)",
+			 amopfamily, amoplefttype, amoprighttype, amopstrategy);
+	amopform = (Form_pg_amop) GETSTRUCT(amoptup);
+
+	prev_context = MemoryContextSwitchTo(amop_cache->mcxt);
+	if (o_amop_strat != NULL)	/* Existed o_amop_strat updated */
+	{
+		Assert(false);
+	}
+	else
+	{
+		o_amop_strat = palloc0(sizeof(OAmOpStrat));
+		*entry_ptr = (Pointer) o_amop_strat;
+	}
+
+	o_amop_strat->amopopr = amopform->amopopr;
+
+	MemoryContextSwitchTo(prev_context);
+	ReleaseSysCache(amoptup);
+}
+
+void
+o_amop_strat_cache_free_entry(Pointer entry)
 {
 	pfree(entry);
 }
@@ -186,6 +258,43 @@ o_amop_cache_search_htup_list(TupleDesc tupdesc, Oid amopopr)
 	return result;
 }
 
+static HeapTuple
+o_amop_strat_to_htup(OAmOpStrat *o_amop_strat, TupleDesc tupdesc)
+{
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_amop] = {0};
+	bool		nulls[Natts_pg_amop] = {0};
+
+	if (o_amop_strat)
+	{
+		values[Anum_pg_amop_amopfamily - 1] = o_amop_strat->key.keys[0];
+		values[Anum_pg_amop_amoplefttype - 1] = o_amop_strat->key.keys[1];
+		values[Anum_pg_amop_amoprighttype - 1] = o_amop_strat->key.keys[2];
+		values[Anum_pg_amop_amopstrategy - 1] = o_amop_strat->key.keys[3];
+		values[Anum_pg_amop_amopopr - 1] =
+			ObjectIdGetDatum(o_amop_strat->amopopr);
+
+		result = heap_form_tuple(tupdesc, values, nulls);
+	}
+	return result;
+}
+
+HeapTuple
+o_amop_strat_cache_search_htup(TupleDesc tupdesc, Oid amopfamily,
+							   Oid amoplefttype, Oid amoprighttype,
+							   int16 amopstrategy)
+{
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OAmOpStrat *o_amop_strat;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_amop_strat = o_amop_strat_cache_search(datoid, amopfamily, amoplefttype,
+											 amoprighttype, amopstrategy,
+											 cur_lsn, amop_cache->nkeys);
+	return o_amop_strat_to_htup(o_amop_strat, tupdesc);
+}
+
 /*
  * A tuple print function for o_print_btree_pages()
  */
@@ -204,4 +313,20 @@ o_amop_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					 o_amop->amopfamily,
 					 o_amop->amoplefttype,
 					 o_amop->amoprighttype);
+}
+
+/*
+ * A tuple print function for o_print_btree_pages()
+ */
+void
+o_amop_strat_cache_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup,
+							 Pointer arg)
+{
+	OAmOpStrat *o_amop_strat = (OAmOpStrat *) tup.data;
+
+	appendStringInfo(buf, "(");
+	o_sys_cache_key_print(desc, buf, tup, arg);
+	appendStringInfo(buf,
+					 ", amopopr: %u)",
+					 o_amop_strat->amopopr);
 }

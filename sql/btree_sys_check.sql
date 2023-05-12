@@ -88,10 +88,13 @@ SELECT regexp_replace(
 		'g');
 
 -- SYS_TREES_ENUM_CACHE
-SELECT regexp_replace(
-		orioledb_sys_tree_structure(5, 'ne'),
-		'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
-		'NNN, (NNN), X/X, ',
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(5, 'ne'),
+			'\d+, \(\d+, ("\w+")\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN, \1), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
 		'g');
 
 -- SYS_TREES_ENUMOID_CACHE
@@ -180,7 +183,7 @@ SELECT regexp_replace(regexp_replace(
 -- SYS_TREES_AMPROC_CACHE
 SELECT regexp_replace(regexp_replace(
 			orioledb_sys_tree_structure(16, 'ne'),
-			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'\d+, \(\d+, \d+, \d+, \d+\), [A-F0-9]+/[A-F0-9]+, ',
 			'NNN, (NNN), X/X, ',
 			'g'),
 		': \d+',
