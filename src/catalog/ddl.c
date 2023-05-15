@@ -817,7 +817,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("unsupported alter table subcommand")),
-									errdetail("Subcommand \"%s\" is not supported on OrioleDB tables yet.  Please send a bug report.",
+									errdetail("Subcommand \"%s\" is not supported on OrioleDB tables yet.  This will be implemented in future.",
 											  alter_table_type_to_string(cmd->subtype)));
 							break;
 					}
