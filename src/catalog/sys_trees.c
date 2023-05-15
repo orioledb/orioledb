@@ -101,6 +101,10 @@ static void o_index_chunk_tup_print(BTreeDescr *desc, StringInfo buf,
 static int	o_index_chunk_length(BTreeDescr *desc, OTuple tuple);
 static JsonbValue *o_index_chunk_key_to_jsonb(BTreeDescr *desc, OTuple tup,
 											  JsonbParseState **state);
+static bool o_index_chunk_needs_undo(BTreeDescr *desc, BTreeOperationType action,
+									 OTuple oldTuple, OTupleXactInfo oldXactInfo,
+									 bool oldDeleted, OTuple newTuple,
+									 OXid newOxid);
 
 static int	free_tree_off_len_cmp(BTreeDescr *desc,
 								  void *p1, BTreeKeyType k1,
@@ -152,7 +156,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.poolType = OPagePoolCatalog,
 		.undoReserveType = UndoReserveTxn,
 		.storageType = BTreeStoragePersistence,
-		.needs_undo = NULL
+		.needs_undo = o_index_chunk_needs_undo
 	},
 	{							/* SYS_TREES_OPCLASS_CACHE */
 		.keyLength = sizeof(OSysCacheKey1),
@@ -924,6 +928,14 @@ o_index_chunk_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state
 	jsonb_push_int8_key(state, "relnode", key->oids.relnode);
 	jsonb_push_int8_key(state, "offset", key->offset);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
+}
+
+static bool
+o_index_chunk_needs_undo(BTreeDescr *desc, BTreeOperationType action,
+						 OTuple oldTuple, OTupleXactInfo oldXactInfo, bool oldDeleted,
+						 OTuple newTuple, OXid newOxid)
+{
+	return true;
 }
 
 /*

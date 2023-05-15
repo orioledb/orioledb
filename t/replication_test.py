@@ -586,6 +586,35 @@ class ReplicationTest(BaseTest):
 
 					self.catchup_orioledb(replica)
 
+	def test_replicate_table_rewrite(self):
+		node = self.node
+		node.start()
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1(
+							val_1 text NOT NULL COLLATE "C",
+							val_2 varchar NOT NULL,
+							val_3 integer,
+							PRIMARY KEY (val_1)
+						)USING orioledb;
+
+						INSERT INTO o_test_1 VALUES ('ABC1', 'ABC2', NULL), ('ABC2', 'ABC4', NULL),
+													('ABC3', 'ABC6', NULL);
+
+						ALTER TABLE o_test_1 ALTER val_2 TYPE char
+							USING substr(val_2, substr(val_2,4,1)::int / 2, 1);
+					""")
+					con1.commit()
+
+					catchup_orioledb(replica)
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x

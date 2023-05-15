@@ -2161,6 +2161,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			memcpy(&oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
 
+			if (!single)
+				workers_synchronize(xlogPtr, true);
+
 			Assert(cur_state->o_tables_meta_locked);
 			handle_o_tables_meta_unlock(oids, oldRelnode);
 

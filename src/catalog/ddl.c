@@ -1832,7 +1832,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				Relation	old_rel;
 				ORelOids	old_oids,
-							new_oids;
+							new_oids,
+							tmp_oids = {InvalidOid, InvalidOid, InvalidOid};
 				OTable	   *old_o_table,
 						   *new_o_table;
 				CommitSeqNo csn;
@@ -1866,7 +1867,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_tables_update_without_oids_indexes(new_o_table, oxid, csn);
 				o_indices_update(new_o_table, TOASTIndexNumber, oxid, csn);
 
-				o_tables_meta_unlock(new_oids, old_oids.relnode);
+				o_tables_meta_unlock(tmp_oids, InvalidOid);
 
 				o_table_free(old_o_table);
 				o_table_free(new_o_table);
