@@ -615,6 +615,39 @@ class ReplicationTest(BaseTest):
 
 					catchup_orioledb(replica)
 
+	def test_replication_row_type(self):
+		node = self.node
+		node.start()
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+
+					CREATE TYPE o_type_1 AS (
+						a int,
+						b int
+					);
+
+					CREATE TABLE o_test_1(
+						val_1 o_type_1 NOT NULL,
+						val_2 int NOT NULL DEFAULT 5
+					) USING orioledb;
+
+					INSERT INTO o_test_1
+						SELECT (id, id * 2)::o_type_1
+							FROM generate_series(1, 2) id;
+
+					ALTER TABLE o_test_1 ADD COLUMN val_3 text DEFAULT 'abc';
+					CREATE INDEX ind_1 ON o_test_1 (val_3);
+					ALTER TABLE o_test_1 ADD PRIMARY KEY (val_1);
+				""")
+
+				self.assertEqual(master.execute("TABLE o_test_1"),
+								 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
+				self.catchup_orioledb(replica)
+				self.assertEqual(replica.execute("TABLE o_test_1"),
+								 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x

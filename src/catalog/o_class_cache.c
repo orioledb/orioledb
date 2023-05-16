@@ -219,7 +219,11 @@ o_class_cache_search_tupdesc(Oid cc_reloid)
 								   class_cache->nkeys);
 	if (o_class)
 	{
+		MemoryContext oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
 		result = CreateTemplateTupleDesc(o_class->natts);
+		MemoryContextSwitchTo(oldcxt);
 		memcpy(&result->attrs, o_class->attrs,
 			   o_class->natts * sizeof(FormData_pg_attribute));
 	}
