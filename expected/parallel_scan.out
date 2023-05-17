@@ -566,8 +566,32 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 COMMIT;
+BEGIN;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
+CREATE TABLE o_test_parallel (
+	val_1 int
+) USING orioledb;
+INSERT INTO o_test_parallel (val_1) VALUES (1);
+SELECT * FROM o_test_parallel;
+ val_1 
+-------
+     1
+(1 row)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 7 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table seq_scan_test
 drop cascades to table o_test_o_scan_register
 drop cascades to table o_test_1
@@ -575,6 +599,7 @@ drop cascades to table o_test_parallel_bitmap_scan
 drop cascades to table o_test_parallel_index_scan
 drop cascades to table o_test_parallel_bitmap_scan_explain_buffers
 drop cascades to table o_test_parallel_unique_index_scan
+drop cascades to table o_test_parallel
 DROP SCHEMA parallel_scan CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)

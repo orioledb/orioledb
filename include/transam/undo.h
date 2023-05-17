@@ -155,7 +155,7 @@ extern UndoLocation curRetainUndoLocation;
 									(location) < pg_atomic_read_u64(&undo_meta->checkpointRetainEndLocation)))
 #define UNDO_REC_XACT_RETAIN(location) ((location) >= pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation))
 #define GET_CUR_UNDO_STACK_LOCATIONS() (AssertMacro(MyProc->pgprocno >= 0 && MyProc->pgprocno < max_procs), \
-										&oProcData[MyProc->pgprocno].undoStackLocations[get_current_local_xid() % PROC_XID_ARRAY_SIZE])
+										&oProcData[MyProc->pgprocno].undoStackLocations[oProcData[MyProc->pgprocno].autonomousNestingLevel])
 
 extern Pointer o_undo_buffers;
 extern UndoMeta *undo_meta;

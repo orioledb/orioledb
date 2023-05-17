@@ -85,7 +85,6 @@ typedef struct OCustomScanState
 	CustomScanState css;
 	bool		useEaCounters;
 	OEACallsCounters eaCounters;
-	OXid		scan_oxid;
 	OPlanState *o_plan_state;
 } OCustomScanState;
 
@@ -414,13 +413,6 @@ o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 	Relation	relation;
 	OTableDescr *descr;
 	Plan	   *custom_plan;
-	OXid		cur_oxid;
-	StringInfo	str = makeStringInfo();
-#if PG_VERSION_NUM >= 150000
-	String	   *cur_oxid_str;
-#else
-	Value	   *cur_oxid_str;
-#endif
 
 	rte = planner_rt_fetch(rel->relid, rootPageBlkno);
 	Assert(rte->rtekind == RTE_RELATION);
@@ -448,10 +440,6 @@ o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 	if (IsA(custom_plan, Result))
 		custom_plan = outerPlan(custom_plan);
 
-	cur_oxid = get_current_oxid();
-	appendStringInfo(str, UINT64_FORMAT, cur_oxid);
-	cur_oxid_str = makeString(str->data);
-
 	if (o_path->type == O_IndexPath)
 	{
 		OIndexPath *ix_path = (OIndexPath *) o_path;
@@ -477,11 +465,9 @@ o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 		custom_scan->custom_exprs = NIL;
 		custom_scan->custom_private =
 			list_make4(makeInteger(O_IndexPlan),
-					   cur_oxid_str,
 					   makeInteger(ix_path->ix_num),
-					   makeInteger(ix_path->scandir));
-		custom_scan->custom_private = lappend(custom_scan->custom_private,
-											  makeInteger(onlyCurIx));
+					   makeInteger(ix_path->scandir),
+					   makeInteger(onlyCurIx));
 	}
 	else
 	{
@@ -494,8 +480,7 @@ o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 
 		Assert(primary->nFields == 1);
 		custom_scan->custom_private =
-			list_make3(makeInteger(O_BitmapHeapPlan),
-					   cur_oxid_str,
+			list_make2(makeInteger(O_BitmapHeapPlan),
 					   makeInteger(primary->fields[0].inputtype));
 	}
 
@@ -518,20 +503,10 @@ o_create_custom_scan_state(CustomScan *cscan)
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 	OPlanTag	plan_tag = intVal(linitial(cscan->custom_private));
 	Plan	   *custom_plan;
-#if PG_VERSION_NUM >= 150000
-	String	   *scan_oxid_str = lsecond(cscan->custom_private);
-#else
-	Value	   *scan_oxid_str = lsecond(cscan->custom_private);
-#endif
 
 	node->type = T_CustomScanState;
 	ocstate->css.methods = &o_scan_exec_methods;
 	ocstate->css.slotOps = &TTSOpsOrioleDB;
-#if PG_VERSION_NUM >= 150000
-	ocstate->scan_oxid = pg_strtoint64(scan_oxid_str->sval);
-#else
-	ocstate->scan_oxid = pg_strtouint64(scan_oxid_str->val.str, NULL, 0);
-#endif
 
 	Assert(cscan->custom_plans);
 	custom_plan = (Plan *) linitial(cscan->custom_plans);
@@ -543,8 +518,8 @@ o_create_custom_scan_state(CustomScan *cscan)
 		OIndexPlanState *ix_plan_state =
 			(OIndexPlanState *) palloc0(sizeof(OIndexPlanState));
 
-		ix_plan_state->ostate.ixNum = intVal(lthird(cscan->custom_private));
-		ix_plan_state->ostate.scanDir = intVal(lfourth(cscan->custom_private));
+		ix_plan_state->ostate.ixNum = intVal(lsecond(cscan->custom_private));
+		ix_plan_state->ostate.scanDir = intVal(lthird(cscan->custom_private));
 		ix_plan_state->ostate.iterator = NULL;
 		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
 		ix_plan_state->ostate.curKeyRange.empty = true;
@@ -572,7 +547,7 @@ o_create_custom_scan_state(CustomScan *cscan)
 			Assert(false);
 		}
 		ix_plan_state->ostate.onlyCurIx =
-			intVal(lfirst(list_nth_cell(cscan->custom_private, 4)));
+			intVal(lfourth(cscan->custom_private));
 
 		ocstate->o_plan_state = (OPlanState *) ix_plan_state;
 	}
@@ -582,7 +557,7 @@ o_create_custom_scan_state(CustomScan *cscan)
 			(OBitmapHeapPlanState *) palloc0(sizeof(OBitmapHeapPlanState));
 		BitmapHeapScan *bh_scan = (BitmapHeapScan *) custom_plan;
 
-		bitmap_state->typeoid = intVal(lthird(cscan->custom_private));
+		bitmap_state->typeoid = intVal(lsecond(cscan->custom_private));
 		bitmap_state->bitmapqualplan = copyObject(bh_scan->scan.plan.lefttree);
 		bitmap_state->bitmapqualorig = copyObject(bh_scan->bitmapqualorig);
 		ocstate->o_plan_state = (OPlanState *) bitmap_state;
@@ -603,11 +578,6 @@ void
 o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
-	OXid		cur_oxid;
-
-	cur_oxid = get_current_oxid_if_any();
-	if (!OXidIsValid(cur_oxid) && IsInParallelMode())
-		set_current_oxid(ocstate->scan_oxid);
 
 	ocstate->useEaCounters = is_explain_analyze(&node->ss.ps);
 

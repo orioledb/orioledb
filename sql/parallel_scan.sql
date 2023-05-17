@@ -205,6 +205,20 @@ SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
 SELECT orioledb_parallel_debug_stop();
 COMMIT;
 
+BEGIN;
+SELECT orioledb_parallel_debug_start();
+
+CREATE TABLE o_test_parallel (
+	val_1 int
+) USING orioledb;
+
+INSERT INTO o_test_parallel (val_1) VALUES (1);
+
+SELECT * FROM o_test_parallel;
+
+SELECT orioledb_parallel_debug_stop();
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

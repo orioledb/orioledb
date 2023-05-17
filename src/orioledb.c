@@ -683,7 +683,7 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&oProcData[i].transactionUndoRetainLocation, InvalidUndoLocation);
 			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, OWalInvalidCommitPos);
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
-			oProcData[i].lastLXid = LXID_NORMAL_FROM - 1;
+			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,
 							 undo_meta->undoStackLocationsFlushLockTrancheId);

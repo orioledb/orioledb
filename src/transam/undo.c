@@ -1123,6 +1123,11 @@ undo_xact_callback(XactEvent event, void *arg)
 	OXid		oxid = get_current_oxid_if_any();
 	CommitSeqNo csn;
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
+	bool		isParallelWorker;
+
+	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
+						MyProc->lockGroupLeader != MyProc) ||
+		IsInParallelMode();
 
 	/*
 	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
@@ -1133,18 +1138,13 @@ undo_xact_callback(XactEvent event, void *arg)
 	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
 		seq_scans_cleanup();
 
-	if (!OXidIsValid(oxid))
+	if (!OXidIsValid(oxid) || isParallelWorker)
 	{
-		switch (event)
+		if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
 		{
-			case XACT_EVENT_COMMIT:
-			case XACT_EVENT_ABORT:
-				reset_cur_undo_locations();
-				orioledb_reset_xmin_hook();
-				oxid_needs_wal_flush = false;
-				break;
-			default:
-				break;
+			reset_cur_undo_locations();
+			orioledb_reset_xmin_hook();
+			oxid_needs_wal_flush = false;
 		}
 	}
 	else
@@ -1218,6 +1218,9 @@ undo_xact_callback(XactEvent event, void *arg)
 		free_retained_undo_location();
 		saved_undo_location = InvalidUndoLocation;
 	}
+
+	if (event == XACT_EVENT_COMMIT && isParallelWorker)
+		parallel_worker_set_oxid();
 }
 
 void
@@ -1444,6 +1447,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 
 	oxid_needs_wal_flush = false;
 	reset_current_oxid();
+	GET_CUR_PROCDATA()->autonomousNestingLevel++;
 }
 
 void
@@ -1463,6 +1467,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	}
 
 	oxid_needs_wal_flush = state->needs_wal_flush;
+	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
 }
 
@@ -1490,6 +1495,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	}
 
 	oxid_needs_wal_flush = state->needs_wal_flush;
+	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
 }
 

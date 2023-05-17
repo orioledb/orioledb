@@ -113,7 +113,7 @@ typedef struct
 	pg_atomic_uint64 transactionUndoRetainLocation;
 	pg_atomic_uint64 snapshotRetainUndoLocation;
 	pg_atomic_uint64 commitInProgressXlogLocation;
-	LocalTransactionId lastLXid;
+	int			autonomousNestingLevel;
 	LWLock		undoStackLocationsFlushLock;
 	bool		flushUndoLocations;
 	bool		waitingForOxid;

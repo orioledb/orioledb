@@ -32,16 +32,15 @@
 #define	COMMITSEQNO_SPECIAL_BIT (UINT64CONST(1) << 63)
 #define COMMITSEQNO_SPECIAL_COMMITTING_BIT (1)
 #define COMMITSEQNO_IS_SPECIAL(csn) ((csn) & COMMITSEQNO_SPECIAL_BIT)
-#define COMMITSEQNO_GET_LXID(csn) (((csn) >> 31) & 0xFFFFFFFF)
+#define COMMITSEQNO_GET_LEVEL(csn) (((csn) >> 31) & 0xFFFFFFFF)
 #define COMMITSEQNO_GET_PROCNUM(csn) (((csn) >> 15) & 0xFFFF)
-#define COMMITSEQNO_MAKE_SPECIAL(procnum, lxid, committing) \
+#define COMMITSEQNO_MAKE_SPECIAL(procnum, level, committing) \
 	(COMMITSEQNO_SPECIAL_BIT | ((uint64) procnum << 15) | \
-	 ((uint64) lxid << 31) | \
+	 ((uint64) level << 31) | \
 	 ((committing) ? COMMITSEQNO_SPECIAL_COMMITTING_BIT : 0))
 
 static OXid curOxid = InvalidOXid;
 static pg_atomic_uint64 *xidBuffer;
-static LocalTransactionId curLocalXid;
 
 XidMeta    *xid_meta;
 
@@ -392,7 +391,7 @@ wait_for_oxid(OXid oxid)
 		return true;
 
 	procnum = COMMITSEQNO_GET_PROCNUM(csn);
-	vxidElem = &oProcData[procnum].vxids[COMMITSEQNO_GET_LXID(csn) % PROC_XID_ARRAY_SIZE];
+	vxidElem = &oProcData[procnum].vxids[COMMITSEQNO_GET_LEVEL(csn)];
 	vxid = vxidElem->vxid;
 
 	pg_read_barrier();
@@ -802,6 +801,7 @@ get_current_oxid(void)
 	{
 		OXid		newOxid = pg_atomic_fetch_add_u64(&xid_meta->nextXid, 1);
 		XidVXidMapElement *vxidElem;
+		int			nestingLevel;
 
 		/*
 		 * Advance xmin every 10th part of circular buffer.  That should
@@ -832,8 +832,9 @@ get_current_oxid(void)
 		/*
 		 * Make new xidmap item and write it to the circular buffer.
 		 */
-		curLocalXid = ++(GET_CUR_PROCDATA()->lastLXid);
-		vxidElem = &GET_CUR_PROCDATA()->vxids[curLocalXid % PROC_XID_ARRAY_SIZE];
+		nestingLevel = GET_CUR_PROCDATA()->autonomousNestingLevel;
+		Assert(nestingLevel >= 0 && nestingLevel < PROC_XID_ARRAY_SIZE);
+		vxidElem = &GET_CUR_PROCDATA()->vxids[nestingLevel];
 
 		vxidElem->oxid = newOxid;
 		vxidElem->vxid.backendId = MyProc->backendId;
@@ -842,7 +843,7 @@ get_current_oxid(void)
 		Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size]) == COMMITSEQNO_FROZEN);
 		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size],
 							COMMITSEQNO_MAKE_SPECIAL(MyProc->pgprocno,
-													 curLocalXid,
+													 nestingLevel,
 													 false));
 		curOxid = newOxid;
 	}
@@ -850,29 +851,32 @@ get_current_oxid(void)
 	return curOxid;
 }
 
-LocalTransactionId
-get_current_local_xid(void)
-{
-	return curLocalXid;
-}
-
 void
 set_current_oxid(OXid oxid)
 {
-	CommitSeqNo csn;
-
 	curOxid = oxid;
-	csn = map_oxid_csn(oxid);
-	Assert(COMMITSEQNO_IS_SPECIAL(csn));
-	curLocalXid = COMMITSEQNO_GET_LXID(csn);
 
+}
+
+void
+parallel_worker_set_oxid(void)
+{
+	XidVXidMapElement *vxidElem;
+	ODBProcData *leaderProcData;
+
+	Assert(MyProc->lockGroupLeader);
+
+	leaderProcData = &oProcData[MyProc->lockGroupLeader->pgprocno];
+	vxidElem = &leaderProcData->vxids[leaderProcData->autonomousNestingLevel];
+
+	curOxid = vxidElem->oxid;
+	saved_undo_location = InvalidUndoLocation;
 }
 
 void
 reset_current_oxid(void)
 {
 	curOxid = InvalidOXid;
-	curLocalXid = 0;
 }
 
 OXid
@@ -891,7 +895,7 @@ current_oxid_precommit(void)
 		return;
 
 	set_oxid_csn(curOxid, COMMITSEQNO_MAKE_SPECIAL(MyProc->pgprocno,
-												   curLocalXid,
+												   GET_CUR_PROCDATA()->autonomousNestingLevel,
 												   true));
 
 	pg_write_barrier();
@@ -931,7 +935,7 @@ current_oxid_commit(CommitSeqNo csn)
 
 	set_oxid_csn(curOxid, csn);
 	pg_write_barrier();
-	my_proc_info->vxids[curLocalXid % PROC_XID_ARRAY_SIZE].oxid = InvalidOXid;
+	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
@@ -949,7 +953,7 @@ current_oxid_abort(void)
 
 	set_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
 	pg_write_barrier();
-	my_proc_info->vxids[curLocalXid % PROC_XID_ARRAY_SIZE].oxid = InvalidOXid;
+	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
