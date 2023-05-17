@@ -298,6 +298,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 	ioc_arg.newSlot = (OTableSlot *) slot;
 	ioc_arg.lockMode = tuple_lock_mode_to_row_lock_mode(lockmode);
 	ioc_arg.scanSlot = lockedSlot;
+	ioc_arg.tupUndoLocation = InvalidUndoLocation;
 
 	while (true)
 	{
@@ -386,6 +387,19 @@ o_tbl_insert_with_arbiter(Relation rel,
 			{
 				Assert(ioc_arg.scanSlot == lockedSlot);
 				Assert(!TTS_EMPTY(lockedSlot));
+
+				if (COMMITSEQNO_IS_INPROGRESS(ioc_arg.csn) &&
+					(ioc_arg.oxid == get_current_oxid_if_any()) &&
+					UndoLocationIsValid(ioc_arg.tupUndoLocation) &&
+					(ioc_arg.tupUndoLocation >= saved_undo_location))
+				{
+					ereport(ERROR,
+							(errcode(ERRCODE_CARDINALITY_VIOLATION),
+					/* translator: %s is a SQL command name */
+							 errmsg("%s command cannot affect row a second time",
+									"ON CONFLICT DO UPDATE"),
+							 errhint("Ensure that no rows proposed for insertion within the same command have duplicate constrained values.")));
+				}
 				STOPEVENT(STOPEVENT_IOC_BEFORE_UPDATE, NULL);
 			}
 			return NULL;
@@ -437,6 +451,16 @@ o_tbl_insert_with_arbiter(Relation rel,
 			larg.selfModified = false;
 
 			lockResult = o_tbl_lock(descr, &key, lockmode, oxid, &larg, &hint);
+
+			if (larg.selfModified)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_CARDINALITY_VIOLATION),
+				/* translator: %s is a SQL command name */
+						 errmsg("%s command cannot affect row a second time",
+								"ON CONFLICT DO UPDATE"),
+						 errhint("Ensure that no rows proposed for insertion within the same command have duplicate constrained values.")));
+			}
 
 			if (lockResult == OBTreeModifyResultNotFound)
 			{
@@ -1319,9 +1343,15 @@ o_insert_with_arbiter_modify_callback(BTreeDescr *descr,
 
 		/* Updates current csn */
 		if (XACT_INFO_IS_FINISHED(xactInfo))
+		{
 			ioc_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : ioc_arg->csn;
+		}
 		else
+		{
 			ioc_arg->csn = COMMITSEQNO_INPROGRESS;
+			ioc_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
+			ioc_arg->tupUndoLocation = UndoLocationGetValue(location);
+		}
 
 		copy_tuple_to_slot(tup, ioc_arg->scanSlot, ioc_arg->desc,
 						   ioc_arg->csn, ioc_arg->conflictIxNum, hint);
@@ -1544,7 +1574,7 @@ o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 	{
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
 		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
-		o_arg->tupUndoLocation = location;
+		o_arg->tupUndoLocation = UndoLocationGetValue(location);
 	}
 
 	copy_tuple_to_slot(tup, slot, o_arg->descr, o_arg->csn,
@@ -1575,7 +1605,7 @@ o_lock_deleted_callback(BTreeDescr *descr,
 	{
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
 		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
-		o_arg->tupUndoLocation = location;
+		o_arg->tupUndoLocation = UndoLocationGetValue(location);
 	}
 
 	if (deleted == BTreeLeafTupleMovedPartitions)

@@ -22,6 +22,18 @@ INSERT INTO o_test_ioc1 VALUES (1, 5) ON CONFLICT DO NOTHING RETURNING *;
 
 SELECT * FROM o_test_ioc1;
 
+TRUNCATE o_test_ioc1;
+INSERT INTO o_test_ioc1 AS t
+	VALUES (1, 1), (1, 2)
+		ON CONFLICT (id1) DO UPDATE SET id2 = t.id2 + EXCLUDED.id2;
+
+CREATE UNIQUE INDEX o_test_ioc1_uniq on o_test_ioc1(id2);
+ALTER TABLE o_test_ioc1 ADD COLUMN val int;
+
+INSERT INTO o_test_ioc1 AS t
+	VALUES (1, 1, 1), (2, 1, 2)
+		ON CONFLICT (id2) DO UPDATE SET val = t.val + EXCLUDED.val;
+
 CREATE TABLE o_test_ioc2
 (
 	id1 int8 NOT NULL,

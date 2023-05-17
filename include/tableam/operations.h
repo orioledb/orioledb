@@ -47,6 +47,7 @@ typedef struct
 	OXid		conflictOxid;
 	OXid		oxid;
 	CommitSeqNo csn;
+	UndoLocation tupUndoLocation;
 	OIndexNumber conflictIxNum;
 	bool		copyPrimaryOxid;
 	RowLockMode lockMode;

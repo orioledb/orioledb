@@ -29,6 +29,19 @@ SELECT * FROM o_test_ioc1;
    1 |   1
 (1 row)
 
+TRUNCATE o_test_ioc1;
+INSERT INTO o_test_ioc1 AS t
+	VALUES (1, 1), (1, 2)
+		ON CONFLICT (id1) DO UPDATE SET id2 = t.id2 + EXCLUDED.id2;
+ERROR:  ON CONFLICT DO UPDATE command cannot affect row a second time
+HINT:  Ensure that no rows proposed for insertion within the same command have duplicate constrained values.
+CREATE UNIQUE INDEX o_test_ioc1_uniq on o_test_ioc1(id2);
+ALTER TABLE o_test_ioc1 ADD COLUMN val int;
+INSERT INTO o_test_ioc1 AS t
+	VALUES (1, 1, 1), (2, 1, 2)
+		ON CONFLICT (id2) DO UPDATE SET val = t.val + EXCLUDED.val;
+ERROR:  ON CONFLICT DO UPDATE command cannot affect row a second time
+HINT:  Ensure that no rows proposed for insertion within the same command have duplicate constrained values.
 CREATE TABLE o_test_ioc2
 (
 	id1 int8 NOT NULL,
