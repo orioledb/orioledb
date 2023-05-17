@@ -18,7 +18,7 @@ CREATE TABLE blog_post
     title text NOT NULL,
     body text NOT NULL,
     author text NOT NULL,
-    published_at timestamp  NOT NULL,
+    published_at timestamptz  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     views bigint NOT NULL,
     PRIMARY KEY(id)
 ) USING orioledb;
