@@ -657,6 +657,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			if (poscan->flags & O_PARALLEL_IS_SINGLE_LEAF_PAGE)
 			{
 				SpinLockRelease(&poscan->intpageAccess);
+				scan->haveHistImg = false;
+				BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 				return false;
 			}
 
@@ -1156,6 +1158,7 @@ btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
 	{
 		btree_iterator_free(scan->iter);
 		scan->iter = NULL;
+		scan->haveHistImg = false;
 	}
 	return result;
 }
@@ -1500,6 +1503,7 @@ btree_seq_scan_get_tuple_from_iterator_raw(BTreeSeqScan *scan,
 	{
 		btree_iterator_free(scan->iter);
 		scan->iter = NULL;
+		scan->haveHistImg = false;
 	}
 	return result;
 }
