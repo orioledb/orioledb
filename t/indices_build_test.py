@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-from .base_test import BaseTest, wait_checkpointer_stopevent
+from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
-from .base_test import wait_checkpointer_stopevent
+from .base_test import wait_stopevent, wait_checkpointer_stopevent
 
+from itertools import groupby
+import os
 import re
 
 class IndicesBuildTest(BaseTest):
@@ -497,3 +499,92 @@ class IndicesBuildTest(BaseTest):
 						  ('ABC3', 'C', None),
 						  ('ABC4', 'D', None)])
 		node.stop()
+
+	def test_indices_build_concurrent_checkpoint(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+						 "orioledb.enable_stopevents = true\n")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_indices
+			(
+				key int NOT NULL,
+				val int,
+				PRIMARY KEY (key)
+			) USING orioledb;
+			INSERT INTO o_indices
+				SELECT i, i + 1000 FROM generate_series(1, 500) AS i;
+		""")
+		dboid = node.execute("""
+			SELECT oid FROM pg_database WHERE datname = 'postgres';
+		""")[0][0]
+		ix_relnodes = node.execute("""
+			SELECT index_relnode FROM orioledb_index_oids();
+		""")
+		filter_files = [(dboid, x[0]) for x in ix_relnodes]
+
+		con1 = node.connect()
+		con1_pid = con1.pid
+		con2 = node.connect()
+		con2.execute("CHECKPOINT;")
+		con2.execute("CHECKPOINT;")
+
+		con2.execute("""
+			SELECT pg_stopevent_set('build_index_placeholder_inserted',
+									'$.treeName == \"o_indices_ix1\"');
+		""")
+		con1_thread = ThreadQueryExecutor(con1, """
+			CREATE UNIQUE INDEX o_indices_ix1 ON o_indices (val);
+		""")
+		con1_thread.start()
+		wait_stopevent(node, con1_pid)
+
+		con2.execute("CHECKPOINT;")
+		# o_indices_ix1 shouldn't be checkpointed
+		self.assertEqual(self.get_map_files(filter_files), {})
+
+		con2.execute("""
+			SELECT pg_stopevent_reset('build_index_placeholder_inserted');
+		""")
+		con1_thread.join()
+		con1.commit()
+		con1.close()
+		ix_oid = con2.execute("""
+			SELECT 'o_indices_ix1'::regclass::oid;
+		""")[0][0]
+		con2.close()
+		# single o_indices_ix1 map file should present
+		self.assertEqual(self.get_map_files(filter_files),
+		   				 {f"{dboid}_{ix_oid}": [3]})
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+		node.execute("CHECKPOINT;")
+
+		self.assertEqual(self.get_map_files(filter_files),
+		   				 {f"{dboid}_{ix_oid}": [5, 3]})
+		self.check_used_index(node,
+			"SELECT * FROM o_indices WHERE val > 0 ORDER BY val",
+			'o_indices_ix1')
+		node.stop()
+
+	def get_map_files(self, filter_files):
+		map_files = []
+		orioledb_dir = self.node.data_dir + "/orioledb_data"
+		for f in os.listdir(orioledb_dir):
+			if re.match(".*\.map$", f):
+				map_files.append(f)
+
+		map_files = [re.split(r'\.|-|_', f) for f in map_files]
+		map_files = [[*[int(x) for x in f[:3]], f[3]] for f in map_files]
+		map_files = sorted(map_files, reverse=True)
+		map_files = [f for f in map_files if f[0] != 1]
+		map_files = [f for f in map_files if (f[0], f[1]) not in filter_files]
+		map_files = {k: [x[2] for x in v]
+						for k, v in groupby(map_files,
+											key=(lambda x:
+												'_'.join([str(x[0]),
+														  str(x[1])])))}
+		return map_files

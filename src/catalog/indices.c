@@ -30,6 +30,7 @@
 #include "tuple/toast.h"
 #include "utils/compress.h"
 #include "utils/planner.h"
+#include "utils/stopevent.h"
 
 #include "access/genam.h"
 #include "access/relation.h"
@@ -312,6 +313,25 @@ rebuild_indices_insert_placeholders(OTableDescr *descr)
 									 descr->toast->desc.oids.relnode);
 }
 
+static Jsonb *
+index_build_params(OTableIndex *index)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_int8_key(&state, "datoid", index->oids.datoid);
+	jsonb_push_int8_key(&state, "reloid", index->oids.reloid);
+	jsonb_push_int8_key(&state, "relnode", index->oids.relnode);
+	jsonb_push_string_key(&state, "treeName", index->name.data);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
 /*--
  * We build indices in three phases.
  *
@@ -569,6 +589,13 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 		ORelOids	invalidOids = {InvalidOid, InvalidOid, InvalidOid};
 
 		o_tables_meta_unlock(invalidOids, InvalidOid);
+		if (STOPEVENTS_ENABLED())
+		{
+			Jsonb	   *params;
+
+			params = index_build_params(index);
+			STOPEVENT(STOPEVENT_BUILD_INDEX_PLACEHOLDER_INSERTED, params);
+		}
 
 		if (index->type == oIndexPrimary)
 		{
