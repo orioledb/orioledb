@@ -260,7 +260,7 @@ static void replay_container(Pointer ptr, Pointer endPtr,
 
 static inline void worker_send_msg(int worker_id, Pointer msg, uint64 msg_size);
 static void worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
-							   OTuple tuple, int tuple_len, bool wal);
+							   OTuple tuple, int tuple_len);
 static void workers_send_finish(void);
 static void workers_send_oxid_finish(XLogRecPtr ptr, bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
@@ -274,7 +274,7 @@ static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
 												OTuple tup,
 												OXid oxid, CommitSeqNo csn);
 static inline void spread_idx_modify(BTreeDescr *desc, uint16 recType,
-									 OTuple rec, bool wal);
+									 OTuple rec);
 
 static inline uint16 recovery_msg_from_wal_record(uint8 wal_record);
 
@@ -2136,6 +2136,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else
 			{
+				Assert(ix_type == oIndexToast);
 				descr = NULL;
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
 												 false, NULL);
@@ -2283,11 +2284,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			if (single)
 			{
 				recovery_switch_to_oxid(oxid, -1);
-				apply_modify_record(descr, indexDescr, type, tuple.tuple, false);
+				apply_modify_record(descr, indexDescr, type, tuple.tuple);
 			}
 			else
 			{
-				spread_idx_modify(&indexDescr->desc, type, tuple.tuple, true);
+				spread_idx_modify(&indexDescr->desc, type, tuple.tuple);
 			}
 
 			ptr += length;
@@ -2359,21 +2360,36 @@ worker_send_msg(int worker_id, Pointer msg, uint64 msg_size)
  */
 static void
 worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
-				   OTuple tuple, int tuple_len, bool wal)
+				   OTuple tuple, int tuple_len)
 {
 	RecoveryMsgHeader *header;
 	RecoveryWorkerState *state = &workers_pool[worker_id];
 	Pointer		data;
 	int			max_msg_size;
-	ORelOids	oids = desc->oids;
-	OIndexType	type = desc->type;
+	ORelOids	oids;
+	OIndexType	type;
 
-	if (wal && !IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
+	if (!IS_SYS_TREE_OIDS(desc->oids))
 	{
-		OIndexDescr *id = (OIndexDescr *) desc->arg;
+		if (desc->type == oIndexPrimary)
+		{
+			OIndexDescr *id = (OIndexDescr *) desc->arg;
 
-		oids = id->tableOids;
-		type = oIndexInvalid;
+			oids = id->tableOids;
+			type = oIndexInvalid;
+		}
+		else
+		{
+			Assert(desc->type == oIndexToast);
+			oids = desc->oids;
+			type = oIndexToast;
+		}
+	}
+	else
+	{
+		oids = desc->oids;
+		type = oIndexPrimary;
+		Assert(desc->type == oIndexPrimary);
 	}
 
 	max_msg_size = MAXALIGN(sizeof(RecoveryMsgHeader) + sizeof(OXid)
@@ -2679,7 +2695,7 @@ apply_sys_tree_modify_record(int sys_tree_num, uint16 type, OTuple tup,
  * helps to apply recovery records for tuples in the right order.
  */
 static inline void
-spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec, bool wal)
+spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec)
 {
 	OTuple		key PG_USED_FOR_ASSERTS_ONLY;
 	uint32		hash;
@@ -2700,13 +2716,13 @@ spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec, bool wal)
 				pfree(key.data);
 #endif
 			worker_send_modify(GET_WORKER_ID(hash), desc,
-							   recType, rec, tup_len, wal);
+							   recType, rec, tup_len);
 			break;
 		case RECOVERY_DELETE:
 			key_len = o_btree_len(desc, rec, OKeyLength);
 			hash = o_btree_hash(desc, rec, BTreeKeyNonLeafKey);
 			worker_send_modify(GET_WORKER_ID(hash), desc, recType,
-							   rec, key_len, wal);
+							   rec, key_len);
 			break;
 		default:
 			Assert(false);

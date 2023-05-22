@@ -130,7 +130,7 @@ PGDLLEXPORT void recovery_worker_main(Datum main_arg);
  * Recovery utility.
  */
 extern void apply_modify_record(OTableDescr *descr, OIndexDescr *id,
-								uint16 type, OTuple p, bool must_modify);
+								uint16 type, OTuple p);
 extern bool apply_btree_modify_record(BTreeDescr *tree, uint16 type,
 									  OTuple ptr, OXid oxid, CommitSeqNo csn);
 

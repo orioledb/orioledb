@@ -45,15 +45,14 @@ static CommitSeqNo my_ptr;
 
 static void recovery_queue_process(shm_mq_handle *queue, int id);
 static inline Pointer recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id);
-static bool apply_tbl_modify_record(OTableDescr *descr, uint16 type,
-									OTuple p, OXid oxid, CommitSeqNo csn,
-									bool must_modify);
-static bool apply_tbl_insert(OTableDescr *descr, OTuple tuple,
-							 OXid oxid, CommitSeqNo csn, bool must_modify);
-static bool apply_tbl_delete(OTableDescr *descr, OTuple key,
-							 OXid oxid, CommitSeqNo csn, bool must_modify);
-static bool apply_tbl_update(OTableDescr *descr, OTuple tuple,
-							 OXid oxid, CommitSeqNo csn, bool must_modify);
+static void apply_tbl_modify_record(OTableDescr *descr, uint16 type,
+									OTuple p, OXid oxid, CommitSeqNo csn);
+static void apply_tbl_insert(OTableDescr *descr, OTuple tuple,
+							 OXid oxid, CommitSeqNo csn);
+static void apply_tbl_delete(OTableDescr *descr, OTuple key,
+							 OXid oxid, CommitSeqNo csn);
+static void apply_tbl_update(OTableDescr *descr, OTuple tuple,
+							 OXid oxid, CommitSeqNo csn);
 
 typedef struct
 {
@@ -333,7 +332,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 					apply_modify_record(descr, indexDescr,
 										(recovery_header->type & RECOVERY_MODIFY),
-										tuple, false);
+										tuple);
 				}
 				data_pos += tuple_len;
 			}
@@ -407,15 +406,14 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 }
 
 /*
- * Apply the modify WAL or XIP record.
+ * Apply the modify WAL record.
  */
 void
 apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
-					OTuple p, bool must_modify)
+					OTuple p)
 {
 	OXid		oxid;
 	CommitSeqNo csn;
-	bool		success = true;
 
 	oxid = get_current_oxid();
 	csn = COMMITSEQNO_INPROGRESS;
@@ -428,18 +426,12 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 	if (descr && toast_consistent)
 	{
 		/* Modify table */
-		success = apply_tbl_modify_record(descr, type, p, oxid, csn, must_modify);
+		apply_tbl_modify_record(descr, type, p, oxid, csn);
 	}
 	else
 	{
 		o_btree_load_shmem(&id->desc);
-		success = apply_btree_modify_record(&id->desc, type, p, oxid, csn);
-	}
-
-	/* For now only XIP records must be always applied */
-	if (!success && must_modify)
-	{
-		elog(PANIC, "Wrong recovery result for modify type %d", type);
+		apply_btree_modify_record(&id->desc, type, p, oxid, csn);
 	}
 }
 
@@ -517,38 +509,37 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
  * Applies table modify records. We skip unique indices because recovery master
  * distributes it separately.
  */
-static bool
+static void
 apply_tbl_modify_record(OTableDescr *descr, uint16 type,
-						OTuple p, OXid oxid, CommitSeqNo csn,
-						bool must_modify)
+						OTuple p, OXid oxid, CommitSeqNo csn)
 {
 	switch (type)
 	{
 		case RECOVERY_INSERT:
-			return apply_tbl_insert(descr, p, oxid, csn, must_modify);
+			apply_tbl_insert(descr, p, oxid, csn);
+			return;
 		case RECOVERY_DELETE:
-			return apply_tbl_delete(descr, p, oxid, csn, must_modify);
+			apply_tbl_delete(descr, p, oxid, csn);
+			return;
 		case RECOVERY_UPDATE:
-			return apply_tbl_update(descr, p, oxid, csn, must_modify);
+			apply_tbl_update(descr, p, oxid, csn);
+			return;
 		default:
 			Assert(false);
 			elog(ERROR, "Wrong primary index modify record type %d", type);
 	}
-	return true;
 }
 
-static bool
+static void
 apply_tbl_insert(OTableDescr *descr, OTuple tuple,
-				 OXid oxid, CommitSeqNo csn, bool must_modify)
+				 OXid oxid, CommitSeqNo csn)
 {
-	OBTreeModifyResult modify_result;
 	OBTreeKeyBound keyBound;
 	OTuple		stuple,
 				cur_tuple;
 	OIndexDescr *id;
 	int			i;
-	bool		result = true,
-				primary = NULL;
+	bool		isPrimary = false;
 	TupleTableSlot *slot = descr->newTuple;
 	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
@@ -566,25 +557,25 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
-		primary = i == PrimaryIndexNumber;
+		isPrimary = (i == PrimaryIndexNumber);
 		id = descr->indices[i];
 
-		if (!primary)
+		if (!isPrimary)
 		{
 			stuple = tts_orioledb_make_secondary_tuple(slot, descr->indices[i], true);
 		}
 
-		if (!primary)
+		if (!isPrimary)
 		{
 			if (!o_is_index_predicate_satisfied(id, slot, id->econtext))
 				continue;
 		}
 
-		cur_tuple = primary ? tuple : stuple;
+		cur_tuple = isPrimary ? tuple : stuple;
 
 		o_btree_load_shmem(&id->desc);
 
-		if (primary)
+		if (isPrimary)
 		{
 			callbackInfo.modifyCallback = recovery_insert_primary_callback;
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_primary_callback;
@@ -595,20 +586,13 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 		}
 		tts_orioledb_fill_key_bound(slot, id, &keyBound);
-		modify_result = o_btree_modify(&id->desc, BTreeOperationInsert,
-									   cur_tuple, BTreeKeyLeafTuple,
-									   (Pointer) &keyBound, BTreeKeyBound,
-									   oxid, csn, RowLockUpdate,
-									   NULL, &callbackInfo);
+		(void) o_btree_modify(&id->desc, BTreeOperationInsert,
+							  cur_tuple, BTreeKeyLeafTuple,
+							  (Pointer) &keyBound, BTreeKeyBound,
+							  oxid, csn, RowLockUpdate,
+							  NULL, &callbackInfo);
 
-		if (!(modify_result == OBTreeModifyResultInserted || modify_result == OBTreeModifyResultUpdated)
-			&& must_modify)
-		{
-			result = false;
-			break;
-		}
-
-		if (!primary)
+		if (!isPrimary)
 		{
 			pfree(stuple.data);
 			O_TUPLE_SET_NULL(stuple);
@@ -618,30 +602,29 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 	if (!O_TUPLE_IS_NULL(stuple))
 		pfree(stuple.data);
 	ExecClearTuple(slot);
-	return result;
 }
 
-static bool
+static void
 apply_tbl_delete(OTableDescr *descr, OTuple key,
-				 OXid oxid, CommitSeqNo csn, bool must_modify)
+				 OXid oxid, CommitSeqNo csn)
 {
 	OBTreeModifyResult modify_result;
 	OBTreeKeyBound keyBound;
 	CallbackTupleCopy tupCopy;
 	OIndexDescr *id;
 	int			i;
-	bool		primary;
+	bool		isPrimary;
 	TupleTableSlot *slot = descr->newTuple;
 	OTuple		nullTup;
 
 	O_TUPLE_SET_NULL(nullTup);
 	for (i = 0; i < descr->nIndices; i++)
 	{
-		primary = i == PrimaryIndexNumber;
+		isPrimary = i == PrimaryIndexNumber;
 		id = descr->indices[i];
 
 		o_btree_load_shmem(&id->desc);
-		if (primary)
+		if (isPrimary)
 		{
 			BTreeModifyCallbackInfo callbackInfo = {
 				.waitCallback = NULL,
@@ -660,12 +643,12 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 										   oxid, csn, RowLockUpdate,
 										   NULL, &callbackInfo);
 			if (modify_result != OBTreeModifyResultDeleted)
-				return false;
+				return;
 
 			if (descr->nIndices == 1)
 			{
 				pfree(tupCopy.tuple.data);
-				return true;
+				return;
 			}
 
 			tts_orioledb_store_tuple(slot, tupCopy.tuple, descr,
@@ -694,12 +677,11 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 	}
 
 	ExecClearTuple(slot);
-	return true;
 }
 
-static bool
+static void
 apply_tbl_update(OTableDescr *descr, OTuple tuple,
-				 OXid oxid, CommitSeqNo csn, bool must_modify)
+				 OXid oxid, CommitSeqNo csn)
 {
 	OBTreeModifyResult modify_result;
 	OBTreeKeyBound old_key,
@@ -708,18 +690,17 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 	CallbackTupleCopy tupCopy;
 	OIndexDescr *tree;
 	int			i;
-	bool		result = true,
-				primary;
+	bool		isPrimary;
 	TupleTableSlot *new_slot = descr->newTuple,
 			   *old_slot = descr->oldTuple;
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
-		primary = i == PrimaryIndexNumber;
+		isPrimary = i == PrimaryIndexNumber;
 		tree = descr->indices[i];
 
 		o_btree_load_shmem(&tree->desc);
-		if (primary)
+		if (isPrimary)
 		{
 			BTreeModifyCallbackInfo callbackInfo = {
 				.waitCallback = NULL,
@@ -736,12 +717,12 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 										   RowLockNoKeyUpdate,
 										   NULL, &callbackInfo);
 			if (modify_result != OBTreeModifyResultUpdated)
-				return false;
+				return;
 
 			if (descr->nIndices == 1)
 			{
 				pfree(tupCopy.tuple.data);
-				return true;
+				return;
 			}
 
 			tts_orioledb_store_tuple(new_slot, tuple, descr,
@@ -799,5 +780,4 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 
 	ExecClearTuple(new_slot);
 	ExecClearTuple(old_slot);
-	return result;
 }
