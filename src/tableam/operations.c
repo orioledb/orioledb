@@ -508,17 +508,17 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	OTuple		newTup;
 	OIndexDescr *primary = GET_PRIMARY(descr);
 
+	if (slot->tts_ops != descr->newTuple->tts_ops)
+	{
+		ExecCopySlot(descr->newTuple, slot);
+		slot = descr->newTuple;
+	}
+
 	if (primary->primaryIsCtid)
 	{
 		Assert(oldPkey->nkeys == 1);
 		Assert(DatumGetPointer(oldPkey->keys[0].value));
 		slot->tts_tid = *((ItemPointerData *) DatumGetPointer(oldPkey->keys[0].value));
-	}
-
-	if (slot->tts_ops != descr->newTuple->tts_ops)
-	{
-		ExecCopySlot(descr->newTuple, slot);
-		slot = descr->newTuple;
 	}
 
 	tts_orioledb_toast(slot, descr);

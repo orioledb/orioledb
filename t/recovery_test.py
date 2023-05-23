@@ -1724,3 +1724,42 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
+	def test_recovery_partition_ioc_ctid(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.start()
+
+		node.execute("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1 (
+				a int UNIQUE,
+				b char
+			) PARTITION BY LIST (a);
+
+			CREATE TABLE o_test_2 (
+				a int UNIQUE,
+				b char
+			) USING orioledb;
+
+			ALTER TABLE o_test_1 ATTACH PARTITION o_test_2 FOR VALUES IN (3);
+			INSERT INTO o_test_1 VALUES (3, 'a');
+		""")
+		self.assertEqual(node.execute("""
+			SELECT ctid, * FROM o_test_2
+		"""), [('(0,1)', 3, 'a')])
+		node.execute("""
+			INSERT INTO o_test_1 VALUES (3, 'a') ON CONFLICT (a)
+				DO UPDATE SET b = 'b';
+		""")
+		self.assertEqual(node.execute("""
+			SELECT ctid, * FROM o_test_2
+		"""), [('(0,1)', 3, 'b')])
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.execute("""
+			SELECT ctid, * FROM o_test_2
+		"""), [('(0,1)', 3, 'b')])
+		node.stop()
+
