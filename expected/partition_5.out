@@ -605,8 +605,60 @@ SELECT tableoid::regclass, * FROM o_test_partition_pkey_update_move;
 (2 rows)
 
 COMMIT;
+CREATE TABLE o_test_cross_partition_update_trigger (
+  a INT PRIMARY KEY
+) PARTITION BY LIST (a);
+CREATE TABLE o_test_cross_partition_update_trigger_fk (
+	a INT,
+	CONSTRAINT fkey FOREIGN KEY (a)
+		REFERENCES o_test_cross_partition_update_trigger(a) ON UPDATE CASCADE
+) USING orioledb;
+CREATE TABLE o_test_cross_partition_update_trigger_child1 (
+  a int NOT NULL
+) USING orioledb;
+CREATE TABLE o_test_cross_partition_update_trigger_child2 (
+  a int NOT NULL
+) USING orioledb;
+ALTER TABLE o_test_cross_partition_update_trigger
+	ATTACH PARTITION o_test_cross_partition_update_trigger_child1
+		FOR VALUES IN (1);
+ALTER TABLE o_test_cross_partition_update_trigger
+	ATTACH PARTITION o_test_cross_partition_update_trigger_child2
+		FOR VALUES IN (2);
+INSERT INTO o_test_cross_partition_update_trigger VALUES (1);
+INSERT INTO o_test_cross_partition_update_trigger_fk VALUES (1);
+SELECT tableoid::regclass, * FROM o_test_cross_partition_update_trigger;
+                   tableoid                   | a 
+----------------------------------------------+---
+ o_test_cross_partition_update_trigger_child1 | 1
+(1 row)
+
+TABLE o_test_cross_partition_update_trigger_fk;
+ a 
+---
+ 1
+(1 row)
+
+UPDATE o_test_cross_partition_update_trigger SET a = a + 1 RETURNING *;
+ a 
+---
+ 2
+(1 row)
+
+SELECT tableoid::regclass, * FROM o_test_cross_partition_update_trigger;
+                   tableoid                   | a 
+----------------------------------------------+---
+ o_test_cross_partition_update_trigger_child2 | 2
+(1 row)
+
+TABLE o_test_cross_partition_update_trigger_fk;
+ a 
+---
+ 2
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
 drop cascades to table o_test_cross_partition_update_child
@@ -621,8 +673,11 @@ drop cascades to table o_test_partition_multiple_moves_child1
 drop cascades to table o_test_partition_multiple_moves_child2
 drop cascades to table o_test_partition_multiple_moves_from
 drop cascades to table o_test_partition_pkey_update_move_child2
+drop cascades to table o_test_cross_partition_update_trigger_fk
+drop cascades to table o_test_cross_partition_update_trigger_child1
+drop cascades to table o_test_cross_partition_update_trigger_child2
 DROP SCHEMA partition CASCADE;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range
 drop cascades to table o_test_partition_on_conflict_list
 drop cascades to table o_test_cross_partition_update
@@ -631,4 +686,5 @@ drop cascades to table o_test_partition_index
 drop cascades to table o_test_partition_pkey_update
 drop cascades to table o_test_partition_multiple_moves
 drop cascades to table o_test_partition_pkey_update_move
+drop cascades to table o_test_cross_partition_update_trigger
 RESET search_path;

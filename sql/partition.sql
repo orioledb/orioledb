@@ -280,6 +280,40 @@ UPDATE o_test_partition_pkey_update_move SET val_1 = val_1 + 1;
 SELECT tableoid::regclass, * FROM o_test_partition_pkey_update_move;
 COMMIT;
 
+CREATE TABLE o_test_cross_partition_update_trigger (
+  a INT PRIMARY KEY
+) PARTITION BY LIST (a);
+
+CREATE TABLE o_test_cross_partition_update_trigger_fk (
+	a INT,
+	CONSTRAINT fkey FOREIGN KEY (a)
+		REFERENCES o_test_cross_partition_update_trigger(a) ON UPDATE CASCADE
+) USING orioledb;
+
+CREATE TABLE o_test_cross_partition_update_trigger_child1 (
+  a int NOT NULL
+) USING orioledb;
+
+CREATE TABLE o_test_cross_partition_update_trigger_child2 (
+  a int NOT NULL
+) USING orioledb;
+
+ALTER TABLE o_test_cross_partition_update_trigger
+	ATTACH PARTITION o_test_cross_partition_update_trigger_child1
+		FOR VALUES IN (1);
+ALTER TABLE o_test_cross_partition_update_trigger
+	ATTACH PARTITION o_test_cross_partition_update_trigger_child2
+		FOR VALUES IN (2);
+INSERT INTO o_test_cross_partition_update_trigger VALUES (1);
+INSERT INTO o_test_cross_partition_update_trigger_fk VALUES (1);
+
+SELECT tableoid::regclass, * FROM o_test_cross_partition_update_trigger;
+TABLE o_test_cross_partition_update_trigger_fk;
+UPDATE o_test_cross_partition_update_trigger SET a = a + 1 RETURNING *;
+SELECT tableoid::regclass, * FROM o_test_cross_partition_update_trigger;
+TABLE o_test_cross_partition_update_trigger_fk;
+
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;
 RESET search_path;
