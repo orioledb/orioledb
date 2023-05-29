@@ -254,6 +254,32 @@ UPDATE o_test_partition_multiple_moves t1 SET val_1 = 2
 
 SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
 
+CREATE TABLE o_test_partition_pkey_update_move (
+  val_1 INT PRIMARY KEY
+) PARTITION BY LIST (val_1);
+
+CREATE TABLE o_test_partition_pkey_update_move_child1
+	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (1);
+
+CREATE TABLE o_test_partition_pkey_update_move_child2 (
+  val_1 int NOT NULL
+) USING orioledb;
+
+CREATE TABLE o_test_partition_pkey_update_move_child3
+	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (3, 4);
+
+BEGIN;
+ALTER TABLE o_test_partition_pkey_update_move
+	ATTACH PARTITION o_test_partition_pkey_update_move_child2
+		FOR VALUES IN (2);
+
+INSERT INTO o_test_partition_pkey_update_move VALUES (1), (3);
+
+SELECT tableoid::regclass, * FROM o_test_partition_pkey_update_move;
+UPDATE o_test_partition_pkey_update_move SET val_1 = val_1 + 1;
+SELECT tableoid::regclass, * FROM o_test_partition_pkey_update_move;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;
 RESET search_path;

@@ -574,8 +574,39 @@ SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
  o_test_partition_multiple_moves_child2 |     2 |     1 |    60
 (1 row)
 
+CREATE TABLE o_test_partition_pkey_update_move (
+  val_1 INT PRIMARY KEY
+) PARTITION BY LIST (val_1);
+CREATE TABLE o_test_partition_pkey_update_move_child1
+	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (1);
+CREATE TABLE o_test_partition_pkey_update_move_child2 (
+  val_1 int NOT NULL
+) USING orioledb;
+CREATE TABLE o_test_partition_pkey_update_move_child3
+	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (3, 4);
+BEGIN;
+ALTER TABLE o_test_partition_pkey_update_move
+	ATTACH PARTITION o_test_partition_pkey_update_move_child2
+		FOR VALUES IN (2);
+INSERT INTO o_test_partition_pkey_update_move VALUES (1), (3);
+SELECT tableoid::regclass, * FROM o_test_partition_pkey_update_move;
+                 tableoid                 | val_1 
+------------------------------------------+-------
+ o_test_partition_pkey_update_move_child1 |     1
+ o_test_partition_pkey_update_move_child3 |     3
+(2 rows)
+
+UPDATE o_test_partition_pkey_update_move SET val_1 = val_1 + 1;
+SELECT tableoid::regclass, * FROM o_test_partition_pkey_update_move;
+                 tableoid                 | val_1 
+------------------------------------------+-------
+ o_test_partition_pkey_update_move_child2 |     2
+ o_test_partition_pkey_update_move_child3 |     4
+(2 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
 drop cascades to table o_test_cross_partition_update_child
@@ -589,8 +620,9 @@ drop cascades to table o_test_partition_pkey_update_child
 drop cascades to table o_test_partition_multiple_moves_child1
 drop cascades to table o_test_partition_multiple_moves_child2
 drop cascades to table o_test_partition_multiple_moves_from
+drop cascades to table o_test_partition_pkey_update_move_child2
 DROP SCHEMA partition CASCADE;
-NOTICE:  drop cascades to 7 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range
 drop cascades to table o_test_partition_on_conflict_list
 drop cascades to table o_test_cross_partition_update
@@ -598,4 +630,5 @@ drop cascades to table o_test_2
 drop cascades to table o_test_partition_index
 drop cascades to table o_test_partition_pkey_update
 drop cascades to table o_test_partition_multiple_moves
+drop cascades to table o_test_partition_pkey_update_move
 RESET search_path;
