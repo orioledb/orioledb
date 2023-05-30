@@ -509,6 +509,9 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	if (!reuse)
 	{
 		index->type = ix_type;
+#if PG_VERSION_NUM >= 150000
+		index->nulls_not_distinct = index_rel->rd_index->indnullsnotdistinct;
+#endif
 		o_table_fill_index(o_table, ix_num, index_rel);
 	}
 

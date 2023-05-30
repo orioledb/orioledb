@@ -1943,6 +1943,16 @@ CREATE INDEX IF NOT EXISTS o_test_index_already_exists_skip_ix1
 \d o_test_index_already_exists_skip
 SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
 
+CREATE TABLE o_test_unique_nulls_not_distinct (
+	val_1 int UNIQUE NULLS NOT DISTINCT,
+	val_2 text
+) USING orioledb;
+
+TABLE o_test_unique_nulls_not_distinct;
+INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('six');
+INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('seven');
+TABLE o_test_unique_nulls_not_distinct;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;

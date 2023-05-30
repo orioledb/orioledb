@@ -357,6 +357,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->tableOids = table->oids;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
+	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
 	if (table->has_primary)
@@ -730,6 +731,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 	descr->primaryIsCtid = oIndex->primaryIsCtid;
 	descr->unique = (oIndex->indexType == oIndexUnique ||
 					 oIndex->indexType == oIndexPrimary);
+	descr->nulls_not_distinct = oIndex->nulls_not_distinct;
 	descr->nUniqueFields = oIndex->nUniqueFields;
 	descr->nFields = oIndex->nNonLeafFields;
 

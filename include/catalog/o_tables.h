@@ -66,6 +66,7 @@ typedef struct
 	ORelOids	oids;
 	OIndexType	type;
 	OCompress	compress;
+	bool		nulls_not_distinct;
 	uint8		nfields;
 	/* number of index fields */
 	uint8		nkeyfields;

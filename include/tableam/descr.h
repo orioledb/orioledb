@@ -116,6 +116,7 @@ struct OIndexDescr
 	 * index.
 	 */
 	bool		unique;
+	bool		nulls_not_distinct;
 	int			nUniqueFields;
 
 	/*

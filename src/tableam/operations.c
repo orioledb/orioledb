@@ -1067,7 +1067,8 @@ o_tbl_index_insert(OTableDescr *descr,
 		}
 
 		o_btree_load_shmem(bd);
-		if (primary || !id->unique || o_has_nulls(tup))
+		if (primary || !id->unique ||
+			(!id->nulls_not_distinct && o_has_nulls(tup)))
 			result = o_btree_modify(bd, BTreeOperationInsert,
 									tup, BTreeKeyLeafTuple,
 									(Pointer) &knew, BTreeKeyBound,

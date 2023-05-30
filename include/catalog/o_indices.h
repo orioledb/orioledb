@@ -27,6 +27,7 @@ typedef struct
 	NameData	name;
 	bool		primaryIsCtid;
 	OCompress	compress;
+	bool		nulls_not_distinct;
 	/* number of fields added using INCLUDE command explicitly */
 	/* pkey fields added implicitly in o_o_define_index_validate not counted */
 	uint16		nIncludedFields;
