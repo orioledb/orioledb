@@ -794,24 +794,26 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					/* make checks */
 					switch (cmd->subtype)
 					{
-						case AT_AlterColumnType:
-						case AT_AddIndex:
 						case AT_AddColumn:
-						case AT_DropColumn:
-						case AT_ColumnDefault:
 						case AT_AddConstraint:
-						case AT_DropConstraint:
-						case AT_GenericOptions:
-						case AT_SetNotNull:
-						case AT_ChangeOwner:
-						case AT_DropNotNull:
-						case AT_AddInherit:
-						case AT_DropInherit:
-						case AT_CookedColumnDefault:
 						case AT_AddIdentity:
-						case AT_SetIdentity:
-						case AT_DropIdentity:
+						case AT_AddIndex:
+						case AT_AddInherit:
+						case AT_AlterColumnType:
+						case AT_ChangeOwner:
+						case AT_ColumnDefault:
+						case AT_CookedColumnDefault:
+						case AT_DisableRowSecurity:
+						case AT_DropColumn:
+						case AT_DropConstraint:
 						case AT_DropExpression:
+						case AT_DropIdentity:
+						case AT_DropInherit:
+						case AT_DropNotNull:
+						case AT_EnableRowSecurity:
+						case AT_GenericOptions:
+						case AT_SetIdentity:
+						case AT_SetNotNull:
 							break;
 						default:
 							ereport(ERROR,
