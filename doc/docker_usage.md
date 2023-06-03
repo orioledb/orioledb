@@ -200,7 +200,7 @@ This command will build the Docker image and tag it as `orioletest:14-gcc-alpine
 ## Experimental OrioleDB + PostGIS Extension build:
 
 Known limitations:
-- It only works with Alpine `3.18` and `edge` This is due to a Docker `postgis/docker-postgis` limitation. The build script expects the `sfcgal` package, which is only available in Alpine 3.18 or later versions.
+- It only works with Alpine `3.18`. This is due to a Docker `postgis/docker-postgis` limitation. The build script expects the `sfcgal` package, which is only available in Alpine 3.18 or later versions.
 - OrioleDB `gist`, `sp-gist`, and other related indexes are not yet supported.
 
 
