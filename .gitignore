@@ -35,6 +35,7 @@ lib*.pc
 # Local excludes in root directory
 /t/__pycache__/
 /log/
+/log_docker_build/
 /results/
 /tmp_check/
 /tmp_check_iso/
