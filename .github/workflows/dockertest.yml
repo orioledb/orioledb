@@ -1,4 +1,4 @@
-name: DockerTest
+name: dockerTEST
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
         compiler: [clang, gcc]
         alpine:  [edge, 3.18, 3.13]
 
-    name: Build ${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
+    name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.alpine == 'edge' }}
 
@@ -29,13 +29,13 @@ jobs:
           else echo "DOCKER_PG_LLVM_DEPS=llvm-dev clang"     >> $GITHUB_ENV; \
           fi
 
-      - name: Echo environment variable
+      - name: Echo DOCKER_PG_LLVM_DEP
         run: echo "DOCKER_PG_LLVM_DEP = ${{ env.DOCKER_PG_LLVM_DEPS }} "
 
       - name: Checkout source
         uses: actions/checkout@v3
 
-      - name: Build ${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
+      - name: docker build orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
         uses: docker/build-push-action@v4
         with:
           context: .
