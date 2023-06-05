@@ -5717,99 +5717,6 @@ SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 (0 rows)
 
 SET enable_bitmapscan = on;
-CREATE TABLE o_test_nulls
-(
-  id bigint NOT NULL,
-  value bigint,
-  PRIMARY KEY (id)
-) USING orioledb;
-INSERT INTO o_test_nulls (SELECT i, i FROM generate_series(1,10000) i);
-INSERT INTO o_test_nulls (SELECT i, NULL FROM generate_series(10001,11000) i);
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value NULLS FIRST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
- count 
--------
-  1000
-(1 row)
-
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
- count 
--------
- 10000
-(1 row)
-
-DROP INDEX o_test_nulls_value_idx;
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value NULLS LAST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
- count 
--------
-  1000
-(1 row)
-
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
- count 
--------
- 10000
-(1 row)
-
-DROP INDEX o_test_nulls_value_idx;
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value ASC NULLS FIRST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
- count 
--------
-  1000
-(1 row)
-
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
- count 
--------
- 10000
-(1 row)
-
-DROP INDEX o_test_nulls_value_idx;
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value ASC NULLS LAST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
- count 
--------
-  1000
-(1 row)
-
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
- count 
--------
- 10000
-(1 row)
-
-DROP INDEX o_test_nulls_value_idx;
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value DESC NULLS FIRST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
- count 
--------
-  1000
-(1 row)
-
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
- count 
--------
- 10000
-(1 row)
-
-DROP INDEX o_test_nulls_value_idx;
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value DESC NULLS LAST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
- count 
--------
-  1000
-(1 row)
-
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
- count 
--------
- 10000
-(1 row)
-
-DROP INDEX o_test_nulls_value_idx;
-DROP TABLE o_test_nulls CASCADE;
 -- Check that build of index with same fields as pkey succeeds
 SET enable_seqscan = off;
 CREATE TABLE IF NOT EXISTS o_test_unique_as_pkey (
@@ -8663,27 +8570,8 @@ SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
  
 (1 row)
 
-CREATE TABLE o_test_unique_nulls_not_distinct (
-	val_1 int UNIQUE NULLS NOT DISTINCT,
-	val_2 text
-) USING orioledb;
-TABLE o_test_unique_nulls_not_distinct;
- val_1 | val_2 
--------+-------
-(0 rows)
-
-INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('six');
-INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('seven');
-ERROR:  duplicate key value violates unique constraint "o_test_unique_nulls_not_distinct_val_1_key"
-DETAIL:  Key (val_1)=(null) already exists.
-TABLE o_test_unique_nulls_not_distinct;
- val_1 | val_2 
--------+-------
-       | six
-(1 row)
-
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 55 other objects
+NOTICE:  drop cascades to 54 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8738,7 +8626,6 @@ drop cascades to table o_test_equal_but_binary_not_equal
 drop cascades to table o_test_pkey_include_same_fields
 drop cascades to table o_test_include_same_as_pkey
 drop cascades to table o_test_index_already_exists_skip
-drop cascades to table o_test_unique_nulls_not_distinct
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)

@@ -88,6 +88,8 @@ row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 			cmp = o_idx_cmp_range_key_to_value(subkey1,
 											   &id->fields[keynum],
 											   value, isnull);
+			if (!(flags & O_VALUE_BOUND_NULL) && isnull)
+				valid = false;
 
 			valid_cmp = low ? cmp > 0 : cmp < 0;
 
@@ -124,17 +126,21 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range)
 
 		if (!(low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
-			if (o_idx_cmp_range_key_to_value(&low->keys[i],
-											 &id->fields[i],
-											 value, isnull) > 0)
+			if (!(low->keys[i].flags & O_VALUE_BOUND_NULL) && isnull)
+				valid = false;
+			if (valid &&
+				(o_idx_cmp_range_key_to_value(&low->keys[i], &id->fields[i],
+											  value, isnull) > 0))
 				valid = false;
 		}
 
 		if (valid && !(high->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
-			if (o_idx_cmp_range_key_to_value(&high->keys[i],
-											 &id->fields[i],
-											 value, isnull) < 0)
+			if (!(high->keys[i].flags & O_VALUE_BOUND_NULL) && isnull)
+				valid = false;
+			if (valid &&
+				(o_idx_cmp_range_key_to_value(&high->keys[i], &id->fields[i],
+											  value, isnull) < 0))
 				valid = false;
 		}
 	}

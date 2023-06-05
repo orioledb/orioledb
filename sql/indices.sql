@@ -1164,48 +1164,6 @@ EXPLAIN SELECT * FROM o_test_partial_idx_update
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = on;
 
-CREATE TABLE o_test_nulls
-(
-  id bigint NOT NULL,
-  value bigint,
-  PRIMARY KEY (id)
-) USING orioledb;
-
-INSERT INTO o_test_nulls (SELECT i, i FROM generate_series(1,10000) i);
-INSERT INTO o_test_nulls (SELECT i, NULL FROM generate_series(10001,11000) i);
-
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value NULLS FIRST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
-DROP INDEX o_test_nulls_value_idx;
-
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value NULLS LAST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
-DROP INDEX o_test_nulls_value_idx;
-
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value ASC NULLS FIRST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
-DROP INDEX o_test_nulls_value_idx;
-
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value ASC NULLS LAST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
-DROP INDEX o_test_nulls_value_idx;
-
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value DESC NULLS FIRST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
-DROP INDEX o_test_nulls_value_idx;
-
-CREATE INDEX o_test_nulls_value_idx ON o_test_nulls(value DESC NULLS LAST);
-SELECT count(*) FROM o_test_nulls WHERE value IS NULL;
-SELECT count(*) FROM o_test_nulls WHERE value IS NOT NULL;
-DROP INDEX o_test_nulls_value_idx;
-
-DROP TABLE o_test_nulls CASCADE;
-
 -- Check that build of index with same fields as pkey succeeds
 SET enable_seqscan = off;
 CREATE TABLE IF NOT EXISTS o_test_unique_as_pkey (
@@ -1942,16 +1900,6 @@ CREATE INDEX IF NOT EXISTS o_test_index_already_exists_skip_ix1
 	ON o_test_index_already_exists_skip(val_1);
 \d o_test_index_already_exists_skip
 SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
-
-CREATE TABLE o_test_unique_nulls_not_distinct (
-	val_1 int UNIQUE NULLS NOT DISTINCT,
-	val_2 text
-) USING orioledb;
-
-TABLE o_test_unique_nulls_not_distinct;
-INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('six');
-INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('seven');
-TABLE o_test_unique_nulls_not_distinct;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;

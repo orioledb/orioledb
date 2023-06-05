@@ -347,47 +347,6 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::date
 SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::date;
 RESET enable_seqscan;
 
--- Test null clauses in index scan
-create table o_test_null_clauses (
-	id bigint PRIMARY KEY,
-	val int
-) USING orioledb;
-CREATE INDEX ON o_test_null_clauses(val);
-INSERT INTO o_test_null_clauses
-	SELECT id, id + 2 val FROM generate_series(1, 10) id;
-INSERT INTO o_test_null_clauses VALUES (11, NULL), (12, NULL);
-SET enable_bitmapscan = off;
-SET enable_seqscan = off;
-EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses ORDER BY val NULLS FIRST;
-SELECT * FROM o_test_null_clauses ORDER BY val NULLS FIRST;
--- Test primary index scan with null clause
-EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
-	WHERE val IS NULL ORDER BY val;
-SELECT * FROM o_test_null_clauses WHERE val IS NULL ORDER BY val;
--- Test primary index scan with not null clause
-EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
-	WHERE val IS NOT NULL ORDER BY val;
-SELECT * FROM o_test_null_clauses WHERE val IS NOT NULL ORDER BY val;
--- Test primary index scan with not null and another clause
-EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
-	WHERE val IS NOT NULL AND val > 5 ORDER BY val;
-SELECT * FROM o_test_null_clauses
-	WHERE val IS NOT NULL AND val > 5 ORDER BY val;
--- Test primary index scan with not null and another clause and nullsfirst
-EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
-	WHERE val IS NOT NULL AND val > 5 ORDER BY val NULLS FIRST;
-SELECT * FROM o_test_null_clauses
-	WHERE val IS NOT NULL AND val > 5 ORDER BY val NULLS FIRST;
-RESET enable_seqscan;
-RESET enable_bitmapscan;
--- Test primary index scan with null array clause
-EXPLAIN (COSTS off) select id from o_test_null_clauses
-	WHERE id = ANY(NULL::int4[]);
-select id from o_test_null_clauses WHERE id = ANY(NULL::int4[]);
--- Test nested primary index scan with not null clause
-EXPLAIN (COSTS off) select max(id) from o_test_null_clauses;
-select max(id) from o_test_null_clauses;
-
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA primary_key CASCADE;
 RESET search_path;

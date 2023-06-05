@@ -91,6 +91,7 @@ REGRESSCHECKS = btree_sys_check \
 				inherits \
 				ioc \
 				joins \
+				nulls \
 				opclass \
 				parallel_scan \
 				partial \
