@@ -32,7 +32,8 @@ extern CommitSeqNo recovery_map_oxid_csn(OXid oxid, bool *found);
 extern void worker_send_msg(int worker_id, Pointer msg, uint64 msg_size);
 extern void worker_queue_flush(int worker_id);
 extern void idx_workers_shutdown(void);
-
+extern void recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version, int nindices,
+							   bool send_to_leader);
 extern void workers_send_finish(bool send_to_idx_pool);
 extern void update_proc_retain_undo_location(int worker_id);
 

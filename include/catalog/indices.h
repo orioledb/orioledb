@@ -77,16 +77,8 @@ typedef struct oIdxShared
 	 */
 	ConditionVariable workersdonecv;
 
+	/* recoverycv is used to coordinate index build queue in recovery */
 	ConditionVariable recoverycv;
-	/* Don't start next index build in recovery while current is in progress */
-	bool		recoveryidxbuild;
-
-	/*
-	 * Exclude relation with index being built in recovery from applying
-	 * recovery modify messages concurrently
-	 */
-	bool		recoveryidxbuild_modify;
-	ORelOids	oids;
 
 	/*
 	 * mutex protects all fields before heapdesc.
@@ -117,6 +109,10 @@ typedef struct oIdxShared
 	ParallelOScanDescData poscan;
 	OIndexNumber ix_num;
 	BgWorkerHandle *worker_handle;
+	/* Index build queue positions */
+	uint32		new_position;
+	uint32		completed_position;
+	OXid		recovery_oxid;
 	Size		o_table_size;
 	char		o_table_serialized[];
 } oIdxShared;
@@ -145,6 +141,6 @@ extern void build_secondary_index(OTable *o_table, OTableDescr *descr,
 								  OIndexNumber ix_num, bool in_dedicated_recovery_worker);
 PGDLLEXPORT void _o_index_parallel_build_main(dsm_segment *seg, shm_toc *toc);
 extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
-										  char *o_table_serialized, Size o_table_size);
+										  OTable *recovery_o_table);
 extern Size _o_index_parallel_estimate_shared(Size o_table_size);
 #endif							/* __INDICES_H__ */

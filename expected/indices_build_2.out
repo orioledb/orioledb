@@ -1,3 +1,5 @@
+CREATE SCHEMA indices_build;
+SET SESSION search_path = 'indices_build';
 CREATE EXTENSION orioledb;
 -- Index build with primary key
 CREATE TABLE o_indices0
@@ -22717,7 +22719,6 @@ CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
 				''), 1, length)
 		FROM generate_series(1, (length + 20) / 21) i; $$
 LANGUAGE SQL;
-ERROR:  function "generate_string" already exists with same argument types
 CREATE TABLE o_indices8
 (
 	key integer NOT NULL,
@@ -22838,9 +22839,9 @@ SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_indices8  (cost=0.15..47.30 rows=180 width=36)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_indices8  (cost=0.13..8.17 rows=2 width=36)
    Forward index scan of: o_indices8_idx1
    Conds: (val > 'a'::text)
 (3 rows)
@@ -23002,9 +23003,9 @@ ALTER TABLE o_indices8
   ADD CONSTRAINT o_indices8_pkey
     PRIMARY KEY (key);
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_indices8  (cost=0.15..47.30 rows=180 width=36)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_indices8  (cost=0.13..8.17 rows=2 width=36)
    Forward index only scan of: o_indices8_idx1
    Conds: (val > 'a'::text)
 (3 rows)
@@ -23118,9 +23119,9 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_indices8  (cost=0.15..47.30 rows=180 width=36)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_indices8  (cost=0.13..8.17 rows=2 width=36)
    Forward index scan of: o_indices8_idx1
    Conds: (val > 'a'::text)
 (3 rows)
@@ -23564,7 +23565,7 @@ SELECT * FROM o_test_default_volatile;
 (3 rows)
 
 \d+ o_test_default_volatile
-                                              Table "public.o_test_default_volatile"
+                                           Table "indices_build.o_test_default_volatile"
  Column |  Type   | Collation | Nullable |                     Default                      | Storage | Stats target | Description 
 --------+---------+-----------+----------+--------------------------------------------------+---------+--------------+-------------
  a      | integer |           |          |                                                  | plain   |              | 
@@ -23639,7 +23640,7 @@ CREATE TABLE o_test_add_serial (
 INSERT INTO o_test_add_serial VALUES (1), (2), (3);
 ALTER TABLE o_test_add_serial ADD COLUMN b serial;
 \d+ o_test_add_serial
-                                               Table "public.o_test_add_serial"
+                                            Table "indices_build.o_test_add_serial"
  Column |  Type   | Collation | Nullable |                   Default                    | Storage | Stats target | Description 
 --------+---------+-----------+----------+----------------------------------------------+---------+--------------+-------------
  a      | integer |           |          |                                              | plain   |              | 
@@ -23679,9 +23680,719 @@ SELECT * FROM o_test_add_serial ORDER BY a DESC;
   1 | 1
 (6 rows)
 
-DROP FUNCTION generate_string;
+CREATE TABLE o_test_pkey_mixed_build
+(
+	f1 int,
+	f2 int,
+	f3 int,
+	i1 int,
+	i2 int,
+	pk1 int,
+	pk2 int,
+	pk3 int,
+	pk4 int
+) USING orioledb;
+\d+ o_test_pkey_mixed_build
+                      Table "indices_build.o_test_pkey_mixed_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ f1     | integer |           |          |         | plain   |              | 
+ f2     | integer |           |          |         | plain   |              | 
+ f3     | integer |           |          |         | plain   |              | 
+ i1     | integer |           |          |         | plain   |              | 
+ i2     | integer |           |          |         | plain   |              | 
+ pk1    | integer |           |          |         | plain   |              | 
+ pk2    | integer |           |          |         | plain   |              | 
+ pk3    | integer |           |          |         | plain   |              | 
+ pk4    | integer |           |          |         | plain   |              | 
+
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+              orioledb_tbl_indices               
+-------------------------------------------------
+ Index ctid_primary                             +
+     Index type: primary, unique, ctid          +
+     Leaf tuple size: 10, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid                +
+ 
+(1 row)
+
+INSERT INTO o_test_pkey_mixed_build
+	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v, 4 * 10 ^ v, 5 * 10 ^ v,
+		   6 * 10 ^ v, 7 * 10 ^ v, 8 * 10 ^ v, 9 * 10 ^ v FROM
+		   generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
+                                           orioledb_tbl_structure                                           
+------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                       +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '2', '3', '4', '5', '6', '7', '8', '9')                  +
+     Item 1: offset = 328, tuple = ('(0,2)', '10', '20', '30', '40', '50', '60', '70', '80', '90')         +
+     Item 2: offset = 392, tuple = ('(0,3)', '100', '200', '300', '400', '500', '600', '700', '800', '900')+
+                                                                                                           +
+ Index toast: not loaded                                                                                   +
+ 
+(1 row)
+
+ALTER TABLE o_test_pkey_mixed_build ADD PRIMARY KEY (pk1, pk2, pk3, pk4);
+CREATE INDEX o_test_pkey_mixed_build_ix1
+	ON o_test_pkey_mixed_build (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2);
+\d+ o_test_pkey_mixed_build
+                      Table "indices_build.o_test_pkey_mixed_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ f1     | integer |           |          |         | plain   |              | 
+ f2     | integer |           |          |         | plain   |              | 
+ f3     | integer |           |          |         | plain   |              | 
+ i1     | integer |           |          |         | plain   |              | 
+ i2     | integer |           |          |         | plain   |              | 
+ pk1    | integer |           | not null |         | plain   |              | 
+ pk2    | integer |           | not null |         | plain   |              | 
+ pk3    | integer |           | not null |         | plain   |              | 
+ pk4    | integer |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_pkey_mixed_build_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
+    "o_test_pkey_mixed_build_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+                       orioledb_tbl_indices                        
+-------------------------------------------------------------------
+ Index o_test_pkey_mixed_build_pkey                               +
+     Index type: primary, unique                                  +
+     Leaf tuple size: 9, non-leaf tuple size: 4                   +
+     Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+ Index o_test_pkey_mixed_build_ix1                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ 
+(1 row)
+
+CREATE UNIQUE INDEX o_test_pkey_mixed_build_uniq1
+	ON o_test_pkey_mixed_build (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2);
+\d+ o_test_pkey_mixed_build
+                      Table "indices_build.o_test_pkey_mixed_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ f1     | integer |           |          |         | plain   |              | 
+ f2     | integer |           |          |         | plain   |              | 
+ f3     | integer |           |          |         | plain   |              | 
+ i1     | integer |           |          |         | plain   |              | 
+ i2     | integer |           |          |         | plain   |              | 
+ pk1    | integer |           | not null |         | plain   |              | 
+ pk2    | integer |           | not null |         | plain   |              | 
+ pk3    | integer |           | not null |         | plain   |              | 
+ pk4    | integer |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_pkey_mixed_build_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
+    "o_test_pkey_mixed_build_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+    "o_test_pkey_mixed_build_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+                       orioledb_tbl_indices                        
+-------------------------------------------------------------------
+ Index o_test_pkey_mixed_build_pkey                               +
+     Index type: primary, unique                                  +
+     Leaf tuple size: 9, non-leaf tuple size: 4                   +
+     Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+ Index o_test_pkey_mixed_build_ix1                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ Index o_test_pkey_mixed_build_uniq1                              +
+     Index type: secondary, unique                                +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f2, f1, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f2, f1, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ 
+(1 row)
+
+CREATE INDEX o_test_pkey_mixed_build_ix3
+	ON o_test_pkey_mixed_build (f3, f2, pk4, f1, pk4) INCLUDE (pk3);
+\d+ o_test_pkey_mixed_build
+                      Table "indices_build.o_test_pkey_mixed_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ f1     | integer |           |          |         | plain   |              | 
+ f2     | integer |           |          |         | plain   |              | 
+ f3     | integer |           |          |         | plain   |              | 
+ i1     | integer |           |          |         | plain   |              | 
+ i2     | integer |           |          |         | plain   |              | 
+ pk1    | integer |           | not null |         | plain   |              | 
+ pk2    | integer |           | not null |         | plain   |              | 
+ pk3    | integer |           | not null |         | plain   |              | 
+ pk4    | integer |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_pkey_mixed_build_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
+    "o_test_pkey_mixed_build_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+    "o_test_pkey_mixed_build_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
+    "o_test_pkey_mixed_build_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f3 f2 pk4 f1 pk3 pk1 pk2
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+                       orioledb_tbl_indices                        
+-------------------------------------------------------------------
+ Index o_test_pkey_mixed_build_pkey                               +
+     Index type: primary, unique                                  +
+     Leaf tuple size: 9, non-leaf tuple size: 4                   +
+     Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+ Index o_test_pkey_mixed_build_ix1                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ Index o_test_pkey_mixed_build_uniq1                              +
+     Index type: secondary, unique                                +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f2, f1, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f2, f1, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ Index o_test_pkey_mixed_build_ix3                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 7, non-leaf tuple size: 7                   +
+     Non-leaf tuple fields: f3, f2, pk4, f1, pk3, pk1, pk2        +
+     Leaf tuple fields: f3, f2, pk4, f1, pk3, pk1, pk2            +
+ 
+(1 row)
+
+CREATE INDEX o_test_pkey_mixed_build_ix4
+	ON o_test_pkey_mixed_build (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2);
+\d+ o_test_pkey_mixed_build
+                      Table "indices_build.o_test_pkey_mixed_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ f1     | integer |           |          |         | plain   |              | 
+ f2     | integer |           |          |         | plain   |              | 
+ f3     | integer |           |          |         | plain   |              | 
+ i1     | integer |           |          |         | plain   |              | 
+ i2     | integer |           |          |         | plain   |              | 
+ pk1    | integer |           | not null |         | plain   |              | 
+ pk2    | integer |           | not null |         | plain   |              | 
+ pk3    | integer |           | not null |         | plain   |              | 
+ pk4    | integer |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_pkey_mixed_build_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
+    "o_test_pkey_mixed_build_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+    "o_test_pkey_mixed_build_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
+    "o_test_pkey_mixed_build_ix4" btree (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2)
+    "o_test_pkey_mixed_build_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+
+-- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
+-- f3 f2 pk4 f1 pk3 pk1 pk2
+-- i1 f1 pk4 f2 pk3 i2 pk1 pk2
+SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
+                       orioledb_tbl_indices                        
+-------------------------------------------------------------------
+ Index o_test_pkey_mixed_build_pkey                               +
+     Index type: primary, unique                                  +
+     Leaf tuple size: 9, non-leaf tuple size: 4                   +
+     Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+ Index o_test_pkey_mixed_build_ix1                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f1, f2, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ Index o_test_pkey_mixed_build_uniq1                              +
+     Index type: secondary, unique                                +
+     Leaf tuple size: 9, non-leaf tuple size: 9                   +
+     Non-leaf tuple fields: f2, f1, pk1, f3, i1, pk4, i2, pk2, pk3+
+     Leaf tuple fields: f2, f1, pk1, f3, i1, pk4, i2, pk2, pk3    +
+ Index o_test_pkey_mixed_build_ix3                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 7, non-leaf tuple size: 7                   +
+     Non-leaf tuple fields: f3, f2, pk4, f1, pk3, pk1, pk2        +
+     Leaf tuple fields: f3, f2, pk4, f1, pk3, pk1, pk2            +
+ Index o_test_pkey_mixed_build_ix4                                +
+     Index type: secondary                                        +
+     Leaf tuple size: 8, non-leaf tuple size: 8                   +
+     Non-leaf tuple fields: i1, f1, pk4, f2, pk3, i2, pk1, pk2    +
+     Leaf tuple fields: i1, f1, pk4, f2, pk3, i2, pk1, pk2        +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build;
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on o_test_pkey_mixed_build
+(1 row)
+
+SELECT * FROM o_test_pkey_mixed_build;
+ f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
+-----+-----+-----+-----+-----+-----+-----+-----+-----
+   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
+  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
+ 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+(3 rows)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed_build
+   Forward index only scan of: o_test_pkey_mixed_build_ix1
+(2 rows)
+
+SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
+ f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
+-----+-----+-----+-----+-----+-----+-----+-----+-----
+   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
+  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
+ 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed_build
+   Forward index only scan of: o_test_pkey_mixed_build_uniq1
+(2 rows)
+
+SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
+ f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
+-----+-----+-----+-----+-----+-----+-----+-----+-----
+   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
+  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
+ 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed_build
+   Forward index scan of: o_test_pkey_mixed_build_ix3
+(2 rows)
+
+SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
+ f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
+-----+-----+-----+-----+-----+-----+-----+-----+-----
+   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
+  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
+ 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed_build
+   Forward index scan of: o_test_pkey_mixed_build_ix4
+(2 rows)
+
+SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
+ f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
+-----+-----+-----+-----+-----+-----+-----+-----+-----
+   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
+  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
+ 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+(3 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
+                                                        orioledb_tbl_structure                                                        
+--------------------------------------------------------------------------------------------------------------------------------------
+ Index o_test_pkey_mixed_build_pkey contents                                                                                         +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                                                 +
+     Leftmost, Rightmost                                                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('60', '70', '80', '90')                                        +
+     Item 0: offset = 264, tuple = ('1', '2', '3', '4', '5', '6', '7', '8', '9')                                                     +
+   Chunk 1: offset = 1, location = 320, hikey location = 88, hikey = ('600', '700', '800', '900')                                    +
+     Item 1: offset = 328, tuple = ('10', '20', '30', '40', '50', '60', '70', '80', '90')                                            +
+   Chunk 2: offset = 2, location = 384, hikey location = 104                                                                         +
+     Item 2: offset = 392, tuple = ('100', '200', '300', '400', '500', '600', '700', '800', '900')                                   +
+                                                                                                                                     +
+ Index o_test_pkey_mixed_build_ix1 contents                                                                                          +
+ Page 0: level = 0, maxKeyLen = 36, nVacatedBytes = 0                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                                                 +
+     Leftmost, Rightmost                                                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10', '20', '60', '30', '40', '90', '50', '70', '80')          +
+     Item 0: offset = 264, tuple = ('1', '2', '6', '3', '4', '9', '5', '7', '8')                                                     +
+   Chunk 1: offset = 1, location = 320, hikey location = 112, hikey = ('100', '200', '600', '300', '400', '900', '500', '700', '800')+
+     Item 1: offset = 328, tuple = ('10', '20', '60', '30', '40', '90', '50', '70', '80')                                            +
+   Chunk 2: offset = 2, location = 384, hikey location = 152                                                                         +
+     Item 2: offset = 392, tuple = ('100', '200', '600', '300', '400', '900', '500', '700', '800')                                   +
+                                                                                                                                     +
+ Index o_test_pkey_mixed_build_uniq1 contents                                                                                        +
+ Page 0: level = 0, maxKeyLen = 36, nVacatedBytes = 0                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                                                                  +
+     Leftmost, Rightmost                                                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('20', '10', '60', '30', '40', '90', '50', '70', '80')          +
+     Item 0: offset = 264, tuple = ('2', '1', '6', '3', '4', '9', '5', '7', '8')                                                     +
+   Chunk 1: offset = 1, location = 320, hikey location = 112, hikey = ('200', '100', '600', '300', '400', '900', '500', '700', '800')+
+     Item 1: offset = 328, tuple = ('20', '10', '60', '30', '40', '90', '50', '70', '80')                                            +
+   Chunk 2: offset = 2, location = 384, hikey location = 152                                                                         +
+     Item 2: offset = 392, tuple = ('200', '100', '600', '300', '400', '900', '500', '700', '800')                                   +
+                                                                                                                                     +
+ Index o_test_pkey_mixed_build_ix3 contents                                                                                          +
+ Page 0: level = 0, maxKeyLen = 28, nVacatedBytes = 0                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                                                 +
+     Leftmost, Rightmost                                                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('30', '20', '90', '10', '80', '60', '70')                      +
+     Item 0: offset = 264, tuple = ('3', '2', '9', '1', '8', '6', '7')                                                               +
+   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('300', '200', '900', '100', '800', '600', '700')              +
+     Item 1: offset = 320, tuple = ('30', '20', '90', '10', '80', '60', '70')                                                        +
+   Chunk 2: offset = 2, location = 368, hikey location = 136                                                                         +
+     Item 2: offset = 376, tuple = ('300', '200', '900', '100', '800', '600', '700')                                                 +
+                                                                                                                                     +
+ Index o_test_pkey_mixed_build_ix4 contents                                                                                          +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0                                                                                +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                                                 +
+     Leftmost, Rightmost                                                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('40', '10', '90', '20', '80', '50', '60', '70')                +
+     Item 0: offset = 264, tuple = ('4', '1', '9', '2', '8', '5', '6', '7')                                                          +
+   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('400', '100', '900', '200', '800', '500', '600', '700')       +
+     Item 1: offset = 320, tuple = ('40', '10', '90', '20', '80', '50', '60', '70')                                                  +
+   Chunk 2: offset = 2, location = 368, hikey location = 136                                                                         +
+     Item 2: offset = 376, tuple = ('400', '100', '900', '200', '800', '500', '600', '700')                                          +
+                                                                                                                                     +
+ Index toast: not loaded                                                                                                             +
+ 
+(1 row)
+
+CREATE TABLE o_test_pkey_include_box_build
+(
+	pk1 int,
+	pk2 box,
+	f2 int
+) USING orioledb;
+\d+ o_test_pkey_include_box_build
+                   Table "indices_build.o_test_pkey_include_box_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ pk1    | integer |           |          |         | plain   |              | 
+ pk2    | box     |           |          |         | plain   |              | 
+ f2     | integer |           |          |         | plain   |              | 
+
+SELECT orioledb_tbl_indices('o_test_pkey_include_box_build'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+INSERT INTO o_test_pkey_include_box_build
+	SELECT 1 * 10 ^ v, box(point(2 * 10 ^ v, 3 * 10 ^ v),
+						   point(4 * 10 ^ v, 5 * 10 ^ v)),
+		   6 * 10 ^ v FROM generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
+                              orioledb_tbl_structure                              
+----------------------------------------------------------------------------------
+ Index ctid_primary contents                                                     +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                             +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty             +
+     Leftmost, Rightmost                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                      +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '(4,5),(2,3)', '6')            +
+     Item 1: offset = 336, tuple = ('(0,2)', '10', '(40,50),(20,30)', '60')      +
+     Item 2: offset = 408, tuple = ('(0,3)', '100', '(400,500),(200,300)', '600')+
+                                                                                 +
+ Index toast: not loaded                                                         +
+ 
+(1 row)
+
+ALTER TABLE o_test_pkey_include_box_build ADD PRIMARY KEY (pk1) INCLUDE (pk2);
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_include_box_build
+   Forward index scan of: o_test_pkey_include_box_build_pkey
+(2 rows)
+
+SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
+ pk1 |         pk2         | f2  
+-----+---------------------+-----
+   1 | (4,5),(2,3)         |   6
+  10 | (40,50),(20,30)     |  60
+ 100 | (400,500),(200,300) | 600
+(3 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
+                                       orioledb_tbl_structure                                        
+-----------------------------------------------------------------------------------------------------
+ Index o_test_pkey_include_box_build_pkey contents                                                  +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 0                                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
+     Leftmost, Rightmost                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10', '(40,50),(20,30)')      +
+     Item 0: offset = 264, tuple = ('1', '(4,5),(2,3)', '6')                                        +
+   Chunk 1: offset = 1, location = 328, hikey location = 112, hikey = ('100', '(400,500),(200,300)')+
+     Item 1: offset = 336, tuple = ('10', '(40,50),(20,30)', '60')                                  +
+   Chunk 2: offset = 2, location = 400, hikey location = 152                                        +
+     Item 2: offset = 408, tuple = ('100', '(400,500),(200,300)', '600')                            +
+                                                                                                    +
+ Index toast: not loaded                                                                            +
+ 
+(1 row)
+
+CREATE TABLE o_test_include_box_build (
+	val_1 int,
+	val_4 box
+) USING orioledb;
+INSERT INTO o_test_include_box_build
+	SELECT 1 * 10 ^ v, box(point(2 * 10 ^ v, 3 * 10 ^ v),
+						   point(4 * 10 ^ v, 5 * 10 ^ v))
+		FROM generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
+                          orioledb_tbl_structure                           
+---------------------------------------------------------------------------
+ Index ctid_primary contents                                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '(4,5),(2,3)')          +
+     Item 1: offset = 328, tuple = ('(0,2)', '10', '(40,50),(20,30)')     +
+     Item 2: offset = 392, tuple = ('(0,3)', '100', '(400,500),(200,300)')+
+                                                                          +
+ Index toast: not loaded                                                  +
+ 
+(1 row)
+
+CREATE UNIQUE INDEX o_test_include_box_build_ix1
+	ON o_test_include_box_build (val_1) INCLUDE (val_4);
+\d+ o_test_include_box_build
+                      Table "indices_build.o_test_include_box_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ val_1  | integer |           |          |         | plain   |              | 
+ val_4  | box     |           |          |         | plain   |              | 
+Indexes:
+    "o_test_include_box_build_ix1" UNIQUE, btree (val_1) INCLUDE (val_4)
+
+SELECT orioledb_tbl_indices('o_test_include_box_build'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ Index o_test_include_box_build_ix1            +
+     Index type: secondary, unique             +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: val_1, val_4, ctid +
+     Leaf tuple fields: val_1, val_4, ctid     +
+ 
+(1 row)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box_build ORDER BY val_1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_build
+   Forward index only scan of: o_test_include_box_build_ix1
+(2 rows)
+
+SELECT * FROM o_test_include_box_build ORDER BY val_1;
+ val_1 |        val_4        
+-------+---------------------
+     1 | (4,5),(2,3)
+    10 | (40,50),(20,30)
+   100 | (400,500),(200,300)
+(3 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
+                                            orioledb_tbl_structure                                            
+--------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '(4,5),(2,3)')                                             +
+     Item 1: offset = 328, tuple = ('(0,2)', '10', '(40,50),(20,30)')                                        +
+     Item 2: offset = 392, tuple = ('(0,3)', '100', '(400,500),(200,300)')                                   +
+                                                                                                             +
+ Index o_test_include_box_build_ix1 contents                                                                 +
+ Page 0: level = 0, maxKeyLen = 46, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                                          +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10', '(40,50),(20,30)', '(0,2)')      +
+     Item 0: offset = 264, tuple = ('1', '(4,5),(2,3)', '(0,1)')                                             +
+   Chunk 1: offset = 1, location = 328, hikey location = 120, hikey = ('100', '(400,500),(200,300)', '(0,3)')+
+     Item 1: offset = 336, tuple = ('10', '(40,50),(20,30)', '(0,2)')                                        +
+   Chunk 2: offset = 2, location = 400, hikey location = 168                                                 +
+     Item 2: offset = 408, tuple = ('100', '(400,500),(200,300)', '(0,3)')                                   +
+                                                                                                             +
+ Index toast: not loaded                                                                                     +
+ 
+(1 row)
+
+CREATE TABLE o_test_include_box_with_pkey_build (
+	val_1 int,
+	val_2 int,
+	val_3 int,
+	val_4 box
+) USING orioledb;
+\d+ o_test_include_box_with_pkey_build
+                 Table "indices_build.o_test_include_box_with_pkey_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ val_1  | integer |           |          |         | plain   |              | 
+ val_2  | integer |           |          |         | plain   |              | 
+ val_3  | integer |           |          |         | plain   |              | 
+ val_4  | box     |           |          |         | plain   |              | 
+
+SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 5, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+ 
+(1 row)
+
+INSERT INTO o_test_include_box_with_pkey_build
+	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v,
+		   box(point(4 * 10 ^ v, 5 * 10 ^ v), point(6 * 10 ^ v, 7 * 10 ^ v))
+		FROM generate_series(0, 2) v;
+SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
+							  'nue');
+                                 orioledb_tbl_structure                                  
+-----------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                            +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                    +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                    +
+     Leftmost, Rightmost                                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                             +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '2', '3', '(6,7),(4,5)')              +
+     Item 1: offset = 336, tuple = ('(0,2)', '10', '20', '30', '(60,70),(40,50)')       +
+     Item 2: offset = 408, tuple = ('(0,3)', '100', '200', '300', '(600,700),(400,500)')+
+                                                                                        +
+ Index toast: not loaded                                                                +
+ 
+(1 row)
+
+ALTER TABLE o_test_include_box_with_pkey_build ADD PRIMARY KEY (val_1);
+CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix1
+	ON o_test_include_box_with_pkey (val_2) INCLUDE (val_4);
+ERROR:  relation "o_test_include_box_with_pkey" does not exist
+CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix2
+	ON o_test_include_box_with_pkey_build (val_3);
+\d+ o_test_include_box_with_pkey_build
+                 Table "indices_build.o_test_include_box_with_pkey_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ val_1  | integer |           | not null |         | plain   |              | 
+ val_2  | integer |           |          |         | plain   |              | 
+ val_3  | integer |           |          |         | plain   |              | 
+ val_4  | box     |           |          |         | plain   |              | 
+Indexes:
+    "o_test_include_box_with_pkey_build_pkey" PRIMARY KEY, btree (val_1)
+    "o_test_include_box_with_pkey_build_ix2" UNIQUE, btree (val_3)
+
+SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_include_box_with_pkey_build_pkey +
+     Index type: primary, unique               +
+     Leaf tuple size: 4, non-leaf tuple size: 1+
+     Non-leaf tuple fields: val_1              +
+ Index o_test_include_box_with_pkey_build_ix2  +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val_3, val_1       +
+     Leaf tuple fields: val_3, val_1           +
+ 
+(1 row)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey_build
+   Forward index scan of: o_test_include_box_with_pkey_build_pkey
+(2 rows)
+
+SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
+ val_1 | val_2 | val_3 |        val_4        
+-------+-------+-------+---------------------
+     1 |     2 |     3 | (6,7),(4,5)
+    10 |    20 |    30 | (60,70),(40,50)
+   100 |   200 |   300 | (600,700),(400,500)
+(3 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Sort
+   Sort Key: val_2
+   ->  Seq Scan on o_test_include_box_with_pkey_build
+(3 rows)
+
+SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
+ val_1 | val_2 | val_3 |        val_4        
+-------+-------+-------+---------------------
+     1 |     2 |     3 | (6,7),(4,5)
+    10 |    20 |    30 | (60,70),(40,50)
+   100 |   200 |   300 | (600,700),(400,500)
+(3 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey_build
+   Forward index scan of: o_test_include_box_with_pkey_build_ix2
+(2 rows)
+
+SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
+ val_1 | val_2 | val_3 |        val_4        
+-------+-------+-------+---------------------
+     1 |     2 |     3 | (6,7),(4,5)
+    10 |    20 |    30 | (60,70),(40,50)
+   100 |   200 |   300 | (600,700),(400,500)
+(3 rows)
+
+RESET enable_seqscan;
+SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
+							  'nue');
+                               orioledb_tbl_structure                               
+------------------------------------------------------------------------------------
+ Index o_test_include_box_with_pkey_build_pkey contents                            +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean               +
+     Leftmost, Rightmost                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('10')        +
+     Item 0: offset = 264, tuple = ('1', '2', '3', '(6,7),(4,5)')                  +
+   Chunk 1: offset = 1, location = 328, hikey location = 80, hikey = ('100')       +
+     Item 1: offset = 336, tuple = ('10', '20', '30', '(60,70),(40,50)')           +
+   Chunk 2: offset = 2, location = 400, hikey location = 88                        +
+     Item 2: offset = 408, tuple = ('100', '200', '300', '(600,700),(400,500)')    +
+                                                                                   +
+ Index o_test_include_box_with_pkey_build_ix2 contents                             +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                               +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                +
+     Leftmost, Rightmost                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('30', '10')  +
+     Item 0: offset = 264, tuple = ('3', '1')                                      +
+   Chunk 1: offset = 1, location = 288, hikey location = 80, hikey = ('300', '100')+
+     Item 1: offset = 296, tuple = ('30', '10')                                    +
+   Chunk 2: offset = 2, location = 320, hikey location = 88                        +
+     Item 2: offset = 328, tuple = ('300', '100')                                  +
+                                                                                   +
+ Index toast: not loaded                                                           +
+ 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 15 other objects
+NOTICE:  drop cascades to 19 other objects
 DETAIL:  drop cascades to table o_indices0
 drop cascades to table o_indices1
 drop cascades to table o_indices2
@@ -23697,3 +24408,12 @@ drop cascades to table o_indices9
 drop cascades to table o_indices10
 drop cascades to table o_test_default_volatile
 drop cascades to table o_test_add_serial
+drop cascades to table o_test_pkey_mixed_build
+drop cascades to table o_test_pkey_include_box_build
+drop cascades to table o_test_include_box_build
+drop cascades to table o_test_include_box_with_pkey_build
+DROP SCHEMA indices_build CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function generate_string(integer,integer)
+drop cascades to sequence o_test_default_volatile_seq
+RESET search_path;

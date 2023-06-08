@@ -660,7 +660,7 @@ attrnumber_cmp(const void *p1, const void *p2)
 }
 
 void
-o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
+o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 {
 	int			i;
 	int			maxTableAttnum = 0;
@@ -679,14 +679,21 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex)
 													 oIndex->nLeafFields);
 	if (oIndex->indexType == oIndexPrimary)
 	{
-		OTable	   *o_table = o_tables_get(descr->tableOids);
+		bool		free_oTable = false;
 
-		if (o_table)
+		if (!oTable)
 		{
-			o_tupdesc_load_constr(descr->leafTupdesc, o_table, descr);
+			oTable = o_tables_get(descr->tableOids);
+			free_oTable = true;
+		}
+
+		if (oTable)
+		{
+			o_tupdesc_load_constr(descr->leafTupdesc, oTable, descr);
 			primary_init_nfields = palloc(sizeof(*primary_init_nfields));
-			*primary_init_nfields = o_table->primary_init_nfields;
-			o_table_free(o_table);
+			*primary_init_nfields = oTable->primary_init_nfields;
+			if (free_oTable)
+				o_table_free(oTable);
 		}
 	}
 

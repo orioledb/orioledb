@@ -71,6 +71,12 @@ typedef struct
 
 static RecoveryWorkerState *workers_pool;
 
+typedef struct
+{
+	ORelOids	oids;			/* hash table key */
+	uint32		position;
+} RecoveryIdxBuildQueueState;
+
 /*
  * Recovery transaction state.
  */
@@ -165,6 +171,8 @@ static RecoveryXidState *cur_state = NULL;
 /* Recovery transaction hash for the current process. */
 static HTAB *recovery_xid_state_hash = NULL;
 
+static HTAB *idxbuild_oids_hash = NULL;
+
 /* Queue of undo retain locations */
 static pairingheap *retain_queue = NULL;
 
@@ -246,6 +254,8 @@ pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
 bool	   *recovery_single_process;
 
+static void delay_rels_queued_for_idxbuild(ORelOids oids);
+static void delay_if_queued_for_idxbuild(void);
 static void update_run_xmin(void);
 static void free_run_xmin(void);
 static bool need_flush_undo_pos(int worker_id);
@@ -369,8 +379,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
 
 		ConditionVariableInit(&recovery_oidxshared->recoverycv);
-		recovery_oidxshared->recoveryidxbuild = false;
-		recovery_oidxshared->recoveryidxbuild_modify = false;
+		recovery_oidxshared->new_position = 0;
+		recovery_oidxshared->completed_position = 0;
 	}
 }
 
@@ -573,7 +583,7 @@ o_recovery_start_hook(void)
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
 		}
-		for (i = 0; i <= recovery_last_worker; i++)
+		for (i = recovery_first_worker; i <= finish; i++)
 		{
 			if (shm_mq_wait_for_attach(workers_pool[i].queue) != SHM_MQ_SUCCESS)
 				elog(ERROR, "unable to attach recovery workers to shm queue");
@@ -856,7 +866,18 @@ recovery_init(int worker_id)
 				  worker_id);
 
 	if (worker_id < 0)
+	{
+		HASHCTL		reloid_ctl;
+
+		MemSet(&reloid_ctl, 0, sizeof(reloid_ctl));
+		reloid_ctl.keysize = sizeof(ORelOids);
+		reloid_ctl.entrysize = sizeof(RecoveryIdxBuildQueueState);
+		reloid_ctl.hcxt = TopMemoryContext;
+		idxbuild_oids_hash = hash_create("orioledb recovery index build queue relations hash",
+										 16, &reloid_ctl,
+										 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 		recovery_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
+	}
 
 	if (worker_id == index_build_leader)
 	{
@@ -948,6 +969,8 @@ recovery_finish(int worker_id)
 	bool		flush_undo_pos = need_flush_undo_pos(worker_id);
 	HASH_SEQ_STATUS hash_seq;
 
+	delay_if_queued_for_idxbuild();
+
 	if (cur_state)
 	{
 		cur_state->needs_wal_flush = oxid_needs_wal_flush;
@@ -988,6 +1011,12 @@ recovery_finish(int worker_id)
 	HandleStartupProcInterrupts_hook = NULL;
 	hash_destroy(recovery_xid_state_hash);
 	recovery_xid_state_hash = NULL;
+
+	if (worker_id < 0)
+	{
+		hash_destroy(idxbuild_oids_hash);
+		idxbuild_oids_hash = NULL;
+	}
 	release_undo_size(UndoReserveTxn);
 	free_retained_undo_location();
 	pairingheap_free(retain_queue);
@@ -1136,6 +1165,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 {
 	OXid		oxid = recovery_oxid;
 	bool		flush_undo_pos = need_flush_undo_pos(worker_id);
+
+	delay_if_queued_for_idxbuild();
 
 	if (!COMMITSEQNO_IS_ABORTED(csn) && sync)
 	{
@@ -2004,8 +2035,9 @@ clean_workers_oids(void)
 }
 
 #if PG_VERSION_NUM >= 140000
-static void
-recovery_send_oids(ORelOids oids, OIndexNumber ix_num, Oid ix_oid, Oid ix_relnode, int nindices, bool send_to_leader)
+void
+recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
+				   int nindices, bool send_to_leader)
 {
 	RecoveryOidsMsgIdxBuild *msg;
 	int			i;
@@ -2014,15 +2046,28 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, Oid ix_oid, Oid ix_relnod
 	Assert(ORelOidsIsValid(oids));
 	msg = palloc0(sizeof(RecoveryOidsMsgIdxBuild));
 	msg->header.type = send_to_leader ? RECOVERY_LEADER_PARALLEL_INDEX_BUILD : RECOVERY_WORKER_PARALLEL_INDEX_BUILD;
-	memcpy(&msg->oids, &oids, sizeof(ORelOids));
+	msg->oids = oids;
 	msg->ix_num = ix_num;
-	msg->ix_oid = ix_oid;
-	msg->ix_relnode = ix_relnode;
-	msg->nindices = nindices;
-	Assert(o_tables_get(msg->oids) != NULL);
+	msg->o_table_version = o_table_version;
+	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version) != NULL);
 
 	if (send_to_leader)
 	{
+		RecoveryIdxBuildQueueState *state;
+
+		/* Remember oids of index build added to a queue in a hash table */
+		state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
+														   &oids,
+														   HASH_ENTER,
+														   NULL);
+
+		SpinLockAcquire(&recovery_oidxshared->mutex);
+		recovery_oidxshared->new_position++;
+		state->position = recovery_oidxshared->new_position;
+		SpinLockRelease(&recovery_oidxshared->mutex);
+
+		msg->current_position = state->position;
+		recovery_oidxshared->recovery_oxid = recovery_oxid;
 		worker_send_msg(index_build_leader, (Pointer) msg, sizeof(RecoveryOidsMsgIdxBuild));
 		worker_queue_flush(index_build_leader);
 	}
@@ -2080,6 +2125,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		}
 		Assert(old_o_table);
 
+
 		nindices = Max(old_o_table->nindices, new_o_table->nindices);
 		for (ix_num = 0; ix_num < nindices - 1; ix_num++)
 		{
@@ -2110,6 +2156,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			}
 			else
 			{
+
 				o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
 												 new_o_table->indices[ix_num].oids.relnode);
 				o_tables_meta_unlock_no_wal();
@@ -2123,24 +2170,9 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				 */
 				if (!*recovery_single_process)
 				{
-					/*
-					 * If other index build is in progress, wait until it
-					 * finishes
-					 */
-					while (recovery_oidxshared->recoveryidxbuild)
-						ConditionVariableSleep(&recovery_oidxshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
-
-					ConditionVariableCancelSleep();
-
-					/* Prevent rel modify during index build */
-					SpinLockAcquire(&recovery_oidxshared->mutex);
-					recovery_oidxshared->recoveryidxbuild_modify = true;
-					recovery_oidxshared->recoveryidxbuild = true;
-					SpinLockRelease(&recovery_oidxshared->mutex);
-
+					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
-					recovery_send_oids(oids, ix_num, new_o_table->indices[ix_num].oids.datoid,
-									   new_o_table->indices[ix_num].oids.relnode, nindices, true);
+					recovery_send_oids(oids, ix_num, new_o_table->version, nindices, true);
 				}
 				else
 					build_secondary_index(new_o_table, &tmp_descr, ix_num, false);
@@ -2519,11 +2551,80 @@ worker_send_msg(int worker_id, Pointer msg, uint64 msg_size)
 
 	Assert(workers_pool);
 	Assert(state);
+	Assert(state->handle);
 	if ((RECOVERY_QUEUE_BUF_SIZE - state->queue_buf_len) < msg_size)
 		worker_queue_flush(worker_id);
 
 	memcpy(state->queue_buf + state->queue_buf_len, msg, msg_size);
 	state->queue_buf_len += msg_size;
+}
+
+static void
+delay_if_queued_for_idxbuild(void)
+{
+	while (idxbuild_oids_hash)
+	{
+		HASH_SEQ_STATUS hash_seq;
+		RecoveryIdxBuildQueueState *cur;
+
+		/* Remove hash entries for completed indexes */
+		hash_seq_init(&hash_seq, idxbuild_oids_hash);
+		while ((cur = (RecoveryIdxBuildQueueState *) hash_seq_search(&hash_seq)) != NULL)
+		{
+			if (cur->position <= recovery_oidxshared->completed_position)
+				hash_search(idxbuild_oids_hash, &cur->oids, HASH_REMOVE, NULL);
+		}
+
+		/* All completed ? */
+		if (hash_get_num_entries(idxbuild_oids_hash) == 0)
+			break;
+
+		ConditionVariableSleep(&recovery_oidxshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+	}
+	ConditionVariableCancelSleep();
+}
+
+static void
+delay_rels_queued_for_idxbuild(ORelOids oids)
+{
+	RecoveryIdxBuildQueueState *hash_elem;
+	bool		found;
+
+	/*
+	 * Delay modify requests if indexes for the relation are requested to be
+	 * build but haven't been built yet
+	 */
+	while (true)
+	{
+		SpinLockAcquire(&recovery_oidxshared->mutex);
+		hash_elem = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
+															   &oids,
+															   HASH_FIND,
+															   &found);
+		if (!found)
+		{
+			SpinLockRelease(&recovery_oidxshared->mutex);
+			ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
+			break;
+		}
+
+		if (hash_elem->position <= recovery_oidxshared->completed_position)
+		{
+			/* Remove completed index build and repeat hash search */
+			hash_elem = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
+																   &oids,
+																   HASH_REMOVE,
+																   &found);
+			SpinLockRelease(&recovery_oidxshared->mutex);
+		}
+		else
+		{
+			/* Wait until next index build is completed and repeat hash search */
+			SpinLockRelease(&recovery_oidxshared->mutex);
+			ConditionVariableSleep(&recovery_oidxshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+		}
+	}
+	ConditionVariableCancelSleep();
 }
 
 /*
@@ -2562,6 +2663,8 @@ worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
 		type = oIndexPrimary;
 		Assert(desc->type == oIndexPrimary);
 	}
+
+	delay_rels_queued_for_idxbuild(oids);
 
 	max_msg_size = MAXALIGN(sizeof(RecoveryMsgHeader) + sizeof(OXid)
 							+ sizeof(ORelOids) + 1

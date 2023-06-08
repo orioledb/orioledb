@@ -60,7 +60,7 @@ typedef struct
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids, ORelOids tableOids, void *arg);
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
-extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex);
+extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable);
 extern void free_o_index(OIndex *o_index);
 extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
