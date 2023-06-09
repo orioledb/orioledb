@@ -1,0 +1,114 @@
+name: benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_type:
+        description: 'EC2 Instance Type'
+        required: true
+        default: 'c5d.metal'
+      args:
+        description: 'Benchmark script args'
+        required: true
+        default: '--shared_buffers=32GB --max_wal_size=4GB --clients=160,180,200,220,240 --max_connections=300 --time=60 --engines=orioledb,builtin --tests=read-only-9,read-write-proc --scale=1000 --base_dir=/mnt'
+jobs:
+  start-runner:
+    name: Start self-hosted EC2 runner
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: orioledb/ec2-github-runner@v3
+        with:
+          mode: start
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          runner-user: ubuntu
+          ec2-image-id: ami-02e2a649d220de1f5
+          ec2-instance-type: ${{ github.event.inputs.instance_type }}
+          subnet-id: subnet-04b4e8ee77472631f
+          security-group-id: sg-0f1853a1ae02202b5
+          aws-resource-tags: > # optional, requires additional permissions
+            [
+              {"Key": "Name", "Value": "ec2-github-runner"},
+              {"Key": "GitHubRepository", "Value": "${{ github.repository }}"}
+            ]
+  run-benchmark:
+    name: Do the job on the runner
+    needs: start-runner # required to start the main job when the runner is ready
+    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [16]
+        compiler: [clang]
+        check_type: [debug]
+    env:
+      LLVM_VER: 12
+      CPU: ${{ matrix.cpu }}
+      CHECK_TYPE: ${{ matrix.check_type }}
+      COMPILER: ${{ matrix.compiler }}
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v3
+        with:
+          path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v3
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+      - name: Benchmark
+        run: |
+          ulimit -n 65535
+          sudo systemctl daemon-reload
+          if [ -b /dev/nvme1n1 ]; then
+            sudo mkfs -t ext4 /dev/nvme1n1
+            sudo mount /dev/nvme1n1 /mnt
+          fi
+          sudo chown ubuntu:ubuntu /mnt
+          sudo sysctl -w vm.nr_hugepages=`grep MemTotal /proc/meminfo | awk '{print int($2/2048/2)}'`
+          PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH" python3 ./orioledb/ci/pgbench.py ${{ github.event.inputs.args }} --results_dir=$GITHUB_WORKSPACE/results
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: results
+          path: results/
+  stop-runner:
+    name: Stop self-hosted EC2 runner
+    needs:
+      - start-runner # required to get output from the start-runner job
+      - run-benchmark # required to wait when the main job is done
+    runs-on: ubuntu-latest
+    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Stop EC2 runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}

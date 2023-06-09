@@ -13,7 +13,11 @@ sudo apt-get -y install -qq wget ca-certificates
 sudo apt-get update -qq
 
 apt_packages="build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev"
-pip_packages="psycopg2 six testgres"
+if [ $GITHUB_JOB = "run-benchmark" ]; then
+	pip_packages="psycopg2-binary six testgres python-telegram-bot matplotlib"
+else
+	pip_packages="psycopg2 six testgres"
+fi
 
 if [ $COMPILER = "clang" ]; then
 	apt_packages="$apt_packages llvm-$LLVM_VER clang-$LLVM_VER clang-tools-$LLVM_VER"
