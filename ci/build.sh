@@ -39,5 +39,7 @@ elif [ $CHECK_TYPE = "check_page" ]; then
 elif [ $CHECK_TYPE != "static" ]; then
 	make -j `nproc` USE_PGXS=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
 fi
-make -j `nproc` USE_PGXS=1 install
+if [ $CHECK_TYPE != "static" ]; then
+	make -j `nproc` USE_PGXS=1 install
+fi
 cd ..
