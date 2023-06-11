@@ -1,18 +1,26 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.17 3.16 3.15 3.14 3.13 ]
+# set ALPINE_VERSION= [ edge 3.18 3.17 3.16 3.15 3.14 3.13 ]
 ARG ALPINE_VERSION=3.17
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION
-# Set PG_MAJOR = [ 15 14 13 ]
+# Set PG_MAJOR = [16 15 14 13 ]
 ARG PG_MAJOR=14
 ENV PG_MAJOR ${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
 ARG BUILD_CC_COMPILER=clang
 ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
+
+# Define build dependencies for LLVM [ llvm-dev clang ]
+# These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
+# They are useful for building downstream extensions using the same LLVM, like PostGIS alpine https://github.com/postgis/docker-postgis
+# Note: PostgreSQL does not support LLVM 16. Therefore, for Alpine >=3.18, please use "llvm15-dev clang15".
+# Reference: https://github.com/docker-library/postgres/pull/1077
+ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
+ENV DOCKER_PG_LLVM_DEPS ${DOCKER_PG_LLVM_DEPS}
 
 # 70 is the standard uid/gid for "postgres" in Alpine
 # https://git.alpinelinux.org/aports/tree/main/postgresql/postgresql.pre-install?h=3.12-stable
@@ -45,7 +53,7 @@ RUN set -eux; \
 # https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
 # https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
+		3.16 | 3.17 | 3.18 | 3.19* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
 		*) : ;; \
 	esac ; \
 	\
@@ -56,14 +64,44 @@ RUN set -eux; \
 	echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
 	echo "ALPINE_VERSION=$ALPINE_VERSION" ; \
 	echo "EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES" ; \
+	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \	
+	\
+# check if the custom llvm version is set, and if so, set the LLVM_CONFIG and CLANG variables
+	CUSTOM_LLVM_VERSION=$(echo "$DOCKER_PG_LLVM_DEPS" | sed -n 's/.*llvm\([0-9]*\).*/\1/p') ; \
+	if [ ! -z "${CUSTOM_LLVM_VERSION}" ];  then \
+		echo "CUSTOM_LLVM_VERSION=$CUSTOM_LLVM_VERSION" ; \
+		export LLVM_CONFIG="/usr/lib/llvm${CUSTOM_LLVM_VERSION}/bin/llvm-config" ; \
+		export CLANG=clang-${CUSTOM_LLVM_VERSION} ; \
+		if [[ "${BUILD_CC_COMPILER}" == "clang" ]]; then \
+			export BUILD_CC_COMPILER=clang-${CUSTOM_LLVM_VERSION} ; \
+			echo "fix: BUILD_CC_COMPILER=clang-${CUSTOM_LLVM_VERSION}" ; \
+		fi ; \
+	fi ; \
+	\
+# temporary not allowing LLVM 16 to be used
+# reason: we can't overwrite and fix the DOCKER_PG_LLVM_DEPS
+# and the future downstream extensions like PostGIS need a correct build information (DOCKER_PG_LLVM_DEPS)
+	if \
+	# if the custom llvm version is set ( via DOCKER_PG_LLVM_DEPS ), and it is 16, then halt operation
+		( [ ! -z "${CUSTOM_LLVM_VERSION}" ] && [ "$CUSTOM_LLVM_VERSION" == "16" ] ) \
+	# or - if the custom llvm version is not set, and the Alpine version is >=3.18, then halt operation
+	  ||  ( [ -z "${CUSTOM_LLVM_VERSION}" ] && ( [ "$ALPINE_VERSION" == "3.18" ] || [ "$ALPINE_VERSION" == "3.19" ]) ) \
+	  ;  then \
+			set +x ; \	  
+			echo "------------------------------" ; \
+			echo "Error: The LLVM 16 is not compatible with the current PostgreSQL! Halting operation." ; \
+			echo "Suggested workarounds: use --build-arg DOCKER_PG_LLVM_DEPS='llvm15-dev clang15' " ; \
+			exit 1; \
+	fi ; \
 	\
 	apk add --no-cache --virtual .build-deps \
+		${DOCKER_PG_LLVM_DEPS} \
 		bison \
-		clang \
 		coreutils \
 		curl \
 		dpkg-dev dpkg \
 		flex \
+		g++ \
 		gcc \
 		krb5-dev \
 		libc-dev \
@@ -71,7 +109,6 @@ RUN set -eux; \
 		libxml2-dev \
 		libxslt-dev \
 		linux-headers \
-		llvm-dev clang g++ \
 		make \
 		openldap-dev \
 		openssl-dev \
@@ -134,7 +171,6 @@ RUN set -eux; \
 		--prefix=/usr/local \
 		--with-includes=/usr/local/include \
 		--with-libraries=/usr/local/lib \
-		--with-krb5 \
 		--with-gssapi \
 		--with-ldap \
 		--with-tcl \
