@@ -21,8 +21,8 @@ fi
 
 cd postgresql
 ./configure $CONFIG_ARGS
-make -j `nproc`
-make -j `nproc` install
+make -sj `nproc`
+make -sj `nproc` install
 cd ..
 
 if [ $CHECK_TYPE = "static" ] && [ $COMPILER = "clang" ]; then
