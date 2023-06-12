@@ -7,6 +7,14 @@ on:
         description: 'EC2 Instance Type'
         required: true
         default: 'c5d.metal'
+      pg_version:
+        description: 'PostgreSQL version'
+        required: true
+        default: '16'
+      compiler:
+        description: 'Compiler'
+        required: true
+        default: 'clang'
       args:
         description: 'Benchmark script args'
         required: true
@@ -47,15 +55,10 @@ jobs:
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     strategy:
       fail-fast: false
-      matrix:
-        pg_version: [16]
-        compiler: [clang]
-        check_type: [debug]
     env:
       LLVM_VER: 12
-      CPU: ${{ matrix.cpu }}
-      CHECK_TYPE: ${{ matrix.check_type }}
-      COMPILER: ${{ matrix.compiler }}
+      CHECK_TYPE: debug
+      COMPILER: ${{ github.event.inputs.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v3
@@ -64,7 +67,7 @@ jobs:
       - name: Get the required tag name
         shell: bash
         run: |
-          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+          echo "PGTAG=$(grep '^${{ github.event.inputs.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
         uses: actions/checkout@v3
         with:
