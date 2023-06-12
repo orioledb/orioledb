@@ -13,7 +13,11 @@ if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 fi
 
 # configure & build
-if [ $CHECK_TYPE = "normal" ]; then
+if [ $GITHUB_JOB = "run-benchmark" ]; then
+	# Asserts slow down the benchmarking, but we still need debug symbols for
+	# profiling.
+	CONFIG_ARGS="--enable-debug --disable-cassert --enable-tap-tests --with-icu --prefix=$GITHUB_WORKSPACE/pgsql"
+elif [ $CHECK_TYPE = "normal" ]; then
 	CONFIG_ARGS="--disable-debug --disable-cassert --enable-tap-tests --with-icu --prefix=$GITHUB_WORKSPACE/pgsql"
 else
 	CONFIG_ARGS="--enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$GITHUB_WORKSPACE/pgsql"
