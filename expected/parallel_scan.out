@@ -590,8 +590,194 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 COMMIT;
+BEGIN;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL max_parallel_workers_per_gather = 1;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_hashjoin = off;
+SET LOCAL enable_sort = off;
+SET LOCAL enable_bitmapscan = off;
+CREATE TABLE o_test_parallel_seq_rescan1 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+CREATE TABLE o_test_parallel_seq_rescan2 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+INSERT INTO o_test_parallel_seq_rescan1 VALUES (1, 10001);
+INSERT INTO o_test_parallel_seq_rescan2 VALUES (1, 20001);
+ANALYZE o_test_parallel_seq_rescan1;
+EXPLAIN (COSTS OFF)
+	SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v
+		FROM o_test_parallel_seq_rescan1 ot1
+		INNER JOIN o_test_parallel_seq_rescan2 ot2
+			ON ot1.val_1 = ot2.val_1
+				WHERE ot1.val_1 = 1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_test_parallel_seq_rescan1 ot1
+         Filter: (val_1 = 1)
+   ->  Gather
+         Workers Planned: 1
+         ->  Parallel Seq Scan on o_test_parallel_seq_rescan2 ot2
+               Filter: (val_1 = 1)
+(7 rows)
+
+SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v
+	FROM o_test_parallel_seq_rescan1 ot1
+	INNER JOIN o_test_parallel_seq_rescan2 ot2
+	ON ot1.val_1 = ot2.val_1
+		WHERE ot1.val_1 = 1;
+ val_1 | ot1v  | ot2v  
+-------+-------+-------
+     1 | 10001 | 20001
+(1 row)
+
+COMMIT;
+BEGIN;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL max_parallel_workers_per_gather = 1;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_hashjoin = off;
+SET LOCAL enable_sort = off;
+SET LOCAL enable_bitmapscan = off;
+CREATE TABLE o_test_parallel_seq_rescan_multiple_joins1 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+CREATE TABLE o_test_parallel_seq_rescan_multiple_joins2 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+CREATE TABLE o_test_parallel_seq_rescan_multiple_joins3 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+INSERT INTO o_test_parallel_seq_rescan_multiple_joins1
+	SELECT v, v + 10000 FROM generate_series(1, 1000) v;
+INSERT INTO o_test_parallel_seq_rescan_multiple_joins2
+	SELECT v, v + 20000 FROM generate_series(1, 1000) v;
+INSERT INTO o_test_parallel_seq_rescan_multiple_joins3
+	VALUES (1, 30001), (1, 30002), (1, 30003);
+ANALYZE o_test_parallel_seq_rescan_multiple_joins1,
+		o_test_parallel_seq_rescan_multiple_joins2;
+EXPLAIN (COSTS OFF)
+	SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v, ot3.val_2 ot3v
+		FROM o_test_parallel_seq_rescan_multiple_joins1 ot1
+		INNER JOIN o_test_parallel_seq_rescan_multiple_joins2 ot2
+			ON ot1.val_1 = ot2.val_1
+		INNER JOIN o_test_parallel_seq_rescan_multiple_joins3 ot3
+			ON ot1.val_1 = ot3.val_1
+				WHERE ot1.val_1 = 1 ORDER BY ot1.val_1, ot1v, ot2v, ot3v;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ot1.val_2, ot2.val_2, ot3.val_2
+   ->  Nested Loop
+         ->  Nested Loop
+               ->  Gather
+                     Workers Planned: 1
+                     ->  Parallel Seq Scan on o_test_parallel_seq_rescan_multiple_joins1 ot1
+                           Filter: (val_1 = 1)
+               ->  Gather
+                     Workers Planned: 1
+                     ->  Parallel Seq Scan on o_test_parallel_seq_rescan_multiple_joins2 ot2
+                           Filter: (val_1 = 1)
+         ->  Gather
+               Workers Planned: 1
+               ->  Parallel Seq Scan on o_test_parallel_seq_rescan_multiple_joins3 ot3
+                     Filter: (val_1 = 1)
+(16 rows)
+
+SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v, ot3.val_2 ot3v
+	FROM o_test_parallel_seq_rescan_multiple_joins1 ot1
+	INNER JOIN o_test_parallel_seq_rescan_multiple_joins2 ot2
+		ON ot1.val_1 = ot2.val_1
+	INNER JOIN o_test_parallel_seq_rescan_multiple_joins3 ot3
+		ON ot1.val_1 = ot3.val_1
+			WHERE ot1.val_1 = 1 ORDER BY ot1.val_1, ot1v, ot2v, ot3v;
+ val_1 | ot1v  | ot2v  | ot3v  
+-------+-------+-------+-------
+     1 | 10001 | 20001 | 30001
+     1 | 10001 | 20001 | 30002
+     1 | 10001 | 20001 | 30003
+(3 rows)
+
+COMMIT;
+BEGIN;
+CREATE TABLE o_test_parallelscan_reinitialize1 (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+CREATE TABLE o_test_parallelscan_reinitialize2 (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1,val_2)
+) USING orioledb;
+CREATE INDEX o_test_parallelscan_reinitialize1_ix
+	ON o_test_parallelscan_reinitialize1 (val_1);
+CREATE INDEX o_test_parallelscan_reinitialize2_ix
+	ON o_test_parallelscan_reinitialize2 (val_1);
+INSERT INTO o_test_parallelscan_reinitialize1
+	SELECT 1, v FROM generate_series(1, 5) v;
+INSERT INTO o_test_parallelscan_reinitialize2 VALUES (1,1), (1,2);
+ANALYZE o_test_parallelscan_reinitialize1;
+SET LOCAL parallel_leader_participation = off;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL max_parallel_workers_per_gather = 3;
+SET LOCAL enable_indexscan = OFF;
+SET LOCAL enable_hashjoin = OFF;
+SET LOCAL enable_sort = OFF;
+SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+	SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
+		FROM o_test_parallelscan_reinitialize1 ot1
+		INNER JOIN o_test_parallelscan_reinitialize2 ot2
+			ON ot1.val_1 = ot2.val_1
+				WHERE ot1.val_1 % 1000 = 1 AND ot2.val_1 = any(array[1]);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop
+   Join Filter: (ot1.val_1 = ot2.val_1)
+   ->  Seq Scan on o_test_parallelscan_reinitialize1 ot1
+         Filter: ((val_1 % 1000) = 1)
+   ->  Gather
+         Workers Planned: 3
+         ->  Parallel Seq Scan on o_test_parallelscan_reinitialize2 ot2
+               Filter: (val_1 = ANY ('{1}'::integer[]))
+(8 rows)
+
+SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
+	FROM o_test_parallelscan_reinitialize1 ot1
+	INNER JOIN o_test_parallelscan_reinitialize2 ot2
+		ON ot1.val_1 = ot2.val_1
+			WHERE ot1.val_1 % 1000 = 1 AND ot2.val_1 = any(array[1]);
+ val_1 | ot1v2 | ot2v2 
+-------+-------+-------
+     1 |     1 |     1
+     1 |     1 |     2
+     1 |     2 |     1
+     1 |     2 |     2
+     1 |     3 |     1
+     1 |     3 |     2
+     1 |     4 |     1
+     1 |     4 |     2
+     1 |     5 |     1
+     1 |     5 |     2
+(10 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 15 other objects
 DETAIL:  drop cascades to table seq_scan_test
 drop cascades to table o_test_o_scan_register
 drop cascades to table o_test_1
@@ -600,6 +786,13 @@ drop cascades to table o_test_parallel_index_scan
 drop cascades to table o_test_parallel_bitmap_scan_explain_buffers
 drop cascades to table o_test_parallel_unique_index_scan
 drop cascades to table o_test_parallel
+drop cascades to table o_test_parallel_seq_rescan1
+drop cascades to table o_test_parallel_seq_rescan2
+drop cascades to table o_test_parallel_seq_rescan_multiple_joins1
+drop cascades to table o_test_parallel_seq_rescan_multiple_joins2
+drop cascades to table o_test_parallel_seq_rescan_multiple_joins3
+drop cascades to table o_test_parallelscan_reinitialize1
+drop cascades to table o_test_parallelscan_reinitialize2
 DROP SCHEMA parallel_scan CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)

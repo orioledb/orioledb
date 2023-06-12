@@ -219,6 +219,144 @@ SELECT * FROM o_test_parallel;
 SELECT orioledb_parallel_debug_stop();
 COMMIT;
 
+BEGIN;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL max_parallel_workers_per_gather = 1;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_hashjoin = off;
+SET LOCAL enable_sort = off;
+SET LOCAL enable_bitmapscan = off;
+
+CREATE TABLE o_test_parallel_seq_rescan1 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+CREATE TABLE o_test_parallel_seq_rescan2 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_parallel_seq_rescan1 VALUES (1, 10001);
+INSERT INTO o_test_parallel_seq_rescan2 VALUES (1, 20001);
+
+ANALYZE o_test_parallel_seq_rescan1;
+
+EXPLAIN (COSTS OFF)
+	SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v
+		FROM o_test_parallel_seq_rescan1 ot1
+		INNER JOIN o_test_parallel_seq_rescan2 ot2
+			ON ot1.val_1 = ot2.val_1
+				WHERE ot1.val_1 = 1;
+SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v
+	FROM o_test_parallel_seq_rescan1 ot1
+	INNER JOIN o_test_parallel_seq_rescan2 ot2
+	ON ot1.val_1 = ot2.val_1
+		WHERE ot1.val_1 = 1;
+COMMIT;
+
+BEGIN;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL max_parallel_workers_per_gather = 1;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_hashjoin = off;
+SET LOCAL enable_sort = off;
+SET LOCAL enable_bitmapscan = off;
+
+CREATE TABLE o_test_parallel_seq_rescan_multiple_joins1 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+CREATE TABLE o_test_parallel_seq_rescan_multiple_joins2 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+CREATE TABLE o_test_parallel_seq_rescan_multiple_joins3 (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_parallel_seq_rescan_multiple_joins1
+	SELECT v, v + 10000 FROM generate_series(1, 1000) v;
+INSERT INTO o_test_parallel_seq_rescan_multiple_joins2
+	SELECT v, v + 20000 FROM generate_series(1, 1000) v;
+INSERT INTO o_test_parallel_seq_rescan_multiple_joins3
+	VALUES (1, 30001), (1, 30002), (1, 30003);
+
+ANALYZE o_test_parallel_seq_rescan_multiple_joins1,
+		o_test_parallel_seq_rescan_multiple_joins2;
+
+EXPLAIN (COSTS OFF)
+	SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v, ot3.val_2 ot3v
+		FROM o_test_parallel_seq_rescan_multiple_joins1 ot1
+		INNER JOIN o_test_parallel_seq_rescan_multiple_joins2 ot2
+			ON ot1.val_1 = ot2.val_1
+		INNER JOIN o_test_parallel_seq_rescan_multiple_joins3 ot3
+			ON ot1.val_1 = ot3.val_1
+				WHERE ot1.val_1 = 1 ORDER BY ot1.val_1, ot1v, ot2v, ot3v;
+SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v, ot3.val_2 ot3v
+	FROM o_test_parallel_seq_rescan_multiple_joins1 ot1
+	INNER JOIN o_test_parallel_seq_rescan_multiple_joins2 ot2
+		ON ot1.val_1 = ot2.val_1
+	INNER JOIN o_test_parallel_seq_rescan_multiple_joins3 ot3
+		ON ot1.val_1 = ot3.val_1
+			WHERE ot1.val_1 = 1 ORDER BY ot1.val_1, ot1v, ot2v, ot3v;
+COMMIT;
+
+BEGIN;
+
+CREATE TABLE o_test_parallelscan_reinitialize1 (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+
+CREATE TABLE o_test_parallelscan_reinitialize2 (
+	val_1 int,
+	val_2 int,
+	PRIMARY KEY(val_1,val_2)
+) USING orioledb;
+
+CREATE INDEX o_test_parallelscan_reinitialize1_ix
+	ON o_test_parallelscan_reinitialize1 (val_1);
+CREATE INDEX o_test_parallelscan_reinitialize2_ix
+	ON o_test_parallelscan_reinitialize2 (val_1);
+
+INSERT INTO o_test_parallelscan_reinitialize1
+	SELECT 1, v FROM generate_series(1, 5) v;
+INSERT INTO o_test_parallelscan_reinitialize2 VALUES (1,1), (1,2);
+
+ANALYZE o_test_parallelscan_reinitialize1;
+SET LOCAL parallel_leader_participation = off;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL max_parallel_workers_per_gather = 3;
+SET LOCAL enable_indexscan = OFF;
+SET LOCAL enable_hashjoin = OFF;
+SET LOCAL enable_sort = OFF;
+SET LOCAL enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF)
+	SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
+		FROM o_test_parallelscan_reinitialize1 ot1
+		INNER JOIN o_test_parallelscan_reinitialize2 ot2
+			ON ot1.val_1 = ot2.val_1
+				WHERE ot1.val_1 % 1000 = 1 AND ot2.val_1 = any(array[1]);
+SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
+	FROM o_test_parallelscan_reinitialize1 ot1
+	INNER JOIN o_test_parallelscan_reinitialize2 ot2
+		ON ot1.val_1 = ot2.val_1
+			WHERE ot1.val_1 % 1000 = 1 AND ot2.val_1 = any(array[1]);
+
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;
