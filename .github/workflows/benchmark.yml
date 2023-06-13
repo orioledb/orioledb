@@ -43,7 +43,7 @@ jobs:
           ec2-image-id: ami-02e2a649d220de1f5
           ec2-instance-type: ${{ github.event.inputs.instance_type }}
           subnet-id: subnet-04b4e8ee77472631f
-          security-group-id: sg-0f1853a1ae02202b5
+          security-group-id: sg-0294fb158210dc0df
           aws-resource-tags: > # optional, requires additional permissions
             [
               {"Key": "Name", "Value": "ec2-github-runner"},
