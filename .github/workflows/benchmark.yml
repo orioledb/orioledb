@@ -88,7 +88,13 @@ jobs:
           fi
           sudo chown ubuntu:ubuntu /mnt
           sudo sysctl -w vm.nr_hugepages=`grep MemTotal /proc/meminfo | awk '{print int($2/2048/2)}'`
+          sudo sh -c 'echo "RemoveIPC=no" >> /etc/systemd/logind.conf'
+          sudo apt-get -y remove -qq unattended-upgrades
+          sudo sh -c 'echo "/mnt/%t_%p.core" > /proc/sys/kernel/core_pattern'
           PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH" python3 ./orioledb/ci/pgbench.py ${{ github.event.inputs.args }} --results_dir=$GITHUB_WORKSPACE/results
+      - name: Check for core dumps
+        run: bash ./orioledb/ci/check_bench_cores.sh
+        if: ${{ success() || failure() }}
       - name: Upload results
         uses: actions/upload-artifact@v3
         with:
