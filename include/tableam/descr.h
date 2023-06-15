@@ -3,7 +3,7 @@
  * descr.h
  *		Declarations of descriptors used for table access method definiton.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/descr.h

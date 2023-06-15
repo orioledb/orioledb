@@ -5,7 +5,7 @@
  *
  * database_cache is tree that contains cached metadata from pg_database.
  *
- * Copyright (c) 2021-2023, OrioleDB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_database_cache.c

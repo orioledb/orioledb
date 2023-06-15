@@ -5,7 +5,7 @@
  *
  * type_cache is tree that contains cached metadata from pg_type.
  *
- * Copyright (c) 2021-2022, OrioleDB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_type_cache.c

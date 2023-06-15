@@ -4,7 +4,7 @@
  *		Declarations for implementation of BTree interface for OrioleDB
  *		tables.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/tree.h

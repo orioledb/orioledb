@@ -3,7 +3,7 @@
  * scan.h
  *		Declarations for sequential scan of OrioleDB B-tree.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/scan.h

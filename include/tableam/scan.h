@@ -3,7 +3,7 @@
  * scan.h
  *		Scan Provider for orioledb tables.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/scan.h

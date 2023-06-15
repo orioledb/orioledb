@@ -3,7 +3,7 @@
  * io.h
  *		Declarations for orioledb B-tree IO.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/io.h

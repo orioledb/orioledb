@@ -4,7 +4,7 @@
  *		Function dealing with key ranges for planning and execution stage
  *		in OrioleDB.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/tableam/key_range.c

@@ -3,7 +3,7 @@
  * split.c
  *		Routines for implementation of splitting B-tree page.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/split.c

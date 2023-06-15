@@ -8,7 +8,7 @@
  * enumoid_cache is tree that contains typeoids for enumoids,
  * that used to get type from enumoid in o_enum_cmp_internal_hook.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_enum_cache.c

@@ -3,7 +3,7 @@
  * index_scan.c
  *		Routines for index scan of orioledb table
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/tableam/index_scan.c

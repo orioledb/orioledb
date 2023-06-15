@@ -3,7 +3,7 @@
  * page_pool.c
  *		OrioleDB logical page pool implementation.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/utils/page_pool.c

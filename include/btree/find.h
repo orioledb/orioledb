@@ -3,7 +3,7 @@
  * find.h
  *		Declarations for finding page in orioledb B-tree.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/find.h

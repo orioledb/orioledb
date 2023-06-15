@@ -3,7 +3,7 @@
  * o_indices.h
  * 		Declarations for orioledb indices system tree.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/catalog/o_indices.h

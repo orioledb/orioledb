@@ -3,7 +3,7 @@
  * indices.c
  *		Indices routines
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/indices.c

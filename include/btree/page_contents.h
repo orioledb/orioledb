@@ -3,7 +3,7 @@
  * page_contents.h
  *		Declarations of OrioleDB B-tree page structure.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/page_contents.h

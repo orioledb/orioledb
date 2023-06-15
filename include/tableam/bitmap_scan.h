@@ -3,7 +3,7 @@
  * bitmap_scan.h
  *		Declarations for bitmap scan of OrioleDB table.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/bitmap_scan.h

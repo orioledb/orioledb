@@ -3,7 +3,7 @@
  * recovery.c
  *		General routines for orioledb recovery.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/recovery/recovery.c

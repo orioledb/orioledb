@@ -3,7 +3,7 @@
  * toast.h
  * 		Low-level declarations for orioledb TOAST implementation
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tuple/toast.h

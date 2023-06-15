@@ -14,7 +14,7 @@
  * is reset after reboot of the database engine and the state must
  * be restored after it.
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/free_extents.c

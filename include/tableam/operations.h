@@ -3,7 +3,7 @@
  * operations.h
  *		Declarations of table-level operations
  *
- * Copyright (c) 2021-2022, Oriole DB Inc.
+ * Copyright (c) 2021-2023, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/operations.h
