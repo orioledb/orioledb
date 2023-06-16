@@ -32,7 +32,7 @@ class FileOperationsTest(BaseTest):
 			self.assertEqual("We should not be here", "")
 		except Exception as e:
 			message = re.sub('[0-9]+', 'x', e.message)
-			self.assertTrue(message.startswith("FATAL:  could not open data file orioledb_data/x_x\n"))
+			self.assertTrue("FATAL:  could not open data file orioledb_data/x/x\n" in message)
 
 		# checks that all pages has been released
 		self.assertEqual(

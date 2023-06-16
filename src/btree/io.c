@@ -179,12 +179,14 @@ btree_smgr_filename(BTreeDescr *desc, off_t offset)
 {
 	int			num = offset / ORIOLEDB_SEGMENT_SIZE;
 
+	o_check_init_db_dir(desc->oids.datoid);
+
 	if (num == 0)
-		return psprintf(ORIOLEDB_DATA_DIR "/%u_%u",
+		return psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
 						desc->oids.datoid,
 						desc->oids.relnode);
 	else
-		return psprintf(ORIOLEDB_DATA_DIR "/%u_%u.%u",
+		return psprintf(ORIOLEDB_DATA_DIR "/%u/%u.%u",
 						desc->oids.datoid,
 						desc->oids.relnode,
 						num);
@@ -2206,9 +2208,9 @@ perform_writeback(IOWriteBack *writeback)
 			if (!use_mmap)
 			{
 				if (segno == 0)
-					snprintf(filename, MAXPGPATH, ORIOLEDB_DATA_DIR "/%u_%u", datoid, relnode);
+					snprintf(filename, MAXPGPATH, ORIOLEDB_DATA_DIR "/%u/%u", datoid, relnode);
 				else
-					snprintf(filename, MAXPGPATH, ORIOLEDB_DATA_DIR "/%u_%u.%u", datoid, relnode, segno);
+					snprintf(filename, MAXPGPATH, ORIOLEDB_DATA_DIR "/%u/%u.%u", datoid, relnode, segno);
 				file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
 				offset = cur.fileExtent.off;
 				len = cur.fileExtent.len;
@@ -2271,35 +2273,39 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 	struct dirent *file;
 	DIR		   *dir;
 	char	   *filename;
+	char	   *dirname;
 	bool		first_file_deleted = false;
 
-	dir = opendir(ORIOLEDB_DATA_DIR);
+	dirname = psprintf(ORIOLEDB_DATA_DIR "/%u", datoid);
+
+	dir = opendir(dirname);
+
+	pfree(dirname);
 	if (dir == NULL)
 		return false;
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
-		uint32		file_datoid,
-					file_relnode,
+		uint32		file_relnode,
 					file_chkp = 0,
 					file_segno = 0;
 		char		file_ext[5];
 		char	   *file_ext_p = NULL;
 
-		if ((sscanf(file->d_name, "%10u_%10u-%10u.%4s",
-					&file_datoid, &file_relnode, &file_chkp, file_ext) == 4 &&
+		if ((sscanf(file->d_name, "%10u-%10u.%4s",
+					&file_relnode, &file_chkp, file_ext) == 3 &&
 			 (!strcmp(file_ext, "tmp") || !strcmp(file_ext, "map")) &&
 			 (file_ext_p = file_ext)) ||
-			sscanf(file->d_name, "%10u_%10u.%10u",
-				   &file_datoid, &file_relnode, &file_segno) == 3 ||
-			sscanf(file->d_name, "%10u_%10u",
-				   &file_datoid, &file_relnode) == 2)
+			sscanf(file->d_name, "%10u.%10u",
+				   &file_relnode, &file_segno) == 2 ||
+			sscanf(file->d_name, "%10u",
+				   &file_relnode) == 1)
 		{
-			if (datoid == file_datoid && relnode == file_relnode)
+			if (relnode == file_relnode)
 			{
 				if (!first_file_deleted)
 				{
-					filename = psprintf(ORIOLEDB_DATA_DIR "/%u_%u",
+					filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
 										datoid, relnode);
 					callback(filename, 0, NULL, arg);
 					pfree(filename);
@@ -2308,7 +2314,8 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 
 				if (file_segno != 0 || file_ext_p != NULL)
 				{
-					filename = psprintf(ORIOLEDB_DATA_DIR "/%s", file->d_name);
+					filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%s",
+										datoid, file->d_name);
 					callback(filename, file_segno, file_ext_p, arg);
 					pfree(filename);
 				}

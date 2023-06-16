@@ -134,6 +134,8 @@ get_seq_buf_filename(SeqBufTag *tag)
 {
 	char	   *typename;
 
+	o_check_init_db_dir(tag->datoid);
+
 	if (tag->type == 't')
 		typename = "tmp";
 	else if (tag->type == 'm')
@@ -144,7 +146,7 @@ get_seq_buf_filename(SeqBufTag *tag)
 		return NULL;
 	}
 	/* this format is used by recovery_cleanup_old_files() */
-	return psprintf(ORIOLEDB_DATA_DIR "/%u_%u-%u.%s", tag->datoid,
+	return psprintf(ORIOLEDB_DATA_DIR "/%u/%u-%u.%s", tag->datoid,
 					tag->relnode, tag->num, typename);
 }
 

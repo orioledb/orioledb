@@ -663,11 +663,12 @@ class ReplicationTest(BaseTest):
 	def get_orioledb_files(self, node):
 		orioledb_dir = node.data_dir + "/orioledb_data"
 		all_files = []
-		for f in os.listdir(orioledb_dir):
-			m = re.match(r'(\d+)_(\d+).*', f)
-			if m and int(m.group(1)) > 1:
-				# do not check o_tables BTree files
-				all_files.append(f)
+		for ff in os.listdir(orioledb_dir):
+			dbDir = os.path.join(orioledb_dir, ff)
+			if os.path.isdir(dbDir) and int(ff) > 1:
+				for f in os.listdir(dbDir):
+					m = re.match(r'(\d+).*', f)
+					all_files.append(ff + '_' + f)
 		return all_files
 
 	def all_tables_dropped(self, node):

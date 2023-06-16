@@ -4164,7 +4164,7 @@ char *
 get_eviction_filename(ORelOids oids, uint32 chkp_num)
 {
 	/* this format is used by recovery_cleanup_old_files() */
-	return psprintf(ORIOLEDB_DATA_DIR "/%u_%u-%u." ORIOLEDB_EVT_EXTENSION,
+	return psprintf(ORIOLEDB_DATA_DIR "/%u/%u-%u." ORIOLEDB_EVT_EXTENSION,
 					oids.datoid, oids.relnode, chkp_num);
 }
 
@@ -4520,7 +4520,7 @@ tbl_data_exists(ORelOids *oids)
 	File		file;
 
 	/* TODO: more smart check */
-	filename = psprintf(ORIOLEDB_DATA_DIR "/%u_%u", oids->datoid, oids->relnode);
+	filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%u", oids->datoid, oids->relnode);
 	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 	pfree(filename);
 

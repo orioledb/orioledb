@@ -253,6 +253,7 @@ extern bool orioledb_table_description_compress;
 #define O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(blkno) \
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
+extern void o_check_init_db_dir(Oid dbOid);
 extern void orioledb_check_shmem(void);
 
 typedef int OCompress;

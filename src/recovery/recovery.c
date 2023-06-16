@@ -1772,8 +1772,10 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 void
 recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 {
-	DIR		   *dir;
-	struct dirent *file;
+	DIR		   *dir,
+			   *dbDir;
+	struct dirent *file,
+			   *dbFile;
 	char	   *filename;
 	char		ext[5];
 
@@ -1786,69 +1788,84 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
-		uint32		file_datoid,
-					file_reloid,
-					file_chkp;
-		bool		cleanup = false;
+		Oid			dbOid;
+		char	   *dbDirName;
 
-		if (sscanf(file->d_name, "%10u_%10u-%10u.%4s",
-				   &file_datoid, &file_reloid, &file_chkp, ext) == 4)
+		if (sscanf(file->d_name, "%u", &dbOid) != 1)
+			continue;
+
+		dbDirName = psprintf(ORIOLEDB_DATA_DIR "/%u", dbOid);
+		dbDir = opendir(dbDirName);
+		pfree(dbDirName);
+		if (dbDir == NULL)
+			continue;
+
+		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
 		{
-			if (before_recovery)
+			uint32		file_reloid,
+						file_chkp;
+			bool		cleanup = false;
+
+			if (sscanf(dbFile->d_name, "%10u-%10u.%4s",
+					   &file_reloid, &file_chkp, ext) == 3)
 			{
-				/*
-				 * Before recovery We should cleanup: 1. All *.evt files. 2.
-				 * *.map and *.tmp files which were not created by
-				 * checkpointer. 3. All free extents tree files.
-				 *
-				 * Otherwise: 1. BTree will be loaded from evicted state, not
-				 * from checkpoint state. 2. In some cases wrong *.map files
-				 * will be created. (if size of old *.map or *.tmp file is
-				 * more than will be created by checkpointer).
-				 */
-				cleanup = strcmp(ext, ORIOLEDB_EVT_EXTENSION) == 0;
-
-				if (!cleanup && file_chkp > chkp_num)
+				if (before_recovery)
 				{
-					cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
+					/*
+					 * Before recovery We should cleanup: 1. All *.evt files.
+					 * 2. *.map and *.tmp files which were not created by
+					 * checkpointer. 3. All free extents tree files.
+					 *
+					 * Otherwise: 1. BTree will be loaded from evicted state,
+					 * not from checkpoint state. 2. In some cases wrong *.map
+					 * files will be created. (if size of old *.map or *.tmp
+					 * file is more than will be created by checkpointer).
+					 */
+					cleanup = strcmp(ext, ORIOLEDB_EVT_EXTENSION) == 0;
+
+					if (!cleanup && file_chkp > chkp_num)
+					{
+						cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
+					}
+
+					if (!cleanup)
+					{
+						ORelOids	oids = {dbOid, file_reloid, file_reloid};
+
+						cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
+					}
 				}
-
-				if (!cleanup)
+				else
 				{
-					ORelOids	oids = {file_datoid, file_reloid, file_reloid};
-
-					cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
+					/*
+					 * After recovery we should cleanup old *.tmp and *.map
+					 * files.
+					 */
+					if (file_chkp < chkp_num)
+						cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
+					else if (file_chkp == chkp_num)
+						cleanup = !strcmp(ext, "tmp");
 				}
 			}
-			else
+			else if (before_recovery &&
+					 sscanf(dbFile->d_name, "%10u", &file_reloid) == 1)
 			{
 				/*
-				 * After recovery we should cleanup old *.tmp and *.map files.
+				 * Removes free extents tree data files.
 				 */
-				if (file_chkp < chkp_num)
-					cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
-				else if (file_chkp == chkp_num)
-					cleanup = !strcmp(ext, "tmp");
+				ORelOids	oids = {dbOid, file_reloid, file_reloid};
+
+				cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
+			}
+
+			if (cleanup)
+			{
+				filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%s", dbOid, dbFile->d_name);
+				durable_unlink(filename, FATAL);
+				pfree(filename);
 			}
 		}
-		else if (before_recovery &&
-				 sscanf(file->d_name, "%10u_%10u",
-						&file_datoid, &file_reloid) == 2)
-		{
-			/*
-			 * Removes free extents tree data files.
-			 */
-			ORelOids	oids = {file_datoid, file_reloid, file_reloid};
-
-			cleanup = IS_SYS_TREE_OIDS(oids) && sys_tree_get_storage_type(oids.relnode) == BTreeStorageTemporary;
-		}
-
-		if (cleanup)
-		{
-			filename = psprintf(ORIOLEDB_DATA_DIR "/%s", file->d_name);
-			durable_unlink(filename, FATAL);
-			pfree(filename);
-		}
+		closedir(dbDir);
 	}
 
 	if (errno != 0)

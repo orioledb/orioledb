@@ -572,10 +572,14 @@ class IndicesBuildTest(BaseTest):
 
 	def get_map_files(self, filter_files):
 		map_files = []
+
 		orioledb_dir = self.node.data_dir + "/orioledb_data"
-		for f in os.listdir(orioledb_dir):
-			if re.match(".*\.map$", f):
-				map_files.append(f)
+		for ff in os.listdir(orioledb_dir):
+			dbDir = os.path.join(orioledb_dir, ff)
+			if os.path.isdir(dbDir):
+				for f in os.listdir(dbDir):
+					if re.match(".*\.map$", f):
+						map_files.append(ff + '_' + f)
 
 		map_files = [re.split(r'\.|-|_', f) for f in map_files]
 		map_files = [[*[int(x) for x in f[:3]], f[3]] for f in map_files]

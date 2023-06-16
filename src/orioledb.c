@@ -42,6 +42,7 @@
 #include "catalog/pg_enum.h"
 #include "executor/execExpr.h"
 #include "funcapi.h"
+#include "libpq/auth.h"
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/plancat.h"
@@ -232,6 +233,7 @@ _PG_init(void)
 
 	verify_dir_is_empty_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
 	verify_dir_is_empty_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
+	verify_dir_is_empty_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
 
 	/* See InitializeMaxBackends(), InitProcGlobal() */
 	max_procs = MaxConnections + autovacuum_max_workers + 2 +
@@ -658,6 +660,19 @@ _PG_init(void)
 	stopevents_make_cxt();
 }
 
+void
+o_check_init_db_dir(Oid dbOid)
+{
+	static bool initializedOid = InvalidOid;
+
+	if (initializedOid == dbOid)
+		return;
+
+	verify_dir_is_empty_or_create(psprintf("%s/%u",
+										   ORIOLEDB_DATA_DIR,
+										   dbOid), NULL, NULL);
+	initializedOid = dbOid;
+}
 
 static Size
 o_proc_shmem_needs(void)

@@ -137,13 +137,16 @@ class FilesTest(BaseTest):
 		xid_files = []
 
 		orioledb_dir = self.node.data_dir + "/orioledb_data"
-		for f in os.listdir(orioledb_dir):
-			if re.match(".*\.map$", f):
-				map_files.append(f)
-			if re.match(".*\.tmp$", f):
-				tmp_files.append(f)
-			if re.match(".*\.xid$", f):
-				xid_files.append(f)
+		for ff in os.listdir(orioledb_dir):
+			dbDir = os.path.join(orioledb_dir, ff)
+			if re.match(".*\.xid$", ff):
+				xid_files.append(ff)
+			elif os.path.isdir(dbDir):
+				for f in os.listdir(dbDir):
+					if re.match(".*\.map$", f):
+						map_files.append(ff + '_' + f)
+					if re.match(".*\.tmp$", f):
+						tmp_files.append(ff + '_' + f)
 
 		self.assertEqual(1, len(xid_files))
 		last_xid = int(xid_files[0].split('.')[0])
@@ -241,8 +244,7 @@ class FilesTest(BaseTest):
 			""")
 		node.stop()
 
-		last_xid, map_files, tmp_files = self.get_file_lists(
-											filter_sys_trees=True)
+		last_xid, map_files, tmp_files = self.get_file_lists(filter_sys_trees=True)
 		tmp_files = [f for f in tmp_files if int(f[2]) < last_xid - 1]
 
 		self.assertEqual([], tmp_files)
@@ -307,7 +309,7 @@ class FilesTest(BaseTest):
 		map_files = ""
 		tmp_files = ""
 
-		for f in os.listdir(orioledb_dir):
+		for f in glob.glob(orioledb_dir + '/*/*'):
 			if re.match(".*\.map$", f):
 				map_files = map_files + " " + f
 			if re.match(".*\.tmp$", f):
@@ -474,7 +476,7 @@ class FilesTest(BaseTest):
 			(str(1), str(n)))
 		con1.commit()
 
-		evt_files = [f for f in glob.glob(node.data_dir + "/orioledb_data/*.evt")]
+		evt_files = [f for f in glob.glob(node.data_dir + "/orioledb_data/*/*.evt")]
 		self.assertNotEqual(len(evt_files), 0)
 
 		con1.close()
@@ -484,5 +486,5 @@ class FilesTest(BaseTest):
 						 "orioledb.main_buffers = 100MB\n")
 		node.start()
 		node.safe_psql('postgres', 'CHECKPOINT;')
-		evt_files = [f for f in glob.glob(node.data_dir + "/orioledb_data/*.evt")]
+		evt_files = [f for f in glob.glob(node.data_dir + "/orioledb_data/*/*.evt")]
 		self.assertEqual(len(evt_files), 0)
