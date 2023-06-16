@@ -271,6 +271,36 @@ SELECT orioledb_tbl_structure('o_test_inherits_alter_type_int8'::regclass,
 SELECT orioledb_tbl_structure('o_test_inherits_alter_type_int8_child'::regclass,
 							  'nue');
 
+BEGIN;
+
+CREATE TABLE o_test_alter_type_ix_included_rollback (
+	val_1 int,
+	val_2 text,
+	val_3 int
+) USING orioledb;
+
+CREATE INDEX o_test_alter_type_ix_included_rollback_ix1
+	ON o_test_alter_type_ix_included_rollback(val_3) INCLUDE (val_2);
+
+INSERT INTO o_test_alter_type_ix_included_rollback
+	SELECT v, 'XXX' || v, v * 10
+		FROM generate_series(1, 5) v;
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
+		ORDER BY val_3;
+SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
+
+ALTER TABLE o_test_alter_type_ix_included_rollback
+	ALTER val_2 TYPE text COLLATE "C";
+
+EXPLAIN (COSTS OFF)
+	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
+		ORDER BY val_3;
+SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
+
+ROLLBACK;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;

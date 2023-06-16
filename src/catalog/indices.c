@@ -638,7 +638,8 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_update(o_table, oxid, csn);
-		add_undo_create_relnode(o_table->oids, &index->oids, 1);
+		if (!reuse)
+			add_undo_create_relnode(o_table->oids, &index->oids, 1);
 		recreate_table_descr_by_oids(oids);
 	}
 
