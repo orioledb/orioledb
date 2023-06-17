@@ -62,7 +62,7 @@ See [usage](doc/usage.md), [architecture](doc/arch.md), and
 
 ## Status
 
-OrioleDB now has public alpha status.  It is recommended for experiments,
+OrioleDB now has public beta status.  It is recommended for experiments,
 testing, benchmarking, etc., but is not recommended for production usage.
 If you are interested in OrioleDB's benefits in production, please
 [contact us](mailto:sales@orioledb.com).

@@ -27,7 +27,7 @@ Connect to the server via psql:
 
 You should expect a similar psql message:
 ```
-psql (15.2 OrioleDB public alpha 13 PGTAG=patches15_13 alpine:3.17+clang build:2023-06-02T19:08:58+00:00)
+psql (15.2 OrioleDB public beta 1 PGTAG=patches15_15 alpine:3.17+clang build:2023-06-17T23:05:36+00:00)
 Type "help" for help.
 
 postgres=#
@@ -39,6 +39,12 @@ Enable orioledb extension:
 
 Test some commands:
 ```
+postgres=# select orioledb_version();
+    orioledb_version
+------------------------
+ OrioleDB public beta 1
+(1 row)
+
 postgres=# \d+
                                            List of relations
  Schema |         Name         | Type |  Owner   | Persistence | Access method |  Size   | Description
@@ -101,14 +107,6 @@ postgres=# \dx+ orioledb
  view orioledb_table
  view orioledb_table_descr
 (39 rows)
-
-postgres=# select orioledb_version();
-     orioledb_version
---------------------------
- OrioleDB public alpha 13
-(1 row)
-
-
 ```
 
 Quit from the database:  `\q`
