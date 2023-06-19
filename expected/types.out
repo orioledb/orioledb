@@ -987,6 +987,23 @@ ERROR:  domain o_test_domain_1 does not allow null values
 CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
 ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
 ERROR:  value for domain o_test_domain_2 violates check constraint "o_test_domain_2_check"
+BEGIN;
+CREATE DOMAIN myint_domain_rollback AS integer CHECK (VALUE > 5);
+CREATE DOMAIN myarray_domain_rollback AS myint_domain_rollback[];
+CREATE TABLE o_test_domain_rollback (
+	val_1 myarray_domain_rollback,
+	val_2 int NOT NULL,
+	val_3 inet,
+	PRIMARY KEY(val_1, val_2, val_3)
+)USING orioledb;
+INSERT INTO o_test_domain_rollback VALUES ('{10}', 10, '10.10.10.10');
+SELECT * FROM o_test_domain_rollback;
+ val_1 | val_2 |    val_3    
+-------+-------+-------------
+ {10}  |    10 | 10.10.10.10
+(1 row)
+
+ROLLBACK;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_record_type

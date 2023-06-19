@@ -19,6 +19,7 @@
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
+#include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
@@ -392,6 +393,7 @@ modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 	UndoLocation nonLockUndoLocation;
 	OBTreeFindPageContext context;
 	BTreeKeyType keyType = item->action == BTreeOperationUpdate ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
+	bool		found;
 
 	Assert(abort);
 
@@ -418,8 +420,11 @@ modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 	if (!changeCountsValid)
 		item->pageChangeCount = InvalidOPageChangeCount;
 
-	if (!refind_page(&context, (Pointer) &tuple, keyType, 0,
-					 item->blkno, item->pageChangeCount))
+	o_set_syscache_hooks();
+	found = refind_page(&context, (Pointer) &tuple, keyType, 0, item->blkno,
+						item->pageChangeCount);
+	o_reset_syscache_hooks();
+	if (!found)
 	{
 		/*
 		 * BTree can be already deleted and cleaned by

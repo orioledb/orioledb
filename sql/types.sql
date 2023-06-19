@@ -346,6 +346,22 @@ ALTER TABLE o_test_domain_check ADD COLUMN val_3 o_test_domain_1;
 CREATE DOMAIN o_test_domain_2 AS text CHECK (VALUE <> 'foo') DEFAULT 'foo';
 ALTER TABLE o_test_domain_check ADD COLUMN val_4 o_test_domain_2;
 
+BEGIN;
+
+CREATE DOMAIN myint_domain_rollback AS integer CHECK (VALUE > 5);
+CREATE DOMAIN myarray_domain_rollback AS myint_domain_rollback[];
+
+CREATE TABLE o_test_domain_rollback (
+	val_1 myarray_domain_rollback,
+	val_2 int NOT NULL,
+	val_3 inet,
+	PRIMARY KEY(val_1, val_2, val_3)
+)USING orioledb;
+
+INSERT INTO o_test_domain_rollback VALUES ('{10}', 10, '10.10.10.10');
+SELECT * FROM o_test_domain_rollback;
+ROLLBACK;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA types CASCADE;
 RESET search_path;
