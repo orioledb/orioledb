@@ -313,6 +313,29 @@ UPDATE o_test_cross_partition_update_trigger SET a = a + 1 RETURNING *;
 SELECT tableoid::regclass, * FROM o_test_cross_partition_update_trigger;
 TABLE o_test_cross_partition_update_trigger_fk;
 
+BEGIN;
+
+CREATE TABLE o_test_partition_truncate (
+  a int UNIQUE,
+  b char
+) PARTITION BY LIST (a);
+
+CREATE TABLE o_test_partition_truncate2 (
+  b char,
+  a int unique
+) USING orioledb;
+
+ALTER TABLE o_test_partition_truncate
+	ATTACH PARTITION o_test_partition_truncate2 FOR VALUES IN (3);
+
+INSERT INTO o_test_partition_truncate VALUES (3, 'b');
+
+TRUNCATE o_test_partition_truncate;
+
+SELECT * FROM o_test_partition_truncate;
+
+COMMIT;
+
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA partition CASCADE;

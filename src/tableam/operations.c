@@ -1698,6 +1698,7 @@ o_truncate_table(ORelOids oids)
 
 	if (!invalidatedTable)
 	{
+		cleanup_btree(oids.datoid, oids.relnode, true);
 		o_invalidate_oids(oids);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(oids.datoid, oids.reloid, oids.relnode);*/

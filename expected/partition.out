@@ -653,8 +653,27 @@ TABLE o_test_cross_partition_update_trigger_fk;
  1
 (1 row)
 
+BEGIN;
+CREATE TABLE o_test_partition_truncate (
+  a int UNIQUE,
+  b char
+) PARTITION BY LIST (a);
+CREATE TABLE o_test_partition_truncate2 (
+  b char,
+  a int unique
+) USING orioledb;
+ALTER TABLE o_test_partition_truncate
+	ATTACH PARTITION o_test_partition_truncate2 FOR VALUES IN (3);
+INSERT INTO o_test_partition_truncate VALUES (3, 'b');
+TRUNCATE o_test_partition_truncate;
+SELECT * FROM o_test_partition_truncate;
+ a | b 
+---+---
+(0 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 18 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
 drop cascades to table o_test_cross_partition_update_child
@@ -672,8 +691,9 @@ drop cascades to table o_test_partition_pkey_update_move_child2
 drop cascades to table o_test_cross_partition_update_trigger_fk
 drop cascades to table o_test_cross_partition_update_trigger_child1
 drop cascades to table o_test_cross_partition_update_trigger_child2
+drop cascades to table o_test_partition_truncate2
 DROP SCHEMA partition CASCADE;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range
 drop cascades to table o_test_partition_on_conflict_list
 drop cascades to table o_test_cross_partition_update
@@ -683,4 +703,5 @@ drop cascades to table o_test_partition_pkey_update
 drop cascades to table o_test_partition_multiple_moves
 drop cascades to table o_test_partition_pkey_update_move
 drop cascades to table o_test_cross_partition_update_trigger
+drop cascades to table o_test_partition_truncate
 RESET search_path;
