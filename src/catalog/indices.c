@@ -881,7 +881,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	/* If no workers were successfully launched, back out (do serial build) */
 	if (!in_recovery)
 	{
-		if (btleader->nparticipanttuplesorts == 0)
+		if (pcxt->nworkers_launched == 0)
 		{
 			pfree(&btshared->o_table_serialized);
 			_o_index_end_parallel(btleader);
