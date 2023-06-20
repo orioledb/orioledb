@@ -797,6 +797,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		descr->predicate_str = pstrdup(oIndex->predicate_str);
 	descr->expressions = list_copy_deep(oIndex->expressions);
 
+	o_set_syscache_hooks();
 	descr->predicate_state = ExecInitQual(descr->predicate, NULL);
 	descr->expressions_state = NIL;
 	foreach(lc, descr->expressions)
@@ -809,6 +810,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		descr->expressions_state = lappend(descr->expressions_state,
 										   expr_state);
 	}
+	o_reset_syscache_hooks();
 	if (oIndex->indexType == oIndexPrimary)
 	{
 		descr->tbl_attnums = palloc0(sizeof(AttrNumberMap) * descr->nFields);

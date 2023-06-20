@@ -1130,6 +1130,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * function.
 	 */
 	Assert(OidIsValid(opclass->key.common.datoid)); /* ssup may use SysCache */
+	o_set_syscache_hooks();
 	if (MyDatabaseId == opclass->key.common.datoid &&
 		OidIsValid(opclass->ssupOid))
 	{
@@ -1160,6 +1161,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid);
+	o_reset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
 }

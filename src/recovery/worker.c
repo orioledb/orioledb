@@ -15,8 +15,9 @@
 #include "orioledb.h"
 
 #include "btree/modify.h"
-#include "catalog/o_tables.h"
 #include "catalog/indices.h"
+#include "catalog/o_sys_cache.h"
+#include "catalog/o_tables.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "tableam/descr.h"
@@ -568,6 +569,7 @@ static void
 apply_tbl_modify_record(OTableDescr *descr, uint16 type,
 						OTuple p, OXid oxid, CommitSeqNo csn)
 {
+	o_set_syscache_hooks();
 	switch (type)
 	{
 		case RECOVERY_INSERT:
@@ -583,6 +585,7 @@ apply_tbl_modify_record(OTableDescr *descr, uint16 type,
 			Assert(false);
 			elog(ERROR, "Wrong primary index modify record type %d", type);
 	}
+	o_reset_syscache_hooks();
 }
 
 static void

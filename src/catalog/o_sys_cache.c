@@ -2220,39 +2220,45 @@ o_is_syscache_hooks_set()
 void
 o_set_syscache_hooks()
 {
-	if (!CurrentResourceOwner)
+	if (!IsTransactionState())
 	{
-		if (!my_owner)
-			my_owner = ResourceOwnerCreate(NULL, "orioledb o_fmgr_sql");
-		CurrentResourceOwner = my_owner;
-	}
+		if (!CurrentResourceOwner)
+		{
+			if (!my_owner)
+				my_owner = ResourceOwnerCreate(NULL, "orioledb o_fmgr_sql");
+			CurrentResourceOwner = my_owner;
+		}
 
-	GetUserIdAndSecContext(&save_userid, &save_sec_context);
-	SetUserIdAndSecContext(BOOTSTRAP_SUPERUSERID,
-						   save_sec_context |
-						   SECURITY_LOCAL_USERID_CHANGE);
-	SearchCatCacheInternal_hook = o_SearchCatCacheInternal_hook;
-	SearchCatCacheList_hook = o_SearchCatCacheList_hook;
-	SysCacheGetAttr_hook = o_SysCacheGetAttr_hook;
-	GetCatCacheHashValue_hook = o_GetCatCacheHashValue_hook;
-	GetDefaultOpClass_hook = o_type_cache_default_opclass;
-	load_typcache_tupdesc_hook = o_load_typcache_tupdesc_hook;
-	load_enum_cache_data_hook = o_load_enum_cache_data_hook;
+		GetUserIdAndSecContext(&save_userid, &save_sec_context);
+		SetUserIdAndSecContext(BOOTSTRAP_SUPERUSERID,
+							   save_sec_context |
+							   SECURITY_LOCAL_USERID_CHANGE);
+		SearchCatCacheInternal_hook = o_SearchCatCacheInternal_hook;
+		SearchCatCacheList_hook = o_SearchCatCacheList_hook;
+		SysCacheGetAttr_hook = o_SysCacheGetAttr_hook;
+		GetCatCacheHashValue_hook = o_GetCatCacheHashValue_hook;
+		GetDefaultOpClass_hook = o_type_cache_default_opclass;
+		load_typcache_tupdesc_hook = o_load_typcache_tupdesc_hook;
+		load_enum_cache_data_hook = o_load_enum_cache_data_hook;
+	}
 }
 
 void
 o_reset_syscache_hooks()
 {
-	SearchCatCacheInternal_hook = NULL;
-	SearchCatCacheList_hook = NULL;
-	SysCacheGetAttr_hook = NULL;
-	GetCatCacheHashValue_hook = NULL;
-	GetDefaultOpClass_hook = NULL;
-	load_typcache_tupdesc_hook = NULL;
-	load_enum_cache_data_hook = NULL;
-	SetUserIdAndSecContext(save_userid, save_sec_context);
-	if (CurrentResourceOwner == my_owner)
+	if (SearchCatCacheInternal_hook != NULL)
 	{
-		CurrentResourceOwner = NULL;
+		SearchCatCacheInternal_hook = NULL;
+		SearchCatCacheList_hook = NULL;
+		SysCacheGetAttr_hook = NULL;
+		GetCatCacheHashValue_hook = NULL;
+		GetDefaultOpClass_hook = NULL;
+		load_typcache_tupdesc_hook = NULL;
+		load_enum_cache_data_hook = NULL;
+		SetUserIdAndSecContext(save_userid, save_sec_context);
+		if (CurrentResourceOwner == my_owner)
+		{
+			CurrentResourceOwner = NULL;
+		}
 	}
 }
