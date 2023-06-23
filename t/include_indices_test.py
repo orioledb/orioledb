@@ -279,3 +279,37 @@ class IncludeIndicesTest(BaseTest):
 							ORDER BY lower(val_1);
 					""")
 				)
+
+	def test_recovery_spread_idx_with_null(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1 (
+				val_1 int,
+				val_2 int,
+				PRIMARY KEY (val_1) INCLUDE (val_2)
+			) USING orioledb;
+
+			INSERT INTO o_test_1 SELECT x * 5, NULL
+				FROM generate_series(1,10) AS x;
+		""")
+		self.assertEqual(
+			[(5, None), (10, None), (15, None), (20, None), (25, None),
+			 (30, None), (35, None), (40, None), (45, None), (50, None)],
+			node.execute("""
+				SELECT * FROM o_test_1 ORDER BY val_1;
+			""")
+		)
+		node.stop(['-m','immediate'])
+
+		node.start()
+		self.assertEqual(
+			[(5, None), (10, None), (15, None), (20, None), (25, None),
+			 (30, None), (35, None), (40, None), (45, None), (50, None)],
+			node.execute("""
+				SELECT * FROM o_test_1 ORDER BY val_1;
+			""")
+		)
+		node.stop()

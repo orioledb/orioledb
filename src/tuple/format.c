@@ -393,8 +393,12 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
 	if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 	{
 		OTupleHeader header = (OTupleHeader) tuple.data;
-		int			hoff = SizeOfOTupleHeader + header->hasnulls ? MAXALIGN(BITMAPLEN(header->natts)) : 0;
+		int			hasnull_off;
+		int			hoff;
 
+		hasnull_off = header->hasnulls ? MAXALIGN(BITMAPLEN(header->natts)) :
+			0;
+		hoff = SizeOfOTupleHeader + hasnull_off;
 		*size = header->len - hoff;
 		return (Pointer) tuple.data + hoff;
 	}
