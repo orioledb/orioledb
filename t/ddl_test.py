@@ -4,6 +4,7 @@
 import subprocess
 
 from .base_test import BaseTest
+from testgres.exceptions import QueryException
 
 class DDLTest(BaseTest):
 	def test_update_default_to_null_same_trx(self):
@@ -63,3 +64,24 @@ class DDLTest(BaseTest):
 				con.execute("EXECUTE P0_5('-2841', '93929');")
 				con.commit()
 				con.execute("EXECUTE P0_5('3165', '17463');")
+
+	def test_sys_attrs(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test_1 (val_1 int)USING orioledb;
+			INSERT INTO o_test_1 VALUES (1);
+		""")
+		tableoid = node.execute("SELECT 'o_test_1'::regclass::oid;")[0][0]
+		self.assertEqual(node.execute("SELECT ctid, * FROM o_test_1;")[0],
+		   				 ('(0,1)', 1))
+		self.assertEqual(node.execute("SELECT tableoid, * FROM o_test_1;")[0],
+		   				 (tableoid, 1))
+		error_fields = ["xmin", "xmax", "cmin", "cmax"]
+		for field in error_fields:
+			with self.assertRaises(QueryException) as e:
+				node.safe_psql(f"SELECT {field}, * FROM o_test_1;")
+			self.assertErrorMessageEquals(e, (f"orioledb tuples does not have "
+											  f"system attribute: {field}"))

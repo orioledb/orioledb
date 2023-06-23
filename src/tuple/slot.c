@@ -21,6 +21,7 @@
 
 #include "access/detoast.h"
 #include "access/toast_internals.h"
+#include "catalog/heap.h"
 #include "catalog/pg_type_d.h"
 #include "storage/itemptr.h"
 #include "utils/expandeddatum.h"
@@ -338,6 +339,7 @@ static Datum
 tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 {
 	OTableSlot *oslot = (OTableSlot *) slot;
+	const FormData_pg_attribute *att;
 
 	if (attnum == RowIdAttributeNumber)
 	{
@@ -421,7 +423,9 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		return PointerGetDatum(result);
 	}
 
-	elog(ERROR, "virtual tuple table slot does not have system attributes");
+	att = SystemAttributeDefinition(attnum);
+	elog(ERROR, "orioledb tuples does not have system attribute: %s",
+		 att->attname.data);
 
 	return 0;					/* silence compiler warnings */
 }
