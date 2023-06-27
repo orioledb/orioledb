@@ -357,6 +357,41 @@ SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
 
 COMMIT;
 
+BEGIN;
+CREATE TABLE o_test_parallel_join (
+	val_1 float8 NOT NULL,
+	val_2 text NOT NULL,
+	PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+
+INSERT INTO o_test_parallel_join
+	SELECT a, repeat('x', a) FROM generate_series(1, 3) as a;
+
+CREATE TABLE o_test_parallel_join2 (
+	val_1 float8 NOT NULL,
+	val_2 text NOT NULL,
+	PRIMARY KEY (val_1, val_2)
+) USING orioledb;
+
+INSERT INTO o_test_parallel_join2
+	SELECT a, repeat('x', a) FROM generate_series(1, 3) as a;
+
+SET LOCAL max_parallel_workers_per_gather = 2;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL enable_indexscan = OFF;
+SET LOCAL enable_hashjoin = OFF;
+SET LOCAL enable_mergejoin = OFF;
+SET LOCAL enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_parallel_join
+		JOIN o_test_parallel_join2 USING (val_1, val_2);
+SELECT * FROM o_test_parallel_join
+	JOIN o_test_parallel_join2 USING (val_1, val_2);
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

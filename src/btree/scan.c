@@ -405,8 +405,11 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 		{
 			SpinLockAcquire(&poscan->workerStart);
 			Assert(poscan->workersReportedCount <= poscan->nworkers);
-			if (poscan->workersReportedCount == poscan->nworkers &&
-				(diskLeader || poscan->dsmHandle != 0 || poscan->downlinksCount == 0))
+			if ((poscan->workersReportedCount == poscan->nworkers ||
+				 poscan->flags & O_PARALLEL_IS_SINGLE_LEAF_PAGE) &&
+				(diskLeader ||
+				 poscan->dsmHandle != 0 ||
+				 poscan->downlinksCount == 0))
 			{
 				SpinLockRelease(&poscan->workerStart);
 				break;
