@@ -995,7 +995,7 @@ o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id)
 }
 
 bool
-o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
+o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 {
 	OTableChunkKey key;
 	bool		result;
@@ -1006,7 +1006,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 
 	key.oids = table->oids;
 	key.offset = 0;
-	key.version = 0;
+	key.version = version;
 
 	systrees_modify_start();
 	o_tables_oids_indexes(NULL, table, oxid, csn);
@@ -1016,6 +1016,12 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	pfree(data);
 
 	return result;
+}
+
+bool
+o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
+{
+	return o_tables_add_version(table, oxid, csn, 0);
 }
 
 /*

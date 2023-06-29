@@ -137,6 +137,8 @@ extern void o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_o
 
 /* Adds a new table to o_tables list */
 extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
+extern bool o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn,
+								 uint32 version);
 
 /* Returns OTable by its oids */
 extern OTable *o_tables_get(ORelOids oids);

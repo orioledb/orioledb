@@ -648,6 +648,36 @@ class ReplicationTest(BaseTest):
 				self.assertEqual(replica.execute("TABLE o_test_1"),
 								 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
 
+
+	def test_replication_table_rewrite(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.start()
+		with self.node as master:
+			with self.getReplica() as replica:
+				replica.start()
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1 (
+							val_1 int,
+							val_2 boolean
+						) USING orioledb;
+
+						CREATE UNIQUE INDEX ind_1
+							ON o_test_1 ((val_1::text COLLATE "C"));
+
+						ALTER TABLE o_test_1 ALTER val_2 TYPE TEXT;
+					""")
+
+					con1.commit()
+
+					self.catchup_orioledb(replica)
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x

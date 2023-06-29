@@ -1932,7 +1932,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				fill_current_oxid_csn(&oxid, &csn);
 				o_tables_drop_by_oids(old_oids, oxid, csn);
 				o_tables_swap_relnodes(old_o_table, new_o_table);
-				o_tables_add(old_o_table, oxid, csn);
+				o_tables_add_version(old_o_table, oxid, csn,
+									 new_o_table->version + 1);
 				o_tables_update_without_oids_indexes(new_o_table, oxid, csn);
 				o_indices_update(new_o_table, TOASTIndexNumber, oxid, csn);
 

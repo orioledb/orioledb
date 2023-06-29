@@ -354,7 +354,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = recovery_oidxshared->recovery_oxid;
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
-				Assert(o_table->version <= msg->o_table_version);
+				Assert(o_table);
+				Assert(o_table->version == msg->o_table_version);
 
 				if (recovery_header->type & RECOVERY_LEADER_PARALLEL_INDEX_BUILD)
 				{
