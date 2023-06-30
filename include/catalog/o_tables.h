@@ -94,6 +94,7 @@ typedef struct
 	uint16		nindices;
 	Oid			tid_btree_ops_oid;	/* have to store it here */
 	bool		has_primary;
+	bool		temp;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
@@ -112,7 +113,8 @@ extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 							   Relation index_rel);
 
 /* Creates and fills OTable. */
-extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc);
+extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
+									  char relpersistence);
 
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,

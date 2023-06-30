@@ -23,6 +23,7 @@ typedef struct
 	ORelOids	indexOids;
 	OIndexType	indexType;
 	ORelOids	tableOids;
+	bool		temp_table;
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
@@ -57,7 +58,9 @@ typedef struct
 } OIndex;
 
 /* callback for o_indices_foreach_oids() */
-typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids, ORelOids tableOids, void *arg);
+typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
+									ORelOids tableOids, bool temp_table,
+									void *arg);
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
 extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable);

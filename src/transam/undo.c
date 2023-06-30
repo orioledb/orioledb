@@ -524,7 +524,7 @@ o_add_branch_undo_item(UndoLocation newLocation)
  */
 static UndoLocation
 walk_undo_range(UndoLocation location, UndoLocation toLoc, UndoItemBuf *buf,
-				OXid oxid, bool abort, UndoLocation *onCommitLocation,
+				OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
 				bool changeCountsValid)
 {
 	UndoStackItem *item;
@@ -534,7 +534,7 @@ walk_undo_range(UndoLocation location, UndoLocation toLoc, UndoItemBuf *buf,
 	{
 		item = undo_item_buf_read_item(buf, location);
 		descr = item_type_get_descr(item->type);
-		descr->callback(location, item, oxid, abort, changeCountsValid);
+		descr->callback(location, item, oxid, abort_val, changeCountsValid);
 
 		/*
 		 * Update location of the last item, which needs an action on commit,
@@ -551,7 +551,7 @@ walk_undo_range(UndoLocation location, UndoLocation toLoc, UndoItemBuf *buf,
 		 * On commit, we only walk through the specific items. On abort, we
 		 * walk through all the items.
 		 */
-		if (!abort)
+		if (!abort_val)
 		{
 			OnCommitUndoStackItem *fItem = (OnCommitUndoStackItem *) item;
 

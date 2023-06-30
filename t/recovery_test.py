@@ -1781,3 +1781,57 @@ class RecoveryTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 		node.stop()
+
+	def test_temp_table_not_checkpointed(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+
+		with node.connect() as con1:
+			con1.execute("""
+				CREATE TEMP TABLE o_test_3 (f1 int, f2 text) USING orioledb;
+			""")
+			con1.execute("""
+				CREATE TEMP TABLE o_test_4 (
+					b bool,
+					i int,
+					junk float,
+					unique(b, i)
+				) USING orioledb;
+			""")
+			con1.execute("""
+				CREATE TEMP TABLE o_test_9 (c1 int, c2 text) USING orioledb;
+			""")
+			con1.execute("""
+				CHECKPOINT;
+			""")
+			con1.commit()
+			self.assertEqual(node.execute("""
+								SELECT c.relname
+								FROM orioledb_table ot JOIN
+									pg_database db ON db.oid = ot.datoid JOIN
+									pg_class c ON c.oid = ot.reloid
+								WHERE db.datname = current_database()
+								ORDER BY c.relname
+							"""),
+							[('o_test_3',), ('o_test_4',), ('o_test_9',)])
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(node.execute("""
+								SELECT c.relname
+								FROM orioledb_table ot JOIN
+									pg_database db ON db.oid = ot.datoid JOIN
+									pg_class c ON c.oid = ot.reloid
+								WHERE db.datname = current_database()
+								ORDER BY c.relname
+						 """),
+						 [])
+		node.stop()
+

@@ -184,7 +184,8 @@ static void checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 								 OInMemoryBlkno *blkno, uint32 page_chage_count,
 								 int level);
 static void checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
-									   ORelOids tableOids, void *arg);
+									   ORelOids tableOids, bool temp_table,
+									   void *arg);
 static inline bool init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static inline void free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static FileExtentsArray *file_extents_array_init(void);
@@ -4104,13 +4105,17 @@ prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
 
 static void
 checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
-						   ORelOids tableOids, void *arg)
+						   ORelOids tableOids, bool temp_table,
+						   void *arg)
 {
 	CheckpointTablesArg *tbl_arg = (CheckpointTablesArg *) arg;
 	OIndexDescr *descr;
 	int			cur_chkp_index = (checkpoint_state->lastCheckpointNumber + 1) % 2;
 	MemoryContext prev_context;
 	Jsonb	   *params;
+
+	if (temp_table)
+		return;
 
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 

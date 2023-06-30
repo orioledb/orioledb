@@ -642,7 +642,8 @@ orioledb_relation_set_new_filenode(Relation rel,
 		ORelOidsSetFromRel(new_oids, rel);
 		new_oids.relnode = RelFileNodeGetNode(newrnode);
 
-		new_o_table = o_table_tableam_create(new_oids, tupdesc);
+		new_o_table = o_table_tableam_create(new_oids, tupdesc,
+											 rel->rd_rel->relpersistence);
 		o_opclass_cache_add_table(new_o_table);
 		o_table_fill_oids(new_o_table, rel, newrnode);
 

@@ -184,6 +184,7 @@ make_ctid_o_index(OTable *table)
 	result->indexType = oIndexPrimary;
 	namestrcpy(&result->name, "ctid_primary");
 	result->tableOids = table->oids;
+	result->temp_table = table->temp;
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
 	result->nLeafFields = table->nfields + 1;
@@ -239,6 +240,7 @@ make_primary_o_index(OTable *table)
 	namestrcpy(&result->name, tableIndex->name.data);
 	Assert(tableIndex->type == oIndexPrimary);
 	result->tableOids = table->oids;
+	result->temp_table = table->temp;
 	result->primaryIsCtid = false;
 	if (OCompressIsValid(tableIndex->compress))
 		result->compress = tableIndex->compress;
@@ -356,6 +358,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->indexType = tableIndex->type;
 	namestrcpy(&result->name, tableIndex->name.data);
 	result->tableOids = table->oids;
+	result->temp_table = table->temp;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
@@ -412,6 +415,7 @@ make_toast_o_index(OTable *table)
 	result->indexType = oIndexToast;
 	namestrcpy(&result->name, "toast");
 	result->tableOids = table->oids;
+	result->temp_table = table->temp;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
 	if (table->has_primary)
@@ -981,17 +985,19 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	{
 		OIndexChunk *chunk = (OIndexChunk *) tuple.data;
 		ORelOids	tableOids;
+		bool		temp_table;
 
 		type = chunk->key.type;
 		oids = chunk->key.oids;
 		Assert(chunk->dataLength >= sizeof(tableOids));
 		memcpy(&tableOids, chunk->data, sizeof(tableOids));
+		memcpy(&temp_table, chunk->data + sizeof(tableOids), sizeof(bool));
 		Assert(chunk->key.offset == 0);
 		Assert(ORelOidsIsValid(oids));
 		Assert(!ORelOidsIsEqual(old_oids, oids));
 		old_oids = oids;
 
-		callback(type, oids, tableOids, arg);
+		callback(type, oids, tableOids, temp_table, arg);
 
 		pfree(tuple.data);
 		btree_iterator_free(it);
@@ -1043,7 +1049,7 @@ index_type_from_str(const char *s, int len)
 
 static void
 o_index_oids_array_callback(OIndexType type, ORelOids treeOids,
-							ORelOids tableOids, void *arg)
+							ORelOids tableOids, bool temp_table, void *arg)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) arg;
 	Datum		values[6];

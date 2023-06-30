@@ -1616,7 +1616,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tupdesc = RelationGetDescr(rel);
 
 				o_tables_meta_lock();
-				o_table = o_table_tableam_create(oids, tupdesc);
+				o_table = o_table_tableam_create(oids, tupdesc,
+												 rel->rd_rel->relpersistence);
 				o_opclass_cache_add_table(o_table);
 
 				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
