@@ -48,6 +48,7 @@ OBJS = src/btree/btree.o \
 	   src/recovery/recovery.o \
 	   src/recovery/wal.o \
 	   src/recovery/worker.o \
+	   src/s3/queue.o \
 	   src/s3/requests.o \
 	   src/tableam/bitmap_scan.o \
 	   src/tableam/descr.o \
