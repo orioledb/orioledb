@@ -55,6 +55,8 @@
 #define ORIOLEDB_COMP_BLCKSZ	512
 /* size of data file segment */
 #define ORIOLEDB_SEGMENT_SIZE	(1024 * 1024 * 1024)
+/* size of S3 data file part */
+#define ORIOLEDB_S3_PART_SIZE	(1024 * 1024)
 
 #define GetMaxBackends() MaxBackends
 
@@ -241,6 +243,10 @@ extern int	default_toast_compress;
 #if PG_VERSION_NUM >= 140000
 extern bool orioledb_table_description_compress;
 #endif
+extern char *s3_host;
+extern char *s3_region;
+extern char *s3_accesskey;
+extern char *s3_secretkey;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MyProc->pgprocno >= 0 && \

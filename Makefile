@@ -4,7 +4,7 @@ MODULE_big = orioledb
 EXTENSION = orioledb
 DATA = orioledb--1.0.sql orioledb--1.0--1.1.sql
 PGFILEDESC = "orioledb - orioledb transactional storage engine via TableAm"
-SHLIB_LINK += -lzstd
+SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
 
 EXTRA_CLEAN = include/utils/stopevents_defs.h \
 			  include/utils/stopevents_data.h
@@ -48,6 +48,7 @@ OBJS = src/btree/btree.o \
 	   src/recovery/recovery.o \
 	   src/recovery/wal.o \
 	   src/recovery/worker.o \
+	   src/s3/requests.o \
 	   src/tableam/bitmap_scan.o \
 	   src/tableam/descr.o \
 	   src/tableam/func.o \

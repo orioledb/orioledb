@@ -114,6 +114,10 @@ int			default_toast_compress = InvalidOCompress;
 #if PG_VERSION_NUM >= 140000
 bool		orioledb_table_description_compress = false;
 #endif
+char	   *s3_host = NULL;
+char	   *s3_region = NULL;
+char	   *s3_accesskey = NULL;
+char	   *s3_secretkey = NULL;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -555,6 +559,50 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 #endif
+
+	DefineCustomStringVariable("orioledb.s3_host",
+							   "S3 host",
+							   NULL,
+							   &s3_host,
+							   NULL,
+							   PGC_POSTMASTER,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
+
+	DefineCustomStringVariable("orioledb.s3_region",
+							   "S3 region",
+							   NULL,
+							   &s3_region,
+							   NULL,
+							   PGC_POSTMASTER,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
+
+	DefineCustomStringVariable("orioledb.s3_accesskey",
+							   "S3 access key",
+							   NULL,
+							   &s3_accesskey,
+							   NULL,
+							   PGC_POSTMASTER,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
+
+	DefineCustomStringVariable("orioledb.s3_secretkey",
+							   "S3 secret key",
+							   NULL,
+							   &s3_secretkey,
+							   NULL,
+							   PGC_POSTMASTER,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
 
 	main_buffers_count = ((Size) main_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	free_tree_buffers_count = ((Size) free_tree_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
