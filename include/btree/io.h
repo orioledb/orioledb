@@ -40,6 +40,7 @@ extern int	OFileWrite(File file, char *buffer, int amount, off_t offset,
 					   uint32 wait_event_info);
 extern void btree_open_smgr(BTreeDescr *descr);
 extern void btree_close_smgr(BTreeDescr *descr);
+extern char *btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum);
 extern char *btree_smgr_filename(BTreeDescr *desc, off_t offset);
 extern int	btree_smgr_write(BTreeDescr *desc, char *buffer, int amount,
 							 off_t offset);

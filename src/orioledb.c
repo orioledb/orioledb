@@ -25,6 +25,7 @@
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "s3/queue.h"
+#include "s3/worker.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/toast.h"
@@ -116,6 +117,7 @@ int			default_toast_compress = InvalidOCompress;
 bool		orioledb_table_description_compress = false;
 #endif
 bool		orioledb_s3_mode = false;
+int			s3_num_workers = 3;
 int			s3_queue_size_guc;
 char	   *s3_host = NULL;
 char	   *s3_region = NULL;
@@ -171,7 +173,8 @@ static ShmemItem shmemItems[] = {
 	{o_proc_shmem_needs, o_proc_shmem_init},
 	{ppools_shmem_needs, ppools_shmem_init},
 	{btree_scan_shmem_needs, btree_scan_init_shmem},
-	{s3_queue_shmem_needs, s3_queue_init_shmem}
+	{s3_queue_shmem_needs, s3_queue_init_shmem},
+	{s3_workers_shmem_needs, s3_workers_init_shmem}
 };
 
 
@@ -588,6 +591,19 @@ _PG_init(void)
 							NULL,
 							NULL);
 
+	DefineCustomIntVariable("orioledb.s3_num_workers",
+							"The number of workers to make S3 requests",
+							NULL,
+							&s3_num_workers,
+							3,
+							1,
+							MAX_BACKENDS,
+							PGC_POSTMASTER,
+							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
+
 	DefineCustomStringVariable("orioledb.s3_host",
 							   "S3 host",
 							   NULL,
@@ -714,6 +730,10 @@ _PG_init(void)
 	/* Register background writers */
 	for (i = 0; i < bgwriter_num_workers; i++)
 		register_bgwriter();
+
+	/* Register S3 workers */
+	for (i = 0; orioledb_s3_mode && (i < s3_num_workers); i++)
+		register_s3worker(i);
 
 	/* Register custom deTOAST function */
 	register_o_detoast_func(o_detoast);
