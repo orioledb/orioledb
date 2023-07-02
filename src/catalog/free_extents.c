@@ -91,6 +91,8 @@ get_extent(BTreeDescr *desc, uint16 len)
 	BTreeDescr *off_len_tree = get_sys_tree(SYS_TREES_EXTENTS_OFF_LEN);
 	OTuple		tmpTup;
 
+	Assert(!orioledb_s3_mode);
+
 	/* a fast check */
 	if (pg_atomic_read_u64(&metaPage->numFreeBlocks) < len)
 	{
@@ -99,7 +101,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 		if (use_device)
 			result.off = orioledb_device_alloc(desc, len * ORIOLEDB_COMP_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, len);
+			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[0], len);
 		return result;
 	}
 
@@ -180,7 +182,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 		if (use_device)
 			result.off = orioledb_device_alloc(desc, len * ORIOLEDB_COMP_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, len);
+			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[0], len);
 		enable_stopevents = old_enable_stopevents;
 		return result;
 	}

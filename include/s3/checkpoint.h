@@ -13,8 +13,6 @@
 #ifndef __S3_CHECKPOINT_H__
 #define __S3_CHECKPOINT_H__
 
-#include "s3/queue.h"
-
 extern void s3_perform_backup(S3TaskLocation location);
 
 #endif							/* __S3_CHECKPOINT_H__ */

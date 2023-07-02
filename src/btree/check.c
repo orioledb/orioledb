@@ -70,7 +70,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	BTreeCheckStatus status;
 	ExtentsArray free_extents;
-	uint64		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength);
+	uint64		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength[0]);	/* Fix for S3 mode */
 	bool		is_compressed = OCompressIsValid(desc->compress);
 	uint32		checkpoint_number = 0;
 	bool		result,

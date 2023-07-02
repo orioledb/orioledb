@@ -223,9 +223,9 @@ int			recovery_pool_size_guc;
 int			recovery_idx_pool_size_guc;
 
 /*
- * GUC value, size of a single recovery queue.
+ * GUC value, size of a single recovery queue in KB.
  */
-Size		recovery_queue_size_guc;
+int			recovery_queue_size_guc;
 
 /*
  * Are TOAST trees consistent with primary indices.
@@ -292,7 +292,7 @@ recovery_shmem_needs(void)
 {
 	Size		size = 0;
 
-	size = add_size(size, mul_size(CACHELINEALIGN(recovery_queue_size_guc),
+	size = add_size(size, mul_size(CACHELINEALIGN((Size) recovery_queue_size_guc * 1024),
 								   recovery_pool_size_guc + recovery_idx_pool_size_guc));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
@@ -317,8 +317,10 @@ recovery_shmem_needs(void)
 void
 recovery_shmem_init(Pointer ptr, bool found)
 {
+	recovery_queue_data_size = (Size) recovery_queue_size_guc * 1024;
+
 	recovery_first_queue = ptr;
-	ptr += mul_size(CACHELINEALIGN(recovery_queue_size_guc),
+	ptr += mul_size(CACHELINEALIGN(recovery_queue_data_size),
 					recovery_pool_size_guc + recovery_idx_pool_size_guc);
 
 	recovery_single_process = (bool *) ptr;
@@ -351,8 +353,6 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_sharedsort = (Sharedsort *) ptr;
 	ptr += CACHELINEALIGN(tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1));
 
-	recovery_queue_data_size = recovery_queue_size_guc;
-
 	if (!found)
 	{
 		int			i;
@@ -369,7 +369,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 
 		for (i = 0; i < recovery_pool_size_guc + recovery_idx_pool_size_guc; i++)
 		{
-			shm_mq_create(GET_WORKER_QUEUE(i), recovery_queue_size_guc);
+			shm_mq_create(GET_WORKER_QUEUE(i), recovery_queue_data_size);
 			pg_atomic_init_u64(&worker_ptrs[i].commitPtr, InvalidXLogRecPtr);
 			pg_atomic_init_u64(&worker_ptrs[i].retainPtr, InvalidXLogRecPtr);
 			worker_ptrs[i].flushedUndoLocCompletedCheckpointNumber = 0;

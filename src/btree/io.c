@@ -27,6 +27,7 @@
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
 #include "recovery/recovery.h"
+#include "s3/worker.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "utils/compress.h"
@@ -55,6 +56,7 @@ typedef struct TreeOffset
 	Oid			datoid;
 	Oid			relnode;
 	int			segno;
+	uint32		chkpNum;
 	FileExtent	fileExtent;
 	bool		compressed;
 } TreeOffset;
@@ -77,7 +79,8 @@ static bool io_in_progress = false;
 
 static bool prepare_non_leaf_page(Page p);
 static uint64 get_free_disk_offset(BTreeDescr *desc);
-static bool get_free_disk_extent(BTreeDescr *desc, off_t page_size, FileExtent *extent);
+static bool get_free_disk_extent(BTreeDescr *desc, uint32 chkpNum,
+								 off_t page_size, FileExtent *extent);
 static bool get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 											FileExtent *extent, uint32 checkpoint_number);
 
@@ -124,6 +127,7 @@ static void
 io_start(void)
 {
 	uint64		startNum;
+	bool		slept = false;
 
 	if (max_io_concurrency == 0)
 		return;
@@ -133,8 +137,10 @@ io_start(void)
 	while (startNum > pg_atomic_read_u64(&ioShmem->writesFinished) + max_io_concurrency)
 	{
 		ConditionVariableSleep(&ioShmem->cv[startNum % max_procs], WAIT_EVENT_PG_SLEEP);
+		slept = true;
 	}
-	ConditionVariableCancelSleep();
+	if (slept)
+		ConditionVariableCancelSleep();
 }
 
 static void
@@ -174,6 +180,31 @@ OFileWrite(File file, char *buffer, int amount, off_t offset,
 	return result;
 }
 
+typedef struct
+{
+	uint32		checkpointNumber;
+	uint32		segmentNumber;
+} FileHashKey;
+
+typedef struct
+{
+	FileHashKey key;
+	File		file;
+	char		status;			/* for simplehash use */
+} FileHashElement;
+
+#define SH_PREFIX s3Files
+#define SH_ELEMENT_TYPE FileHashElement
+#define SH_KEY_TYPE FileHashKey
+#define SH_KEY key
+#define SH_HASH_KEY(tb, key) hash_any((unsigned char *) &key, sizeof(FileHashKey))
+#define SH_EQUAL(tb, a, b) memcmp(&a, &b, sizeof(FileHashKey)) == 0
+#define SH_SCOPE static inline
+#define SH_GET_HASH(tb, a) a->hash
+#define SH_DEFINE
+#define SH_DECLARE
+#include "lib/simplehash.h"
+
 char *
 btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum)
 {
@@ -208,7 +239,7 @@ btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum)
 }
 
 char *
-btree_smgr_filename(BTreeDescr *desc, off_t offset)
+btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 {
 	int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 
@@ -217,54 +248,104 @@ btree_smgr_filename(BTreeDescr *desc, off_t offset)
 	return btree_filename(desc->oids.datoid,
 						  desc->oids.relnode,
 						  segno,
-						  0);
+						  chkpNum);
 }
 
-static void
-btree_open_smgr_file(BTreeDescr *desc, int num)
+static File
+btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum)
 {
-	char	   *filename;
-
-	if (num >= desc->smgr.filesAllocated)
+	if (orioledb_s3_mode)
 	{
-		int			i = desc->smgr.filesAllocated;
+		FileHashElement *hashElem;
+		FileHashKey key;
+		bool		found;
+		char	   *filename;
 
-		while (num >= desc->smgr.filesAllocated)
-			desc->smgr.filesAllocated *= 2;
-		desc->smgr.files = (File *) repalloc(desc->smgr.files,
-											 sizeof(File) * desc->smgr.filesAllocated);
-		for (; i < desc->smgr.filesAllocated; i++)
-			desc->smgr.files[i] = -1;
+		key.checkpointNumber = chkpNum;
+		key.segmentNumber = num;
+		hashElem = s3Files_insert(desc->smgr.hash, key, &found);
+		if (found)
+			return hashElem->file;
+
+		filename = btree_smgr_filename(desc,
+									   (off_t) num * ORIOLEDB_SEGMENT_SIZE,
+									   chkpNum);
+		hashElem->file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+		if (hashElem->file <= 0)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not open data file %s", filename)));
+		pfree(filename);
+		return hashElem->file;
 	}
+	else
+	{
+		char	   *filename;
 
-	if (desc->smgr.files[num] >= 0)
-		return;
+		if (num >= desc->smgr.array.filesAllocated)
+		{
+			int			i = desc->smgr.array.filesAllocated;
 
-	filename = btree_smgr_filename(desc, (off_t) num * ORIOLEDB_SEGMENT_SIZE);
-	desc->smgr.files[num] = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+			while (num >= desc->smgr.array.filesAllocated)
+				desc->smgr.array.filesAllocated *= 2;
+			desc->smgr.array.files = (File *) repalloc(desc->smgr.array.files,
+													   sizeof(File) * desc->smgr.array.filesAllocated);
+			for (; i < desc->smgr.array.filesAllocated; i++)
+				desc->smgr.array.files[i] = -1;
+		}
 
-	if (desc->smgr.files[num] <= 0)
-		ereport(FATAL,
-				(errcode_for_file_access(),
-				 errmsg("could not open data file %s", filename)));
+		if (desc->smgr.array.files[num] >= 0)
+			return desc->smgr.array.files[num];
 
-	pfree(filename);
+		filename = btree_smgr_filename(desc,
+									   (off_t) num * ORIOLEDB_SEGMENT_SIZE,
+									   chkpNum);
+		desc->smgr.array.files[num] = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+
+		if (desc->smgr.array.files[num] <= 0)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not open data file %s", filename)));
+		pfree(filename);
+		return desc->smgr.array.files[num];
+	}
+}
+
+void
+btree_init_smgr(BTreeDescr *descr)
+{
+	if (orioledb_s3_mode)
+	{
+		descr->smgr.hash = NULL;
+	}
+	else
+	{
+		descr->smgr.array.files = NULL;
+		descr->smgr.array.filesAllocated = 0;
+	}
 }
 
 void
 btree_open_smgr(BTreeDescr *descr)
 {
-	int			i;
+	if (orioledb_s3_mode)
+	{
+		descr->smgr.hash = s3Files_create(TopMemoryContext, 16, NULL);
+	}
+	else
+	{
+		int			i;
 
-	if (descr->smgr.files)
-		return;
+		if (descr->smgr.array.files)
+			return;
 
-	descr->smgr.filesAllocated = 16;
-	descr->smgr.files = (File *) MemoryContextAlloc(TopMemoryContext,
-													sizeof(File) * descr->smgr.filesAllocated);
-	for (i = 0; i < descr->smgr.filesAllocated; i++)
-		descr->smgr.files[i] = -1;
-	btree_open_smgr_file(descr, 0);
+		descr->smgr.array.filesAllocated = 16;
+		descr->smgr.array.files = (File *) MemoryContextAlloc(TopMemoryContext,
+															  sizeof(File) * descr->smgr.array.filesAllocated);
+		for (i = 0; i < descr->smgr.array.filesAllocated; i++)
+			descr->smgr.array.files[i] = -1;
+		(void) btree_open_smgr_file(descr, 0, 0);
+	}
 }
 
 void
@@ -272,23 +353,111 @@ btree_close_smgr(BTreeDescr *descr)
 {
 	int			i;
 
-	if (descr->smgr.files)
+	if (orioledb_s3_mode)
 	{
-		for (i = 0; i < descr->smgr.filesAllocated; i++)
-		{
-			if (descr->smgr.files[i] >= 0)
-				FileClose(descr->smgr.files[i]);
-		}
-		pfree(descr->smgr.files);
+		if (descr->smgr.hash)
+			s3Files_destroy(descr->smgr.hash);
 	}
-	descr->smgr.filesAllocated = 0;
-	descr->smgr.files = NULL;
+	else if (descr->smgr.array.files)
+	{
+		for (i = 0; i < descr->smgr.array.filesAllocated; i++)
+		{
+			if (descr->smgr.array.files[i] >= 0)
+				FileClose(descr->smgr.array.files[i]);
+		}
+		pfree(descr->smgr.array.files);
+	}
+	descr->smgr.array.filesAllocated = 0;
+	descr->smgr.array.files = NULL;
 }
 
-int
-btree_smgr_write(BTreeDescr *desc, char *buffer, int amount, off_t offset)
+static void
+btree_s3_flush(BTreeDescr *desc, uint32 chkpNum)
+{
+	int			i;
+	BTreeMetaPage *meta = BTREE_GET_META(desc);
+
+	for (i = 0; i < MAX_NUM_DIRTY_PARTS; i++)
+	{
+		S3TaskLocation location;
+		int32		segNum,
+					partNum;
+
+		segNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].segNum;
+		partNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum;
+		if (segNum >= 0 && partNum >= 0)
+		{
+			location = s3_schedule_file_part_write(chkpNum,
+												   desc->oids.datoid,
+												   desc->oids.relnode,
+												   segNum,
+												   partNum);
+			meta->partsInfo[chkpNum % 2].writeMaxLocation =
+				Max(meta->partsInfo[chkpNum % 2].writeMaxLocation, location);
+		}
+		meta->partsInfo[chkpNum % 2].dirtyParts[i].segNum = -1;
+		meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum = -1;
+	}
+}
+
+static void
+btree_smgr_schedule_s3_write(BTreeDescr *desc, uint32 chkpNum,
+							 int32 segNum, int32 partNum)
+{
+	int			i;
+	int32		curSegNum,
+				curPartNum,
+				tmpSegNum,
+				tmpPartNum;
+	BTreeMetaPage *meta = BTREE_GET_META(desc);
+
+	curSegNum = segNum;
+	curPartNum = partNum;
+	for (i = 0; i < MAX_NUM_DIRTY_PARTS; i++)
+	{
+		tmpSegNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].segNum;
+		tmpPartNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum;
+		meta->partsInfo[chkpNum % 2].dirtyParts[i].segNum = curSegNum;
+		meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum = curPartNum;
+		curSegNum = tmpSegNum;
+		curPartNum = tmpPartNum;
+
+		if ((curSegNum == segNum && curPartNum == partNum) || curSegNum < 0)
+			break;
+
+		if (i == MAX_NUM_DIRTY_PARTS - 1)
+		{
+			S3TaskLocation location;
+
+			location = s3_schedule_file_part_write(chkpNum,
+												   desc->oids.datoid,
+												   desc->oids.relnode,
+												   curSegNum,
+												   curPartNum);
+			meta->partsInfo[chkpNum % 2].writeMaxLocation =
+				Max(meta->partsInfo[chkpNum % 2].writeMaxLocation, location);
+		}
+	}
+}
+
+static int
+btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
+				 int amount, off_t offset)
 {
 	int			result = 0;
+
+	if (orioledb_s3_mode)
+	{
+		btree_smgr_schedule_s3_write(desc,
+									 chkpNum,
+									 offset / ORIOLEDB_SEGMENT_SIZE,
+									 (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE);
+		if (offset / ORIOLEDB_S3_PART_SIZE != (offset + amount - 1) / ORIOLEDB_S3_PART_SIZE)
+			btree_smgr_schedule_s3_write(desc,
+										 chkpNum,
+										 (offset + amount - 1) / ORIOLEDB_SEGMENT_SIZE,
+										 ((offset + amount - 1) % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE);
+	}
 
 	if (use_mmap)
 	{
@@ -308,11 +477,12 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, int amount, off_t offset)
 	while (amount > 0)
 	{
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		File		file;
 
-		btree_open_smgr_file(desc, segno);
+		file = btree_open_smgr_file(desc, segno, chkpNum);
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
-			result += OFileWrite(desc->smgr.files[segno], buffer, amount,
+			result += OFileWrite(file, buffer, amount,
 								 offset % ORIOLEDB_SEGMENT_SIZE,
 								 WAIT_EVENT_DATA_FILE_WRITE);
 			break;
@@ -322,7 +492,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, int amount, off_t offset)
 			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - offset % ORIOLEDB_SEGMENT_SIZE;
 
 			Assert(amount >= stepAmount);
-			result += OFileWrite(desc->smgr.files[segno], buffer, stepAmount,
+			result += OFileWrite(file, buffer, stepAmount,
 								 offset % ORIOLEDB_SEGMENT_SIZE,
 								 WAIT_EVENT_DATA_FILE_WRITE);
 			buffer += stepAmount;
@@ -334,7 +504,8 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, int amount, off_t offset)
 }
 
 int
-btree_smgr_read(BTreeDescr *desc, char *buffer, int amount, off_t offset)
+btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
+				int amount, off_t offset)
 {
 	int			result = 0;
 
@@ -356,11 +527,12 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, int amount, off_t offset)
 	while (amount > 0)
 	{
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		File		file;
 
-		btree_open_smgr_file(desc, segno);
+		file = btree_open_smgr_file(desc, segno, chkpNum);
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
-			result += OFileRead(desc->smgr.files[segno], buffer, amount,
+			result += OFileRead(file, buffer, amount,
 								offset % ORIOLEDB_SEGMENT_SIZE,
 								WAIT_EVENT_DATA_FILE_READ);
 			break;
@@ -370,7 +542,7 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, int amount, off_t offset)
 			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - offset % ORIOLEDB_SEGMENT_SIZE;
 
 			Assert(amount >= stepAmount);
-			result += OFileRead(desc->smgr.files[segno], buffer, stepAmount,
+			result += OFileRead(file, buffer, stepAmount,
 								offset % ORIOLEDB_SEGMENT_SIZE,
 								WAIT_EVENT_DATA_FILE_READ);
 			buffer += stepAmount;
@@ -383,7 +555,8 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, int amount, off_t offset)
 }
 
 void
-btree_smgr_writeback(BTreeDescr *desc, off_t offset, int amount)
+btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
+					 off_t offset, int amount)
 {
 	if (use_mmap)
 	{
@@ -399,11 +572,12 @@ btree_smgr_writeback(BTreeDescr *desc, off_t offset, int amount)
 	while (amount > 0)
 	{
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		File		file;
 
-		btree_open_smgr_file(desc, segno);
+		file = btree_open_smgr_file(desc, segno, chkpNum);
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
-			FileWriteback(desc->smgr.files[segno], offset % ORIOLEDB_SEGMENT_SIZE,
+			FileWriteback(file, offset % ORIOLEDB_SEGMENT_SIZE,
 						  amount, WAIT_EVENT_DATA_FILE_FLUSH);
 			break;
 		}
@@ -412,7 +586,7 @@ btree_smgr_writeback(BTreeDescr *desc, off_t offset, int amount)
 			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - offset % ORIOLEDB_SEGMENT_SIZE;
 
 			Assert(amount >= stepAmount);
-			FileWriteback(desc->smgr.files[segno], offset % ORIOLEDB_SEGMENT_SIZE,
+			FileWriteback(file, offset % ORIOLEDB_SEGMENT_SIZE,
 						  stepAmount, WAIT_EVENT_DATA_FILE_FLUSH);
 			offset += stepAmount;
 			amount -= stepAmount;
@@ -421,17 +595,22 @@ btree_smgr_writeback(BTreeDescr *desc, off_t offset, int amount)
 }
 
 void
-btree_smgr_sync(BTreeDescr *desc, off_t length)
+btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 {
 	int			num;
+
+	if (orioledb_s3_mode)
+		btree_s3_flush(desc, chkpNum);
 
 	if (use_mmap || use_device)
 		return;
 
 	for (num = 0; num < length / ORIOLEDB_SEGMENT_SIZE; num++)
 	{
-		btree_open_smgr_file(desc, num);
-		FileSync(desc->smgr.files[num], WAIT_EVENT_DATA_FILE_SYNC);
+		File		file;
+
+		file = btree_open_smgr_file(desc, num, chkpNum);
+		FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
 	}
 }
 
@@ -516,6 +695,8 @@ get_free_disk_offset(BTreeDescr *desc)
 	uint32		free_buf_num;
 	bool		gotBlock;
 
+	Assert(!orioledb_s3_mode);
+
 	/*
 	 * Switch to the next sequential buffer with free blocks numbers in
 	 * needed.
@@ -598,7 +779,7 @@ get_free_disk_offset(BTreeDescr *desc)
 		if (use_device)
 			result = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			result = pg_atomic_fetch_add_u64(&metaPage->datafileLength, 1);
+			result = pg_atomic_fetch_add_u64(&metaPage->datafileLength[0], 1);
 	}
 	LWLockRelease(metaLock);
 	return result;
@@ -610,8 +791,23 @@ get_free_disk_offset(BTreeDescr *desc)
  * FileExtentIsValid(extent) == false if fails.
  */
 static bool
-get_free_disk_extent(BTreeDescr *desc, off_t page_size, FileExtent *extent)
+get_free_disk_extent(BTreeDescr *desc, uint32 chkpNum,
+					 off_t page_size, FileExtent *extent)
 {
+	if (orioledb_s3_mode)
+	{
+		int			len = OCompressIsValid(desc->compress) ? FileExtentLen(page_size) : 1;
+		BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+
+		extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[chkpNum % 2], len);
+		extent->len = len;
+
+		extent->off |= (uint64) chkpNum << S3_CHKP_NUM_SHIFT;
+
+		return FileExtentIsValid(*extent);
+	}
+
+
 	if (!OCompressIsValid(desc->compress))
 	{
 		Assert(page_size == ORIOLEDB_BLCKSZ);
@@ -642,7 +838,7 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 
 	LWLockAcquire(&metaPage->copyBlknoLock, LW_SHARED);
 
-	if (!get_free_disk_extent(desc, page_size, extent))
+	if (!get_free_disk_extent(desc, checkpoint_number, page_size, extent))
 	{
 		LWLockRelease(&metaPage->copyBlknoLock);
 		return false;
@@ -693,11 +889,13 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
  * array of offsets for the page.
  */
 bool
-read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent)
+read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
+					FileExtent *extent)
 {
 	off_t		byte_offset,
 				read_size;
 	uint64		offset = DOWNLINK_GET_DISK_OFF(downlink);
+	uint32		chkpNum = 0;
 	uint16		len = DOWNLINK_GET_DISK_LEN(downlink);
 	bool		err = false;
 
@@ -711,13 +909,19 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *
 		extent->off = offset;
 		extent->len = 1;
 
+		if (orioledb_s3_mode)
+		{
+			chkpNum = S3_GET_CHKP_NUM(offset);
+			offset &= S3_OFFSET_MASK;
+		}
+
 		if (use_device)
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
 		else
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_BLCKSZ;
 		read_size = ORIOLEDB_BLCKSZ;
 
-		err = btree_smgr_read(desc, img, read_size, byte_offset) != read_size;
+		err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
 	}
 	else
 	{
@@ -728,10 +932,16 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *
 		extent->off = offset;
 		extent->len = len;
 
+		if (orioledb_s3_mode)
+		{
+			chkpNum = S3_GET_CHKP_NUM(offset);
+			offset &= S3_OFFSET_MASK;
+		}
+
 		byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
 		read_size = len * ORIOLEDB_COMP_BLCKSZ;
 
-		err = btree_smgr_read(desc, read_buf, read_size, byte_offset) != read_size;;
+		err = btree_smgr_read(desc, read_buf, chkpNum, read_size, byte_offset) != read_size;;
 
 		if (!err && compressed)
 		{
@@ -756,6 +966,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 	off_t		byte_offset,
 				write_size;
 	bool		err = false;
+	uint32		chkpNum = 0;
 
 	Assert(FileExtentOffIsValid(extent->off));
 	if (!OCompressIsValid(desc->compress))
@@ -764,17 +975,31 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 		Assert(extent->len == 1);
 		Assert(page_size == ORIOLEDB_BLCKSZ);
 
+		byte_offset = (off_t) extent->off;
+
+		if (orioledb_s3_mode)
+		{
+			chkpNum = S3_GET_CHKP_NUM(byte_offset);
+			byte_offset &= S3_OFFSET_MASK;
+		}
+
 		if (use_device)
-			byte_offset = (off_t) extent->off * (off_t) ORIOLEDB_COMP_BLCKSZ;
+			byte_offset *= (off_t) ORIOLEDB_COMP_BLCKSZ;
 		else
-			byte_offset = (off_t) extent->off * (off_t) ORIOLEDB_BLCKSZ;
+			byte_offset *= (off_t) ORIOLEDB_BLCKSZ;
 		write_size = ORIOLEDB_BLCKSZ;
 
-		err = btree_smgr_write(desc, page, write_size, byte_offset) != write_size;
+		err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 	}
 	else
 	{
-		byte_offset = (off_t) extent->off * (off_t) ORIOLEDB_COMP_BLCKSZ;
+		byte_offset = (off_t) extent->off;
+		if (orioledb_s3_mode)
+		{
+			chkpNum = S3_GET_CHKP_NUM(byte_offset);
+			byte_offset &= S3_OFFSET_MASK;
+		}
+		byte_offset *= (off_t) ORIOLEDB_COMP_BLCKSZ;
 
 		if (page_size != ORIOLEDB_BLCKSZ)
 		{
@@ -789,7 +1014,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 			Assert(ORIOLEDB_BLCKSZ < UINT16_MAX);
 
 			write_size = sizeof(OCompressHeader);
-			err = btree_smgr_write(desc, (char *) &header, write_size, byte_offset) != write_size;
+			err = btree_smgr_write(desc, (char *) &header, chkpNum, write_size, byte_offset) != write_size;
 			byte_offset += write_size;
 
 			if (err)
@@ -803,7 +1028,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 		}
 
 		/* write data */
-		err = btree_smgr_write(desc, page, write_size, byte_offset) != write_size;
+		err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 	}
 
 	return !err;
@@ -836,6 +1061,7 @@ load_page(OBTreeFindPageContext *context)
 	bool		was_fetch = false;
 	bool		was_image = false;
 	bool		was_keep_lokey = false;
+	uint32		chkpNum = 0;
 
 	context_index = context->index;
 	parent_blkno = context->items[context_index].blkno;
@@ -876,10 +1102,13 @@ load_page(OBTreeFindPageContext *context)
 		int_hdr->downlink = downlink;
 		PAGE_INC_N_ONDISK(parent_page);
 		unlock_io(ionum);
+		if (orioledb_s3_mode)
+			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
+
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg("could not read page with file offset " UINT64_FORMAT " from %s",
 							   DOWNLINK_GET_DISK_OFF(downlink),
-							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink)))));
+							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
 
 	put_page_image(blkno, buf);
@@ -1064,7 +1293,43 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * Determine the file position to write this page.
 	 */
 	chkp_index = checkpoint_number % 2;
-	if (less_num)
+	if (orioledb_s3_mode)
+	{
+		if (less_num)
+		{
+			err = !get_free_disk_extent(desc, checkpoint_number, write_size, &page_desc->fileExtent);
+			*dirty_parent = true;
+		}
+		else
+		{
+			if (!OCompressIsValid(desc->compress))
+			{
+				/* easy case: no compression */
+				*dirty_parent = false;
+			}
+			else
+			{
+				uint16		old_len = page_desc->fileExtent.len,
+							new_len = FileExtentLen(write_size);
+
+				if (old_len < new_len)
+				{
+					err = !get_free_disk_extent(desc, checkpoint_number, write_size, &page_desc->fileExtent);
+					*dirty_parent = true;
+				}
+				else if (old_len > new_len)
+				{
+					page_desc->fileExtent.len = new_len;
+					*dirty_parent = true;
+				}
+				else
+				{
+					*dirty_parent = false;
+				}
+			}
+		}
+	}
+	else if (less_num)
 	{
 		/*
 		 * Page wasn't yet written during given checkpoint, so we have to
@@ -1099,7 +1364,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 		}
 		else
 		{
-			err = !get_free_disk_extent(desc, write_size, &page_desc->fileExtent);
+			err = !get_free_disk_extent(desc, checkpoint_number, write_size, &page_desc->fileExtent);
 		}
 
 		*dirty_parent = true;
@@ -1125,7 +1390,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 			 * check: is current image take as much space as previous written
 			 * page?
 			 */
-			if (page_desc->fileExtent.len < new_len)
+			if (old_len < new_len)
 			{
 				free_extent_for_checkpoint(desc, &page_desc->fileExtent, checkpoint_number);
 				/* allocate more file blocks */
@@ -1137,11 +1402,11 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 				}
 				else
 				{
-					err = !get_free_disk_extent(desc, write_size,
-												&page_desc->fileExtent);
+					err = !get_free_disk_extent(desc, checkpoint_number,
+												write_size, &page_desc->fileExtent);
 				}
 			}
-			else if (page_desc->fileExtent.len > new_len)
+			else if (old_len > new_len)
 			{
 				/*
 				 * free space
@@ -1167,7 +1432,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 	{
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not (re) allocate file blocks for page %d to file %s",
-							   blkno, btree_smgr_filename(desc, 0))));
+							   blkno, btree_smgr_filename(desc, 0, checkpoint_number))));
 	}
 
 	Assert(FileExtentIsValid(page_desc->fileExtent));
@@ -1177,7 +1442,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not write page %d to file %s with offset %lu",
 							   blkno,
-							   btree_smgr_filename(desc, page_desc->fileExtent.off),
+							   btree_smgr_filename(desc, page_desc->fileExtent.off, checkpoint_number),
 							   (unsigned long) page_desc->fileExtent.off)));
 
 		return InvalidDiskDownlink;
@@ -1192,7 +1457,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
  * Returns downlink to the page.
  */
 uint64
-perform_page_io_autonomous(BTreeDescr *desc, Page img, FileExtent *extent)
+perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExtent *extent)
 {
 	Pointer		write_img;
 	size_t		write_size;
@@ -1203,11 +1468,11 @@ perform_page_io_autonomous(BTreeDescr *desc, Page img, FileExtent *extent)
 
 	write_img = get_write_img(desc, img, &write_size);
 
-	if (!get_free_disk_extent(desc, write_size, extent))
+	if (!get_free_disk_extent(desc, chkpNum, write_size, extent))
 	{
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not get free file offset for write page to file %s",
-							   btree_smgr_filename(desc, 0))));
+							   btree_smgr_filename(desc, 0, 0))));
 
 		return InvalidDiskDownlink;
 	}
@@ -1216,10 +1481,24 @@ perform_page_io_autonomous(BTreeDescr *desc, Page img, FileExtent *extent)
 
 	if (!write_page_to_disk(desc, extent, write_img, write_size))
 	{
+		uint64		offset;
+		uint32		chkpNum;
+
+		if (orioledb_s3_mode)
+		{
+			offset = extent->off & S3_OFFSET_MASK;
+			chkpNum = S3_GET_CHKP_NUM(extent->off);
+		}
+		else
+		{
+			offset = extent->off;
+			chkpNum = 0;
+		}
+
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not write autonomous page to file %s with offset %lu",
-							   btree_smgr_filename(desc, extent[0].off),
-							   (unsigned long) extent[0].off)));
+							   btree_smgr_filename(desc, offset, chkpNum),
+							   (unsigned long) offset)));
 
 		return InvalidDiskDownlink;
 	}
@@ -1233,11 +1512,12 @@ perform_page_io_autonomous(BTreeDescr *desc, Page img, FileExtent *extent)
  * Returns downlink to the page.
  */
 uint64
-perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
-					  BTreeMetaPage *metaPage)
+perform_page_io_build(BTreeDescr *desc, Page img,
+					  FileExtent *extent, BTreeMetaPage *metaPage)
 {
 	Pointer		write_img;
 	size_t		write_size;
+	uint32		chkpNum;
 
 	btree_page_update_max_key_len(desc, img);
 
@@ -1247,6 +1527,16 @@ perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
 
 	write_img = get_write_img(desc, img, &write_size);
 
+	if (orioledb_s3_mode)
+	{
+		/* FIXME: concurrency */
+		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
+	}
+	else
+	{
+		chkpNum = 0;
+	}
+
 	if (!OCompressIsValid(desc->compress))
 	{
 		Assert(write_size == ORIOLEDB_BLCKSZ);
@@ -1255,7 +1545,7 @@ perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
 		if (use_device)
 			extent->off = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, 1);
+			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[chkpNum % 2], 1);
 	}
 	else
 	{
@@ -1263,7 +1553,7 @@ perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
 		if (use_device)
 			extent->off = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
-			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength, extent->len);
+			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[chkpNum % 2], extent->len);
 	}
 
 	Assert(FileExtentIsValid(*extent));
@@ -1272,7 +1562,7 @@ perform_page_io_build(BTreeDescr *desc, Page img, FileExtent *extent,
 	{
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not write autonomous page to file %s with offset %lu",
-							   btree_smgr_filename(desc, extent[0].off),
+							   btree_smgr_filename(desc, extent[0].off, chkpNum),
 							   (unsigned long) extent[0].off)));
 
 		return InvalidDiskDownlink;
@@ -1582,12 +1872,18 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	File		file;
 	bool		was_dirty;
 	int			i PG_USED_FOR_ASSERTS_ONLY;
+	uint32		chkpNum = 0;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
 		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u32(&(O_PAGE_HEADER(rootPageBlkno)->state))));
 
 	/* we check it before */
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
+	if (orioledb_s3_mode)
+	{
+		btree_s3_flush(desc, 0);
+		btree_s3_flush(desc, 1);
+	}
 
 	was_dirty = IS_DIRTY(root_blkno);
 	if (was_dirty)
@@ -1623,7 +1919,10 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	ppool_free_page(desc->ppool, root_blkno, NULL);
 
-	file_header.datafileLength = pg_atomic_read_u64(&metaPage->datafileLength);
+	if (orioledb_s3_mode)
+		chkpNum = S3_GET_CHKP_NUM(DOWNLINK_GET_DISK_OFF(new_downlink));
+
+	file_header.datafileLength = pg_atomic_read_u64(&metaPage->datafileLength[chkpNum % 2]);
 	file_header.leafPagesNum = pg_atomic_read_u32(&metaPage->leafPagesNum);
 	file_header.ctid = pg_atomic_read_u64(&metaPage->ctid);
 	file_header.numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
@@ -1633,6 +1932,8 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 #endif
 
 	evicted_tree_data.file_header = file_header;
+	evicted_tree_data.maxLocation[0] = metaPage->partsInfo[0].writeMaxLocation;
+	evicted_tree_data.maxLocation[1] = metaPage->partsInfo[1].writeMaxLocation;
 
 	/*
 	 * Free all private seq buf pages and get their offsets
@@ -2108,6 +2409,8 @@ tree_offsets_cmp(const void *a, const void *b)
 		return (val1.datoid < val2.datoid) ? -1 : 1;
 	else if (val1.relnode != val2.relnode)
 		return (val1.relnode < val2.relnode) ? -1 : 1;
+	else if (val1.chkpNum != val2.chkpNum)
+		return (val1.chkpNum < val2.chkpNum) ? -1 : 1;
 	else if (val1.segno != val2.segno)
 		return (val1.segno < val2.segno) ? -1 : 1;
 	else if (val1.fileExtent.off != val2.fileExtent.off)
@@ -2139,6 +2442,16 @@ writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 
 	if (!ORelOidsIsValid(desc->oids) || desc->type == oIndexInvalid)
 		return;
+
+	if (orioledb_s3_mode)
+	{
+		offset.chkpNum = S3_GET_CHKP_NUM(extent.off);
+		extent.off &= S3_OFFSET_MASK;
+	}
+	else
+	{
+		offset.chkpNum = 0;
+	}
 
 	Assert(extent.len > 0);
 	Assert(extent.len <= (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ));
@@ -2185,11 +2498,11 @@ perform_writeback(IOWriteBack *writeback)
 				flushAfter;
 	uint64		offset = InvalidFileExtentOff - 1;
 	off_t		blcksz = 0;
-	char		filename[MAXPGPATH];
 	Oid			datoid = InvalidOid,
 				relnode = InvalidOid;
 	File		file = -1;
 	int			segno = 0;
+	int			chkpNum = 0;
 
 	if (use_device && !use_mmap)
 	{
@@ -2210,7 +2523,8 @@ perform_writeback(IOWriteBack *writeback)
 	{
 		TreeOffset	cur = writeback->extents[i];
 
-		if (datoid != cur.datoid || relnode != cur.relnode || segno != cur.segno)
+		if (datoid != cur.datoid || relnode != cur.relnode ||
+			segno != cur.segno || chkpNum != cur.chkpNum)
 		{
 			if (use_mmap)
 			{
@@ -2233,13 +2547,14 @@ perform_writeback(IOWriteBack *writeback)
 			datoid = cur.datoid;
 			relnode = cur.relnode;
 			segno = cur.segno;
+			chkpNum = cur.chkpNum;
 			if (!use_mmap)
 			{
-				if (segno == 0)
-					snprintf(filename, MAXPGPATH, ORIOLEDB_DATA_DIR "/%u/%u", datoid, relnode);
-				else
-					snprintf(filename, MAXPGPATH, ORIOLEDB_DATA_DIR "/%u/%u.%u", datoid, relnode, segno);
+				char	   *filename;
+
+				filename = btree_filename(datoid, relnode, segno, chkpNum);
 				file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+				pfree(filename);
 				offset = cur.fileExtent.off;
 				len = cur.fileExtent.len;
 			}

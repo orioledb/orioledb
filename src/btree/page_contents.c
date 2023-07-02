@@ -374,7 +374,8 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	memset(p + O_PAGE_HEADER_SIZE, 0, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
 	pg_atomic_init_u32(&metaPageBlkno->leafPagesNum, leafPagesNum);
 	pg_atomic_init_u64(&metaPageBlkno->numFreeBlocks, 0);
-	pg_atomic_init_u64(&metaPageBlkno->datafileLength, 0);
+	pg_atomic_init_u64(&metaPageBlkno->datafileLength[0], 0);
+	pg_atomic_init_u64(&metaPageBlkno->datafileLength[1], 0);
 	pg_atomic_init_u64(&metaPageBlkno->ctid, 0);
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
 		pg_atomic_init_u32(&metaPageBlkno->numSeqScans[i], 0);
@@ -398,6 +399,13 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 		{
 			metaPageBlkno->nextChkp[j].pages[i] = OInvalidInMemoryBlkno;
 			metaPageBlkno->tmpBuf[j].pages[i] = OInvalidInMemoryBlkno;
+		}
+
+		metaPageBlkno->partsInfo[i].writeMaxLocation = 0;
+		for (j = 0; j < MAX_NUM_DIRTY_PARTS; j++)
+		{
+			metaPageBlkno->partsInfo[i].dirtyParts[j].segNum = -1;
+			metaPageBlkno->partsInfo[i].dirtyParts[j].partNum = -1;
 		}
 	}
 }
