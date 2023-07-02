@@ -243,6 +243,8 @@ extern int	default_toast_compress;
 #if PG_VERSION_NUM >= 140000
 extern bool orioledb_table_description_compress;
 #endif
+extern bool orioledb_s3_mode;
+extern int	s3_queue_size_guc;
 extern char *s3_host;
 extern char *s3_region;
 extern char *s3_accesskey;

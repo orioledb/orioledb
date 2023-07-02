@@ -24,6 +24,7 @@
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "s3/queue.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/toast.h"
@@ -114,6 +115,8 @@ int			default_toast_compress = InvalidOCompress;
 #if PG_VERSION_NUM >= 140000
 bool		orioledb_table_description_compress = false;
 #endif
+bool		orioledb_s3_mode = false;
+int			s3_queue_size_guc;
 char	   *s3_host = NULL;
 char	   *s3_region = NULL;
 char	   *s3_accesskey = NULL;
@@ -167,7 +170,8 @@ static ShmemItem shmemItems[] = {
 	{recovery_shmem_needs, recovery_shmem_init},
 	{o_proc_shmem_needs, o_proc_shmem_init},
 	{ppools_shmem_needs, ppools_shmem_init},
-	{btree_scan_shmem_needs, btree_scan_init_shmem}
+	{btree_scan_shmem_needs, btree_scan_init_shmem},
+	{s3_queue_shmem_needs, s3_queue_init_shmem}
 };
 
 
@@ -559,6 +563,30 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 #endif
+
+	DefineCustomBoolVariable("orioledb.s3_mode",
+							 "The OrioleDB function mode on top of S3 storage",
+							 NULL,
+							 &orioledb_s3_mode,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("orioledb.s3_queue_size",
+							"The size of queue for S3 tasks",
+							NULL,
+							&s3_queue_size_guc,
+							1024,
+							128,
+							MAX_KILOBYTES,
+							PGC_POSTMASTER,
+							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
 
 	DefineCustomStringVariable("orioledb.s3_host",
 							   "S3 host",
