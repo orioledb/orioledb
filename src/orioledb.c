@@ -377,7 +377,7 @@ _PG_init(void)
 	DefineCustomIntVariable("orioledb.recovery_queue_size",
 							"Size of orioledb recovery queue per worker.",
 							NULL,
-							(int *) &recovery_queue_size_guc,
+							&recovery_queue_size_guc,
 							1024,
 							512,
 							MAX_KILOBYTES,
@@ -648,6 +648,19 @@ _PG_init(void)
 							   NULL,
 							   NULL);
 
+	if (orioledb_s3_mode)
+	{
+		if (!s3_host || !s3_region || !s3_accesskey || !s3_secretkey)
+		{
+			ereport(FATAL, (errcode(ERRCODE_CONFIG_FILE_ERROR),
+							errmsg("missing options for S3 connection"),
+							errdetail("For OrioleDB S3 mode you need to specify "
+									  "orioledb.s3_host, orioledb.s3_region, "
+									  "orioledb.s3_accesskey and "
+									  "orioledb.s3_secretkey.")));
+		}
+	}
+
 	main_buffers_count = ((Size) main_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	free_tree_buffers_count = ((Size) free_tree_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	catalog_buffers_count = ((Size) catalog_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
@@ -666,8 +679,6 @@ _PG_init(void)
 	xid_circular_buffer_size /= ORIOLEDB_BLCKSZ;
 	xid_buffers_count = (uint32) xid_circular_buffer_size;
 	xid_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(pg_atomic_uint64);
-
-	recovery_queue_size_guc *= 1024;
 
 	page_descs_size = CACHELINEALIGN(mul_size(orioledb_buffers_count, sizeof(OrioleDBPageDesc)));
 

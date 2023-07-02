@@ -16,6 +16,7 @@
 #include "checkpoint/checkpoint.h"
 #include "catalog/sys_trees.h"
 #include "utils/seq_buf.h"
+#include "s3/queue.h"
 #include "tableam/handler.h"
 #include "transam/undo.h"
 #include "tuple/format.h"
@@ -32,6 +33,7 @@
 typedef struct
 {
 	CheckpointFileHeader file_header;
+	S3TaskLocation maxLocation[2];
 	EvictedSeqBufData freeBuf;
 
 	/*

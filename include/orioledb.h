@@ -171,6 +171,11 @@ typedef struct
 				off:48;
 } FileExtent;
 
+#define S3_OFFSET_MASK		(0x00FFFFFFFF)
+#define S3_CHKP_NUM_MASK	(0xFF00000000)
+#define S3_CHKP_NUM_SHIFT	(32)
+#define S3_GET_CHKP_NUM(offset) (((offset) & S3_CHKP_NUM_MASK) >> S3_CHKP_NUM_SHIFT)
+
 #define InvalidFileExtentLen (0)
 #define InvalidFileExtentOff (UINT64CONST(0xFFFFFFFFFFFF))
 #define FileExtentLenIsValid(len) ((len) != InvalidFileExtentLen)
@@ -244,8 +249,8 @@ extern int	default_toast_compress;
 extern bool orioledb_table_description_compress;
 #endif
 extern bool orioledb_s3_mode;
-extern int	s3_queue_size_guc;
 extern int	s3_num_workers;
+extern int	s3_queue_size_guc;
 extern char *s3_host;
 extern char *s3_region;
 extern char *s3_accesskey;

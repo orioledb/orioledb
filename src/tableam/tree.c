@@ -17,6 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/io.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
@@ -101,8 +102,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, ORelOids oids,
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.rootPageChangeCount = 0;
-	desc->smgr.files = NULL;
-	desc->smgr.filesAllocated = 0;
+	btree_init_smgr(desc);
 	desc->freeBuf.file = -1;
 	desc->nextChkp[0].file = -1;
 	desc->nextChkp[1].file = -1;

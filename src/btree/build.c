@@ -340,6 +340,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	int			i;
 	Datum	   *values;
 	bool	   *isnull;
+	uint32		chkpNum;
 
 	btree_open_smgr(desc);
 
@@ -347,7 +348,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	values = (Datum *) palloc(sizeof(Datum) * tupdesc->natts);
 	isnull = (bool *) palloc(sizeof(bool) * tupdesc->natts);
 
-	pg_atomic_init_u64(&metaPageBlkno.datafileLength, 0);
+	pg_atomic_init_u64(&metaPageBlkno.datafileLength[0], 0);
+	pg_atomic_init_u64(&metaPageBlkno.datafileLength[1], 0);
 	pg_atomic_init_u64(&metaPageBlkno.numFreeBlocks, 0);
 	pg_atomic_init_u32(&metaPageBlkno.leafPagesNum, 0);
 	pg_atomic_init_u64(&metaPageBlkno.ctid, ctid);
@@ -422,9 +424,14 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	btree_close_smgr(desc);
 	pfree(stack);
 
+	if (orioledb_s3_mode)
+		chkpNum = S3_GET_CHKP_NUM(DOWNLINK_GET_DISK_OFF(downlink));
+	else
+		chkpNum = 0;
+
 	memset(file_header, 0, sizeof(*file_header));
 	file_header->rootDownlink = downlink;
-	file_header->datafileLength = pg_atomic_read_u64(&metaPageBlkno.datafileLength);
+	file_header->datafileLength = pg_atomic_read_u64(&metaPageBlkno.datafileLength[chkpNum % 2]);
 	file_header->numFreeBlocks = pg_atomic_read_u64(&metaPageBlkno.numFreeBlocks);
 	file_header->leafPagesNum = pg_atomic_read_u32(&metaPageBlkno.leafPagesNum);
 	file_header->ctid = pg_atomic_read_u64(&metaPageBlkno.ctid);

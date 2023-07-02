@@ -33,6 +33,8 @@
 #include "recovery/internal.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "s3/checkpoint.h"
+#include "s3/worker.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -146,6 +148,7 @@ MemoryContext chkp_mem_context = NULL;
 static char *xidFilename = NULL;
 static uint32 xidFileCheckpointnum = 0;
 static File xidFile = -1;
+static S3TaskLocation maxLocation = 0;
 
 static void init_writeback(CheckpointWriteBack *writeback, int flags, bool isCompressed);
 static void writeback_put_extent(CheckpointWriteBack *writeback, FileExtent *extent);
@@ -393,6 +396,8 @@ writeback_put_extent(CheckpointWriteBack *writeback, FileExtent *extent)
 													 sizeof(FileExtent) * writeback->extentsAllocated);
 	}
 	writeback->extents[writeback->extentsNumber] = *extent;
+	if (orioledb_s3_mode)
+		writeback->extents[writeback->extentsNumber].off &= S3_OFFSET_MASK;
 	if (!writeback->isCompressed && use_device)
 		writeback->extents[writeback->extentsNumber].len *= ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ;
 	writeback->extentsNumber++;
@@ -406,6 +411,7 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 	uint64		offset = InvalidFileExtentOff;
 	double		progress = 0.0;
 	uint		blcksz = (writeback->isCompressed || use_mmap) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
+	uint32		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
 
 	if (use_device && !use_mmap)
 	{
@@ -431,7 +437,8 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 		else
 		{
 			if (len > 0)
-				btree_smgr_writeback(desc, (off_t) offset * (off_t) blcksz,
+				btree_smgr_writeback(desc, chkpNum,
+									 (off_t) offset * (off_t) blcksz,
 									 (off_t) len * (off_t) blcksz);
 			offset = writeback->extents[i].off;
 			len = writeback->extents[i].len;
@@ -450,7 +457,8 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 	}
 
 	if (len > 0)
-		btree_smgr_writeback(desc, (off_t) offset * (off_t) blcksz,
+		btree_smgr_writeback(desc, chkpNum,
+							 (off_t) offset * (off_t) blcksz,
 							 (off_t) len * (off_t) blcksz);
 	checkpoint_state->pagesWritten += writeback->extentsNumber;
 	writeback->extentsNumber = 0;
@@ -827,6 +835,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	orioledb_check_shmem();
 
+	maxLocation = 0;
+
 	if (IsPostmasterEnvironment)
 		checkpoint_state->pid = MyProcPid;
 
@@ -895,15 +905,19 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 			success = checkpoint_ix(flags, desc);
 			/* System trees can't be concurrently deleted */
 			Assert(success);
-			sort_checkpoint_map_file(desc, cur_chkp_num % 2);
-			sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
-			chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
-														   desc);
+			if (!orioledb_s3_mode)
+			{
+				sort_checkpoint_map_file(desc, cur_chkp_num % 2);
+				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+				chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
+															   desc);
+			}
 		}
 		else
 		{
 			checkpoint_temporary_tree(flags, desc);
-			sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+			if (!orioledb_s3_mode)
+				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
 		}
 	}
 
@@ -1052,6 +1066,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	elog(LOG, "orioledb checkpoint %u complete",
 		 checkpoint_state->lastCheckpointNumber);
+
+	if (orioledb_s3_mode)
+		s3_perform_backup(maxLocation);
 
 	if (next_CheckPoint_hook)
 		next_CheckPoint_hook(redo_pos, flags);
@@ -1482,6 +1499,13 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
 	SeqBufDescPrivate *bufs[2] = {&desc->nextChkp[chkp_num % 2], &desc->tmpBuf[chkp_num % 2]};
 	int			i;
 	bool		success;
+
+	if (orioledb_s3_mode)
+	{
+		extent->len = InvalidFileExtentLen;
+		extent->off = InvalidFileExtentOff;
+		return;
+	}
 
 	for (i = 0; i < 2; i++)
 	{
@@ -1933,6 +1957,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 				is_compressed = OCompressIsValid(descr->compress);
 	CheckpointWriteBack writeback;
 	off_t		file_length;
+	uint32		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
 
 	/*
 	 * TODO: can we make checkpoint on evicted or unloaded tree?
@@ -1946,43 +1971,50 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	Assert(ORootPageIsValid(descr) && OMetaPageIsValid(descr));
 
 	/* Initialize next checkpoint file and next tmp file */
-	memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
-	next_chkp_tag.datoid = datoid;
-	next_chkp_tag.relnode = relnode;
-	next_chkp_tag.num = checkpoint_state->lastCheckpointNumber + 2;
-	next_chkp_tag.type = 'm';
-
-	if (!init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]) ||
-		!init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]))
+	if (orioledb_s3_mode)
 	{
-		free_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
-		free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
-		elog(FATAL, "Unable to get pages for sequence buffers.");
+		pg_atomic_write_u64(&meta_page->datafileLength[next_chkp_index], 0);
 	}
+	else
+	{
+		memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
+		next_chkp_tag.datoid = datoid;
+		next_chkp_tag.relnode = relnode;
+		next_chkp_tag.num = checkpoint_state->lastCheckpointNumber + 2;
+		next_chkp_tag.type = 'm';
 
-	success = init_seq_buf(&descr->nextChkp[next_chkp_index],
-						   &meta_page->nextChkp[next_chkp_index],
-						   &next_chkp_tag, true, true, sizeof(CheckpointFileHeader), NULL);
-	if (!success)
-		ereport(FATAL,
-				(errcode_for_file_access(),
-				 errmsg("could not create a new sequence buffer file %s",
-						get_seq_buf_filename(&next_chkp_tag))));
+		if (!init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]) ||
+			!init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]))
+		{
+			free_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
+			free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
+			elog(FATAL, "Unable to get pages for sequence buffers.");
+		}
 
-	memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
-	next_tmp_tag.datoid = datoid;
-	next_tmp_tag.relnode = relnode;
-	next_tmp_tag.num = checkpoint_state->lastCheckpointNumber + 2;
-	next_tmp_tag.type = 't';
+		success = init_seq_buf(&descr->nextChkp[next_chkp_index],
+							   &meta_page->nextChkp[next_chkp_index],
+							   &next_chkp_tag, true, true, sizeof(CheckpointFileHeader), NULL);
+		if (!success)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not create a new sequence buffer file %s",
+							get_seq_buf_filename(&next_chkp_tag))));
 
-	success = init_seq_buf(&descr->tmpBuf[next_chkp_index],
-						   &meta_page->tmpBuf[next_chkp_index],
-						   &next_tmp_tag, true, true, 0, NULL);
-	if (!success)
-		ereport(FATAL,
-				(errcode_for_file_access(),
-				 errmsg("could not init a new sequence buffer file %s",
-						get_seq_buf_filename(&next_tmp_tag))));
+		memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
+		next_tmp_tag.datoid = datoid;
+		next_tmp_tag.relnode = relnode;
+		next_tmp_tag.num = chkpNum + 1;
+		next_tmp_tag.type = 't';
+
+		success = init_seq_buf(&descr->tmpBuf[next_chkp_index],
+							   &meta_page->tmpBuf[next_chkp_index],
+							   &next_tmp_tag, true, true, 0, NULL);
+		if (!success)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not init a new sequence buffer file %s",
+							get_seq_buf_filename(&next_tmp_tag))));
+	}
 
 	/* Make checkpoint of the tree itself */
 	init_writeback(&writeback, flags, is_compressed);
@@ -2003,11 +2035,20 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 	if (!use_device)
 	{
+		int			index = orioledb_s3_mode ? (chkpNum % 2) : 0;
+
 		if (is_compressed)
-			file_length = pg_atomic_read_u64(&meta_page->datafileLength) * ORIOLEDB_COMP_BLCKSZ;
+			file_length = pg_atomic_read_u64(&meta_page->datafileLength[index]) * ORIOLEDB_COMP_BLCKSZ;
 		else
-			file_length = pg_atomic_read_u64(&meta_page->datafileLength) * ORIOLEDB_BLCKSZ;
-		btree_smgr_sync(descr, file_length);
+			file_length = pg_atomic_read_u64(&meta_page->datafileLength[index]) * ORIOLEDB_BLCKSZ;
+		btree_smgr_sync(descr, chkpNum, file_length);
+
+		if (orioledb_s3_mode)
+		{
+			S3TaskLocation location = BTREE_GET_META(descr)->partsInfo[chkpNum % 2].writeMaxLocation;
+
+			maxLocation = Max(maxLocation, location);
+		}
 	}
 
 	if (is_compressed)
@@ -2031,26 +2072,43 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 	/* Make header for the map file... */
 	header.rootDownlink = root_downlink;
-	header.datafileLength = pg_atomic_read_u64(&meta_page->datafileLength);
+	if (orioledb_s3_mode)
+		header.datafileLength = pg_atomic_read_u64(&meta_page->datafileLength[chkpNum % 2]);
+	else
+		header.datafileLength = pg_atomic_read_u64(&meta_page->datafileLength[0]);
 	header.leafPagesNum = pg_atomic_read_u32(&meta_page->leafPagesNum);
 	header.ctid = pg_atomic_read_u64(&meta_page->ctid);
 
-	if (!is_compressed)
+	if (!orioledb_s3_mode && !is_compressed)
 	{
 		offset = seq_buf_get_offset(&descr->freeBuf);
 		free_buf_tag = descr->freeBuf.shared->tag;
 	}
 	LWLockRelease(&meta_page->copyBlknoLock);
 
-	/* finalizes *.tmp file */
-	seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
-	free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);
+	if (!orioledb_s3_mode)
+	{
+		/* finalizes *.tmp file */
+		seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
+		free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);
 
-	/* finalizes *.map file */
-	map_len = seq_buf_finalize(&descr->nextChkp[cur_chkp_index]);
-	free_seq_buf_pages(descr, descr->nextChkp[cur_chkp_index].shared);
-	filename = get_seq_buf_filename(&descr->nextChkp[cur_chkp_index].tag);
-	file = PathNameOpenFile(filename, O_RDWR | PG_BINARY);
+		/* finalizes *.map file */
+		map_len = seq_buf_finalize(&descr->nextChkp[cur_chkp_index]);
+		free_seq_buf_pages(descr, descr->nextChkp[cur_chkp_index].shared);
+		filename = get_seq_buf_filename(&descr->nextChkp[cur_chkp_index].tag);
+		file = PathNameOpenFile(filename, O_RDWR | PG_BINARY);
+	}
+	else
+	{
+		memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
+		next_chkp_tag.datoid = datoid;
+		next_chkp_tag.relnode = relnode;
+		next_chkp_tag.num = checkpoint_state->lastCheckpointNumber + 1;
+		next_chkp_tag.type = 'm';
+
+		filename = get_seq_buf_filename(&next_chkp_tag);
+		file = PathNameOpenFile(filename, O_CREAT | O_RDWR | PG_BINARY);
+	}
 	if (file < 0)
 	{
 		ereport(FATAL,
@@ -2058,7 +2116,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 				 errmsg("could not open checkpoint file %s", filename)));
 	}
 
-	if (is_compressed && free_extents->size != 0)
+	if (is_compressed && free_extents->size != 0 && !orioledb_s3_mode)
 	{
 		/*
 		 * We need to combine a *.map file content and the free_extents array
@@ -2189,7 +2247,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 			pfree(map_extents);
 		file_extents_array_free(free_extents);
 	}
-	else if (!is_compressed)
+	else if (!is_compressed && !orioledb_s3_mode)
 	{
 		Assert(!is_compressed);
 		finalize_filename = seq_buf_file_exist(&free_buf_tag)
@@ -2200,6 +2258,10 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		if (finalize_filename)
 			pfree(finalize_filename);
 		header.numFreeBlocks = (map_len - sizeof(CheckpointFileHeader)) / (use_device ? sizeof(FileExtent) : sizeof(uint32));
+	}
+	else if (orioledb_s3_mode)
+	{
+		header.numFreeBlocks = 0;
 	}
 	else
 	{
@@ -2215,6 +2277,19 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not write checkpoint header to file %s", filename)));
 	}
+
+	if (orioledb_s3_mode)
+	{
+		S3TaskLocation location;
+
+		location = s3_schedule_file_part_write(checkpoint_state->lastCheckpointNumber + 1,
+											   datoid,
+											   relnode,
+											   -1,
+											   -1);
+		maxLocation = Max(maxLocation, location);
+	}
+
 	FileClose(file);
 	pfree(filename);
 
@@ -2749,6 +2824,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 	uint32		page_chage_count = InvalidOPageChangeCount;
 	uint		blcksz = OCompressIsValid(descr->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
 	Jsonb	   *params;
+	uint32		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
 
 	memset(&message, 0, sizeof(WalkMessage));
 
@@ -2863,10 +2939,18 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				header->checkpointNum = 0;
 				if (FileExtentIsValid(page_desc->fileExtent))
 				{
-					/* the offset will not be used in current checkpoint */
-					free_extent_for_checkpoint(descr, &page_desc->fileExtent,
-											   checkpoint_state->lastCheckpointNumber + 1);
-					MARK_DIRTY(descr->ppool, blkno);
+					if (orioledb_s3_mode)
+					{
+						page_desc->fileExtent.len = InvalidFileExtentLen;
+						page_desc->fileExtent.off = InvalidFileExtentOff;
+					}
+					else
+					{
+						/* the offset will not be used in current checkpoint */
+						free_extent_for_checkpoint(descr, &page_desc->fileExtent,
+												   chkpNum);
+						MARK_DIRTY(descr->ppool, blkno);
+					}
 				}
 			}
 
@@ -2916,16 +3000,21 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 					downlink = perform_page_io(descr,
 											   blkno,
 											   state->stack[level].image,
-											   state->lastCheckpointNumber + 1,
+											   chkpNum,
 											   false,
 											   &parent_dirty);
 
 					if (!DiskDownlinkIsValid(downlink))
 					{
+						uint64		offset = page_desc->fileExtent.off;
+
+						if (orioledb_s3_mode)
+							offset &= S3_OFFSET_MASK;
+
 						elog(ERROR, "unable to perform page IO for page %d to file %s with offset %lu",
 							 blkno,
-							 btree_smgr_filename(descr, page_desc->fileExtent.off),
-							 (uint64) page_desc->fileExtent.off);
+							 btree_smgr_filename(descr, chkpNum, offset),
+							 offset);
 					}
 
 					writeback_put_extent(writeback, &page_desc->fileExtent);
@@ -3190,11 +3279,12 @@ autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
 	Page		img = state->stack[level].image;
 	BTreePageHeader *img_header;
 	uint64		downlink;
+	uint32		chkpNum = state->lastCheckpointNumber + 1;
 	FileExtent	extent;
 
 	/* prepare the image header */
 	img_header = (BTreePageHeader *) img;
-	img_header->checkpointNum = state->lastCheckpointNumber + 1;
+	img_header->checkpointNum = chkpNum;
 	img_header->undoLocation = InvalidUndoLocation;
 	img_header->csn = COMMITSEQNO_FROZEN;
 	img_header->rightLink = InvalidRightLink;
@@ -3208,7 +3298,7 @@ autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
 	/* write the image to disk */
 	split_page_by_chunks(descr, img);
 
-	downlink = perform_page_io_autonomous(descr, img, &extent);
+	downlink = perform_page_io_autonomous(descr, chkpNum, img, &extent);
 	writeback_put_extent(writeback, &extent);
 
 	Assert(DiskDownlinkIsValid(downlink));
@@ -3217,7 +3307,7 @@ autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
 	 * The BTree is not contain a page with the offset, so we need to free it
 	 * for next checkpoint because it will not be possible in the future.
 	 */
-	free_extent_for_checkpoint(descr, &extent, state->lastCheckpointNumber + 2);
+	free_extent_for_checkpoint(descr, &extent, chkpNum + 1);
 
 	/* the next page no more can be leftmost for the current level */
 	state->stack[level].autonomousLeftmost = false;
@@ -3477,6 +3567,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				prev_less = false,
 				tuple_processed;
 	BTreePageItemLocator loc;
+	uint32		chkpNum = state->lastCheckpointNumber + 1;
 
 	autonomous = state->stack[level].autonomous;
 	blkno = state->stack[level].blkno;
@@ -4031,17 +4122,22 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			written_downlink = perform_page_io(descr,
 											   blkno,
 											   img,
-											   state->lastCheckpointNumber + 1,
+											   chkpNum,
 											   false,
 											   &parent_dirty);
 
 			if (!DiskDownlinkIsValid(written_downlink))
 			{
+				uint64		offset = page_desc->fileExtent.off;
+
+				if (orioledb_s3_mode)
+					offset &= S3_OFFSET_MASK;
+
 				Assert(page_desc != NULL);
 				elog(ERROR, "Unable to perform page IO for page %d to file %s with offset %lu",
 					 blkno,
-					 btree_smgr_filename(descr, page_desc->fileExtent.off),
-					 (long unsigned) page_desc->fileExtent.off);
+					 btree_smgr_filename(descr, chkpNum, offset),
+					 offset);
 			}
 
 			writeback_put_extent(writeback, &page_desc->fileExtent);
@@ -4153,11 +4249,14 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 			if (success)
 			{
-				sort_checkpoint_map_file(td, cur_chkp_index);
-				sort_checkpoint_tmp_file(td, cur_chkp_index);
-				if (OCompressIsValid(td->compress))
-					tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
-				tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
+				if (!orioledb_s3_mode)
+				{
+					sort_checkpoint_map_file(td, cur_chkp_index);
+					sort_checkpoint_tmp_file(td, cur_chkp_index);
+					if (OCompressIsValid(td->compress))
+						tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
+					tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
+				}
 				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			}
 		}
@@ -4511,9 +4610,17 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 	meta_page = BTREE_GET_META(desc);
 	pg_atomic_write_u64(&meta_page->numFreeBlocks, file_header.numFreeBlocks);
-	pg_atomic_write_u64(&meta_page->datafileLength, file_header.datafileLength);
+	if (orioledb_s3_mode)
+		pg_atomic_write_u64(&meta_page->datafileLength[chkp_num % 2], file_header.datafileLength);
+	else
+		pg_atomic_write_u64(&meta_page->datafileLength[0], file_header.datafileLength);
 	pg_atomic_write_u32(&meta_page->leafPagesNum, file_header.leafPagesNum);
 	pg_atomic_write_u64(&meta_page->ctid, file_header.ctid);
+	if (evicted_data && *evicted_data)
+	{
+		meta_page->partsInfo[0].writeMaxLocation = (*evicted_data)->maxLocation[0];
+		meta_page->partsInfo[1].writeMaxLocation = (*evicted_data)->maxLocation[1];
+	}
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(meta_page, ORIOLEDB_BLCKSZ);
 
@@ -4534,7 +4641,8 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			unlock_page(desc->rootInfo.rootPageBlkno);
 			ereport(ERROR, (errcode_for_file_access(),
 							errmsg("could not read rootPageBlkno page from %s",
-								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(file_header.rootDownlink)))));
+								   btree_smgr_filename(desc, chkp_num,
+													   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink)))));
 		}
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);
@@ -4605,8 +4713,7 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		{
 			if (!init_seq_buf_pages(desc, shareds[i]))
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg(
-									   "could not init sequence buffer pages.")));
+								errmsg("could not init sequence buffer pages.")));
 		}
 	}
 
@@ -4676,7 +4783,8 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 	if (init_shmem)
 		evictable_tree_init_meta(desc, &evicted_tree_data, chkp_num, false);
 
-	if (!checkpointable_tree_fill_seq_buffers(desc, init_shmem,
+	if (!orioledb_s3_mode &&
+		!checkpointable_tree_fill_seq_buffers(desc, init_shmem,
 											  evicted_tree_data, chkp_num))
 	{
 		ereport(FATAL, (errcode_for_file_access(),
