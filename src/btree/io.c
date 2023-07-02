@@ -175,21 +175,49 @@ OFileWrite(File file, char *buffer, int amount, off_t offset,
 }
 
 char *
+btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum)
+{
+	o_check_init_db_dir(datoid);
+
+	if (orioledb_s3_mode)
+	{
+		if (segno == 0)
+			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u-%u",
+							datoid,
+							relnode,
+							chkpNum);
+		else
+			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u.%u-%u",
+							datoid,
+							relnode,
+							segno,
+							chkpNum);
+	}
+	else
+	{
+		if (segno == 0)
+			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
+							datoid,
+							relnode);
+		else
+			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u.%u",
+							datoid,
+							relnode,
+							segno);
+	}
+}
+
+char *
 btree_smgr_filename(BTreeDescr *desc, off_t offset)
 {
-	int			num = offset / ORIOLEDB_SEGMENT_SIZE;
+	int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 
 	o_check_init_db_dir(desc->oids.datoid);
 
-	if (num == 0)
-		return psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
-						desc->oids.datoid,
-						desc->oids.relnode);
-	else
-		return psprintf(ORIOLEDB_DATA_DIR "/%u/%u.%u",
-						desc->oids.datoid,
-						desc->oids.relnode,
-						num);
+	return btree_filename(desc->oids.datoid,
+						  desc->oids.relnode,
+						  segno,
+						  0);
 }
 
 static void
