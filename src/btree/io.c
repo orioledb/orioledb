@@ -1119,6 +1119,25 @@ load_page(OBTreeFindPageContext *context)
 
 	Assert(O_PAGE_IS(page, LEAF) ||
 		   (PAGE_GET_N_ONDISK(page) == BTREE_PAGE_ITEMS_COUNT(page)));
+
+	if (orioledb_s3_mode && !O_PAGE_IS(page, LEAF))
+	{
+		BTreePageItemLocator loc;
+
+		/*
+		 * In S3 mode schedule load of all the page children for faster warmup.
+		 */
+		BTREE_PAGE_FOREACH_ITEMS(page, &loc)
+		{
+			BTreeNonLeafTuphdr *tupHdr;
+
+			tupHdr =  (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
+			s3_schedule_downlink_load(desc->oids.datoid,
+									  desc->oids.relnode,
+									  tupHdr->downlink);
+		}
+	}
+
 	unlock_page(blkno);
 
 	EA_LOAD_INC(blkno);

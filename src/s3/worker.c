@@ -216,6 +216,17 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
 	return location;
 }
 
+/*
+ * Schedule the load of given downlink from S3 to local storage.
+ */
+S3TaskLocation
+s3_schedule_downlink_load(Oid datoid, Oid relnode, uint64 downlink)
+{
+	/* TODO: Implement */
+
+	return InvalidS3TaskLocation;
+}
+
 void
 s3worker_main(Datum main_arg)
 {

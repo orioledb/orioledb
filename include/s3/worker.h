@@ -53,5 +53,7 @@ extern S3TaskLocation s3_schedule_file_write(uint32 chkpNum, char *filename);
 extern S3TaskLocation s3_schedule_file_part_write(uint32 chkpNum, Oid datoid,
 												  Oid relnode, int32 segNum,
 												  int32 partNum);
+extern S3TaskLocation s3_schedule_downlink_load(Oid datoid, Oid relnode,
+												uint64 downlink);
 
 #endif							/* __S3_WORKER_H__ */
