@@ -156,6 +156,50 @@ UPDATE rll_test2 SET spacer = repeat('c', 1000) WHERE key > 1;
 -- Check how we cleanup prevHasLocks
 SELECT * FROM rll_test2 WHERE key = 1 FOR UPDATE;
 
+CREATE TABLE o_test_update_locked_for_update (
+	key int NOT NULL PRIMARY KEY,
+	val_1 text,
+	val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_update_locked_for_update VALUES (1, 'a', 0);
+
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
+BEGIN;
+UPDATE o_test_update_locked_for_update SET val_2 = val_2 - 1 WHERE key = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
+SELECT * FROM o_test_update_locked_for_update FOR UPDATE;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
+UPDATE o_test_update_locked_for_update SET val_2 = val_2 - 1 WHERE key = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
+DELETE FROM o_test_update_locked_for_update WHERE KEY = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
+ROLLBACK;
+
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
+UPDATE o_test_update_locked_for_update SET val_2 = val_2 - 1 WHERE key = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+SELECT * FROM o_test_update_locked_for_update;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA row_level_locks CASCADE;
 RESET search_path;

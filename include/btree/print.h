@@ -34,6 +34,7 @@ typedef struct
 	bool		printRowVersion;
 	bool		printStateValue;
 	bool		printFileOffset;
+	bool		printFormatFlags;
 } BTreePrintOptions;
 
 /* Tuples and keys printing func */

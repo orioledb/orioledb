@@ -20,6 +20,7 @@
 #include "btree/undo.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "tuple/format.h"
 #include "utils/page_pool.h"
 
 #include "access/transam.h"
@@ -83,6 +84,8 @@ static bool btree_print_undo_location(UndoLocation undoLocation,
 									  StringInfo outbuf,
 									  BTreePrintData *printData,
 									  bool addComma);
+static bool btree_print_format_flags(int formatFlags, StringInfo outbuf,
+									 BTreePrintData *printData, bool addComma);
 static void btree_print_page_number(OInMemoryBlkno blkno, StringInfo outbuf,
 									BTreePrintData *printData);
 static void btree_print_orioledb_downlink(uint64 downlink, StringInfo outbuf,
@@ -359,6 +362,10 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 						needsComma = true;
 						btree_print_backend_id(XACT_INFO_GET_OXID(tuphdr.xactInfo), outbuf, printData);
 					}
+
+					needsComma |= btree_print_format_flags(tuphdr.formatFlags,
+														   outbuf, printData,
+														   needsComma);
 
 					if (tuphdr.deleted != BTreeLeafTupleNonDeleted)
 					{
@@ -676,6 +683,22 @@ btree_print_undo_location(UndoLocation undoLocation, StringInfo outbuf,
 			appendStringInfo(outbuf, "undoLocation = " UINT64_FORMAT, printedUndoLoc);
 			return true;
 		}
+	}
+	return false;
+}
+
+static bool
+btree_print_format_flags(int formatFlags, StringInfo outbuf,
+						 BTreePrintData *printData, bool addComma)
+{
+	if (printData->options->printFormatFlags)
+	{
+		if (addComma)
+			appendStringInfo(outbuf, ", ");
+		appendStringInfo(outbuf, "format = %sFIXED",
+						 formatFlags == O_TUPLE_FLAGS_FIXED_FORMAT ? "" :
+						 "NOT ");
+		return true;
 	}
 	return false;
 }

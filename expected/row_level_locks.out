@@ -600,10 +600,184 @@ SELECT * FROM rll_test2 WHERE key = 1 FOR UPDATE;
    1 |     2 | 
 (1 row)
 
+CREATE TABLE o_test_update_locked_for_update (
+	key int NOT NULL PRIMARY KEY,
+	val_1 text,
+	val_2 int
+) USING orioledb;
+INSERT INTO o_test_update_locked_for_update VALUES (1, 'a', 0);
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                        orioledb_tbl_structure                         
+-----------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty  +
+     Leftmost, Rightmost                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64           +
+     Item 0: format = NOT FIXED, offset = 264, tuple = ('1', 'a', '0')+
+                                                                      +
+ Index toast: not loaded                                              +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |     0
+(1 row)
+
+BEGIN;
+UPDATE o_test_update_locked_for_update SET val_2 = val_2 - 1 WHERE key = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                                   orioledb_tbl_structure                                   
+--------------------------------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                       +
+     Leftmost, Rightmost                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                +
+     Item 0: mode = noKeyUpdate, format = NOT FIXED, offset = 264, tuple = ('1', 'a', '-1')+
+       Undo item: format = NOT FIXED, tuple = ('1', 'a', '0')                              +
+                                                                                           +
+ Index toast: not loaded                                                                   +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |    -1
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update FOR UPDATE;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |    -1
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                                      orioledb_tbl_structure                                      
+--------------------------------------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                                             +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                             +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                             +
+     Leftmost, Rightmost                                                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                      +
+     Item 0: lock only, mode = update, format = NOT FIXED, offset = 264, tuple = ('1', 'a', '-1')+
+       Undo item: mode = noKeyUpdate, format = FIXED                                             +
+       Undo item: format = NOT FIXED, tuple = ('1', 'a', '0')                                    +
+                                                                                                 +
+ Index toast: not loaded                                                                         +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |    -1
+(1 row)
+
+UPDATE o_test_update_locked_for_update SET val_2 = val_2 - 1 WHERE key = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                                          orioledb_tbl_structure                                           
+-----------------------------------------------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                      +
+     Leftmost, Rightmost                                                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                               +
+     Item 0: mode = noKeyUpdate, format = NOT FIXED, offset = 264, chainHasLocks, tuple = ('1', 'a', '-2')+
+       Undo item: lock only, mode = update, format = NOT FIXED, tuple = ('1', 'a', '-1')                  +
+       Undo item: mode = noKeyUpdate, format = FIXED                                                      +
+       Undo item: format = NOT FIXED, tuple = ('1', 'a', '0')                                             +
+                                                                                                          +
+ Index toast: not loaded                                                                                  +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |    -2
+(1 row)
+
+DELETE FROM o_test_update_locked_for_update WHERE KEY = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                                     orioledb_tbl_structure                                     
+------------------------------------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 40                                          +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                           +
+     Leftmost, Rightmost                                                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                    +
+     Item 0: mode = update, format = NOT FIXED, deleted, offset = 264, tuple = ('1', 'a', '-2')+
+       Undo item: mode = noKeyUpdate, format = NOT FIXED                                       +
+       Undo item: mode = noKeyUpdate, format = NOT FIXED, tuple = ('1', 'a', '-1')             +
+       Undo item: format = NOT FIXED, tuple = ('1', 'a', '0')                                  +
+                                                                                               +
+ Index toast: not loaded                                                                       +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+(0 rows)
+
+ROLLBACK;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                        orioledb_tbl_structure                         
+-----------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty  +
+     Leftmost, Rightmost                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64           +
+     Item 0: format = NOT FIXED, offset = 264, tuple = ('1', 'a', '0')+
+                                                                      +
+ Index toast: not loaded                                              +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |     0
+(1 row)
+
+UPDATE o_test_update_locked_for_update SET val_2 = val_2 - 1 WHERE key = 1;
+SELECT orioledb_tbl_structure('o_test_update_locked_for_update'::regclass,
+							  'fen');
+                         orioledb_tbl_structure                         
+------------------------------------------------------------------------
+ Index o_test_update_locked_for_update_pkey contents                   +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty   +
+     Leftmost, Rightmost                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 64            +
+     Item 0: format = NOT FIXED, offset = 264, tuple = ('1', 'a', '-1')+
+                                                                       +
+ Index toast: not loaded                                               +
+ 
+(1 row)
+
+SELECT * FROM o_test_update_locked_for_update;
+ key | val_1 | val_2 
+-----+-------+-------
+   1 | a     |    -1
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table trigger_test
 drop cascades to table rll_test2
+drop cascades to table o_test_update_locked_for_update
 DROP SCHEMA row_level_locks CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function update_trg_func()

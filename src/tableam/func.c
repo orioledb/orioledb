@@ -167,6 +167,9 @@ init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg)
 			case 'o':
 				printOptions->printFileOffset = true;
 				break;
+			case 'f':
+				printOptions->printFormatFlags = true;
+				break;
 			default:
 				ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 								(errmsg("invalid option '%c'", options[i]))));
@@ -868,7 +871,8 @@ log_btree(BTreeDescr *desc)
 		.checkpointNumPrintType = BTreePrintAbsolute,
 		.printRowVersion = true,
 		.printStateValue = true,
-		.printFileOffset = true
+		.printFileOffset = true,
+		.printFormatFlags = true
 	};
 	static Oid	typeoids[] = {TIDOID, TEXTOID, INT4OID, INT2OID, BYTEAOID};
 	static Oid	outoids[] = {F_TIDOUT, F_TEXTOUT, F_INT4OUT, F_INT2OUT, F_BYTEAOUT};
