@@ -107,6 +107,7 @@ o_range_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(rangetup);
 }
 
+
 void
 o_range_cache_free_entry(Pointer entry)
 {
@@ -182,3 +183,104 @@ o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid, XLogRecPtr insert_lsn)
 								 btree_opintype, BTORDER_PROC, insert_lsn,
 								 NULL);
 }
+
+#if PG_VERSION_NUM >= 140000
+
+static OSysCache *multirange_cache = NULL;
+
+static void o_multirange_cache_free_entry(Pointer entry);
+static void o_multirange_cache_fill_entry(Pointer *entry_ptr,
+										  OSysCacheKey *key,
+										  Pointer arg);
+
+O_SYS_CACHE_FUNCS(multirange_cache, OMultiRange, 1);
+static OSysCacheFuncs multirange_cache_funcs =
+{
+	.free_entry = o_multirange_cache_free_entry,
+	.fill_entry = o_multirange_cache_fill_entry
+};
+
+O_SYS_CACHE_INIT_FUNC(multirange_cache)
+{
+	Oid			keytypes[] = {OIDOID};
+
+	multirange_cache = o_create_sys_cache(SYS_TREES_MULTIRANGE_CACHE, false,
+										  RangeMultirangeTypidIndexId,
+										  RANGEMULTIRANGE, 1, keytypes, 0,
+										  fastcache, mcxt,
+										  &multirange_cache_funcs);
+}
+
+void
+o_multirange_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
+							  Pointer arg)
+{
+	HeapTuple	rangetup;
+	Form_pg_range rangeform;
+	OMultiRange *o_multirange = (OMultiRange *) *entry_ptr;
+	MemoryContext prev_context;
+	Oid			rngtypid;
+
+	rngtypid = DatumGetObjectId(key->keys[0]);
+
+	rangetup = SearchSysCache1(RANGEMULTIRANGE, key->keys[0]);
+	if (!HeapTupleIsValid(rangetup))
+		elog(ERROR, "cache lookup failed for multirange (%u)", rngtypid);
+	rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+	prev_context = MemoryContextSwitchTo(range_cache->mcxt);
+	if (o_multirange == NULL)
+	{
+		o_multirange = palloc0(sizeof(OMultiRange));
+		*entry_ptr = (Pointer) o_multirange;
+	}
+
+	o_multirange->rngtypid = rangeform->rngtypid;
+	custom_type_add_if_needed(key->common.datoid, o_multirange->rngtypid,
+							  key->common.lsn);
+
+	MemoryContextSwitchTo(prev_context);
+	ReleaseSysCache(rangetup);
+}
+
+void
+o_multirange_cache_free_entry(Pointer entry)
+{
+	pfree(entry);
+}
+
+void
+o_multirange_cache_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup,
+							 Pointer arg)
+{
+	OMultiRange *o_multirange = (OMultiRange *) tup.data;
+
+	appendStringInfo(buf, "(");
+	o_sys_cache_key_print(desc, buf, tup, arg);
+	appendStringInfo(buf, ", rngtypid: %u)", o_multirange->rngtypid);
+}
+
+HeapTuple
+o_multirange_cache_search_htup(TupleDesc tupdesc, Oid rngmultitypid)
+{
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	HeapTuple	result = NULL;
+	Datum		values[Natts_pg_range] = {0};
+	bool		nulls[Natts_pg_range] = {0};
+	OMultiRange *o_multirange;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_multirange = o_multirange_cache_search(datoid, rngmultitypid, cur_lsn,
+											 multirange_cache->nkeys);
+	if (o_multirange)
+	{
+		values[Anum_pg_range_rngtypid - 1] = o_multirange->key.keys[0];
+		values[Anum_pg_range_rngtypid - 1] =
+			ObjectIdGetDatum(o_multirange->rngtypid);
+
+		result = heap_form_tuple(tupdesc, values, nulls);
+	}
+	return result;
+}
+#endif

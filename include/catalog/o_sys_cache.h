@@ -435,6 +435,20 @@ extern void o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid,
 extern void o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									OTuple tup, Pointer arg);
 
+#if PG_VERSION_NUM >= 140000
+typedef struct
+{
+	OSysCacheKey1 key;
+	Oid			rngtypid;
+} OMultiRange;
+
+O_SYS_CACHE_DECLS(multirange_cache, OMultiRange, 1);
+extern HeapTuple o_multirange_cache_search_htup(TupleDesc tupdesc,
+												Oid rngmultitypid);
+extern void o_multirange_cache_tup_print(BTreeDescr *desc, StringInfo buf,
+										 OTuple tup, Pointer arg);
+#endif
+
 /* o_class_cache.c */
 typedef struct OClass OClass;
 

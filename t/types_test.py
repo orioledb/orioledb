@@ -767,3 +767,43 @@ class TypesTest(BaseTest):
 									ORDER BY val COLLATE test_coll2;
 							"""))
 		node.stop()
+
+	@unittest.skipIf(BaseTest.get_pg_version() < 14,
+					 'Multiranges added in postgres 14')
+	def test_multirange_index_recovery(self):
+		node = self.node
+		node.append_conf(log_min_messages = 'debug4')
+		node.start()
+
+		with node.connect() as con:
+			con.execute("""
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+
+				CREATE TABLE o_test_1 (
+					val_1 int4multirange
+				) USING orioledb;
+
+				INSERT INTO o_test_1
+					SELECT int4multirange(int4range(g, g+10),
+						int4range(g+20, g+30),int4range(g+40, g+50))
+							FROM generate_series(1,1000) g;
+
+				CREATE INDEX ind_1 ON o_test_1 (val_1);
+
+				SELECT count(*) FROM o_test_1
+					WHERE val_1 = '{}'::int4multirange;
+			""")
+
+			con.execute("""
+				CHECKPOINT;
+			""")
+			con.commit()
+
+		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_test_1")[0][0],
+						 1000)
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_test_1")[0][0],
+						 1000)
+		node.stop()

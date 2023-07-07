@@ -39,7 +39,12 @@
 #define SYS_TREES_COLLATION_CACHE		(17)
 #define SYS_TREES_DATABASE_CACHE		(18)
 #define SYS_TREES_AMOP_STRAT_CACHE		(19)
+#if PG_VERSION_NUM >= 140000
+#define SYS_TREES_MULTIRANGE_CACHE		(20)
+#define SYS_TREES_NUM					(20)
+#else
 #define SYS_TREES_NUM					(19)
+#endif
 
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)

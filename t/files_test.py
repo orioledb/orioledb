@@ -2,13 +2,9 @@
 # coding: utf-8
 
 from itertools import chain, groupby
-import unittest
-import testgres
 import re
-from typing import Tuple
 import os
 import glob
-import sys
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
@@ -163,7 +159,7 @@ class FilesTest(BaseTest):
 														  str(x[1])])))}
 		return (last_xid, map_files, tmp_files)
 
-	# checks orioledb.remove_old_checkpoint_files = true behavion (default)
+	# checks orioledb.remove_old_checkpoint_files = true behavior (default)
 	def test_tmp_map_cleanup(self):
 		node = self.node
 		node.start() # start PostgreSQL
@@ -184,11 +180,11 @@ class FilesTest(BaseTest):
 		node.safe_psql('postgres', 'CHECKPOINT;')
 		node.stop(['-m', 'immediate'])
 
-		last_xid, map_files, tmp_files = self.get_file_lists()
+		last_xid, map_files, tmp_files = self.get_file_lists(filter_sys_trees=True)
 		old_map_files = [f for f in
 							list(chain.from_iterable(map_files.values()))
 								if f != last_xid]
-		self.assertEqual([0] * 17, old_map_files)
+		self.assertEqual([0], old_map_files)
 		self.assertEqual(['2'], [f[2] for f in tmp_files])
 
 		node.start()
@@ -196,11 +192,11 @@ class FilesTest(BaseTest):
 		node.safe_psql('postgres', 'CHECKPOINT;')
 		node.stop(['-m', 'immediate'])
 
-		last_xid, map_files, tmp_files = self.get_file_lists()
+		last_xid, map_files, tmp_files = self.get_file_lists(filter_sys_trees=True)
 		old_map_files = [f for f in
 							list(chain.from_iterable(map_files.values()))
 								if f != last_xid]
-		self.assertEqual([4] * 18, old_map_files)
+		self.assertEqual([4, 4], old_map_files)
 		self.assertEqual([], [f[2] for f in tmp_files])
 
 	def test_multiple_checkpoint_tmp_map_cleanup(self):
@@ -282,7 +278,7 @@ class FilesTest(BaseTest):
 		con.close()
 		node.stop()
 
-	# checks orioledb.remove_old_checkpoint_files = false behavion
+	# checks orioledb.remove_old_checkpoint_files = false behavior
 	def test_tmp_map_noncleanup(self):
 		node = self.node
 		node.append_conf('postgresql.conf',

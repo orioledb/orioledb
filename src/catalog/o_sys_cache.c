@@ -166,6 +166,9 @@ o_sys_caches_init(void)
 	o_type_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_collation_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_database_cache_init(sys_cache_cxt, sys_cache_fastcache);
+#if PG_VERSION_NUM >= 140000
+	o_multirange_cache_init(sys_cache_cxt, sys_cache_fastcache);
+#endif
 	orioledb_setup_syscache_hooks();
 }
 
@@ -1235,6 +1238,23 @@ custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 				o_range_cache_add_rngsubopc(datoid, typeform->oid, insert_lsn);
 			}
 			break;
+#if PG_VERSION_NUM >= 140000
+		case TYPTYPE_MULTIRANGE:
+			{
+				XLogRecPtr	sys_lsn;
+				Oid			sys_datoid;
+				OClassArg	class_arg = {.sys_table = true};
+
+				o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
+				o_class_cache_add_if_needed(sys_datoid, RangeRelationId,
+											sys_lsn, (Pointer) &class_arg);
+				o_multirange_cache_add_if_needed(datoid, typeform->oid,
+												 insert_lsn, NULL);
+				o_type_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
+										   NULL);
+			}
+			break;
+#endif
 		case TYPTYPE_ENUM:
 			{
 				XLogRecPtr	sys_lsn;
@@ -1458,6 +1478,9 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 		case OperatorOidIndexId:
 		case ProcedureOidIndexId:
 		case RangeTypidIndexId:
+#if PG_VERSION_NUM >= 140000
+		case RangeMultirangeTypidIndexId:
+#endif
 		case TypeOidIndexId:
 			if (cache->cc_tupdesc)
 				tupdesc = cache->cc_tupdesc;
@@ -1628,6 +1651,20 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 				hook_tuple = o_range_cache_search_htup(tupdesc, rngtypid);
 			}
 			break;
+#if PG_VERSION_NUM >= 140000
+		case RangeMultirangeTypidIndexId:
+			{
+				Oid			rngmultitypid;
+
+				rngmultitypid = DatumGetObjectId(v1);
+
+				Assert(tupdesc);
+
+				hook_tuple = o_multirange_cache_search_htup(tupdesc,
+															rngmultitypid);
+			}
+			break;
+#endif
 		case TypeOidIndexId:
 			{
 				Oid			typeoid;

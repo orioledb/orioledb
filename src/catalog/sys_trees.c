@@ -357,7 +357,21 @@ static SysTreeMeta sysTreesMeta[] =
 		.undoReserveType = UndoReserveTxn,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
+	},
+#if PG_VERSION_NUM >= 140000
+	{							/* SYS_TREES_MULTIRANGE_CACHE */
+		.keyLength = sizeof(OSysCacheKey1),
+		.tupleLength = sizeof(OMultiRange),
+		.cmpFunc = o_sys_cache_cmp,
+		.keyPrint = o_sys_cache_key_print,
+		.tupPrint = o_multirange_cache_tup_print,
+		.keyToJsonb = o_sys_cache_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoReserveType = UndoReserveTxn,
+		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
 	}
+#endif
 };
 
 static SysTreeShmemHeader *sysTreesShmemHeaders = NULL;

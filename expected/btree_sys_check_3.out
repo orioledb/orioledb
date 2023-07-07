@@ -1,6 +1,13 @@
 CREATE SCHEMA btree_sys_check;
 SET SESSION search_path = 'btree_sys_check';
 CREATE EXTENSION orioledb;
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+ major_version 
+---------------
+ 14
+(1 row)
+
 CREATE TABLE o_test(
 	id integer NOT NULL,
 	val text NOT NULL,
@@ -522,11 +529,82 @@ SELECT regexp_replace(regexp_replace(
  
 (1 row)
 
+-- SYS_TREES_AMOP_STRAT_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(19, 'ne'),
+			'\d+, \(\d+, \d+, \d+, \d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+                              regexp_replace                              
+--------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 56, nVacatedBytes = 0                    +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean     +
+     Leftmost, Rightmost                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64              +
+     Item 0: offset = 328, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 1: offset = 408, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 2: offset = 488, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 3: offset = 568, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 4: offset = 648, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 5: offset = 728, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 6: offset = 808, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 7: offset = 888, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 8: offset = 968, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)  +
+     Item 9: offset = 1048, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN) +
+     Item 10: offset = 1128, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 11: offset = 1208, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 12: offset = 1288, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 13: offset = 1368, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 14: offset = 1448, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 15: offset = 1528, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 16: offset = 1608, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 17: offset = 1688, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 18: offset = 1768, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 19: offset = 1848, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 20: offset = 1928, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 21: offset = 2008, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 22: offset = 2088, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 23: offset = 2168, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 24: offset = 2248, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 25: offset = 2328, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 26: offset = 2408, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 27: offset = 2488, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 28: offset = 2568, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 29: offset = 2648, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 30: offset = 2728, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 31: offset = 2808, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+     Item 32: offset = 2888, tuple = ((NNN, (NNN), X/X, N), amopopr: NNN)+
+                                                                         +
+ 
+(1 row)
+
+-- SYS_TREES_MULTIRANGE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(20, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+                           regexp_replace                            
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+                                                                    +
+ 
+(1 row)
+
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
-ERROR:  Value num must be in the range from 1 to 19
+ERROR:  Value num must be in the range from 1 to 20
 SELECT orioledb_sys_tree_check(-1111);
-ERROR:  Value num must be in the range from 1 to 19
+ERROR:  Value num must be in the range from 1 to 20
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_sys_check CASCADE;
 RESET search_path;

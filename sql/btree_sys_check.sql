@@ -2,6 +2,9 @@ CREATE SCHEMA btree_sys_check;
 SET SESSION search_path = 'btree_sys_check';
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 CREATE TABLE o_test(
 	id integer NOT NULL,
 	val text NOT NULL,
@@ -203,6 +206,26 @@ SELECT regexp_replace(regexp_replace(
 -- SYS_TREES_DATABASE_CACHE
 SELECT regexp_replace(regexp_replace(
 			orioledb_sys_tree_structure(18, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_AMOP_STRAT_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(19, 'ne'),
+			'\d+, \(\d+, \d+, \d+, \d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_MULTIRANGE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(20, 'ne'),
 			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
 			'NNN, (NNN), X/X, ',
 			'g'),
