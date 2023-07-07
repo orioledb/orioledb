@@ -392,6 +392,35 @@ SELECT * FROM o_test_parallel_join
 	JOIN o_test_parallel_join2 USING (val_1, val_2);
 COMMIT;
 
+BEGIN;
+CREATE TABLE o_test_no_parallel_index_scan (
+  val_1 INT PRIMARY KEY,
+  val_2 text
+) USING orioledb;
+
+INSERT INTO o_test_no_parallel_index_scan VALUES (1, 'a'), (2, 'b');
+
+SET LOCAL max_parallel_workers_per_gather = 1;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+-- Parallel Index Only Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_no_parallel_index_scan;
+SELECT val_1 FROM o_test_no_parallel_index_scan;
+SET LOCAL enable_indexonlyscan = off;
+-- Parallel Index Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF)
+	SELECT array_agg(val_1), array_agg(val_2)
+		FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
+SELECT array_agg(val_1), array_agg(val_2)
+	FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
+
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

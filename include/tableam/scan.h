@@ -33,9 +33,9 @@ typedef struct OPlanState
 
 extern set_rel_pathlist_hook_type old_set_rel_pathlist_hook;
 
-extern void orioledb_set_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
+extern void orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 										   Index rti, RangeTblEntry *rte);
-extern bool orioledb_set_plain_rel_pathlist_hook(PlannerInfo *rootPageBlkno,
+extern bool orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root,
 												 RelOptInfo *rel,
 												 RangeTblEntry *rte);
 

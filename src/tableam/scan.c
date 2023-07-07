@@ -92,7 +92,7 @@ set_rel_pathlist_hook_type old_set_rel_pathlist_hook = NULL;
 OEACallsCounters *ea_counters = NULL;
 
 /* custom scan */
-static Plan *o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
+static Plan *o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 								CustomPath *best_path, List *tlist,
 								List *clauses, List *custom_plans);
 static void o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags);
@@ -320,7 +320,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
  * Removes all index and base relation scan paths for a orioledb TableAm table.
  */
 void
-orioledb_set_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
+orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 							   Index rti, RangeTblEntry *rte)
 {
 	if (rte->rtekind == RTE_RELATION &&
@@ -393,14 +393,14 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 	 */
 
 	if (old_set_rel_pathlist_hook != NULL)
-		old_set_rel_pathlist_hook(rootPageBlkno, rel, rti, rte);
+		old_set_rel_pathlist_hook(root, rel, rti, rte);
 }
 
 /*
  * Creates orioledb CustomScan plan from orioledb CustomPath.
  */
 static Plan *
-o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
+o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 				   CustomPath *best_path, List *tlist,
 				   List *clauses, List *custom_plans)
 {
@@ -414,7 +414,7 @@ o_plan_custom_path(PlannerInfo *rootPageBlkno, RelOptInfo *rel,
 	OTableDescr *descr;
 	Plan	   *custom_plan;
 
-	rte = planner_rt_fetch(rel->relid, rootPageBlkno);
+	rte = planner_rt_fetch(rel->relid, root);
 	Assert(rte->rtekind == RTE_RELATION);
 	reloid = rte->relid;
 

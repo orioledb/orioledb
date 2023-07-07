@@ -825,8 +825,57 @@ SELECT * FROM o_test_parallel_join
 (3 rows)
 
 COMMIT;
+BEGIN;
+CREATE TABLE o_test_no_parallel_index_scan (
+  val_1 INT PRIMARY KEY,
+  val_2 text
+) USING orioledb;
+INSERT INTO o_test_no_parallel_index_scan VALUES (1, 'a'), (2, 'b');
+SET LOCAL max_parallel_workers_per_gather = 1;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+-- Parallel Index Only Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_no_parallel_index_scan;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_no_parallel_index_scan
+   Forward index only scan of: o_test_no_parallel_index_scan_pkey
+(2 rows)
+
+SELECT val_1 FROM o_test_no_parallel_index_scan;
+ val_1 
+-------
+     1
+     2
+(2 rows)
+
+SET LOCAL enable_indexonlyscan = off;
+-- Parallel Index Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF)
+	SELECT array_agg(val_1), array_agg(val_2)
+		FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_no_parallel_index_scan
+         Forward index scan of: o_test_no_parallel_index_scan_pkey
+         Conds: (val_1 > 0)
+(4 rows)
+
+SELECT array_agg(val_1), array_agg(val_2)
+	FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
+ array_agg | array_agg 
+-----------+-----------
+ {1,2}     | {a,b}
+(1 row)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 18 other objects
 DETAIL:  drop cascades to table seq_scan_test
 drop cascades to table o_test_o_scan_register
 drop cascades to table o_test_1
@@ -844,6 +893,7 @@ drop cascades to table o_test_parallelscan_reinitialize1
 drop cascades to table o_test_parallelscan_reinitialize2
 drop cascades to table o_test_parallel_join
 drop cascades to table o_test_parallel_join2
+drop cascades to table o_test_no_parallel_index_scan
 DROP SCHEMA parallel_scan CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)

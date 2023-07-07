@@ -173,7 +173,7 @@ static void orioledb_shmem_startup(void);
 static bool verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
-static void orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
+static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											Oid relationObjectId,
 											bool inhparent,
 											RelOptInfo *rel);
@@ -1390,7 +1390,7 @@ orioledb_error_cleanup_hook(void)
 }
 
 static void
-orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
+orioledb_get_relation_info_hook(PlannerInfo *root,
 								Oid relationObjectId,
 								bool inhparent,
 								RelOptInfo *rel)
@@ -1422,6 +1422,11 @@ orioledb_get_relation_info_hook(PlannerInfo *rootPageBlkno,
 					IndexOptInfo *info = lfirst_node(IndexOptInfo, lc);
 					bool		hasbitmap;
 
+					/*
+					 * TODO: Remove when parallel index scan will be
+					 * implemented
+					 */
+					info->amcanparallel = false;
 					hasbitmap = info->indexoid != primary->oids.reloid &&
 						primary->nFields <= 1;
 					for (i = 0;
