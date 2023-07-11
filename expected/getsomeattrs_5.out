@@ -606,8 +606,86 @@ SELECT * FROM o_test_17 WHERE (val_1) < (2);
      1 |     10 |       |      
 (1 row)
 
+BEGIN;
+create table o_test_getsomeattrs_pkey_ix_order (
+	id bigint PRIMARY KEY,
+	val int
+) USING orioledb;
+CREATE INDEX ON o_test_getsomeattrs_pkey_ix_order(val);
+INSERT INTO o_test_getsomeattrs_pkey_ix_order
+	VALUES (1, 1), (2, NULL), (3, NULL);
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+EXPLAIN (COSTS off)
+	SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_getsomeattrs_pkey_ix_order
+   Forward index only scan of: o_test_getsomeattrs_pkey_ix_order_pkey
+   Conds: (id > 0)
+(3 rows)
+
+SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
+ id 
+----
+  1
+  2
+  3
+(3 rows)
+
+EXPLAIN (COSTS off)
+	SELECT id FROM o_test_getsomeattrs_pkey_ix_order
+		WHERE id IS NOT NULL ORDER BY id;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_getsomeattrs_pkey_ix_order
+   Forward index only scan of: o_test_getsomeattrs_pkey_ix_order_pkey
+   Conds: (id IS NOT NULL)
+(3 rows)
+
+SELECT id FROM o_test_getsomeattrs_pkey_ix_order
+	WHERE id IS NOT NULL ORDER BY id;
+ id 
+----
+  1
+  2
+  3
+(3 rows)
+
+COMMIT;
+BEGIN;
+CREATE TABLE o_test_getsomeattrs_pkey_nkeys_not_equal_nFields (
+  val_1 INT PRIMARY KEY,
+  val_2 text
+) USING orioledb;
+INSERT INTO o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
+	VALUES (1, 'a'), (2, 'b');
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+SET LOCAL log_min_messages = 'debug4';
+SET LOCAL client_min_messages = 'debug4';
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
+		GROUP BY val_1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Group
+   Group Key: val_1
+   ->  Custom Scan (o_scan) on o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
+         Forward index scan of: o_test_getsomeattrs_pkey_nkeys_not_equal_nfields_pkey
+(4 rows)
+
+SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
+	GROUP BY val_1;
+ val_1 | val_2 
+-------+-------
+     1 | a
+     2 | b
+(2 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 19 other objects
+NOTICE:  drop cascades to 21 other objects
 DETAIL:  drop cascades to table o_test_0
 drop cascades to table o_test_1
 drop cascades to table o_test_2
@@ -627,6 +705,8 @@ drop cascades to table o_test_14
 drop cascades to table o_test_15
 drop cascades to table o_test_16
 drop cascades to table o_test_17
+drop cascades to table o_test_getsomeattrs_pkey_ix_order
+drop cascades to table o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
 DROP SCHEMA getsomeattrs CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)

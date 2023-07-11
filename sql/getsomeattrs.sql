@@ -275,6 +275,51 @@ INSERT INTO o_test_17 SELECT v, v * 10, NULL, NULL FROM generate_series(1,2) v;
 SELECT * FROM o_test_17;
 SELECT * FROM o_test_17 WHERE (val_1) < (2);
 
+BEGIN;
+create table o_test_getsomeattrs_pkey_ix_order (
+	id bigint PRIMARY KEY,
+	val int
+) USING orioledb;
+CREATE INDEX ON o_test_getsomeattrs_pkey_ix_order(val);
+INSERT INTO o_test_getsomeattrs_pkey_ix_order
+	VALUES (1, 1), (2, NULL), (3, NULL);
+
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+EXPLAIN (COSTS off)
+	SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
+SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
+EXPLAIN (COSTS off)
+	SELECT id FROM o_test_getsomeattrs_pkey_ix_order
+		WHERE id IS NOT NULL ORDER BY id;
+SELECT id FROM o_test_getsomeattrs_pkey_ix_order
+	WHERE id IS NOT NULL ORDER BY id;
+COMMIT;
+
+BEGIN;
+
+CREATE TABLE o_test_getsomeattrs_pkey_nkeys_not_equal_nFields (
+  val_1 INT PRIMARY KEY,
+  val_2 text
+) USING orioledb;
+
+INSERT INTO o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
+	VALUES (1, 'a'), (2, 'b');
+
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+SET LOCAL log_min_messages = 'debug4';
+SET LOCAL client_min_messages = 'debug4';
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
+		GROUP BY val_1;
+SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
+	GROUP BY val_1;
+
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA getsomeattrs CASCADE;
 RESET search_path;

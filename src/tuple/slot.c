@@ -186,13 +186,16 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	bool		index_order;
 	int			cur_tbl_attnum = 0;
 
-	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
-
 	if (__natts <= slot->tts_nvalid || O_TUPLE_IS_NULL(oslot->tuple))
 		return;
 
 	Assert(descr);
 	idx = descr->indices[oslot->ixnum];
+
+	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
+	if (oslot->ixnum == PrimaryIndexNumber)
+		index_order = index_order &&
+			slot->tts_tupleDescriptor->natts == idx->nFields;
 
 	Assert(slot->tts_nvalid == 0 || oslot->ixnum == PrimaryIndexNumber);
 
