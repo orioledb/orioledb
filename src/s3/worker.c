@@ -19,6 +19,7 @@
 #include "s3/requests.h"
 #include "s3/worker.h"
 
+#include "access/xlog_internal.h"
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/bgwriter.h"
@@ -160,6 +161,18 @@ s3process_task(uint64 taskLocation)
 		pfree(filename);
 		pfree(objectname);
 	}
+	else if (task->type == S3TaskTypeWriteWALFile)
+	{
+		char	   *filename;
+
+		filename = psprintf(XLOGDIR "/%s", task->typeSpecific.walFilename);
+		objectname = psprintf("wal/%s", task->typeSpecific.walFilename);
+		
+		s3_put_file(objectname, filename);
+
+		pfree(filename);
+		pfree(objectname);
+	}
 
 	pfree(task);
 
@@ -210,6 +223,30 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
 	task->typeSpecific.writeFilePart.partNum = partNum;
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
+
+	pfree(task);
+
+	return location;
+}
+
+/*
+ * Schedule a synchronization of given WAL file to S3.
+ */
+S3TaskLocation
+s3_schedule_wal_file_write(char *filename)
+{
+	S3Task	   *task;
+	int			filenameLen,
+				taskLen;
+	S3TaskLocation location;
+
+	filenameLen = strlen(filename);
+	taskLen = INTALIGN(offsetof(S3Task, typeSpecific.walFilename) + filenameLen + 1);
+	task = (S3Task *) palloc0(taskLen);
+	task->type = S3TaskTypeWriteWALFile;
+	memcpy(task->typeSpecific.walFilename, filename, filenameLen + 1);
+
+	location = s3_queue_put_task((Pointer) task, taskLen);
 
 	pfree(task);
 
