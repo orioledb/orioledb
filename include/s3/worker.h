@@ -18,7 +18,8 @@
 typedef enum
 {
 	S3TaskTypeWriteFile,
-	S3TaskTypeWriteFilePart
+	S3TaskTypeWriteFilePart,
+	S3TaskTypeWriteWALFile
 } S3TaskType;
 
 /*
@@ -42,6 +43,7 @@ typedef struct
 			int32		segNum;
 			int32		partNum;
 		}			writeFilePart;
+		char		walFilename[1];
 	}			typeSpecific;
 } S3Task;
 
@@ -53,6 +55,7 @@ extern S3TaskLocation s3_schedule_file_write(uint32 chkpNum, char *filename);
 extern S3TaskLocation s3_schedule_file_part_write(uint32 chkpNum, Oid datoid,
 												  Oid relnode, int32 segNum,
 												  int32 partNum);
+extern S3TaskLocation s3_schedule_wal_file_write(char *filename);
 extern S3TaskLocation s3_schedule_downlink_load(Oid datoid, Oid relnode,
 												uint64 downlink);
 
