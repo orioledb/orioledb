@@ -112,7 +112,7 @@ struct BTreeSeqScan
 
 	/*
 	 * Number of the last completed checkpoint when scan was started.  We need
-	 * on-disk pages of this checkpoint to be not overriden until scan
+	 * on-disk pages of this checkpoint to be not overridden until scan
 	 * finishes.  This means we shouldn't start using free blocks of later
 	 * checkpoints before this scan is finished.
 	 */
