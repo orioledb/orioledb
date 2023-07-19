@@ -110,6 +110,9 @@ s3process_task(uint64 taskLocation)
 
 		s3_put_file(objectname, filename);
 		pfree(objectname);
+
+		if (task->typeSpecific.writeFile.delete)
+			unlink(filename);
 	}
 	else if (task->type == S3TaskTypeWriteFilePart &&
 			 task->typeSpecific.writeFilePart.segNum >= 0)
@@ -183,7 +186,7 @@ s3process_task(uint64 taskLocation)
  * Schedule a synchronization of given data file to S3.
  */
 S3TaskLocation
-s3_schedule_file_write(uint32 chkpNum, char *filename)
+s3_schedule_file_write(uint32 chkpNum, char *filename, bool delete)
 {
 	S3Task	   *task;
 	int			filenameLen,
@@ -195,6 +198,7 @@ s3_schedule_file_write(uint32 chkpNum, char *filename)
 	task = (S3Task *) palloc0(taskLen);
 	task->type = S3TaskTypeWriteFile;
 	task->typeSpecific.writeFile.chkpNum = chkpNum;
+	task->typeSpecific.writeFile.delete = delete;
 	memcpy(task->typeSpecific.writeFile.filename, filename, filenameLen + 1);
 
 	location = s3_queue_put_task((Pointer) task, taskLen);

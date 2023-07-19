@@ -187,11 +187,22 @@ typedef struct
 typedef struct
 {
 	List	   *tablespaces;
-
+	List	   *smallFileNames;
+	List	   *smallFileSizes;
+	int			smallFilesTotalSize;
+	int			smallFilesNum;
+	uint32		chkpNum;
 } S3BackupState;
 
-static int64 s3_backup_scan_dir(uint32 chkpNum, const char *path,
-								int basepathlen, List *tablespaces,
+#define SMALL_FILE_THRESHOLD		0x10000
+#define SMALL_FILES_TOTAL_THRESHOLD 0x100000
+
+static S3TaskLocation flush_small_files(S3BackupState *state);
+static S3TaskLocation accumulate_small_file(S3BackupState *state,
+											const char *path,
+											int size);
+static int64 s3_backup_scan_dir(S3BackupState *state,
+								const char *path, int basepathlen,
 								const char *spcoid);
 static List *get_tablespaces(StringInfo tblspcmapfile);
 
@@ -222,6 +233,11 @@ s3_perform_backup(S3TaskLocation location)
 	newti = palloc0(sizeof(tablespaceinfo));
 	newti->size = -1;
 	state.tablespaces = lappend(state.tablespaces, newti);
+	state.chkpNum = chkpNum;
+	state.smallFileNames = NIL;
+	state.smallFileSizes = NIL;
+	state.smallFilesTotalSize = sizeof(int);
+	state.smallFilesNum = 0;
 
 	/* Send off our tablespaces one by one */
 	foreach(lc, state.tablespaces)
@@ -241,9 +257,9 @@ s3_perform_backup(S3TaskLocation location)
 			 */
 
 			/* Then the bulk of the files... */
-			s3_backup_scan_dir(chkpNum, ".", 1, state.tablespaces, NULL);
+			s3_backup_scan_dir(&state, ".", 1, NULL);
 
-			location = s3_schedule_file_write(chkpNum, XLOG_CONTROL_FILE);
+			location = s3_schedule_file_write(chkpNum, XLOG_CONTROL_FILE, false);
 			maxLocation = Max(maxLocation, location);
 		}
 		else
@@ -252,16 +268,17 @@ s3_perform_backup(S3TaskLocation location)
 
 			snprintf(pathbuf, sizeof(pathbuf), "%s", ti->path);
 
-			s3_backup_scan_dir(chkpNum, pathbuf, strlen(pathbuf),
-							   state.tablespaces, ti->oid);
+			s3_backup_scan_dir(&state, pathbuf, strlen(pathbuf), ti->oid);
 		}
 	}
+	location = flush_small_files(&state);
+	maxLocation = Max(maxLocation, location);
 	s3_queue_wait_for_location(maxLocation);
 }
 
 static int64
-s3_backup_scan_dir(uint32 chkpNum, const char *path, int basepathlen,
-				   List *tablespaces, const char *spcoid)
+s3_backup_scan_dir(S3BackupState *state, const char *path,
+				   int basepathlen, const char *spcoid)
 {
 	DIR		   *dir;
 	struct dirent *de;
@@ -467,7 +484,7 @@ s3_backup_scan_dir(uint32 chkpNum, const char *path, int basepathlen,
 			 * Call ourselves recursively for a directory, unless it happens
 			 * to be a separate tablespace located within PGDATA.
 			 */
-			foreach(lc, tablespaces)
+			foreach(lc, state->tablespaces)
 			{
 				tablespaceinfo *ti = (tablespaceinfo *) lfirst(lc);
 
@@ -492,14 +509,17 @@ s3_backup_scan_dir(uint32 chkpNum, const char *path, int basepathlen,
 				skip_this_dir = true;
 
 			if (!skip_this_dir)
-				size += s3_backup_scan_dir(chkpNum, pathbuf, basepathlen,
-										   tablespaces, spcoid);
+				size += s3_backup_scan_dir(state, pathbuf,
+										   basepathlen, spcoid);
 		}
 		else if (S_ISREG(statbuf.st_mode))
 		{
 			S3TaskLocation location;
 
-			location = s3_schedule_file_write(chkpNum, pathbuf);
+			if (statbuf.st_size < SMALL_FILE_THRESHOLD)
+				location = accumulate_small_file(state, pathbuf, statbuf.st_size);
+			else
+				location = s3_schedule_file_write(state->chkpNum, pathbuf, false);
 			maxLocation = Max(maxLocation, location);
 		}
 		else
@@ -620,4 +640,142 @@ get_tablespaces(StringInfo tblspcmapfile)
 	FreeDir(tblspcdir);
 
 	return tablespaces;
+}
+
+static void
+write_int(File file, char *filename, int offset, int value)
+{
+	if (FileWrite(file, (char *) &value, sizeof(value), offset, WAIT_EVENT_DATA_FILE_WRITE) != sizeof(value))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+					errmsg("could not write temporary file \"%s\": %m",
+						   filename)));
+}
+
+static void
+write_data(File file, char *filename, int offset, Pointer ptr, int length)
+{
+	if (FileWrite(file, ptr, length, offset, WAIT_EVENT_DATA_FILE_WRITE) != length)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+					errmsg("could not write temporary file \"%s\": %m",
+						   filename)));
+}
+
+static Pointer
+read_small_file(const char *filename, int size)
+{
+	File		file;
+	Pointer		buffer;
+	int			rc;
+
+	buffer = (Pointer) palloc(size);
+
+	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	if (file < 0)
+		return NULL;
+
+	rc = FileRead(file, buffer, size, 0, WAIT_EVENT_DATA_FILE_READ);
+
+	if (rc < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+					errmsg("could not read small file \"%s\": %m",
+						   filename)));
+
+	FileClose(file);
+
+	return buffer;
+}
+
+static S3TaskLocation
+flush_small_files(S3BackupState *state)
+{
+	ListCell *lc, *lc2;
+	int		totalNamesLen = 0;
+	int		offset = 0;
+	int		nameOffset;
+	int		dataOffset;
+	char   *filename;
+	File	file;
+	S3TaskLocation location;
+
+	foreach(lc, state->smallFileNames)
+		totalNamesLen += strlen(lfirst(lc)) + 1;
+
+	nameOffset = sizeof(int) * (1 + 3 * list_length(state->smallFileNames));
+	dataOffset = nameOffset + totalNamesLen;
+
+	filename = psprintf(ORIOLEDB_DATA_DIR "/small_files_%d", state->smallFilesNum);
+
+	file = PathNameOpenFile(filename, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY);
+	if (file <= 0)
+	{
+		ereport(ERROR,
+				(errcode_for_file_access(),
+					errmsg("could not create temporary file \"%s\": %m",
+						   filename)));
+	}
+
+	write_int(file, filename, 0, list_length(state->smallFileNames));
+	offset = sizeof(int);
+
+	forboth(lc, state->smallFileNames, lc2, state->smallFileSizes)
+	{
+		write_int(file, filename, offset, nameOffset);
+		write_int(file, filename, offset + sizeof(int), dataOffset);
+		write_int(file, filename, offset + 2 * sizeof(int), lfirst_int(lc2));
+
+		nameOffset += strlen(lfirst(lc)) + 1;
+		dataOffset += lfirst_int(lc2);
+		offset += 3 * sizeof(int);
+	}
+
+	foreach(lc, state->smallFileNames)
+	{
+		int		len = strlen(lfirst(lc)) + 1;
+
+		write_data(file, filename, offset, lfirst(lc), len);
+		offset += len;
+	}
+
+	forboth(lc, state->smallFileNames, lc2, state->smallFileSizes)
+	{
+		int		len = lfirst_int(lc2);
+		Pointer	data = read_small_file(lfirst(lc), len);
+
+		write_data(file, filename, offset, data, len);
+		offset += len;
+	}
+
+	FileClose(file);
+
+	location = s3_schedule_file_write(state->chkpNum, filename, true);
+
+	pfree(filename);
+
+	list_free_deep(state->smallFileNames);
+	list_free(state->smallFileSizes);
+	state->smallFileNames = NIL;
+	state->smallFileSizes = NIL;
+	state->smallFilesTotalSize = sizeof(int);
+	state->smallFilesNum++;
+
+	return location;
+}
+
+static S3TaskLocation
+accumulate_small_file(S3BackupState *state, const char *path, int size)
+{
+	int		sizeRequired = 3 * sizeof(int) + strlen(path) + 1 + size;
+	S3TaskLocation	location = 0;
+
+	if (state->smallFilesTotalSize + sizeRequired > SMALL_FILES_TOTAL_THRESHOLD)
+		location = flush_small_files(state);
+
+	state->smallFileNames = lappend(state->smallFileNames, pstrdup(path));
+	state->smallFileSizes = lappend_int(state->smallFileSizes, size);
+	state->smallFilesTotalSize += sizeRequired;
+
+	return location;
 }
