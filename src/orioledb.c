@@ -123,6 +123,7 @@ char	   *s3_host = NULL;
 char	   *s3_region = NULL;
 char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
+char	   *s3_cainfo = NULL;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -641,6 +642,18 @@ _PG_init(void)
 							   "S3 secret key",
 							   NULL,
 							   &s3_secretkey,
+							   NULL,
+							   PGC_POSTMASTER,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
+
+	DefineCustomStringVariable("orioledb.s3_cainfo",
+							   "S3 CApath or CAfile path used to validate "
+							   "the peer certificate. For tests only!",
+							   NULL,
+							   &s3_cainfo,
 							   NULL,
 							   PGC_POSTMASTER,
 							   0,
