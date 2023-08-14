@@ -255,6 +255,7 @@ extern char *s3_host;
 extern char *s3_region;
 extern char *s3_accesskey;
 extern char *s3_secretkey;
+extern char *s3_cainfo;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MyProc->pgprocno >= 0 && \

@@ -2666,7 +2666,7 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 		{
 			if (relnode == file_relnode)
 			{
-				if (!first_file_deleted)
+				if (!orioledb_s3_mode && !first_file_deleted)
 				{
 					filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
 										datoid, relnode);

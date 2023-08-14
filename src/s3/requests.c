@@ -210,12 +210,14 @@ s3_get(PG_FUNCTION_ARGS)
 	curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
 	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if (s3_cainfo)
+		curl_easy_setopt(curl, CURLOPT_CAINFO, s3_cainfo);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_buf);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
 
 	sc = curl_easy_perform(curl);
 
-	if (sc != 0 || strlen(buf.data) != 0)
+	if (sc != 0)
 	{
 		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
 						errmsg("could not get object from S3"),
@@ -326,6 +328,7 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	slist = curl_slist_append(slist,
 							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
 											  s3_accesskey, datestring, s3_region, signature)));
+	slist = curl_slist_append(slist, "Transfer-Encoding: chunked");
 	pfree(tmp);
 
 	initStringInfo(&buf);
@@ -334,6 +337,8 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
 	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if (s3_cainfo)
+		curl_easy_setopt(curl, CURLOPT_CAINFO, s3_cainfo);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, dataSize);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_buf);
