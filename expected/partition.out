@@ -117,6 +117,35 @@ SELECT * FROM o_test_partition_on_conflict_list;
 ---+---
 (0 rows)
 
+CREATE TABLE o_test_partition_on_conflict_update_same_trx (
+	a int UNIQUE,
+	b char(2)
+) PARTITION BY LIST (a);
+CREATE TABLE o_test_partition_on_conflict_update_same_trx_child (
+	a int UNIQUE,
+	b char(2)
+) USING orioledb;
+ALTER TABLE o_test_partition_on_conflict_update_same_trx
+	ATTACH PARTITION o_test_partition_on_conflict_update_same_trx_child
+		FOR VALUES IN (3);
+BEGIN;
+INSERT INTO o_test_partition_on_conflict_update_same_trx
+	VALUES (3, 'a') ON CONFLICT (a) DO UPDATE SET b = excluded.b;
+TABLE o_test_partition_on_conflict_update_same_trx;
+ a | b  
+---+----
+ 3 | a 
+(1 row)
+
+INSERT INTO o_test_partition_on_conflict_update_same_trx
+	VALUES (3, 'a') ON CONFLICT (a) DO UPDATE SET b = excluded.b || 'c';
+TABLE o_test_partition_on_conflict_update_same_trx;
+ a | b  
+---+----
+ 3 | ac
+(1 row)
+
+COMMIT;
 CREATE TABLE o_test_cross_partition_update (
   val_1 int,
   val_2 int
@@ -673,9 +702,10 @@ SELECT * FROM o_test_partition_truncate;
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 18 other objects
+NOTICE:  drop cascades to 19 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
+drop cascades to table o_test_partition_on_conflict_update_same_trx_child
 drop cascades to table o_test_cross_partition_update_child
 drop cascades to table o_test_cross_partition_update_child2
 drop cascades to table o_test_1
@@ -693,9 +723,10 @@ drop cascades to table o_test_cross_partition_update_trigger_child1
 drop cascades to table o_test_cross_partition_update_trigger_child2
 drop cascades to table o_test_partition_truncate2
 DROP SCHEMA partition CASCADE;
-NOTICE:  drop cascades to 10 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range
 drop cascades to table o_test_partition_on_conflict_list
+drop cascades to table o_test_partition_on_conflict_update_same_trx
 drop cascades to table o_test_cross_partition_update
 drop cascades to table o_test_2
 drop cascades to table o_test_partition_index

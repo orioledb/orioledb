@@ -473,6 +473,11 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
 						&marg.csn, NULL);
+	if (slot->tts_ops != descr->newTuple->tts_ops)
+	{
+		ExecCopySlot(descr->newTuple, slot);
+		slot = descr->newTuple;
+	}
 
 	marg.descr = descr;
 	marg.oxid = oxid;

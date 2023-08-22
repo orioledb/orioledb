@@ -69,6 +69,30 @@ SELECT * FROM o_test_partition_on_conflict_list;
 DELETE FROM o_test_partition_on_conflict_list WHERE a = 3;
 SELECT * FROM o_test_partition_on_conflict_list;
 
+CREATE TABLE o_test_partition_on_conflict_update_same_trx (
+	a int UNIQUE,
+	b char(2)
+) PARTITION BY LIST (a);
+
+CREATE TABLE o_test_partition_on_conflict_update_same_trx_child (
+	a int UNIQUE,
+	b char(2)
+) USING orioledb;
+
+ALTER TABLE o_test_partition_on_conflict_update_same_trx
+	ATTACH PARTITION o_test_partition_on_conflict_update_same_trx_child
+		FOR VALUES IN (3);
+
+BEGIN;
+INSERT INTO o_test_partition_on_conflict_update_same_trx
+	VALUES (3, 'a') ON CONFLICT (a) DO UPDATE SET b = excluded.b;
+TABLE o_test_partition_on_conflict_update_same_trx;
+
+INSERT INTO o_test_partition_on_conflict_update_same_trx
+	VALUES (3, 'a') ON CONFLICT (a) DO UPDATE SET b = excluded.b || 'c';
+TABLE o_test_partition_on_conflict_update_same_trx;
+COMMIT;
+
 CREATE TABLE o_test_cross_partition_update (
   val_1 int,
   val_2 int
