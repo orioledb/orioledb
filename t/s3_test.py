@@ -135,6 +135,98 @@ class S3Test(BaseTest):
 			self.assertEqual(file_content, orioledb_object_body)
 		node.stop(['-m', 'immediate'])
 
+	def test_s3_checkpoint(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.append_conf(f"""
+			orioledb.recovery_idx_pool_size = 1
+			orioledb.recovery_pool_size = 1
+
+			orioledb.debug_disable_pools_limit = true
+			orioledb.main_buffers = 1MB
+			orioledb.debug_disable_bgwriter = true
+		""")
+		node.start()
+		datname = default_dbname()
+		datoid = node.execute(f"""
+			SELECT oid from pg_database WHERE datname = '{datname}'
+		""")[0][0]
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+		node.safe_psql("""
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT")
+		node.safe_psql("""
+			CREATE TABLE o_test_2 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_2 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT")
+		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
+						 node.execute("SELECT * FROM o_test_1"))
+
+		node.stop(['-m', 'immediate'])
+
+		orioledb_dir = node.data_dir + "/orioledb_data"
+		chkp_num = 0
+		obj_prefix = f'orioledb_data/{chkp_num}'
+		files = []
+		for path, _, filenames in os.walk(orioledb_dir):
+			path = path.removeprefix(node.data_dir).split('/')[1:]
+			if path == ['orioledb_data']:
+				if not filenames:
+					break
+				chkp_num = [x.split('.')[0] for x in filenames
+								if x.endswith('.xid')][0]
+				obj_prefix = f'orioledb_data/{chkp_num}'
+			elif path == ['orioledb_data', '1']:
+				continue
+			else:
+				for name in filenames:
+					name = name.split('/')[-1].split('.')
+					if len(name) > 1:
+						postfix = name[-1]
+					else:
+						postfix = None
+					name[0] = name[0].split('-')
+					if postfix == 'map':
+						if name[0][1] == chkp_num:
+							name = f"{name[0][0]}.map"
+						else:
+							name = None
+					else:
+						if name[0][1] == chkp_num:
+							name = f"{name[0][0]}.0.0"
+						else:
+							name = None
+					if name:
+						files += [f"{obj_prefix}/{path[-1]}/{name}"]
+
+		objects = self.client.list_objects(Bucket=self.bucket_name,
+										   Prefix=f'{obj_prefix}/{datoid}')
+		objects = objects.get("Contents", [])
+		objects = sorted(list(x["Key"] for x in objects))
+		files = sorted(files)
+		self.assertEqual(objects, files)
+		node.start()
+		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
+						 node.execute("SELECT * FROM o_test_1"))
+		node.stop()
+
 
 class MotoServerSSL:
 	def __init__(self, host: str = "localhost", port: int = 5000,
