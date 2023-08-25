@@ -27,7 +27,9 @@
 
 #include "access/xlog_internal.h"
 #include "access/xlogbackup.h"
+#include "catalog/pg_control.h"
 #include "commands/defrem.h"
+#include "common/controldata_utils.h"
 #include "common/compression.h"
 #include "common/file_perm.h"
 #include "common/file_utils.h"
@@ -206,6 +208,84 @@ static int64 s3_backup_scan_dir(S3BackupState *state,
 								const char *spcoid);
 static List *get_tablespaces(StringInfo tblspcmapfile);
 
+static void
+fill_backup_state(BackupState *state)
+{
+	char	   *label = "base backup";
+	bool		backup_started_in_recovery;
+
+	Assert(state != NULL);
+	backup_started_in_recovery = RecoveryInProgress();
+
+	/*
+	 * During recovery, we don't need to check WAL level. Because, if WAL
+	 * level is not sufficient, it's impossible to get here during recovery.
+	 */
+	if (!backup_started_in_recovery && !XLogIsNeeded())
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("WAL level not sufficient for making an online backup"),
+				 errhint("wal_level must be set to \"replica\" or \"logical\" at server start.")));
+
+	memcpy(state->name, label, strlen(label));
+
+	/*
+	 * Ensure we decrement runningBackups if we fail below. NB -- for this to
+	 * work correctly, it is critical that sessionBackupState is only updated
+	 * after this block is over.
+	 */
+	PG_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
+	{
+		ControlFileData *ControlFile;
+		bool		crc_ok;
+		/*
+		 * Force an XLOG file switch before the checkpoint, to ensure that the
+		 * WAL segment the checkpoint is written to doesn't contain pages with
+		 * old timeline IDs.  That would otherwise happen if you called
+		 * pg_backup_start() right after restoring from a PITR archive: the
+		 * first WAL segment containing the startup checkpoint has pages in
+		 * the beginning with the old timeline ID.  That can cause trouble at
+		 * recovery: we won't have a history file covering the old timeline if
+		 * pg_wal directory was not included in the base backup and the WAL
+		 * archive was cleared too before starting the backup.
+		 *
+		 * This also ensures that we have emitted a WAL page header that has
+		 * XLP_BKP_REMOVABLE off before we emit the checkpoint record.
+		 * Therefore, if a WAL archiver (such as pglesslog) is trying to
+		 * compress out removable backup blocks, it won't remove any that
+		 * occur after this point.
+		 *
+		 * During recovery, we skip forcing XLOG file switch, which means that
+		 * the backup taken during recovery is not available for the special
+		 * recovery case described above.
+		 */
+		if (!backup_started_in_recovery)
+			RequestXLogSwitch(false);
+
+		/*
+		 * Now we need to fetch the checkpoint record location, and also
+		 * its REDO pointer.  The oldest point in WAL that would be needed
+		 * to restore starting from the checkpoint is precisely the REDO
+		 * pointer.
+		 */
+		/* read the control file */
+		ControlFile = get_controlfile(DataDir, &crc_ok);
+		if (!crc_ok)
+			ereport(ERROR,
+					(errmsg("calculated CRC checksum does not match value stored in file")));
+		LWLockAcquire(ControlFileLock, LW_SHARED);
+		state->checkpointloc = ControlFile->checkPoint;
+		state->startpoint = ControlFile->checkPointCopy.redo;
+		state->starttli = ControlFile->checkPointCopy.ThisTimeLineID;
+		LWLockRelease(ControlFileLock);
+
+		state->starttime = (pg_time_t) time(NULL);
+	}
+	PG_END_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
+
+	state->started_in_recovery = backup_started_in_recovery;
+}
+
 /*
  * Actually do a base backup for the specified tablespaces.
  *
@@ -220,6 +300,7 @@ s3_perform_backup(S3TaskLocation location)
 	StringInfoData tablespaceMapData;
 	ListCell   *lc;
 	tablespaceinfo *newti;
+	BackupState *backup_state;
 
 	backup_started_in_recovery = RecoveryInProgress();
 
@@ -239,6 +320,10 @@ s3_perform_backup(S3TaskLocation location)
 	state.smallFilesTotalSize = sizeof(int);
 	state.smallFilesNum = 0;
 
+	backup_state = (BackupState *) palloc0(sizeof(BackupState));
+
+	fill_backup_state(backup_state);
+
 	/* Send off our tablespaces one by one */
 	foreach(lc, state.tablespaces)
 	{
@@ -247,14 +332,33 @@ s3_perform_backup(S3TaskLocation location)
 		if (ti->path == NULL)
 		{
 			S3TaskLocation location;
+			char	   *backup_filename;
+			char	   *backup_label;
+			File		backup_file;
 
-			/* TODO: send backup label */
+			backup_filename = ORIOLEDB_DATA_DIR "/" BACKUP_LABEL_FILE;
 
-			/*
-			 * if (opt->sendtblspcmapfile) { sendFileWithContent(sink,
-			 * TABLESPACE_MAP, tablespace_map->data, &manifest);
-			 * sendtblspclinks = false; }
-			 */
+			/* Include the backup_label first... */
+			backup_label = build_backup_content(backup_state, false);
+			backup_file = PathNameOpenFile(backup_filename,
+										   O_WRONLY | O_CREAT | O_TRUNC |
+										   PG_BINARY);
+
+			if (FileWrite(backup_file, (Pointer) backup_label,
+						  strlen(backup_label), 0,
+						  WAIT_EVENT_DATA_FILE_WRITE) != strlen(backup_label))
+			{
+				ereport(FATAL,
+						(errcode_for_file_access(),
+						 errmsg("Could not write backup_label to file: %s",
+								backup_filename)));
+			}
+
+			FileClose(backup_file);
+
+			location = s3_schedule_file_write(chkpNum, backup_filename);
+			maxLocation = Max(maxLocation, location);
+			pfree(backup_label);
 
 			/* Then the bulk of the files... */
 			s3_backup_scan_dir(&state, ".", 1, NULL);
@@ -273,6 +377,8 @@ s3_perform_backup(S3TaskLocation location)
 	}
 	location = flush_small_files(&state);
 	maxLocation = Max(maxLocation, location);
+	pfree(tablespaceMapData.data);
+	pfree(backup_state);
 	s3_queue_wait_for_location(maxLocation);
 }
 
@@ -444,7 +550,13 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		}
 
 		if (excludeFound)
+		{
+			S3TaskLocation location;
+
+			location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+			maxLocation = Max(maxLocation, location);
 			continue;
+		}
 
 		/*
 		 * We can skip pg_wal, the WAL segments need to be fetched from the
@@ -453,6 +565,15 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		 */
 		if (strcmp(pathbuf, "./pg_wal") == 0)
 		{
+			S3TaskLocation location;
+
+			location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+			maxLocation = Max(maxLocation, location);
+
+			location = s3_schedule_empty_dir_write(chkpNum,
+												   "./pg_wal/archive_status");
+			maxLocation = Max(maxLocation, location);
+
 			continue;			/* don't recurse into pg_wal */
 		}
 
@@ -479,6 +600,10 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		{
 			bool		skip_this_dir = false;
 			ListCell   *lc;
+			S3TaskLocation location;
+
+			location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+			maxLocation = Max(maxLocation, location);
 
 			/*
 			 * Call ourselves recursively for a directory, unless it happens
@@ -508,7 +633,14 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 			if (strcmp(pathbuf, "./pg_tblspc") == 0)
 				skip_this_dir = true;
 
-			if (!skip_this_dir)
+			if (skip_this_dir)
+			{
+				S3TaskLocation location;
+
+				location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+				maxLocation = Max(maxLocation, location);
+			}
+			else
 				size += s3_backup_scan_dir(state, pathbuf,
 										   basepathlen, spcoid);
 		}

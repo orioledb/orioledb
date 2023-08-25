@@ -98,21 +98,49 @@ s3process_task(uint64 taskLocation)
 	if (task->type == S3TaskTypeWriteFile)
 	{
 		char	   *filename = task->typeSpecific.writeFile.filename;
+		bool		backup;
+
+		backup = strcmp(filename,
+						ORIOLEDB_DATA_DIR "/" BACKUP_LABEL_FILE) == 0;
 
 		if (filename[0] == '.' && filename[1] == '/')
 			filename += 2;
 
-		objectname = psprintf("data/%u/%s",
-							  task->typeSpecific.writeFile.chkpNum,
-							  filename);
+		if (backup)
+			objectname = psprintf("data/%u/%s",
+								  task->typeSpecific.writeFile.chkpNum,
+								  BACKUP_LABEL_FILE);
+		else
+			objectname = psprintf("data/%u/%s",
+								  task->typeSpecific.writeFile.chkpNum,
+								  filename);
 
 		elog(DEBUG1, "S3 put %s %s", objectname, filename);
 
 		s3_put_file(objectname, filename);
+
+		if (backup)
+			unlink(filename);
 		pfree(objectname);
 
 		if (task->typeSpecific.writeFile.delete)
 			unlink(filename);
+	}
+	else if (task->type == S3TaskTypeWriteEmptyDir)
+	{
+		char	   *dirname = task->typeSpecific.writeEmptyDir.dirname;
+
+		if (dirname[0] == '.' && dirname[1] == '/')
+			dirname += 2;
+
+		objectname = psprintf("data/%u/%s/",
+							  task->typeSpecific.writeFile.chkpNum,
+							  dirname);
+
+		elog(DEBUG1, "S3 dir put %s %s", objectname, dirname);
+
+		s3_put_empty_dir(objectname);
+		pfree(objectname);
 	}
 	else if (task->type == S3TaskTypeWriteFilePart &&
 			 task->typeSpecific.writeFilePart.segNum >= 0)
@@ -200,6 +228,32 @@ s3_schedule_file_write(uint32 chkpNum, char *filename, bool delete)
 	task->typeSpecific.writeFile.chkpNum = chkpNum;
 	task->typeSpecific.writeFile.delete = delete;
 	memcpy(task->typeSpecific.writeFile.filename, filename, filenameLen + 1);
+
+	location = s3_queue_put_task((Pointer) task, taskLen);
+
+	pfree(task);
+
+	return location;
+}
+
+/*
+ * Schedule a synchronization of given empty directory to S3.
+ */
+S3TaskLocation
+s3_schedule_empty_dir_write(uint32 chkpNum, char *dirname)
+{
+	S3Task	   *task;
+	int			dirnameLen,
+				taskLen;
+	S3TaskLocation location;
+
+	dirnameLen = strlen(dirname);
+	taskLen = INTALIGN(offsetof(S3Task, typeSpecific.writeEmptyDir.dirname) +
+					   dirnameLen + 1);
+	task = (S3Task *) palloc0(taskLen);
+	task->type = S3TaskTypeWriteEmptyDir;
+	task->typeSpecific.writeEmptyDir.chkpNum = chkpNum;
+	memcpy(task->typeSpecific.writeEmptyDir.dirname, dirname, dirnameLen + 1);
 
 	location = s3_queue_put_task((Pointer) task, taskLen);
 
