@@ -12,17 +12,16 @@ import time
 import hashlib
 import base64
 import inspect
-import tempfile
+from tempfile import mkdtemp
 
 from threading import Thread
 from testgres.enums import NodeStatus
-from testgres.consts import PG_CONF_FILE
 from testgres.utils import get_pg_version, get_pg_config
 
 class BaseTest(unittest.TestCase):
 	replica = None
 	basePort = None
-	myName = None
+	_myName = None
 
 	def getTestNum(self):
 		testFullName = inspect.getfile(self.__class__)
@@ -40,26 +39,30 @@ class BaseTest(unittest.TestCase):
 
 	def getReplica(self) -> testgres.PostgresNode:
 		if self.replica is None:
-			baseDir = tempfile.mkdtemp(prefix = self.myName + '_tgsb_')
+			baseDir = mkdtemp(prefix = self.myName + '_tgsb_')
 			replica = self.node.backup(base_dir = baseDir).spawn_replica('replica')
 			replica.port = self.getBasePort() + 1
-			replica.append_conf(filename=PG_CONF_FILE, line='\n')
-			replica.append_conf(filename=PG_CONF_FILE, port=replica.port)
+			replica.append_conf(port=replica.port)
 			self.replica = replica
 		return self.replica
 
-	def setUp(self):
-		name = os.path.basename(inspect.getfile(self.__class__))
-		if name.endswith('_test.py'):
-			name = name[:-8]
-		elif name.endswith('.py'):
-			name = name[:-3]
-		self.myName = name
+	@property
+	def myName(self):
+		if not self._myName:
+			name = os.path.basename(inspect.getfile(self.__class__))
+			if name.endswith('_test.py'):
+				name = name[:-8]
+			elif name.endswith('.py'):
+				name = name[:-3]
+			self._myName = name
+		return self._myName
 
+	def setUp(self):
+		baseDir = mkdtemp(prefix = self.myName + '_tgsn_')
 		self.startTime = time.time()
 		self.node = testgres.get_new_node('test',
 										  port = self.getBasePort(),
-										  base_dir = tempfile.mkdtemp(prefix = name + '_tgsn_'))
+										  base_dir = baseDir)
 		self.node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		self.node.append_conf('postgresql.conf',
 							  "shared_preload_libraries = orioledb\n")

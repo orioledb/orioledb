@@ -578,7 +578,7 @@ o_recovery_start_hook(void)
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_workers_number value.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.")));
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
@@ -909,7 +909,7 @@ recovery_init(int worker_id)
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_workers_number value.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.")));
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;

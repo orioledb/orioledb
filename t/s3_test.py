@@ -2,17 +2,24 @@ import json
 import logging
 import os
 import time
-from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
+from tempfile import mkdtemp
+from threading import Thread, Event
 from typing import Optional
 
 import boto3
+from boto3.s3.transfer import TransferConfig
+import testgres
 from botocore import UNSIGNED
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from moto.core import set_initial_no_auth_action_count
 from moto.server import DomainDispatcherApplication, create_backend_app
-from testgres.enums import NodeStatus
-from werkzeug.serving import (BaseWSGIServer, make_ssl_devcert,
-                              make_server)
+from testgres.consts import DATA_DIR
+from testgres.defaults import default_dbname, default_username
+
+from testgres.utils import clean_on_error
+from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
 
 from .base_test import BaseTest
 
@@ -109,7 +116,6 @@ class S3Test(BaseTest):
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
 			orioledb.s3_cainfo = '{self.ssl_key[0]}'
-			orioledb.s3_num_workers = 1
 		""")
 		node.start()
 		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
@@ -144,15 +150,9 @@ class S3Test(BaseTest):
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
 			orioledb.s3_cainfo = '{self.ssl_key[0]}'
-			orioledb.s3_num_workers = 1
-		""")
-		node.append_conf(f"""
-			orioledb.recovery_idx_pool_size = 1
-			orioledb.recovery_pool_size = 1
 
-			orioledb.debug_disable_pools_limit = true
-			orioledb.main_buffers = 1MB
-			orioledb.debug_disable_bgwriter = true
+			orioledb.s3_num_workers = 1
+			orioledb.recovery_pool_size = 1
 		""")
 		node.start()
 		datname = default_dbname()
@@ -226,6 +226,154 @@ class S3Test(BaseTest):
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
 						 node.execute("SELECT * FROM o_test_1"))
 		node.stop()
+
+	def test_s3_data_dir_load(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+
+			orioledb.s3_num_workers = 1
+			orioledb.recovery_pool_size = 1
+		""")
+		node.start()
+		node.safe_psql("""
+			CREATE TABLE pg_test_1 (
+				val_1 int
+			);
+			INSERT INTO pg_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT")
+		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
+						 node.execute("SELECT * FROM pg_test_1"))
+
+		node.stop()
+
+		objects = self.client.list_objects(Bucket=self.bucket_name)
+		objects = objects.get("Contents", [])
+		objects = sorted(list(x["Key"] for x in objects))
+
+		new_temp_dir = mkdtemp(prefix = self.myName + '_tgsb_')
+		new_data_dir = os.path.join(new_temp_dir, DATA_DIR)
+		host_port = f"https://{self.host}:{self.port}"
+		loader = OrioledbS3ObjectLoader(self.access_key_id,
+										self.secret_access_key,
+										self.region,
+										host_port,
+										self.ssl_key[0])
+
+		loader.download_files_in_directory(self.bucket_name, 'data/',
+										   new_data_dir)
+		self.replica = testgres.get_new_node('test', base_dir=new_temp_dir)
+		replica = self.replica
+		replica.port = self.getBasePort() + 1
+		replica.append_conf(port=replica.port)
+		replica._assign_master(node)
+		replica._create_recovery_conf(username=default_username())
+
+		node.start()
+		replica.start()
+		replica.catchup()
+		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
+						node.execute("SELECT * FROM pg_test_1"))
+		replica.stop(['-m', 'immediate'])
+		node.stop(['-m', 'immediate'])
+
+class OrioledbS3ObjectLoader:
+	def __init__(self, aws_access_key_id, aws_secret_access_key, aws_region,
+				 endpoint_url, verify):
+		session = boto3.Session(
+			aws_access_key_id=aws_access_key_id,
+			aws_secret_access_key=aws_secret_access_key,
+			region_name=aws_region
+		)
+		self.s3 = session.client("s3", endpoint_url=endpoint_url,
+								 verify=verify)
+		self._error_occurred = Event()
+
+	def list_objects_in_directory(self, bucket_name, directory):
+		objects = []
+		paginator = self.s3.get_paginator('list_objects_v2')
+
+		greatest_number = -1
+		greatest_number_dir = None
+		for page in paginator.paginate(Bucket=bucket_name, Prefix=directory,
+									   Delimiter='/'):
+			if 'CommonPrefixes' in page:
+				for prefix in page['CommonPrefixes']:
+					prefix_key = prefix['Prefix'].rstrip('/')
+					subdirectory = prefix_key.split('/')[-1]
+					try:
+						number = int(subdirectory)
+						if number > greatest_number:
+							greatest_number = number
+							greatest_number_dir = prefix['Prefix']
+					except ValueError:
+						pass
+		if greatest_number_dir:
+			objects = self.list_objects_in_subdirectory(bucket_name,
+														greatest_number_dir)
+
+		return objects
+
+	def list_objects_in_subdirectory(self, bucket_name, directory):
+		objects = []
+		paginator = self.s3.get_paginator('list_objects_v2')
+
+		for page in paginator.paginate(Bucket=bucket_name, Prefix=directory):
+			if 'Contents' in page:
+				page_objs = [x["Key"] for x in page['Contents']]
+				objects.extend(page_objs)
+
+		return objects
+
+	def download_file(self, bucket_name, file_key, local_path):
+		try:
+			transfer_config = TransferConfig(use_threads=False,
+											 max_concurrency=1)
+			if file_key[-1] == '/':
+				dirs = local_path
+			else:
+				dirs = '/'.join(local_path.split('/')[:-1])
+			os.makedirs(dirs, exist_ok=True,
+						mode=0o700)
+			if file_key[-1] != '/':
+				self.s3.download_file(
+					bucket_name, file_key, local_path, Config=transfer_config
+				)
+		except ClientError as e:
+			if e.response['Error']['Code'] == "404":
+				print(f"File not found: {file_key}")
+			else:
+				print(f"An error occurred: {e}")
+			self._error_occurred.set()
+
+	def download_files_in_directory(self, bucket_name, directory,
+									local_directory):
+		objects = self.list_objects_in_directory(bucket_name, directory)
+		max_threads = os.cpu_count()
+
+		with ThreadPoolExecutor(max_threads) as executor:
+			futures = []
+
+			for file_key in objects:
+				local_file = '/'.join(file_key.split('/')[2:])
+				local_path = f"{local_directory}/{local_file}"
+				future = executor.submit(self.download_file, bucket_name,
+										 file_key, local_path)
+				futures.append(future)
+
+			for future in futures:
+				future.result()
+
+				if self._error_occurred.is_set():
+					print("An error occurred. Stopping all downloads.")
+					executor.shutdown(wait=False, cancel_futures=True)
+					break
 
 
 class MotoServerSSL:

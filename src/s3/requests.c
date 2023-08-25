@@ -328,7 +328,7 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	slist = curl_slist_append(slist,
 							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
 											  s3_accesskey, datestring, s3_region, signature)));
-	slist = curl_slist_append(slist, "Transfer-Encoding: chunked");
+	slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
 	pfree(tmp);
 
 	initStringInfo(&buf);
@@ -357,7 +357,8 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	curl_easy_cleanup(curl);
 
 	curl_slist_free_all(slist);
-	pfree(data);
+	if (data)
+		pfree(data);
 	pfree(url);
 	pfree(datestring);
 	pfree(datetimestring);
@@ -393,6 +394,15 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 						  &dataSize);
 
 	s3_put_object_with_contents(objectname, data, dataSize);
+}
+
+/*
+ * Put empty dir as S3 object.
+ */
+void
+s3_put_empty_dir(char *objectname)
+{
+	s3_put_object_with_contents(objectname, NULL, 0);
 }
 
 /*
