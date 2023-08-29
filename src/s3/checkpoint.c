@@ -27,6 +27,7 @@
 
 #include "access/xlog_internal.h"
 #include "access/xlogbackup.h"
+#include "access/xloginsert.h"
 #include "catalog/pg_control.h"
 #include "commands/defrem.h"
 #include "common/controldata_utils.h"
@@ -212,21 +213,8 @@ static void
 fill_backup_state(BackupState *state)
 {
 	char	   *label = "base backup";
-	bool		backup_started_in_recovery;
 
 	Assert(state != NULL);
-	backup_started_in_recovery = RecoveryInProgress();
-
-	/*
-	 * During recovery, we don't need to check WAL level. Because, if WAL
-	 * level is not sufficient, it's impossible to get here during recovery.
-	 */
-	if (!backup_started_in_recovery && !XLogIsNeeded())
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("WAL level not sufficient for making an online backup"),
-				 errhint("wal_level must be set to \"replica\" or \"logical\" at server start.")));
-
 	memcpy(state->name, label, strlen(label));
 
 	/*
@@ -238,42 +226,14 @@ fill_backup_state(BackupState *state)
 	{
 		ControlFileData *ControlFile;
 		bool		crc_ok;
-		/*
-		 * Force an XLOG file switch before the checkpoint, to ensure that the
-		 * WAL segment the checkpoint is written to doesn't contain pages with
-		 * old timeline IDs.  That would otherwise happen if you called
-		 * pg_backup_start() right after restoring from a PITR archive: the
-		 * first WAL segment containing the startup checkpoint has pages in
-		 * the beginning with the old timeline ID.  That can cause trouble at
-		 * recovery: we won't have a history file covering the old timeline if
-		 * pg_wal directory was not included in the base backup and the WAL
-		 * archive was cleared too before starting the backup.
-		 *
-		 * This also ensures that we have emitted a WAL page header that has
-		 * XLP_BKP_REMOVABLE off before we emit the checkpoint record.
-		 * Therefore, if a WAL archiver (such as pglesslog) is trying to
-		 * compress out removable backup blocks, it won't remove any that
-		 * occur after this point.
-		 *
-		 * During recovery, we skip forcing XLOG file switch, which means that
-		 * the backup taken during recovery is not available for the special
-		 * recovery case described above.
-		 */
-		if (!backup_started_in_recovery)
-			RequestXLogSwitch(false);
 
-		/*
-		 * Now we need to fetch the checkpoint record location, and also
-		 * its REDO pointer.  The oldest point in WAL that would be needed
-		 * to restore starting from the checkpoint is precisely the REDO
-		 * pointer.
-		 */
-		/* read the control file */
+		RequestXLogSwitch(false);
+
+		LWLockAcquire(ControlFileLock, LW_SHARED);
 		ControlFile = get_controlfile(DataDir, &crc_ok);
 		if (!crc_ok)
 			ereport(ERROR,
 					(errmsg("calculated CRC checksum does not match value stored in file")));
-		LWLockAcquire(ControlFileLock, LW_SHARED);
 		state->checkpointloc = ControlFile->checkPoint;
 		state->startpoint = ControlFile->checkPointCopy.redo;
 		state->starttli = ControlFile->checkPointCopy.ThisTimeLineID;
@@ -283,7 +243,7 @@ fill_backup_state(BackupState *state)
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
 
-	state->started_in_recovery = backup_started_in_recovery;
+	state->started_in_recovery = false;
 }
 
 /*
@@ -377,6 +337,21 @@ s3_perform_backup(S3TaskLocation location)
 	}
 	location = flush_small_files(&state);
 	maxLocation = Max(maxLocation, location);
+
+	/*
+	 * Write the backup-end xlog record
+	 */
+	XLogBeginInsert();
+	XLogRegisterData((char *) (&backup_state->startpoint),
+					 sizeof(backup_state->startpoint));
+	XLogInsert(RM_XLOG_ID, XLOG_BACKUP_END);
+
+	/*
+	 * Force a switch to a new xlog segment file, so that the backup is
+	 * valid as soon as archiver moves out the current segment file.
+	 */
+	RequestXLogSwitch(false);
+
 	pfree(tablespaceMapData.data);
 	pfree(backup_state);
 	s3_queue_wait_for_location(maxLocation);

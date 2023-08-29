@@ -1501,7 +1501,6 @@ perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExten
 	if (!write_page_to_disk(desc, extent, write_img, write_size))
 	{
 		uint64		offset;
-		uint32		chkpNum;
 
 		if (orioledb_s3_mode)
 		{
