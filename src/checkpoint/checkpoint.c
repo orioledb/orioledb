@@ -1067,7 +1067,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	elog(LOG, "orioledb checkpoint %u complete",
 		 checkpoint_state->lastCheckpointNumber);
 
-	if (orioledb_s3_mode)
+	if (!(flags & CHECKPOINT_END_OF_RECOVERY) && orioledb_s3_mode)
 		s3_perform_backup(maxLocation);
 
 	if (next_CheckPoint_hook)
@@ -1941,7 +1941,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	char	   *filename,
 			   *finalize_filename;
 	BTreeMetaPage *meta_page;
-	uint64		map_len,
+	uint64		map_len = 0,
 				offset = 0,
 				root_downlink;
 	CheckpointFileHeader header = {0};

@@ -35,7 +35,7 @@ hmac_sha256(char *input, char *output, char *secretkey, int secretkeylen)
 	unsigned int len;
 
 	ctx = HMAC_CTX_new();
-	HMAC_Init(ctx, secretkey, secretkeylen, EVP_sha256());
+	HMAC_Init_ex(ctx, secretkey, secretkeylen, EVP_sha256(), NULL);
 	HMAC_Update(ctx, (unsigned char *) input, strlen(input));
 	HMAC_Final(ctx, (unsigned char *) output, &len);
 	HMAC_CTX_free(ctx);

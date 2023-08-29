@@ -151,7 +151,7 @@ class S3Test(BaseTest):
 			orioledb.s3_secretkey = '{self.secret_access_key}'
 			orioledb.s3_cainfo = '{self.ssl_key[0]}'
 
-			orioledb.s3_num_workers = 1
+			orioledb.s3_num_workers = 3
 			orioledb.recovery_pool_size = 1
 		""")
 		node.start()
@@ -236,9 +236,10 @@ class S3Test(BaseTest):
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
 			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 3
 
-			orioledb.s3_num_workers = 1
 			orioledb.recovery_pool_size = 1
+			orioledb.recovery_idx_pool_size = 1
 		""")
 		node.start()
 		node.safe_psql("""
@@ -250,12 +251,7 @@ class S3Test(BaseTest):
 		node.safe_psql("CHECKPOINT")
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
 						 node.execute("SELECT * FROM pg_test_1"))
-
 		node.stop()
-
-		objects = self.client.list_objects(Bucket=self.bucket_name)
-		objects = objects.get("Contents", [])
-		objects = sorted(list(x["Key"] for x in objects))
 
 		new_temp_dir = mkdtemp(prefix = self.myName + '_tgsb_')
 		new_data_dir = os.path.join(new_temp_dir, DATA_DIR)
@@ -265,13 +261,17 @@ class S3Test(BaseTest):
 										self.region,
 										host_port,
 										self.ssl_key[0])
-
 		loader.download_files_in_directory(self.bucket_name, 'data/',
-										   new_data_dir)
+											new_data_dir)
 		self.replica = testgres.get_new_node('test', base_dir=new_temp_dir)
+
 		replica = self.replica
 		replica.port = self.getBasePort() + 1
 		replica.append_conf(port=replica.port)
+		replica.append_conf("""
+			orioledb.s3_mode = false
+			archive_mode = false
+		""")
 		replica._assign_master(node)
 		replica._create_recovery_conf(username=default_username())
 
@@ -295,7 +295,7 @@ class OrioledbS3ObjectLoader:
 								 verify=verify)
 		self._error_occurred = Event()
 
-	def list_objects_in_directory(self, bucket_name, directory):
+	def list_objects_last_checkpoint(self, bucket_name, directory):
 		objects = []
 		paginator = self.s3.get_paginator('list_objects_v2')
 
@@ -315,12 +315,11 @@ class OrioledbS3ObjectLoader:
 					except ValueError:
 						pass
 		if greatest_number_dir:
-			objects = self.list_objects_in_subdirectory(bucket_name,
-														greatest_number_dir)
+			objects = self.list_objects(bucket_name, greatest_number_dir)
 
 		return objects
 
-	def list_objects_in_subdirectory(self, bucket_name, directory):
+	def list_objects(self, bucket_name, directory):
 		objects = []
 		paginator = self.s3.get_paginator('list_objects_v2')
 
@@ -353,15 +352,21 @@ class OrioledbS3ObjectLoader:
 			self._error_occurred.set()
 
 	def download_files_in_directory(self, bucket_name, directory,
-									local_directory):
-		objects = self.list_objects_in_directory(bucket_name, directory)
+									local_directory, last_checkpoint=True):
+		if last_checkpoint:
+			objects = self.list_objects_last_checkpoint(bucket_name, directory)
+		else:
+			objects = self.list_objects(bucket_name, directory)
 		max_threads = os.cpu_count()
 
 		with ThreadPoolExecutor(max_threads) as executor:
 			futures = []
 
 			for file_key in objects:
-				local_file = '/'.join(file_key.split('/')[2:])
+				if last_checkpoint:
+					local_file = '/'.join(file_key.split('/')[2:])
+				else:
+					local_file = '/'.join(file_key.split('/')[1:])
 				local_path = f"{local_directory}/{local_file}"
 				future = executor.submit(self.download_file, bucket_name,
 										 file_key, local_path)

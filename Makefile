@@ -167,6 +167,7 @@ TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
 						t/not_supported_yet_test.py \
 						t/parallel_test.py \
 						t/reindex_test.py \
+						t/s3_test.py \
 						t/schema_test.py \
 						t/trigger_test.py \
 						t/vacuum_test.py
