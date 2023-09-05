@@ -286,3 +286,11 @@
    ...
    fun:pg_popcount64_choose
 }
+
+# pg_check_dir()
+
+{
+   pg_check_dir
+   Memcheck:Cond
+   fun:pg_check_dir
+}
