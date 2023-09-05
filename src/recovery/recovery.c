@@ -2373,6 +2373,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			handle_o_tables_meta_unlock(oids, oldRelnode);
 
 			if (!single)
+				workers_synchronize(xlogPtr + 1, true);
+
+			if (!single)
 				clean_workers_oids();
 		}
 		else if (rec_type == WAL_REC_TRUNCATE)

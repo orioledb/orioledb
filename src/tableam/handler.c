@@ -1031,7 +1031,6 @@ orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan)
 
 	SpinLockInit(&poscan->intpageAccess);
 	SpinLockInit(&poscan->workerStart);
-	SpinLockInit(&poscan->workerBeginDisk);
 	LWLockInitialize(&poscan->intpageLoad, btreeScanShmem->pageLoadTrancheId);
 	LWLockInitialize(&poscan->downlinksPublish, btreeScanShmem->downlinksPublishTrancheId);
 	pg_atomic_init_u64(&poscan->downlinkIndex, 0);

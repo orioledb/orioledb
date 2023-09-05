@@ -190,9 +190,7 @@ typedef struct ParallelOScanDescData
 										 * parallel table scan */
 	BTreeIntPageParallelData intPage[2];
 	slock_t		intpageAccess,
-				workerStart,	/* for sequential workers joining */
-				workerBeginDisk;	/* for sequential joining to disk read
-									 * phase */
+				workerStart;	/* for sequential workers joining */
 	LWLock		intpageLoad,	/* for sequential internal page loading */
 				downlinksPublish;	/* workers can put disk downlinks to
 									 * shared state */

@@ -389,7 +389,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 	}
 	else
 	{
-		SpinLockAcquire(&poscan->workerBeginDisk);
+		SpinLockAcquire(&poscan->workerStart);
 		if (!(poscan->flags & O_PARALLEL_DISK_SCAN_STARTED))
 		{
 			poscan->flags |= O_PARALLEL_DISK_SCAN_STARTED;
@@ -397,21 +397,21 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 		}
 		/* Publish the number of downlinks */
 		poscan->downlinksCount += scan->downlinksCount;
-		++poscan->workersReportedCount;
-		SpinLockRelease(&poscan->workerBeginDisk);
+		poscan->workersReportedCount++;
+		SpinLockRelease(&poscan->workerStart);
 
 		/* Wait until all workers publish their number of downlinks. */
 		while (true)
 		{
-			SpinLockAcquire(&poscan->workerBeginDisk);
+			SpinLockAcquire(&poscan->workerStart);
 			Assert(poscan->workersReportedCount <= poscan->nworkers);
 			if (poscan->workersReportedCount == poscan->nworkers &&
 				(diskLeader || poscan->dsmHandle != 0 || poscan->downlinksCount == 0))
 			{
-				SpinLockRelease(&poscan->workerBeginDisk);
+				SpinLockRelease(&poscan->workerStart);
 				break;
 			}
-			SpinLockRelease(&poscan->workerBeginDisk);
+			SpinLockRelease(&poscan->workerStart);
 
 			pg_usleep(100L);
 			CHECK_FOR_INTERRUPTS();
