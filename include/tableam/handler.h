@@ -179,6 +179,7 @@ typedef BTreeIntPageParallelData *BTreeIntPageParallel;
 												 * intPage[0]. If not set -
 												 * vice versa. */
 #define O_PARALLEL_DISK_SCAN_STARTED 	(1<<4)
+#define O_PARALLEL_DOWNLINKS_SORTED 	(1<<5)
 
 #define CUR_PAGE(poscan)	(&(poscan)->intPage[((poscan)->flags & O_PARALLEL_CURRENT_PAGE) ? 0 : 1])
 #define NEXT_PAGE(poscan)	(&(poscan)->intPage[((poscan)->flags & O_PARALLEL_CURRENT_PAGE) ? 1 : 0])
@@ -193,14 +194,11 @@ typedef struct ParallelOScanDescData
 				workerBeginDisk;	/* for sequential joining to disk read
 									 * phase */
 	LWLock		intpageLoad,	/* for sequential internal page loading */
-				downlinksSubscribe, /* workers can get disk downlinks from
-									 * shared state */
 				downlinksPublish;	/* workers can put disk downlinks to
 									 * shared state */
 	uint64		downlinksCount; /* cumulative number of disk downlinks in all
 								 * workers */
 	pg_atomic_uint64 downlinkIndex;
-	ConditionVariable downlinksCv;
 	int			workersReportedCount;	/* number of workers that reported
 										 * disk downlinks number */
 	bits8		flags;

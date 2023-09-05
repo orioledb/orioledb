@@ -22,7 +22,6 @@
 typedef struct
 {
 	int			pageLoadTrancheId,
-				downlinksSubscribeTrancheId,
 				downlinksPublishTrancheId;
 } BTreeScanShmem;
 

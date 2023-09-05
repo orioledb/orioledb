@@ -163,14 +163,11 @@ btree_scan_init_shmem(Pointer ptr, bool found)
 	if (!found)
 	{
 		btreeScanShmem->pageLoadTrancheId = LWLockNewTrancheId();
-		btreeScanShmem->downlinksSubscribeTrancheId = LWLockNewTrancheId();
 		btreeScanShmem->downlinksPublishTrancheId = LWLockNewTrancheId();
 	}
 
 	LWLockRegisterTranche(btreeScanShmem->pageLoadTrancheId,
 						  "OBTreeScanPageLoadTrancheId");
-	LWLockRegisterTranche(btreeScanShmem->downlinksSubscribeTrancheId,
-						  "OBTreeScanDownlinksSubscribeTrancheId");
 	LWLockRegisterTranche(btreeScanShmem->downlinksPublishTrancheId,
 						  "OBTreeScanDownlinksPublishTrancheId");
 }
@@ -392,45 +389,40 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 	}
 	else
 	{
-		int			workersReportedCount;
-
 		SpinLockAcquire(&poscan->workerBeginDisk);
 		if (!(poscan->flags & O_PARALLEL_DISK_SCAN_STARTED))
 		{
 			poscan->flags |= O_PARALLEL_DISK_SCAN_STARTED;
 			diskLeader = true;
-			LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
-			LWLockAcquire(&poscan->downlinksSubscribe, LW_EXCLUSIVE);
 		}
 		/* Publish the number of downlinks */
 		poscan->downlinksCount += scan->downlinksCount;
-		workersReportedCount = ++poscan->workersReportedCount;
+		++poscan->workersReportedCount;
 		SpinLockRelease(&poscan->workerBeginDisk);
 
-		if (workersReportedCount == poscan->nworkers)
-			ConditionVariableBroadcast(&poscan->downlinksCv);
+		/* Wait until all workers publish their number of downlinks. */
+		while (true)
+		{
+			SpinLockAcquire(&poscan->workerBeginDisk);
+			Assert(poscan->workersReportedCount <= poscan->nworkers);
+			if (poscan->workersReportedCount == poscan->nworkers &&
+				(diskLeader || poscan->dsmHandle != 0 || poscan->downlinksCount == 0))
+			{
+				SpinLockRelease(&poscan->workerBeginDisk);
+				break;
+			}
+			SpinLockRelease(&poscan->workerBeginDisk);
+
+			pg_usleep(100L);
+			CHECK_FOR_INTERRUPTS();
+		}
 
 		if (diskLeader)
 		{
-			/* Wait until all workers publish their number of downlinks. */
-			while (true)
-			{
-				SpinLockAcquire(&poscan->workerBeginDisk);
-				Assert(poscan->workersReportedCount <= poscan->nworkers);
-				if (poscan->workersReportedCount == poscan->nworkers)
-				{
-					SpinLockRelease(&poscan->workerBeginDisk);
-					break;
-				}
-				SpinLockRelease(&poscan->workerBeginDisk);
-
-				ConditionVariableSleep(&poscan->downlinksCv, WAIT_EVENT_PARALLEL_FINISH);
-			}
-			ConditionVariableCancelSleep();
-
 			if (poscan->downlinksCount > 0)
 			{
 				/* Create DSM segment and publish downlinks list first */
+				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 				Assert(!poscan->dsmHandle);
 				scan->dsmSeg = dsm_create(MAXALIGN(poscan->downlinksCount * sizeof(scan->diskDownlinks[0])), 0);
 				poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
@@ -449,9 +441,9 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 					if (pg_atomic_read_u64(&poscan->downlinkIndex) == poscan->downlinksCount)
 						break;
 
-					ConditionVariableSleep(&poscan->downlinksCv, WAIT_EVENT_PARALLEL_FINISH);
+					pg_usleep(100L);
+					CHECK_FOR_INTERRUPTS();
 				}
-				ConditionVariableCancelSleep();
 
 				/* Make sure all workers released this lock */
 				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
@@ -460,13 +452,10 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				qsort(dsm_segment_address(scan->dsmSeg), poscan->downlinksCount,
 					  sizeof(scan->diskDownlinks[0]), cmp_downlinks);
 			}
-			else
-			{
-				LWLockRelease(&poscan->downlinksPublish);
-			}
 
 			pg_atomic_write_u64(&poscan->downlinkIndex, 0);
-			LWLockRelease(&poscan->downlinksSubscribe);
+			pg_write_barrier();
+			poscan->flags |= O_PARALLEL_DOWNLINKS_SORTED;
 			/* Now workers can get downlinks from shared sorted list */
 		}
 		else
@@ -488,10 +477,18 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 			}
 			LWLockRelease(&poscan->downlinksPublish);
 
-			if (scan->downlinksCount > 0 && index == poscan->downlinksCount)
-				ConditionVariableBroadcast(&poscan->downlinksCv);
+			/*
+			 * Wait until leader sorts the downlinks.
+			 */
+			while (true)
+			{
+				if (poscan->flags & O_PARALLEL_DOWNLINKS_SORTED)
+					break;
+
+				pg_usleep(100L);
+				CHECK_FOR_INTERRUPTS();
+			}
 		}
-		LWLockAcquire(&poscan->downlinksSubscribe, LW_SHARED);
 	}
 }
 
@@ -933,7 +930,6 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 
 		if (index >= poscan->downlinksCount)
 		{
-			LWLockRelease(&poscan->downlinksSubscribe);
 			return false;
 		}
 		downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
