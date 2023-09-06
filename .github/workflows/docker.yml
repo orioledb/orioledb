@@ -3,9 +3,17 @@ name: dockerhub
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   push_to_registry:
+    strategy:
+      fail-fast: true
+      matrix:
+        postgres: [16, 15, 14]
+        compiler: [clang]
+        alpine:  [3.18]
+
     name: Push Docker image to Docker Hub
     runs-on: ubuntu-latest
     steps:
@@ -15,7 +23,17 @@ jobs:
       - name: Get the required tag name
         shell: bash
         run: |
-          echo "PGTAG=$(grep '^14: ' .pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+          echo "PGTAG=$(grep '^${{ matrix.postgres }}: ' .pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Set DOCKER_PG_LLVM_DEPS
+        run: |
+          if [[ "${{ matrix.alpine }}" == "3.18" ]] || [[ "${{ matrix.alpine }}" == "edge" ]]; \
+          then echo "DOCKER_PG_LLVM_DEPS=llvm15-dev clang15" >> $GITHUB_ENV; \
+          else echo "DOCKER_PG_LLVM_DEPS=llvm-dev clang"     >> $GITHUB_ENV; \
+          fi
+
+      - name: Echo DOCKER_PG_LLVM_DEP
+        run: echo "DOCKER_PG_LLVM_DEP = ${{ env.DOCKER_PG_LLVM_DEPS }} "
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
@@ -34,6 +52,10 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: orioledb/orioledb
+          flavor: |
+            latest=auto
+            prefix=
+            suffix=-pg${{ matrix.postgres }},onlatest=true
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
@@ -44,4 +66,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            ALPINE_VERSION=${{ matrix.alpine }}
+            BUILD_CC_COMPILER=${{ matrix.compiler }}
             PGTAG=${{ env.PGTAG }}
+            DOCKER_PG_LLVM_DEPS=${{ env.DOCKER_PG_LLVM_DEPS }}
