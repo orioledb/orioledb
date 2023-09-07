@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import time
+import re
+import struct
 from concurrent.futures import ThreadPoolExecutor
 from tempfile import mkdtemp
 from threading import Thread, Event
@@ -346,6 +348,23 @@ class OrioledbS3ObjectLoader:
 				self.s3.download_file(
 					bucket_name, file_key, local_path, Config=transfer_config
 				)
+			if re.match(r'/orioledb_data/small_files_\d+$', local_path):
+				base_dir = '/'.join(local_path.split('/')[:-2])
+				with open(local_path, 'rb') as file:
+					data = file.read()
+				numFiles = struct.unpack('i', data[0:4])
+				for i in range(0, numFiles):
+					nameOffset = struct.unpack('i', data[4 + i * 12: 8 + i * 12])
+					dataOffset = struct.unpack('i', data[8 + i * 12: 12 + i * 12])
+					dataLength = struct.unpack('i', data[12 + i * 12: 16 + i * 12])
+					name = b''
+					while data[nameOffset] != '\0':
+						name = name + data[nameOffset]
+						nameOffset = nameOffset + 1
+					name = name.decode('ascii')
+					with open(f"{base_dir}/{name}", 'wb') as file:
+						file.write(data[dataOffset: dataOffset + dataLength])
+
 		except ClientError as e:
 			if e.response['Error']['Code'] == "404":
 				print(f"File not found: {file_key}")
