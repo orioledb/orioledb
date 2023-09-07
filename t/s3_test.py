@@ -342,28 +342,24 @@ class OrioledbS3ObjectLoader:
 				dirs = local_path
 			else:
 				dirs = '/'.join(local_path.split('/')[:-1])
-			os.makedirs(dirs, exist_ok=True,
-						mode=0o700)
+			os.makedirs(dirs, exist_ok=True, mode=0o700)
 			if file_key[-1] != '/':
 				self.s3.download_file(
 					bucket_name, file_key, local_path, Config=transfer_config
 				)
-			if re.match(r'/orioledb_data/small_files_\d+$', local_path):
+			if re.match(r'.*/orioledb_data/small_files_\d+$', local_path):
 				base_dir = '/'.join(local_path.split('/')[:-2])
 				with open(local_path, 'rb') as file:
 					data = file.read()
-				numFiles = struct.unpack('i', data[0:4])
+				numFiles = struct.unpack('i', data[0:4])[0]
 				for i in range(0, numFiles):
-					nameOffset = struct.unpack('i', data[4 + i * 12: 8 + i * 12])
-					dataOffset = struct.unpack('i', data[8 + i * 12: 12 + i * 12])
-					dataLength = struct.unpack('i', data[12 + i * 12: 16 + i * 12])
-					name = b''
-					while data[nameOffset] != '\0':
-						name = name + data[nameOffset]
-						nameOffset = nameOffset + 1
-					name = name.decode('ascii')
-					with open(f"{base_dir}/{name}", 'wb') as file:
+					(nameOffset, dataOffset, dataLength) = struct.unpack('iii', data[4 + i * 12: 16 + i * 12])
+					name = data[nameOffset: data.find(b'\0', nameOffset)].decode('ascii')
+					fullname = f"{base_dir}/{name}"
+					os.makedirs(os.path.dirname(dirs), exist_ok=True, mode=0o700)
+					with open(fullname, 'wb') as file:
 						file.write(data[dataOffset: dataOffset + dataLength])
+					os.chmod(fullname, 0o600)
 
 		except ClientError as e:
 			if e.response['Error']['Code'] == "404":
