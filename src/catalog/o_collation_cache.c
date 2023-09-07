@@ -85,6 +85,7 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	Oid			colloid;
 	Datum		datum;
 	bool		isNull;
+	bool		valid;
 
 	colloid = DatumGetObjectId(key->keys[0]);
 
@@ -92,6 +93,17 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	if (!HeapTupleIsValid(collationtup))
 		elog(ERROR, "cache lookup failed for collation (%u)", colloid);
 	collform = (Form_pg_collation) GETSTRUCT(collationtup);
+
+	valid = collform->collprovider == COLLPROVIDER_ICU ||
+		lc_collate_is_c(colloid);
+
+#if PG_VERSION_NUM >= 150000
+	valid = valid || (colloid == DEFAULT_COLLATION_OID &&
+					  default_locale.provider == COLLPROVIDER_ICU);
+#endif
+	if (!valid)
+		elog(ERROR,
+			 "Only C, POSIX and ICU collations supported for orioledb tables");
 
 	prev_context = MemoryContextSwitchTo(collation_cache->mcxt);
 	if (o_collation != NULL)	/* Existed o_collation updated */
@@ -281,4 +293,20 @@ o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid)
 		result = heap_form_tuple(tupdesc, values, nulls);
 	}
 	return result;
+}
+
+void
+orioledb_save_collation(Oid colloid)
+{
+	if (OidIsValid(colloid))
+	{
+		XLogRecPtr	cur_lsn;
+		Oid			datoid;
+		OClassArg	arg = {.sys_table = true};
+
+		o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+		o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn,
+									(Pointer) &arg);
+		o_collation_cache_add_if_needed(datoid, colloid, cur_lsn, NULL);
+	}
 }

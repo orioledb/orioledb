@@ -5,6 +5,12 @@ OrioleDB is implemented using the table access method interface.  Therefore, to 
 
 OrioleDB uses index-organized tables.  So, the selection of the primary key is a very critical decision affecting performance.  If you specify no primary key, then a hidden surrogate primary key will be created over the virtual `ctid` column.
 
+Collations
+----------
+OrioleDB tables support only ICU, C, and POSIX collations. So, make sure the cluster or database is set up with default collations that fall under those options, otherwise you have to write COLLATE for every "text" field of the table.
+
+ALTER COLLATION REFRESH VERSION is also disabled for collations that used for fields and indexes of orioledb tables.
+
 Example
 -------
 

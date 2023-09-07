@@ -1244,27 +1244,6 @@ orioledb_compute_xid_horizon_for_tuples(Relation rel,
 }
 #endif
 
-void
-orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
-{
-	strlcpy(NameStr(field->name), NameStr(attr->attname), NAMEDATALEN);
-	field->typid = attr->atttypid;
-	field->collation = attr->attcollation;
-	field->typmod = attr->atttypmod;
-	field->typlen = attr->attlen;
-	field->ndims = attr->attndims;
-	field->byval = attr->attbyval;
-	field->align = attr->attalign;
-	field->storage = attr->attstorage;
-#if PG_VERSION_NUM >= 140000
-	field->compression = attr->attcompression;
-#endif
-	field->droped = attr->attisdropped;
-	field->notnull = attr->attnotnull;
-	field->hasmissing = attr->atthasmissing;
-	field->hasdef = attr->atthasdef;
-}
-
 static bool
 orioledb_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 							   void **arg)

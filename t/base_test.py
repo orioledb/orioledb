@@ -60,7 +60,7 @@ class BaseTest(unittest.TestCase):
 		self.node = testgres.get_new_node('test',
 										  port = self.getBasePort(),
 										  base_dir = tempfile.mkdtemp(prefix = name + '_tgsn_'))
-		self.node.init()  # run initdb
+		self.node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		self.node.append_conf('postgresql.conf',
 							  "shared_preload_libraries = orioledb\n")
 
@@ -111,7 +111,9 @@ class BaseTest(unittest.TestCase):
 
 	def assertErrorMessageEquals(self, e: Exception, err_msg: str,
 								 second_msg: str = None,
-								 second_title: str = 'HINT'):
+								 second_title: str = 'HINT',
+								 third_msg: str = None,
+								 third_title: str = 'HINT'):
 		if (hasattr(e, 'exception')):
 			e = e.exception
 
@@ -119,6 +121,8 @@ class BaseTest(unittest.TestCase):
 			exp_msg = "ERROR:  %s\n" % (err_msg)
 			if (second_msg != None):
 				exp_msg += "%s:  %s\n" % (second_title, second_msg)
+			if (third_msg != None):
+				exp_msg += "%s:  %s\n" % (third_title, third_msg)
 
 		if (hasattr(e, 'pgerror')):
 			msg = e.pgerror
@@ -135,7 +139,12 @@ class BaseTest(unittest.TestCase):
 
 	@staticmethod
 	def pg_with_icu():
-		return re.search(r'--with-icu', get_pg_config()["CONFIGURE"]) != None
+		configure = get_pg_config()["CONFIGURE"]
+		if BaseTest.get_pg_version() < 16:
+			res = re.search(r'--with-icu(=yes)?', configure) != None
+		else:
+			res = re.search(r'--with-icu=no', configure) == None
+		return res
 
 	def catchup_orioledb(self, replica):
 		# wait for synchronization

@@ -34,6 +34,7 @@
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 
 PG_FUNCTION_INFO_V1(orioledb_index_oids);
 PG_FUNCTION_INFO_V1(orioledb_index_description);
@@ -1114,7 +1115,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	{
 		OTableField *field = &index->leafFields[i];
 		char	   *typename = o_get_type_name(field->typid, field->typmod);
-		char	   *colname = o_get_collation_name(field->collation);
+		char	   *colname = get_collation_name(field->collation);
 
 		if (max_column_str < strlen(NameStr(field->name)))
 			max_column_str = strlen(NameStr(field->name));
@@ -1144,7 +1145,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	{
 		OTableField *field = &index->leafFields[i];
 		char	   *typename = o_get_type_name(field->typid, field->typmod);
-		char	   *colname = o_get_collation_name(field->collation);
+		char	   *colname = get_collation_name(field->collation);
 
 		appendStringInfo(&buf, format.data,
 						 NameStr(field->name),

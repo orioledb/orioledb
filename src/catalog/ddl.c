@@ -118,6 +118,7 @@ static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 									  bool execute_once);
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
+static void o_find_collation_dependencies(Oid colloid);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -1009,6 +1010,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			}
 		}
 	}
+	else if (IsA(pstmt->utilityStmt, AlterCollationStmt))
+	{
+		AlterCollationStmt *astmt = (AlterCollationStmt *) pstmt->utilityStmt;
+		Oid			collOid = get_collation_oid(astmt->collname, false);
+
+		o_find_collation_dependencies(collOid);
+	}
 
 	if (call_next)
 	{
@@ -1053,6 +1061,93 @@ o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
 			lappend(alter_type_exprs,
 					list_make2(makeInteger(attnum), cooked_default));
 	}
+}
+
+static void
+o_find_collation_dependencies(Oid colloid)
+{
+	Relation	depRel;
+	ScanKeyData key[2];
+	SysScanDesc depScan;
+	HeapTuple	depTup;
+	HeapTuple	collationtup;
+	Form_pg_collation collform;
+
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
+
+	/*
+	 * We scan pg_depend to find those things that depend on the given type.
+	 * (We assume we can ignore refobjsubid for a type.)
+	 */
+	depRel = table_open(DependRelationId, AccessShareLock);
+
+	ScanKeyInit(&key[0],
+				Anum_pg_depend_refclassid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(CollationRelationId));
+	ScanKeyInit(&key[1],
+				Anum_pg_depend_refobjid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(colloid));
+
+	depScan = systable_beginscan(depRel, DependReferenceIndexId, true,
+								 NULL, 2, key);
+
+	collationtup = SearchSysCache1(COLLOID, colloid);
+	if (!HeapTupleIsValid(collationtup))
+		elog(ERROR, "cache lookup failed for collation (%u)", colloid);
+	collform = (Form_pg_collation) GETSTRUCT(collationtup);
+
+	while (HeapTupleIsValid(depTup = systable_getnext(depScan)))
+	{
+		Form_pg_depend pg_depend = (Form_pg_depend) GETSTRUCT(depTup);
+		Relation	rel;
+
+		/* Else, ignore dependees that aren't user columns of relations */
+		/* (we assume system columns are never of interesting types) */
+		if (pg_depend->classid != RelationRelationId)
+			continue;
+
+		rel = relation_open(pg_depend->objid, AccessShareLock);
+
+		if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+			 rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+			is_orioledb_rel(rel))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot refresh collation \"%s\" because "
+							"orioledb table \"%s\" uses it",
+							collform->collname.data,
+							RelationGetRelationName(rel))));
+		}
+		else if (rel->rd_rel->relkind == RELKIND_INDEX)
+		{
+			Relation	tbl;
+
+			tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
+
+			if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+				 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+				is_orioledb_rel(tbl))
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("cannot refresh collation \"%s\" because "
+								"orioledb index \"%s\" uses it",
+								collform->collname.data,
+								RelationGetRelationName(rel))));
+			}
+			relation_close(tbl, AccessShareLock);
+		}
+
+		relation_close(rel, AccessShareLock);
+	}
+	ReleaseSysCache(collationtup);
+	systable_endscan(depScan);
+
+	relation_close(depRel, AccessShareLock);
 }
 
 static void
@@ -1776,6 +1871,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					if (!rewrite)
 					{
+						orioledb_save_collation(field->collation);
 						fill_current_oxid_csn(&oxid, &csn);
 						o_tables_meta_lock();
 						o_tables_update(o_table, oxid, csn);

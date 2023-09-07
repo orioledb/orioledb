@@ -230,7 +230,6 @@ extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 extern void o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table,
 								  OIndexDescr *descr);
 extern char *o_get_type_name(Oid typid, int32 typmod);
-extern char *o_get_collation_name(Oid colid);
 
 static inline int
 o_table_fieldnum(OTable *table, const char *name)

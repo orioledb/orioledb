@@ -641,6 +641,9 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 		}
 		tts_orioledb_fill_key_bound(slot, id, &keyBound);
+		/* HACK: prevent sys cache pages from loading during o_btree_modify */
+		(void) o_btree_cmp(&id->desc, &cur_tuple, BTreeKeyLeafTuple,
+						   (Pointer) &keyBound, BTreeKeyBound);
 		(void) o_btree_modify(&id->desc, BTreeOperationInsert,
 							  cur_tuple, BTreeKeyLeafTuple,
 							  (Pointer) &keyBound, BTreeKeyBound,

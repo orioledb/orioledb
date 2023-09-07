@@ -180,14 +180,18 @@ ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
   ISOLATIONCHECKS += isol_merge
 endif
 
+PG_REGRESS_ARGS=--no-locale --encoding=UTF8
+
 regresscheck: | install
 	$(pg_regress_check) \
 		--temp-config orioledb_regression.conf \
+		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
 isolationcheck: | install
 	$(pg_isolation_regress_check) \
 		--temp-config orioledb_isolation.conf \
+		$(PG_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
 $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install

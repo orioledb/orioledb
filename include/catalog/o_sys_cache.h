@@ -590,6 +590,7 @@ extern void o_amproc_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 /* o_collation_cache.c */
 O_SYS_CACHE_DECLS(collation_cache, OCollation, 1);
 extern HeapTuple o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid);
+extern void orioledb_save_collation(Oid colloid);
 
 /* o_database_cache.c */
 typedef struct ODatabase

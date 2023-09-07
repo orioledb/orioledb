@@ -417,18 +417,8 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			exprField->align = typeTup->typalign;
 			exprField->typmod = exprTypmod(indexkey);
 			exprField->collation = exprCollation(indexkey);
-			if (OidIsValid(exprField->collation))
-			{
-				XLogRecPtr	cur_lsn;
-				Oid			datoid;
-				OClassArg	arg = {.sys_table = true};
 
-				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-				o_class_cache_add_if_needed(datoid, CollationRelationId,
-											cur_lsn, (Pointer) &arg);
-				o_collation_cache_add_if_needed(datoid, exprField->collation,
-												cur_lsn, NULL);
-			}
+			orioledb_save_collation(exprField->collation);
 
 			ReleaseSysCache(tuple);
 
@@ -511,18 +501,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
 		}
-		if (OidIsValid(ix_field->collation))
-		{
-			XLogRecPtr	cur_lsn;
-			Oid			datoid;
-			OClassArg	arg = {.sys_table = true};
-
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_collation_cache_add_if_needed(datoid, ix_field->collation,
-											cur_lsn, NULL);
-		}
+		orioledb_save_collation(ix_field->collation);
 	}
 }
 
@@ -619,6 +598,27 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 	MemoryContextSwitchTo(oldcxt);
 }
 
+void
+orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
+{
+	strlcpy(NameStr(field->name), NameStr(attr->attname), NAMEDATALEN);
+	field->typid = attr->atttypid;
+	field->collation = attr->attcollation;
+	field->typmod = attr->atttypmod;
+	field->typlen = attr->attlen;
+	field->ndims = attr->attndims;
+	field->byval = attr->attbyval;
+	field->align = attr->attalign;
+	field->storage = attr->attstorage;
+#if PG_VERSION_NUM >= 140000
+	field->compression = attr->attcompression;
+#endif
+	field->droped = attr->attisdropped;
+	field->notnull = attr->attnotnull;
+	field->hasmissing = attr->atthasmissing;
+	field->hasdef = attr->atthasdef;
+}
+
 OTable *
 o_table_tableam_create(ORelOids oids, TupleDesc tupdesc)
 {
@@ -641,18 +641,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc)
 		OTableField *field = &o_table->fields[i];
 
 		orioledb_attr_to_field(field, attr);
-		if (OidIsValid(field->collation))
-		{
-			XLogRecPtr	cur_lsn;
-			Oid			datoid;
-			OClassArg	arg = {.sys_table = true};
-
-			o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-			o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn,
-										(Pointer) &arg);
-			o_collation_cache_add_if_needed(datoid, field->collation, cur_lsn,
-											NULL);
-		}
+		orioledb_save_collation(field->collation);
 	}
 	o_table->nindices = 0;
 	o_table_resize_constr(o_table);
@@ -1249,15 +1238,6 @@ o_get_type_name(Oid typid, int32 typmod)
 								FORMAT_TYPE_ALLOW_INVALID);
 }
 
-char *
-o_get_collation_name(Oid colid)
-{
-	if (colid < FirstGenbkiObjectId)
-		return get_collation_name(colid);
-	else
-		return psprintf("%u", colid);
-}
-
 static text *
 describe_table(ORelOids oids)
 {
@@ -1284,7 +1264,7 @@ describe_table(ORelOids oids)
 	{
 		OTableField *field = &table->fields[i];
 		char	   *typename = o_get_type_name(field->typid, field->typmod);
-		char	   *colname = o_get_collation_name(field->collation);
+		char	   *colname = get_collation_name(field->collation);
 
 		if (max_column_str < strlen(NameStr(field->name)))
 			max_column_str = strlen(NameStr(field->name));
@@ -1323,7 +1303,7 @@ describe_table(ORelOids oids)
 	{
 		OTableField *field = &table->fields[i];
 		char	   *typename = o_get_type_name(field->typid, field->typmod);
-		char	   *colname = o_get_collation_name(field->collation);
+		char	   *colname = get_collation_name(field->collation);
 
 		appendStringInfo(&buf, format.data,
 						 NameStr(field->name),

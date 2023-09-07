@@ -58,6 +58,7 @@
 #include "utils/builtins.h"
 #include "utils/inval.h"
 #include "utils/rangetypes.h"
+#include "utils/pg_locale.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 
@@ -119,6 +120,7 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
+static bool o_newlocale_from_collation(void);
 
 /*
  * Temporary memory context for BTree operations. Helps us to avoid
@@ -675,6 +677,7 @@ _PG_init(void)
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
 	xact_redo_hook = o_xact_redo_hook;
+	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }
@@ -1460,4 +1463,10 @@ orioledb_parallel_debug_stop(PG_FUNCTION_ARGS)
 	force_parallel_mode = FORCE_PARALLEL_OFF;
 #endif
 	PG_RETURN_VOID();
+}
+
+static bool
+o_newlocale_from_collation()
+{
+	return shared_segment_initialized;
 }
