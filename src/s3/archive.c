@@ -81,14 +81,14 @@ make_preload_hash(void)
 
 #if PG_VERSION_NUM >= 160000
 static bool s3_archive_configured(ArchiveModuleState *state);
-static bool s3_archive_preload_file(ArchiveModuleState *state,
+static void s3_archive_preload_file(ArchiveModuleState *state,
 									const char *file, const char *path);
 static bool s3_archive_file(ArchiveModuleState *state,
 							const char *file, const char *path);
 
 static const ArchiveModuleCallbacks s3_archive_callbacks = {
 	.check_configured_cb = s3_archive_configured,
-	.archive_file_preload_cb = s3_archive_preload_file,
+	.archive_preload_file_cb = s3_archive_preload_file,
 	.archive_file_cb = s3_archive_file
 };
 
@@ -156,7 +156,6 @@ s3_archive_preload_file(ArchiveModuleState *state,
 s3_archive_preload_file(const char *file, const char *path)
 #endif
 {
-	S3TaskLocation location;
 	bool		found;
 	PreloadHashItem *item;
 
@@ -170,7 +169,7 @@ s3_archive_preload_file(const char *file, const char *path)
 		return;
 	}
 
-	item->location = s3_schedule_wal_file_write(file);
+	item->location = s3_schedule_wal_file_write((char *) file);
 }
 
 /*
@@ -201,7 +200,7 @@ s3_archive_file(const char *file, const char *path)
 	}
 	else
 	{
-		location = s3_schedule_wal_file_write(file);
+		location = s3_schedule_wal_file_write((char *) file);
 	}
 
 	s3_queue_wait_for_location(location);

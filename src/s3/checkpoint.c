@@ -316,7 +316,7 @@ s3_perform_backup(S3TaskLocation location)
 
 			FileClose(backup_file);
 
-			location = s3_schedule_file_write(chkpNum, backup_filename);
+			location = s3_schedule_file_write(chkpNum, backup_filename, false);
 			maxLocation = Max(maxLocation, location);
 			pfree(backup_label);
 
@@ -528,7 +528,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		{
 			S3TaskLocation location;
 
-			location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+			location = s3_schedule_empty_dir_write(state->chkpNum, pathbuf);
 			maxLocation = Max(maxLocation, location);
 			continue;
 		}
@@ -542,10 +542,10 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		{
 			S3TaskLocation location;
 
-			location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+			location = s3_schedule_empty_dir_write(state->chkpNum, pathbuf);
 			maxLocation = Max(maxLocation, location);
 
-			location = s3_schedule_empty_dir_write(chkpNum,
+			location = s3_schedule_empty_dir_write(state->chkpNum,
 												   "./pg_wal/archive_status");
 			maxLocation = Max(maxLocation, location);
 
@@ -577,7 +577,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 			ListCell   *lc;
 			S3TaskLocation location;
 
-			location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+			location = s3_schedule_empty_dir_write(state->chkpNum, pathbuf);
 			maxLocation = Max(maxLocation, location);
 
 			/*
@@ -612,7 +612,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 			{
 				S3TaskLocation location;
 
-				location = s3_schedule_empty_dir_write(chkpNum, pathbuf);
+				location = s3_schedule_empty_dir_write(state->chkpNum, pathbuf);
 				maxLocation = Max(maxLocation, location);
 			}
 			else
