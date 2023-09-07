@@ -20,6 +20,7 @@ from testgres.defaults import default_dbname, default_username
 
 from testgres.utils import clean_on_error
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
+import urllib3
 
 from .base_test import BaseTest
 
@@ -38,6 +39,7 @@ class S3Test(BaseTest):
 	@classmethod
 	@set_initial_no_auth_action_count(4)
 	def setUpClass(cls):
+		urllib3.util.connection.HAS_IPV6 = False
 		cls.ssl_key = make_ssl_devcert('/tmp/ordb_test_key', cn=cls.host)
 		cls.s3_server = MotoServerSSL(ssl_context=cls.ssl_key)
 		cls.s3_server.start()
