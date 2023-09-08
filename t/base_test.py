@@ -139,12 +139,11 @@ class BaseTest(unittest.TestCase):
 
 	@staticmethod
 	def pg_with_icu():
-		configure = get_pg_config()["CONFIGURE"]
-		if BaseTest.get_pg_version() < 16:
-			res = re.search(r'--with-icu(=yes)?', configure) != None
-		else:
-			res = re.search(r'--with-icu=no', configure) == None
-		return res
+		with open(os.path.join(get_pg_config()["INCLUDEDIR"], 'pg_config.h')) as file:
+			for line in file:
+				if re.match(r'#define USE_ICU 1.*', line):
+					return True
+		return False
 
 	def catchup_orioledb(self, replica):
 		# wait for synchronization
