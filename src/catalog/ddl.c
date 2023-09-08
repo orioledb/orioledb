@@ -370,20 +370,6 @@ expand_vacuum_rel(VacuumRelation *vrel, int options)
 			elog(ERROR, "cache lookup failed for relation %u", relid);
 		classForm = (Form_pg_class) GETSTRUCT(tuple);
 
-#if PG_VERSION_NUM >= 160000
-
-		/*
-		 * Make a returnable VacuumRelation for this rel if the user has the
-		 * required privileges.
-		 */
-		if (vacuum_is_permitted_for_relation(relid, classForm, options))
-		{
-			vacrels = lappend(vacrels, makeVacuumRelation(vrel->relation,
-														  relid,
-														  vrel->va_cols));
-		}
-#else
-
 		/*
 		 * Make a returnable VacuumRelation for this rel if user is a proper
 		 * owner.
@@ -394,8 +380,6 @@ expand_vacuum_rel(VacuumRelation *vrel, int options)
 														  relid,
 														  vrel->va_cols));
 		}
-#endif
-
 
 		include_parts = (classForm->relkind == RELKIND_PARTITIONED_TABLE);
 		ReleaseSysCache(tuple);
@@ -470,11 +454,9 @@ get_all_vacuum_rels(int options)
 		Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
 		Oid			relid = classForm->oid;
 
-#if PG_VERSION_NUM < 160000
 		/* check permissions of relation */
 		if (!vacuum_is_relation_owner(relid, classForm, options))
 			continue;
-#endif
 
 		/*
 		 * We include partitioned tables here; depending on which operation is
@@ -485,12 +467,6 @@ get_all_vacuum_rels(int options)
 			classForm->relkind != RELKIND_MATVIEW &&
 			classForm->relkind != RELKIND_PARTITIONED_TABLE)
 			continue;
-
-#if PG_VERSION_NUM >= 160000
-		/* check permissions of relation */
-		if (!vacuum_is_permitted_for_relation(relid, classForm, options))
-			continue;
-#endif
 
 		/*
 		 * Build VacuumRelation(s) specifying the table OIDs to be processed.
@@ -562,8 +538,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 		objectOid = get_namespace_oid(objectName, false);
 
 #if PG_VERSION_NUM >= 160000
-		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()) &&
-			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()))
 #else
 		if (!pg_namespace_ownercheck(objectOid, GetUserId()))
 #endif
@@ -583,8 +558,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("can only reindex the currently open database")));
 #if PG_VERSION_NUM >= 160000
-		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()) &&
-			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()))
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(objectOid));
 #else
@@ -664,18 +638,15 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 			continue;
 
 		/*
-		 * The table can be reindexed if the user has been granted MAINTAIN on
-		 * the table or one of its partition ancestors or the user is a
-		 * superuser, the table owner, or the database/schema owner (but in
-		 * the latter case, only if it's not a shared relation).
-		 * pg_class_aclcheck includes the superuser case, and depending on
-		 * objectKind we already know that the user has permission to run
-		 * REINDEX on this database or schema per the permission checks at the
-		 * beginning of this routine.
+		 * The table can be reindexed if the user is superuser, the table
+		 * owner, or the database/schema owner (but in the latter case, only
+		 * if it's not a shared relation).  object_ownercheck includes the
+		 * superuser case, and depending on objectKind we already know that
+		 * the user has permission to run REINDEX on this database or schema
+		 * per the permission checks at the beginning of this routine.
 		 */
 		if (classtuple->relisshared &&
-			pg_class_aclcheck(relid, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK &&
-			!has_partition_ancestor_privs(relid, GetUserId(), ACL_MAINTAIN))
+			object_ownercheck(RelationRelationId, relid, GetUserId()))
 			continue;
 #else
 		/* Check user/system classification, and optionally skip */
