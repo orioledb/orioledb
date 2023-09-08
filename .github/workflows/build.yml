@@ -7,7 +7,7 @@ on:
 jobs:
   test:
     runs-on:
-     - ubuntu-20.04
+     - ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
