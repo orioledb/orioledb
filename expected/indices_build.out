@@ -1,5 +1,6 @@
 CREATE SCHEMA indices_build;
 SET SESSION search_path = 'indices_build';
+SET SESSION log_error_verbosity = 'terse';
 CREATE EXTENSION orioledb;
 -- Index build with primary key
 CREATE TABLE o_indices0
