@@ -294,3 +294,11 @@
    Memcheck:Cond
    fun:pg_check_dir
 }
+
+# icu_language_tag
+
+{
+   icu_language_tag
+   Memcheck:Cond
+   fun:icu_language_tag
+}
