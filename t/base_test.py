@@ -214,3 +214,17 @@ def wait_bgwriter_stopevent(node):
 			bgwriter_pid = select_list[0][0]
 
 	wait_stopevent(node, bgwriter_pid)
+
+def new_execute(self, query, *args):
+	self.cursor.execute(query, args)
+	try:
+		res = self.cursor.fetchall()
+		# pg8000 might return tuples
+		if isinstance(res, tuple):
+			res = [tuple(t) for t in res]
+
+		return res
+	except Exception as e:
+		return None
+
+testgres.NodeConnection.execute = new_execute
