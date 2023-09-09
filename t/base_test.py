@@ -214,6 +214,7 @@ def wait_bgwriter_stopevent(node):
 
 	wait_stopevent(node, bgwriter_pid)
 
+# workaround for testgres error messages on empty results
 def new_execute(self, query, *args):
 	self.cursor.execute(query, args)
 	try:
