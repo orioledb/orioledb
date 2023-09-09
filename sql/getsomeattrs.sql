@@ -317,6 +317,8 @@ EXPLAIN (COSTS OFF)
 		GROUP BY val_1;
 SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 	GROUP BY val_1;
+RESET log_min_messages;
+RESET client_min_messages;
 
 COMMIT;
 
