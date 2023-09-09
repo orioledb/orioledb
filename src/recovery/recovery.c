@@ -1041,7 +1041,7 @@ recovery_finish(int worker_id)
 	CurTransactionContext = NULL;
 	iam_recovery = false;
 
-	o_reset_syscache_hooks();
+	o_unset_syscache_hooks();
 }
 
 /*

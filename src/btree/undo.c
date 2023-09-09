@@ -423,7 +423,7 @@ modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 	o_set_syscache_hooks();
 	found = refind_page(&context, (Pointer) &tuple, keyType, 0, item->blkno,
 						item->pageChangeCount);
-	o_reset_syscache_hooks();
+	o_unset_syscache_hooks();
 	if (!found)
 	{
 		/*

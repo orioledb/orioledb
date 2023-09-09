@@ -124,6 +124,7 @@ static HTAB *sys_caches;
 static ResourceOwner my_owner = NULL;
 static Oid	save_userid;
 static int	save_sec_context;
+static int	o_sys_cache_hooks_depth = 0;
 
 /*
  * Initializes the enum B-tree memory.
@@ -2249,14 +2250,15 @@ o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid)
 }
 
 bool
-o_is_syscache_hooks_set()
+o_is_syscache_hooks_set(void)
 {
 	return SearchCatCacheInternal_hook == o_SearchCatCacheInternal_hook;
 }
 
 void
-o_set_syscache_hooks()
+o_set_syscache_hooks(void)
 {
+	o_sys_cache_hooks_depth++;
 	if (!IsTransactionState())
 	{
 		if (!CurrentResourceOwner)
@@ -2281,9 +2283,10 @@ o_set_syscache_hooks()
 }
 
 void
-o_reset_syscache_hooks()
+o_unset_syscache_hooks(void)
 {
-	if (SearchCatCacheInternal_hook != NULL)
+	o_sys_cache_hooks_depth--;
+	if (SearchCatCacheInternal_hook != NULL && o_sys_cache_hooks_depth == 0)
 	{
 		SearchCatCacheInternal_hook = NULL;
 		SearchCatCacheList_hook = NULL;
@@ -2298,4 +2301,11 @@ o_reset_syscache_hooks()
 			CurrentResourceOwner = NULL;
 		}
 	}
+}
+
+void
+o_reset_syscache_hooks(void)
+{
+	o_sys_cache_hooks_depth = 1;
+	o_unset_syscache_hooks();
 }

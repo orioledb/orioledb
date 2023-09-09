@@ -380,6 +380,7 @@ o_sys_cache_set_datoid_lsn(XLogRecPtr *cur_lsn, Oid *datoid)
 extern void o_composite_type_element_save(Oid datoid, Oid oid,
 										  XLogRecPtr insert_lsn);
 extern void o_set_syscache_hooks(void);
+extern void o_unset_syscache_hooks(void);
 extern void o_reset_syscache_hooks(void);
 extern bool o_is_syscache_hooks_set(void);
 

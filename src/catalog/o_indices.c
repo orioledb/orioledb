@@ -814,7 +814,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		descr->expressions_state = lappend(descr->expressions_state,
 										   expr_state);
 	}
-	o_reset_syscache_hooks();
+	o_unset_syscache_hooks();
 	if (oIndex->indexType == oIndexPrimary)
 	{
 		descr->tbl_attnums = palloc0(sizeof(AttrNumberMap) * descr->nFields);

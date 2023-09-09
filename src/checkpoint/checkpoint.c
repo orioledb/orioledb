@@ -1049,7 +1049,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
-	o_reset_syscache_hooks();
+	o_unset_syscache_hooks();
 
 	elog(LOG, "orioledb checkpoint %u complete",
 		 checkpoint_state->lastCheckpointNumber);

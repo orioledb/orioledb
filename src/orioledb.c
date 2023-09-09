@@ -1382,6 +1382,7 @@ orioledb_error_cleanup_hook(void)
 	btree_mark_incomplete_splits();
 	unset_skip_ucm();
 	btree_io_error_cleanup();
+	o_reset_syscache_hooks();
 	if (drop_index_list)
 	{
 		list_free_deep(drop_index_list);

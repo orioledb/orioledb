@@ -1161,7 +1161,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid);
-	o_reset_syscache_hooks();
+	o_unset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
 }

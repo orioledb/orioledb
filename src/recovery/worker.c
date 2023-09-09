@@ -586,7 +586,7 @@ apply_tbl_modify_record(OTableDescr *descr, uint16 type,
 			Assert(false);
 			elog(ERROR, "Wrong primary index modify record type %d", type);
 	}
-	o_reset_syscache_hooks();
+	o_unset_syscache_hooks();
 }
 
 static void
