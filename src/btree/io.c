@@ -454,19 +454,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 				 int amount, off_t offset)
 {
 	int			result = 0;
-
-	if (orioledb_s3_mode)
-	{
-		btree_smgr_schedule_s3_write(desc,
-									 chkpNum,
-									 offset / ORIOLEDB_SEGMENT_SIZE,
-									 (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE);
-		if (offset / ORIOLEDB_S3_PART_SIZE != (offset + amount - 1) / ORIOLEDB_S3_PART_SIZE)
-			btree_smgr_schedule_s3_write(desc,
-										 chkpNum,
-										 (offset + amount - 1) / ORIOLEDB_SEGMENT_SIZE,
-										 ((offset + amount - 1) % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE);
-	}
+	off_t		curOffset = offset;
 
 	if (use_mmap)
 	{
@@ -485,30 +473,44 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 
 	while (amount > 0)
 	{
-		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		int			segno = curOffset / ORIOLEDB_SEGMENT_SIZE;
 		File		file;
 
 		file = btree_open_smgr_file(desc, segno, chkpNum);
-		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
+		if ((curOffset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
 			result += OFileWrite(file, buffer, amount,
-								 offset % ORIOLEDB_SEGMENT_SIZE,
+								 curOffset % ORIOLEDB_SEGMENT_SIZE,
 								 WAIT_EVENT_DATA_FILE_WRITE);
 			break;
 		}
 		else
 		{
-			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - offset % ORIOLEDB_SEGMENT_SIZE;
+			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - curOffset % ORIOLEDB_SEGMENT_SIZE;
 
 			Assert(amount >= stepAmount);
 			result += OFileWrite(file, buffer, stepAmount,
-								 offset % ORIOLEDB_SEGMENT_SIZE,
+								 curOffset % ORIOLEDB_SEGMENT_SIZE,
 								 WAIT_EVENT_DATA_FILE_WRITE);
 			buffer += stepAmount;
-			offset += stepAmount;
+			curOffset += stepAmount;
 			amount -= stepAmount;
 		}
 	}
+
+	if (orioledb_s3_mode)
+	{
+		btree_smgr_schedule_s3_write(desc,
+									 chkpNum,
+									 offset / ORIOLEDB_SEGMENT_SIZE,
+									 (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE);
+		if (offset / ORIOLEDB_S3_PART_SIZE != (offset + amount - 1) / ORIOLEDB_S3_PART_SIZE)
+			btree_smgr_schedule_s3_write(desc,
+										 chkpNum,
+										 (offset + amount - 1) / ORIOLEDB_SEGMENT_SIZE,
+										 ((offset + amount - 1) % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE);
+	}
+
 	return result;
 }
 
