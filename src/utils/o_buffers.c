@@ -202,14 +202,18 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 	{
 		buffer = &group->buffers[i];
 		if (buffer->usageCount < victimUsageCount)
+		{
 			victim = i;
+			victimUsageCount = buffer->usageCount;
+		}
+		buffer->usageCount /= 2;
 	}
 	buffer = &group->buffers[victim];
 	LWLockAcquire(&buffer->bufferCtlLock, LW_EXCLUSIVE);
 	if (buffer->dirty)
 		write_buffer(desc, buffer);
 
-	buffer->usageCount = 0;
+	buffer->usageCount = 1;
 	buffer->dirty = false;
 	buffer->blockNum = blockNum;
 
