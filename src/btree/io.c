@@ -356,7 +356,16 @@ btree_close_smgr(BTreeDescr *descr)
 	if (orioledb_s3_mode)
 	{
 		if (descr->smgr.hash)
+		{
+			s3Files_iterator i;
+			FileHashElement *hashElem;
+
+			s3Files_start_iterate(descr->smgr.hash, &i);
+			while ((hashElem = s3Files_iterate(descr->smgr.hash, &i)) != NULL)
+				FileClose(hashElem->file);
+
 			s3Files_destroy(descr->smgr.hash);
+		}
 	}
 	else if (descr->smgr.array.files)
 	{
