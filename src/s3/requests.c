@@ -389,7 +389,7 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 	uint64		dataSize;
 
 	data = read_file_part(filename,
-						  partnum * ORIOLEDB_S3_PART_SIZE,
+						  partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
 						  ORIOLEDB_S3_PART_SIZE,
 						  &dataSize);
 

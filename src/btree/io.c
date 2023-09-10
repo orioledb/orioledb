@@ -480,7 +480,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		if ((curOffset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
 			result += OFileWrite(file, buffer, amount,
-								 curOffset % ORIOLEDB_SEGMENT_SIZE,
+								 curOffset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 								 WAIT_EVENT_DATA_FILE_WRITE);
 			break;
 		}
@@ -490,7 +490,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 
 			Assert(amount >= stepAmount);
 			result += OFileWrite(file, buffer, stepAmount,
-								 curOffset % ORIOLEDB_SEGMENT_SIZE,
+								 curOffset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 								 WAIT_EVENT_DATA_FILE_WRITE);
 			buffer += stepAmount;
 			curOffset += stepAmount;
@@ -544,7 +544,7 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
 			result += OFileRead(file, buffer, amount,
-								offset % ORIOLEDB_SEGMENT_SIZE,
+								offset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 								WAIT_EVENT_DATA_FILE_READ);
 			break;
 		}
@@ -554,7 +554,7 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 
 			Assert(amount >= stepAmount);
 			result += OFileRead(file, buffer, stepAmount,
-								offset % ORIOLEDB_SEGMENT_SIZE,
+								offset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 								WAIT_EVENT_DATA_FILE_READ);
 			buffer += stepAmount;
 			offset += stepAmount;
@@ -588,7 +588,8 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 		file = btree_open_smgr_file(desc, segno, chkpNum);
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
-			FileWriteback(file, offset % ORIOLEDB_SEGMENT_SIZE,
+			FileWriteback(file,
+						  offset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 						  amount, WAIT_EVENT_DATA_FILE_FLUSH);
 			break;
 		}
@@ -597,7 +598,8 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - offset % ORIOLEDB_SEGMENT_SIZE;
 
 			Assert(amount >= stepAmount);
-			FileWriteback(file, offset % ORIOLEDB_SEGMENT_SIZE,
+			FileWriteback(file,
+						  offset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 						  stepAmount, WAIT_EVENT_DATA_FILE_FLUSH);
 			offset += stepAmount;
 			amount -= stepAmount;
