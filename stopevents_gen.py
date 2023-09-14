@@ -12,17 +12,17 @@ f.close()
 
 f = open('include/utils/stopevents_defs.h', 'w')
 f.write('/* Generated file, see stopevents_gen.py */\n\n')
-i = 0
-for e in event_names:
-	f.write('#define STOPEVENT_' + e.upper() + ' (' + str(i) + ')\n')
-	i = i + 1
-f.write('#define STOPEVENTS_COUNT (' + str(i) + ')\n')
+
+for i, e in enumerate(event_names):
+	f.write(f'#define STOPEVENT_{e.upper()} ({str(i)})\n')
+	
+f.write('#define STOPEVENTS_COUNT (' + str(len(event_names)) + ')\n')
 f.close()
 
 f = open('include/utils/stopevents_data.h', 'w')
 f.write('/* Generated file, see stopevents_gen.py */\n\n')
-i = 0
+
 for e in event_names:
-	f.write('"' + e + '",\n')
-	i = i + 1
+	f.write(f'"{e}",\n')
+
 f.close()
