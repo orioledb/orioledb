@@ -4154,8 +4154,270 @@ SELECT orioledb_parallel_debug_stop();
  
 (1 row)
 
+CREATE TABLE o_test_split_rightmost (
+  val_1 int NOT NULL,
+  val_2 text NOT NULL,
+  PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+INSERT INTO o_test_split_rightmost
+  SELECT a, repeat('x', a) FROM generate_series(978, 985) as a;
+-- For the Page 1, dataSize VALUE should not be greater than ORIOLEDB_BLCKSZ
+SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
+          orioledb_tbl_bin_structure           
+-----------------------------------------------
+ Index o_test_split_rightmost_pkey contents   +
+ Page 0:                                      +
+ BTreePageHeader(64)                          +
+     o_header: OrioleDBPageHeader(12)         +
+         state: pg_atomic_uint32(4)           +
+         usageCount: pg_atomic_uint32(4)      +
+         pageChangeCount: uint32(4)           +
+     flags: 6 bit                             +
+     field1: 11 bit                           +
+     field2: 15 bit                           +
+     undoLocation: UndoLocation(8)            +
+     csn: CommitSeqNo(8)                      +
+     rightLink: uint64(8)                     +
+     checkpointNum: uint32(4)                 +
+     maxKeyLen: LocationIndex(2)              +
+     prevInsertOffset: OffsetNumber(2)        +
+     chunksCount: OffsetNumber(2)             +
+     itemsCount: OffsetNumber(2)              +
+     hikeysEnd: OffsetNumber(2)               +
+     dataSize: LocationIndex(2)               +
+     dataSize VALUE: 1536                     +
+     chunkDesc: ARRAY:                        +
+         [0]: BTreePageChunkDesc(4)           +
+             shortLocation: 12 bit            +
+             offset: 10 bit                   +
+             hikeyShortLocation: 8 bit        +
+             hikeyFlags: 2 bit                +
+     BTreePageHeader REST (4)                 +
+ HIKEY DATA (448)                             +
+ CHUNKS: ARRAY:                               +
+     [0]: 1024                                +
+         ITEMS: ARRAY:                        +
+             [0]: LocationIndex(2)            +
+             [1]: LocationIndex(2)            +
+         ITEMS ARRAY ALIGN (4)                +
+         ITEM DATA: ARRAY                     +
+ Page 1:                                      +
+ BTreePageHeader(64)                          +
+     o_header: OrioleDBPageHeader(12)         +
+         state: pg_atomic_uint32(4)           +
+         usageCount: pg_atomic_uint32(4)      +
+         pageChangeCount: uint32(4)           +
+     flags: 6 bit                             +
+     field1: 11 bit                           +
+     field2: 15 bit                           +
+     undoLocation: UndoLocation(8)            +
+     csn: CommitSeqNo(8)                      +
+     rightLink: uint64(8)                     +
+     checkpointNum: uint32(4)                 +
+     maxKeyLen: LocationIndex(2)              +
+     prevInsertOffset: OffsetNumber(2)        +
+     chunksCount: OffsetNumber(2)             +
+     itemsCount: OffsetNumber(2)              +
+     hikeysEnd: OffsetNumber(2)               +
+     dataSize: LocationIndex(2)               +
+     dataSize VALUE: 7176                     +
+     chunkDesc: ARRAY:                        +
+         [0]: BTreePageChunkDesc(4)           +
+             shortLocation: 12 bit            +
+             offset: 10 bit                   +
+             hikeyShortLocation: 8 bit        +
+             hikeyFlags: 2 bit                +
+     BTreePageHeader REST (4)                 +
+ HIKEY DATA (1000)                            +
+ CHUNKS: ARRAY:                               +
+     [0]: 6112                                +
+         ITEMS: ARRAY:                        +
+             [0]: LocationIndex(2)            +
+             [1]: LocationIndex(2)            +
+             [2]: LocationIndex(2)            +
+             [3]: LocationIndex(2)            +
+             [4]: LocationIndex(2)            +
+             [5]: LocationIndex(2)            +
+         ITEMS ARRAY ALIGN (4)                +
+         ITEM DATA: ARRAY                     +
+             [0]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 988 - 4: i        +
+                         LONG DATA            +
+                 TUPLE DATA ALIGN (4)         +
+             [1]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 988 - 4: i        +
+                         LONG DATA            +
+                 TUPLE DATA ALIGN (4)         +
+             [2]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 988 - 4: i        +
+                         LONG DATA            +
+                 TUPLE DATA ALIGN (4)         +
+             [3]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 992 - 4: i        +
+                         LONG DATA            +
+             [4]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 992 - 4: i        +
+                         LONG DATA            +
+             [5]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 992 - 4: i        +
+                         LONG DATA            +
+ Page 2:                                      +
+ BTreePageHeader(64)                          +
+     o_header: OrioleDBPageHeader(12)         +
+         state: pg_atomic_uint32(4)           +
+         usageCount: pg_atomic_uint32(4)      +
+         pageChangeCount: uint32(4)           +
+     flags: 6 bit                             +
+     field1: 11 bit                           +
+     field2: 15 bit                           +
+     undoLocation: UndoLocation(8)            +
+     csn: CommitSeqNo(8)                      +
+     rightLink: uint64(8)                     +
+     checkpointNum: uint32(4)                 +
+     maxKeyLen: LocationIndex(2)              +
+     prevInsertOffset: OffsetNumber(2)        +
+     chunksCount: OffsetNumber(2)             +
+     itemsCount: OffsetNumber(2)              +
+     hikeysEnd: OffsetNumber(2)               +
+     dataSize: LocationIndex(2)               +
+     dataSize VALUE: 2304                     +
+     chunkDesc: ARRAY:                        +
+         [0]: BTreePageChunkDesc(4)           +
+             shortLocation: 12 bit            +
+             offset: 10 bit                   +
+             hikeyShortLocation: 8 bit        +
+             hikeyFlags: 2 bit                +
+     BTreePageHeader REST (4)                 +
+ HIKEY DATA (192)                             +
+ CHUNKS: ARRAY:                               +
+     [0]: 2048                                +
+         ITEMS: ARRAY:                        +
+             [0]: LocationIndex(2)            +
+             [1]: LocationIndex(2)            +
+         ITEMS ARRAY ALIGN (4)                +
+         ITEM DATA: ARRAY                     +
+             [0]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 992 - 4: i        +
+                         LONG DATA            +
+             [1]: BTreeLeafTuphdr(16)         +
+                 xactInfo: 61 bit             +
+                 deleted: 2 bit               +
+                 chainHasLocks: 1 bit         +
+                 undoLocation: 62 bit         +
+                 formatFlags: 2 bit           +
+                 Tuple header: OTupleHeader(8)+
+                     hasnulls: 1 bit          +
+                     len: 15 bit              +
+                     natts: uint16(2)         +
+                     version: uint32(4)       +
+                 Tuple data: 8                +
+                     val_1: 4 - 0: i          +
+                     val_2: 996 - 4: i        +
+                         LONG DATA            +
+                 TUPLE DATA ALIGN (4)         +
+ 
+(1 row)
+
+SELECT val_1, length(val_2) = val_1,
+	   val_2 = repeat('x', val_1) FROM o_test_split_rightmost;
+ val_1 | ?column? | ?column? 
+-------+----------+----------
+   978 | t        | t
+   979 | t        | t
+   980 | t        | t
+   981 | t        | t
+   982 | t        | t
+   983 | t        | t
+   984 | t        | t
+   985 | t        | t
+(8 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 16 other objects
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table o_tableam6
 drop cascades to table o_tableam_join1
 drop cascades to table o_tableam_cte_base
@@ -4170,6 +4432,7 @@ drop cascades to table o_tableam_snapshot_check
 drop cascades to table o_ctid_test
 drop cascades to table o_tmp_1
 drop cascades to table o_test_1
+drop cascades to table o_test_split_rightmost
 drop cascades to view db_o_tables
 drop cascades to view db_o_indices
 DROP SCHEMA tableam CASCADE;

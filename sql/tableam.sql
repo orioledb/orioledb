@@ -927,6 +927,19 @@ SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
 REINDEX SCHEMA :temp_schema_name;
 
 SELECT orioledb_parallel_debug_stop();
+CREATE TABLE o_test_split_rightmost (
+  val_1 int NOT NULL,
+  val_2 text NOT NULL,
+  PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+
+INSERT INTO o_test_split_rightmost
+  SELECT a, repeat('x', a) FROM generate_series(978, 985) as a;
+-- For the Page 1, dataSize VALUE should not be greater than ORIOLEDB_BLCKSZ
+SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
+SELECT val_1, length(val_2) = val_1,
+	   val_2 = repeat('x', val_1) FROM o_test_split_rightmost;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

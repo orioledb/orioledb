@@ -62,7 +62,7 @@ o_tuple_init_reader(OTupleReaderState *state, OTuple tuple, TupleDesc desc,
 	state->slow = false;
 }
 
-static uint32
+uint32
 o_tuple_next_field_offset(OTupleReaderState *state, Form_pg_attribute att)
 {
 	uint32		off;

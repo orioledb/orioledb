@@ -174,6 +174,8 @@ typedef OTupleHeaderData *OTupleHeader;
 extern void o_tuple_init_reader(OTupleReaderState *state, OTuple tuple,
 								TupleDesc desc, OTupleFixedFormatSpec *spec);
 extern Datum o_tuple_read_next_field(OTupleReaderState *state, bool *isnull);
+extern uint32 o_tuple_next_field_offset(OTupleReaderState *state,
+										Form_pg_attribute att);
 extern ItemPointer o_tuple_get_last_iptr(TupleDesc desc,
 										 OTupleFixedFormatSpec *spec,
 										 OTuple tuple, bool *isnull);

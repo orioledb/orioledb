@@ -193,6 +193,7 @@ btree_page_split_location(BTreeDescr *desc, Page page, OffsetNumber offset,
 				hikeys_end;
 	SplitItemIterator left_it,
 				right_it;
+	LocationIndex keyLen;
 
 	Assert(spaceRatio > 0.0f && spaceRatio < 1.0f);
 
@@ -202,6 +203,11 @@ btree_page_split_location(BTreeDescr *desc, Page page, OffsetNumber offset,
 		newitem_size = BTreeNonLeafTuphdrSize + MAXALIGN(tuplesize);
 
 	maxKeyLen = MAXALIGN(((BTreePageHeader *) page)->maxKeyLen);
+	if (!O_PAGE_IS(page, LEAF))
+		keyLen = MAXALIGN(tuplesize);
+	else
+		keyLen = MAXALIGN(o_btree_len(desc, tuple, OTupleKeyLengthNoVersion));
+	maxKeyLen = Max(maxKeyLen, keyLen);
 
 	totalCount = BTREE_PAGE_ITEMS_COUNT(page) + (replace ? 0 : 1);
 	hikeys_end = BTREE_PAGE_HIKEYS_END(desc, page);
