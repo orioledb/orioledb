@@ -253,7 +253,7 @@ fill_backup_state(BackupState *state)
  * clobbered by longjmp" from stupider versions of gcc.
  */
 void
-s3_perform_backup(S3TaskLocation location)
+s3_perform_backup(S3TaskLocation maxLocation)
 {
 	uint32		chkpNum = checkpoint_state->lastCheckpointNumber;
 	S3BackupState state;
@@ -261,10 +261,10 @@ s3_perform_backup(S3TaskLocation location)
 	ListCell   *lc;
 	tablespaceinfo *newti;
 	BackupState *backup_state;
+	S3TaskLocation location;
 
 	backup_started_in_recovery = RecoveryInProgress();
 
-	maxLocation = 0;
 	total_checksum_failures = 0;
 
 	initStringInfo(&tablespaceMapData);
@@ -291,7 +291,6 @@ s3_perform_backup(S3TaskLocation location)
 
 		if (ti->path == NULL)
 		{
-			S3TaskLocation location;
 			char	   *backup_filename;
 			char	   *backup_label;
 			File		backup_file;
@@ -610,8 +609,6 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 
 			if (skip_this_dir)
 			{
-				S3TaskLocation location;
-
 				location = s3_schedule_empty_dir_write(state->chkpNum, pathbuf);
 				maxLocation = Max(maxLocation, location);
 			}
