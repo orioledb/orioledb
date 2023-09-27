@@ -1143,6 +1143,10 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 void
 o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 {
+	if (flags & CHECKPOINT_END_OF_RECOVERY)
+	{
+		o_tables_drop_all_temporary();
+	}
 	if (!(flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY)))
 	{
 		o_sys_caches_delete_by_lsn(checkPointRedo);
@@ -4113,9 +4117,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	int			cur_chkp_index = (checkpoint_state->lastCheckpointNumber + 1) % 2;
 	MemoryContext prev_context;
 	Jsonb	   *params;
-
-	if (temp_table)
-		return;
 
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 

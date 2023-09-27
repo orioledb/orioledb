@@ -96,6 +96,7 @@ typedef struct
 static void o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name, OTableField *field);
 static void o_tables_foreach_callback(ORelOids oids, void *arg);
 static void o_tables_drop_all_callback(ORelOids oids, void *arg);
+static void o_tables_drop_all_temporary_callback(OTable *o_table, void *arg);
 static void o_table_oids_array_callback(ORelOids oids, void *arg);
 static inline void o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool checkpoint);
 
@@ -995,6 +996,22 @@ o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id)
 						  COMMITSEQNO_NON_DELETED, &arg);
 }
 
+void
+o_tables_drop_all_temporary()
+{
+	OTablesDropAllArg arg;
+	CommitSeqNo csn;
+	OXid		oxid;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	arg.oxid = oxid;
+	arg.csn = csn;
+
+	o_tables_foreach(o_tables_drop_all_temporary_callback,
+					 COMMITSEQNO_NON_DELETED, &arg);
+}
+
 bool
 o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 {
@@ -1429,6 +1446,37 @@ o_tables_drop_all_callback(ORelOids oids, void *arg)
 			add_undo_drop_relnode(oids, treeOids, numTreeOids);
 			pfree(treeOids);
 			o_table_free(table);
+		}
+	}
+}
+
+static void
+o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
+{
+	OTablesDropAllArg *drop_arg = (OTablesDropAllArg *) arg;
+
+	if (o_table->temp)
+	{
+		OTableChunkKey key;
+		bool		result;
+
+		key.oids = o_table->oids;
+		key.offset = 0;
+
+		systrees_modify_start();
+		o_tables_oids_indexes(o_table, NULL, drop_arg->oxid, drop_arg->csn);
+		result = generic_toast_delete(&oTablesToastAPI, (Pointer) &key, drop_arg->oxid,
+									  drop_arg->csn, get_sys_tree(SYS_TREES_O_TABLES));
+		systrees_modify_end();
+
+		if (result)
+		{
+			ORelOids   *treeOids;
+			int			numTreeOids;
+
+			treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+			add_undo_drop_relnode(o_table->oids, treeOids, numTreeOids);
+			pfree(treeOids);
 		}
 	}
 }
