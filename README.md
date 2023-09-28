@@ -74,7 +74,12 @@ If you are interested in OrioleDB's benefits in production, please
 We provide docker images for `amd64` and `arm64v8` architectures under Alpine Linux.
 
 ```
-docker pull orioledb/orioledb
+docker pull orioledb/orioledb:latest-pg16
+```
+For example it can be started same as postgres server:
+```bash
+# !Don't forget to set default locale to C, POSIX or use icu-locale
+docker run --name some-postgres -e POSTGRES_PASSWORD=... -e POSTGRES_INITDB_ARGS="--locale=C" -d -p5432:5432 orioledb/orioledb:latest-pg16
 ```
 
 See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
@@ -84,6 +89,7 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
 Before building and installing OrioleDB, one should ensure to have the following:
 
  * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [13 (tag: patches13_16)](https://github.com/orioledb/postgres/tree/patches13_16), [14 (tag: patches14_16)](https://github.com/orioledb/postgres/tree/patches14_16), [15 (tag: patches15_18)](https://github.com/orioledb/postgres/tree/patches15_18), or [16 (tag: patches16_18)](https://github.com/orioledb/postgres/tree/patches16_18);
+   * for versions before 16 ``./config`` script should be run with `--with-icu`
  * Development package of libzstd;
  * python 3.5+ with testgres package.
 
@@ -92,6 +98,7 @@ Typical installation procedure may look like this:
 ```bash
  $ git clone https://github.com/orioledb/orioledb
  $ cd orioledb
+ # Make sure that postgres bin directory is in PATH before running
  $ make USE_PGXS=1
  $ make USE_PGXS=1 install
  $ make USE_PGXS=1 installcheck
@@ -104,6 +111,32 @@ the PostgreSQL database server.
 ```
 shared_preload_libraries = 'orioledb.so'
 ```
+
+## Collations
+OrioleDB tables support only ICU, C, and POSIX collations. 
+
+So that you don't have to write COLLATE for every "text" field of tables you have options:
+### Create whole cluster with one of these collations:
+```bash
+initdb --locale=C -D..
+# OR
+initdb --locale=POSIX -D..
+```
+For postgres >=15 you have option:
+```bash
+# en - ICU locale name
+initdb --locale-provider=icu --icu-locale=en -D...
+```
+
+### Create new database with default collation from template0
+```bash
+createdb --locale=C --template template0 ...
+# OR
+createdb --locale=POSIX --template template0 ... 
+# For postgres >=15 you have option:
+createdb --locale-provider=icu --icu-locale=en --template template0 ... 
+```
+Or using `CREATE DATABASE` with `LOCALE` or `ICU_LOCALE` parameters.
 
 ## Setup
 

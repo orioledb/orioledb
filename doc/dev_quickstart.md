@@ -18,7 +18,7 @@ cd postgres-patches15/
 ### Checkout to required patch tag:
 Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
 ```bash
-git checkout patches15_5
+git checkout patches15_18
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -30,9 +30,8 @@ sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include
 ```bash
 PG_PREFIX=$HOME/pg15
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
-THREADS=$(cat /proc/cpuinfo | grep processor | wc -l) # determine cpu core amount
-make -j$THREADS
-make -j$THREADS install
+make -j$(nproc)
+make -j$(nproc) install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -77,7 +76,7 @@ make USE_PGXS=1 installcheck
 ```bash
 cd orioledb
 make USE_PGXS=1 install
-initdb -D $HOME/pgdata
+initdb --no-locale -D $HOME/pgdata
 sed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log
 psql -c "CREATE EXTENSION IF NOT EXISTS orioledb; SELECT orioledb_commit_hash();" -d postgres
@@ -114,16 +113,15 @@ cd postgres-patches15/
 ### Checkout to required patch tag:
 Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
 ```bash
-git checkout patches15_5
+git checkout patches15_18
 ```
 
 ### Configure and build
 ```bash
 PG_PREFIX=$HOME/pg15
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
-THREADS=$(sysctl -a machdep.cpu.core_count | cut -d' ' -f2) # determine cpu core amount
-make -j$THREADS
-make -j$THREADS install
+make -j$(nproc)
+make -j$(nproc) install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.zshrc
 exec zsh -l
 ```
@@ -168,7 +166,7 @@ make USE_PGXS=1 installcheck
 ```bash
 cd orioledb
 make USE_PGXS=1 install
-initdb -D $HOME/pgdata
+initdb --no-locale -D $HOME/pgdata
 gsed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log
 psql -c "CREATE EXTENSION IF NOT EXISTS orioledb; SELECT orioledb_commit_hash();" -d postgres
@@ -207,7 +205,7 @@ cd postgres-patches15/
 ### Checkout to required patch tag:
 Check required postgres patch version in [.pgtags](../.pgtags) or [README.md](../README.md#build-from-source) files. Because documentation can become outdated.
 ```bash
-git checkout patches15_5
+git checkout patches15_18
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -219,9 +217,8 @@ sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include
 ```bash
 PG_PREFIX=$HOME/pg15
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
-THREADS=$(cat /proc/cpuinfo | grep processor | wc -l) # determine cpu core amount
-make -j$THREADS
-make -j$THREADS install
+make -j$(nproc)
+make -j$(nproc) install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -269,7 +266,7 @@ make USE_PGXS=1 installcheck
 #### Manual installation and running
 ```bash
 make USE_PGXS=1 install
-initdb -D $HOME/pgdata
+initdb --no-locale -D $HOME/pgdata
 sed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log
 psql -c "CREATE EXTENSION IF NOT EXISTS orioledb; SELECT orioledb_commit_hash();" -d postgres
