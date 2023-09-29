@@ -22,23 +22,29 @@
 #include "utils/wait_event.h"
 
 #include "curl/curl.h"
-#include "openssl/hmac.h"
+#include "openssl/evp.h"
 #include "openssl/sha.h"
 
 PG_FUNCTION_INFO_V1(s3_get);
 PG_FUNCTION_INFO_V1(s3_put);
 
 static void
-hmac_sha256(char *input, char *output, char *secretkey, int secretkeylen)
+hmac_sha256(char *input, char *output, char *secretkey, int secretkeylen, int outlen)
 {
-	HMAC_CTX   *ctx;
-	unsigned int len;
+	OSSL_PARAM params[2];
+	EVP_MAC_CTX   *ctx;
+	EVP_MAC	      *mac;
+	size_t 	       len;
 
-	ctx = HMAC_CTX_new();
-	HMAC_Init_ex(ctx, secretkey, secretkeylen, EVP_sha256(), NULL);
-	HMAC_Update(ctx, (unsigned char *) input, strlen(input));
-	HMAC_Final(ctx, (unsigned char *) output, &len);
-	HMAC_CTX_free(ctx);
+	mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
+	ctx = EVP_MAC_CTX_new(mac);
+	params[0] = OSSL_PARAM_construct_utf8_string("digest", "SHA256", 0);
+	params[1] = OSSL_PARAM_construct_end();
+	EVP_MAC_init(ctx, (unsigned char *) secretkey, secretkeylen, params);
+	EVP_MAC_update(ctx, (unsigned char *) input, strlen(input));
+	EVP_MAC_final(ctx, (unsigned char *) output, &len, outlen);
+	EVP_MAC_CTX_free(ctx);
+	EVP_MAC_free(mac);
 
 	Assert(len == 32);
 }
@@ -101,10 +107,10 @@ s3_signature(char *method, char *datetimestring, char *datestring,
 								   objectname, contenthash);
 
 	key = psprintf("AWS4%s", s3_secretkey);
-	hmac_sha256(datestring, hash, key, strlen(key));
-	hmac_sha256(s3_region, hash, hash, sizeof(hash));
-	hmac_sha256("s3", hash, hash, sizeof(hash));
-	hmac_sha256("aws4_request", hash, hash, sizeof(hash));
+	hmac_sha256(datestring, hash, key, strlen(key), sizeof(hash));
+	hmac_sha256(s3_region, hash, hash, sizeof(hash), sizeof(hash));
+	hmac_sha256("s3", hash, hash, sizeof(hash), sizeof(hash));
+	hmac_sha256("aws4_request", hash, hash, sizeof(hash), sizeof(hash));
 
 	initStringInfo(&buf);
 	appendStringInfo(&buf, "AWS4-HMAC-SHA256\n");
@@ -112,7 +118,7 @@ s3_signature(char *method, char *datetimestring, char *datestring,
 	appendStringInfo(&buf, "%s/%s/s3/aws4_request\n", datestring, s3_region);
 	appendStringInfo(&buf, "%s", chash);
 
-	hmac_sha256(buf.data, hash, hash, sizeof(hash));
+	hmac_sha256(buf.data, hash, hash, sizeof(hash), sizeof(hash));
 
 	pfree(key);
 	pfree(chash);
