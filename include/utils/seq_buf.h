@@ -46,7 +46,7 @@ typedef struct
 	SeqBufPrevPageState prevPageState;
 } SeqBufDescShared;
 
-#define SEQ_BUF_SHARED_EXIST(shared_ptr) (OInMemoryBlknoIsValid((shared_ptr)->pages[0]))
+#define SEQ_BUF_SHARED_EXIST(shared_ptr) ((shared_ptr) && OInMemoryBlknoIsValid((shared_ptr)->pages[0]))
 
 typedef struct
 {
