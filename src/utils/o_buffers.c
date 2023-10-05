@@ -135,17 +135,23 @@ unlink_file(OBuffersDesc *desc, uint64 fileNum)
 }
 
 static void
-write_buffer(OBuffersDesc *desc, OBuffer *buffer)
+write_buffer_data(OBuffersDesc *desc, char *data, uint64 blockNum)
 {
 	int			result;
 
-	open_file(desc, buffer->blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
-	result = OFileWrite(desc->curFile, buffer->data, ORIOLEDB_BLCKSZ,
-						(buffer->blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize,
+	open_file(desc, blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
+	result = OFileWrite(desc->curFile, data, ORIOLEDB_BLCKSZ,
+						(blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize,
 						WAIT_EVENT_SLRU_WRITE);
 	if (result != ORIOLEDB_BLCKSZ)
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not write buffer to file %s", desc->curFileName)));
+}
+
+static void
+write_buffer(OBuffersDesc *desc, OBuffer *buffer)
+{
+	write_buffer_data(desc, buffer->data, buffer->blockNum);
 }
 
 static void
@@ -173,8 +179,10 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 	OBuffersGroup *group = &desc->groups[blockNum % desc->groupsCount];
 	OBuffer    *buffer = NULL;
 	int			i,
-				victim;
-	uint32		victimUsageCount;
+				victim = 0;
+	uint32		victimUsageCount = 0;
+	bool		prevDirty;
+	uint32		prevBlockNum;
 
 	/* First check if required buffer is already loaded */
 	LWLockAcquire(&group->groupCtlLock, LW_SHARED);
@@ -192,16 +200,25 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 	}
 	LWLockRelease(&group->groupCtlLock);
 
-	/* No lock: have to evict some buffer */
+	/* No luck: have to evict some buffer */
 	LWLockAcquire(&group->groupCtlLock, LW_EXCLUSIVE);
 
 	/* Search for victim buffer */
-	victim = 0;
-	victimUsageCount = group->buffers[0].usageCount;
-	for (i = 1; i < O_BUFFERS_PER_GROUP; i++)
+	for (i = 0; i < O_BUFFERS_PER_GROUP; i++)
 	{
 		buffer = &group->buffers[i];
-		if (buffer->usageCount < victimUsageCount)
+
+		/* Need to recheck after relock */
+		if (buffer->blockNum == blockNum)
+		{
+			LWLockAcquire(&buffer->bufferCtlLock, write ? LW_EXCLUSIVE : LW_SHARED);
+			buffer->usageCount++;
+			LWLockRelease(&group->groupCtlLock);
+
+			return buffer;
+		}
+
+		if (i == 0 || buffer->usageCount < victimUsageCount)
 		{
 			victim = i;
 			victimUsageCount = buffer->usageCount;
@@ -210,16 +227,21 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 	}
 	buffer = &group->buffers[victim];
 	LWLockAcquire(&buffer->bufferCtlLock, LW_EXCLUSIVE);
-	if (buffer->dirty)
-		write_buffer(desc, buffer);
+
+	prevDirty = buffer->dirty;
+	prevBlockNum = buffer->blockNum;
 
 	buffer->usageCount = 1;
 	buffer->dirty = false;
 	buffer->blockNum = blockNum;
 
+	LWLockRelease(&group->groupCtlLock);
+
+	if (prevDirty)
+		write_buffer_data(desc, buffer->data, prevBlockNum);
+
 	read_buffer(desc, buffer);
 
-	LWLockRelease(&group->groupCtlLock);
 	return buffer;
 }
 
