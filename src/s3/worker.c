@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
+#include "s3/headers.h"
 #include "s3/queue.h"
 #include "s3/requests.h"
 #include "s3/worker.h"
@@ -131,48 +132,79 @@ s3process_task(uint64 taskLocation)
 		s3_put_empty_dir(objectname);
 		pfree(objectname);
 	}
-	else if (task->type == S3TaskTypeWriteFilePart &&
-			 task->typeSpecific.writeFilePart.segNum >= 0)
+	else if (task->type == S3TaskTypeReadFilePart)
 	{
 		char	   *filename;
+		S3HeaderTag tag;
 
-		filename = btree_filename(task->typeSpecific.writeFilePart.datoid,
-								  task->typeSpecific.writeFilePart.relnode,
-								  task->typeSpecific.writeFilePart.segNum,
-								  task->typeSpecific.writeFilePart.chkpNum);
+		filename = btree_filename(task->typeSpecific.filePart.datoid,
+								  task->typeSpecific.filePart.relnode,
+								  task->typeSpecific.filePart.segNum,
+								  task->typeSpecific.filePart.chkpNum);
 
 		objectname = psprintf("orioledb_data/%u/%u/%u.%u.%u",
 							  task->typeSpecific.writeFile.chkpNum,
-							  task->typeSpecific.writeFilePart.datoid,
-							  task->typeSpecific.writeFilePart.relnode,
-							  task->typeSpecific.writeFilePart.segNum,
-							  task->typeSpecific.writeFilePart.partNum);
+							  task->typeSpecific.filePart.datoid,
+							  task->typeSpecific.filePart.relnode,
+							  task->typeSpecific.filePart.segNum,
+							  task->typeSpecific.filePart.partNum);
 
-		elog(DEBUG1, "S3 part put %s %s", objectname, filename);
+		elog(DEBUG1, "S3 part get %s %s", objectname, filename);
 
-		s3_put_file_part(objectname, filename, task->typeSpecific.writeFilePart.partNum);
+		s3_get_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+
+		tag.datoid = task->typeSpecific.filePart.datoid;
+		tag.relnode = task->typeSpecific.filePart.relnode;
+		tag.checkpointNum = task->typeSpecific.filePart.chkpNum;
+		tag.segNum = task->typeSpecific.filePart.segNum;
+
+		s3_header_mark_part_loaded(tag, task->typeSpecific.filePart.partNum);
 
 		pfree(filename);
 		pfree(objectname);
 	}
 	else if (task->type == S3TaskTypeWriteFilePart &&
-			 task->typeSpecific.writeFilePart.segNum < 0)
+			 task->typeSpecific.filePart.segNum >= 0)
+	{
+		char	   *filename;
+
+		filename = btree_filename(task->typeSpecific.filePart.datoid,
+								  task->typeSpecific.filePart.relnode,
+								  task->typeSpecific.filePart.segNum,
+								  task->typeSpecific.filePart.chkpNum);
+
+		objectname = psprintf("orioledb_data/%u/%u/%u.%u.%u",
+							  task->typeSpecific.writeFile.chkpNum,
+							  task->typeSpecific.filePart.datoid,
+							  task->typeSpecific.filePart.relnode,
+							  task->typeSpecific.filePart.segNum,
+							  task->typeSpecific.filePart.partNum);
+
+		elog(DEBUG1, "S3 part put %s %s", objectname, filename);
+
+		s3_put_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+
+		pfree(filename);
+		pfree(objectname);
+	}
+	else if (task->type == S3TaskTypeWriteFilePart &&
+			 task->typeSpecific.filePart.segNum < 0)
 	{
 		char	   *filename;
 		SeqBufTag	chkp_tag;
 
 		memset(&chkp_tag, 0, sizeof(chkp_tag));
-		chkp_tag.datoid = task->typeSpecific.writeFilePart.datoid;
-		chkp_tag.relnode = task->typeSpecific.writeFilePart.relnode;
-		chkp_tag.num = task->typeSpecific.writeFilePart.chkpNum;
+		chkp_tag.datoid = task->typeSpecific.filePart.datoid;
+		chkp_tag.relnode = task->typeSpecific.filePart.relnode;
+		chkp_tag.num = task->typeSpecific.filePart.chkpNum;
 		chkp_tag.type = 'm';
 
 		filename = get_seq_buf_filename(&chkp_tag);
 
 		objectname = psprintf("orioledb_data/%u/%u/%u.map",
 							  task->typeSpecific.writeFile.chkpNum,
-							  task->typeSpecific.writeFilePart.datoid,
-							  task->typeSpecific.writeFilePart.relnode);
+							  task->typeSpecific.filePart.datoid,
+							  task->typeSpecific.filePart.relnode);
 
 		elog(DEBUG1, "S3 map put %s %s", objectname, filename);
 
@@ -263,11 +295,53 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
 
 	task = (S3Task *) palloc0(sizeof(S3Task));
 	task->type = S3TaskTypeWriteFilePart;
-	task->typeSpecific.writeFilePart.chkpNum = chkpNum;
-	task->typeSpecific.writeFilePart.datoid = datoid;
-	task->typeSpecific.writeFilePart.relnode = relnode;
-	task->typeSpecific.writeFilePart.segNum = segNum;
-	task->typeSpecific.writeFilePart.partNum = partNum;
+	task->typeSpecific.filePart.chkpNum = chkpNum;
+	task->typeSpecific.filePart.datoid = datoid;
+	task->typeSpecific.filePart.relnode = relnode;
+	task->typeSpecific.filePart.segNum = segNum;
+	task->typeSpecific.filePart.partNum = partNum;
+
+	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
+
+	pfree(task);
+
+	return location;
+}
+
+/*
+ * Schedule the read of given data file part from S3.
+ */
+S3TaskLocation
+s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
+						   int32 segNum, int32 partNum)
+{
+	S3Task	   *task;
+	S3TaskLocation location;
+	S3PartStatus status;
+	S3HeaderTag tag = {.datoid = datoid,.relnode = relnode,.checkpointNum = chkpNum,.segNum = segNum};
+
+	status = s3_header_mark_part_loading(tag, partNum);
+	if (status == S3PartStatusLoading)
+	{
+		/*
+		 * The task is already scheduled.  We don't know the location, but we
+		 * know it's lower than current insert location.
+		 */
+		return s3_queue_get_insert_location();
+	}
+	else if (status == S3PartStatusLoaded)
+	{
+		return InvalidS3TaskLocation;
+	}
+	Assert(status == S3PartStatusNotLoaded);
+
+	task = (S3Task *) palloc0(sizeof(S3Task));
+	task->type = S3TaskTypeReadFilePart;
+	task->typeSpecific.filePart.chkpNum = chkpNum;
+	task->typeSpecific.filePart.datoid = datoid;
+	task->typeSpecific.filePart.relnode = relnode;
+	task->typeSpecific.filePart.segNum = segNum;
+	task->typeSpecific.filePart.partNum = partNum;
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
 
@@ -304,11 +378,62 @@ s3_schedule_wal_file_write(char *filename)
  * Schedule the load of given downlink from S3 to local storage.
  */
 S3TaskLocation
-s3_schedule_downlink_load(Oid datoid, Oid relnode, uint64 downlink)
+s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 {
-	/* TODO: Implement */
+	uint64		offset = DOWNLINK_GET_DISK_OFF(downlink);
+	uint16		len = DOWNLINK_GET_DISK_LEN(downlink);
+	off_t		byte_offset,
+				read_size;
+	uint32		chkpNum;
+	int32		segNum,
+				partNum;
+
+	chkpNum = S3_GET_CHKP_NUM(offset);
+	offset &= S3_OFFSET_MASK;
+
+	if (!OCompressIsValid(desc->compress))
+	{
+		byte_offset = (off_t) offset * (off_t) ORIOLEDB_BLCKSZ;
+		read_size = ORIOLEDB_BLCKSZ;
+	}
+	else
+	{
+		byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
+		read_size = len * ORIOLEDB_COMP_BLCKSZ;
+	}
+
+	while (true)
+	{
+		segNum = byte_offset / ORIOLEDB_SEGMENT_SIZE;
+		partNum = (byte_offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
+		s3_schedule_file_part_read(chkpNum, desc->oids.datoid, desc->oids.relnode,
+								   segNum, partNum);
+		if (byte_offset % ORIOLEDB_S3_PART_SIZE + read_size > ORIOLEDB_S3_PART_SIZE)
+		{
+			uint64		shift = ORIOLEDB_S3_PART_SIZE - byte_offset % ORIOLEDB_S3_PART_SIZE;
+
+			byte_offset += shift;
+			read_size -= shift;
+		}
+		else
+		{
+			break;
+		}
+	}
 
 	return InvalidS3TaskLocation;
+}
+
+void
+s3_load_file_part(uint32 chkpNum, Oid datoid, Oid relnode,
+				  int32 segNum, int32 partNum)
+{
+	S3TaskLocation location;
+
+	location = s3_schedule_file_part_read(chkpNum, datoid, relnode,
+										  segNum, partNum);
+
+	s3_queue_wait_for_location(location);
 }
 
 void

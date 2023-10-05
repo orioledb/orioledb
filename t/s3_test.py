@@ -258,9 +258,10 @@ class S3Test(BaseTest):
 			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
 		""")[0][0]
 		node.safe_psql("""
+			CREATE EXTENSION orioledb;
 			CREATE TABLE pg_test_1 (
 				val_1 int
-			);
+			) USING orioledb;
 			INSERT INTO pg_test_1 SELECT * FROM generate_series(1, 5);
 		""")
 		node.safe_psql("CHECKPOINT;")
@@ -285,6 +286,10 @@ class S3Test(BaseTest):
 
 		loader.download_files_in_directory(self.bucket_name, 'data/',
 										   new_data_dir)
+		loader.download_files_in_directory(self.bucket_name,
+										   'orioledb_data/',
+										   f"{new_data_dir}/orioledb_data",
+										   suffix='.map')
 		new_node = testgres.get_new_node('test', base_dir=new_temp_dir)
 
 		control = new_node.get_control_data()
@@ -294,10 +299,6 @@ class S3Test(BaseTest):
 
 		new_node.port = self.getBasePort() + 1
 		new_node.append_conf(port=new_node.port)
-		new_node.append_conf("""
-			orioledb.s3_mode = false
-			archive_mode = false
-		""")
 
 		new_node.start()
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
@@ -411,6 +412,7 @@ class OrioledbS3ObjectLoader:
 					with open(fullname, 'wb') as file:
 						file.write(data[dataOffset: dataOffset + dataLength])
 					os.chmod(fullname, 0o600)
+				os.unlink(local_path)
 
 		except ClientError as e:
 			if e.response['Error']['Code'] == "404":
@@ -420,7 +422,8 @@ class OrioledbS3ObjectLoader:
 			self._error_occurred.set()
 
 	def download_files_in_directory(self, bucket_name, directory,
-									local_directory, last_checkpoint=True):
+									local_directory, last_checkpoint=True,
+									suffix=''):
 		if last_checkpoint:
 			objects = self.list_objects_last_checkpoint(bucket_name, directory)
 		else:
@@ -431,6 +434,8 @@ class OrioledbS3ObjectLoader:
 			futures = []
 
 			for file_key in objects:
+				if not file_key.endswith(suffix):
+					continue
 				if last_checkpoint:
 					local_file = '/'.join(file_key.split('/')[2:])
 				else:

@@ -24,6 +24,7 @@
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "s3/headers.h"
 #include "s3/queue.h"
 #include "s3/worker.h"
 #include "tableam/handler.h"
@@ -175,7 +176,8 @@ static ShmemItem shmemItems[] = {
 	{ppools_shmem_needs, ppools_shmem_init},
 	{btree_scan_shmem_needs, btree_scan_init_shmem},
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
-	{s3_workers_shmem_needs, s3_workers_init_shmem}
+	{s3_workers_shmem_needs, s3_workers_init_shmem},
+	{s3_headers_shmem_needs, s3_headers_shmem_init}
 };
 
 
@@ -583,6 +585,19 @@ _PG_init(void)
 							"The size of queue for S3 tasks",
 							NULL,
 							&s3_queue_size_guc,
+							1024,
+							128,
+							MAX_KILOBYTES,
+							PGC_POSTMASTER,
+							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.s3_headers_buffers",
+							"The size of buffers for S3 meta-information",
+							NULL,
+							&s3_headers_buffers_size,
 							1024,
 							128,
 							MAX_KILOBYTES,
@@ -1508,6 +1523,8 @@ orioledb_error_cleanup_hook(void)
 		list_free_deep(drop_index_list);
 		drop_index_list = NIL;
 	}
+	if (orioledb_s3_mode)
+		s3_headers_error_cleanup();
 }
 
 static void

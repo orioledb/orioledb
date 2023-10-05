@@ -170,42 +170,41 @@ write_data_to_buf(void *buffer, size_t size, size_t nmemb, void *userp)
 }
 
 /*
- * A SQL function to get object from S3.  Currently only used for debugging
- * purposes.
+ * Get the binary content of an object from S3 into 'str'.
  */
-Datum
-s3_get(PG_FUNCTION_ARGS)
+static void
+s3_get_object(char *objectname, StringInfo str)
 {
 	CURL	   *curl;
-	StringInfoData buf;
-	char	   *filename;
 	char	   *url;
 	char	   *datestring;
 	char	   *datetimestring;
 	char	   *signature;
 	struct curl_slist *slist;
+	char	   *tmp;
 	int			sc;
 	unsigned char hash[32];
 	char	   *contenthash;
+	long		http_code = 0;
 
 	(void) SHA256(NULL, 0, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
 
-	filename = text_to_cstring(PG_GETARG_TEXT_PP(0));
-
-	url = psprintf("https://%s/%s", s3_host, filename);
+	url = psprintf("https://%s/%s", s3_host, objectname);
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
-	signature = s3_signature("GET", datetimestring, datestring, filename,
+	signature = s3_signature("GET", datetimestring, datestring, objectname,
 							 s3_secretkey, contenthash);
 
 	slist = NULL;
-	slist = curl_slist_append(slist, psprintf("x-amz-date: %s", datetimestring));
-	slist = curl_slist_append(slist, psprintf("x-amz-content-sha256: %s", contenthash));
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
+	pfree(tmp);
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
+	pfree(tmp);
 	slist = curl_slist_append(slist,
-							  psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
-									   s3_accesskey, datestring, s3_region, signature));
-	initStringInfo(&buf);
+							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
+											  s3_accesskey, datestring, s3_region, signature)));
+	pfree(tmp);
 
 	curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
@@ -213,19 +212,40 @@ s3_get(PG_FUNCTION_ARGS)
 	if (s3_cainfo)
 		curl_easy_setopt(curl, CURLOPT_CAINFO, s3_cainfo);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_buf);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, str);
 
 	sc = curl_easy_perform(curl);
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0)
+	if (sc != 0 || http_code != 200)
 	{
 		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
 						errmsg("could not get object from S3"),
-						errdetail("return code = %d, response = %s",
-								  sc, buf.data)));
+						errdetail("return code = %d, http code = %ld, response = %s",
+								  sc, http_code, str->data)));
 	}
 
 	curl_easy_cleanup(curl);
+
+	curl_slist_free_all(slist);
+	pfree(url);
+	pfree(datestring);
+	pfree(datetimestring);
+	pfree(signature);
+}
+
+/*
+ * A SQL function to get object from S3.  Currently only used for debugging
+ * purposes.
+ */
+Datum
+s3_get(PG_FUNCTION_ARGS)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+
+	s3_get_object(text_to_cstring(PG_GETARG_TEXT_PP(0)), &buf);
 
 	PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
@@ -245,7 +265,12 @@ read_file_part(const char *filename, uint64 offset,
 
 	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 	if (file < 0)
+	{
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open file \"%s\": %m", filename)));
 		return NULL;
+	}
 
 	totalSize = FileSize(file);
 	totalSize = Min(totalSize, offset + maxSize);
@@ -262,7 +287,9 @@ read_file_part(const char *filename, uint64 offset,
 
 		if (rc < 0)
 		{
-			pfree(buffer);
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not read file \"%s\": %m", filename)));
 			return NULL;
 		}
 
@@ -280,6 +307,38 @@ read_file_part(const char *filename, uint64 offset,
 	FileClose(file);
 
 	return buffer;
+}
+
+/*
+ * Writes the part of the file 'filename' from 'offset' with length 'size'.
+ */
+static void
+write_file_part(const char *filename, uint64 offset,
+				Pointer data, uint64 size)
+{
+	File		file;
+	int			rc;
+
+	file = PathNameOpenFile(filename, O_CREAT | O_RDWR | PG_BINARY);
+	if (file < 0)
+	{
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open file \"%s\": %m", filename)));
+		return;
+	}
+
+	rc = FileWrite(file, data, size, offset, WAIT_EVENT_DATA_FILE_WRITE);
+
+	if (rc < 0 || rc != size)
+	{
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write file \"%s\": %m", filename)));
+		return;
+	}
+
+	FileClose(file);
 }
 
 /*
@@ -308,6 +367,7 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	int			sc;
 	StringInfoData buf;
 	unsigned char hash[32];
+	long		http_code = 0;
 
 	(void) SHA256((unsigned char *) data, dataSize, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
@@ -345,13 +405,14 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
 
 	sc = curl_easy_perform(curl);
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0 || strlen(buf.data) != 0)
+	if (sc != 0 || http_code != 200 || strlen(buf.data) != 0)
 	{
 		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
 						errmsg("could not put object to S3"),
-						errdetail("return code = %d, response = %s",
-								  sc, buf.data)));
+						errdetail("return code = %d, http code = %ld, response = %s",
+								  sc, http_code, buf.data)));
 	}
 
 	curl_easy_cleanup(curl);
@@ -394,6 +455,25 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 						  &dataSize);
 
 	s3_put_object_with_contents(objectname, data, dataSize);
+}
+
+/*
+ * Get the file part from S3 object.
+ */
+void
+s3_get_file_part(char *objectname, char *filename, int partnum)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+	s3_get_object(objectname, &buf);
+
+	write_file_part(filename,
+					partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
+					buf.data,
+					buf.len);
+
+	pfree(buf.data);
 }
 
 /*

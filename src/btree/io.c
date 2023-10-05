@@ -27,6 +27,7 @@
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
 #include "recovery/recovery.h"
+#include "s3/headers.h"
 #include "s3/worker.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
@@ -454,7 +455,9 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 				 int amount, off_t offset)
 {
 	int			result = 0;
-	off_t		curOffset = offset;
+	off_t		curOffset = offset,
+				granularity;
+	S3HeaderTag tag;
 
 	if (use_mmap)
 	{
@@ -471,22 +474,44 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		return result;
 	}
 
+	if (orioledb_s3_mode)
+	{
+		granularity = ORIOLEDB_S3_PART_SIZE;
+		tag.datoid = desc->oids.datoid;
+		tag.relnode = desc->oids.relnode;
+		tag.checkpointNum = chkpNum;
+	}
+	else
+	{
+		granularity = ORIOLEDB_SEGMENT_SIZE;
+	}
+
 	while (amount > 0)
 	{
 		int			segno = curOffset / ORIOLEDB_SEGMENT_SIZE;
+		int			partno = 0;
 		File		file;
 
+		if (orioledb_s3_mode)
+		{
+			tag.segNum = segno;
+			partno = (curOffset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
+			s3_header_lock_part(tag, partno);
+		}
+
 		file = btree_open_smgr_file(desc, segno, chkpNum);
-		if ((curOffset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
+		if ((curOffset + amount) / granularity == curOffset / granularity)
 		{
 			result += OFileWrite(file, buffer, amount,
 								 curOffset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 								 WAIT_EVENT_DATA_FILE_WRITE);
+			if (orioledb_s3_mode)
+				s3_header_unlock_part(tag, partno, true);
 			break;
 		}
 		else
 		{
-			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - curOffset % ORIOLEDB_SEGMENT_SIZE;
+			int			stepAmount = granularity - curOffset % granularity;
 
 			Assert(amount >= stepAmount);
 			result += OFileWrite(file, buffer, stepAmount,
@@ -496,6 +521,9 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 			curOffset += stepAmount;
 			amount -= stepAmount;
 		}
+
+		if (orioledb_s3_mode)
+			s3_header_unlock_part(tag, partno, true);
 	}
 
 	if (orioledb_s3_mode)
@@ -519,6 +547,8 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 				int amount, off_t offset)
 {
 	int			result = 0;
+	off_t		granularity;
+	S3HeaderTag tag;
 
 	if (use_mmap)
 	{
@@ -535,22 +565,44 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		return result;
 	}
 
+	if (orioledb_s3_mode)
+	{
+		granularity = ORIOLEDB_S3_PART_SIZE;
+		tag.datoid = desc->oids.datoid;
+		tag.relnode = desc->oids.relnode;
+		tag.checkpointNum = chkpNum;
+	}
+	else
+	{
+		granularity = ORIOLEDB_SEGMENT_SIZE;
+	}
+
 	while (amount > 0)
 	{
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		int			partno = 0;
 		File		file;
 
+		if (orioledb_s3_mode)
+		{
+			tag.segNum = segno;
+			partno = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
+			s3_header_lock_part(tag, partno);
+		}
+
 		file = btree_open_smgr_file(desc, segno, chkpNum);
-		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
+		if ((offset + amount) / granularity == offset / granularity)
 		{
 			result += OFileRead(file, buffer, amount,
 								offset % ORIOLEDB_SEGMENT_SIZE + (orioledb_s3_mode ? ORIOLEDB_BLCKSZ : 0),
 								WAIT_EVENT_DATA_FILE_READ);
+			if (orioledb_s3_mode)
+				s3_header_unlock_part(tag, partno, false);
 			break;
 		}
 		else
 		{
-			int			stepAmount = ORIOLEDB_SEGMENT_SIZE - offset % ORIOLEDB_SEGMENT_SIZE;
+			int			stepAmount = granularity - offset % granularity;
 
 			Assert(amount >= stepAmount);
 			result += OFileRead(file, buffer, stepAmount,
@@ -560,6 +612,9 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 			offset += stepAmount;
 			amount -= stepAmount;
 		}
+
+		if (orioledb_s3_mode)
+			s3_header_unlock_part(tag, partno, false);
 	}
 
 	return result;
@@ -1146,9 +1201,7 @@ load_page(OBTreeFindPageContext *context)
 			BTreeNonLeafTuphdr *tupHdr;
 
 			tupHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
-			s3_schedule_downlink_load(desc->oids.datoid,
-									  desc->oids.relnode,
-									  tupHdr->downlink);
+			s3_schedule_downlink_load(desc, tupHdr->downlink);
 		}
 	}
 

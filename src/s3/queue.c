@@ -20,6 +20,26 @@
 #include "utils/wait_event.h"
 
 /*
+ * Meta-information about S3 tasks queue.
+ */
+typedef struct
+{
+	/* Location to insert new tasks */
+	pg_atomic_uint64 insertLocation;
+	ConditionVariable insertLocationCV;
+
+	/* Location to pick the existing tasks by workers */
+	pg_atomic_uint64 pickLocation;
+
+	/*
+	 * All the tasks before this location has been already erased in the
+	 * buffer.
+	 */
+	pg_atomic_uint64 erasedLocation;
+	ConditionVariable erasedLocationCV;
+} S3TaskQueueMeta;
+
+/*
  * The "erased" flag for the task length.  This flag means that task body was
  * already erased, but erased position wasn't yet advanced through this task.
  */
@@ -67,6 +87,12 @@ s3_queue_init_shmem(Pointer ptr, bool found)
 
 		memset(s3_queue_buffer, 0, s3_queue_size);
 	}
+}
+
+S3TaskLocation
+s3_queue_get_insert_location(void)
+{
+	return pg_atomic_read_u64(&s3_queue_meta->insertLocation);
 }
 
 /*
