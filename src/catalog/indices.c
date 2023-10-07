@@ -912,7 +912,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		WaitForParallelWorkersToAttach(pcxt);
 	else
 	{
-		while (btshared->nrecoveryworkersjoined < btshared->nrecoveryworkers)
+		while (btshared->nrecoveryworkersjoined < btleader->nparticipanttuplesorts)
 			ConditionVariableSleep(&btshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
 
 		ConditionVariableCancelSleep();
