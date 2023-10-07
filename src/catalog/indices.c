@@ -1260,7 +1260,8 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, Par
 }
 
 void
-build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num, bool in_dedicated_recovery_worker)
+build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
+					  bool in_dedicated_recovery_worker)
 {
 	Tuplesortstate *sortstate;
 	Relation	tableRelation,
@@ -1274,7 +1275,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num, 
 	uint64		ctid;
 	double		heap_tuples;
 	double	   *index_tuples;
-	int			nParallelWorkers = 3;
+	int			nParallelWorkers = max_parallel_maintenance_workers;
 	OIndexDescr *idx;
 
 	ctid = 1;
@@ -1285,7 +1286,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num, 
 
 
 	/* Attempt to launch parallel worker scan when required */
-	if (nParallelWorkers > 0)
+	if (in_dedicated_recovery_worker || nParallelWorkers > 0)
 	{
 		index_tuples = palloc0(sizeof(double));
 
