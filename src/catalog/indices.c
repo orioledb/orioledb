@@ -1269,7 +1269,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	CheckpointFileHeader fileHeader;
 
 	/* Infrastructure for parallel build corresponds to _bt_spools_heapscan */
-	oIdxSpool  *btspool;
+	oIdxSpool  *btspool = NULL;
 	oIdxBuildState buildstate;
 	SortCoordinate coordinate = NULL;
 	uint64		ctid;
