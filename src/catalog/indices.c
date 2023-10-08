@@ -866,9 +866,9 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 #if PG_VERSION_NUM >= 140000
 		if (btshared->nrecoveryworkers != 0)
 		{
+			tuplesort_initialize_shared(sharedsort, btshared->scantuplesortstates, NULL);
 			recovery_send_oids(btspool->o_table->oids, buildstate->ix_num,
 							   btspool->o_table->version, btspool->o_table->nindices, false);
-			tuplesort_initialize_shared(sharedsort, btshared->scantuplesortstates, NULL);
 		}
 #endif
 		elog(DEBUG4, "Parallel index build uses %d recovery workers", btshared->nrecoveryworkers);
