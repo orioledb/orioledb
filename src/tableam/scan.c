@@ -309,6 +309,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					result = !rclauseset.nonempty;
 				}
 			}
+			o_table_free(o_table);
 		}
 		relation_close(relation, NoLock);
 	}
@@ -815,11 +816,12 @@ o_end_custom_scan(CustomScanState *node)
 
 		if (bitmap_state->bitmapqualplanstate)
 			ExecEndNode(bitmap_state->bitmapqualplanstate);
-		MemoryContextReset(bitmap_state->cxt);
 		if (bitmap_state->scan)
 			o_free_bitmap_scan(bitmap_state->scan);
 		if (ocstate->useEaCounters)
 			pfree(bitmap_state->eaCounters);
+		MemoryContextDelete(bitmap_state->cxt);
+		bitmap_state->cxt = NULL;
 	}
 	ea_counters = NULL;
 }
