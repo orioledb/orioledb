@@ -1459,15 +1459,26 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 	{
 		OTableChunkKey key;
 		bool		result;
+		OAutonomousTxState state;
 
 		key.oids = o_table->oids;
 		key.offset = 0;
 
-		systrees_modify_start();
-		o_tables_oids_indexes(o_table, NULL, drop_arg->oxid, drop_arg->csn);
-		result = generic_toast_delete(&oTablesToastAPI, (Pointer) &key, drop_arg->oxid,
-									  drop_arg->csn, get_sys_tree(SYS_TREES_O_TABLES));
-		systrees_modify_end();
+		start_autonomous_transaction(&state);
+		PG_TRY();
+		{
+			o_tables_oids_indexes(o_table, NULL, get_current_oxid(), drop_arg->csn);
+			result = generic_toast_delete(&oTablesToastAPI, (Pointer) &key,
+										  get_current_oxid(), drop_arg->csn,
+										  get_sys_tree(SYS_TREES_O_TABLES));
+		}
+		PG_CATCH();
+		{
+			abort_autonomous_transaction(&state);
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
+		finish_autonomous_transaction(&state);
 
 		if (result)
 		{

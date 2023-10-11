@@ -1795,6 +1795,7 @@ class RecoveryTest(BaseTest):
 		with node.connect() as con1:
 			con1.execute("""
 				CREATE TEMP TABLE o_test_3 (f1 int, f2 text) USING orioledb;
+				INSERT INTO o_test_3 VALUES (1, 'A'), (2, 'B');
 			""")
 			con1.execute("""
 				CREATE TEMP TABLE o_test_4 (
@@ -1807,10 +1808,14 @@ class RecoveryTest(BaseTest):
 			con1.execute("""
 				CREATE TEMP TABLE o_test_9 (c1 int, c2 text) USING orioledb;
 			""")
+			self.assertEqual([(1, 'A'), (2, 'B')], 
+							 con1.execute("TABLE o_test_3"))
 			con1.execute("""
 				CHECKPOINT;
 			""")
 			con1.commit()
+			self.assertEqual([(1, 'A'), (2, 'B')], 
+							 con1.execute("TABLE o_test_3"))
 			self.assertEqual(node.execute("""
 								SELECT c.relname
 								FROM orioledb_table ot JOIN

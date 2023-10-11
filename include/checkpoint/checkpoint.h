@@ -248,8 +248,10 @@ extern bool can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num);
 extern void free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num);
 extern void backend_set_autonomous_level(CheckpointState *state, uint32 level);
 extern bool tbl_data_exists(ORelOids *oids);
-extern void evictable_tree_init(BTreeDescr *desc, bool init_shmem);
-extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted);
+extern void evictable_tree_init(BTreeDescr *desc, bool init_shmem,
+								bool *was_evicted);
+extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem,
+									 bool *was_evicted);
 extern void checkpointable_tree_free(BTreeDescr *desc);
 extern void systrees_modify_start(void);
 extern void systrees_modify_end(void);

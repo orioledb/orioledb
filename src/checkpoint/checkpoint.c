@@ -184,8 +184,7 @@ static void checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 								 OInMemoryBlkno *blkno, uint32 page_chage_count,
 								 int level);
 static void checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
-									   ORelOids tableOids, bool temp_table,
-									   void *arg);
+									   ORelOids tableOids, void *arg);
 static inline bool init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static inline void free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static FileExtentsArray *file_extents_array_init(void);
@@ -1143,7 +1142,8 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 void
 o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 {
-	if (flags & CHECKPOINT_END_OF_RECOVERY)
+	/* called in StartupXLOG */
+	if (flags == 0)
 	{
 		o_tables_drop_all_temporary();
 	}
@@ -4109,8 +4109,7 @@ prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
 
 static void
 checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
-						   ORelOids tableOids, bool temp_table,
-						   void *arg)
+						   ORelOids tableOids, void *arg)
 {
 	CheckpointTablesArg *tbl_arg = (CheckpointTablesArg *) arg;
 	OIndexDescr *descr;
@@ -4148,16 +4147,26 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		if (STOPEVENTS_ENABLED())
 			params = prepare_checkpoint_tree_start_params(td);
 		STOPEVENT(STOPEVENT_CHECKPOINT_INDEX_START, params);
-		success = checkpoint_ix(tbl_arg->flags, td);
-		if (success)
+		if (td->storageType == BTreeStoragePersistence)
 		{
-			sort_checkpoint_map_file(td, cur_chkp_index);
-			sort_checkpoint_tmp_file(td, cur_chkp_index);
-			if (OCompressIsValid(td->compress))
-				tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
-			tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
-			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			success = checkpoint_ix(tbl_arg->flags, td);
+
+			if (success)
+			{
+				sort_checkpoint_map_file(td, cur_chkp_index);
+				sort_checkpoint_tmp_file(td, cur_chkp_index);
+				if (OCompressIsValid(td->compress))
+					tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
+				tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
+				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			}
 		}
+		else
+		{
+			checkpoint_temporary_tree(tbl_arg->flags, td);
+			sort_checkpoint_tmp_file(td, cur_chkp_index);
+		}
+
 
 		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 	}
@@ -4543,18 +4552,20 @@ tbl_data_exists(ORelOids *oids)
  * Initializes B-tree with a page eviction support, but without checkpoint support.
  */
 void
-evictable_tree_init(BTreeDescr *desc, bool init_shmem)
+evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 {
 	uint32		chkp_num;
 	int			chkp_index;
 	SeqBufTag	tmp_tag = {0};
 	bool		checkpoint_concurrent;
 	BTreeMetaPage *meta_page;
+	EvictedTreeData *evicted_tree_data = NULL;
+	bool		is_compressed = OCompressIsValid(desc->compress);
 
 	btree_open_smgr(desc);
 
 	if (init_shmem)
-		evictable_tree_init_meta(desc, NULL, 0, true);
+		evictable_tree_init_meta(desc, &evicted_tree_data, 0, true);
 
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
@@ -4567,24 +4578,36 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem)
 
 	if (init_shmem)
 	{
-		if (!init_seq_buf_pages(desc,
-								&meta_page->freeBuf))
-			ereport(FATAL, (errcode_for_file_access(),
-							errmsg(
-								   "could not init sequence buffer pages.")));
+		SeqBufDescShared *shareds[3] = {&meta_page->nextChkp[chkp_index],
+			&meta_page->tmpBuf[chkp_index],
+		&meta_page->freeBuf};
+		int			i;
 
-		if (!init_seq_buf_pages(desc, &meta_page->tmpBuf[chkp_index]))
-			ereport(FATAL, (errcode_for_file_access(),
-							errmsg(
-								   "could not init sequence buffer pages.")));
+		for (i = 0; i < (is_compressed ? 2 : 3); i++)
+		{
+			if (!init_seq_buf_pages(desc, shareds[i]))
+				ereport(FATAL, (errcode_for_file_access(),
+								errmsg(
+									   "could not init sequence buffer pages.")));
+		}
 	}
 
-	if (!init_seq_buf(&desc->freeBuf,
-					  &meta_page->freeBuf,
-					  &tmp_tag, false, init_shmem, 0, NULL))
+	if (is_compressed)
 	{
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not fill sequence buffers.")));
+		/* no need to initialize freeBuf shared memory */
+		desc->freeBuf.tag = tmp_tag;
+		if (init_shmem)
+			meta_page->freeBuf.tag = tmp_tag;
+	}
+	else
+	{
+		if (!init_seq_buf(&desc->freeBuf,
+						  &meta_page->freeBuf,
+						  &tmp_tag, false, init_shmem, 0, NULL))
+		{
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not fill sequence buffers.")));
+		}
 	}
 
 	if (!init_seq_buf(&desc->tmpBuf[chkp_index],
@@ -4602,6 +4625,12 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not fill sequence buffers.")));
 	}
+
+	if (init_shmem && was_evicted)
+		*was_evicted = evicted_tree_data != NULL;
+
+	if (evicted_tree_data != NULL)
+		pfree(evicted_tree_data);
 }
 
 /*

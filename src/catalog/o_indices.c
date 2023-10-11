@@ -997,7 +997,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		Assert(!ORelOidsIsEqual(old_oids, oids));
 		old_oids = oids;
 
-		callback(type, oids, tableOids, temp_table, arg);
+		callback(type, oids, tableOids, arg);
 
 		pfree(tuple.data);
 		btree_iterator_free(it);
@@ -1049,7 +1049,7 @@ index_type_from_str(const char *s, int len)
 
 static void
 o_index_oids_array_callback(OIndexType type, ORelOids treeOids,
-							ORelOids tableOids, bool temp_table, void *arg)
+							ORelOids tableOids, void *arg)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) arg;
 	Datum		values[6];

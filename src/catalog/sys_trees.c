@@ -711,7 +711,7 @@ sys_tree_init(int i, bool init_shmem)
 	}
 	else if (descr->storageType == BTreeStorageTemporary)
 	{
-		evictable_tree_init(descr, init_shmem);
+		evictable_tree_init(descr, init_shmem, NULL);
 	}
 	else if (descr->storageType == BTreeStorageInMemory)
 	{

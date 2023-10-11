@@ -59,8 +59,7 @@ typedef struct
 
 /* callback for o_indices_foreach_oids() */
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
-									ORelOids tableOids, bool temp_table,
-									void *arg);
+									ORelOids tableOids, void *arg);
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
 extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable);
