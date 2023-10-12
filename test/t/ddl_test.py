@@ -9,6 +9,31 @@ from testgres.exceptions import QueryException
 
 class DDLTest(BaseTest):
 
+	def test_first_null_field_in_recovery(self):
+
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int PRIMARY KEY
+			)USING orioledb;
+
+			INSERT INTO o_test_1(val_1, val_2) VALUES (1, 10);
+
+			INSERT INTO o_test_1 (val_2) VALUES (5);
+		""")
+
+		self.assertEqual([(None, 5), (1, 10)], node.execute("TABLE o_test_1"))
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual([(None, 5), (1, 10)], node.execute("TABLE o_test_1"))
+		node.stop()
+
 	def test_update_default_to_null_same_trx(self):
 		with self.node as node:
 			node.start()
