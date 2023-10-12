@@ -43,6 +43,7 @@ step "s1_ioc" { INSERT INTO rll_test VALUES (1, 20, 200)
 step "s1_savepoint" { SAVEPOINT point_name_1; }
 step "s1_rollbak_to_savepoint" { ROLLBACK TO SAVEPOINT point_name_1; }
 step "s1_release" { RELEASE SAVEPOINT point_name_1; }
+step "s2_deadlock_timeout" { SET deadlock_timeout = '1h'; }
 step "s1_commit" { COMMIT; }
 step "s1_rollback" { ROLLBACK; }
 
@@ -64,6 +65,7 @@ step "s2_delete" { DELETE FROM rll_test WHERE key = 1; }
 step "s2_savepoint" { SAVEPOINT point_name_2; }
 step "s2_rollbak_to_savepoint" {ROLLBACK TO SAVEPOINT point_name_2; }
 step "s2_release" { RELEASE SAVEPOINT point_name_2; }
+step "s1_deadlock_timeout" { SET deadlock_timeout = '100ms'; }
 step "s2_commit" { COMMIT; }
 step "s2_rollback" { ROLLBACK; }
 
@@ -418,7 +420,8 @@ permutation "s1_begin" "s2_begin"
 "s1_select"
 "s1_commit" "s2_commit"
 
-permutation "s1_begin" "s2_begin"
+# Deadlock scenario
+permutation "s1_begin" "s2_begin" "s1_deadlock_timeout" "s2_deadlock_timeout"
 "s1_savepoint"
 "s2_select_key_share"
 "s1_update"

@@ -980,9 +980,11 @@ key|value|uniq
 step s1_commit: COMMIT;
 step s2_commit: COMMIT;
 
-starting permutation: s1_begin s2_begin s1_savepoint s2_select_key_share s1_update s2_select_update s1_delete s1_rollbak_to_savepoint s1_commit s2_commit
+starting permutation: s1_begin s2_begin s1_deadlock_timeout s2_deadlock_timeout s1_savepoint s2_select_key_share s1_update s2_select_update s1_delete s1_rollbak_to_savepoint s1_commit s2_commit
 step s1_begin: BEGIN;
 step s2_begin: BEGIN;
+step s1_deadlock_timeout: SET deadlock_timeout = '100ms';
+step s2_deadlock_timeout: SET deadlock_timeout = '1h';
 step s1_savepoint: SAVEPOINT point_name_1;
 step s2_select_key_share: SELECT * FROM rll_test WHERE key = 1 FOR KEY SHARE;
 key|value|uniq
