@@ -1,6 +1,12 @@
 CREATE SCHEMA nulls_schema;
 SET SESSION search_path = 'nulls_schema';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 -- Test null clauses in index scan
 create table o_test_null_clauses (
 	id bigint PRIMARY KEY,
@@ -390,6 +396,12 @@ TABLE o_test_unique_nulls_not_distinct;
  val_1 | val_2 
 -------+-------
        | six
+(1 row)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;

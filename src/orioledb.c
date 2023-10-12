@@ -1453,9 +1453,9 @@ Datum
 orioledb_parallel_debug_start(PG_FUNCTION_ARGS)
 {
 #if PG_VERSION_NUM >= 160000
-	debug_parallel_query = DEBUG_PARALLEL_ON;
+	debug_parallel_query = DEBUG_PARALLEL_REGRESS;
 #else
-	force_parallel_mode = FORCE_PARALLEL_ON;
+	force_parallel_mode = FORCE_PARALLEL_REGRESS;
 #endif
 	PG_RETURN_VOID();
 }

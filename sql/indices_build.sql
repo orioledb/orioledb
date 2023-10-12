@@ -2,6 +2,7 @@ CREATE SCHEMA indices_build;
 SET SESSION search_path = 'indices_build';
 SET SESSION log_error_verbosity = 'terse';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
 
 -- Index build with primary key
 CREATE TABLE o_indices0
@@ -688,6 +689,7 @@ RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
 							  'nue');
 
+SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices_build CASCADE;
 RESET search_path;

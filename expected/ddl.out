@@ -22,6 +22,12 @@ INSERT INTO o_ddl_check VALUES ('1', '2', NULL);
 -- OK
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 DROP TABLE o_ddl_check;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 CREATE TABLE o_ddl_check
 (
 	f1 text NOT NULL COLLATE "C",
@@ -40,6 +46,12 @@ ERROR:  duplicate key value violates unique constraint "o_ddl_check_pkey"
 DETAIL:  Key (f1)=('ABC1') already exists.
 INSERT INTO o_ddl_check VALUES ('ABC2', 'ABC4', NULL);
 INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
+
 SELECT * FROM o_ddl_check;
   f1  |  f2  | f3 
 ------+------+----

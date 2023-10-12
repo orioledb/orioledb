@@ -7,6 +7,12 @@
 CREATE SCHEMA indices;
 SET SESSION search_path = 'indices';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 CREATE TABLE o_test50
 (
 	key int8 NOT NULL,
@@ -8567,6 +8573,12 @@ SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
      Leaf tuple size: 2, non-leaf tuple size: 2+
      Non-leaf tuple fields: val_1, ctid        +
      Leaf tuple fields: val_1, ctid            +
+ 
+(1 row)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
  
 (1 row)
 

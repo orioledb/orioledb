@@ -2361,6 +2361,12 @@ SELECT * FROM o_tableam6a;
 
 DROP TABLE o_tableam6a;
 SET default_table_access_method = 'orioledb';
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 CREATE TABLE o_tableam7
 (
 	id int8 not null,
@@ -4142,6 +4148,12 @@ CREATE TABLE o_test_1 USING orioledb
     AS SELECT * FROM generate_series(1, 1000, 1);
 SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
 REINDEX SCHEMA :temp_schema_name;
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to table o_tableam6

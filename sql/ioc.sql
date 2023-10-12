@@ -3,6 +3,7 @@
 CREATE SCHEMA ioc;
 SET SESSION search_path = 'ioc';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
 
 ---
 -- easy cases
@@ -248,6 +249,7 @@ INSERT INTO o_test_ioc_change_pkey VALUES (1, 15) ON CONFLICT (val_1)
 COMMIT;
 TABLE o_test_ioc_change_pkey;
 
+SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ioc CASCADE;
 RESET search_path;

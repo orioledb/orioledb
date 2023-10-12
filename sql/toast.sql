@@ -4,6 +4,7 @@
 CREATE SCHEMA toast;
 SET SESSION search_path = 'toast';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
 CREATE TABLE o_test1 (
        id integer NOT NULL,
        t text NOT NULL,
@@ -489,6 +490,7 @@ SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
 SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
 COMMIT;
 
+SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast CASCADE;
 RESET search_path;

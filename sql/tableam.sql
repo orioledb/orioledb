@@ -484,6 +484,7 @@ SELECT * FROM o_tableam6a;
 DROP TABLE o_tableam6a;
 
 SET default_table_access_method = 'orioledb';
+SELECT orioledb_parallel_debug_start();
 CREATE TABLE o_tableam7
 (
 	id int8 not null,
@@ -925,6 +926,7 @@ SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
 
 REINDEX SCHEMA :temp_schema_name;
 
+SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

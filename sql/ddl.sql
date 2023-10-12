@@ -20,6 +20,7 @@ INSERT INTO o_ddl_check VALUES ('1', '2', NULL);
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 
 DROP TABLE o_ddl_check;
+SELECT orioledb_parallel_debug_start();
 CREATE TABLE o_ddl_check
 (
 	f1 text NOT NULL COLLATE "C",
@@ -35,6 +36,7 @@ INSERT INTO o_ddl_check VALUES ('ABC1', '2', '3');
 
 INSERT INTO o_ddl_check VALUES ('ABC2', 'ABC4', NULL);
 INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
+SELECT orioledb_parallel_debug_stop();
 
 SELECT * FROM o_ddl_check;
 SELECT orioledb_table_description('o_ddl_check'::regclass);

@@ -1,6 +1,12 @@
 CREATE SCHEMA nulls_schema;
 SET SESSION search_path = 'nulls_schema';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 -- Test null clauses in index scan
 create table o_test_null_clauses (
 	id bigint PRIMARY KEY,
@@ -396,6 +402,12 @@ TABLE o_test_unique_nulls_not_distinct;
 ERROR:  relation "o_test_unique_nulls_not_distinct" does not exist
 LINE 1: TABLE o_test_unique_nulls_not_distinct;
               ^
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
+ 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_test_null_clauses

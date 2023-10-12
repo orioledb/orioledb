@@ -9,6 +9,7 @@
 CREATE SCHEMA indices;
 SET SESSION search_path = 'indices';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
 
 CREATE TABLE o_test50
 (
@@ -1901,6 +1902,7 @@ CREATE INDEX IF NOT EXISTS o_test_index_already_exists_skip_ix1
 \d o_test_index_already_exists_skip
 SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
 
+SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
 RESET search_path;

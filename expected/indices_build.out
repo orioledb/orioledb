@@ -2,6 +2,12 @@ CREATE SCHEMA indices_build;
 SET SESSION search_path = 'indices_build';
 SET SESSION log_error_verbosity = 'terse';
 CREATE EXTENSION orioledb;
+SELECT orioledb_parallel_debug_start();
+ orioledb_parallel_debug_start 
+-------------------------------
+ 
+(1 row)
+
 -- Index build with primary key
 CREATE TABLE o_indices0
 (
@@ -24388,6 +24394,12 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
      Item 2: offset = 328, tuple = ('300', '100')                                  +
                                                                                    +
  Index toast: not loaded                                                           +
+ 
+(1 row)
+
+SELECT orioledb_parallel_debug_stop();
+ orioledb_parallel_debug_stop 
+------------------------------
  
 (1 row)
 
