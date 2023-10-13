@@ -772,7 +772,6 @@ class TypesTest(BaseTest):
 					 'Multiranges added in postgres 14')
 	def test_multirange_index_recovery(self):
 		node = self.node
-		node.append_conf(log_min_messages = 'debug4')
 		node.start()
 
 		with node.connect() as con:

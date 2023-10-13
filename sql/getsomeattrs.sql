@@ -310,15 +310,11 @@ INSERT INTO o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 SET LOCAL enable_seqscan = off;
 SET LOCAL enable_bitmapscan = off;
 
-SET LOCAL log_min_messages = 'debug4';
-SET LOCAL client_min_messages = 'debug4';
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 		GROUP BY val_1;
 SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 	GROUP BY val_1;
-RESET log_min_messages;
-RESET client_min_messages;
 
 COMMIT;
 
