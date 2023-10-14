@@ -36,6 +36,7 @@ typedef struct
 {
 	char		condition[QUERY_BUFFER_SIZE];
 	bool		enabled;
+	int			nWaiters;
 	slock_t		lock;
 	ConditionVariable cv;
 } StopEvent;
@@ -76,6 +77,7 @@ StopEventShmemInit(Pointer ptr, bool found)
 		{
 			SpinLockInit(&stopevents[i].lock);
 			stopevents[i].enabled = false;
+			stopevents[i].nWaiters = 0;
 			ConditionVariableInit(&stopevents[i].cv);
 		}
 	}
@@ -127,20 +129,13 @@ pg_stopevent_reset(PG_FUNCTION_ARGS)
 {
 	text	   *event_name = PG_GETARG_TEXT_PP(0);
 	StopEvent  *event;
-	proclist_mutable_iter iter;
 	bool		result = false;
 
 	event = find_stop_event(event_name);
 
 	SpinLockAcquire(&event->lock);
 
-	SpinLockAcquire(&event->cv.mutex);
-	proclist_foreach_modify(iter, &event->cv.wakeup, cvWaitLink)
-	{
-		result = true;
-	}
-	SpinLockRelease(&event->cv.mutex);
-
+	result = (event->nWaiters > 0);
 	event->enabled = false;
 	SpinLockRelease(&event->lock);
 
@@ -342,14 +337,27 @@ handle_stopevent(int event_id, Jsonb *params)
 
 	if (event->enabled && check_stopevent_condition(event, params))
 	{
-		ConditionVariablePrepareToSleep(&event->cv);
-		for (;;)
+		SpinLockAcquire(&event->lock);
+		event->nWaiters++;
+		SpinLockRelease(&event->lock);
+		PG_TRY();
 		{
-			if (!check_stopevent_condition(event, params))
-				break;
-			ConditionVariableSleep(&event->cv, PG_WAIT_EXTENSION);
+			ConditionVariablePrepareToSleep(&event->cv);
+			for (;;)
+			{
+				if (!check_stopevent_condition(event, params))
+					break;
+				ConditionVariableSleep(&event->cv, PG_WAIT_EXTENSION);
+			}
+			ConditionVariableCancelSleep();
 		}
-		ConditionVariableCancelSleep();
+		PG_FINALLY();
+		{
+			SpinLockAcquire(&event->lock);
+			event->nWaiters--;
+			SpinLockRelease(&event->lock);
+		}
+		PG_END_TRY();
 	}
 
 	if (trace_stopevents)
