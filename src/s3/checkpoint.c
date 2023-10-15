@@ -346,8 +346,8 @@ s3_perform_backup(S3TaskLocation maxLocation)
 	XLogInsert(RM_XLOG_ID, XLOG_BACKUP_END);
 
 	/*
-	 * Force a switch to a new xlog segment file, so that the backup is
-	 * valid as soon as archiver moves out the current segment file.
+	 * Force a switch to a new xlog segment file, so that the backup is valid
+	 * as soon as archiver moves out the current segment file.
 	 */
 	RequestXLogSwitch(false);
 
@@ -752,8 +752,8 @@ write_int(File file, char *filename, int offset, int value)
 	if (FileWrite(file, (char *) &value, sizeof(value), offset, WAIT_EVENT_DATA_FILE_WRITE) != sizeof(value))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-					errmsg("could not write temporary file \"%s\": %m",
-						   filename)));
+				 errmsg("could not write temporary file \"%s\": %m",
+						filename)));
 }
 
 static void
@@ -762,8 +762,8 @@ write_data(File file, char *filename, int offset, Pointer ptr, int length)
 	if (FileWrite(file, ptr, length, offset, WAIT_EVENT_DATA_FILE_WRITE) != length)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-					errmsg("could not write temporary file \"%s\": %m",
-						   filename)));
+				 errmsg("could not write temporary file \"%s\": %m",
+						filename)));
 }
 
 static Pointer
@@ -784,8 +784,8 @@ read_small_file(const char *filename, int size)
 	if (rc < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-					errmsg("could not read small file \"%s\": %m",
-						   filename)));
+				 errmsg("could not read small file \"%s\": %m",
+						filename)));
 
 	FileClose(file);
 
@@ -795,13 +795,14 @@ read_small_file(const char *filename, int size)
 static S3TaskLocation
 flush_small_files(S3BackupState *state)
 {
-	ListCell *lc, *lc2;
-	int		totalNamesLen = 0;
-	int		offset = 0;
-	int		nameOffset;
-	int		dataOffset;
-	char   *filename;
-	File	file;
+	ListCell   *lc,
+			   *lc2;
+	int			totalNamesLen = 0;
+	int			offset = 0;
+	int			nameOffset;
+	int			dataOffset;
+	char	   *filename;
+	File		file;
 	S3TaskLocation location;
 
 	foreach(lc, state->smallFileNames)
@@ -817,8 +818,8 @@ flush_small_files(S3BackupState *state)
 	{
 		ereport(ERROR,
 				(errcode_for_file_access(),
-					errmsg("could not create temporary file \"%s\": %m",
-						   filename)));
+				 errmsg("could not create temporary file \"%s\": %m",
+						filename)));
 	}
 
 	write_int(file, filename, 0, list_length(state->smallFileNames));
@@ -837,7 +838,7 @@ flush_small_files(S3BackupState *state)
 
 	foreach(lc, state->smallFileNames)
 	{
-		int		len = strlen(lfirst(lc)) + 1;
+		int			len = strlen(lfirst(lc)) + 1;
 
 		write_data(file, filename, offset, lfirst(lc), len);
 		offset += len;
@@ -845,8 +846,8 @@ flush_small_files(S3BackupState *state)
 
 	forboth(lc, state->smallFileNames, lc2, state->smallFileSizes)
 	{
-		int		len = lfirst_int(lc2);
-		Pointer	data = read_small_file(lfirst(lc), len);
+		int			len = lfirst_int(lc2);
+		Pointer		data = read_small_file(lfirst(lc), len);
 
 		write_data(file, filename, offset, data, len);
 		offset += len;
@@ -871,8 +872,8 @@ flush_small_files(S3BackupState *state)
 static S3TaskLocation
 accumulate_small_file(S3BackupState *state, const char *path, int size)
 {
-	int		sizeRequired = 3 * sizeof(int) + strlen(path) + 1 + size;
-	S3TaskLocation	location = 0;
+	int			sizeRequired = 3 * sizeof(int) + strlen(path) + 1 + size;
+	S3TaskLocation location = 0;
 
 	if (state->smallFilesTotalSize + sizeRequired > SMALL_FILES_TOTAL_THRESHOLD)
 		location = flush_small_files(state);

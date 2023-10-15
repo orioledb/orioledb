@@ -1138,13 +1138,14 @@ load_page(OBTreeFindPageContext *context)
 		BTreePageItemLocator loc;
 
 		/*
-		 * In S3 mode schedule load of all the page children for faster warmup.
+		 * In S3 mode schedule load of all the page children for faster
+		 * warmup.
 		 */
 		BTREE_PAGE_FOREACH_ITEMS(page, &loc)
 		{
 			BTreeNonLeafTuphdr *tupHdr;
 
-			tupHdr =  (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
+			tupHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
 			s3_schedule_downlink_load(desc->oids.datoid,
 									  desc->oids.relnode,
 									  tupHdr->downlink);

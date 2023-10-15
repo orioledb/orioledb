@@ -198,7 +198,7 @@ s3process_task(uint64 taskLocation)
 
 		filename = psprintf(XLOGDIR "/%s", task->typeSpecific.walFilename);
 		objectname = psprintf("wal/%s", task->typeSpecific.walFilename);
-		
+
 		s3_put_file(objectname, filename);
 
 		pfree(filename);

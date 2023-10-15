@@ -52,8 +52,8 @@ preload_item_match(const void *key1, const void *key2, Size keysize)
 {
 	const char **f1 = (const char **) key1;
 	const char **f2 = (const char **) key2;
-	int		l1 = strlen(*f1),
-			l2 = strlen(*f2);
+	int			l1 = strlen(*f1),
+				l2 = strlen(*f2);
 
 	if (l1 == l2 && memcpy((void *) *f1, (void *) *f2, l1) == 0)
 		return 0;
