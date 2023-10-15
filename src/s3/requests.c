@@ -373,7 +373,7 @@ void
 s3_put_file(char *objectname, char *filename)
 {
 	Pointer		data;
-	uint64		dataSize;
+	uint64		dataSize = 0;
 
 	data = read_file(filename, &dataSize);
 	s3_put_object_with_contents(objectname, data, dataSize);

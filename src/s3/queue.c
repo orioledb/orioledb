@@ -308,7 +308,7 @@ s3_queue_erase_task(S3TaskLocation taskLocation)
 void
 s3_queue_wait_for_location(S3TaskLocation location)
 {
-	bool		slept;
+	bool		slept = false;
 
 	while (pg_atomic_read_u64(&s3_queue_meta->erasedLocation) <= location)
 	{
