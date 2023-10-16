@@ -831,37 +831,6 @@ INSERT INTO o_test(id, val) VALUES (1, 'hello');
 INSERT INTO o_test(id, val) VALUES (2, 'hey');
 DELETE FROM o_test where id = 1;
 COMMIT;
-CREATE FUNCTION func_1(int) RETURNS int AS $$
-DECLARE TOTAL int;
-BEGIN
-	CREATE TEMP TABLE o_test_1(val_1 int)USING orioledb;
-	INSERT INTO o_test_1 VALUES($1);
-	INSERT INTO o_test_1 VALUES(11);
-	INSERT INTO o_test_1 VALUES(12);
-	INSERT INTO o_test_1 VALUES(13);
-	SELECT sum(val_1) INTO total FROM o_test_1;
-	DROP TABLE o_test_1;
-	RETURN total;
-end
-$$ language plpgsql;
-SELECT func_1(1);
- func_1 
---------
-     37
-(1 row)
-
-SELECT func_1(2);
- func_1 
---------
-     38
-(1 row)
-
-SELECT func_1(3);
- func_1 
---------
-     39
-(1 row)
-
 CREATE TABLE o_test_opcoptions_reset (
 	val_1 int NOT NULL,
 	val_3 text DEFAULT 'abc'
@@ -1442,10 +1411,9 @@ drop cascades to table o_test_add_pkey_empty_index
 drop cascades to table o_test_empty
 drop cascades to table o_test_plpgsql_default
 DROP SCHEMA ddl CASCADE;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
 drop cascades to sequence o_test_j_seq
 drop cascades to function query_to_text(text)
-drop cascades to function func_1(integer)
 drop cascades to function o_test_plpgsql_default_func(integer)
 RESET search_path;

@@ -431,36 +431,72 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 }
 
 void
-btree_write_file_header(BTreeDescr *desc,
-						CheckpointFileHeader *file_header)
+btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 {
-	SeqBufTag	prev_chkp_tag;
-	bool		checkpoint_concurrent;
-	char	   *map_filename;
 	File		file;
+	uint32		checkpoint_number;
+	bool		checkpoint_concurrent;
+	char	   *filename;
 
-	memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
-	prev_chkp_tag.datoid = desc->oids.datoid;
-	prev_chkp_tag.relnode = desc->oids.relnode;
-	prev_chkp_tag.num = get_cur_checkpoint_number(&desc->oids,
-												  desc->type,
+	Assert(desc->storageType == BTreeStoragePersistence ||
+		   desc->storageType == BTreeStorageTemporary);
+
+	checkpoint_number = get_cur_checkpoint_number(&desc->oids, desc->type,
 												  &checkpoint_concurrent);
-	prev_chkp_tag.type = 'm';
 
-	map_filename = get_seq_buf_filename(&prev_chkp_tag);
-
-	file = PathNameOpenFile(map_filename, O_WRONLY | O_CREAT | PG_BINARY);
-
-	if (OFileWrite(file,
-				   (Pointer) file_header,
-				   sizeof(CheckpointFileHeader),
-				   0,
-				   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(CheckpointFileHeader))
+	if (desc->storageType == BTreeStoragePersistence)
 	{
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not write checkpoint header to file: %s", map_filename)));
-	}
+		SeqBufTag	prev_chkp_tag;
 
+		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
+		prev_chkp_tag.datoid = desc->oids.datoid;
+		prev_chkp_tag.relnode = desc->oids.relnode;
+		prev_chkp_tag.num = checkpoint_number;
+		prev_chkp_tag.type = 'm';
+
+		filename = get_seq_buf_filename(&prev_chkp_tag);
+
+		file = PathNameOpenFile(filename, O_WRONLY | O_CREAT | PG_BINARY);
+
+		if (OFileWrite(file, (Pointer) file_header,
+					   sizeof(CheckpointFileHeader), 0,
+					   WAIT_EVENT_DATA_FILE_WRITE) !=
+			sizeof(CheckpointFileHeader))
+		{
+			pfree(filename);
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("Could not write checkpoint header to file: %s",
+							filename)));
+		}
+	}
+	else
+	{
+		EvictedTreeData evicted_tree_data = {{0}};
+
+		evicted_tree_data.file_header = *file_header;
+		filename = get_eviction_filename(desc->oids, checkpoint_number + 1);
+
+		file = PathNameOpenFile(filename, O_WRONLY | O_CREAT | PG_BINARY);
+		if (file < 0)
+		{
+			pfree(filename);
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("Could not open eviction file: %s", filename)));
+		}
+
+		if (OFileWrite(file, (Pointer) &evicted_tree_data,
+					   sizeof(evicted_tree_data), 0,
+					   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(evicted_tree_data))
+		{
+			FileClose(file);
+			pfree(filename);
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("Could not write eviction data to file: %s",
+								   filename)));
+		}
+	}
 	FileClose(file);
-	pfree(map_filename);
+	pfree(filename);
 }

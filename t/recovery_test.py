@@ -1782,7 +1782,7 @@ class RecoveryTest(BaseTest):
 		node.start()
 		node.stop()
 
-	def test_temp_table_not_checkpointed(self):
+	def test_temp_tables_cleanup_after_recovery(self):
 		node = self.node
 		node.append_conf('orioledb.recovery_pool_size = 1')
 		node.append_conf('orioledb.recovery_idx_pool_size = 1')
@@ -1808,13 +1808,13 @@ class RecoveryTest(BaseTest):
 			con1.execute("""
 				CREATE TEMP TABLE o_test_9 (c1 int, c2 text) USING orioledb;
 			""")
-			self.assertEqual([(1, 'A'), (2, 'B')], 
+			self.assertEqual([(1, 'A'), (2, 'B')],
 							 con1.execute("TABLE o_test_3"))
 			con1.execute("""
 				CHECKPOINT;
 			""")
 			con1.commit()
-			self.assertEqual([(1, 'A'), (2, 'B')], 
+			self.assertEqual([(1, 'A'), (2, 'B')],
 							 con1.execute("TABLE o_test_3"))
 			self.assertEqual(node.execute("""
 								SELECT c.relname
@@ -1826,6 +1826,8 @@ class RecoveryTest(BaseTest):
 							"""),
 							[('o_test_3',), ('o_test_4',), ('o_test_9',)])
 
+		node.stop(['-m', 'immediate'])
+		node.start()
 		node.stop(['-m', 'immediate'])
 
 		node.start()
