@@ -1837,6 +1837,8 @@ class RecoveryTest(BaseTest):
 		node.start()
 		node.stop(['-m', 'immediate'])
 		self.assertEqual(len(sorted(os.listdir(db_dir))), 0)
+		node.start()
+		node.stop(['-m', 'immediate'])
 
 		node.start()
 		self.assertEqual(node.execute("""
