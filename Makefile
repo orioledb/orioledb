@@ -102,6 +102,7 @@ REGRESSCHECKS = btree_sys_check \
 				subquery \
 				subtransactions \
 				tableam \
+				temp \
 				toast \
 				trigger \
 				types

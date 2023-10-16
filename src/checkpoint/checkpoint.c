@@ -4399,15 +4399,32 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 	BTreeMetaPage *meta_page;
 
 	Assert(TREE_HAS_OIDS(desc));
+	Assert(evicted_data);
 
 	if (clear_tree)
 	{
-		/* No need to create or read a map file */
-		file_header.rootDownlink = InvalidDiskDownlink;
-		file_header.datafileLength = 0;
-		file_header.numFreeBlocks = 0;
-		file_header.leafPagesNum = 1;
-		file_header.ctid = 0;
+		*evicted_data = read_evicted_data(desc->oids, chkp_num + 1);
+
+		if (*evicted_data != NULL)
+		{
+			char	   *filename = get_eviction_filename(desc->oids, chkp_num + 1);
+
+			if (unlink(filename) < 0)
+				ereport(WARNING,
+						(errcode_for_file_access(),
+							errmsg("could not unlink eviction file \"%s\": %m", filename)));
+			file_header = (*evicted_data)->file_header;
+			pfree(filename);
+		}
+		else
+		{
+			/* No need to create or read a map file */
+			file_header.rootDownlink = InvalidDiskDownlink;
+			file_header.datafileLength = 0;
+			file_header.numFreeBlocks = 0;
+			file_header.leafPagesNum = 1;
+			file_header.ctid = 0;
+		}
 	}
 	else
 	{
@@ -4426,7 +4443,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDONLY | PG_BINARY);
 		prev_chkp_file_exist = prev_chkp_file >= 0;
 
-		if (!prev_chkp_file_exist)
+		if (!prev_chkp_file_exist && desc->storageType != BTreeStorageTemporary)
 		{
 			/*
 			 * Creates file with default header
@@ -4459,7 +4476,6 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			/*
 			 * Reads header from file.
 			 */
-			Assert(evicted_data);
 			*evicted_data = read_evicted_data(desc->oids, chkp_num + 1);
 
 			if (*evicted_data != NULL)
@@ -4485,7 +4501,8 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 				}
 			}
 		}
-		FileClose(prev_chkp_file);
+		if (prev_chkp_file_exist)
+			FileClose(prev_chkp_file);
 		pfree(prev_chkp_fname);
 	}
 
@@ -4564,11 +4581,11 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 
 	btree_open_smgr(desc);
 
-	if (init_shmem)
-		evictable_tree_init_meta(desc, &evicted_tree_data, 0, true);
-
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
+	if (init_shmem)
+		evictable_tree_init_meta(desc, &evicted_tree_data, chkp_num, true);
+
 	chkp_index = (chkp_num + 1) % 2;
 	tmp_tag.datoid = desc->oids.datoid;
 	tmp_tag.relnode = desc->oids.relnode;

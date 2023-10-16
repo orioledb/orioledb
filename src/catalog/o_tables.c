@@ -1460,11 +1460,14 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 		OTableChunkKey key;
 		bool		result;
 		OAutonomousTxState state;
+		ORelOids	tmpOids = {InvalidOid, InvalidOid, InvalidOid};
 
 		key.oids = o_table->oids;
 		key.offset = 0;
 
 		start_autonomous_transaction(&state);
+
+		o_tables_meta_lock();
 		PG_TRY();
 		{
 			o_tables_oids_indexes(o_table, NULL, get_current_oxid(), drop_arg->csn);
@@ -1474,10 +1477,12 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 		}
 		PG_CATCH();
 		{
+			o_tables_meta_unlock(tmpOids, InvalidOid);
 			abort_autonomous_transaction(&state);
 			PG_RE_THROW();
 		}
 		PG_END_TRY();
+		o_tables_meta_unlock(tmpOids, InvalidOid);
 		finish_autonomous_transaction(&state);
 
 		if (result)

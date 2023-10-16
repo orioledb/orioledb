@@ -255,18 +255,6 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
 
 DROP TABLE o_test_expression;
 
--- test expressions on tmp table
-CREATE TEMP TABLE o_test_expression_tmp
-(
-	key int8 NOT NULL,
-	value text
-) USING orioledb;
-
-CREATE INDEX o_test_expression_tmp_ix1 ON o_test_expression_tmp ((key * 100));
-CREATE INDEX o_test_expression_tmp_ix2 ON o_test_expression_tmp ((value::int));
-CREATE INDEX o_test_expression_tmp_ix3 ON o_test_expression_tmp ((value || 'WOW'));
-DROP TABLE o_test_expression_tmp;
-
 -- create table with primary key
 CREATE TABLE o_tableam3
 (
@@ -900,13 +888,6 @@ FETCH FROM c1;
 ROLLBACK TO x;
 COMMIT;
 
-BEGIN;
-CREATE TEMPORARY TABLE o_test_2 (val_1, val_2) USING orioledb
-    ON COMMIT DROP
-    AS (SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
-SELECT * FROM o_test_2;
-COMMIT;
-
 CREATE TABLE o_test_1 (
 	val_1 int4,
 	val_2 text
@@ -915,16 +896,6 @@ INSERT INTO o_test_1 VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e');
 CREATE UNIQUE INDEX o_test_1_val_2_idx ON o_test_1 (val_2);
 INSERT INTO o_test_1 VALUES (6, 'e');
 DROP TABLE o_test_1;
-
-CREATE TEMP TABLE o_tmp_1 () USING orioledb
-    ON COMMIT DELETE ROWS;
-
-CREATE TABLE o_test_1 USING orioledb
-    AS SELECT * FROM generate_series(1, 1000, 1);
-
-SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
-
-REINDEX SCHEMA :temp_schema_name;
 
 SELECT orioledb_parallel_debug_stop();
 CREATE TABLE o_test_split_rightmost (
