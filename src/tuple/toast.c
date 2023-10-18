@@ -390,10 +390,10 @@ ToastAPI	tableToastAPI = {
 	.versionCallback = tableVersionCallback
 };
 
-
 bool
-generic_toast_insert(ToastAPI *api, void *key, Pointer data, Size data_size,
-					 OXid oxid, CommitSeqNo csn, void *arg)
+generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
+								  Size data_size, OXid oxid, CommitSeqNo csn,
+								  void *arg, bool wal)
 {
 	BTreeDescr *desc = api->getBTreeDesc(arg);
 	uint32		max_length = api->getMaxChunkSize(key, arg);
@@ -433,8 +433,9 @@ generic_toast_insert(ToastAPI *api, void *key, Pointer data, Size data_size,
 			break;
 		}
 
-		add_modify_wal_record(WAL_REC_INSERT, desc,
-							  tup, o_btree_len(desc, tup, OTupleLength));
+		if (desc->storageType == BTreeStoragePersistence && wal)
+			add_modify_wal_record(WAL_REC_INSERT, desc, tup,
+								  o_btree_len(desc, tup, OTupleLength));
 
 		pfree(tup.data);
 
@@ -443,6 +444,15 @@ generic_toast_insert(ToastAPI *api, void *key, Pointer data, Size data_size,
 	}
 
 	return inserted;
+}
+
+
+bool
+generic_toast_insert(ToastAPI *api, void *key, Pointer data, Size data_size,
+					 OXid oxid, CommitSeqNo csn, void *arg)
+{
+	return generic_toast_insert_optional_wal(api, key, data, data_size, oxid,
+											 csn, arg, true);
 }
 
 void
@@ -508,8 +518,9 @@ o_delete_callback(BTreeDescr *descr,
 }
 
 bool
-generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
-					 OXid oxid, CommitSeqNo csn, void *arg)
+generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
+								  Size data_size, OXid oxid, CommitSeqNo csn,
+								  void *arg, bool wal)
 {
 	BTreeDescr *desc = api->getBTreeDesc(arg);
 	int			max_length = api->getMaxChunkSize(key, arg);
@@ -555,10 +566,15 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 			break;
 		}
 
+		if (desc->storageType == BTreeStoragePersistence && wal)
+		{
+			uint8		rec_type;
 
-		add_modify_wal_record((result == OBTreeModifyResultUpdated) ? WAL_REC_UPDATE :
-							  WAL_REC_INSERT,
-							  desc, tup, o_btree_len(desc, tup, OTupleLength));
+			rec_type = (result == OBTreeModifyResultUpdated) ? WAL_REC_UPDATE :
+				WAL_REC_INSERT;
+			add_modify_wal_record(rec_type, desc, tup,
+								  o_btree_len(desc, tup, OTupleLength));
+		}
 
 		offset += length;
 		data_size -= length;
@@ -568,14 +584,22 @@ generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
 	 * There might be tailing tuples.  We need to delete them.
 	 */
 	api->updateKey(key, offset + 1, arg);
-	(void) generic_toast_delete(api, key, oxid, csn, arg);
+	(void) generic_toast_delete_optional_wal(api, key, oxid, csn, arg, wal);
 
 	return success;
 }
 
 bool
-generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
-					 CommitSeqNo csn, void *arg)
+generic_toast_update(ToastAPI *api, void *key, Pointer data, Size data_size,
+					 OXid oxid, CommitSeqNo csn, void *arg)
+{
+	return generic_toast_update_optional_wal(api, key, data, data_size, oxid,
+											 csn, arg, true);
+}
+
+bool
+generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
+								  CommitSeqNo csn, void *arg, bool wal)
 {
 	BTreeDescr *desc = api->getBTreeDesc(arg);
 	void	   *nextKey;
@@ -596,7 +620,6 @@ generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
 	do
 	{
 		BTreeLocationHint hint;
-		bool		key_allocated;
 		OTuple		walKey;
 		OTuple		tuple;
 		uint32		offset;
@@ -624,24 +647,37 @@ generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
 			deleted = true;
 		}
 
-		if (!api->deleteLogFullTuple)
+		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			walKey = o_btree_tuple_make_key(desc, tuple, NULL, true, &key_allocated);
-			add_modify_wal_record(WAL_REC_DELETE, desc,
-								  walKey, o_btree_len(desc, walKey, OKeyLength));
-			if (key_allocated)
-				pfree(walKey.data);
-		}
-		else
-		{
-			add_modify_wal_record(WAL_REC_DELETE, desc,
-								  tuple, o_btree_len(desc, tuple, OTupleLength));
+			if (!api->deleteLogFullTuple)
+			{
+				bool		key_allocated;
+
+				walKey = o_btree_tuple_make_key(desc, tuple, NULL, true,
+												&key_allocated);
+				add_modify_wal_record(WAL_REC_DELETE, desc, walKey,
+									  o_btree_len(desc, walKey, OKeyLength));
+				if (key_allocated)
+					pfree(walKey.data);
+			}
+			else
+			{
+				add_modify_wal_record(WAL_REC_DELETE, desc, tuple,
+									  o_btree_len(desc, tuple, OTupleLength));
+			}
 		}
 
 		pfree(tuple.data);
 	} while (true);
 
 	return deleted;
+}
+
+bool
+generic_toast_delete(ToastAPI *api, void *key, OXid oxid, CommitSeqNo csn,
+					 void *arg)
+{
+	return generic_toast_delete_optional_wal(api, key, oxid, csn, arg, true);
 }
 
 Pointer

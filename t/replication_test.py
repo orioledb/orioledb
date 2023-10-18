@@ -678,6 +678,115 @@ class ReplicationTest(BaseTest):
 
 					self.catchup_orioledb(replica)
 
+	def test_replication_temp_table_data_cleanup(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.start()
+		with self.node as master:
+			master.safe_psql("""
+				CREATE EXTENSION orioledb;
+			""")
+
+			with master.connect() as con1:
+				con1.begin()
+				con1.execute("""
+					CREATE TEMP TABLE o_test (
+						f1 int,
+						f2 text
+					) USING orioledb;
+				""")
+				con1.execute("""
+					INSERT INTO o_test VALUES (1, 'A'), (2, 'B');
+				""")
+				con1.execute("""
+					CREATE UNIQUE INDEX o_test_idx1 ON o_test (f1);
+				""")
+				con1.execute("""
+					ALTER TABLE o_test ALTER f1 TYPE text
+						COLLATE "POSIX" USING f1::text || f2;
+				""")
+				con1.commit()
+				master.safe_psql("""
+					CHECKPOINT;
+				""")
+			with self.getReplica() as replica:
+				replica.start()
+				with master.connect() as con1:
+					con1.begin()
+					con1.execute("""
+						CREATE TEMP TABLE o_test_3 (
+							f1 int,
+							f2 text
+						) USING orioledb;
+						INSERT INTO o_test_3 VALUES (1, 'A'), (2, 'B');
+
+						CREATE UNIQUE INDEX o_test_3_idx1 ON o_test_3 (f1);
+
+						SET LOCAL enable_seqscan = off;
+						SELECT * FROM o_test_3 ORDER BY f1;
+
+						ALTER TABLE o_test_3 ALTER f1 TYPE text
+							COLLATE "POSIX" USING f1::text || f2;
+
+						SELECT * FROM o_test_3 ORDER BY f1;
+					""")
+					master.execute("""
+						CHECKPOINT;
+					""")
+					self.assertEqual([('1A', 'A'), ('2B', 'B')],
+									 con1.execute("TABLE o_test_3"))
+
+					con1.commit()
+					self.assertEqual([('1A', 'A'), ('2B', 'B')],
+									 con1.execute("TABLE o_test_3"))
+
+					self.catchup_orioledb(replica)
+					self.assertEqual(master.execute("""
+										SELECT c.relname
+										FROM orioledb_table ot JOIN
+											pg_database db ON db.oid = ot.datoid JOIN
+											pg_class c ON c.oid = ot.reloid
+										WHERE db.datname = current_database()
+										ORDER BY c.relname
+									"""),
+									[('o_test_3',)])
+					self.assertEqual(replica.execute("""
+										SELECT c.relname
+										FROM orioledb_table ot JOIN
+											pg_database db ON db.oid = ot.datoid JOIN
+											pg_class c ON c.oid = ot.reloid
+										WHERE db.datname = current_database()
+										ORDER BY c.relname
+									"""),
+									[])
+
+					master.stop(['-m', 'immediate'])
+					master.start()
+					master.stop(['-m', 'immediate'])
+
+					master.start()
+					self.assertEqual(master.execute("""
+											SELECT c.relname
+											FROM orioledb_table ot JOIN
+												pg_database db ON db.oid = ot.datoid JOIN
+												pg_class c ON c.oid = ot.reloid
+											WHERE db.datname = current_database()
+											ORDER BY c.relname
+									"""),
+									[])
+					self.assertEqual(replica.execute("""
+										SELECT c.relname
+										FROM orioledb_table ot JOIN
+											pg_database db ON db.oid = ot.datoid JOIN
+											pg_class c ON c.oid = ot.reloid
+										WHERE db.datname = current_database()
+										ORDER BY c.relname
+									"""),
+									[])
+					master.stop()
+					raise 0
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x

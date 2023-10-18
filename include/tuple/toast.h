@@ -104,6 +104,18 @@ extern bool generic_toast_update(ToastAPI *api, void *key, Pointer data,
 extern bool generic_toast_delete(ToastAPI *api, void *key, OXid oxid,
 								 CommitSeqNo csn, void *arg);
 
+extern bool generic_toast_insert_optional_wal(ToastAPI *api, void *key,
+											  Pointer data, Size data_size,
+											  OXid oxid, CommitSeqNo csn,
+											  void *arg, bool wal);
+extern bool generic_toast_update_optional_wal(ToastAPI *api, void *key,
+											  Pointer data, Size data_size,
+											  OXid oxid, CommitSeqNo csn,
+											  void *arg, bool wal);
+extern bool generic_toast_delete_optional_wal(ToastAPI *api, void *key,
+											  OXid oxid, CommitSeqNo csn,
+											  void *arg, bool wal);
+
 /* Returns tuple only if its size equals data_size, or NULL otherwise */
 extern Pointer generic_toast_get(ToastAPI *api, void *key, Size data_size,
 								 CommitSeqNo csn, void *arg);

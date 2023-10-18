@@ -257,7 +257,63 @@ extern void orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr);
 
 extern void o_tables_meta_lock(void);
 extern void o_tables_meta_lock_no_wal(void);
+
+static inline void
+o_tables_rel_meta_lock(Relation rel)
+{
+	if (!rel || rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
+		o_tables_meta_lock();
+	else
+		o_tables_meta_lock_no_wal();
+}
+static inline void
+o_tables_table_meta_lock(OTable *o_table)
+{
+	if (!o_table || !o_table->temp)
+		o_tables_meta_lock();
+	else
+		o_tables_meta_lock_no_wal();
+}
+
 extern void o_tables_meta_unlock(ORelOids oids, Oid oldRelnode);
 extern void o_tables_meta_unlock_no_wal(void);
+
+static inline void
+o_tables_rel_meta_unlock(Relation rel, Oid oldRelnode)
+{
+	if (!rel)
+	{
+		ORelOids	tmpOids = {InvalidOid, InvalidOid, InvalidOid};
+
+		o_tables_meta_unlock(tmpOids, oldRelnode);
+	}
+	else if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
+	{
+		ORelOids	oids;
+
+		ORelOidsSetFromRel(oids, rel);
+		o_tables_meta_unlock(oids, oldRelnode);
+	}
+	else
+	{
+		o_tables_meta_unlock_no_wal();
+	}
+}
+static inline void
+o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
+{
+	if (!o_table)
+	{
+		ORelOids	tmpOids = {InvalidOid, InvalidOid, InvalidOid};
+
+		o_tables_meta_unlock(tmpOids, oldRelnode);
+	}
+	else if (!o_table->temp)
+	{
+		o_tables_meta_unlock(o_table->oids, oldRelnode);
+	}
+	else
+		o_tables_meta_unlock_no_wal();
+}
 
 #endif							/* __O_TABLES_H__ */

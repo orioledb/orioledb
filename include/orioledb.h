@@ -19,6 +19,7 @@
 #include "access/xlog.h"
 #include "common/int.h"
 #include "nodes/extensible.h"
+#include "miscadmin.h"
 #include "port/atomics.h"
 #include "storage/bufpage.h"
 #include "storage/fd.h"

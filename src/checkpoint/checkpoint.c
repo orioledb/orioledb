@@ -4165,6 +4165,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		{
 			checkpoint_temporary_tree(tbl_arg->flags, td);
 			sort_checkpoint_tmp_file(td, cur_chkp_index);
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
 
 
@@ -4827,9 +4828,10 @@ systrees_modify_start(void)
 }
 
 void
-systrees_modify_end(void)
+systrees_modify_end(bool any_wal)
 {
-	(void) flush_local_wal(false);
+	if (any_wal)
+		(void) flush_local_wal(false);
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	add_systrees_lock_undo(true);
 }

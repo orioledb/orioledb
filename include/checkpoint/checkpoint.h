@@ -254,7 +254,7 @@ extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem,
 									 bool *was_evicted);
 extern void checkpointable_tree_free(BTreeDescr *desc);
 extern void systrees_modify_start(void);
-extern void systrees_modify_end(void);
+extern void systrees_modify_end(bool any_wal);
 extern void systrees_lock_callback(UndoLocation location,
 								   UndoStackItem *baseItem, OXid oxid,
 								   bool abort, bool changeCountsValid);
