@@ -334,6 +334,39 @@ class OrioledbS3ObjectLoader:
 
 		return objects
 
+	# Reimplement os.dirs so it sets mode for intermediate dirs also
+	def makedirs(self, name, mode=0o777, exist_ok=False):
+		"""makedirs(name [, mode=0o777][, exist_ok=False])
+
+		Super-mkdir; create a leaf directory and all intermediate ones.  Works like
+		mkdir, except that any intermediate path segment (not just the rightmost)
+		will be created if it does not exist. If the target directory already
+		exists, raise an OSError if exist_ok is False. Otherwise no exception is
+		raised.  This is recursive.
+
+		"""
+		head, tail = os.path.split(name)
+		if not tail:
+			head, tail = os.path.split(head)
+		if head and tail and not os.path.exists(head):
+			try:
+				self.makedirs(head, mode, exist_ok=exist_ok)
+			except FileExistsError:
+				# Defeats race condition when another thread created the path
+				pass
+			cdir = os.curdir
+			if isinstance(tail, bytes):
+				cdir = bytes(os.curdir, 'ASCII')
+			if tail == cdir:           # xxx/newdir/. exists if xxx/newdir exists
+				return
+		try:
+			os.mkdir(name, mode)
+		except OSError:
+			# Cannot rely on checking for EEXIST, since the operating system
+			# could give priority to other errors like EACCES or EROFS
+			if not exist_ok or not os.path.isdir(name):
+				raise
+
 	def download_file(self, bucket_name, file_key, local_path):
 		try:
 			transfer_config = TransferConfig(use_threads=False,
@@ -342,7 +375,7 @@ class OrioledbS3ObjectLoader:
 				dirs = local_path
 			else:
 				dirs = '/'.join(local_path.split('/')[:-1])
-			os.makedirs(dirs, exist_ok=True, mode=0o700)
+			self.makedirs(dirs, exist_ok=True, mode=0o700)
 			if file_key[-1] != '/':
 				self.s3.download_file(
 					bucket_name, file_key, local_path, Config=transfer_config
@@ -356,7 +389,7 @@ class OrioledbS3ObjectLoader:
 					(nameOffset, dataOffset, dataLength) = struct.unpack('iii', data[4 + i * 12: 16 + i * 12])
 					name = data[nameOffset: data.find(b'\0', nameOffset)].decode('ascii')
 					fullname = f"{base_dir}/{name}"
-					os.makedirs(os.path.dirname(dirs), exist_ok=True, mode=0o700)
+					self.makedirs(os.path.dirname(fullname), exist_ok=True, mode=0o700)
 					with open(fullname, 'wb') as file:
 						file.write(data[dataOffset: dataOffset + dataLength])
 					os.chmod(fullname, 0o600)
