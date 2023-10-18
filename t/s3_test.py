@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import re
+import signal
 import struct
 from concurrent.futures import ThreadPoolExecutor
 from tempfile import mkdtemp
@@ -242,50 +243,64 @@ class S3Test(BaseTest):
 			orioledb.s3_cainfo = '{self.ssl_key[0]}'
 			orioledb.s3_num_workers = 3
 
+			archive_mode = on
+			archive_library = 'orioledb'
+		""")
+		node.append_conf(f"""
 			orioledb.recovery_pool_size = 1
 			orioledb.recovery_idx_pool_size = 1
 		""")
 		node.start()
+		archiver_pid = node.execute("""
+			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
+		""")[0][0]
 		node.safe_psql("""
 			CREATE TABLE pg_test_1 (
 				val_1 int
 			);
 			INSERT INTO pg_test_1 SELECT * FROM generate_series(1, 5);
 		""")
-		node.safe_psql("CHECKPOINT")
+		node.safe_psql("CHECKPOINT;")
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
 						 node.execute("SELECT * FROM pg_test_1"))
-		node.stop()
+		node.stop(['--no-wait'])
 
 		new_temp_dir = mkdtemp(prefix = self.myName + '_tgsb_')
 		new_data_dir = os.path.join(new_temp_dir, DATA_DIR)
+		new_wal_dir = os.path.join(new_data_dir, 'pg_wal')
+
 		host_port = f"https://{self.host}:{self.port}"
 		loader = OrioledbS3ObjectLoader(self.access_key_id,
 										self.secret_access_key,
 										self.region,
 										host_port,
 										self.ssl_key[0])
-		loader.download_files_in_directory(self.bucket_name, 'data/',
-											new_data_dir)
-		self.replica = testgres.get_new_node('test', base_dir=new_temp_dir)
 
-		replica = self.replica
-		replica.port = self.getBasePort() + 1
-		replica.append_conf(port=replica.port)
-		replica.append_conf("""
+		while loader.list_objects(self.bucket_name, 'wal/') == []:
+			pass
+		os.kill(archiver_pid, signal.SIGUSR2)
+
+		loader.download_files_in_directory(self.bucket_name, 'data/',
+										   new_data_dir)
+		new_node = testgres.get_new_node('test', base_dir=new_temp_dir)
+
+		control = new_node.get_control_data()
+		wal_file = control["Latest checkpoint's REDO WAL file"]
+		loader.download_file(self.bucket_name, f"wal/{wal_file}",
+							 f"{new_wal_dir}/{wal_file}")
+
+		new_node.port = self.getBasePort() + 1
+		new_node.append_conf(port=new_node.port)
+		new_node.append_conf("""
 			orioledb.s3_mode = false
 			archive_mode = false
 		""")
-		replica._assign_master(node)
-		replica._create_recovery_conf(username=default_username())
 
-		node.start()
-		replica.start()
-		replica.catchup()
+		new_node.start()
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
-						node.execute("SELECT * FROM pg_test_1"))
-		replica.stop(['-m', 'immediate'])
-		node.stop(['-m', 'immediate'])
+						new_node.execute("SELECT * FROM pg_test_1"))
+		new_node.stop()
+		new_node.cleanup()
 
 class OrioledbS3ObjectLoader:
 	def __init__(self, aws_access_key_id, aws_secret_access_key, aws_region,

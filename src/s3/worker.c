@@ -98,29 +98,18 @@ s3process_task(uint64 taskLocation)
 	if (task->type == S3TaskTypeWriteFile)
 	{
 		char	   *filename = task->typeSpecific.writeFile.filename;
-		bool		backup;
-
-		backup = strcmp(filename,
-						ORIOLEDB_DATA_DIR "/" BACKUP_LABEL_FILE) == 0;
 
 		if (filename[0] == '.' && filename[1] == '/')
 			filename += 2;
 
-		if (backup)
-			objectname = psprintf("data/%u/%s",
-								  task->typeSpecific.writeFile.chkpNum,
-								  BACKUP_LABEL_FILE);
-		else
-			objectname = psprintf("data/%u/%s",
-								  task->typeSpecific.writeFile.chkpNum,
-								  filename);
+		objectname = psprintf("data/%u/%s",
+							  task->typeSpecific.writeFile.chkpNum,
+							  filename);
 
 		elog(DEBUG1, "S3 put %s %s", objectname, filename);
 
 		s3_put_file(objectname, filename);
 
-		if (backup)
-			unlink(filename);
 		pfree(objectname);
 
 		if (task->typeSpecific.writeFile.delete)

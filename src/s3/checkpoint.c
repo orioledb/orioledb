@@ -209,43 +209,6 @@ static int64 s3_backup_scan_dir(S3BackupState *state,
 								const char *spcoid);
 static List *get_tablespaces(StringInfo tblspcmapfile);
 
-static void
-fill_backup_state(BackupState *state)
-{
-	char	   *label = "base backup";
-
-	Assert(state != NULL);
-	memcpy(state->name, label, strlen(label));
-
-	/*
-	 * Ensure we decrement runningBackups if we fail below. NB -- for this to
-	 * work correctly, it is critical that sessionBackupState is only updated
-	 * after this block is over.
-	 */
-	PG_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
-	{
-		ControlFileData *ControlFile;
-		bool		crc_ok;
-
-		RequestXLogSwitch(false);
-
-		LWLockAcquire(ControlFileLock, LW_SHARED);
-		ControlFile = get_controlfile(DataDir, &crc_ok);
-		if (!crc_ok)
-			ereport(ERROR,
-					(errmsg("calculated CRC checksum does not match value stored in file")));
-		state->checkpointloc = ControlFile->checkPoint;
-		state->startpoint = ControlFile->checkPointCopy.redo;
-		state->starttli = ControlFile->checkPointCopy.ThisTimeLineID;
-		LWLockRelease(ControlFileLock);
-
-		state->starttime = (pg_time_t) time(NULL);
-	}
-	PG_END_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
-
-	state->started_in_recovery = false;
-}
-
 /*
  * Actually do a base backup for the specified tablespaces.
  *
@@ -260,7 +223,6 @@ s3_perform_backup(S3TaskLocation maxLocation)
 	StringInfoData tablespaceMapData;
 	ListCell   *lc;
 	tablespaceinfo *newti;
-	BackupState *backup_state;
 	S3TaskLocation location;
 
 	backup_started_in_recovery = RecoveryInProgress();
@@ -280,10 +242,6 @@ s3_perform_backup(S3TaskLocation maxLocation)
 	state.smallFilesTotalSize = sizeof(int);
 	state.smallFilesNum = 0;
 
-	backup_state = (BackupState *) palloc0(sizeof(BackupState));
-
-	fill_backup_state(backup_state);
-
 	/* Send off our tablespaces one by one */
 	foreach(lc, state.tablespaces)
 	{
@@ -291,34 +249,6 @@ s3_perform_backup(S3TaskLocation maxLocation)
 
 		if (ti->path == NULL)
 		{
-			char	   *backup_filename;
-			char	   *backup_label;
-			File		backup_file;
-
-			backup_filename = ORIOLEDB_DATA_DIR "/" BACKUP_LABEL_FILE;
-
-			/* Include the backup_label first... */
-			backup_label = build_backup_content(backup_state, false);
-			backup_file = PathNameOpenFile(backup_filename,
-										   O_WRONLY | O_CREAT | O_TRUNC |
-										   PG_BINARY);
-
-			if (FileWrite(backup_file, (Pointer) backup_label,
-						  strlen(backup_label), 0,
-						  WAIT_EVENT_DATA_FILE_WRITE) != strlen(backup_label))
-			{
-				ereport(FATAL,
-						(errcode_for_file_access(),
-						 errmsg("Could not write backup_label to file: %s",
-								backup_filename)));
-			}
-
-			FileClose(backup_file);
-
-			location = s3_schedule_file_write(chkpNum, backup_filename, false);
-			maxLocation = Max(maxLocation, location);
-			pfree(backup_label);
-
 			/* Then the bulk of the files... */
 			s3_backup_scan_dir(&state, ".", 1, NULL);
 
@@ -337,22 +267,8 @@ s3_perform_backup(S3TaskLocation maxLocation)
 	location = flush_small_files(&state);
 	maxLocation = Max(maxLocation, location);
 
-	/*
-	 * Write the backup-end xlog record
-	 */
-	XLogBeginInsert();
-	XLogRegisterData((char *) (&backup_state->startpoint),
-					 sizeof(backup_state->startpoint));
-	XLogInsert(RM_XLOG_ID, XLOG_BACKUP_END);
-
-	/*
-	 * Force a switch to a new xlog segment file, so that the backup is valid
-	 * as soon as archiver moves out the current segment file.
-	 */
-	RequestXLogSwitch(false);
 
 	pfree(tablespaceMapData.data);
-	pfree(backup_state);
 	s3_queue_wait_for_location(maxLocation);
 }
 
