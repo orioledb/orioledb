@@ -617,7 +617,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 	is_build = is_build && !skip_build;
 
-	o_tables_meta_lock();
+	o_tables_table_meta_lock(NULL);
 
 	o_opclass_cache_add_table(o_table);
 	custom_types_add_all(o_table, index);
@@ -662,9 +662,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 	if (!reuse && is_build)
 	{
-		ORelOids	invalidOids = {InvalidOid, InvalidOid, InvalidOid};
-
-		o_tables_meta_unlock(invalidOids, InvalidOid);
+		o_tables_table_meta_unlock(NULL, InvalidOid);
 		if (STOPEVENTS_ENABLED())
 		{
 			Jsonb	   *params;
@@ -686,8 +684,9 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	}
 	else
 	{
-		o_tables_meta_unlock(o_table->oids,
-							 (index->type == oIndexPrimary) ? old_o_table->oids.relnode : InvalidOid);
+		o_tables_table_meta_unlock(o_table, (index->type == oIndexPrimary) ?
+								   old_o_table->oids.relnode :
+								   InvalidOid);
 	}
 
 	if (old_o_table)
@@ -1358,13 +1357,13 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	 * shared root info placeholder to let checkpointer process this tree when
 	 * we release the lock.
 	 */
-	o_tables_meta_lock();
+	o_tables_table_meta_lock(o_table);
 
 	btree_write_file_header(&idx->desc, &fileHeader);
 	o_drop_shared_root_info(idx->desc.oids.datoid,
 							idx->desc.oids.relnode);
 
-	o_tables_meta_unlock(o_table->oids, InvalidOid);
+	o_tables_table_meta_unlock(o_table, InvalidOid);
 
 	if (!is_recovery_in_progress())
 	{
@@ -1498,7 +1497,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	 * Remove shared root info placeholders to let checkpointer process these
 	 * trees when we release the lock.
 	 */
-	o_tables_meta_lock();
+	o_tables_table_meta_lock(o_table);
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
@@ -1510,7 +1509,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	o_drop_shared_root_info(descr->toast->desc.oids.datoid,
 							descr->toast->desc.oids.relnode);
 
-	o_tables_meta_unlock(o_table->oids, old_o_table->oids.relnode);
+	o_tables_table_meta_unlock(o_table, old_o_table->oids.relnode);
 
 	pfree(fileHeaders);
 
@@ -1544,7 +1543,6 @@ drop_primary_index(Relation rel, OTable *o_table)
 	OTable	   *old_o_table;
 	OTableDescr *descr;
 	OTableDescr *old_descr;
-	ORelOids	invalidOids = {InvalidOid, InvalidOid, InvalidOid};
 
 	Assert(o_table->indices[PrimaryIndexNumber].type == oIndexPrimary);
 
@@ -1559,12 +1557,12 @@ drop_primary_index(Relation rel, OTable *o_table)
 	o_table->has_primary = false;
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 
-	o_tables_meta_lock();
+	o_tables_table_meta_lock(NULL);
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
 	rebuild_indices_insert_placeholders(descr);
-	o_tables_meta_unlock(invalidOids, InvalidOid);
+	o_tables_table_meta_unlock(NULL, InvalidOid);
 
 	rebuild_indices(old_o_table, old_descr, o_table, descr);
 
@@ -1590,9 +1588,9 @@ drop_secondary_index(OTable *o_table, OIndexNumber ix_num)
 
 	/* update o_table */
 	fill_current_oxid_csn(&oxid, &csn);
-	o_tables_meta_lock();
+	o_tables_table_meta_lock(o_table);
 	o_tables_update(o_table, oxid, csn);
-	o_tables_meta_unlock(o_table->oids, InvalidOid);
+	o_tables_table_meta_unlock(o_table, InvalidOid);
 	add_undo_drop_relnode(o_table->oids, &deletedOids, 1);
 	recreate_table_descr_by_oids(o_table->oids);
 }

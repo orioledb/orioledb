@@ -1374,17 +1374,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTable	   *table;
 				ORelOids   *treeOids;
 				int			numTreeOids;
-				ORelOids	oids,
-							tmpOids = {InvalidOid, InvalidOid, InvalidOid};
+				ORelOids	oids;
 
 				ORelOidsSetFromRel(oids, rel);
 
 				fill_current_oxid_csn(&oxid, &csn);
 				Assert(relation_get_descr(rel) != NULL);
 
-				o_tables_meta_lock();
+				o_tables_table_meta_lock(NULL);
 				table = o_tables_drop_by_oids(oids, oxid, csn);
-				o_tables_meta_unlock(tmpOids, InvalidOid);
+				o_tables_table_meta_unlock(NULL, InvalidOid);
 				treeOids = o_table_make_index_oids(table, &numTreeOids);
 				add_undo_drop_relnode(oids, treeOids, numTreeOids);
 				pfree(treeOids);
@@ -1418,10 +1417,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_field->droped = true;
 
 						fill_current_oxid_csn(&oxid, &csn);
-						o_tables_meta_lock();
+						o_tables_rel_meta_lock(rel);
 						o_tables_update(o_table, oxid, csn);
 						o_tables_after_update(o_table, oxid, csn);
-						o_tables_meta_unlock(oids, InvalidOid);
+						o_tables_rel_meta_unlock(rel, InvalidOid);
 					}
 					o_table_free(o_table);
 				}
@@ -1490,15 +1489,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	{
 		CommitSeqNo csn;
 		OXid		oxid;
-		ORelOids	tmpOids = {InvalidOid, InvalidOid, InvalidOid};
 
 		Assert(OidIsValid(objectId));
 
 		fill_current_oxid_csn(&oxid, &csn);
 
-		o_tables_meta_lock();
+		o_tables_table_meta_lock(NULL);
 		o_tables_drop_all(oxid, csn, objectId);
-		o_tables_meta_unlock(tmpOids, InvalidOid);
+		o_tables_table_meta_unlock(NULL, InvalidOid);
 	}
 	else if (access == OAT_DROP && classId == TypeRelationId &&
 			 ActiveSnapshotSet())
@@ -1589,10 +1587,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					o_table_resize_constr(o_table);
 
-					o_tables_meta_lock();
+					o_tables_rel_meta_lock(rel);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
-					o_tables_meta_unlock(oids, InvalidOid);
+					o_tables_rel_meta_unlock(rel, InvalidOid);
 
 					o_table_free(o_table);
 				}
@@ -1615,7 +1613,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				ORelOidsSetFromRel(oids, rel);
 				tupdesc = RelationGetDescr(rel);
 
-				o_tables_meta_lock();
+				o_tables_rel_meta_lock(rel);
 				o_table = o_table_tableam_create(oids, tupdesc,
 												 rel->rd_rel->relpersistence);
 				o_opclass_cache_add_table(o_table);
@@ -1623,7 +1621,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 				o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
 				o_tables_add(o_table, oxid, csn);
-				o_tables_meta_unlock(oids, InvalidOid);
+				o_tables_rel_meta_unlock(rel, InvalidOid);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
 					 (subId == 0))
@@ -1708,13 +1706,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					fill_current_oxid_csn(&oxid, &csn);
 
-					o_tables_meta_lock();
+					o_tables_rel_meta_lock(tbl);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
 
 					treeOids = o_table_make_index_oids(o_table, &numTreeOids);
 					add_undo_create_relnode(oids, treeOids, numTreeOids);
-					o_tables_meta_unlock(oids, InvalidOid);
+					o_tables_rel_meta_unlock(tbl, InvalidOid);
 					pfree(treeOids);
 				}
 				if (tbl)
@@ -1773,10 +1771,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 										&old_field, field);
 
 					fill_current_oxid_csn(&oxid, &csn);
-					o_tables_meta_lock();
+					o_tables_rel_meta_lock(rel);
 					o_tables_update(o_table, oxid, csn);
 					o_tables_after_update(o_table, oxid, csn);
-					o_tables_meta_unlock(oids, InvalidOid);
+					o_tables_rel_meta_unlock(rel, InvalidOid);
 
 					/* This has no effect? */
 					o_table->fields[subId - 1] = old_field;
@@ -1845,7 +1843,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						orioledb_save_collation(field->collation);
 						fill_current_oxid_csn(&oxid, &csn);
-						o_tables_meta_lock();
+						o_tables_rel_meta_lock(rel);
 						o_tables_update(o_table, oxid, csn);
 						o_tables_after_update(o_table, oxid, csn);
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
@@ -1890,7 +1888,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								}
 							}
 						}
-						o_tables_meta_unlock(oids, InvalidOid);
+						o_tables_rel_meta_unlock(rel, InvalidOid);
 					}
 					o_table->fields[subId - 1] = old_field;
 					o_table_free(o_table);
@@ -1902,8 +1900,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				Relation	old_rel;
 				ORelOids	old_oids,
-							new_oids,
-							tmp_oids = {InvalidOid, InvalidOid, InvalidOid};
+							new_oids;
 				OTable	   *old_o_table,
 						   *new_o_table;
 				CommitSeqNo csn;
@@ -1929,7 +1926,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						 RelationGetRelationName(rel));
 				}
 
-				o_tables_meta_lock();
+				o_tables_rel_meta_lock(NULL);
 				fill_current_oxid_csn(&oxid, &csn);
 				o_tables_drop_by_oids(old_oids, oxid, csn);
 				o_tables_swap_relnodes(old_o_table, new_o_table);
@@ -1938,7 +1935,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_tables_update_without_oids_indexes(new_o_table, oxid, csn);
 				o_indices_update(new_o_table, TOASTIndexNumber, oxid, csn);
 
-				o_tables_meta_unlock(tmp_oids, InvalidOid);
+				o_tables_rel_meta_unlock(NULL, InvalidOid);
 
 				o_table_free(old_o_table);
 				o_table_free(new_o_table);
@@ -1987,10 +1984,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						Assert(ix_num < o_table->nindices);
 						fill_current_oxid_csn(&oxid, &csn);
-						o_tables_meta_lock();
+						o_tables_rel_meta_lock(tbl);
 						o_tables_update(o_table, oxid, csn);
 						o_indices_update(o_table, ix_num, oxid, csn);
-						o_tables_meta_unlock(table_oids, InvalidOid);
+						o_tables_rel_meta_unlock(tbl, InvalidOid);
 						o_invalidate_oids(idx_oids);
 						o_add_invalidate_undo_item(idx_oids,
 												   O_INVALIDATE_OIDS_ON_ABORT);

@@ -172,7 +172,7 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	WALRecFinish *rec;
 
 	Assert(!is_recovery_process());
-	Assert(rec_type == WAL_REC_COMMIT || WAL_REC_ROLLBACK);
+	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
 
 	if (local_wal_buffer_offset == 0)
 	{

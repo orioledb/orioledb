@@ -2294,7 +2294,8 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 
 		if ((sscanf(file->d_name, "%10u-%10u.%4s",
 					&file_relnode, &file_chkp, file_ext) == 3 &&
-			 (!strcmp(file_ext, "tmp") || !strcmp(file_ext, "map")) &&
+			 (!strcmp(file_ext, "tmp") || !strcmp(file_ext, "map") ||
+			  !strcmp(file_ext, "evt")) &&
 			 (file_ext_p = file_ext)) ||
 			sscanf(file->d_name, "%10u.%10u",
 				   &file_relnode, &file_segno) == 2 ||

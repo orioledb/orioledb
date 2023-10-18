@@ -853,6 +853,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	OIndex	   *oIndex;
 	Pointer		data;
 	int			len;
+	BTreeDescr  *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
 	oIndex->createOxid = oxid;
@@ -862,8 +863,10 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	data = serialize_o_index(oIndex, &len);
 	free_o_index(oIndex);
 
-	result = generic_toast_insert(&oIndicesToastAPI, (Pointer) &key, data, len,
-								  oxid, csn, get_sys_tree(SYS_TREES_O_INDICES));
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	result = generic_toast_insert_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &key, data, len, oxid,
+											   csn, sys_tree, !table->temp);
 	pfree(data);
 	return result;
 }
@@ -874,6 +877,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	OIndexChunkKey key;
 	bool		result;
 	OIndex	   *oIndex;
+	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
 	key.oids = oIndex->indexOids;
@@ -881,8 +885,10 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.offset = 0;
 	free_o_index(oIndex);
 
-	result = generic_toast_delete(&oIndicesToastAPI, (Pointer) &key,
-								  oxid, csn, get_sys_tree(SYS_TREES_O_INDICES));
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	result = generic_toast_delete_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &key, oxid, csn,
+											   sys_tree, !table->temp);
 	return result;
 }
 
@@ -919,6 +925,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	bool		result;
 	Pointer		data;
 	int			len;
+	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
 	data = serialize_o_index(oIndex, &len);
@@ -928,9 +935,11 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	free_o_index(oIndex);
 
 	systrees_modify_start();
-	result = generic_toast_update(&oIndicesToastAPI, (Pointer) &key, data, len,
-								  oxid, csn, get_sys_tree(SYS_TREES_O_INDICES));
-	systrees_modify_end();
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	result = generic_toast_update_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &key, data, len, oxid,
+											   csn, sys_tree, !table->temp);
+	systrees_modify_end(!table->temp);
 
 	pfree(data);
 

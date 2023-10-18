@@ -216,7 +216,8 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 
 	/* Tuple might be changes in the callback */
 	tup = tts_orioledb_form_tuple(slot, descr);
-	o_wal_insert(&primary->desc, tup);
+	if (primary->desc.storageType == BTreeStoragePersistence)
+		o_wal_insert(&primary->desc, tup);
 
 	return slot;
 }
@@ -367,7 +368,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 			tts_orioledb_insert_toast_values(slot, descr, oxid, csn);
 
 			tup = tts_orioledb_form_tuple(slot, descr);
-			o_wal_insert(primary, tup);
+			if (primary->storageType == BTreeStoragePersistence)
+				o_wal_insert(primary, tup);
 			return slot;
 		}
 
@@ -572,7 +574,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			mres.success = tts_orioledb_update_toast_values(oldSlot, slot, descr,
 															oxid, csn);
 
-			if (mres.success)
+			if (mres.success &&
+				primary->desc.storageType == BTreeStoragePersistence)
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
@@ -592,7 +595,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				mres.success = tts_orioledb_remove_toast_values(oldSlot, descr, oxid, csn);
 			}
 
-			if (mres.success)
+			if (mres.success &&
+				primary->desc.storageType == BTreeStoragePersistence)
 			{
 				OTuple		old_tup = ((OTableSlot *) oldSlot)->tuple,
 							final_tup = tts_orioledb_form_tuple(slot, descr);
@@ -665,7 +669,8 @@ o_tbl_delete(OTableDescr *descr, OBTreeKeyBound *primary_key,
 
 			primary_tuple = ((OTableSlot *) result.oldTuple)->tuple;
 
-			o_wal_delete(&primary->desc, primary_tuple);
+			if (primary->desc.storageType == BTreeStoragePersistence)
+				o_wal_delete(&primary->desc, primary_tuple);
 		}
 		else
 		{

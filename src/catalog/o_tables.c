@@ -961,6 +961,7 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	OTableChunkKey key;
 	OTable	   *table;
 	bool		result;
+	BTreeDescr *sys_tree;
 
 	key.oids = oids;
 	key.offset = 0;
@@ -968,9 +969,11 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	systrees_modify_start();
 	table = o_tables_get(oids);
 	o_tables_oids_indexes(table, NULL, oxid, csn);
-	result = generic_toast_delete(&oTablesToastAPI, (Pointer) &key, oxid,
-								  csn, get_sys_tree(SYS_TREES_O_TABLES));
-	systrees_modify_end();
+	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+	result = generic_toast_delete_optional_wal(&oTablesToastAPI,
+											   (Pointer) &key, oxid, csn,
+											   sys_tree, !table->temp);
+	systrees_modify_end(!table->temp);
 
 	if (result)
 	{
@@ -1019,6 +1022,7 @@ o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 	bool		result;
 	Pointer		data;
 	int			len;
+	BTreeDescr *sys_tree;
 
 	data = serialize_o_table(table, &len);
 
@@ -1028,9 +1032,11 @@ o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 
 	systrees_modify_start();
 	o_tables_oids_indexes(NULL, table, oxid, csn);
-	result = generic_toast_insert(&oTablesToastAPI, (Pointer) &key, data, len,
-								  oxid, csn, get_sys_tree(SYS_TREES_O_TABLES));
-	systrees_modify_end();
+	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+	result = generic_toast_insert_optional_wal(&oTablesToastAPI,
+											   (Pointer) &key, data, len, oxid,
+											   csn, sys_tree, !table->temp);
+	systrees_modify_end(!table->temp);
 	pfree(data);
 
 	return result;
@@ -1130,6 +1136,7 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	bool		result;
 	Pointer		data;
 	int			len;
+	BTreeDescr *sys_tree;
 
 	data = serialize_o_table(table, &len);
 
@@ -1141,9 +1148,11 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	old_table = o_tables_get(table->oids);
 	if (update_indices)
 		o_tables_oids_indexes(old_table, table, oxid, csn);
-	result = generic_toast_update(&oTablesToastAPI, (Pointer) &key, data, len,
-								  oxid, csn, get_sys_tree(SYS_TREES_O_TABLES));
-	systrees_modify_end();
+	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+	result = generic_toast_update_optional_wal(&oTablesToastAPI,
+											   (Pointer) &key, data, len, oxid,
+											   csn, sys_tree, !table->temp);
+	systrees_modify_end(!table->temp);
 
 	pfree(data);
 	o_table_free(old_table);
@@ -1460,29 +1469,34 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 		OTableChunkKey key;
 		bool		result;
 		OAutonomousTxState state;
-		ORelOids	tmpOids = {InvalidOid, InvalidOid, InvalidOid};
 
 		key.oids = o_table->oids;
 		key.offset = 0;
 
 		start_autonomous_transaction(&state);
 
-		o_tables_meta_lock();
+		o_tables_table_meta_lock(NULL);
 		PG_TRY();
 		{
+			BTreeDescr *sys_tree;
+
 			o_tables_oids_indexes(o_table, NULL, get_current_oxid(), drop_arg->csn);
-			result = generic_toast_delete(&oTablesToastAPI, (Pointer) &key,
-										  get_current_oxid(), drop_arg->csn,
-										  get_sys_tree(SYS_TREES_O_TABLES));
+			sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+			result = generic_toast_delete_optional_wal(&oTablesToastAPI,
+													   (Pointer) &key,
+													   get_current_oxid(),
+													   drop_arg->csn,
+													   sys_tree,
+													   !o_table->temp);
 		}
 		PG_CATCH();
 		{
-			o_tables_meta_unlock(tmpOids, InvalidOid);
+			o_tables_table_meta_unlock(NULL, InvalidOid);
 			abort_autonomous_transaction(&state);
 			PG_RE_THROW();
 		}
 		PG_END_TRY();
-		o_tables_meta_unlock(tmpOids, InvalidOid);
+		o_tables_table_meta_unlock(NULL, InvalidOid);
 		finish_autonomous_transaction(&state);
 
 		if (result)
@@ -1760,9 +1774,9 @@ o_tables_drop_columns_with_type_callback(OTable *o_table, void *arg)
 
 	if (updated)
 	{
-		o_tables_meta_lock();
+		o_tables_table_meta_lock(o_table);
 		o_tables_update(o_table, drop_arg->oxid, drop_arg->csn);
-		o_tables_meta_unlock(o_table->oids, InvalidOid);
+		o_tables_table_meta_unlock(o_table, InvalidOid);
 	}
 }
 
