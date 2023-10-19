@@ -785,7 +785,8 @@ class ReplicationTest(BaseTest):
 									"""),
 									[])
 					master.stop()
-					raise 0
+					self.assertTrue(self.all_tables_dropped(master))
+					self.assertTrue(self.all_tables_dropped(replica))
 
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
