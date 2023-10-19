@@ -4413,7 +4413,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			if (unlink(filename) < 0)
 				ereport(WARNING,
 						(errcode_for_file_access(),
-							errmsg("could not unlink eviction file \"%s\": %m", filename)));
+						 errmsg("could not unlink eviction file \"%s\": %m", filename)));
 			file_header = (*evicted_data)->file_header;
 			pfree(filename);
 		}

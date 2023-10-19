@@ -853,7 +853,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	OIndex	   *oIndex;
 	Pointer		data;
 	int			len;
-	BTreeDescr  *sys_tree;
+	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
 	oIndex->createOxid = oxid;

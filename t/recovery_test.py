@@ -1827,7 +1827,8 @@ class RecoveryTest(BaseTest):
 							"""),
 							[('o_test_3',), ('o_test_4',), ('o_test_9',)])
 
-		node.stop(['-m', 'immediate'])
+			node.stop(['-m', 'immediate'])
+
 		file_num = 3 # table num
 		file_num += 3 # toast num
 		file_num += 1 # ix num
@@ -1849,3 +1850,25 @@ class RecoveryTest(BaseTest):
 						 [])
 		node.stop()
 
+	def test_recovery_temp_table_index(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TEMP TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+
+			CREATE INDEX ind_1 ON o_test_1(val_1);
+			DROP INDEX ind_1;
+
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		node.stop()
