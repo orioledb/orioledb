@@ -617,7 +617,10 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 	is_build = is_build && !skip_build;
 
-	o_tables_table_meta_lock(NULL);
+	if (!reuse && is_build)
+		o_tables_table_meta_lock(NULL);
+	else
+		o_tables_table_meta_lock(o_table);
 
 	o_opclass_cache_add_table(o_table);
 	custom_types_add_all(o_table, index);
