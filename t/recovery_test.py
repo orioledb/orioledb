@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import unittest
-import testgres
-import string
+import os
 import random
 
 from .base_test import BaseTest
@@ -1791,6 +1789,9 @@ class RecoveryTest(BaseTest):
 		node.safe_psql("""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 		""")
+		cur_database = node.execute("""
+			SELECT oid FROM pg_database WHERE datname = current_database()
+		""")[0][0]
 
 		with node.connect() as con1:
 			con1.execute("""
@@ -1827,8 +1828,14 @@ class RecoveryTest(BaseTest):
 							[('o_test_3',), ('o_test_4',), ('o_test_9',)])
 
 		node.stop(['-m', 'immediate'])
+		file_num = 3 # table num
+		file_num += 3 # toast num
+		file_num += 1 # ix num
+		db_dir = f"{node.data_dir}/orioledb_data/{cur_database}"
+		self.assertEqual(len(sorted(os.listdir(db_dir))), file_num)
 		node.start()
 		node.stop(['-m', 'immediate'])
+		self.assertEqual(len(sorted(os.listdir(db_dir))), 0)
 
 		node.start()
 		self.assertEqual(node.execute("""

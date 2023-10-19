@@ -849,7 +849,7 @@ o_table_make_index_oids(OTable *table, int *num)
 
 	/* ctid primary index if needed */
 	if (table->nindices == 0 ||
-		table->indices[PrimaryIndexNumber].type == oIndexPrimary)
+		table->indices[PrimaryIndexNumber].type != oIndexPrimary)
 		oids[oids_num++] = table->oids;
 
 	*num = oids_num;
@@ -1488,6 +1488,20 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 													   drop_arg->csn,
 													   sys_tree,
 													   !o_table->temp);
+			if (result)
+			{
+				ORelOids   *treeOids;
+				int			numTreeOids;
+				int			i;
+
+				treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+				for (i = 0; i < numTreeOids; i++)
+				{
+					cleanup_btree(treeOids[i].datoid, treeOids[i].relnode,
+								  true);
+				}
+				pfree(treeOids);
+			}
 		}
 		PG_CATCH();
 		{
@@ -1498,16 +1512,6 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 		PG_END_TRY();
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		finish_autonomous_transaction(&state);
-
-		if (result)
-		{
-			ORelOids   *treeOids;
-			int			numTreeOids;
-
-			treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-			add_undo_drop_relnode(o_table->oids, treeOids, numTreeOids);
-			pfree(treeOids);
-		}
 	}
 }
 
