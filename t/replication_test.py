@@ -15,7 +15,6 @@ def catchup_orioledb(replica):
 	replica.poll_query_until("SELECT orioledb_recovery_synchronized();", expected = True)
 
 class ReplicationTest(BaseTest):
-
 	def test_replication_simple(self):
 		with self.node as master:
 			master.start()
@@ -787,6 +786,44 @@ class ReplicationTest(BaseTest):
 					master.stop()
 					self.assertTrue(self.all_tables_dropped(master))
 					self.assertTrue(self.all_tables_dropped(replica))
+
+
+	def test_replication_temp_table_pkey(self):
+		node = self.node
+		node.start()
+
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1(val_1 serial)USING orioledb;
+						CREATE TABLE o_test_2(val_1 serial, val_2 text)USING orioledb;
+						CREATE TABLE o_test_3(val_1 serial)USING orioledb;
+						CREATE TABLE o_test_4(val_1 serial, val_2 text)USING orioledb;
+
+						DROP TABLE o_test_1, o_test_2, o_test_3, o_test_4;
+
+						CREATE TEMPORARY TABLE o_test_5(val_1 int PRIMARY KEY, val_2 int) USING orioledb;
+
+						CREATE TABLE o_test_6(val_1 int)USING orioledb;
+						INSERT INTO o_test_6 SELECT i FROM generate_series(1,100)i;
+
+						CHECKPOINT;
+
+						DROP TABLE o_test_6;
+					""")
+
+					con1.commit()
+
+					self.catchup_orioledb(replica)
+
+					replica.stop()
+
+					replica.start()
 
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
