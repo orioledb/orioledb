@@ -89,8 +89,10 @@ typedef struct
 {
 	RecoveryMsgHeader header;
 	ORelOids	oids;
+	ORelOids	old_oids;
 	OIndexNumber ix_num;
 	uint32		o_table_version;
+	uint32		old_o_table_version;
 	uint32		current_position;
 } RecoveryOidsMsgIdxBuild;
 

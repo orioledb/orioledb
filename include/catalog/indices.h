@@ -27,6 +27,7 @@
 #define index_build_first_worker (recovery_pool_size_guc + 1)
 #define index_build_last_worker  (recovery_pool_size_guc + recovery_idx_pool_size_guc - 1)
 #define index_build_workers 	 (recovery_idx_pool_size_guc - 1)
+#define recovery_parallel_indices_rebuild_limit  (recovery_parallel_indices_rebuild_limit_guc)
 typedef struct BgWorkerHandle
 {
 	int			slot;
@@ -46,7 +47,9 @@ typedef struct oIdxSpool
 	Tuplesortstate **sortstates;	/* state data for tuplesort.c */
 	Relation	index;
 	OTable	   *o_table;
+	OTable	   *old_o_table;
 	OTableDescr *descr;
+	OTableDescr *old_descr;
 	bool		isunique;
 
 } oIdxSpool;
@@ -105,7 +108,7 @@ typedef struct oIdxShared
 	double		indtuples[INDEX_MAX_KEYS];
 
 	/* Oriole-specific */
-	void		(*worker_heap_sort_fn) (oIdxSpool *, void *, Sharedsort *, int sortmem, bool progress);
+	void		(*worker_heap_sort_fn) (oIdxSpool *, void *, Sharedsort **, int sortmem, bool progress);
 	ParallelOScanDescData poscan;
 	OIndexNumber ix_num;
 	BgWorkerHandle *worker_handle;
@@ -114,7 +117,10 @@ typedef struct oIdxShared
 	uint32		completed_position;
 	OXid		recovery_oxid;
 	Size		o_table_size;
+	Size		old_o_table_size;
+	bool		isrebuild;
 	char		o_table_serialized[];
+	/* old_o_table_serialized follows */
 } oIdxShared;
 
 extern oIdxShared *recovery_oidxshared;
@@ -134,13 +140,13 @@ extern bool is_in_indexes_rebuild(void);
 
 extern void rebuild_indices_insert_placeholders(OTableDescr *descr);
 extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
-							OTable *o_table, OTableDescr *descr);
+							OTable *o_table, OTableDescr *descr, bool in_dedicated_recovery_worker);
 extern void assign_new_oids(OTable *oTable, Relation rel);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
 extern void build_secondary_index(OTable *o_table, OTableDescr *descr,
 								  OIndexNumber ix_num, bool in_dedicated_recovery_worker);
 PGDLLEXPORT void _o_index_parallel_build_main(dsm_segment *seg, shm_toc *toc);
 extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
-										  OTable *recovery_o_table);
+										  OTable *recovery_o_table, OTable *recovery_old_o_table);
 extern Size _o_index_parallel_estimate_shared(Size o_table_size);
 #endif							/* __INDICES_H__ */

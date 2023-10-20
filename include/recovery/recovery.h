@@ -28,8 +28,9 @@ extern CommitSeqNo recovery_map_oxid_csn(OXid oxid, bool *found);
 extern void worker_send_msg(int worker_id, Pointer msg, uint64 msg_size);
 extern void worker_queue_flush(int worker_id);
 extern void idx_workers_shutdown(void);
-extern void recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version, int nindices,
-							   bool send_to_leader);
+extern void recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
+							   ORelOids old_oids, uint32 old_o_table_version,
+							   int nindices, bool send_to_leader);
 extern void workers_send_finish(bool send_to_idx_pool);
 extern void update_proc_retain_undo_location(int worker_id);
 
@@ -43,6 +44,7 @@ extern XLogRecPtr recovery_get_current_ptr(void);
 extern int	recovery_queue_size_guc;
 extern int	recovery_pool_size_guc;
 extern int	recovery_idx_pool_size_guc;
+extern int	recovery_parallel_indices_rebuild_limit_guc;
 extern OXid recovery_oxid;
 
 typedef struct BTreeDescr BTreeDescr;

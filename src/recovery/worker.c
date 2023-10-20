@@ -345,22 +345,41 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 			else if (recovery_header->type & (RECOVERY_LEADER_PARALLEL_INDEX_BUILD | RECOVERY_WORKER_PARALLEL_INDEX_BUILD))
 			{
 				RecoveryOidsMsgIdxBuild *msg = (RecoveryOidsMsgIdxBuild *) (data + data_pos);
-				OTable	   *o_table;
+				OTable	   *o_table,
+						   *old_o_table = NULL;
 
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = recovery_oidxshared->recovery_oxid;
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
+				if (recovery_oidxshared->isrebuild)
+				{
+					Assert(ORelOidsIsValid(msg->old_oids));
+					old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
+					Assert(old_o_table);
+					Assert(old_o_table->version == msg->old_o_table_version);
+				}
 
 				if (recovery_header->type & RECOVERY_LEADER_PARALLEL_INDEX_BUILD)
 				{
 					OTableDescr *o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
+					OTableDescr *old_o_descr = NULL;
 
 					Assert(id == index_build_leader);
 					o_fill_tmp_table_descr(o_descr, o_table);
 
-					build_secondary_index(o_table, o_descr, msg->ix_num, true);
+					Assert((recovery_oidxshared->isrebuild && msg->ix_num == InvalidIndexNumber) || (!recovery_oidxshared->isrebuild && msg->ix_num != InvalidIndexNumber));
+					if (recovery_oidxshared->isrebuild)
+					{
+						old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
+						o_fill_tmp_table_descr(old_o_descr, old_o_table);
+						rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true);
+					}
+					else
+					{
+						build_secondary_index(o_table, o_descr, msg->ix_num, true);
+					}
 
 					/*
 					 * Wake up the other recovery processes that may wait to
@@ -373,16 +392,25 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
 					o_free_tmp_table_descr(o_descr);
 					pfree(o_descr);
+					if (recovery_oidxshared->isrebuild)
+					{
+						o_free_tmp_table_descr(old_o_descr);
+						pfree(old_o_descr);
+					}
 				}
 				else if (recovery_header->type & RECOVERY_WORKER_PARALLEL_INDEX_BUILD)
 				{
 					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
 					/* participate as a worker in parallel index build */
-					_o_index_parallel_build_inner(NULL, NULL, o_table);
+					_o_index_parallel_build_inner(NULL, NULL, o_table, old_o_table);
 				}
 
 				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
 				pfree(o_table);
+				if (recovery_oidxshared->isrebuild)
+				{
+					pfree(old_o_table);
+				}
 			}
 			else if (recovery_header->type & RECOVERY_COMMIT)
 			{

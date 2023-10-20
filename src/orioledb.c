@@ -428,6 +428,25 @@ _PG_init(void)
 							NULL,
 							NULL);
 
+	DefineCustomIntVariable("orioledb.recovery_parallel_indices_rebuild_limit",
+							"Sets the maximum number of indices that could be rebuilt in parallel in recovery.",
+							NULL,
+							&recovery_parallel_indices_rebuild_limit_guc,
+#if PG_VERSION_NUM >= 140000
+							32,
+							1,
+							128,
+#else
+							0,
+							0,
+							0,
+#endif
+							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
 	/*
 	 * This variable added because we need values less than minimum value of
 	 * checkpoint_timeout(30s) for tests.
