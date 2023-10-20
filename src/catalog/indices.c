@@ -1251,6 +1251,7 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, Par
 													 &idx->leafSpec),
 										idx->name.data, true);
 			tuplesort_putotuple(sortstates[0], secondaryTup);
+			pfree(secondaryTup.data);
 		}
 
 		ExecClearTuple(primarySlot);
