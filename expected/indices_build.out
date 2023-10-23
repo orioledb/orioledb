@@ -24458,6 +24458,16 @@ SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
  
 (1 row)
 
+BEGIN;
+SET LOCAL max_parallel_maintenance_workers = 0;
+CREATE TABLE o_test_max_parallel_maintenance_workers_idx_build (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+INSERT INTO o_test_max_parallel_maintenance_workers_idx_build VALUES (1);
+CREATE INDEX o_test_max_parallel_maintenance_workers_idx_build_ix1
+	ON o_test_max_parallel_maintenance_workers_idx_build (val_2);
+COMMIT;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -24465,7 +24475,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 20 other objects
+NOTICE:  drop cascades to 21 other objects
 DETAIL:  drop cascades to table o_indices0
 drop cascades to table o_indices1
 drop cascades to table o_indices2
@@ -24486,6 +24496,7 @@ drop cascades to table o_test_pkey_include_box_build
 drop cascades to table o_test_include_box_build
 drop cascades to table o_test_include_box_with_pkey_build
 drop cascades to table o_rebuild_unique_with_new_pkey_fields
+drop cascades to table o_test_max_parallel_maintenance_workers_idx_build
 DROP SCHEMA indices_build CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function generate_string(integer,integer)

@@ -715,6 +715,20 @@ ALTER TABLE o_rebuild_unique_with_new_pkey_fields
 	ADD PRIMARY KEY (project_id, id, ts);
 SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
 
+BEGIN;
+SET LOCAL max_parallel_maintenance_workers = 0;
+
+CREATE TABLE o_test_max_parallel_maintenance_workers_idx_build (
+	val_1 int,
+	val_2 int
+) USING orioledb;
+
+INSERT INTO o_test_max_parallel_maintenance_workers_idx_build VALUES (1);
+
+CREATE INDEX o_test_max_parallel_maintenance_workers_idx_build_ix1
+	ON o_test_max_parallel_maintenance_workers_idx_build (val_2);
+COMMIT;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices_build CASCADE;
