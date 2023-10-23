@@ -416,6 +416,7 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	MemoryContext oldcontext = MemoryContextSwitchTo(public->sortcontext);
 	SortTuple	stup;
 	int			tupsize;
+	OTuple		written_tup;
 
 	/*
 	 * Copy the given tuple into memory we control, and decrease availMem.
@@ -424,8 +425,9 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	tupsize = o_tuple_size(tup, spec);
 	stup.tuple = MemoryContextAlloc(public->tuplecontext, MAXIMUM_ALIGNOF + tupsize);
 	write_o_tuple(stup.tuple, tup, tupsize);
+	written_tup = read_o_tuple(stup.tuple);
 
-	stup.datum1 = o_fastgetattr(tup,
+	stup.datum1 = o_fastgetattr(written_tup,
 								public->sortKeys[0].ssup_attno,
 								arg->tupDesc,
 								spec,
