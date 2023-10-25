@@ -14,16 +14,25 @@
 #ifndef __ORIOLEDB_H__
 #define __ORIOLEDB_H__
 
+#ifndef FRONTEND
 #include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#endif							/* FRONTEND */
 #include "common/int.h"
+#ifndef FRONTEND
 #include "nodes/extensible.h"
+#endif							/* FRONTEND */
 #include "miscadmin.h"
+#ifndef FRONTEND
 #include "port/atomics.h"
+#else
+#define pg_atomic_uint64 uint64
+#endif							/* FRONTEND */
 #include "storage/bufpage.h"
 #include "storage/fd.h"
+#ifndef FRONTEND
 #include "storage/lock.h"
 #include "storage/procarray.h"
 #include "storage/spin.h"
@@ -32,6 +41,7 @@
 #include "utils/typcache.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
+#endif							/* FRONTEND */
 
 #if defined __has_include
 #if __has_include ("sanitizer/asan_interface.h")
@@ -166,6 +176,7 @@ typedef enum
 	oIndexExclusion = 6,
 } OIndexType;
 
+#ifndef FRONTEND
 static inline OIndexType
 o_index_rel_get_ix_type(Relation index)
 {
@@ -183,6 +194,7 @@ o_index_rel_get_ix_type(Relation index)
 }
 
 #define PROC_XID_ARRAY_SIZE	32
+#endif							/* FRONTEND */
 
 typedef enum
 {
@@ -210,6 +222,7 @@ typedef enum
 #define GET_PAGE_LEVEL_UNDO_TYPE(undoType) \
 	(((undoType) == UndoLogRegular) ? UndoLogRegularPageLevel : (undoType))
 
+#ifndef FRONTEND
 typedef struct
 {
 	OXid		oxid;
@@ -243,6 +256,7 @@ typedef struct
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;
+#endif							/* FRONTEND */
 
 typedef struct
 {
@@ -251,6 +265,7 @@ typedef struct
 	Oid			relnode;
 } ORelOids;
 
+#ifndef FRONTEND
 typedef uint64 S3TaskLocation;
 
 typedef RelFileLocator RelFileNode;
@@ -267,6 +282,7 @@ typedef RelFileLocator RelFileNode;
 #define IndexStmtGetOldNode(stmt) ((stmt)->oldNumber)
 #define RelationSetNewRelfilenode(relation, persistence) \
 		RelationSetNewRelfilenumber(relation, persistence)
+#endif							/* FRONTEND */
 
 #define ORelOidsIsValid(oids) (OidIsValid((oids).datoid) && OidIsValid((oids).reloid) && OidIsValid((oids).relnode))
 #define ORelOidsIsEqual(l, r) ((l).datoid == (r).datoid && (l).reloid == (r).reloid && (l).relnode == (r).relnode)
@@ -404,6 +420,7 @@ typedef struct
 } OrioleDBPageDesc;
 
 /* orioledb.c */
+#ifndef FRONTEND
 extern Size orioledb_buffers_size;
 extern Size orioledb_buffers_count;
 extern Size undo_circular_buffer_size;
@@ -472,12 +489,14 @@ extern uint32 max_read_page_checkpoint;
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
 extern void orioledb_check_shmem(void);
+#endif							/* FRONTEND */
 
 typedef int OCompress;
 #define O_COMPRESS_DEFAULT (10)
 #define InvalidOCompress (-1)
 #define OCompressIsValid(compress) ((compress) != InvalidOCompress)
 
+#ifndef FRONTEND
 typedef struct ORelOptions
 {
 	StdRdOptions std_options;
@@ -542,5 +561,6 @@ extern void o_drop_table(ORelOids oids);
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;
+#endif							/* FRONTEND */
 
 #endif							/* __ORIOLEDB_H__ */

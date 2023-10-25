@@ -1289,7 +1289,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	enable_stopevents = old_enable_stopevents;
 
 	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
-	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);
+	o_indices_foreach_oids(checkpoint_tables_callback, &o_non_deleted_snapshot, &chkp_tbl_arg);
 
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
@@ -1520,6 +1520,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	if (remove_old_checkpoint_files)
 		unlink_xids_file(prev_chkp_num);
+
+	unlink(ORIOLEDB_DATA_DIR "/rewind");
 
 	CheckPointProgress = o_checkpoint_completion_ratio;
 

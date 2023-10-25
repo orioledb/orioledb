@@ -14,6 +14,8 @@
 #ifndef __BTREE_PAGE_CONTENTS_H__
 #define __BTREE_PAGE_CONTENTS_H__
 
+#include "btree/btree.h"
+#ifndef FRONTEND
 #include "btree/page_state.h"
 #include "s3/queue.h"
 
@@ -68,6 +70,7 @@ StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,
 
 #define BTREE_GET_META(desc) \
 	((BTreeMetaPage *) O_GET_IN_MEMORY_PAGE((desc)->rootInfo.metaPageBlkno))
+#endif							/* FRONTEND */
 
 typedef struct
 {
@@ -343,6 +346,7 @@ typedef struct
 	int			len;
 } OFixedShmemKey;
 
+#ifndef FRONTEND
 typedef enum ReadPageResult
 {
 	ReadPageResultOK,
@@ -452,5 +456,6 @@ typedef struct
 } OPageWaiterShmemState;
 
 extern OPageWaiterShmemState *lockerStates;
+#endif							/* FRONTEND */
 
 #endif							/* __BTREE_PAGE_CONTENTS_H__ */

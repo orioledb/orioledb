@@ -514,9 +514,8 @@ o_sys_cache_search(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 }
 
 static TupleFetchCallbackResult
-o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid,
-								OSnapshot *oSnapshot, void *arg,
-								bool oxidIsFinished)
+o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+								bool deleted, void *arg, bool oxidIsFinished)
 {
 	OSysCacheToastChunkKey *tuple_key = (OSysCacheToastChunkKey *) tuple.data;
 	XLogRecPtr *cur_lsn = (XLogRecPtr *) arg;

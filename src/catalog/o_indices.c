@@ -156,7 +156,7 @@ oIndicesGetTupleDataSize(OTuple tuple, void *arg)
 
 static TupleFetchCallbackResult
 oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					  void *arg, bool oxidIsFinished)
+					  bool deleted, void *arg, bool oxidIsFinished)
 {
 	OIndexChunkKey *tupleKey = (OIndexChunkKey *) tuple.data;
 	OIndexChunkBoundKey *boundKey = (OIndexChunkBoundKey *) arg;
@@ -1502,7 +1502,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 OIndex *
-o_indices_get(ORelOids oids, OIndexType type)
+o_indices_get_with_snapshot(ORelOids oids, OIndexType type, OSnapshot *oSnapshot)
 {
 	return o_indices_get_extended(oids, type, default_table_fetch_context);
 }
@@ -1572,6 +1572,12 @@ o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx)
 
 		pg_usleep(Min(O_DESERIALIZE_RETRY_MIN_DURATION << retry, O_DESERIALIZE_RETRY_MAX_DURATION));
 	}
+}
+
+OIndex *
+o_indices_get(ORelOids oids, OIndexType type)
+{
+	return o_indices_get_with_snapshot(oids, type, &o_non_deleted_snapshot);
 }
 
 bool
@@ -1645,7 +1651,7 @@ o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 }
 
 void
-o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
+o_indices_foreach_oids(OIndexOidsCallback callback, OSnapshot *oSnapshot, void *arg)
 {
 	OIndexChunkKey chunkKey;
 	ORelOids	oids = {0, 0, 0},
@@ -1666,7 +1672,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	 */
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
-								 &o_non_deleted_snapshot, ForwardScanDirection);
+								 oSnapshot, ForwardScanDirection);
 
 	tuple = o_btree_iterator_fetch(it, NULL, NULL,
 								   BTreeKeyNone, false, NULL);
@@ -1700,7 +1706,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		chunkKey.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
-									 &o_non_deleted_snapshot, ForwardScanDirection);
+									 oSnapshot, ForwardScanDirection);
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
@@ -1774,6 +1780,8 @@ orioledb_index_oids(PG_FUNCTION_ARGS)
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
 
 	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -1789,7 +1797,8 @@ orioledb_index_oids(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
-	o_indices_foreach_oids(o_index_oids_array_callback, rsinfo);
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	o_indices_foreach_oids(o_index_oids_array_callback, &oSnapshot, rsinfo);
 
 	return (Datum) 0;
 }
