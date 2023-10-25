@@ -14,6 +14,8 @@
 #ifndef __OXID_H__
 #define __OXID_H__
 
+#ifndef FRONTEND
+
 #include "storage/lmgr.h"
 
 typedef struct
@@ -62,6 +64,7 @@ typedef struct
 								 * allocated when heap xid has been already
 								 * set */
 } LogicalXidCtx;
+#endif							/* FRONTEND */
 
 typedef struct OSnapshot
 {
@@ -71,6 +74,7 @@ typedef struct OSnapshot
 	CommandId	cid;
 } OSnapshot;
 
+#ifndef FRONTEND
 /*
  * OTableFetchContext
  *
@@ -100,6 +104,8 @@ build_fetch_context(OSnapshot *snapshot, uint32 version)
 }
 
 extern OSnapshot o_in_progress_snapshot;
+#endif							/* FRONTEND */
+
 extern OSnapshot o_non_deleted_snapshot;
 
 /*
@@ -117,6 +123,7 @@ typedef enum OSerializableMode
 
 extern int	orioledb_serializable_mode;
 
+#ifndef FRONTEND
 static inline void
 o_check_isolation_level(void)
 {
@@ -237,5 +244,6 @@ extern bool xid_is_finished_for_everybody(OXid xid);
 extern void fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info);
 extern void clear_rewind_oxid(OXid oxid);
 extern bool csn_is_retained_for_rewind(CommitSeqNo csn);
+#endif							/* FRONTEND */
 
 #endif							/* __OXID_H__ */

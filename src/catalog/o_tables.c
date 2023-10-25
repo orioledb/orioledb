@@ -223,7 +223,7 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 
 static TupleFetchCallbackResult
 oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					 void *arg, bool oxidIsFinished)
+					 bool deleted, void *arg, bool oxidIsFinished)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkBoundKey *boundKey = (OTableChunkBoundKey *) arg;

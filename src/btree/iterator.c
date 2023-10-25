@@ -354,7 +354,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			 */
 			OXid		tupOxid = XACT_INFO_GET_OXID(xactInfo);
 
-			cbResult = cb(curTuple, tupOxid, oSnapshot, arg, txIsFinished);
+			cbResult = cb(curTuple, tupOxid, oSnapshot,
+						  tupHdr.deleted, arg, txIsFinished);
 
 			if (cbResult == OTupleFetchMatch)
 				break;
