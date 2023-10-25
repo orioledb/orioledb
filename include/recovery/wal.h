@@ -14,6 +14,9 @@
 #ifndef __WAL_H__
 #define __WAL_H__
 
+#include "btree/btree.h"
+#include "storage/itemptr.h"
+
 #define WAL_REC_NONE           (0)
 
 #define WAL_CONTAINER_HAS_XACT_INFO		(1U << 0)
@@ -100,6 +103,7 @@ typedef struct
 	uint8		logicalXid[sizeof(TransactionId)];
 	/* Since ORIOLEDB_WAL_VERSION = 17 */
 	uint8		heapXid[sizeof(TransactionId)];
+	uint8		trx_start[sizeof(XLogRecPtr)];
 } WALRecXid;
 
 typedef struct
@@ -263,7 +267,8 @@ typedef struct
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
-
+#ifndef FRONTEND
+extern const char *wal_record_type_to_string(int wal_record);
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, uint32 length, char relreplident, uint32 version, uint32 base_version);
@@ -299,5 +304,6 @@ extern void add_cic_phase_wal_record(uint8 recType,
 									 uint32 indexVersion);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
+#endif							/* FRONTEND */
 
 #endif							/* __WAL_H__ */

@@ -41,6 +41,7 @@ typedef struct
 } LocalWal;
 
 static LocalWal local_wal;
+static XLogRecPtr cur_trx_start = InvalidXLogRecPtr;
 
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin,
@@ -70,6 +71,8 @@ static inline void add_local_modify_header(uint8 record_type, OTuple record1,
 										   uint32 length2);
 
 #define XID_RESERVED_LENGTH ((local_wal.contains_xid) ? 0 : sizeof(WALRecXid))
+
+PG_FUNCTION_INFO_V1(orioledb_flush_local_wal);
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
@@ -151,6 +154,8 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 	flush_local_wal_if_needed(required_length);
 	Assert(local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	if (XLogRecPtrIsInvalid(cur_trx_start))
+		cur_trx_start = GetXLogInsertRecPtr();
 
 	add_xid_wal_record_if_needed();
 
@@ -326,6 +331,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 		local_wal.buffer_offset = 0;
 		local_wal.ix_type = oIndexInvalid;
 		ORelOidsSetInvalid(local_wal.oids);
+		cur_trx_start = InvalidXLogRecPtr;
 		return InvalidXLogRecPtr;
 	}
 
@@ -339,6 +345,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
+	cur_trx_start = InvalidXLogRecPtr;
 
 	return walPos;
 }
@@ -387,6 +394,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 		local_wal.buffer_offset = 0;
 		local_wal.ix_type = oIndexInvalid;
 		ORelOidsSetInvalid(local_wal.oids);
+		cur_trx_start = InvalidXLogRecPtr;
 		return;
 	}
 
@@ -401,6 +409,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 						  pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false, !isAutonomous);
 	local_wal.has_material_changes = false;
+	cur_trx_start = InvalidXLogRecPtr;
 
 	elog(DEBUG4, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
 		 oxid, logicalXid);
@@ -533,6 +542,7 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 	memcpy(rec->heapXid, &heapXid, sizeof(TransactionId));
+	memcpy(rec->trx_start, &cur_trx_start, sizeof(XLogRecPtr));
 
 	local_wal.buffer_offset += sizeof(*rec);
 }
@@ -1196,4 +1206,15 @@ void
 set_local_wal_has_material_changes(bool value)
 {
 	local_wal.has_material_changes = value;
+}
+
+/* TODO: Remove, because it is certainly a hack */
+Datum
+orioledb_flush_local_wal(PG_FUNCTION_ARGS)
+{
+	XLogRecPtr	pos;
+
+	pos = flush_local_wal(false, false);
+	XLogFlush(pos);
+	PG_RETURN_VOID();
 }
