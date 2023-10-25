@@ -689,6 +689,32 @@ RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
 							  'nue');
 
+create table o_rebuild_unique_with_new_pkey_fields (
+	id int4,
+	project_id int,
+	ts timestamp,
+	filler text
+) USING orioledb;
+
+INSERT INTO o_rebuild_unique_with_new_pkey_fields
+	VALUES (113472, 9540, '2023-10-25 00:31:36.218459',
+			'c70acc4d23e04fc6e5fa1adbbdd83184'),
+		   (119566, 9540, '2023-10-25 00:31:37.118818',
+			'd757d377da7a0b20a7d0d35e037185e1'),
+		   (38911, 9540, '2023-10-25 00:31:24.844509',
+			'e70acc4d23e04fc6e5fa1adbbdd83184');
+
+CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_ix1
+	ON o_rebuild_unique_with_new_pkey_fields
+		USING btree (project_id, id, ts, filler);
+CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_ix2
+	ON o_rebuild_unique_with_new_pkey_fields
+		USING btree (project_id, filler);
+SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
+ALTER TABLE o_rebuild_unique_with_new_pkey_fields
+	ADD PRIMARY KEY (project_id, id, ts);
+SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices_build CASCADE;

@@ -254,12 +254,13 @@ tuplesort_begin_orioledb_index(OIndexDescr *idx,
 	TuplesortPublic *base = TuplesortstateGetPublic(state);
 	MemoryContext oldcontext;
 	OIndexBuildSortArg *arg;
-	int			key_fields;
+	int			sort_fields;
 	int			i;
 
-	key_fields = idx->nFields;
-	if (idx->unique && ((key_fields - idx->nPrimaryFields) > 0))
-		key_fields -= idx->nPrimaryFields;
+	if (idx->unique)
+		sort_fields = idx->nKeyFields;
+	else
+		sort_fields = idx->nFields;
 
 	oldcontext = MemoryContextSwitchTo(base->maincontext);
 	arg = (OIndexBuildSortArg *) palloc0(sizeof(OIndexBuildSortArg));
@@ -267,8 +268,9 @@ tuplesort_begin_orioledb_index(OIndexDescr *idx,
 	arg->tupDesc = idx->leafTupdesc;
 	arg->enforceUnique = idx->unique;
 
-	base->sortKeys = (SortSupport) palloc0(key_fields * sizeof(SortSupportData));
-	base->nKeys = key_fields;
+	base->sortKeys = (SortSupport) palloc0(sort_fields *
+										   sizeof(SortSupportData));
+	base->nKeys = sort_fields;
 
 	base->removeabbrev = removeabbrev_orioledb_index;
 	base->comparetup = comparetup_orioledb_index;
@@ -276,7 +278,7 @@ tuplesort_begin_orioledb_index(OIndexDescr *idx,
 	base->readtup = readtup_orioledb_index;
 	base->arg = arg;
 
-	for (i = 0; i < key_fields; i++)
+	for (i = 0; i < sort_fields; i++)
 	{
 		if (!OIgnoreColumn(idx, i))
 		{

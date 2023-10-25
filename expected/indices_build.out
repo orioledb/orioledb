@@ -24397,6 +24397,67 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
  
 (1 row)
 
+create table o_rebuild_unique_with_new_pkey_fields (
+	id int4,
+	project_id int,
+	ts timestamp,
+	filler text
+) USING orioledb;
+INSERT INTO o_rebuild_unique_with_new_pkey_fields
+	VALUES (113472, 9540, '2023-10-25 00:31:36.218459',
+			'c70acc4d23e04fc6e5fa1adbbdd83184'),
+		   (119566, 9540, '2023-10-25 00:31:37.118818',
+			'd757d377da7a0b20a7d0d35e037185e1'),
+		   (38911, 9540, '2023-10-25 00:31:24.844509',
+			'e70acc4d23e04fc6e5fa1adbbdd83184');
+CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_ix1
+	ON o_rebuild_unique_with_new_pkey_fields
+		USING btree (project_id, id, ts, filler);
+CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_ix2
+	ON o_rebuild_unique_with_new_pkey_fields
+		USING btree (project_id, filler);
+SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
+                    orioledb_tbl_indices                     
+-------------------------------------------------------------
+ Index ctid_primary                                         +
+     Index type: primary, unique, ctid                      +
+     Leaf tuple size: 5, non-leaf tuple size: 1             +
+     Non-leaf tuple fields: ctid                            +
+ Index o_rebuild_unique_with_new_pkey_fields_ix1            +
+     Index type: secondary, unique                          +
+     Leaf tuple size: 5, non-leaf tuple size: 5             +
+     Non-leaf tuple fields: project_id, id, ts, filler, ctid+
+     Leaf tuple fields: project_id, id, ts, filler, ctid    +
+ Index o_rebuild_unique_with_new_pkey_fields_ix2            +
+     Index type: secondary, unique                          +
+     Leaf tuple size: 3, non-leaf tuple size: 3             +
+     Non-leaf tuple fields: project_id, filler, ctid        +
+     Leaf tuple fields: project_id, filler, ctid            +
+ 
+(1 row)
+
+ALTER TABLE o_rebuild_unique_with_new_pkey_fields
+	ADD PRIMARY KEY (project_id, id, ts);
+SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
+                 orioledb_tbl_indices                  
+-------------------------------------------------------
+ Index o_rebuild_unique_with_new_pkey_fields_pkey     +
+     Index type: primary, unique                      +
+     Leaf tuple size: 4, non-leaf tuple size: 3       +
+     Non-leaf tuple fields: project_id, id, ts        +
+ Index o_rebuild_unique_with_new_pkey_fields_ix1      +
+     Index type: secondary, unique                    +
+     Leaf tuple size: 4, non-leaf tuple size: 4       +
+     Non-leaf tuple fields: project_id, id, ts, filler+
+     Leaf tuple fields: project_id, id, ts, filler    +
+ Index o_rebuild_unique_with_new_pkey_fields_ix2      +
+     Index type: secondary, unique                    +
+     Leaf tuple size: 4, non-leaf tuple size: 4       +
+     Non-leaf tuple fields: project_id, filler, id, ts+
+     Leaf tuple fields: project_id, filler, id, ts    +
+ 
+(1 row)
+
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -24404,7 +24465,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 19 other objects
+NOTICE:  drop cascades to 20 other objects
 DETAIL:  drop cascades to table o_indices0
 drop cascades to table o_indices1
 drop cascades to table o_indices2
@@ -24424,6 +24485,7 @@ drop cascades to table o_test_pkey_mixed_build
 drop cascades to table o_test_pkey_include_box_build
 drop cascades to table o_test_include_box_build
 drop cascades to table o_test_include_box_with_pkey_build
+drop cascades to table o_rebuild_unique_with_new_pkey_fields
 DROP SCHEMA indices_build CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function generate_string(integer,integer)
