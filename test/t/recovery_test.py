@@ -2390,3 +2390,36 @@ class RecoveryWithArchivingTest(BaseTest):
 
 			self.assertTrue(replica.execute("SELECT count(*) from tab_int"),
 			                1000)
+
+	def test_recovery_replacing_deleted_tuples_with_larger_one(self):
+		with self.node as master:
+			master.start()
+			master.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE test_text (
+					x text NOT NULL PRIMARY KEY,
+					y text
+				) USING orioledb;
+				INSERT INTO test_text (x, y)
+					SELECT id, id FROM generate_series(1, 5) id;
+			""")
+
+			master.safe_psql("""
+				DELETE FROM test_text WHERE x = '1';
+			""")
+			master.safe_psql("""
+				INSERT INTO test_text (x, y) VALUES
+					('1', '100001');
+			""")
+			master.safe_psql("""
+				DELETE FROM test_text WHERE x = '1';
+			""")
+			master.safe_psql("""
+				INSERT INTO test_text (x, y) VALUES ('1', '100000000000000001');
+			""")
+
+			master.stop(["-m", 'immediate'])
+			master.start()
+			self.assertEqual(master.execute("SELECT * FROM test_text"),
+			                 [('1', '100000000000000001'), ('2', '2'),
+			                  ('3', '3'), ('4', '4'), ('5', '5')])

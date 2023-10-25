@@ -14,10 +14,12 @@
 #ifndef __SYS_TREES_H__
 #define __SYS_TREES_H__
 
+#ifndef FRONTEND
 #include "btree/btree.h"
 #include "btree/print.h"
 
 #include "utils/catcache.h"
+#endif							/* FRONTEND */
 
 #define SYS_TREES_DATOID				(1)
 
@@ -62,6 +64,7 @@
 
 #define O_OPCLASS_PROSRC_MAXLEN 512
 
+#ifndef FRONTEND
 typedef struct
 {
 	Oid			datoid;
@@ -74,6 +77,7 @@ typedef struct
 	BTreeRootInfo rootInfo;
 	bool		placeholder;
 } SharedRootInfo;
+#endif							/* FRONTEND */
 
 #define O_TABLE_INVALID_VERSION UINT32_MAX
 
@@ -140,6 +144,7 @@ typedef struct
 	Oid			relnode;
 } FreeTreeTuple;
 
+#ifndef FRONTEND
 typedef struct
 {
 	SharedRootInfoKey key;
@@ -165,6 +170,7 @@ extern void sys_tree_set_extra(int tree_num, Pointer extra);
 extern Pointer sys_tree_get_extra(int tree_num);
 #ifdef IS_DEV
 extern const text *inspect_sys_tree_structure(int systree, int depth);
-#endif
+#endif							/* IS_DEV */
+#endif							/* FRONTEND */
 
 #endif							/* __SYS_TREES_H__ */

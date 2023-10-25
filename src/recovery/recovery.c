@@ -332,18 +332,12 @@ static bool replay_container(Pointer ptr, Pointer endPtr,
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
 							   OTuple tuple, int tuple_len);
-static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
-									 bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
-static void workers_synchronize(XLogRecPtr csn, bool send_synchronize);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
-static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
-												OTuple tup,
-												OXid oxid, CommitSeqNo csn);
 static inline void spread_idx_modify(BTreeDescr *desc,
 									 RecoveryMsgType recType,
 									 OTuple rec);
@@ -748,6 +742,7 @@ o_recovery_start_hook(void)
 
 	if (checkpoint_state->lastCheckpointNumber > 0)
 		apply_xids_branches();
+	replay_rewind(checkpoint_state->lastCheckpointNumber, recovery_single);
 }
 
 void
@@ -4112,7 +4107,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 /*
  * Sends commit or rollback message to workers with active the oxid in the pool.
  */
-static void
+void
 workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 {
 	RecoveryWorkerState *state;
@@ -4165,7 +4160,7 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
  * used by workers and synchronize only with needed workers. But we assume that
  * it does not happen too often and we can use this simple solution.
  */
-static void
+void
 workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 {
 	int			i;
@@ -4257,14 +4252,14 @@ worker_queue_flush(int worker_id)
  * Worker can not fetch table description because another worker does not
  * commit transaction yet.
  */
-static bool
-apply_sys_tree_modify_record(int sys_tree_num, uint16 type, OTuple tup,
+bool
+apply_sys_tree_modify_record(int sys_tree_num, RecoveryMsgType recType, OTuple tup,
 							 OXid oxid, CommitSeqNo csn)
 {
 	bool		result;
 
 	result = apply_btree_modify_record(get_sys_tree(sys_tree_num),
-									   type, tup, oxid, csn);
+									   recType, tup, oxid, csn);
 
 	return result;
 }

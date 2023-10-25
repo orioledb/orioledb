@@ -156,7 +156,7 @@ oIndicesGetTupleDataSize(OTuple tuple, void *arg)
 
 static TupleFetchCallbackResult
 oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					  void *arg, bool oxidIsFinished)
+					  bool deleted, void *arg, bool oxidIsFinished)
 {
 	OIndexChunkKey *tupleKey = (OIndexChunkKey *) tuple.data;
 	OIndexChunkBoundKey *boundKey = (OIndexChunkBoundKey *) arg;

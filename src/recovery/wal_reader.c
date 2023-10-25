@@ -18,6 +18,9 @@
  *
  *-------------------------------------------------------------------------
  */
+#ifdef FRONTEND
+#include "postgres_fe.h"
+#endif							/* FRONTEND */
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -26,6 +29,18 @@
 #include "catalog/sys_trees.h"
 #include "recovery/wal_reader.h"
 #include "recovery/wal.h"
+#include "transam/oxid.h"
+
+#include "access/transam.h"
+#include "catalog/pg_class.h"
+#ifndef FRONTEND
+#define pg_log_debug(...) elog(DEBUG4, __VA_ARGS__)
+#define pg_log_info(...) elog(LOG, __VA_ARGS__)
+#define pg_log_warning(...) elog(WARNING, __VA_ARGS__)
+#define pg_fatal(...) elog(FATAL, __VA_ARGS__)
+#else
+#include "common/logging.h"
+#endif
 
 /* Parsers */
 static WalParseResult wal_parse_empty(WalReaderState *r, WalRecord *rec);
@@ -79,6 +94,8 @@ wal_parse_rec_xid(WalReaderState *r, WalRecord *rec)
 	{
 		rec->heapXid = InvalidTransactionId;
 	}
+	/* TODO: Increase wal version variable */
+	WR_PARSE(r, &rec->u.xid.trx_start);
 	return WALPARSE_OK;
 }
 
@@ -407,12 +424,12 @@ wal_container_read_header(WalReaderState *r, bool allow_logging)
 #ifdef IS_DEV
 		/* Always fail tests on difference */
 		if (allow_logging)
-			elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
+			pg_fatal("Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
 
 		return WALPARSE_BAD_VERSION;
 #else
 		if (allow_logging)
-			elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
+			pg_log_warning("Can't apply WAL container version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
 
 		/* Further fail and output is caller-specific */
 #endif
@@ -422,12 +439,12 @@ wal_container_read_header(WalReaderState *r, bool allow_logging)
 #ifdef IS_DEV
 		/* Always fail tests on difference */
 		if (allow_logging)
-			elog(FATAL, "WAL container version %u is older than current %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
+			pg_fatal("WAL container version %u is older than current %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
 
 		return WALPARSE_BAD_VERSION;
 #else
 		if (allow_logging)
-			elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, ORIOLEDB_WAL_VERSION);
+			pg_log_info("WAL container version %u is older than current %u. Applying with conversion.", wal_version, ORIOLEDB_WAL_VERSION);
 #endif
 	}
 
@@ -594,7 +611,7 @@ wal_parse_container(WalReaderState *r, bool allow_logging)
 		rec.data = r->ptr;
 
 		if (allow_logging)
-			elog(DEBUG4, "[%s] WAL RECORD TYPE %u(`%s`)", __func__, rec.type, wal_type_name(rec.type));
+			pg_log_debug("[%s] WAL RECORD TYPE %u(`%s`)", __func__, rec.type, wal_type_name(rec.type));
 
 		/*
 		 * Parse record payload (if any).
@@ -618,9 +635,9 @@ wal_parse_container(WalReaderState *r, bool allow_logging)
 			default:
 				/* Unknown record type. */
 				if (allow_logging)
-					elog(LOG, "[%s] UNKNOWN WAL RECORD TYPE %u: chunk/tail len %ld/%ld",
-						 __func__, rec.type,
-						 r->end - r->start, r->end - r->ptr);
+					pg_log_info("[%s] UNKNOWN WAL RECORD TYPE %u: chunk/tail len %ld/%ld",
+								__func__, rec.type,
+								r->end - r->start, r->end - r->ptr);
 				return WALPARSE_BAD_TYPE;
 		}
 

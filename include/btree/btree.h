@@ -14,6 +14,7 @@
 #ifndef __BTREE_H__
 #define __BTREE_H__
 
+#ifndef FRONTEND
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/seq_buf.h"
@@ -29,6 +30,7 @@
 typedef struct BTreeDescr BTreeDescr;
 typedef struct BTreeIterator BTreeIterator;
 typedef struct CheckpointFileHeader CheckpointFileHeader;
+#endif							/* FRONTEND */
 
 typedef uint16 OIndexNumber;
 typedef uint64 OTupleXactInfo;
@@ -38,6 +40,7 @@ typedef uint64 OTupleXactInfo;
 #define TOASTIndexNumber (0xFFFE)
 #define InvalidIndexNumber (0xFFFF)
 
+#ifndef FRONTEND
 typedef enum BTreeKeyType
 {
 	BTreeKeyLeafTuple,
@@ -66,6 +69,7 @@ typedef struct
 	uint32		rootPageChangeCount;
 	OInMemoryBlkno metaPageBlkno;
 } BTreeRootInfo;
+#endif							/* FRONTEND */
 
 typedef enum
 {
@@ -108,6 +112,7 @@ typedef struct
         (tup).formatFlags = 0; \
     } while (false)
 
+#ifndef FRONTEND
 typedef union
 {
 	struct
@@ -285,10 +290,11 @@ o_btree_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 {
 	return desc->ops->cmp(desc, p1, k1, p2, k2);
 }
-
+#endif							/* FRONTEND */
 
 typedef struct BTreePageItemLocator BTreePageItemLocator;
 
+#ifndef FRONTEND
 typedef struct
 {
 	OInMemoryBlkno blkno;
@@ -407,12 +413,16 @@ typedef enum RowLockMode
 	(AssertMacro(((lockmode) & (XACT_INFO_LOCK_MODE_MASK >> XACT_INFO_LOCK_MODE_SHIFT)) == (lockmode)), \
 	 (OTupleXactInfo)(oxid) | ((OTupleXactInfo) (lockmode) << XACT_INFO_LOCK_MODE_SHIFT) | \
 	 ((lockonly) ? XACT_INFO_LOCK_ONLY_BIT : 0))
+#endif							/* FRONTEND */
 
 /* btree/btree.c */
+#ifndef FRONTEND
 extern LWLockPadded *unique_locks;
 extern int	num_unique_locks;
+#endif							/* FRONTEND */
 typedef struct ItemPointerData ItemPointerData;
 
+#ifndef FRONTEND
 extern void o_btree_check_size_of_tuple(int len, char *relation_name, bool index);
 extern void o_btree_init_unique_lwlocks(void);
 extern void o_btree_init(BTreeDescr *descr);
@@ -428,5 +438,6 @@ extern void btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
 extern Jsonb *btree_page_stopevent_params(BTreeDescr *desc, Page p);
 extern Jsonb *btree_downlink_stopevent_params(BTreeDescr *desc, Page p,
 											  BTreePageItemLocator *loc);
+#endif							/* FRONTEND */
 
 #endif							/* __BTREE_H__ */
