@@ -17,6 +17,8 @@
 
 #include "orioledb.h"
 
+#include "btree/btree.h"
+
 #include "postmaster/bgworker.h"
 
 /*
@@ -31,6 +33,10 @@ extern void recovery_rollback_to_savepoint(SubTransactionId parentSubid, int wor
 extern void recovery_finish(int worker_id);
 extern void update_recovery_undo_loc_flush(bool single, int worker_id);
 extern void recovery_on_proc_exit(int code, Datum arg);
+extern void workers_send_oxid_finish(XLogRecPtr ptr, bool commit);
+extern void workers_synchronize(XLogRecPtr csn, bool send_synchronize);
+
+extern void replay_rewind(uint32 chkp_num, bool single);
 
 extern Pointer recovery_first_queue;
 extern uint64 recovery_queue_data_size;
@@ -164,6 +170,9 @@ PGDLLEXPORT void recovery_worker_main(Datum main_arg);
  */
 extern void apply_modify_record(OTableDescr *descr, OIndexDescr *id,
 								uint16 type, OTuple p);
+extern bool apply_sys_tree_modify_record(int sys_tree_num, RecoveryMsgType type,
+										 OTuple tup, OXid oxid,
+										 CommitSeqNo csn);
 extern bool apply_btree_modify_record(BTreeDescr *tree,
 									  RecoveryMsgType type,
 									  OTuple ptr, OXid oxid, CommitSeqNo csn);
@@ -193,6 +202,7 @@ extern OBTreeModifyCallbackAction recovery_delete_overwrite_callback(BTreeDescr 
 																	 UndoLocation location, RowLockMode *lock_mode,
 																	 BTreeLocationHint *hint,
 																	 void *arg);
+extern ORelOids *o_indices_get_oids(Pointer tuple, ORelOids *tableOids);
 
 extern OBTreeModifyCallbackAction recovery_insert_deleted_primary_callback(BTreeDescr *descr,
 																		   OTuple tup, OTuple *newtup,

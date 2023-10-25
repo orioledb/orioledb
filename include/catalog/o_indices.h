@@ -77,12 +77,15 @@ extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
 extern bool o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
+extern OIndex *o_indices_get_with_snapshot(ORelOids oids, OIndexType type,
+										   OSnapshot *oSnapshot);
 extern OIndex *o_indices_get(ORelOids oids, OIndexType type);
 extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);
-extern void o_indices_foreach_oids(OIndexOidsCallback callback, void *arg);
+extern void o_indices_foreach_oids(OIndexOidsCallback callback,
+								   CommitSeqNo csn, void *arg);
 
 #endif

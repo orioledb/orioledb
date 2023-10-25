@@ -932,7 +932,6 @@ o_table_chunk_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 
 	appendStringInfo(buf, "(((%u, %u, %u), %u, %u), %u)",
 					 chunk->key.oids.datoid,
-					 chunk->key.oids.relnode,
 					 chunk->key.oids.reloid,
 					 chunk->key.chunknum,
 					 chunk->key.version,
@@ -1033,7 +1032,6 @@ o_index_chunk_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 	appendStringInfo(buf, "((%d, (%u, %u, %u), %u), %u)",
 					 (int) chunk->key.type,
 					 chunk->key.oids.datoid,
-					 chunk->key.oids.relnode,
 					 chunk->key.oids.reloid,
 					 chunk->key.chunknum,
 					 chunk->dataLength);

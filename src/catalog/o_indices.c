@@ -1094,7 +1094,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 OIndex *
-o_indices_get(ORelOids oids, OIndexType type)
+o_indices_get_with_snapshot(ORelOids oids, OIndexType type, OSnapshot *oSnapshot)
 {
 	OIndexChunkKey key;
 	Size		dataLength;
@@ -1106,7 +1106,7 @@ o_indices_get(ORelOids oids, OIndexType type)
 	key.chunknum = 0;
 
 	result = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key,
-								   &dataLength, &o_non_deleted_snapshot,
+								   &dataLength, oSnapshot,
 								   get_sys_tree(SYS_TREES_O_INDICES));
 
 	if (result == NULL)
@@ -1116,6 +1116,12 @@ o_indices_get(ORelOids oids, OIndexType type)
 	pfree(result);
 
 	return oIndex;
+}
+
+OIndex *
+o_indices_get(ORelOids oids, OIndexType type)
+{
+	return o_indices_get_with_snapshot(oids, type, &o_non_deleted_snapshot);
 }
 
 bool
@@ -1171,7 +1177,7 @@ o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 }
 
 void
-o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
+o_indices_foreach_oids(OIndexOidsCallback callback, OSnapshot *oSnapshot, void *arg)
 {
 	OIndexChunkKey chunkKey;
 	ORelOids	oids = {0, 0, 0},
@@ -1186,7 +1192,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	chunkKey.chunknum = 0;
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
-								 &o_non_deleted_snapshot, ForwardScanDirection);
+								 oSnapshot, ForwardScanDirection);
 
 	tuple = o_btree_iterator_fetch(it, NULL, NULL,
 								   BTreeKeyNone, false, NULL);
@@ -1218,7 +1224,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		chunkKey.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
-									 &o_non_deleted_snapshot, ForwardScanDirection);
+									 oSnapshot, ForwardScanDirection);
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
@@ -1287,6 +1293,8 @@ orioledb_index_oids(PG_FUNCTION_ARGS)
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
 
 	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -1302,7 +1310,8 @@ orioledb_index_oids(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
-	o_indices_foreach_oids(o_index_oids_array_callback, rsinfo);
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	o_indices_foreach_oids(o_index_oids_array_callback, &oSnapshot, rsinfo);
 
 	return (Datum) 0;
 }
@@ -1323,8 +1332,11 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 				max_collation_str;
 	Datum		values[2];
 	bool		isnull[2] = {false};
+	OXid		oxid;
+	OSnapshot	oSnapshot;
 
-	index = o_indices_get(oids, type);
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	index = o_indices_get_with_snapshot(oids, type, &oSnapshot);
 	if (index == NULL)
 		elog(ERROR, "unable to find orioledb index description.");
 

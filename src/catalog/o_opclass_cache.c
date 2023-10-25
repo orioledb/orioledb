@@ -136,14 +136,9 @@ o_opclass_cache_add_table(OTable *o_table)
 	/*
 	 * Inserts opclasses for TOAST index.
 	 */
-	o_opclass_cache_add_if_needed(datoid,
-								  GetDefaultOpClass(INT2OID, BTREE_AM_OID),
-								  cur_lsn, NULL);
+
 	add_btree_opclass(datoid, GetDefaultOpClass(INT2OID, BTREE_AM_OID),
 					  cur_lsn);
-	o_opclass_cache_add_if_needed(datoid,
-								  GetDefaultOpClass(INT4OID, BTREE_AM_OID),
-								  cur_lsn, NULL);
 	add_btree_opclass(datoid, GetDefaultOpClass(INT4OID, BTREE_AM_OID),
 					  cur_lsn);
 
@@ -152,9 +147,6 @@ o_opclass_cache_add_table(OTable *o_table)
 	 */
 	if (o_table->nindices == 0 || o_table->indices[0].type == oIndexRegular)
 	{
-		o_opclass_cache_add_if_needed(datoid,
-									  GetDefaultOpClass(TIDOID, BTREE_AM_OID),
-									  cur_lsn, NULL);
 		add_btree_opclass(datoid, GetDefaultOpClass(TIDOID, BTREE_AM_OID),
 						  cur_lsn);
 	}
@@ -166,9 +158,6 @@ o_opclass_cache_add_table(OTable *o_table)
 
 		for (cur_field = 0; cur_field < index->nkeyfields; cur_field++)
 		{
-			o_opclass_cache_add_if_needed(datoid,
-										  index->fields[cur_field].opclass,
-										  cur_lsn, NULL);
 			add_btree_opclass(datoid, index->fields[cur_field].opclass,
 							  cur_lsn);
 		}

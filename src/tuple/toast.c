@@ -359,7 +359,8 @@ tableGetTupleDataSize(OTuple tuple, void *arg)
 }
 
 static TupleFetchCallbackResult
-tableVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot, void *arg,
+tableVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+					 bool deleted, void *arg,
 					 TupleFetchCallbackCheckType check_type)
 {
 	OToastKey  *key = (OToastKey *) arg;
@@ -376,7 +377,6 @@ tableVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot, void *arg
 	else
 		return OTupleFetchNext;
 }
-
 
 ToastAPI	tableToastAPI = {
 	.getBTreeDesc = tableGetBTreeDesc,
