@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg_version: [13, 14, 15, 16]
+        pg_version: [15, 16]
         compiler: [clang, gcc]
     env:
       LLVM_VER: 12
