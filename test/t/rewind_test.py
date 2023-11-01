@@ -19,21 +19,23 @@ from .base_test import BaseTest, generate_string
 class RewindTest(BaseTest):
 	def pg_rewind(self, target, source_port, verbose=False,
 				  rewind_log_file=None):
-		psql_params = [
+		pg_rewind_params = [
 			get_bin_path("pg_rewind"),
+			# TODO: change to orioledb or orioledb.so
+			"--extensions", "pg_rewind_orioledb.so",
 			"--target-pgdata", target,
 			"--source-server", f"port={source_port} dbname={default_dbname()}"
 		]  # yapf: disable
 
 		if verbose == True:
-			psql_params.extend(["--progress", "--debug"])
+			pg_rewind_params.extend(["--progress", "--debug"])
 
 		if rewind_log_file != None:
 			os.environ["ORIOLEDB_REWIND_LOG"] = str(rewind_log_file)
 
 		# start psql process
 		process = subprocess.Popen(
-			psql_params,
+			pg_rewind_params,
 			stdin=subprocess.PIPE,
 			stdout=subprocess.PIPE,
 			stderr=subprocess.PIPE)
@@ -267,6 +269,7 @@ class RewindTest(BaseTest):
 
 				replica.append_conf(primary_slot_name = 'replica')
 				replica.start()
+
 				master.safe_psql("""
 					INSERT INTO test1 (x, y)
 						SELECT id, 2 FROM generate_series(3, 4) id;
@@ -276,6 +279,7 @@ class RewindTest(BaseTest):
 						SELECT id, 2 FROM generate_series(3, 4) id;
 				""")
 				master.safe_psql("CHECKPOINT")
+
 				self.catchup_orioledb(replica)
 				self.assertEqual(
 					replica.execute("SELECT * FROM test1"),
@@ -288,6 +292,7 @@ class RewindTest(BaseTest):
 					[(1, 1), (2, 1), (3, 2), (4, 2)])
 				replica.promote()
 				replica.safe_psql("CHECKPOINT;")
+
 				master.safe_psql("""
 					INSERT INTO test1 (x, y)
 						SELECT id, 3 FROM generate_series(5, 8) id;
@@ -310,13 +315,11 @@ class RewindTest(BaseTest):
 					UPDATE test2 SET y = 7 WHERE x = 5;
 					UPDATE test3 SET y = 7 WHERE x = 5;
 				""")
-
 				replica.safe_psql("""
 					DELETE FROM test1 WHERE x = 2;
 					DELETE FROM test2 WHERE x = 2;
 					DELETE FROM test3 WHERE x = 2;
 				""")
-
 				self.assertEqual(
 					replica.execute("SELECT * FROM test1 ORDER BY x"),
 					[(1, 1), (3, 2), (4, 2), (5, 7), (6, 4)])
@@ -364,11 +367,13 @@ class RewindTest(BaseTest):
 					"gssencmode": 'disable',
 					"target_session_attrs": 'any'
 				}
+
 				self.pg_rewind_master(master, replica.port,
 									  master_slot, archive_dir)
 				self.assertTrue(os.path.isfile(rewind_file))
 				self.start_master_as_standby(master, replica, primary_conninfo,
 											 master_slot)
+				self.catchup_orioledb(master)
 				self.assertEqual(
 					master.execute("SELECT * FROM test1 ORDER BY x"),
 					[(1, 1), (3, 2), (4, 2), (5, 7), (6, 4)])
@@ -658,28 +663,12 @@ class RewindTest(BaseTest):
 				con1.execute("SELECT orioledb_flush_local_wal()")
 
 				self.catchup_orioledb(replica)
-				print("MASTER BEFORE:", master.safe_psql("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""").decode("utf-8"))
-				print("REPLICA BEFORE:", replica.safe_psql("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""").decode("utf-8"))
 				self.assertEqual(
 					replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 					5)
 
 				con1.commit()
 				self.catchup_orioledb(replica)
-				print("MASTER AFTER:", master.safe_psql("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""").decode("utf-8"))
-				print("REPLICA AFTER:", replica.safe_psql("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""").decode("utf-8"))
 				self.assertEqual(
 					replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 					5)
@@ -742,32 +731,24 @@ class RewindTest(BaseTest):
 				con1.begin()
 				con1.execute("""INSERT INTO test_table (x, y)
 					SELECT id, 3 FROM generate_series(7, 15) id""")
-				# con1.execute("""UPDATE test_table SET y = 4 WHERE x = 9""")
-				# con1.execute("""DELETE FROM test_table WHERE x = 10""")
-				# con1.execute("""SAVEPOINT s1;""")
-				# con1.execute("""UPDATE test_table SET y = 5 WHERE x = 9""")
-				# con1.execute("""SAVEPOINT s2;""")
-				# con1.execute("""INSERT INTO test_table VALUES (10, 5)""")
-				# con1.execute("""UPDATE test_table SET y = 6 WHERE x = 8""")
-				# con1.execute("""SAVEPOINT s3;""")
-				# con1.execute("""UPDATE test_table SET y = 8 WHERE x = 8""")
-				# con1.execute("""DELETE FROM test_table WHERE x = 10""")
-				# con1.execute("""SAVEPOINT s4;""")
-				# con1.execute("""UPDATE test_table SET y = 8 WHERE x = 9""")
+				con1.execute("""UPDATE test_table SET y = 4 WHERE x = 9""")
+				con1.execute("""DELETE FROM test_table WHERE x = 10""")
+				con1.execute("""SAVEPOINT s1;""")
+				con1.execute("""UPDATE test_table SET y = 5 WHERE x = 9""")
+				con1.execute("""SAVEPOINT s2;""")
+				con1.execute("""INSERT INTO test_table VALUES (10, 5)""")
+				con1.execute("""UPDATE test_table SET y = 6 WHERE x = 8""")
+				con1.execute("""SAVEPOINT s3;""")
+				con1.execute("""UPDATE test_table SET y = 8 WHERE x = 8""")
+				con1.execute("""DELETE FROM test_table WHERE x = 10""")
+				con1.execute("""SAVEPOINT s4;""")
+				con1.execute("""UPDATE test_table SET y = 8 WHERE x = 9""")
 				self.pg_rewind_master(master, replica.port,
 									  master_slot, archive_dir)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 											 master_slot)
-				print("BEFORE CATCHUP:", master.execute("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""")[0][0])
-				con1.execute("SELECT orioledb_flush_local_wal()")
+				# con1.execute("SELECT orioledb_flush_local_wal()")
 				con2 = replica.connect()
-				print("con2 BEFORE CATCHUP:", con2.execute("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""")[0][0])
 				master.catchup()
 				synchronized = False
 				sync_con = master.connect()
@@ -776,19 +757,15 @@ class RewindTest(BaseTest):
 						SELECT orioledb_recovery_synchronized();
 					""")[0][0]
 				sync_con.close()
-				# self.catchup_orioledb(master)
+				self.catchup_orioledb(master)
 				self.assertEqual(
 					replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 					5)
-				print(master.execute("""
-					SELECT orioledb_tbl_structure('test_table'::regclass,
-												  'bUCKSivo')
-				""")[0][0])
 				self.assertEqual(
 					master.execute("SELECT COUNT(*) FROM test_table")[0][0],
 					5)
-				# con1.execute("""ROLLBACK TO SAVEPOINT s2;""")
-				# con1.execute("""DELETE FROM test_table WHERE y = 8""")
+				con1.execute("""ROLLBACK TO SAVEPOINT s2;""")
+				con1.execute("""DELETE FROM test_table WHERE y = 8""")
 				con1.commit()
 				con1.close()
 				self.catchup_orioledb(master)
@@ -1138,7 +1115,7 @@ class RewindTest(BaseTest):
 				INSERT INTO test2 (x, y)
 					SELECT id, 230 FROM generate_series(1, 20) id;
 			""")
-			con1.execute("SELECT orioledb_flush_local_wal()")
+			# con1.execute("SELECT orioledb_flush_local_wal()")
 			return {'master': master_changes,
 					'replica': replica_changes}
 
@@ -1291,13 +1268,13 @@ class RewindTest(BaseTest):
 
 			with self.getReplica() as replica:
 				tests: List[self._RewindTest] = [
-					# self._SecondaryIndexRevivalTest(self),
-					# self._PrimaryIndexRevivalTest(self),
-					# self._TableRevivalTest(self),
-					self._RewindSysTreesInProgressTest(self),
-					# self._ReplicaTableDropTest(self),
-					# self._NewTablesOnTargetAfterPromoteTest(self),
-					# self._ToastAfterSysTreeRevivalTest(self)
+					self._SecondaryIndexRevivalTest(self),
+					self._PrimaryIndexRevivalTest(self),
+					self._TableRevivalTest(self),
+					# self._RewindSysTreesInProgressTest(self),
+					self._ReplicaTableDropTest(self),
+					self._NewTablesOnTargetAfterPromoteTest(self),
+					self._ToastAfterSysTreeRevivalTest(self)
 					]
 
 				master.safe_psql("""

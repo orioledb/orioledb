@@ -1455,6 +1455,8 @@ orioledb_table_oids(PG_FUNCTION_ARGS)
 	o_tables_foreach_oids(o_table_oids_array_callback,
 						  &oSnapshot, rsinfo);
 
+	tuplestore_donestoring(tupstore);
+
 	return (Datum) 0;
 }
 

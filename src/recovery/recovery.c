@@ -132,6 +132,17 @@ typedef struct
 	dlist_node	node;
 } CheckpointUndoStack;
 
+typedef struct
+{
+	bool		single;
+	OTableDescr *descr;
+	OIndexDescr *indexDescr;
+	OXid		oxid;
+	ORelOids	cur_oids,
+			   *treeOids;
+	int			sys_tree_num;
+	XLogRecPtr	xlogRecPtr;
+} RecoveryArg;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
@@ -2504,6 +2515,309 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 	cur_state->o_tables_meta_locked = false;
 }
 
+static void
+recovery_record_callback(uint8 rec_type, Pointer ptr, XLogRecPtr xlogPtr,
+						 void *arg)
+{
+	RecoveryArg *rarg = arg;
+
+	switch (rec_type)
+	{
+		case WAL_REC_XID:
+			{
+				memcpy(&rarg->oxid, ptr, sizeof(OXid));
+
+				advance_oxids(rarg->oxid);
+				recovery_switch_to_oxid(rarg->oxid, -1);
+			}
+			break;
+		case WAL_REC_COMMIT:
+		case WAL_REC_ROLLBACK:
+			{
+				bool		commit,
+							sync = false;
+				OXid		xmin;
+
+				memcpy(&xmin, ptr, sizeof(xmin));
+
+				recovery_xmin = Max(recovery_xmin, xmin);
+
+				Assert(rarg->sys_tree_num <= 0 ||
+					   sys_tree_supports_transactions(rarg->sys_tree_num));
+
+				commit = (rec_type == WAL_REC_COMMIT);
+
+				Assert(rarg->oxid != InvalidOXid);
+
+				if (!rarg->single)
+				{
+					Assert(cur_state != NULL);
+					workers_send_oxid_finish(xlogPtr, commit);
+					if (cur_state->systree_modified ||
+						cur_state->checkpoint_xid)
+					{
+						sync = true;
+						workers_synchronize(xlogPtr, false);
+					}
+				}
+				else
+				{
+					sync = true;
+					pg_atomic_write_u64(recovery_ptr, xlogPtr);
+				}
+
+				recovery_finish_current_oxid(
+											 commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
+											 xlogPtr, -1, sync);
+				rarg->oxid = InvalidOXid;
+			}
+			break;
+		case WAL_REC_JOINT_COMMIT:
+			{
+				TransactionId xid;
+				OXid		xmin;
+
+				memcpy(&xid, ptr, sizeof(xid));
+				ptr += sizeof(xid);
+				memcpy(&xmin, ptr, sizeof(xmin));
+
+				cur_state->xid = xid;
+				recovery_xmin = Max(recovery_xmin, xmin);
+				dlist_push_tail(&joint_commit_list,
+								&cur_state->joint_commit_list_node);
+			}
+			break;
+		case WAL_REC_RELATION:
+			{
+				OIndexType	ix_type;
+
+				ix_type = *ptr;
+				ptr++;
+				memcpy(&rarg->cur_oids.datoid, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&rarg->cur_oids.reloid, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&rarg->cur_oids.relnode, ptr, sizeof(Oid));
+
+				if (IS_SYS_TREE_OIDS(rarg->cur_oids))
+					rarg->sys_tree_num = rarg->cur_oids.relnode;
+				else
+					rarg->sys_tree_num = -1;
+
+				if (rarg->sys_tree_num > 0)
+				{
+					rarg->descr = NULL;
+					rarg->indexDescr = NULL;
+					Assert(sys_tree_get_storage_type(rarg->sys_tree_num) ==
+						   BTreeStoragePersistence);
+				}
+				else if (ix_type == oIndexInvalid)
+				{
+					rarg->descr = o_fetch_table_descr(rarg->cur_oids);
+					rarg->indexDescr =
+						rarg->descr ? GET_PRIMARY(rarg->descr) : NULL;
+				}
+				else
+				{
+					Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
+					rarg->descr = NULL;
+					rarg->indexDescr = o_fetch_index_descr(
+														   rarg->cur_oids, ix_type, false, NULL);
+				}
+			}
+			break;
+		case WAL_REC_O_TABLES_META_LOCK:
+			{
+				Assert(!cur_state->o_tables_meta_locked);
+				o_tables_meta_lock_no_wal();
+				cur_state->o_tables_meta_locked = true;
+			}
+			break;
+		case WAL_REC_O_TABLES_META_UNLOCK:
+			{
+				ORelOids	oids;
+				Oid			oldRelnode;
+
+				memcpy(&oids.datoid, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&oids.reloid, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&oldRelnode, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&oids.relnode, ptr, sizeof(Oid));
+
+				if (!rarg->single)
+					workers_synchronize(xlogPtr, true);
+
+				Assert(cur_state->o_tables_meta_locked);
+				handle_o_tables_meta_unlock(oids, oldRelnode);
+
+				if (!rarg->single)
+					workers_synchronize(xlogPtr + 1, true);
+
+				if (!rarg->single)
+					clean_workers_oids();
+			}
+			break;
+		case WAL_REC_TRUNCATE:
+			{
+				ORelOids	oids;
+
+				memcpy(&oids.datoid, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&oids.reloid, ptr, sizeof(Oid));
+				ptr += sizeof(Oid);
+				memcpy(&oids.relnode, ptr, sizeof(Oid));
+
+				if (!rarg->single)
+					workers_synchronize(xlogPtr, true);
+
+				o_truncate_table(oids);
+
+				AcceptInvalidationMessages();
+				if (!rarg->single)
+					clean_workers_oids();
+			}
+			break;
+		case WAL_REC_SAVEPOINT:
+			{
+				SubTransactionId parentSubid;
+
+				memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
+
+				recovery_savepoint(parentSubid, -1);
+
+				if (!rarg->single)
+					workers_send_savepoint(parentSubid);
+			}
+			break;
+		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
+			{
+				SubTransactionId parentSubid;
+
+				memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
+
+				if (!rarg->single)
+				{
+					workers_send_rollback_to_savepoint(xlogPtr, parentSubid);
+					workers_synchronize(xlogPtr, false);
+				}
+				recovery_rollback_to_savepoint(parentSubid, -1);
+			}
+			break;
+		case WAL_REC_BRIDGE_ERASE:
+			{
+				ItemPointerData iptr;
+
+				memcpy(&iptr, ptr, sizeof(iptr));
+
+				Assert(rarg->indexDescr);
+
+				if (rarg->single)
+				{
+					recovery_switch_to_oxid(oxid, -1);
+					replay_erase_bridge_item(rarg->indexDescr, &iptr);
+				}
+				else
+				{
+					uint32		hash;
+					OTuple		tuple;
+
+					hash = o_hash_iptr(rarg->indexDescr, &iptr);
+					tuple.formatFlags = 0;
+					tuple.data = (Pointer) &iptr;
+					worker_send_modify(GET_WORKER_ID(hash), &rarg->indexDescr->desc,
+									   RecoveryMsgTypeBridgeErase, tuple, 0);
+				}
+			}
+			break;
+		default:
+			{
+				OFixedTuple tuple;
+				bool		success;
+				uint16		type;
+				OffsetNumber length;
+
+				Assert(rec_type == WAL_REC_INSERT ||
+					   rec_type == WAL_REC_UPDATE ||
+					   rec_type == WAL_REC_DELETE);
+
+				tuple.tuple.formatFlags = *ptr;
+				ptr++;
+
+				memcpy(&length, ptr, sizeof(OffsetNumber));
+				ptr += sizeof(OffsetNumber);
+
+				memcpy(tuple.fixedData, ptr, length);
+				tuple.tuple.data = tuple.fixedData;
+				type = recovery_msg_from_wal_record(rec_type);
+
+				Assert(rarg->oxid != InvalidOXid);
+
+				if (rarg->sys_tree_num > 0 &&
+					rarg->xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
+				{
+					Assert(sys_tree_supports_transactions(rarg->sys_tree_num));
+					recovery_switch_to_oxid(rarg->oxid, -1);
+
+					cur_state->systree_modified = true;
+					if (rarg->sys_tree_num == SYS_TREES_O_TABLES)
+						Assert(cur_state->o_tables_meta_locked);
+
+					if (!rarg->single)
+						workers_synchronize(xlogPtr, true);
+
+					success = apply_sys_tree_modify_record(
+														   rarg->sys_tree_num, type, tuple.tuple, rarg->oxid,
+														   COMMITSEQNO_INPROGRESS);
+
+					if (rarg->sys_tree_num == SYS_TREES_O_INDICES && success)
+					{
+						ORelOids	tmp_oids;
+
+						if (type == RecoveryMsgTypeDelete)
+						{
+							rarg->treeOids =
+								o_indices_get_oids(ptr, &tmp_oids);
+							if (rarg->treeOids)
+								add_undo_drop_relnode(tmp_oids, rarg->treeOids,
+													  1);
+						}
+						else if (type == RecoveryMsgTypeInsert)
+						{
+							rarg->treeOids =
+								o_indices_get_oids(ptr, &tmp_oids);
+							if (rarg->treeOids)
+								add_undo_create_relnode(tmp_oids,
+														rarg->treeOids, 1);
+						}
+					}
+				}
+
+				if (rarg->sys_tree_num < 0 && rarg->indexDescr != NULL)
+				{
+					if (rarg->indexDescr->desc.type == oIndexBridge)
+					{
+						elog(LOG, "WAL change for bridge index");
+					}
+
+					if (rarg->single)
+					{
+						recovery_switch_to_oxid(rarg->oxid, -1);
+						apply_modify_record(rarg->descr, rarg->indexDescr,
+											type, tuple.tuple);
+					}
+					else
+					{
+						spread_idx_modify(&rarg->indexDescr->desc, type,
+										  tuple.tuple);
+					}
+				}
+			}
+			break;
+	}
+}
+
 /*
  * Replays a single orioledb WAL container.
  */
@@ -2511,329 +2825,15 @@ static void
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr)
 {
-	OTableDescr *descr = NULL;
-	OIndexDescr *indexDescr = NULL;
-	OXid		oxid = InvalidOXid;
-	ORelOids	cur_oids = {0, 0, 0},
-			   *treeOids;
-	OffsetNumber length;
-	bool		success;
-	uint16		type;
-	uint8		rec_type;
-	int			sys_tree_num = -1;
-	Pointer		ptr = startPtr;
-	XLogRecPtr	xlogPtr;
+	RecoveryArg recovery_arg;
 
-	while (ptr < endPtr)
-	{
-		xlogPtr = xlogRecPtr + (ptr - startPtr);
-		rec_type = *ptr;
-		ptr++;
+	recovery_arg.oxid = InvalidOXid;
+	recovery_arg.sys_tree_num = -1;
+	recovery_arg.xlogRecPtr = xlogRecPtr;
+	recovery_arg.single = single;
 
-		if (rec_type == WAL_REC_XID)
-		{
-			memcpy(&oxid, ptr, sizeof(oxid));
-			ptr += sizeof(oxid);
-			ptr += sizeof(XLogRecPtr);
-
-			/* don't need logicalXid here */
-			ptr += sizeof(TransactionId);
-
-			advance_oxids(oxid);
-			recovery_switch_to_oxid(oxid, -1);
-		}
-		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
-		{
-			bool		commit,
-						sync = false;
-			OXid		xmin;
-
-			memcpy(&xmin, ptr, sizeof(xmin));
-			ptr += sizeof(xmin);
-
-			/* skip csn field */
-			ptr += sizeof(CommitSeqNo);
-
-			recovery_xmin = Max(recovery_xmin, xmin);
-
-			Assert(sys_tree_num <= 0 || sys_tree_supports_transactions(sys_tree_num));
-
-			commit = (rec_type == WAL_REC_COMMIT);
-
-			Assert(oxid != InvalidOXid);
-
-			if (!single)
-			{
-				Assert(cur_state != NULL);
-				workers_send_oxid_finish(xlogPtr, commit);
-				if (cur_state->systree_modified || cur_state->checkpoint_xid)
-				{
-					sync = true;
-					workers_synchronize(xlogPtr, false);
-				}
-			}
-			else
-			{
-				sync = true;
-				pg_atomic_write_u64(recovery_ptr, xlogPtr);
-			}
-
-			recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
-										 xlogPtr, -1, sync);
-			oxid = InvalidOXid;
-		}
-		else if (rec_type == WAL_REC_JOINT_COMMIT)
-		{
-			TransactionId xid;
-			OXid		xmin;
-
-			memcpy(&xid, ptr, sizeof(xid));
-			ptr += sizeof(xid);
-			memcpy(&xmin, ptr, sizeof(xmin));
-			ptr += sizeof(xmin);
-
-			/* skip csn field */
-			ptr += sizeof(CommitSeqNo);
-
-			cur_state->xid = xid;
-			recovery_xmin = Max(recovery_xmin, xmin);
-			dlist_push_tail(&joint_commit_list, &cur_state->joint_commit_list_node);
-		}
-		else if (rec_type == WAL_REC_RELATION)
-		{
-			OIndexType	ix_type;
-
-			ix_type = *ptr;
-			ptr++;
-			memcpy(&cur_oids.datoid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&cur_oids.reloid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-
-			if (IS_SYS_TREE_OIDS(cur_oids))
-				sys_tree_num = cur_oids.relnode;
-			else
-				sys_tree_num = -1;
-
-			if (sys_tree_num > 0)
-			{
-				descr = NULL;
-				indexDescr = NULL;
-				Assert(sys_tree_get_storage_type(sys_tree_num) == BTreeStoragePersistence);
-			}
-			else if (ix_type == oIndexInvalid)
-			{
-				descr = o_fetch_table_descr(cur_oids);
-				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
-			}
-			else
-			{
-				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
-				descr = NULL;
-				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
-												 false, NULL);
-			}
-		}
-		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
-		{
-			Assert(!cur_state->o_tables_meta_locked);
-			o_tables_meta_lock_no_wal();
-			cur_state->o_tables_meta_locked = true;
-		}
-		else if (rec_type == WAL_REC_O_TABLES_META_UNLOCK)
-		{
-			ORelOids	oids;
-			Oid			oldRelnode;
-
-			memcpy(&oids.datoid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.reloid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oldRelnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.relnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-
-			if (!single)
-				workers_synchronize(xlogPtr, true);
-
-			Assert(cur_state->o_tables_meta_locked);
-			handle_o_tables_meta_unlock(oids, oldRelnode);
-
-			if (!single)
-				workers_synchronize(xlogPtr + 1, true);
-
-			if (!single)
-				clean_workers_oids();
-		}
-		else if (rec_type == WAL_REC_TRUNCATE)
-		{
-			ORelOids	oids;
-
-			memcpy(&oids.datoid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.reloid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.relnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-
-			if (!single)
-				workers_synchronize(xlogPtr, true);
-
-			o_truncate_table(oids);
-
-			AcceptInvalidationMessages();
-			if (!single)
-				clean_workers_oids();
-		}
-		else if (rec_type == WAL_REC_SAVEPOINT)
-		{
-			SubTransactionId parentSubid;
-
-			memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
-			ptr += sizeof(SubTransactionId);
-			ptr += 2 * sizeof(TransactionId);
-
-			recovery_savepoint(parentSubid, -1);
-
-			if (!single)
-				workers_send_savepoint(parentSubid);
-		}
-		else if (rec_type == WAL_REC_ROLLBACK_TO_SAVEPOINT)
-		{
-			SubTransactionId parentSubid;
-
-			memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
-			ptr += sizeof(SubTransactionId);
-
-			if (!single)
-			{
-				workers_send_rollback_to_savepoint(xlogPtr, parentSubid);
-				workers_synchronize(xlogPtr, false);
-			}
-			recovery_rollback_to_savepoint(parentSubid, -1);
-		}
-		else if (rec_type == WAL_REC_BRIDGE_ERASE)
-		{
-			ItemPointerData iptr;
-
-			memcpy(&iptr, ptr, sizeof(iptr));
-			ptr += sizeof(iptr);
-
-			Assert(indexDescr);
-
-			if (single)
-			{
-				recovery_switch_to_oxid(oxid, -1);
-				replay_erase_bridge_item(indexDescr, &iptr);
-			}
-			else
-			{
-				uint32		hash;
-				OTuple		tuple;
-
-				hash = o_hash_iptr(indexDescr, &iptr);
-				tuple.formatFlags = 0;
-				tuple.data = (Pointer) &iptr;
-				worker_send_modify(GET_WORKER_ID(hash), &indexDescr->desc,
-								   RecoveryMsgTypeBridgeErase, tuple, 0);
-			}
-		}
-		else if (rec_type == WAL_REC_SYNC_WORKERS)
-		{
-			int			i;
-
-			for (i = 0; i < recovery_pool_size_guc; i++)
-			{
-				if (EnableHotStandby)
-				{
-					/* we need to apply recovery records as fast as we can */
-					worker_queue_flush(i);
-				}
-			}
-		}
-		else
-		{
-			OFixedTuple tuple;
-
-			Assert(rec_type == WAL_REC_INSERT ||
-				   rec_type == WAL_REC_UPDATE ||
-				   rec_type == WAL_REC_DELETE);
-
-			tuple.tuple.formatFlags = *ptr;
-			ptr++;
-
-			memcpy(&length, ptr, sizeof(OffsetNumber));
-			ptr += sizeof(OffsetNumber);
-
-			memcpy(tuple.fixedData, ptr, length);
-			tuple.tuple.data = tuple.fixedData;
-			type = recovery_msg_from_wal_record(rec_type);
-
-			Assert(oxid != InvalidOXid);
-
-			if (sys_tree_num > 0 && xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
-			{
-				Assert(sys_tree_supports_transactions(sys_tree_num));
-				recovery_switch_to_oxid(oxid, -1);
-
-				cur_state->systree_modified = true;
-				if (sys_tree_num == SYS_TREES_O_TABLES)
-					Assert(cur_state->o_tables_meta_locked);
-
-				if (!single)
-					workers_synchronize(xlogPtr, true);
-
-				success = apply_sys_tree_modify_record(sys_tree_num, type,
-													   tuple.tuple, oxid,
-													   COMMITSEQNO_INPROGRESS);
-
-				if (sys_tree_num == SYS_TREES_O_INDICES && success)
-				{
-					ORelOids	tmp_oids;
-
-					if (type == RecoveryMsgTypeDelete)
-					{
-						treeOids = o_indices_get_oids(ptr, &tmp_oids);
-						if (treeOids)
-							add_undo_drop_relnode(tmp_oids, treeOids, 1);
-					}
-					else if (type == RecoveryMsgTypeInsert)
-					{
-						treeOids = o_indices_get_oids(ptr, &tmp_oids);
-						if (treeOids)
-							add_undo_create_relnode(tmp_oids, treeOids, 1);
-					}
-				}
-			}
-
-			if (sys_tree_num > 0 || indexDescr == NULL)
-			{
-				/* nothing to do here */
-				ptr += length;
-				continue;
-			}
-
-			if (indexDescr->desc.type == oIndexBridge)
-			{
-				elog(LOG, "WAL change for bridge index");
-			}
-
-			if (single)
-			{
-				recovery_switch_to_oxid(oxid, -1);
-				apply_modify_record(descr, indexDescr, type, tuple.tuple);
-			}
-			else
-			{
-				spread_idx_modify(&indexDescr->desc, type, tuple.tuple);
-			}
-
-			ptr += length;
-		}
-	}
+	wal_iterate(startPtr, endPtr, xlogRecPtr, recovery_record_callback,
+				&recovery_arg);
 	update_recovery_undo_loc_flush(single, -1);
 }
 

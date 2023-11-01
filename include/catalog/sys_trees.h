@@ -13,11 +13,6 @@
 #ifndef __SYS_TREES_H__
 #define __SYS_TREES_H__
 
-#include "btree/btree.h"
-#include "btree/print.h"
-
-#include "utils/catcache.h"
-
 #define SYS_TREES_DATOID				(1)
 
 #define SYS_TREES_SHARED_ROOT_INFO		(1)

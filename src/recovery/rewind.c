@@ -38,9 +38,9 @@ PG_FUNCTION_INFO_V1(orioledb_pg_rewind_new_row_versions);
 
 typedef struct KeyArrayElement
 {
-	uint8	tupleFormatFlags;
-	uint32	dataLength;
-	char	data[FLEXIBLE_ARRAY_MEMBER];
+	uint8		tupleFormatFlags;
+	uint32		dataLength;
+	char		data[FLEXIBLE_ARRAY_MEMBER];
 } KeyArrayElement;
 
 typedef struct IteratorStackItem
@@ -50,22 +50,22 @@ typedef struct IteratorStackItem
 	uint8		formatFlags;
 	uint32		len;
 	char	   *data;
-} IteratorStackItem;
+}			IteratorStackItem;
 
 typedef struct TableRow
 {
-	ORelOids		oids;
-	OIndexType		ix_type;
-	uint32			nkeys;
-	bytea		   *keys;
+	ORelOids	oids;
+	OIndexType	ix_type;
+	uint32		nkeys;
+	bytea	   *keys;
 } TableRow;
 
 typedef struct KeyIterator
 {
-	OTuple new_tup;
-	OTuple first_key_tup;
-	OTuple last_key_tup;
-	uint8 last_deleted;
+	OTuple		new_tup;
+	OTuple		first_key_tup;
+	OTuple		last_key_tup;
+	uint8		last_deleted;
 	BTreeIterator *iter;
 } KeyIterator;
 
@@ -74,14 +74,16 @@ static BTreeDescr *cmp_tree_desc;
 static void
 appendHton16StringInfo(StringInfo str, uint16 data)
 {
-	uint16 u16data = pg_hton16(data);
+	uint16		u16data = pg_hton16(data);
+
 	appendBinaryStringInfoNT(str, (const char *) &u16data, sizeof(u16data));
 }
 
 static void
 appendHton32StringInfo(StringInfo str, uint32 data)
 {
-	uint32 u32data = pg_hton32(data);
+	uint32		u32data = pg_hton32(data);
+
 	appendBinaryStringInfoNT(str, (const char *) &u32data, sizeof(u32data));
 }
 
@@ -108,10 +110,10 @@ key_array_cmp(const void *p1, const void *p2)
 {
 	KeyArrayElement *key1 = *(KeyArrayElement **) p1;
 	KeyArrayElement *key2 = *(KeyArrayElement **) p2;
-	OTuple key_tup1 = {.formatFlags = key1->tupleFormatFlags,
-					   .data = key1->data};
-	OTuple key_tup2 = {.formatFlags = key2->tupleFormatFlags,
-					   .data = key2->data};
+	OTuple		key_tup1 = {.formatFlags = key1->tupleFormatFlags,
+	.data = key1->data};
+	OTuple		key_tup2 = {.formatFlags = key2->tupleFormatFlags,
+	.data = key2->data};
 
 	return o_btree_cmp(cmp_tree_desc,
 					   (void *) &key_tup1, BTreeKeyNonLeafKey,
@@ -121,15 +123,15 @@ key_array_cmp(const void *p1, const void *p2)
 static TableRow *
 table_next_row(Relation rel, TableScanDesc scan)
 {
-	HeapTuple		htuple;
-	static TableRow	row;
-	TableRow	   *result = NULL;
+	HeapTuple	htuple;
+	static TableRow row;
+	TableRow   *result = NULL;
 
 	htuple = heap_getnext(scan, ForwardScanDirection);
 	if (htuple)
 	{
-		bool	isnull;
-		Datum	attr;
+		bool		isnull;
+		Datum		attr;
 
 		result = &row;
 		attr = heap_getattr(htuple, 1, rel->rd_att, &isnull);
@@ -158,7 +160,7 @@ static int
 fill_descrs(ORelOids oids, OIndexType ix_type,
 			OTableDescr **descr, OIndexDescr **indexDescr)
 {
-	int sys_tree_num = -1;
+	int			sys_tree_num = -1;
 
 	if (IS_SYS_TREE_OIDS(oids))
 		sys_tree_num = oids.relnode;
@@ -188,15 +190,15 @@ fill_descrs(ORelOids oids, OIndexType ix_type,
 static KeyArrayElement **
 create_key_array(uint32 nkeys, size_t extension_size, char **ptr)
 {
-	int i;
-	KeyArrayElement	  **key_array;
+	int			i;
+	KeyArrayElement **key_array;
 
 	key_array = palloc0(sizeof(KeyArrayElement *) * nkeys);
 	for (i = 0; i < nkeys; i++)
 	{
-		uint32 keyLength;
-		uint8 tupleFormatFlags;
-		uint32 u32data;
+		uint32		keyLength;
+		uint8		tupleFormatFlags;
+		uint32		u32data;
 
 		memcpy(&tupleFormatFlags, *ptr, sizeof(uint8));
 		*ptr += sizeof(uint8);
@@ -221,14 +223,14 @@ create_key_array(uint32 nkeys, size_t extension_size, char **ptr)
 static uint32
 sort_key_array(KeyArrayElement **key_array, uint32 nkeys)
 {
-	uint32	i,
-			dst,
-			new_nkeys;
+	uint32		i,
+				dst,
+				new_nkeys;
 
 	pg_qsort(key_array, nkeys, sizeof(KeyArrayElement *),
 			 key_array_cmp);
 
-	// Remove duplicates
+	/* Remove duplicates */
 	dst = 0;
 	for (i = 1; i < nkeys; i++)
 	{
@@ -250,12 +252,12 @@ sort_key_array(KeyArrayElement **key_array, uint32 nkeys)
 Datum
 orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 {
-	Oid				reloid = PG_GETARG_OID(0);
-	Relation		rel;
-	TableScanDesc	scan;
-	TableRow	   *row;
-	bytea		   *result;
-	StringInfo		result_str;
+	Oid			reloid = PG_GETARG_OID(0);
+	Relation	rel;
+	TableScanDesc scan;
+	TableRow   *row;
+	bytea	   *result;
+	StringInfo	result_str;
 
 	rel = table_open(reloid, AccessShareLock);
 	scan = table_beginscan_catalog(rel, 0, NULL);
@@ -264,21 +266,21 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 
 	while ((row = table_next_row(rel, scan)) != NULL)
 	{
-		OTableDescr	   *descr = NULL;
-		OIndexDescr	   *indexDescr = NULL;
-		int				sys_tree_num;
+		OTableDescr *descr = NULL;
+		OIndexDescr *indexDescr = NULL;
+		int			sys_tree_num;
 
 		sys_tree_num = fill_descrs(row->oids, row->ix_type,
 								   &descr, &indexDescr);
 
 		if ((indexDescr) || (sys_tree_num > 0))
 		{
-			int					i;
-			char			   *keys_data_start = VARDATA(row->keys);
-			char			   *ptr = keys_data_start;
-			KeyArrayElement	  **key_array;
-			StringInfo			keys_str;
-			uint32				new_nkeys;
+			int			i;
+			char	   *keys_data_start = VARDATA(row->keys);
+			char	   *ptr = keys_data_start;
+			KeyArrayElement **key_array;
+			StringInfo	keys_str;
+			uint32		new_nkeys;
 
 			key_array = create_key_array(row->nkeys, 0, &ptr);
 			Assert((ptr - keys_data_start) == (VARSIZE(row->keys) - VARHDRSZ));
@@ -307,10 +309,10 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 
 				if (sys_tree_num == SYS_TREES_O_INDICES)
 				{
-					OIndexChunkKey	   *ix_key = (OIndexChunkKey *)
-													key_array[i]->data;
-					OIndexDescr		   *id;
-					uint8				index_exist;
+					OIndexChunkKey *ix_key = (OIndexChunkKey *)
+						key_array[i]->data;
+					OIndexDescr *id;
+					uint8		index_exist;
 
 					id = o_fetch_index_descr(ix_key->oids, ix_key->type,
 											 false, NULL);
@@ -360,12 +362,12 @@ get_tup_oxid_callback(OTuple tuple, OXid tupOxid, CommitSeqNo csn,
 static void
 append_revived_tree(StringInfo str, OIndexChunkKey *ix_key)
 {
-	OIndexDescr		   *ix_descr = NULL;
-	BTreeIterator	   *iter;
-	uint8				deleted = false;
-	OTuple				tup;
-	uint32				ix_nitems;
-	StringInfo			rows_str;
+	OIndexDescr *ix_descr = NULL;
+	BTreeIterator *iter;
+	uint8		deleted = false;
+	OTuple		tup;
+	uint32		ix_nitems;
+	StringInfo	rows_str;
 
 	ix_descr = o_fetch_index_descr(ix_key->oids, ix_key->type, false, NULL);
 	o_btree_load_shmem(&ix_descr->desc);
@@ -380,7 +382,7 @@ append_revived_tree(StringInfo str, OIndexChunkKey *ix_key)
 	rows_str = makeStringInfo();
 	while (!O_TUPLE_IS_NULL(tup))
 	{
-		int tup_len = o_btree_len(&ix_descr->desc, tup, OTupleLength);
+		int			tup_len = o_btree_len(&ix_descr->desc, tup, OTupleLength);
 
 		ix_nitems++;
 		append_tuple(rows_str, tup.formatFlags, tup.data, tup_len, &deleted);
@@ -440,10 +442,10 @@ static void
 process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 			KeyIterator *it, BTreeDescr *td)
 {
-	bool	found = false;
-	OTuple	old_tup = {.data = old_key->data,
-					  .formatFlags = old_key->tupleFormatFlags};
-	int		cmp = -1;
+	bool		found = false;
+	OTuple		old_tup = {.data = old_key->data,
+	.formatFlags = old_key->tupleFormatFlags};
+	int			cmp = -1;
 
 	if (O_TUPLE_IS_NULL(it->new_tup))
 		key_iterator_iterate(it);
@@ -463,7 +465,8 @@ process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 
 	if (found)
 	{
-		int tup_len = o_btree_len(td, it->new_tup, OTupleLength);
+		int			tup_len = o_btree_len(td, it->new_tup, OTupleLength);
+
 		appendStringInfoChar(str, O_REWIND_FOUND);
 		append_tuple(str, it->new_tup.formatFlags, it->new_tup.data, tup_len,
 					 &it->last_deleted);
@@ -471,9 +474,9 @@ process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 		if (IS_SYS_TREE_OIDS(td->oids) &&
 			td->oids.reloid == SYS_TREES_O_INDICES)
 		{
-			Pointer found_ptr = old_key->data + old_key->dataLength -
-								sizeof(uint8);
-			uint8 target_found = *(uint8 *) found_ptr;
+			Pointer		found_ptr = old_key->data + old_key->dataLength -
+				sizeof(uint8);
+			uint8		target_found = *(uint8 *) found_ptr;
 
 			if (target_found)
 				appendHton32StringInfo(str, 0);
@@ -484,7 +487,8 @@ process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 	}
 	else
 	{
-		uint8 deleted = true;
+		uint8		deleted = true;
+
 		appendStringInfoChar(str, O_REWIND_NOT_FOUND);
 		append_tuple(str, old_key->tupleFormatFlags,
 					 old_key->data, old_key->dataLength, &deleted);
@@ -494,27 +498,27 @@ process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 static void
 process_tree(StringInfo str, TableRow *row)
 {
-	int i;
-	char *keys_data_start = VARDATA(row->keys);
-	char *ptr = keys_data_start;
+	int			i;
+	char	   *keys_data_start = VARDATA(row->keys);
+	char	   *ptr = keys_data_start;
 	KeyArrayElement **key_array;
-	KeyIterator		*key_iter;
+	KeyIterator *key_iter;
 	BTreeDescr *td;
-	OTableDescr	   *descr = NULL;
-	OIndexDescr	   *indexDescr = NULL;
-	int				sys_tree_num = -1;
+	OTableDescr *descr = NULL;
+	OIndexDescr *indexDescr = NULL;
+	int			sys_tree_num = -1;
 
 	sys_tree_num = fill_descrs(row->oids, row->ix_type,
-								&descr, &indexDescr);
+							   &descr, &indexDescr);
 
 	if (indexDescr || (sys_tree_num > 0))
 	{
-		// orioledb_pg_rewind_sorted_keys adds additional
-		// uint8 field for SYS_TREES_O_INDICES tree, which specifies that
-		// tree was dropped on target so full tree rewind needed
+		/* orioledb_pg_rewind_sorted_keys adds additional */
+		/* uint8 field for SYS_TREES_O_INDICES tree, which specifies that */
+		/* tree was dropped on target so full tree rewind needed */
 		key_array = create_key_array(row->nkeys,
 									 sys_tree_num == SYS_TREES_O_INDICES ?
-										sizeof(uint8) : 0,
+									 sizeof(uint8) : 0,
 									 &ptr);
 
 		Assert((ptr - keys_data_start) == (VARSIZE(row->keys) - VARHDRSZ));
@@ -545,12 +549,12 @@ process_tree(StringInfo str, TableRow *row)
 Datum
 orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 {
-	Oid				reloid = PG_GETARG_OID(0);
-	Relation		rel;
-	TableScanDesc	scan;
-	TableRow	   *row;
-	bytea		   *result;
-	StringInfo		result_str;
+	Oid			reloid = PG_GETARG_OID(0);
+	Relation	rel;
+	TableScanDesc scan;
+	TableRow   *row;
+	bytea	   *result;
+	StringInfo	result_str;
 
 	rel = table_open(reloid, AccessShareLock);
 	scan = table_beginscan_catalog(rel, 0, NULL);
@@ -590,7 +594,7 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 
 	bool		single = *recovery_single_process;
 	bool		sync = false;
-	XLogRecPtr  rec;
+	XLogRecPtr	rec;
 
 	advance_oxids(temp_oxid);
 	recovery_switch_to_oxid(temp_oxid, -1);
@@ -604,7 +608,7 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 		Assert(sys_tree_supports_transactions(sys_tree_num));
 		apply_sys_tree_modify_record(sys_tree_num,
 									 deleted ? RECOVERY_DELETE :
-											   RECOVERY_INSERT,
+									 RECOVERY_INSERT,
 									 rewind_row, temp_oxid,
 									 COMMITSEQNO_INPROGRESS);
 	}
@@ -628,8 +632,8 @@ static void
 ereport_rewind_error(File rewind_file, OIndexDescr *indexDescr,
 					 int sys_tree_num, char *name)
 {
-	OIndexType err_ix_type;
-	ORelOids err_oids;
+	OIndexType	err_ix_type;
+	ORelOids	err_oids;
 
 	if (sys_tree_num > 0)
 	{
@@ -661,14 +665,15 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 				  OTableDescr *descr, OIndexDescr *indexDescr,
 				  int sys_tree_num, bool add_new)
 {
-	int item_header_size = sizeof(uint8) * 2 +
-						   sizeof(uint32);
-	uint8 deleted;
-	uint32 item_len;
-	OTuple rewind_row;
+	int			item_header_size = sizeof(uint8) * 2 +
+		sizeof(uint32);
+	uint8		deleted;
+	uint32		item_len;
+	OTuple		rewind_row;
+	uint32		u32data;
 
 	Assert(item_header_size < O_BTREE_MAX_TUPLE_SIZE * 2);
-	if (OFileRead(rewind_file, (Pointer)read_buf,
+	if (OFileRead(rewind_file, (Pointer) read_buf,
 				  item_header_size, *offset,
 				  WAIT_EVENT_DATA_FILE_READ) !=
 		item_header_size)
@@ -676,15 +681,14 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 							 "item header");
 	(*offset) += item_header_size;
 
-	deleted = *(uint8 *)(read_buf);
-	rewind_row.formatFlags = *(uint8 *)(read_buf +
-									  sizeof(uint8));
-	item_len = pg_ntoh32(*(uint32 *)(read_buf +
-									 sizeof(uint8) +
-									 sizeof(uint8)));
+	deleted = *(uint8 *) (read_buf);
+	rewind_row.formatFlags = *(uint8 *) (read_buf +
+										 sizeof(uint8));
+	memcpy(&u32data, read_buf + sizeof(uint8) + sizeof(uint8), sizeof(uint32));
+	item_len = pg_ntoh32(u32data);
 
 	Assert(item_len < O_BTREE_MAX_TUPLE_SIZE * 2);
-	if (OFileRead(rewind_file, (Pointer)read_buf,
+	if (OFileRead(rewind_file, (Pointer) read_buf,
 				  item_len, *offset,
 				  WAIT_EVENT_DATA_FILE_READ) !=
 		item_len)
@@ -695,9 +699,11 @@ replay_rewind_row(File rewind_file, char *read_buf, off_t *offset,
 
 	if (indexDescr || (sys_tree_num > 0))
 	{
-		bool old_toast_consistent = toast_consistent;
-		toast_consistent = true; // TODO: Find out are we need real
-								 // toast_consistent value
+		bool		old_toast_consistent = toast_consistent;
+
+		toast_consistent = true;
+/* TODO: Find out are we need real */
+		/* toast_consistent value */
 		apply_rewind_row(descr, indexDescr, sys_tree_num,
 						 rewind_row,
 						 true);
@@ -723,7 +729,7 @@ replay_rewind(uint32 chkp_num, bool single)
 	off_t		offset = 0;
 	int			readed;
 	const int	tree_header_size = sizeof(OIndexType) + 3 * sizeof(Oid) +
-								   sizeof(uint8);
+		sizeof(uint8);
 	uint32		nkeys;
 	uint8		found;
 	XLogRecPtr	startpoint;
@@ -738,7 +744,7 @@ replay_rewind(uint32 chkp_num, bool single)
 
 	Assert(tree_header_size < O_BTREE_MAX_TUPLE_SIZE * 2);
 
-	readed = OFileRead(rewind_file, (Pointer)&read_buf, sizeof(XLogRecPtr),
+	readed = OFileRead(rewind_file, (Pointer) &read_buf, sizeof(XLogRecPtr),
 					   offset, WAIT_EVENT_DATA_FILE_READ);
 	offset += sizeof(XLogRecPtr);
 	if (readed != sizeof(XLogRecPtr))
@@ -747,33 +753,33 @@ replay_rewind(uint32 chkp_num, bool single)
 							   FilePathName(rewind_file))));
 
 	startpoint = *((XLogRecPtr *) (read_buf));
-	readed = OFileRead(rewind_file, (Pointer)&read_buf, tree_header_size,
+	readed = OFileRead(rewind_file, (Pointer) &read_buf, tree_header_size,
 					   offset, WAIT_EVENT_DATA_FILE_READ);
 	while (readed == tree_header_size)
 	{
-		int	sys_tree_num = -1;
+		int			sys_tree_num = -1;
 
 		offset += tree_header_size;
 
 		ix_type = pg_ntoh32(*((uint32 *) (read_buf)));
 		cur_oids.datoid = pg_ntoh32(*((Oid *) (read_buf + sizeof(uint32))));
-		cur_oids.reloid = pg_ntoh32(*((Oid *)(read_buf + sizeof(uint32) +
-											  sizeof(Oid))));
+		cur_oids.reloid = pg_ntoh32(*((Oid *) (read_buf + sizeof(uint32) +
+											   sizeof(Oid))));
 		cur_oids.relnode = pg_ntoh32(*((Oid *) (read_buf + sizeof(uint32) +
-											  sizeof(Oid) * 2)));
-		found = *((uint8 *)(read_buf + sizeof(uint32) +
-							sizeof(Oid) * 3));
+												sizeof(Oid) * 2)));
+		found = *((uint8 *) (read_buf + sizeof(uint32) +
+							 sizeof(Oid) * 3));
 
 		if (IS_SYS_TREE_OIDS(cur_oids))
 			sys_tree_num = cur_oids.relnode;
 
 		if (found)
 		{
-			OTableDescr	   *descr = NULL;
-			OIndexDescr	   *indexDescr = NULL;
-			int				i;
+			OTableDescr *descr = NULL;
+			OIndexDescr *indexDescr = NULL;
+			int			i;
 
-			if (OFileRead(rewind_file, (Pointer)&read_buf, sizeof(uint32),
+			if (OFileRead(rewind_file, (Pointer) &read_buf, sizeof(uint32),
 						  offset, WAIT_EVENT_DATA_FILE_READ) != sizeof(uint32))
 				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not read keys amount for "
@@ -785,19 +791,19 @@ replay_rewind(uint32 chkp_num, bool single)
 									   cur_oids.relnode,
 									   FilePathName(rewind_file))));
 			offset += sizeof(uint32);
-			nkeys = pg_ntoh32(*((uint32 *)(read_buf)));
+			nkeys = pg_ntoh32(*((uint32 *) (read_buf)));
 
 			sys_tree_num = fill_descrs(cur_oids, ix_type, &descr, &indexDescr);
 
 			for (i = 0; i < nkeys; i++)
 			{
-				int		j;
-				int		row_header_size = sizeof(uint8);
-				OTuple	rewind_row = {0};
+				int			j;
+				int			row_header_size = sizeof(uint8);
+				OTuple		rewind_row = {0};
 
-				if (OFileRead(rewind_file, (Pointer)&read_buf,
-								row_header_size, offset,
-								WAIT_EVENT_DATA_FILE_READ) != row_header_size)
+				if (OFileRead(rewind_file, (Pointer) &read_buf,
+							  row_header_size, offset,
+							  WAIT_EVENT_DATA_FILE_READ) != row_header_size)
 					ereport(FATAL, (errcode_for_file_access(),
 									errmsg("could not read row header for "
 										   "tree (%u %u %u %u) "
@@ -809,7 +815,7 @@ replay_rewind(uint32 chkp_num, bool single)
 										   FilePathName(rewind_file))));
 				offset += row_header_size;
 
-				found = *((uint8 *)(read_buf));
+				found = *((uint8 *) (read_buf));
 
 				rewind_row = replay_rewind_row(rewind_file, read_buf, &offset,
 											   descr, indexDescr,
@@ -817,7 +823,7 @@ replay_rewind(uint32 chkp_num, bool single)
 
 				if (sys_tree_num == SYS_TREES_O_INDICES && found)
 				{
-					uint32	ix_nitems;
+					uint32		ix_nitems;
 					OIndexChunkKey *ix_key;
 
 					ix_key = palloc0(sizeof(OIndexChunkKey));
@@ -828,7 +834,7 @@ replay_rewind(uint32 chkp_num, bool single)
 													 false, NULL);
 					Assert(indexDescr);
 
-					if (OFileRead(rewind_file, (Pointer)&read_buf,
+					if (OFileRead(rewind_file, (Pointer) &read_buf,
 								  sizeof(uint32), offset,
 								  WAIT_EVENT_DATA_FILE_READ) !=
 						sizeof(uint32))
@@ -842,7 +848,7 @@ replay_rewind(uint32 chkp_num, bool single)
 											   ix_key->oids.relnode,
 											   FilePathName(rewind_file))));
 					offset += sizeof(uint32);
-					ix_nitems = pg_ntoh32(*(uint32 *)read_buf);
+					ix_nitems = pg_ntoh32(*(uint32 *) read_buf);
 
 					for (j = 0; j < ix_nitems; j++)
 						replay_rewind_row(rewind_file, read_buf, &offset,
@@ -851,7 +857,7 @@ replay_rewind(uint32 chkp_num, bool single)
 				}
 			}
 		}
-		readed = OFileRead(rewind_file, (Pointer)&read_buf, tree_header_size,
+		readed = OFileRead(rewind_file, (Pointer) &read_buf, tree_header_size,
 						   offset, WAIT_EVENT_DATA_FILE_READ);
 	}
 

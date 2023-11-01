@@ -37,10 +37,6 @@ typedef struct
 	bool		printFormatFlags;
 } BTreePrintOptions;
 
-/* Tuples and keys printing func */
-typedef void (*PrintFunc) (BTreeDescr *desc, StringInfo buf,
-						   OTuple tup, Pointer arg);
-
 extern void o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 								PrintFunc keyPrintFunc,
 								PrintFunc tuplePrintFunc,

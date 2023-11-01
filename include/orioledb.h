@@ -70,41 +70,6 @@
 
 #define GetMaxBackends() MaxBackends
 
-/* Number of orioledb page */
-typedef uint32 OInMemoryBlkno;
-#define OInvalidInMemoryBlkno		((OInMemoryBlkno) 0xFFFFFFFF)
-#define OInMemoryBlknoIsValid(blockNumber) \
-	((bool) ((OInMemoryBlkno) (blockNumber) != OInvalidInMemoryBlkno))
-#define ORootPageIsValid(desc) (OInMemoryBlknoIsValid((desc)->rootInfo.rootPageBlkno))
-#define OMetaPageIsValid(desc) (OInMemoryBlknoIsValid((desc)->rootInfo.metaPageBlkno))
-
-/* Undo log location */
-typedef uint64 UndoLocation;
-#define	InvalidUndoLocation		UINT64CONST(0x2000000000000000)
-#define	UndoLocationValueMask	UINT64CONST(0x1FFFFFFFFFFFFFFF)
-#define UndoLocationIsValid(loc)	(((loc) & InvalidUndoLocation) == 0)
-#define UndoLocationGetValue(loc)	((loc) & UndoLocationValueMask)
-
-/* Identifier for orioledb transaction */
-typedef uint64 OXid;
-#define	InvalidOXid					UINT64CONST(0x7FFFFFFFFFFFFFFF)
-#define OXidIsValid(oxid)			((oxid) != InvalidOXid)
-#define LXID_NORMAL_FROM			(1)
-
-/* Index number */
-typedef uint16 OIndexNumber;
-
-/* Index type */
-typedef enum
-{
-	oIndexInvalid = 0,
-	oIndexToast = 1,
-	oIndexBridge = 2,
-	oIndexPrimary = 3,
-	oIndexUnique = 4,
-	oIndexRegular = 5,
-} OIndexType;
-
 #define PROC_XID_ARRAY_SIZE	32
 
 typedef enum
@@ -166,13 +131,6 @@ typedef struct
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;
-
-typedef struct
-{
-	Oid			datoid;
-	Oid			reloid;
-	Oid			relnode;
-} ORelOids;
 
 typedef uint64 S3TaskLocation;
 
@@ -404,9 +362,8 @@ typedef enum OPagePoolType
 #define OPagePoolTypesCount 3
 
 typedef struct OPagePool OPagePool;
-struct BTreeDescr;
 
-extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
+extern uint64 orioledb_device_alloc(BTreeDescr *descr, uint32 size);
 extern OPagePool *get_ppool(OPagePoolType type);
 extern OPagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
 extern OInMemoryBlkno get_dirty_pages_count_sum(void);
@@ -421,9 +378,6 @@ extern CheckPoint_hook_type next_CheckPoint_hook;
 
 /* tableam_handler.c */
 extern bool is_orioledb_rel(Relation rel);
-
-typedef struct OTableDescr OTableDescr;
-typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
 extern UndoLocation saved_undo_location[(int) UndoLogsCount];

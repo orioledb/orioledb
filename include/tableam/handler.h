@@ -14,6 +14,7 @@
 #define __TABLEAM_HANDLER_H__
 
 #include "btree/btree.h"
+#include "btree/print.h"
 #include "catalog/o_tables.h"
 
 #include "access/tableam.h"
