@@ -6,7 +6,7 @@ import re
 import signal
 import struct
 from concurrent.futures import ThreadPoolExecutor
-from tempfile import mkdtemp
+from tempfile import mkdtemp, mkstemp
 from threading import Thread, Event
 from typing import Optional
 
@@ -104,7 +104,9 @@ class S3Test(BaseTest):
 		self.client.close()
 
 	def test_s3_put_get(self):
-		s3_test_file = f"{self.dir_path}/s3_test_data"
+		fd, s3_test_file = mkstemp()
+		with os.fdopen(fd, 'wt') as fp:
+			fp.write("HELLO\nIT'S A ME\nMARIO\n")
 
 		self.client.upload_file(Bucket=self.bucket_name, Filename=s3_test_file,
 								Key="wal/314159")
@@ -145,6 +147,7 @@ class S3Test(BaseTest):
 			file_content = ''.join(f.readlines())
 			self.assertEqual(file_content, orioledb_object_body)
 		node.stop(['-m', 'immediate'])
+		os.unlink(s3_test_file)
 
 	def test_s3_checkpoint(self):
 		node = self.node
