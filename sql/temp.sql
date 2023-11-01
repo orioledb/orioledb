@@ -117,6 +117,42 @@ SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
 
 REINDEX SCHEMA :temp_schema_name;
 
+CREATE TEMP TABLE o_test_temp_inherit (
+	val_1 text,
+	val_2 text
+) USING orioledb;
+
+CREATE INDEX ind_1 ON o_test_temp_inherit ((val_1 || val_2));
+
+CREATE TEMP TABLE o_test_temp_inherit2 (
+	val_3 text PRIMARY KEY
+) USING orioledb;
+
+INSERT INTO o_test_temp_inherit VALUES ('a', 'b'), ('x', 'y');
+INSERT INTO o_test_temp_inherit2 VALUES ('ab'), ('xy');
+
+CREATE TEMP TABLE o_test_temp_inherit_child (
+	val_1 text,
+	val_2 text
+) USING orioledb;
+
+ALTER TABLE o_test_temp_inherit_child INHERIT o_test_temp_inherit;
+
+CREATE TEMP TABLE o_test_temp_inherit_child2 (
+	PRIMARY KEY (val_3)
+) INHERITS (o_test_temp_inherit2) USING orioledb;
+
+INSERT INTO o_test_temp_inherit_child VALUES ('q', 'w'), ('e', 'r'),
+											 ('t', 'y'), ('u', 'i');
+INSERT INTO o_test_temp_inherit_child2 VALUES ('qw'), ('er'), ('ty'), ('ui');
+
+CREATE INDEX ind_2 on o_test_temp_inherit_child ((val_1 || val_2));
+
+SELECT * FROM (SELECT val_1 || val_2 AS val_3 FROM o_test_temp_inherit
+			   UNION ALL
+			   SELECT val_3 FROM o_test_temp_inherit2) t
+	ORDER BY 1 LIMIT 8;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA temp_schema CASCADE;
 RESET search_path;
