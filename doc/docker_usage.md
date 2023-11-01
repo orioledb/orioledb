@@ -27,7 +27,7 @@ Connect to the server via psql:
 
 You should expect a similar psql message:
 ```
-psql (15.2 OrioleDB public beta 1 PGTAG=patches15_15 alpine:3.17+clang build:2023-06-17T23:05:36+00:00)
+psql (15.4 OrioleDB public beta 3 PGTAG=patches15_18 alpine:3.17+clang build:2023-11-01T22:43:27+00:00)
 Type "help" for help.
 
 postgres=#
@@ -42,7 +42,7 @@ Test some commands:
 postgres=# select orioledb_version();
     orioledb_version
 ------------------------
- OrioleDB public beta 1
+ OrioleDB public beta 3
 (1 row)
 
 postgres=# \d+
@@ -202,27 +202,27 @@ Known limitations:
 - OrioleDB `gist`, `sp-gist`, and other related indexes are not yet supported.
 
 
-#### Step 1: create image: `orioletest:15-gcc-alpine3.18`
+#### Step 1: create image: `orioletest:16-gcc-alpine3.18`
 
 ```
 docker build --pull --network=host --progress=plain \
     --build-arg ALPINE_VERSION="3.18" \
     --build-arg BUILD_CC_COMPILER="gcc" \
-    --build-arg PG_MAJOR="15" \
+    --build-arg PG_MAJOR="16" \
     --build-arg DOCKER_PG_LLVM_DEPS="llvm15-dev clang15" \
-    -t orioletest:15-gcc-alpine3.18 .
+    -t orioletest:16-gcc-alpine3.18 .
 ```
 
-#### Step2: Build the `oriolegis:15-3.3` image.
+#### Step2: Build the `oriolegis:16-3.4` image.
 
 in a new directory, run this commands:
 
 ```
 git clone https://github.com/postgis/docker-postgis.git
-cd ./docker-postgis/15-3.3/alpine
+cd ./docker-postgis/16-3.4/alpine
 docker build --network=host --progress=plain \
-     --build-arg BASE_IMAGE=orioletest:15-gcc-alpine3.18 \
-    -t oriolegis:15-3.3 .
+     --build-arg BASE_IMAGE=orioletest:16-gcc-alpine3.18 \
+    -t oriolegis:16-3.4 .
 ```
 ## Developer notes:
 

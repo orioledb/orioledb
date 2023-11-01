@@ -32,6 +32,9 @@
 **/lib*dll.def
 **/lib*.pc
 
+# documnetation files
+doc/
+
 # Local excludes in root directory
 t/__pycache__/
 log/
