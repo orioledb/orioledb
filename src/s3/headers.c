@@ -223,7 +223,7 @@ load_header_buffer(S3HeaderTag tag)
 	uint32		newValues[S3_HEADER_NUM_VALUES];
 	bool		dirty = false,
 				newDirty = false;
-	uint32		changeCount;
+	uint32		changeCount PG_USED_FOR_ASSERTS_ONLY;
 
 	/* First check if required buffer is already loaded */
 	LWLockAcquire(&group->groupCtlLock, LW_EXCLUSIVE);
@@ -509,7 +509,7 @@ s3_header_mark_part_loaded(S3HeaderTag tag, int index)
 	while (true)
 	{
 		uint32		newValue;
-		S3PartStatus status;
+		S3PartStatus status PG_USED_FOR_ASSERTS_ONLY;
 
 		status = S3_PART_GET_STATUS(value);
 

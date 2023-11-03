@@ -457,7 +457,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 	int			result = 0;
 	off_t		curOffset = offset,
 				granularity;
-	S3HeaderTag tag;
+	S3HeaderTag tag = {0};
 
 	if (use_mmap)
 	{
@@ -548,7 +548,7 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 {
 	int			result = 0;
 	off_t		granularity;
-	S3HeaderTag tag;
+	S3HeaderTag tag = {0};
 
 	if (use_mmap)
 	{
