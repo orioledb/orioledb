@@ -338,6 +338,8 @@ write_file_part(const char *filename, uint64 offset,
 		return;
 	}
 
+	FileWriteback(file, offset, size, WAIT_EVENT_DATA_FILE_FLUSH);
+
 	FileClose(file);
 }
 

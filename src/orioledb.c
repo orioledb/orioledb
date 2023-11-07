@@ -119,6 +119,7 @@ bool		orioledb_table_description_compress = false;
 #endif
 bool		orioledb_s3_mode = false;
 int			s3_num_workers = 3;
+int			s3_desired_size = 10000;
 int			s3_queue_size_guc;
 char	   *s3_host = NULL;
 char	   *s3_region = NULL;
@@ -616,6 +617,19 @@ _PG_init(void)
 							MAX_BACKENDS,
 							PGC_POSTMASTER,
 							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.s3_desired_size",
+							"The desired size of local OrioleDB data.",
+							NULL,
+							&s3_desired_size,
+							10000,
+							1,
+							INT_MAX,
+							PGC_SIGHUP,
+							GUC_UNIT_MB,
 							NULL,
 							NULL,
 							NULL);

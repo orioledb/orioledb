@@ -865,10 +865,17 @@ get_free_disk_extent(BTreeDescr *desc, uint32 chkpNum,
 	if (orioledb_s3_mode)
 	{
 		int			len = OCompressIsValid(desc->compress) ? FileExtentLen(page_size) : 1;
+		int			threshold = ORIOLEDB_S3_PART_SIZE / (OCompressIsValid(desc->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ);
 		BTreeMetaPage *metaPage = BTREE_GET_META(desc);
 
 		extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[chkpNum % 2], len);
 		extent->len = len;
+
+		if (extent->off / threshold != (extent->off + len) / threshold)
+		{
+			Assert(extent->off / threshold + 1 == (extent->off + len) / threshold);
+			s3_headers_increase_loaded_parts(1);
+		}
 
 		extent->off |= (uint64) chkpNum << S3_CHKP_NUM_SHIFT;
 
@@ -1639,6 +1646,17 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 			extent->off = orioledb_device_alloc(desc, ORIOLEDB_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
 		else
 			extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[chkpNum % 2], extent->len);
+	}
+
+	if (orioledb_s3_mode)
+	{
+		int			threshold = ORIOLEDB_S3_PART_SIZE / (OCompressIsValid(desc->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ);
+
+		if (extent->off / threshold != (extent->off + extent->len) / threshold)
+		{
+			Assert(extent->off / threshold + 1 == (extent->off + extent->len) / threshold);
+			s3_headers_increase_loaded_parts(1);
+		}
 	}
 
 	Assert(FileExtentIsValid(*extent));

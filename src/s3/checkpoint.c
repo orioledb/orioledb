@@ -17,6 +17,7 @@
 
 #include "checkpoint/checkpoint.h"
 #include "s3/checkpoint.h"
+#include "s3/headers.h"
 #include "s3/worker.h"
 
 #include "utils/wait_event.h"
@@ -228,6 +229,8 @@ s3_perform_backup(S3TaskLocation maxLocation)
 	backup_started_in_recovery = RecoveryInProgress();
 
 	total_checksum_failures = 0;
+
+	s3_headers_sync();
 
 	initStringInfo(&tablespaceMapData);
 	state.tablespaces = get_tablespaces(&tablespaceMapData);

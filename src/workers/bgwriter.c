@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "btree/undo.h"
+#include "s3/headers.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
@@ -184,6 +185,9 @@ bgwriter_main(Datum main_arg)
 			}
 
 			check_pending_truncates();
+
+			if (orioledb_s3_mode)
+				s3_headers_try_eviction_cycle();
 
 			ResetLatch(MyLatch);
 		}
