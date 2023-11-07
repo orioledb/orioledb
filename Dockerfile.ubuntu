@@ -1,7 +1,8 @@
 # This is modified Dockerfile from 16/bookworm in
 # https://github.com/docker-library/postgres
 
-FROM ubuntu:focal
+ARG UBUNTU_VERSION=focal
+FROM ubuntu:${UBUNTU_VERSION}
 
 # Set PG_MAJOR = [16 15 14 13 ]
 ARG PG_MAJOR=14
@@ -13,8 +14,6 @@ ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
 
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
-# They are useful for building downstream extensions using the same LLVM, like PostGIS alpine https://github.com/postgis/docker-postgis
-# Note: PostgreSQL does not support LLVM 16. Therefore, for Alpine >=3.18, please use "llvm15-dev clang15".
 # Reference: https://github.com/docker-library/postgres/pull/1077
 ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
 ENV DOCKER_PG_LLVM_DEPS ${DOCKER_PG_LLVM_DEPS}
@@ -213,8 +212,8 @@ RUN set -eux; \
 	cp -v /usr/local/share/postgresql/postgresql.conf.sample /usr/local/share/postgresql/postgresql.conf.sample.orig; \
 	sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" /usr/local/share/postgresql/postgresql.conf.sample; \
 	echo "shared_preload_libraries = 'orioledb'" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "orioledb.shared_pool_size = 512MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "orioledb.undo_size = 256MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
+	echo "orioledb.main_buffers = 512MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
+	echo "orioledb.undo_buffers = 256MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
 	echo "max_wal_size=8GB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
 	grep -F "listen_addresses = '*'" /usr/local/share/postgresql/postgresql.conf.sample
 

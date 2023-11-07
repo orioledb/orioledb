@@ -12,7 +12,12 @@ jobs:
       matrix:
         postgres: [16, 15, 14]
         compiler: [clang]
-        alpine:  [3.18]
+        distr:  [alpine, ubuntu]
+        include:
+          - distr-version: 3.18
+            distr: alpine
+          - distr-version: focal
+            distr: ubuntu
 
     name: Push Docker image to Docker Hub
     runs-on: ubuntu-latest
@@ -20,14 +25,9 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v3
 
-      - name: Get the required tag name
-        shell: bash
-        run: |
-          echo "PGTAG=$(grep '^${{ matrix.postgres }}: ' .pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
-
       - name: Set DOCKER_PG_LLVM_DEPS
         run: |
-          if [[ "${{ matrix.alpine }}" == "3.18" ]] || [[ "${{ matrix.alpine }}" == "edge" ]]; \
+          if [[ "${{ matrix.distr }}" == "alpine" ]] && ([[ "${{ matrix.distr-version }}" == "3.18" ]] || [[ "${{ matrix.distr-version }}" == "edge" ]]); \
           then echo "DOCKER_PG_LLVM_DEPS=llvm15-dev clang15" >> $GITHUB_ENV; \
           else echo "DOCKER_PG_LLVM_DEPS=llvm-dev clang"     >> $GITHUB_ENV; \
           fi
@@ -55,18 +55,20 @@ jobs:
           flavor: |
             latest=auto
             prefix=
-            suffix=-pg${{ matrix.postgres }},onlatest=true
+            suffix=-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
         with:
           context: .
+          file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            ALPINE_VERSION=${{ matrix.alpine }}
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
+            PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
-            PGTAG=${{ env.PGTAG }}
             DOCKER_PG_LLVM_DEPS=${{ env.DOCKER_PG_LLVM_DEPS }}

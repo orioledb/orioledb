@@ -13,18 +13,23 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        postgres: [16, 13]
-        compiler: [clang, gcc]
-        alpine:  [edge, 3.18, 3.13]
+        postgres: [16, 15, 14]
+        compiler: [clang]
+        distr:  [alpine, ubuntu]
+        include:
+          - distr-version: 3.18
+            distr: alpine
+          - distr-version: focal
+            distr: ubuntu
 
-    name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
+    name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.alpine == 'edge' }}
 
     steps:
       - name: Set DOCKER_PG_LLVM_DEPS
         run: |
-          if [[ "${{ matrix.alpine }}" == "3.18" ]] || [[ "${{ matrix.alpine }}" == "edge" ]]; \
+          if [[ "${{ matrix.distr }}" == "alpine" ]] && ([[ "${{ matrix.distr-version }}" == "3.18" ]] || [[ "${{ matrix.distr-version }}" == "edge" ]]); \
           then echo "DOCKER_PG_LLVM_DEPS=llvm15-dev clang15" >> $GITHUB_ENV; \
           else echo "DOCKER_PG_LLVM_DEPS=llvm-dev clang"     >> $GITHUB_ENV; \
           fi
@@ -35,16 +40,18 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v3
 
-      - name: docker build orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
+      - name: docker build orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
         uses: docker/build-push-action@v4
         with:
           context: .
+          file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
           platforms: linux/amd64
           push: false
           pull: true
-          tags: orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-alpine${{ matrix.alpine }}
+          tags: orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
           build-args: |
-            ALPINE_VERSION=${{ matrix.alpine }}
-            BUILD_CC_COMPILER=${{ matrix.compiler }}
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
             PG_MAJOR=${{ matrix.postgres }}
+            BUILD_CC_COMPILER=${{ matrix.compiler }}
             DOCKER_PG_LLVM_DEPS=${{ env.DOCKER_PG_LLVM_DEPS }}

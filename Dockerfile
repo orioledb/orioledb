@@ -228,8 +228,8 @@ RUN set -eux; \
 	cp -v /usr/local/share/postgresql/postgresql.conf.sample /usr/local/share/postgresql/postgresql.conf.sample.orig; \
 	sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" /usr/local/share/postgresql/postgresql.conf.sample; \
 	echo "shared_preload_libraries = 'orioledb'" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "orioledb.shared_pool_size = 512MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "orioledb.undo_size = 256MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
+	echo "orioledb.main_buffers = 512MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
+	echo "orioledb.undo_buffers = 256MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
 	echo "max_wal_size=8GB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
 	grep -F "listen_addresses = '*'" /usr/local/share/postgresql/postgresql.conf.sample
 
