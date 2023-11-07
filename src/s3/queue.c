@@ -286,7 +286,7 @@ s3_queue_erase_task(S3TaskLocation taskLocation)
 		 * More complex case: we hit the buffer end boundary.  In this case we
 		 * have to erase the two distinct chunks.
 		 */
-		int			firstChunkLen = s3_queue_size - taskLen % s3_queue_size;
+		int			firstChunkLen = s3_queue_size - taskLocation % s3_queue_size;
 
 		Assert(firstChunkLen >= sizeof(uint32));
 
