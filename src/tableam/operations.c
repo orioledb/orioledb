@@ -1603,6 +1603,8 @@ o_lock_deleted_callback(BTreeDescr *descr,
 
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
+	o_arg->deleted = deleted;
+
 	if (XACT_INFO_IS_FINISHED(xactInfo))
 	{
 		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;

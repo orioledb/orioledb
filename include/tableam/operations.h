@@ -78,6 +78,7 @@ typedef struct
 	CommitSeqNo csn;
 	LockWaitPolicy waitPolicy;
 	UndoLocation tupUndoLocation;
+	BTreeLeafTupleDeletedStatus deleted;
 	bool		wouldBlock;
 	bool		modified;
 	bool		selfModified;

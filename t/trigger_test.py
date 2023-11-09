@@ -1,7 +1,9 @@
+import unittest
 from .base_test import BaseTest
 from testgres.exceptions import QueryException
 from testgres.connection import DatabaseError
 import re
+from .base_test import ThreadQueryExecutor
 
 class TriggerTest(BaseTest):
 	def test_self_modified_update_deleted(self):
@@ -894,3 +896,61 @@ class TriggerTest(BaseTest):
 
 		node.start()
 		node.stop()
+
+	@unittest.skipIf(BaseTest.get_pg_version() < 15,
+					 'MERGE command added in postgres 15')
+	def test_trigger_lock_delete_updated(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+
+				CREATE TABLE o_test_1(
+					val_1 int PRIMARY KEY,
+					val_2 integer,
+					val_3 text,
+					val_4 text
+				)USING orioledb;
+
+				CREATE TABLE o_test_2(
+					val_1 int PRIMARY KEY,
+					val_2 integer,
+					val_3 text,
+					val_4 text
+				)USING orioledb;
+
+				CREATE FUNCTION func_1() RETURNS trigger LANGUAGE plpgsql AS
+				$$
+				BEGIN
+				IF tg_op = 'INSERT' THEN
+					RETURN NEW;
+				ELSE
+					RETURN OLD;
+				END IF;
+				END
+				$$;
+
+			CREATE TRIGGER trig_1
+				BEFORE DELETE ON o_test_2
+					FOR EACH ROW EXECUTE FUNCTION func_1();
+
+			INSERT INTO o_test_2
+				VALUES (1, 5, 'a', 'b');
+		""")
+
+		with node.connect() as con1:
+			with node.connect() as con2:
+				con1.begin()
+				con2.begin()
+				t1 = ThreadQueryExecutor(con1, """
+					MERGE INTO o_test_2 t
+						USING (SELECT 1 AS val_1) s ON s.val_1 = t.val_1
+						WHEN MATCHED AND val_2 < 200 THEN DELETE;
+				""")
+				con2.execute("""
+					UPDATE o_test_2 t SET val_2 = val_2 + 10;
+				""")
+				t1.start()
+				con2.commit()
+				t1.join()
+				con1.commit()

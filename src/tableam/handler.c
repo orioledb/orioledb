@@ -589,6 +589,17 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 		tmfd->cmax = InvalidCommandId;
 	}
 
+	if (larg.deleted == BTreeLeafTupleMovedPartitions)
+	{
+		tmfd->traversed = true;
+		ItemPointerSetMovedPartitions(&tmfd->ctid);
+		return TM_Updated;
+	}
+	else
+	{
+		ItemPointerSet(&tmfd->ctid, 0, FirstOffsetNumber);
+	}
+
 	if (larg.wouldBlock)
 		return TM_WouldBlock;
 
