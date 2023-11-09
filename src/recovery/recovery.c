@@ -405,7 +405,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 	uint32		count = 0,
 				i;
 
-	xidFile = PathNameOpenFile(xidFilename, O_RDONLY | O_CREAT | PG_BINARY);
+	xidFile = PathNameOpenFile(xidFilename, O_RDONLY | PG_BINARY);
 	if (xidFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not open xid file %s", xidFilename)));

@@ -252,11 +252,21 @@ s3_perform_backup(S3TaskLocation maxLocation)
 
 		if (ti->path == NULL)
 		{
+			char *xidFilename;
+
 			/* Then the bulk of the files... */
 			s3_backup_scan_dir(&state, ".", 1, NULL);
 
 			location = s3_schedule_file_write(chkpNum, XLOG_CONTROL_FILE, false);
 			maxLocation = Max(maxLocation, location);
+			location = s3_schedule_file_write(chkpNum, ORIOLEDB_DATA_DIR"/control", false);
+			maxLocation = Max(maxLocation, location);
+
+			xidFilename = psprintf(XID_FILENAME_FORMAT,
+								   checkpoint_state->lastCheckpointNumber);
+			location = s3_schedule_file_write(chkpNum, xidFilename, false);
+			maxLocation = Max(maxLocation, location);
+			pfree(xidFilename);
 		}
 		else
 		{

@@ -2,26 +2,21 @@ import json
 import logging
 import os
 import time
-import re
 import signal
-import struct
-from concurrent.futures import ThreadPoolExecutor
 from tempfile import mkdtemp, mkstemp
-from threading import Thread, Event
+from threading import Thread
 from typing import Optional
 
 import boto3
-from boto3.s3.transfer import TransferConfig
 import testgres
 from botocore import UNSIGNED
 from botocore.config import Config
-from botocore.exceptions import ClientError
 from moto.core import set_initial_no_auth_action_count
 from moto.server import DomainDispatcherApplication, create_backend_app
 from testgres.consts import DATA_DIR
-from testgres.defaults import default_dbname, default_username
+from testgres.defaults import default_dbname
+from testgres.enums import NodeStatus
 
-from testgres.utils import clean_on_error
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
 import urllib3
 
@@ -31,12 +26,13 @@ from .base_test import generate_string as gen_str
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
 class S3Test(BaseTest):
 	bucket_name = "test-bucket"
 	host="localhost"
 	port=5000
 	iam_port=5001
-	dir_path = os.path.dirname(os.path.realpath(__file__))
 	user="ORDB_USER"
 	region="us-east-1"
 
@@ -85,6 +81,11 @@ class S3Test(BaseTest):
 		host_port = f"https://{self.host}:{self.port}"
 		self.client = session.client("s3", endpoint_url=host_port,
 									 verify=self.ssl_key[0])
+		self.loader = OrioledbS3Loader(self.access_key_id,
+									   self.secret_access_key,
+									   self.region,
+									   host_port,
+									   self.ssl_key[0])
 		try:
 			self.client.head_bucket(Bucket=self.bucket_name)
 		except:
@@ -328,200 +329,56 @@ class S3Test(BaseTest):
 		""")[0][0]
 		node.safe_psql("""
 			CREATE EXTENSION orioledb;
-			CREATE TABLE pg_test_1 (
+			CREATE TABLE o_test_1 (
 				val_1 int
 			) USING orioledb;
-			INSERT INTO pg_test_1 SELECT * FROM generate_series(1, 5);
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
 		""")
 		node.safe_psql("CHECKPOINT;")
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
-						 node.execute("SELECT * FROM pg_test_1"))
+						 node.execute("SELECT * FROM o_test_1"))
 		node.stop(['--no-wait'])
 
 		new_temp_dir = mkdtemp(prefix = self.myName + '_tgsb_')
-		new_data_dir = os.path.join(new_temp_dir, DATA_DIR)
-		new_wal_dir = os.path.join(new_data_dir, 'pg_wal')
 
-		host_port = f"https://{self.host}:{self.port}"
-		loader = OrioledbS3ObjectLoader(self.access_key_id,
-										self.secret_access_key,
-										self.region,
-										host_port,
-										self.ssl_key[0])
-
-		while loader.list_objects(self.bucket_name, 'wal/') == []:
+		while self.client.list_objects(Bucket=self.bucket_name,
+									   Prefix='wal/') == []:
 			pass
 		os.kill(archiver_pid, signal.SIGUSR2)
+		while node.status() == NodeStatus.Running:
+			pass
 
-		loader.download_files_in_directory(self.bucket_name, 'data/',
-										   new_data_dir)
-		loader.download_files_in_directory(self.bucket_name,
-										   'orioledb_data/',
-										   f"{new_data_dir}/orioledb_data",
-										   suffix='.map')
-		new_node = testgres.get_new_node('test', base_dir=new_temp_dir)
+		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+			self.loader.download(self.bucket_name, new_node.data_dir)
+			new_node.port = self.getBasePort() + 1
+			new_node.append_conf(port=new_node.port)
 
-		control = new_node.get_control_data()
-		wal_file = control["Latest checkpoint's REDO WAL file"]
-		loader.download_file(self.bucket_name, f"wal/{wal_file}",
-							 f"{new_wal_dir}/{wal_file}")
+			new_node.start()
+			self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
+							new_node.execute("SELECT * FROM o_test_1"))
+			new_node.stop()
+			new_node.cleanup()
 
-		new_node.port = self.getBasePort() + 1
-		new_node.append_conf(port=new_node.port)
-
-		new_node.start()
-		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
-						new_node.execute("SELECT * FROM pg_test_1"))
-		new_node.stop()
-		new_node.cleanup()
-
-class OrioledbS3ObjectLoader:
+class OrioledbS3Loader:
 	def __init__(self, aws_access_key_id, aws_secret_access_key, aws_region,
-				 endpoint_url, verify):
-		session = boto3.Session(
-			aws_access_key_id=aws_access_key_id,
-			aws_secret_access_key=aws_secret_access_key,
-			region_name=aws_region
-		)
-		self.s3 = session.client("s3", endpoint_url=endpoint_url,
-								 verify=verify)
-		self._error_occurred = Event()
+				 endpoint_url, verify=None):
+		os.environ["AWS_ACCESS_KEY_ID"] = aws_access_key_id
+		os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_access_key
+		os.environ["AWS_DEFAULT_REGION"] = aws_region
 
-	def list_objects_last_checkpoint(self, bucket_name, directory):
-		objects = []
-		paginator = self.s3.get_paginator('list_objects_v2')
+		self._aws_region = aws_region
+		self._endpoint_url = endpoint_url
+		self._verify = verify
 
-		greatest_number = -1
-		greatest_number_dir = None
-		for page in paginator.paginate(Bucket=bucket_name, Prefix=directory,
-									   Delimiter='/'):
-			if 'CommonPrefixes' in page:
-				for prefix in page['CommonPrefixes']:
-					prefix_key = prefix['Prefix'].rstrip('/')
-					subdirectory = prefix_key.split('/')[-1]
-					try:
-						number = int(subdirectory)
-						if number > greatest_number:
-							greatest_number = number
-							greatest_number_dir = prefix['Prefix']
-					except ValueError:
-						pass
-		if greatest_number_dir:
-			objects = self.list_objects(bucket_name, greatest_number_dir)
-
-		return objects
-
-	def list_objects(self, bucket_name, directory):
-		objects = []
-		paginator = self.s3.get_paginator('list_objects_v2')
-
-		for page in paginator.paginate(Bucket=bucket_name, Prefix=directory):
-			if 'Contents' in page:
-				page_objs = [x["Key"] for x in page['Contents']]
-				objects.extend(page_objs)
-
-		return objects
-
-	# Reimplement os.dirs so it sets mode for intermediate dirs also
-	def makedirs(self, name, mode=0o777, exist_ok=False):
-		"""makedirs(name [, mode=0o777][, exist_ok=False])
-
-		Super-mkdir; create a leaf directory and all intermediate ones.  Works like
-		mkdir, except that any intermediate path segment (not just the rightmost)
-		will be created if it does not exist. If the target directory already
-		exists, raise an OSError if exist_ok is False. Otherwise no exception is
-		raised.  This is recursive.
-
-		"""
-		head, tail = os.path.split(name)
-		if not tail:
-			head, tail = os.path.split(head)
-		if head and tail and not os.path.exists(head):
-			try:
-				self.makedirs(head, mode, exist_ok=exist_ok)
-			except FileExistsError:
-				# Defeats race condition when another thread created the path
-				pass
-			cdir = os.curdir
-			if isinstance(tail, bytes):
-				cdir = bytes(os.curdir, 'ASCII')
-			if tail == cdir:           # xxx/newdir/. exists if xxx/newdir exists
-				return
-		try:
-			os.mkdir(name, mode)
-		except OSError:
-			# Cannot rely on checking for EEXIST, since the operating system
-			# could give priority to other errors like EACCES or EROFS
-			if not exist_ok or not os.path.isdir(name):
-				raise
-
-	def download_file(self, bucket_name, file_key, local_path):
-		try:
-			transfer_config = TransferConfig(use_threads=False,
-											 max_concurrency=1)
-			if file_key[-1] == '/':
-				dirs = local_path
-			else:
-				dirs = '/'.join(local_path.split('/')[:-1])
-			self.makedirs(dirs, exist_ok=True, mode=0o700)
-			if file_key[-1] != '/':
-				self.s3.download_file(
-					bucket_name, file_key, local_path, Config=transfer_config
-				)
-			if re.match(r'.*/orioledb_data/small_files_\d+$', local_path):
-				base_dir = '/'.join(local_path.split('/')[:-2])
-				with open(local_path, 'rb') as file:
-					data = file.read()
-				numFiles = struct.unpack('i', data[0:4])[0]
-				for i in range(0, numFiles):
-					(nameOffset, dataOffset, dataLength) = struct.unpack('iii', data[4 + i * 12: 16 + i * 12])
-					name = data[nameOffset: data.find(b'\0', nameOffset)].decode('ascii')
-					fullname = f"{base_dir}/{name}"
-					self.makedirs(os.path.dirname(fullname), exist_ok=True, mode=0o700)
-					with open(fullname, 'wb') as file:
-						file.write(data[dataOffset: dataOffset + dataLength])
-					os.chmod(fullname, 0o600)
-				os.unlink(local_path)
-
-		except ClientError as e:
-			if e.response['Error']['Code'] == "404":
-				print(f"File not found: {file_key}")
-			else:
-				print(f"An error occurred: {e}")
-			self._error_occurred.set()
-
-	def download_files_in_directory(self, bucket_name, directory,
-									local_directory, last_checkpoint=True,
-									suffix=''):
-		if last_checkpoint:
-			objects = self.list_objects_last_checkpoint(bucket_name, directory)
-		else:
-			objects = self.list_objects(bucket_name, directory)
-		max_threads = os.cpu_count()
-
-		with ThreadPoolExecutor(max_threads) as executor:
-			futures = []
-
-			for file_key in objects:
-				if not file_key.endswith(suffix):
-					continue
-				if last_checkpoint:
-					local_file = '/'.join(file_key.split('/')[2:])
-				else:
-					local_file = '/'.join(file_key.split('/')[1:])
-				local_path = f"{local_directory}/{local_file}"
-				future = executor.submit(self.download_file, bucket_name,
-										 file_key, local_path)
-				futures.append(future)
-
-			for future in futures:
-				future.result()
-
-				if self._error_occurred.is_set():
-					print("An error occurred. Stopping all downloads.")
-					executor.shutdown(wait=False, cancel_futures=True)
-					break
-
+	def download(self, bucket_name, path, verbose=False, logfile=None):
+		args = [f"{dir_path}/../orioledb_s3_loader.py"]
+		args += ["--bucket-name", bucket_name]
+		args += ["--endpoint", self._endpoint_url]
+		args += ["--cert-file", self._verify]
+		args += ["-d", path]
+		if verbose:
+			args += ["--verbose"]
+		testgres.utils.execute_utility(args, logfile)
 
 class MotoServerSSL:
 	def __init__(self, host: str = "localhost", port: int = 5000,
