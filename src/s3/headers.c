@@ -25,6 +25,7 @@
 #include "common/file_perm.h"
 #include "common/file_utils.h"
 #include "common/hashfn.h"
+#include "common/pg_prng.h"
 #include "pgstat.h"
 
 #define S3_HEADER_BUFFERS_PER_GROUP 4
@@ -803,6 +804,24 @@ eviction_callback(S3HeaderTag tag)
 	for (i = 0; i < numParts; i++)
 	{
 		uint32		value;
+
+		if (i == numParts - 1 && fileSize < (uint64) numParts * (uint64) ORIOLEDB_S3_PART_SIZE)
+		{
+			static pg_prng_state random_state;
+			static bool seed_initialized = false;
+
+			if (!seed_initialized)
+			{
+				pg_prng_seed(&random_state, 0);
+				seed_initialized = true;
+			}
+
+			if (pg_prng_int32(&random_state) % ORIOLEDB_S3_PART_SIZE >
+				fileSize - (uint64) (numParts - 1) * (uint64) ORIOLEDB_S3_PART_SIZE)
+			{
+				continue;
+			}
+		}
 
 		value = s3_header_read_value(tag, i);
 
