@@ -297,6 +297,7 @@ load_header_buffer(S3HeaderTag tag)
 	for (i = 0; i < S3_HEADER_BUFFERS_PER_GROUP; i++)
 	{
 		S3HeaderBuffer *buffer = &group->buffers[i];
+
 		if (S3HeaderTagsIsEqual(buffer->tag, tag))
 		{
 			buffer->usageCount++;
@@ -471,8 +472,8 @@ s3_header_lock_part(S3HeaderTag tag, int index)
 
 	while (true)
 	{
-			uint32		newValue = value,
-						usageCount = S3_PART_GET_USAGE_COUNT(value);
+		uint32		newValue = value,
+					usageCount = S3_PART_GET_USAGE_COUNT(value);
 		S3PartStatus status;
 
 		status = S3_PART_GET_STATUS(value);
@@ -619,8 +620,8 @@ sync_buffer(S3HeaderBuffer *buffer)
 void
 s3_headers_sync(void)
 {
-	int		i,
-			j;
+	int			i,
+				j;
 
 	for (i = 0; i < groupsCount; i++)
 	{
@@ -699,9 +700,9 @@ iterate_files(IterateFilesCallback callback)
 	closedir(dir);
 }
 
-static off_t	totalFilesSize;
-static off_t	totalOccupiedSize;
-static uint64	totalFilesCount;
+static off_t totalFilesSize;
+static off_t totalOccupiedSize;
+static uint64 totalFilesCount;
 
 static void
 initial_parts_counting_callback(S3HeaderTag tag)
@@ -732,7 +733,7 @@ initial_parts_counting_callback(S3HeaderTag tag)
 	{
 		S3PartStatus status = S3_PART_GET_STATUS(values[i]);
 		uint32		usageCount = S3_PART_GET_USAGE_COUNT(values[i]);
-		off_t	offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
+		off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
 
 		if (status == S3PartStatusNotLoaded || status == S3PartStatusLoading)
 		{
@@ -825,7 +826,7 @@ eviction_callback(S3HeaderTag tag)
 				if (S3_PART_GET_STATUS(value) == S3PartStatusLoaded &&
 					S3_PART_GET_STATUS(newValue) == S3PartStatusNotLoaded)
 				{
-					off_t	offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
+					off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
 
 					pg_pwrite_zeros(fd, Min(offset + ORIOLEDB_S3_PART_SIZE, fileSize) - offset, offset);
 				}
