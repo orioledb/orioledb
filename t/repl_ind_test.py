@@ -355,14 +355,257 @@ class ReplicationTest(BaseTest):
 					""")
 				
 					con1.commit()
-
 					self.assertEqual([(1, 'qwe', 'rty')], master.execute("""
 									SELECT * FROM o_test_1;"""))
 
 					catchup_orioledb(replica)	
-
 					self.assertEqual([(1, 'qwe', 'rty')], master.execute("""
 									SELECT * FROM o_test_1;"""))
 					self.assertEqual(1, self.get_tbl_count(replica))
 
+	def test_7(self):
+
+		node = self.node
+		node.start()
+		
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+					
+					con1.execute("""
+
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1(
+				  			a int, 
+				  			b int
+						)USING orioledb;
+				  
+						CREATE TABLE o_test_2()INHERITS (o_test_1)USING orioledb;
+
+						CREATE UNIQUE INDEX ind_1 ON o_test_1 (b);
+				  
+						ALTER TABLE o_test_1 
+							ADD PRIMARY KEY USING INDEX ind_1;
+				  
+						ALTER INDEX ind_1 RENAME TO ind_2;
+				  
+						CREATE TABLE o_test_3(
+				  			a int
+						)USING orioledb;
+				  
+				  		CREATE UNIQUE INDEX ind_1 ON o_test_3(a);
+
+					""")
+				
+					con1.commit()
+					catchup_orioledb(replica)	
+					self.assertEqual(master.execute("TABLE o_test_1"),[])	
+					self.assertEqual(master.execute("TABLE o_test_2"),[])
+					self.assertEqual(master.execute("TABLE o_test_3"),[])
+					self.assertEqual(3, self.get_tbl_count(master))
+					
+
+	def test_8(self):
+
+		node = self.node
+		node.start()
+		
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+					
+					con1.execute("""
+
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1(
+				  			val_1 int
+						)USING orioledb;
+						
+				  		CREATE TABLE o_test_2(check(
+				  			val_1 = 4 or val_1 = null)
+				  		)INHERITS(o_test_1)USING orioledb;
+				  
+						CREATE INDEX ON o_test_1(val_1);
+				  		CREATE INDEX ON o_test_2(val_1);
+						
+				  		INSERT INTO o_test_2 VALUES(1);
+						INSERT INTO o_test_2 VALUES(2);
+						INSERT INTO o_test_2 VALUES(null);
+				  
+				  		ALTER TABLE o_test_2 ADD COLUMN val_2 int;
+				  
+				  		CREATE INDEX ON o_test_2 (val_1, val_2);
+						CREATE UNIQUE INDEX ON o_test_2 (val_1, val_2) INCLUDE (val_2, val_2);					
+				  
+						UPDATE o_test_1 SET val_1 = val_1 + 1;
+						UPDATE o_test_1 SET val_1 = val_1 + 2;
+						UPDATE o_test_1 SET val_1 = val_1 + 3;
+
+						DROP TABLE o_test_1 CASCADE;
+
+					""")
+				
+					con1.commit()
+					catchup_orioledb(replica)	
+					self.assertEqual(0, self.get_tbl_count(master))
+
+					
+	
+	def test_9(self):
+
+		node = self.node
+		node.start()
+		
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+					
+					con1.execute("""
+
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1(
+							a int PRIMARY KEY, 
+							b int
+						)USING orioledb;
+
+						INSERT INTO o_test_1 
+							VALUES (1, 0), (4, 5), (6, 10), (8, 3);
+
+						CREATE TABLE o_test_2(
+							b int,
+							a int REFERENCES o_test_1(a) ON DELETE CASCADE
+						)USING orioledb;
+
+						TRUNCATE TABLE o_test_1 CASCADE;
+
+						DROP TABLE o_test_2;
+						
+					""")
+				
+					con1.commit()
+					self.assertEqual(master.execute("TABLE o_test_1"),[])
+					self.assertEqual(1, self.get_tbl_count(master))
+					catchup_orioledb(replica)
+					self.assertEqual(master.execute("TABLE o_test_1"),[])	
+					self.assertEqual(1, self.get_tbl_count(master))
+
+
+
+	def test_10(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			
+			CREATE TABLE o_test_1(
+				val_1 int,
+				val_2 int, 
+				val_3 int, 
+				val_4 int
+			)USING orioledb;
+							 
+			CREATE UNIQUE INDEX ind_1 
+				ON o_test_1 USING btree(val_1, val_2, val_3, val_4);
+							 
+			CREATE INDEX ind_2 
+				ON o_test_1 (val_1, (val_1+0)) INCLUDE (val_2);
+			
+			INSERT INTO o_test_1 
+				SELECT a, 2*a, 3*a, 4*a
+				 	FROM generate_series(1,5) AS a;
+							 
+			CREATE INDEX ON o_test_1 USING btree(val_1, val_2) INCLUDE (val_3, val_4);
+			CREATE INDEX ON o_test_1 USING btree(val_1, val_2) INCLUDE (val_3, val_4);
+				 
+			ALTER TABLE o_test_1 DROP COLUMN val_3;
+			
+			CHECKPOINT;
+	
+		""")
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.safe_psql("TABLE o_test_1"),b'1|2|4\n2|4|8\n3|6|12\n4|8|16\n5|10|20\n')	
+		node.stop()
+
+
+	def test_11(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 int PRIMARY KEY, 
+				val_2 text
+			)USING orioledb;
+			
+			INSERT INTO o_test_1(val_1, val_2)
+        		VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+			CREATE UNIQUE INDEX ind_1 ON o_test_1(val_1, val_2);
+			CREATE UNIQUE INDEX ind_2 ON o_test_1(val_1, val_2 collate "C");
+			CREATE UNIQUE INDEX ind_3 ON o_test_1(val_1, val_2 collate "C");
+			CREATE UNIQUE INDEX ind_4 ON o_test_1(val_1, lower(val_2) collate "C");
+
+			CHECKPOINT;
+	
+		""")
+		self.assertEqual(node.safe_psql("TABLE o_test_1"),b'1|a\n2|b\n3|c\n')	
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.safe_psql("TABLE o_test_1"),b'1|a\n2|b\n3|c\n')	
+		node.stop()
+
+
+	def test_12(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 text,
+				val_2 float,
+				val_3 int		
+			)USING orioledb;
+
+			CREATE TABLE o_test_2(
+				val_4 char(2)
+			)INHERITS (o_test_1)USING orioledb;
+
+			CREATE UNIQUE INDEX ON o_test_1 (val_1);
+			CREATE UNIQUE INDEX ON o_test_2 (val_1);
+
+			INSERT INTO o_test_1 VALUES ('abc', 6.3, 6);
+			INSERT INTO o_test_1 VALUES ('qwe', 2.5555, 88);
+			INSERT INTO o_test_1 VALUES ('rty', 0, 0);
+			INSERT INTO o_test_2 VALUES ('zxc', 6.65, 6, 'ab');
+			INSERT INTO o_test_2 VALUES ('tyu', 9.004, 2345, 'a');
+	
+			CHECKPOINT;
+	
+		""")	
+		self.assertEqual(node.safe_psql("TABLE o_test_1"),b'abc|6.3|6\nqwe|2.5555|88\nrty|0|0\nzxc|6.65|6\ntyu|9.004|2345\n')
+		self.assertEqual(node.safe_psql("TABLE o_test_2"),b'zxc|6.65|6|ab\ntyu|9.004|2345|a \n')
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(node.safe_psql("TABLE o_test_1"),b'abc|6.3|6\nqwe|2.5555|88\nrty|0|0\nzxc|6.65|6\ntyu|9.004|2345\n')	
+		self.assertEqual(node.safe_psql("TABLE o_test_2"),b'zxc|6.65|6|ab\ntyu|9.004|2345|a \n')
+		node.stop()
+
+
+					
+				
 		
