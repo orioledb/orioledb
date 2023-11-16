@@ -237,13 +237,17 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	uint32		newValues[S3_HEADER_NUM_VALUES];
 	bool		dirty = false,
 				newDirty = false;
-	uint32		changeCount PG_USED_FOR_ASSERTS_ONLY;
+	uint32		prevChangeCount PG_USED_FOR_ASSERTS_ONLY;
 	S3HeaderBuffer *buffer = NULL;
 	int			i;
+	bool		haveLoadedPart = false;
+	bool		checkUnlink = false;
+	off_t		prevFileSize = ORIOLEDB_SEGMENT_SIZE;
 
 	buffer = &group->buffers[index];
 
 	prevTag = buffer->tag;
+	prevChangeCount = buffer->changeCount;
 
 	if (buffer->changeCount == S3_HEADER_MAX_CHANGE_COUNT)
 		buffer->changeCount = 0;
@@ -253,12 +257,32 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 
 	LWLockRelease(&group->groupCtlLock);
 
-	changeCount = buffer->changeCount;
 
 	if (OidIsValid(tag.datoid) && OidIsValid(tag.relnode))
+	{
 		read_from_file(tag, newValues, &newDirty);
+	}
 	else
+	{
 		memset(newValues, 0, sizeof(uint32) * S3_HEADER_NUM_VALUES);
+		checkUnlink = true;
+	}
+
+	if (checkUnlink)
+	{
+		char   *filename;
+		int		fd;
+
+		filename = btree_filename(prevTag.datoid, prevTag.relnode,
+								  prevTag.segNum, prevTag.checkpointNum);
+		fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
+		pfree(filename);
+		if (fd > 0)
+		{
+			prevFileSize = lseek(fd, 0, SEEK_END);
+			close(fd);
+		}
+	}
 
 	for (i = 0; i < S3_HEADER_NUM_VALUES; i++)
 	{
@@ -268,13 +292,27 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 										  S3_PART_MAKE(newValues[i],
 													   buffer->changeCount,
 													   newDirty));
-		Assert(S3_PART_GET_CHANGE_COUNT(oldValues[i]) == changeCount - 1);
+		if (S3_PART_GET_STATUS(oldValue) != S3PartStatusNotLoaded &&
+			(uint64) i * (uint64) ORIOLEDB_S3_PART_SIZE < prevFileSize)
+			haveLoadedPart = true;
+		Assert(S3_PART_GET_CHANGE_COUNT(oldValue) == prevChangeCount);
 		dirty = dirty || (oldValue & S3_PART_DIRTY_BIT);
 		oldValues[i] = S3_PART_GET_LOWER(oldValue);
 	}
 
-	if (OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
+	if (checkUnlink && !haveLoadedPart)
+	{
+		char   *filename;
+
+		filename = btree_filename(prevTag.datoid, prevTag.relnode,
+								  prevTag.segNum, prevTag.checkpointNum);
+		unlink(filename);
+		pfree(filename);
+	}
+	else if (OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
+	{
 		write_to_file(prevTag, oldValues);
+	}
 
 	LWLockRelease(&buffer->bufferCtlLock);
 
@@ -319,6 +357,44 @@ load_header_buffer(S3HeaderTag tag)
 	change_buffer(group, victim, tag);
 
 }
+
+static void
+check_unlink_file(S3HeaderTag tag)
+{
+	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
+	int		victim;
+	S3HeaderTag	newTag;
+
+	while (true)
+	{
+		bool	found = false;
+
+		/* First check if required buffer is already loaded */
+		LWLockAcquire(&group->groupCtlLock, LW_EXCLUSIVE);
+		for (victim = 0; victim < S3_HEADER_BUFFERS_PER_GROUP; victim++)
+		{
+			S3HeaderBuffer *buffer = &group->buffers[victim];
+			if (S3HeaderTagsIsEqual(buffer->tag, tag))
+			{
+				found = true;
+				break;
+			}
+		}
+		if (found)
+			break;
+		LWLockRelease(&group->groupCtlLock);
+		load_header_buffer(tag);
+	}
+
+	LWLockAcquire(&group->buffers[victim].bufferCtlLock, LW_EXCLUSIVE);
+	newTag.datoid = InvalidOid;
+	newTag.relnode = InvalidOid;
+	newTag.checkpointNum = 0;
+	newTag.segNum = 0;
+	change_buffer(group, victim, newTag);
+}
+
 
 static uint32
 s3_header_read_value(S3HeaderTag tag, int index)
@@ -534,7 +610,10 @@ s3_header_mark_part_loading(S3HeaderTag tag, int index)
 		}
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			(void) pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
 			return status;
+		}
 	}
 }
 
@@ -786,6 +865,7 @@ eviction_callback(S3HeaderTag tag)
 	off_t		fileSize;
 	int			i;
 	int			numParts;
+	bool		haveLoadedParts = false;
 
 	if (tag.checkpointNum > checkpoint_state->lastCheckpointNumber)
 		return;
@@ -848,10 +928,18 @@ eviction_callback(S3HeaderTag tag)
 					off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
 
 					pg_pwrite_zeros(fd, Min(offset + ORIOLEDB_S3_PART_SIZE, fileSize) - offset, offset);
+					(void) pg_atomic_fetch_sub_u64(&meta->numberOfLoadedParts, 1);
 				}
+				if (S3_PART_GET_STATUS(newValue) != S3PartStatusNotLoaded)
+					haveLoadedParts = true;
 				break;
 			}
 		}
+	}
+
+	if (!haveLoadedParts)
+	{
+		check_unlink_file(tag);
 	}
 
 	close(fd);
@@ -863,6 +951,10 @@ s3_headers_try_eviction_cycle(void)
 	uint64		desiredNumParts = (uint64) s3_desired_size * (uint64) (1024 * 1024) / (uint64) ORIOLEDB_S3_PART_SIZE;
 
 	Assert(orioledb_s3_mode);
+
+	elog(LOG, "%llu %llu",
+		(unsigned long long) pg_atomic_read_u64(&meta->numberOfLoadedParts),
+		(unsigned long long) desiredNumParts);
 
 	if (pg_atomic_read_u64(&meta->numberOfLoadedParts) < desiredNumParts)
 		return;

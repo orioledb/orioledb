@@ -26,6 +26,7 @@ from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
 import urllib3
 
 from .base_test import BaseTest
+from .base_test import generate_string as gen_str
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -233,6 +234,55 @@ class S3Test(BaseTest):
 		node.start()
 		self.assertEqual([(1,), (2,), (3,), (4,), (5,)],
 						 node.execute("SELECT * FROM o_test_1"))
+		node.stop()
+
+	def get_data_size(self):
+		node = self.node
+		total_size = 0
+		for dirpath, dirnames, filenames in os.walk(f"{node.data_dir}/orioledb_data"):
+			for f in filenames:
+				fp = os.path.join(dirpath, f)
+				# skip if it is symbolic link
+				if not os.path.islink(fp):
+					total_size += os.path.getsize(fp)
+		return total_size
+
+	def test_s3_data_eviction(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_desired_size = 20MB
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+
+			log_statement = none
+		""")
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+		node.safe_psql("""
+			BEGIN;
+			CREATE TABLE o_test (
+				id int PRIMARY KEY,
+				value text NOT NULL
+			) USING orioledb;
+			INSERT INTO o_test (id, value) (SELECT id, repeat('x', 2500) FROM generate_series(1, 20000) id);
+			COMMIT;
+		""")
+		node.safe_psql("CHECKPOINT")
+#		while True:
+#			dataSize = self.get_data_size()
+#			print(dataSize)
+#			if dataSize <= 20 * 1024 * 1024:
+#				break
+#			time.sleep(1)
 		node.stop()
 
 	def test_s3_data_dir_load(self):
