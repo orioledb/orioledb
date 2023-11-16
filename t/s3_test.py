@@ -236,6 +236,18 @@ class S3Test(BaseTest):
 						 node.execute("SELECT * FROM o_test_1"))
 		node.stop()
 
+	def get_file_occupied_size(self, path):
+		result = 0
+		zero = b'\0' * 8192
+		f = open(path, "rb")
+		data = f.read(8192)
+		while len(data) > 0:
+			if data != zero:
+				result = result + len(data)
+			data = f.read(8192)
+		f.close()
+		return result
+
 	def get_data_size(self):
 		node = self.node
 		total_size = 0
@@ -244,7 +256,7 @@ class S3Test(BaseTest):
 				fp = os.path.join(dirpath, f)
 				# skip if it is symbolic link
 				if not os.path.islink(fp):
-					total_size += os.path.getsize(fp)
+					total_size += self.get_file_occupied_size(fp)
 		return total_size
 
 	def test_s3_data_eviction(self):
@@ -277,12 +289,11 @@ class S3Test(BaseTest):
 			COMMIT;
 		""")
 		node.safe_psql("CHECKPOINT")
-#		while True:
-#			dataSize = self.get_data_size()
-#			print(dataSize)
-#			if dataSize <= 20 * 1024 * 1024:
-#				break
-#			time.sleep(1)
+		while True:
+			dataSize = self.get_data_size()
+			if dataSize <= 20 * 1024 * 1024:
+				break
+			time.sleep(1)
 		node.stop()
 
 	def test_s3_data_dir_load(self):

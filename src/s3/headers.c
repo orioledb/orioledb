@@ -953,10 +953,6 @@ s3_headers_try_eviction_cycle(void)
 
 	Assert(orioledb_s3_mode);
 
-	elog(LOG, "%llu %llu",
-		 (unsigned long long) pg_atomic_read_u64(&meta->numberOfLoadedParts),
-		 (unsigned long long) desiredNumParts);
-
 	if (pg_atomic_read_u64(&meta->numberOfLoadedParts) < desiredNumParts)
 		return;
 
