@@ -294,6 +294,8 @@ class S3Test(BaseTest):
 			if dataSize <= 20 * 1024 * 1024:
 				break
 			time.sleep(1)
+		self.assertEqual(20000,
+						 node.execute("SELECT COUNT(*) FROM o_test")[0][0])
 		node.stop()
 
 	def test_s3_data_dir_load(self):
