@@ -270,8 +270,8 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 
 	if (checkUnlink)
 	{
-		char   *filename;
-		int		fd;
+		char	   *filename;
+		int			fd;
 
 		filename = btree_filename(prevTag.datoid, prevTag.relnode,
 								  prevTag.segNum, prevTag.checkpointNum);
@@ -302,7 +302,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 
 	if (checkUnlink && !haveLoadedPart)
 	{
-		char   *filename;
+		char	   *filename;
 
 		filename = btree_filename(prevTag.datoid, prevTag.relnode,
 								  prevTag.segNum, prevTag.checkpointNum);
@@ -363,18 +363,19 @@ check_unlink_file(S3HeaderTag tag)
 {
 	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
-	int		victim;
-	S3HeaderTag	newTag;
+	int			victim;
+	S3HeaderTag newTag;
 
 	while (true)
 	{
-		bool	found = false;
+		bool		found = false;
 
 		/* First check if required buffer is already loaded */
 		LWLockAcquire(&group->groupCtlLock, LW_EXCLUSIVE);
 		for (victim = 0; victim < S3_HEADER_BUFFERS_PER_GROUP; victim++)
 		{
 			S3HeaderBuffer *buffer = &group->buffers[victim];
+
 			if (S3HeaderTagsIsEqual(buffer->tag, tag))
 			{
 				found = true;
@@ -953,8 +954,8 @@ s3_headers_try_eviction_cycle(void)
 	Assert(orioledb_s3_mode);
 
 	elog(LOG, "%llu %llu",
-		(unsigned long long) pg_atomic_read_u64(&meta->numberOfLoadedParts),
-		(unsigned long long) desiredNumParts);
+		 (unsigned long long) pg_atomic_read_u64(&meta->numberOfLoadedParts),
+		 (unsigned long long) desiredNumParts);
 
 	if (pg_atomic_read_u64(&meta->numberOfLoadedParts) < desiredNumParts)
 		return;
