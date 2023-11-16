@@ -1693,6 +1693,18 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 					}
 
+					if (rel->rd_rel->relpersistence !=
+						RELPERSISTENCE_PERMANENT &&
+						(OCompressIsValid(compress) ||
+						 OCompressIsValid(primary_compress) ||
+						 OCompressIsValid(toast_compress)))
+					{
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("temp orioledb tables does not "
+										"support compression options")));
+					}
+
 					if (OCompressIsValid(compress))
 					{
 						if (!OCompressIsValid(primary_compress))

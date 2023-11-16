@@ -461,3 +461,23 @@ class NotSupportedYetTest(BaseTest):
 		node.safe_psql("""
 			ALTER COLLATION "my_ICU" REFRESH VERSION;
 		""")
+
+	def test_temp_compression(self):
+		node = self.node
+		node.append_conf(max_prepared_transactions = 2)
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+		""")
+
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				CREATE TEMP TABLE o_test_1 (
+					val_1 int
+				) USING orioledb WITH (compress = 1);
+
+				CHECKPOINT;
+			""")
+
+		self.assertErrorMessageEquals(e, "temp orioledb tables does not "
+										 "support compression options")
