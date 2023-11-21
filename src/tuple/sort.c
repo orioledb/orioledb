@@ -23,6 +23,15 @@
 #include "catalog/pg_opclass_d.h"
 #include "utils/tuplesort.h"
 
+#if PG_VERSION_NUM < 160000
+#define SORT_TUPLE_TYPE SortTupleCompat
+#define TUPLESORT_BEGIN_COMMON_FN tuplesort_begin_common_compat
+#define TUPLESORT_GETTUPLE_COMMON_FN tuplesort_gettuple_common_compat
+#else
+#define SORT_TUPLE_TYPE SortTuple
+#define TUPLESORT_BEGIN_COMMON_FN tuplesort_begin_common
+#define TUPLESORT_GETTUPLE_COMMON_FN tuplesort_gettuple_common
+#endif
 typedef struct
 {
 	TupleDesc	tupDesc;
@@ -62,7 +71,7 @@ read_o_tuple(void *ptr)
 }
 
 static int
-comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate *state)
+comparetup_orioledb_index(const SORT_TUPLE_TYPE *a, const SORT_TUPLE_TYPE *b, Tuplesortstate *state)
 {
 	TuplesortPublic *public = TuplesortstateGetPublic(state);
 	SortSupport sortKey = public->sortKeys;
@@ -170,7 +179,7 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 #endif
 
 static void
-writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
+writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SORT_TUPLE_TYPE *stup)
 {
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) TuplesortstateGetPublic(state)->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
@@ -191,7 +200,7 @@ writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
 }
 
 static void
-readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
+readtup_orioledb_index(Tuplesortstate *state, SORT_TUPLE_TYPE *stup,
 					   TAPEDECL, unsigned int len)
 {
 	TuplesortPublic *public = TuplesortstateGetPublic(state);
@@ -220,7 +229,7 @@ readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
 }
 
 static void
-removeabbrev_orioledb_index(Tuplesortstate *state, SortTuple *stups,
+removeabbrev_orioledb_index(Tuplesortstate *state, SORT_TUPLE_TYPE *stups,
 							int count)
 {
 	int			i;
@@ -230,7 +239,7 @@ removeabbrev_orioledb_index(Tuplesortstate *state, SortTuple *stups,
 
 	for (i = 0; i < count; i++)
 	{
-		SortTuple  *stup = &stups[i];
+		SORT_TUPLE_TYPE  *stup = &stups[i];
 		OTuple		tup;
 
 		tup = read_o_tuple(stup->tuple);
@@ -249,7 +258,7 @@ tuplesort_begin_orioledb_index(OIndexDescr *idx,
 							   bool randomAccess,
 							   SortCoordinate coordinate)
 {
-	Tuplesortstate *state = tuplesort_begin_common(workMem, coordinate,
+	Tuplesortstate *state = TUPLESORT_BEGIN_COMMON_FN(workMem, coordinate,
 												   randomAccess);
 	TuplesortPublic *base = TuplesortstateGetPublic(state);
 	MemoryContext oldcontext;
@@ -308,7 +317,7 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 							   bool randomAccess,
 							   SortCoordinate coordinate)
 {
-	Tuplesortstate *state = tuplesort_begin_common(workMem, coordinate,
+	Tuplesortstate *state = TUPLESORT_BEGIN_COMMON_FN(workMem, coordinate,
 												   randomAccess);
 	TuplesortPublic *base = TuplesortstateGetPublic(state);
 	MemoryContext oldcontext;
@@ -386,10 +395,10 @@ OTuple
 tuplesort_getotuple(Tuplesortstate *state, bool forward)
 {
 	MemoryContext oldcontext = MemoryContextSwitchTo(TuplesortstateGetPublic(state)->sortcontext);
-	SortTuple	stup;
+	SORT_TUPLE_TYPE	stup;
 	OTuple		result;
 
-	if (!tuplesort_gettuple_common(state, forward, &stup))
+	if (!TUPLESORT_GETTUPLE_COMMON_FN(state, forward, &stup))
 		stup.tuple = NULL;
 
 	MemoryContextSwitchTo(oldcontext);
@@ -414,7 +423,7 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
 	MemoryContext oldcontext = MemoryContextSwitchTo(public->sortcontext);
-	SortTuple	stup;
+	SORT_TUPLE_TYPE	stup;
 	int			tupsize;
 	OTuple		written_tup;
 
