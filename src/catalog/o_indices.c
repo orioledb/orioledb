@@ -1035,7 +1035,7 @@ index_type_to_str(OIndexType type)
 		case oIndexUnique:
 			return "unique";
 		case oIndexRegular:
-			return "regural";
+			return "regular";
 		default:
 			return "invalid";
 	}
@@ -1050,7 +1050,7 @@ index_type_from_str(const char *s, int len)
 		return oIndexPrimary;
 	else if (!strncmp(s, "unique", len))
 		return oIndexUnique;
-	else if (!strncmp(s, "regural", len))
+	else if (!strncmp(s, "regular", len))
 		return oIndexRegular;
 	else
 		return oIndexInvalid;
