@@ -222,7 +222,10 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 				 errmsg("could not open data file %s", filename)));
 
 	pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_WRITE);
-	pg_pwrite(fd, (char *) values, headerSize, 0);
+	if (pg_pwrite(fd, (char *) values, headerSize, 0) != headerSize)
+		ereport(LOG,
+				(errcode_for_file_access(),
+				 errmsg("could not write file \"%s\": %m", filename)));
 	pg_flush_data(fd, 0, headerSize);
 	pgstat_report_wait_end();
 
