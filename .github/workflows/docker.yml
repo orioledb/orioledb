@@ -61,7 +61,7 @@ jobs:
           flavor: |
             latest=auto
             prefix=
-            suffix=-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
+            suffix=${{ contains(github.ref, 's3') && '-s3' || '' }}-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
