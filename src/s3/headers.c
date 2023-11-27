@@ -26,6 +26,9 @@
 #include "common/file_utils.h"
 #include "common/hashfn.h"
 #include "common/pg_prng.h"
+#if PG_VERSION_NUM < 160000
+#include "port/pg_iovec.h"
+#endif
 #include "pgstat.h"
 #if PG_VERSION_NUM < 160000
 #include "storage/fd.h"
@@ -105,11 +108,11 @@ static void sync_buffer(S3HeaderBuffer *buffer);
  * Returns the total amount of data written.  On failure, a negative value
  * is returned with errno set.
  */
-ssize_t
+static ssize_t
 pg_pwrite_zeros(int fd, size_t size, off_t offset)
 {
-	static const PGIOAlignedBlock zbuffer = {{0}};	/* worth BLCKSZ */
-	void	   *zerobuf_addr = unconstify(PGIOAlignedBlock *, &zbuffer)->data;
+	static const PGAlignedBlock zbuffer = {{0}};	/* worth BLCKSZ */
+	void	   *zerobuf_addr = unconstify(PGAlignedBlock *, &zbuffer)->data;
 	struct iovec iov[PG_IOV_MAX];
 	size_t		remaining_size = size;
 	ssize_t		total_written = 0;
@@ -449,6 +452,7 @@ check_unlink_file(S3HeaderTag tag)
 		load_header_buffer(tag);
 	}
 
+	Assert(victim < S3_HEADER_BUFFERS_PER_GROUP);
 	LWLockAcquire(&group->buffers[victim].bufferCtlLock, LW_EXCLUSIVE);
 	newTag.datoid = InvalidOid;
 	newTag.relnode = InvalidOid;
