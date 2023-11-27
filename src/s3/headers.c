@@ -27,6 +27,9 @@
 #include "common/hashfn.h"
 #include "common/pg_prng.h"
 #include "pgstat.h"
+#if PG_VERSION_NUM < 160000
+#include "storage/fd.h"
+#endif
 
 #define S3_HEADER_BUFFERS_PER_GROUP 4
 #define S3_HEADER_NUM_VALUES (ORIOLEDB_SEGMENT_SIZE / ORIOLEDB_S3_PART_SIZE)
@@ -91,6 +94,61 @@ static S3HeadersBuffersGroup *groups;
 
 static void initial_parts_conting(void);
 static void sync_buffer(S3HeaderBuffer *buffer);
+
+#if PG_VERSION_NUM < 160000
+/*
+ * pg_pwrite_zeros
+ *
+ * Writes zeros to file worth "size" bytes at "offset" (from the start of the
+ * file), using vectored I/O.
+ *
+ * Returns the total amount of data written.  On failure, a negative value
+ * is returned with errno set.
+ */
+ssize_t
+pg_pwrite_zeros(int fd, size_t size, off_t offset)
+{
+	static const PGIOAlignedBlock zbuffer = {{0}};	/* worth BLCKSZ */
+	void	   *zerobuf_addr = unconstify(PGIOAlignedBlock *, &zbuffer)->data;
+	struct iovec iov[PG_IOV_MAX];
+	size_t		remaining_size = size;
+	ssize_t		total_written = 0;
+
+	/* Loop, writing as many blocks as we can for each system call. */
+	while (remaining_size > 0)
+	{
+		int			iovcnt = 0;
+		ssize_t		written;
+
+		for (; iovcnt < PG_IOV_MAX && remaining_size > 0; iovcnt++)
+		{
+			size_t		this_iov_size;
+
+			iov[iovcnt].iov_base = zerobuf_addr;
+
+			if (remaining_size < BLCKSZ)
+				this_iov_size = remaining_size;
+			else
+				this_iov_size = BLCKSZ;
+
+			iov[iovcnt].iov_len = this_iov_size;
+			remaining_size -= this_iov_size;
+		}
+
+		written = pg_pwritev_with_retry(fd, iov, iovcnt, offset);
+
+		if (written < 0)
+			return written;
+
+		offset += written;
+		total_written += written;
+	}
+
+	Assert(total_written == size);
+
+	return total_written;
+}
+#endif
 
 Size
 s3_headers_shmem_needs(void)
