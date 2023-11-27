@@ -427,7 +427,7 @@ check_unlink_file(S3HeaderTag tag)
 {
 	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
-	int			victim;
+	int			victim = 0;
 	S3HeaderTag newTag;
 
 	while (true)
@@ -453,12 +453,16 @@ check_unlink_file(S3HeaderTag tag)
 	}
 
 	Assert(victim < S3_HEADER_BUFFERS_PER_GROUP);
-	LWLockAcquire(&group->buffers[victim].bufferCtlLock, LW_EXCLUSIVE);
-	newTag.datoid = InvalidOid;
-	newTag.relnode = InvalidOid;
-	newTag.checkpointNum = 0;
-	newTag.segNum = 0;
-	change_buffer(group, victim, newTag);
+	/* if added because of cppcheck */
+	if (victim < S3_HEADER_BUFFERS_PER_GROUP)
+	{
+		LWLockAcquire(&group->buffers[victim].bufferCtlLock, LW_EXCLUSIVE);
+		newTag.datoid = InvalidOid;
+		newTag.relnode = InvalidOid;
+		newTag.checkpointNum = 0;
+		newTag.segNum = 0;
+		change_buffer(group, victim, newTag);
+	}
 }
 
 

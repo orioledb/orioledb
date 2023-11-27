@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        postgres: [16, 15, 14]
+        postgres: [16, 15]
         compiler: [clang]
         distr:  [alpine, ubuntu]
         include:
