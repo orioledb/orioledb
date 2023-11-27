@@ -64,7 +64,7 @@ RUN set -eux; \
 	echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
 	echo "ALPINE_VERSION=$ALPINE_VERSION" ; \
 	echo "EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES" ; \
-	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \	
+	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
 	\
 # check if the custom llvm version is set, and if so, set the LLVM_CONFIG and CLANG variables
 	CUSTOM_LLVM_VERSION=$(echo "$DOCKER_PG_LLVM_DEPS" | sed -n 's/.*llvm\([0-9]*\).*/\1/p') ; \
@@ -87,7 +87,7 @@ RUN set -eux; \
 	# or - if the custom llvm version is not set, and the Alpine version is >=3.18, then halt operation
 	  ||  ( [ -z "${CUSTOM_LLVM_VERSION}" ] && ( [ "$ALPINE_VERSION" == "3.18" ] || [ "$ALPINE_VERSION" == "3.19" ]) ) \
 	  ;  then \
-			set +x ; \	  
+			set +x ; \
 			echo "------------------------------" ; \
 			echo "Error: The LLVM 16 is not compatible with the current PostgreSQL! Halting operation." ; \
 			echo "Suggested workarounds: use --build-arg DOCKER_PG_LLVM_DEPS='llvm15-dev clang15' " ; \
@@ -109,6 +109,8 @@ RUN set -eux; \
 		libxml2-dev \
 		libxslt-dev \
 		linux-headers \
+# needed for s3 support
+		curl-dev \
 		make \
 		openldap-dev \
 		openssl-dev \

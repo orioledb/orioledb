@@ -100,6 +100,7 @@ RUN set -eux; \
 		flex \
 		gdb \
 		git \
+		libcurl4-openssl-dev \
 		libicu-dev \
 		libipc-run-perl \
 		libkrb5-dev \
