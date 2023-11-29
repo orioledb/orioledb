@@ -1902,6 +1902,22 @@ CREATE INDEX IF NOT EXISTS o_test_index_already_exists_skip_ix1
 \d o_test_index_already_exists_skip
 SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
 
+BEGIN;
+
+CREATE TABLE o_test_unique_include (
+  val_1 float8 NOT NULL,
+  val_2 text NOT NULL,
+  PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+
+CREATE UNIQUE INDEX o_test_unique_include_ix1
+	ON o_test_unique_include (val_1) INCLUDE (val_2);
+
+INSERT INTO o_test_unique_include
+    SELECT a, repeat('x', a) FROM generate_series(1, 1000) as a;
+
+COMMIT;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;

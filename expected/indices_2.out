@@ -8576,6 +8576,17 @@ SELECT orioledb_tbl_indices('o_test_index_already_exists_skip'::regclass);
  
 (1 row)
 
+BEGIN;
+CREATE TABLE o_test_unique_include (
+  val_1 float8 NOT NULL,
+  val_2 text NOT NULL,
+  PRIMARY KEY(val_1, val_2)
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_unique_include_ix1
+	ON o_test_unique_include (val_1) INCLUDE (val_2);
+INSERT INTO o_test_unique_include
+    SELECT a, repeat('x', a) FROM generate_series(1, 1000) as a;
+COMMIT;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -8583,7 +8594,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 54 other objects
+NOTICE:  drop cascades to 55 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8638,6 +8649,7 @@ drop cascades to table o_test_equal_but_binary_not_equal
 drop cascades to table o_test_pkey_include_same_fields
 drop cascades to table o_test_include_same_as_pkey
 drop cascades to table o_test_index_already_exists_skip
+drop cascades to table o_test_unique_include
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)
