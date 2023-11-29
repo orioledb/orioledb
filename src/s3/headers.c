@@ -681,7 +681,8 @@ s3_header_mark_part_loading(S3HeaderTag tag, int index)
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
 		{
-			(void) pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
+			if (status == S3PartStatusNotLoaded)
+				(void) pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
 			return status;
 		}
 	}
