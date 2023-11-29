@@ -671,7 +671,7 @@ s3_header_mark_part_loading(S3HeaderTag tag, int index)
 
 		if (status == S3PartStatusLoaded || status == S3PartStatusLoading)
 		{
-			return false;
+			return status;
 		}
 		else
 		{
