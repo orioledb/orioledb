@@ -296,6 +296,11 @@ class S3Test(BaseTest):
 			time.sleep(1)
 		self.assertEqual(20000,
 						 node.execute("SELECT COUNT(*) FROM o_test")[0][0])
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(20000,
+						 node.execute("SELECT COUNT(*) FROM o_test")[0][0])
 		node.stop()
 
 	def test_s3_data_dir_load(self):
