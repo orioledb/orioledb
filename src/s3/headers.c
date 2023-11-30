@@ -304,6 +304,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	uint32		prevChangeCount PG_USED_FOR_ASSERTS_ONLY;
 	S3HeaderBuffer *buffer = NULL;
 	int			i;
+	int			minLoaded = -1;
 	bool		haveLoadedPart = false;
 	bool		checkUnlink = false;
 	off_t		prevFileSize = ORIOLEDB_SEGMENT_SIZE;
@@ -332,6 +333,23 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		checkUnlink = true;
 	}
 
+	for (i = 0; i < S3_HEADER_NUM_VALUES; i++)
+	{
+		uint64		oldValue;
+
+		oldValue = pg_atomic_exchange_u64(&buffer->data[i],
+										  S3_PART_MAKE(newValues[i],
+													   buffer->changeCount,
+													   newDirty));
+		if (S3_PART_GET_STATUS(oldValue) == S3PartStatusLoaded && minLoaded < 0)
+			minLoaded = i;
+		if (S3_PART_GET_STATUS(oldValue) == S3PartStatusLoading)
+			haveLoadedPart = true;
+		Assert(S3_PART_GET_CHANGE_COUNT(oldValue) == prevChangeCount);
+		dirty = dirty || (oldValue & S3_PART_DIRTY_BIT);
+		oldValues[i] = S3_PART_GET_LOWER(oldValue);
+	}
+
 	if (checkUnlink)
 	{
 		char	   *filename;
@@ -346,23 +364,9 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 			prevFileSize = lseek(fd, 0, SEEK_END);
 			close(fd);
 		}
-	}
 
-	for (i = 0; i < S3_HEADER_NUM_VALUES; i++)
-	{
-		uint64		oldValue;
-
-		oldValue = pg_atomic_exchange_u64(&buffer->data[i],
-										  S3_PART_MAKE(newValues[i],
-													   buffer->changeCount,
-													   newDirty));
-		if ((S3_PART_GET_STATUS(oldValue) == S3PartStatusLoaded &&
-			 (uint64) i * (uint64) ORIOLEDB_S3_PART_SIZE < prevFileSize) ||
-			S3_PART_GET_STATUS(oldValue) == S3PartStatusLoading)
+		if (minLoaded >= 0 && minLoaded * ORIOLEDB_S3_PART_SIZE < prevFileSize)
 			haveLoadedPart = true;
-		Assert(S3_PART_GET_CHANGE_COUNT(oldValue) == prevChangeCount);
-		dirty = dirty || (oldValue & S3_PART_DIRTY_BIT);
-		oldValues[i] = S3_PART_GET_LOWER(oldValue);
 	}
 
 	if (checkUnlink && !haveLoadedPart)
