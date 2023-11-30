@@ -356,8 +356,9 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 										  S3_PART_MAKE(newValues[i],
 													   buffer->changeCount,
 													   newDirty));
-		if (S3_PART_GET_STATUS(oldValue) != S3PartStatusNotLoaded &&
-			(uint64) i * (uint64) ORIOLEDB_S3_PART_SIZE < prevFileSize)
+		if ((S3_PART_GET_STATUS(oldValue) == S3PartStatusLoaded &&
+			 (uint64) i * (uint64) ORIOLEDB_S3_PART_SIZE < prevFileSize) ||
+			S3_PART_GET_STATUS(oldValue) == S3PartStatusLoading)
 			haveLoadedPart = true;
 		Assert(S3_PART_GET_CHANGE_COUNT(oldValue) == prevChangeCount);
 		dirty = dirty || (oldValue & S3_PART_DIRTY_BIT);
@@ -629,6 +630,8 @@ s3_header_lock_part(S3HeaderTag tag, int index)
 		{
 			s3_load_file_part(tag.checkpointNum, tag.datoid,
 							  tag.relnode, tag.segNum, index);
+			value = s3_header_read_value(tag, index);
+			continue;
 		}
 		else if (status == S3PartStatusLoading)
 		{
@@ -1009,9 +1012,7 @@ eviction_callback(S3HeaderTag tag)
 	}
 
 	if (!haveLoadedParts)
-	{
 		check_unlink_file(tag);
-	}
 
 	close(fd);
 }

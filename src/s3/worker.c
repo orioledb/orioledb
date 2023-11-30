@@ -331,7 +331,7 @@ s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
 	}
 	else if (status == S3PartStatusLoaded)
 	{
-		return InvalidS3TaskLocation;
+		return 0;
 	}
 	Assert(status == S3PartStatusNotLoaded);
 
@@ -387,6 +387,7 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 	uint32		chkpNum;
 	int32		segNum,
 				partNum;
+	S3TaskLocation result = 0;
 
 	chkpNum = S3_GET_CHKP_NUM(offset);
 	offset &= S3_OFFSET_MASK;
@@ -404,10 +405,14 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 
 	while (true)
 	{
+		S3TaskLocation location;
+
 		segNum = byte_offset / ORIOLEDB_SEGMENT_SIZE;
 		partNum = (byte_offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-		s3_schedule_file_part_read(chkpNum, desc->oids.datoid, desc->oids.relnode,
-								   segNum, partNum);
+		location = s3_schedule_file_part_read(chkpNum,
+											  desc->oids.datoid, desc->oids.relnode,
+											  segNum, partNum);
+		result = Max(result, location);
 		if (byte_offset % ORIOLEDB_S3_PART_SIZE + read_size > ORIOLEDB_S3_PART_SIZE)
 		{
 			uint64		shift = ORIOLEDB_S3_PART_SIZE - byte_offset % ORIOLEDB_S3_PART_SIZE;
@@ -421,7 +426,7 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 		}
 	}
 
-	return InvalidS3TaskLocation;
+	return result;
 }
 
 void

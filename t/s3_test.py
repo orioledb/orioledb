@@ -272,8 +272,6 @@ class S3Test(BaseTest):
 
 			orioledb.s3_num_workers = 3
 			orioledb.recovery_pool_size = 1
-
-			log_statement = none
 		""")
 		node.start()
 		node.safe_psql("""

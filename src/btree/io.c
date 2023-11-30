@@ -1208,7 +1208,7 @@ load_page(OBTreeFindPageContext *context)
 			BTreeNonLeafTuphdr *tupHdr;
 
 			tupHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
-			s3_schedule_downlink_load(desc, tupHdr->downlink);
+			(void) s3_schedule_downlink_load(desc, tupHdr->downlink);
 		}
 	}
 
