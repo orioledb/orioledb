@@ -167,6 +167,7 @@ s3process_task(uint64 taskLocation)
 			 task->typeSpecific.filePart.segNum >= 0)
 	{
 		char	   *filename;
+		S3HeaderTag tag;
 
 		filename = btree_filename(task->typeSpecific.filePart.datoid,
 								  task->typeSpecific.filePart.relnode,
@@ -182,7 +183,16 @@ s3process_task(uint64 taskLocation)
 
 		elog(DEBUG1, "S3 part put %s %s", objectname, filename);
 
+		tag.datoid = task->typeSpecific.filePart.datoid;
+		tag.relnode = task->typeSpecific.filePart.relnode;
+		tag.checkpointNum = task->typeSpecific.filePart.chkpNum;
+		tag.segNum = task->typeSpecific.filePart.segNum;
+
+		s3_header_mark_part_writing(tag, task->typeSpecific.filePart.partNum);
+
 		s3_put_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+
+		s3_header_mark_part_written(tag, task->typeSpecific.filePart.partNum);
 
 		pfree(filename);
 		pfree(objectname);

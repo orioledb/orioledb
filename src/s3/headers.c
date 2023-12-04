@@ -85,10 +85,11 @@ static S3HeadersBuffersGroup *groups;
 #define S3_PART_LOCKS_ONE		   (1)
 #define S3_PART_LOCKS_NUM_SHIFT	   (0)
 #define S3_PART_GET_LOCKS_NUM(p) (((p) & S3_PART_LOCKS_NUM_MASK) >> S3_PART_LOCKS_NUM_SHIFT)
-#define S3_PART_USAGE_COUNT_MASK   UINT64CONST(0x00000000FF000000)
-#define S3_PART_USAGE_COUNT_SHIFT  (24)
+#define S3_PART_USAGE_COUNT_MASK   UINT64CONST(0x00000000FE000000)
+#define S3_PART_USAGE_COUNT_SHIFT  (25)
 #define S3_PART_GET_USAGE_COUNT(p) (((p) & S3_PART_USAGE_COUNT_MASK) >> S3_PART_USAGE_COUNT_SHIFT)
 #define S3_PART_SET_USAGE_COUNT(p, u) (((p) & (~S3_PART_USAGE_COUNT_MASK)) | ((uint64) (u) << S3_PART_USAGE_COUNT_SHIFT))
+#define S3_PART_WRITING_FLAG	   UINT64CONST(0x0000000001000000)
 #define S3_PART_DIRTY_FLAG		   UINT64CONST(0x0000000000800000)
 #define S3_PART_STATUS_MASK		   UINT64CONST(0x0000000000700000)
 #define S3_PART_STATUS_SHIFT	   (20)
@@ -748,6 +749,47 @@ s3_header_unlock_part(S3HeaderTag tag, int index, bool setDirty)
 	}
 }
 
+void
+s3_header_mark_part_writing(S3HeaderTag tag, int index)
+{
+	uint32		value;
+
+	value = s3_header_read_value(tag, index);
+
+	while (true)
+	{
+		uint32		newValue = value;
+
+		newValue &= ~S3_PART_DIRTY_FLAG;
+		newValue |= S3_PART_WRITING_FLAG;
+
+		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			return;
+		}
+	}
+}
+
+void
+s3_header_mark_part_written(S3HeaderTag tag, int index)
+{
+	uint32		value;
+
+	value = s3_header_read_value(tag, index);
+
+	while (true)
+	{
+		uint32		newValue = value;
+
+		newValue &= ~S3_PART_WRITING_FLAG;
+
+		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			return;
+		}
+	}
+}
+
 static void
 sync_buffer(S3HeaderBuffer *buffer)
 {
@@ -989,7 +1031,8 @@ eviction_callback(S3HeaderTag tag)
 						usageCount = S3_PART_GET_USAGE_COUNT(value);
 
 			if (S3_PART_GET_STATUS(value) == S3PartStatusLoaded &&
-				S3_PART_GET_LOCKS_NUM(value) == 0 && usageCount == 0)
+				S3_PART_GET_LOCKS_NUM(value) == 0 && usageCount == 0 &&
+				(value & (S3_PART_DIRTY_FLAG | S3_PART_WRITING_FLAG)) == 0)
 			{
 				newValue = S3_PART_SET_STATUS(newValue, S3PartStatusNotLoaded);
 			}
@@ -1005,6 +1048,7 @@ eviction_callback(S3HeaderTag tag)
 				{
 					off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
 
+					elog(DEBUG1, "S3 evict %u %u %u %d %d", tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, i);
 					pg_pwrite_zeros(fd, Min(offset + ORIOLEDB_S3_PART_SIZE, fileSize) - offset, offset);
 					(void) pg_atomic_fetch_sub_u64(&meta->numberOfLoadedParts, 1);
 				}

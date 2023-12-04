@@ -1984,8 +1984,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
 	if (orioledb_s3_mode)
 	{
-		btree_s3_flush(desc, 0);
-		btree_s3_flush(desc, 1);
+		btree_s3_flush(desc, checkpoint_number);
 	}
 
 	was_dirty = IS_DIRTY(root_blkno);
