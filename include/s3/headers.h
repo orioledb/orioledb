@@ -26,6 +26,7 @@ typedef enum
 	S3PartStatusNotLoaded = 0,
 	S3PartStatusLoading = 1,
 	S3PartStatusLoaded = 2,
+	S3PartStatusEvicting = 3
 } S3PartStatus;
 
 #define S3HeaderTagsIsEqual(t1, t2) \

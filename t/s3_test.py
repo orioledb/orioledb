@@ -237,16 +237,19 @@ class S3Test(BaseTest):
 		node.stop()
 
 	def get_file_occupied_size(self, path):
-		result = 0
-		zero = b'\0' * 8192
-		f = open(path, "rb")
-		data = f.read(8192)
-		while len(data) > 0:
-			if data != zero:
-				result = result + len(data)
+		try:
+			result = 0
+			zero = b'\0' * 8192
+			f = open(path, "rb")
 			data = f.read(8192)
-		f.close()
-		return result
+			while len(data) > 0:
+				if data != zero:
+					result = result + len(data)
+				data = f.read(8192)
+			f.close()
+			return result
+		except: # We could be here due to concurrent operation, e.g. file removal
+			return 0
 
 	def get_data_size(self):
 		node = self.node

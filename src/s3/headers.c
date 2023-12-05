@@ -216,7 +216,11 @@ s3_headers_shmem_init(Pointer buf, bool found)
 void
 s3_headers_increase_loaded_parts(uint64 inc)
 {
-	(void) pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, inc);
+	uint64		result;
+
+	result = pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, inc);
+	elog(DEBUG1, "s3_headers_increase_loaded_parts(%llu %llu)",
+		 (unsigned long long) result, (unsigned long long) inc);
 }
 
 static void
@@ -638,9 +642,11 @@ s3_header_lock_part(S3HeaderTag tag, int index)
 			value = s3_header_read_value(tag, index);
 			continue;
 		}
-		else if (status == S3PartStatusLoading)
+		else if (status == S3PartStatusLoading ||
+				 status == S3PartStatusEvicting)
 		{
-			while (S3_PART_GET_STATUS(value) == S3PartStatusLoading)
+			while (S3_PART_GET_STATUS(value) == S3PartStatusLoading ||
+				   S3_PART_GET_STATUS(value) == S3PartStatusEvicting)
 			{
 				pg_usleep(10000L);
 				value = s3_header_read_value(tag, index);
@@ -677,9 +683,16 @@ s3_header_mark_part_loading(S3HeaderTag tag, int index)
 
 		status = S3_PART_GET_STATUS(value);
 
-		if (status == S3PartStatusLoaded || status == S3PartStatusLoading)
+		if (status == S3PartStatusLoaded ||
+			status == S3PartStatusLoading)
 		{
 			return status;
+		}
+		else if (status == S3PartStatusEvicting)
+		{
+			pg_usleep(10000L);
+			value = s3_header_read_value(tag, index);
+			continue;
 		}
 		else
 		{
@@ -690,7 +703,14 @@ s3_header_mark_part_loading(S3HeaderTag tag, int index)
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
 		{
 			if (status == S3PartStatusNotLoaded)
-				(void) pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
+			{
+				uint64		result;
+
+				result = pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
+				elog(DEBUG1, "s3_header_mark_part_loading(%u %u %u %d %d) - %llu",
+					 tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, index,
+					 (unsigned long long) result);
+			}
 			return status;
 		}
 	}
@@ -762,6 +782,27 @@ s3_header_mark_part_writing(S3HeaderTag tag, int index)
 
 		newValue &= ~S3_PART_DIRTY_FLAG;
 		newValue |= S3_PART_WRITING_FLAG;
+
+		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			return;
+		}
+	}
+}
+
+static void
+s3_header_mark_not_loaded(S3HeaderTag tag, int index)
+{
+	uint32		value;
+
+	value = s3_header_read_value(tag, index);
+
+	while (true)
+	{
+		uint32		newValue = value;
+
+		Assert(S3_PART_GET_STATUS(value) == S3PartStatusEvicting);
+		newValue = S3_PART_SET_STATUS(newValue, S3PartStatusNotLoaded);
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
 		{
@@ -874,9 +915,12 @@ iterate_files(IterateFilesCallback callback)
 						file_chkp,
 						file_segno;
 			S3HeaderTag tag;
+			int			pos,
+						len = strlen(dbFile->d_name);
 
-			if (sscanf(dbFile->d_name, "%10u-%10u",
-					   &file_reloid, &file_chkp) == 2)
+			if (sscanf(dbFile->d_name, "%10u-%10u%n",
+					   &file_reloid, &file_chkp, &pos) == 2 &&
+				pos == len)
 			{
 				tag.checkpointNum = file_chkp;
 				tag.datoid = dbOid;
@@ -884,8 +928,9 @@ iterate_files(IterateFilesCallback callback)
 				tag.segNum = 0;
 				callback(tag);
 			}
-			else if (sscanf(dbFile->d_name, "%10u.%10u-%10u",
-							&file_reloid, &file_segno, &file_chkp) == 3)
+			else if (sscanf(dbFile->d_name, "%10u.%10u-%10u%n",
+							&file_reloid, &file_segno, &file_chkp, &pos) == 3 &&
+					 pos == len)
 			{
 				tag.checkpointNum = file_chkp;
 				tag.datoid = dbOid;
@@ -935,7 +980,9 @@ initial_parts_counting_callback(S3HeaderTag tag)
 		uint32		usageCount = S3_PART_GET_USAGE_COUNT(values[i]);
 		off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
 
-		if (status == S3PartStatusNotLoaded || status == S3PartStatusLoading)
+		if (status == S3PartStatusNotLoaded ||
+			status == S3PartStatusLoading ||
+			status == S3PartStatusEvicting)
 		{
 
 			status = S3PartStatusNotLoaded;
@@ -948,9 +995,15 @@ initial_parts_counting_callback(S3HeaderTag tag)
 		}
 		else
 		{
+			Assert(status == S3PartStatusLoaded);
 			if (fileSize > offset)
 			{
-				(void) pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
+				uint64		result;
+
+				result = pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
+				elog(DEBUG1, "initial_parts_counting_callback(%u %u %u %d %d) - %llu",
+					 tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, i,
+					 (unsigned long long) result);
 				totalOccupiedSize += Min(ORIOLEDB_S3_PART_SIZE, fileSize - offset);
 			}
 		}
@@ -986,9 +1039,6 @@ eviction_callback(S3HeaderTag tag)
 	int			i;
 	int			numParts;
 	bool		haveLoadedParts = false;
-
-	if (tag.checkpointNum > checkpoint_state->lastCheckpointNumber)
-		return;
 
 	filename = btree_filename(tag.datoid, tag.relnode, tag.segNum,
 							  tag.checkpointNum);
@@ -1034,7 +1084,7 @@ eviction_callback(S3HeaderTag tag)
 				S3_PART_GET_LOCKS_NUM(value) == 0 && usageCount == 0 &&
 				(value & (S3_PART_DIRTY_FLAG | S3_PART_WRITING_FLAG)) == 0)
 			{
-				newValue = S3_PART_SET_STATUS(newValue, S3PartStatusNotLoaded);
+				newValue = S3_PART_SET_STATUS(newValue, S3PartStatusEvicting);
 			}
 			else
 			{
@@ -1044,15 +1094,21 @@ eviction_callback(S3HeaderTag tag)
 			if (s3_header_compare_and_swap(tag, i, &value, newValue))
 			{
 				if (S3_PART_GET_STATUS(value) == S3PartStatusLoaded &&
-					S3_PART_GET_STATUS(newValue) == S3PartStatusNotLoaded)
+					S3_PART_GET_STATUS(newValue) == S3PartStatusEvicting)
 				{
 					off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
+					uint64		result;
 
 					elog(DEBUG1, "S3 evict %u %u %u %d %d", tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, i);
 					pg_pwrite_zeros(fd, Min(offset + ORIOLEDB_S3_PART_SIZE, fileSize) - offset, offset);
-					(void) pg_atomic_fetch_sub_u64(&meta->numberOfLoadedParts, 1);
+
+					result = pg_atomic_fetch_sub_u64(&meta->numberOfLoadedParts, 1);
+					elog(DEBUG1, "eviction_callback(%llu 1)",
+						 (unsigned long long) result);
+
+					s3_header_mark_not_loaded(tag, i);
 				}
-				if (S3_PART_GET_STATUS(newValue) != S3PartStatusNotLoaded)
+				if (S3_PART_GET_STATUS(newValue) != S3PartStatusEvicting)
 					haveLoadedParts = true;
 				break;
 			}
