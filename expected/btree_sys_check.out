@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 13
+ 16
 (1 row)
 
 CREATE TABLE o_test(
@@ -264,31 +264,31 @@ SELECT regexp_replace(regexp_replace(
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ((NNN, (NNN), X/X, N), 2628)  +
      Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 2628)                               +
    Chunk 1: offset = 1, location = 2952, hikey location = 112, hikey = ((NNN, (NNN), X/X, N), 2628)+
-     Item 1: offset = 2960, tuple = (((NNN, (NNN), X/X, N), 2628), 884)                            +
-     Item 2: offset = 3904, tuple = (((NNN, (NNN), X/X, N), 0), 2628)                              +
-   Chunk 2: offset = 3, location = 6592, hikey location = 152, hikey = ((NNN, (NNN), X/X, N), 0)   +
-     Item 3: offset = 6600, tuple = (((NNN, (NNN), X/X, N), 2628), 660)                            +
+     Item 1: offset = 2960, tuple = (((NNN, (NNN), X/X, N), 2628), 868)                            +
+     Item 2: offset = 3888, tuple = (((NNN, (NNN), X/X, N), 0), 2628)                              +
+   Chunk 2: offset = 3, location = 6576, hikey location = 152, hikey = ((NNN, (NNN), X/X, N), 0)   +
+     Item 3: offset = 6584, tuple = (((NNN, (NNN), X/X, N), 2628), 652)                            +
                                                                                                    +
  Page 2: level = 0, maxKeyLen = 40, nVacatedBytes = 0                                              +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                               +
      Rightlink is invalid                                                                          +
      Hikey: offset = 104, key = ((NNN, (NNN), X/X, N), 0)                                          +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ((NNN, (NNN), X/X, N), 0)     +
-     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1384)                               +
-   Chunk 1: offset = 1, location = 1712, hikey location = 104, hikey = ((NNN, (NNN), X/X, N), 0)   +
-     Item 1: offset = 1720, tuple = (((NNN, (NNN), X/X, N), 0), 1048)                              +
-     Item 2: offset = 2832, tuple = (((NNN, (NNN), X/X, N), 0), 712)                               +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1336)                               +
+   Chunk 1: offset = 1, location = 1664, hikey location = 104, hikey = ((NNN, (NNN), X/X, N), 0)   +
+     Item 1: offset = 1672, tuple = (((NNN, (NNN), X/X, N), 0), 1012)                              +
+     Item 2: offset = 2744, tuple = (((NNN, (NNN), X/X, N), 0), 688)                               +
                                                                                                    +
- Page 3: level = 0, maxKeyLen = 40, nVacatedBytes = 328                                            +
+ Page 3: level = 0, maxKeyLen = 40, nVacatedBytes = 320                                            +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                               +
      Rightmost                                                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ((NNN, (NNN), X/X, N), 0)     +
-     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1048)                               +
-   Chunk 1: offset = 1, location = 1376, hikey location = 104                                      +
-     Item 1: offset = 1384, tuple = (((NNN, (NNN), X/X, N), 0), 1160)                              +
-     Item 2: offset = 2608, tuple = (((NNN, (NNN), X/X, N), 0), 488)                               +
-     Item 3: offset = 3160, tuple = (((NNN, (NNN), X/X, N), 0), 712)                               +
-     Item 4: deleted, offset = 3936, tuple = (((NNN, (NNN), X/X, Y), 0), 264)                      +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 1012)                               +
+   Chunk 1: offset = 1, location = 1336, hikey location = 104                                      +
+     Item 1: offset = 1344, tuple = (((NNN, (NNN), X/X, N), 0), 1336)                              +
+     Item 2: offset = 2744, tuple = (((NNN, (NNN), X/X, N), 0), 472)                               +
+     Item 3: offset = 3280, tuple = (((NNN, (NNN), X/X, N), 0), 796)                               +
+     Item 4: deleted, offset = 4136, tuple = (((NNN, (NNN), X/X, Y), 0), 256)                      +
                                                                                                    +
  
 (1 row)
@@ -369,30 +369,30 @@ SELECT regexp_replace(regexp_replace(
 		': \d+',
 		': NNN',
 		'g');
-                                                                                                                                                                                                                regexp_replace                                                                                                                                                                                                                
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 528                                                                                                                                                                                                                                                                                                                                                                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                                                                                                                                                                                                                                                                                         +
-     Leftmost, Rightmost                                                                                                                                                                                                                                                                                                                                                                                                                     +
-   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (NNN, (NNN), X/X, N)                                                                                                                                                                                                                                                                                                                                                    +
-     Item 0: offset = 272, tuple = ((NNN, (NNN), X/X, N), typname: int8, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                  +
-     Item 1: offset = 448, tuple = ((NNN, (NNN), X/X, N), typname: int2, typlen: NNN, typbyval: Y, typalign: 's', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                  +
-     Item 2: offset = 624, tuple = ((NNN, (NNN), X/X, N), typname: int4, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                  +
-     Item 3: offset = 800, tuple = ((NNN, (NNN), X/X, N), typname: text, typlen: -1, typbyval: N, typalign: 'i', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'S', typispreferred: Y, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                   +
-     Item 4: offset = 976, tuple = ((NNN, (NNN), X/X, N), typname: tid, typlen: NNN, typbyval: N, typalign: 's', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'U', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                   +
-     Item 5: offset = 1152, tuple = ((NNN, (NNN), X/X, N), typname: float8, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: Y, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)               +
-     Item 6: offset = 1328, tuple = ((NNN, (NNN), X/X, N), typname: timestamp, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'D', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)            +
-   Chunk 1: offset = 7, location = 1504, hikey location = 96                                                                                                                                                                                                                                                                                                                                                                                 +
-     Item 7: offset = 1528, tuple = ((NNN, (NNN), X/X, N), typname: record, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                +
-     Item 8: offset = 1704, tuple = ((NNN, (NNN), X/X, N), typname: anyarray, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)              +
-     Item 9: offset = 1880, tuple = ((NNN, (NNN), X/X, N), typname: void, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)                 +
-     Item 10: offset = 2056, tuple = ((NNN, (NNN), X/X, N), typname: internal, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)            +
-     Item 11: offset = 2232, tuple = ((NNN, (NNN), X/X, N), typname: anyenum, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)             +
-     Item 12: offset = 2408, tuple = ((NNN, (NNN), X/X, N), typname: anyrange, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)             +
-     Item 13: deleted, offset = 2584, tuple = ((NNN, (NNN), X/X, Y), typname: o_enum, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'e', typcategory: 'E', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)     +
-     Item 14: deleted, offset = 2760, tuple = ((NNN, (NNN), X/X, Y), typname: custom_range, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'r', typcategory: 'R', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN)+
-     Item 15: deleted, offset = 2936, tuple = ((NNN, (NNN), X/X, Y), typname: custom_type, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'c', typcategory: 'C', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, default_btree_opclass: NNN, default_hash_opclass: NNN) +
-                                                                                                                                                                                                                                                                                                                                                                                                                                             +
+                                                                                                                                                                                                                         regexp_replace                                                                                                                                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 528                                                                                                                                                                                                                                                                                                                                                                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                                                                                                                                                                                                                                                                                                            +
+     Leftmost, Rightmost                                                                                                                                                                                                                                                                                                                                                                                                                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (NNN, (NNN), X/X, N)                                                                                                                                                                                                                                                                                                                                                                       +
+     Item 0: offset = 272, tuple = ((NNN, (NNN), X/X, N), typname: int8, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                  +
+     Item 1: offset = 448, tuple = ((NNN, (NNN), X/X, N), typname: int2, typlen: NNN, typbyval: Y, typalign: 's', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                  +
+     Item 2: offset = 624, tuple = ((NNN, (NNN), X/X, N), typname: int4, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                  +
+     Item 3: offset = 800, tuple = ((NNN, (NNN), X/X, N), typname: text, typlen: -1, typbyval: N, typalign: 'i', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'S', typispreferred: Y, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                   +
+     Item 4: offset = 976, tuple = ((NNN, (NNN), X/X, N), typname: tid, typlen: NNN, typbyval: N, typalign: 's', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'U', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                   +
+     Item 5: offset = 1152, tuple = ((NNN, (NNN), X/X, N), typname: float8, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'N', typispreferred: Y, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)               +
+     Item 6: offset = 1328, tuple = ((NNN, (NNN), X/X, N), typname: timestamp, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'b', typcategory: 'D', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)            +
+   Chunk 1: offset = 7, location = 1504, hikey location = 96                                                                                                                                                                                                                                                                                                                                                                                                    +
+     Item 7: offset = 1528, tuple = ((NNN, (NNN), X/X, N), typname: record, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                +
+     Item 8: offset = 1704, tuple = ((NNN, (NNN), X/X, N), typname: anyarray, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)              +
+     Item 9: offset = 1880, tuple = ((NNN, (NNN), X/X, N), typname: void, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)                 +
+     Item 10: offset = 2056, tuple = ((NNN, (NNN), X/X, N), typname: internal, typlen: NNN, typbyval: Y, typalign: 'd', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)            +
+     Item 11: offset = 2232, tuple = ((NNN, (NNN), X/X, N), typname: anyenum, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)             +
+     Item 12: offset = 2408, tuple = ((NNN, (NNN), X/X, N), typname: anyrange, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'p', typcategory: 'P', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)             +
+     Item 13: deleted, offset = 2584, tuple = ((NNN, (NNN), X/X, Y), typname: o_enum, typlen: NNN, typbyval: Y, typalign: 'i', typstorage: 'p', typcollation: NNN, typrelid: NNN, typtype: 'e', typcategory: 'E', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)     +
+     Item 14: deleted, offset = 2760, tuple = ((NNN, (NNN), X/X, Y), typname: custom_range, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'r', typcategory: 'R', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN)+
+     Item 15: deleted, offset = 2936, tuple = ((NNN, (NNN), X/X, Y), typname: custom_type, typlen: -1, typbyval: N, typalign: 'd', typstorage: 'x', typcollation: NNN, typrelid: NNN, typtype: 'c', typcategory: 'C', typispreferred: N, typisdefined: Y, typinput: NNN, typoutput: NNN, typreceive: NNN, typsend: NNN, typelem: NNN, typdelim: ',', typbasetype: NNN, typtypmod: -1, typsubscript: NNN, default_btree_opclass: NNN, default_hash_opclass: NNN) +
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                +
  
 (1 row)
 
@@ -504,7 +504,7 @@ SELECT regexp_replace(regexp_replace(
  state = free, datoid equal, relnode equal, ix_type = primary, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 130) +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 144) +
                                                                     +
  
 (1 row)
@@ -590,12 +590,21 @@ SELECT regexp_replace(regexp_replace(
 		': \d+',
 		': NNN',
 		'g');
-ERROR:  Value num must be in the range from 1 to 19
+                           regexp_replace                            
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+                                                                    +
+ 
+(1 row)
+
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
-ERROR:  Value num must be in the range from 1 to 19
+ERROR:  Value num must be in the range from 1 to 20
 SELECT orioledb_sys_tree_check(-1111);
-ERROR:  Value num must be in the range from 1 to 19
+ERROR:  Value num must be in the range from 1 to 20
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_sys_check CASCADE;
 RESET search_path;
