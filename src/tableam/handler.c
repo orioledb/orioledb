@@ -564,6 +564,7 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	larg.wouldBlock = false;
 	larg.modified = false;
 	larg.selfModified = false;
+	larg.deleted = false;
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL);
 
