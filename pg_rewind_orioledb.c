@@ -14,28 +14,8 @@
 #include "common/logging.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
+#include "pg_rewind_ext.h"
 #include "replication/message.h"
-
-PG_MODULE_MAGIC;
-
-// TODO: Add header for this function. pg_rewind.h or something
-extern void SimpleXLogRead(const char *datadir, XLogRecPtr startpoint,
-						   int tliIndex, XLogRecPtr endpoint,
-						   const char *restoreCommand,
-						   void (*page_callback)(XLogReaderState *,
-												 void *arg),
-						   void *arg);
-
-// TODO: Add header to contain this exports. pg_rewind.h or something
-extern PGDLLEXPORT void _PG_rewind(const char *datadir_target,
-								   char *datadir_source,
-								   char *connstr_source, XLogRecPtr startpoint,
-								   int tliIndex, XLogRecPtr endpoint,
-								   const char *restoreCommand,
-								   const char *argv0, bool debug);
-
-// TODO: Add header for this function. pg_rewind.h or something
-extern void extensions_exclude_add(char **exclude_dir);
 
 typedef struct OrioledbKey
 {

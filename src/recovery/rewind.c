@@ -184,6 +184,7 @@ fill_descrs(ORelOids oids, OIndexType ix_type,
 										  false, NULL);
 	}
 
+	Assert(sys_tree_num > 0 || *indexDescr);
 	return sys_tree_num;
 }
 
