@@ -13,16 +13,23 @@ from testgres.defaults import default_dbname
 from testgres.utils import file_tail, get_bin_path, options_string
 from testgres.consts import PG_AUTO_CONF_FILE, TMP_DUMP
 from testgres.enums import NodeStatus
+from sys import platform
 
 from .base_test import BaseTest, generate_string
 
 class RewindTest(BaseTest):
 	def pg_rewind(self, target, source_port, verbose=False,
 				  rewind_log_file=None):
+		if platform == "darwin":
+			dlsuffix='dylib'
+		elif platform == "win32":
+			dlsuffix='dll'
+		else:
+			dlsuffix='so'
+
 		pg_rewind_params = [
 			get_bin_path("pg_rewind"),
-			# TODO: change to orioledb or orioledb.so
-			"--extensions", "pg_rewind_orioledb.so",
+			"--extension", f"pg_rewind_orioledb.{dlsuffix}",
 			"--target-pgdata", target,
 			"--source-server", f"port={source_port} dbname={default_dbname()}"
 		]  # yapf: disable

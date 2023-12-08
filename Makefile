@@ -317,8 +317,19 @@ check_patchset_version:
 $(OBJS): include/utils/stopevents_defs.h check_patchset_version
 
 pg_rewind_orioledb.o: CPPFLAGS += -I$(includedir)
+
+ifeq ($(PORTNAME), darwin)
+ifdef PGXS
+pg_rewind_orioledb$(DLSUFFIX): BE_DLLLIBS = -bundle_loader $(bindir)/pg_rewind
+else # PGXS
+pg_rewind_orioledb$(DLSUFFIX): BE_DLLLIBS = -bundle_loader $(top_builddir)/src/bin/pg_rewind
+endif # PGXS
+pg_rewind_orioledb$(DLSUFFIX): pg_rewind_orioledb.o src/recovery/recovery_internal.o
+	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_SL) -bundle $(BE_DLLLIBS) $(libpq_pgport_shlib) -o $@
+else # darwin
 pg_rewind_orioledb.so: pg_rewind_orioledb.o src/recovery/recovery_internal.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_SL) -shared -o $@
+endif # darwin
 
 submake-regress:
 	$(MAKE) -C $(top_builddir)/src/test/regress all
