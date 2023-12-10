@@ -2137,12 +2137,38 @@ retry:
 	if (!evict && !IS_DIRTY(blkno))
 		return OWalkPageSkipped;
 
+	/* Important to access the shared memory once */
+	oids = *((volatile ORelOids *) &page_desc->oids);
+
+	/*
+	 * index_oids_get_btree_descr() might imply page eviction.  We shouldn't
+	 * do this while holding a page lock.  So, we need to do this before
+	 * locking the page.
+	 */
+	if (IS_SYS_TREE_OIDS(oids))
+	{
+		if (sys_tree_get_storage_type(oids.relnode) != BTreeStorageInMemory)
+			desc = get_sys_tree(oids.relnode);
+		else
+			return OWalkPageSkipped;
+	}
+	else
+	{
+		/* Check is this index is visible for us */
+		desc = index_oids_get_btree_descr(oids, page_desc->type);
+
+		if (desc == NULL)
+			return OWalkPageSkipped;
+	}
+
 	if (!try_lock_page(blkno))
 		return OWalkPageSkipped;
 
 	/* page is locked once we get here */
 
-	if (!ORelOidsIsValid(page_desc->oids) || page_desc->type == oIndexInvalid)
+	if (!ORelOidsIsValid(page_desc->oids) ||
+		page_desc->type == oIndexInvalid ||
+		!ORelOidsIsEqual(oids, page_desc->oids))
 	{
 		unlock_page(blkno);
 		return OWalkPageSkipped;
@@ -2189,31 +2215,6 @@ retry:
 	{
 		unlock_page(blkno);
 		return OWalkPageSkipped;
-	}
-
-	oids = page_desc->oids;
-	if (IS_SYS_TREE_OIDS(oids))
-	{
-		if (sys_tree_get_storage_type(oids.relnode) != BTreeStorageInMemory)
-		{
-			desc = get_sys_tree(oids.relnode);
-		}
-		else
-		{
-			unlock_page(blkno);
-			return OWalkPageSkipped;
-		}
-	}
-	else
-	{
-		/* Check is this index is visible for us */
-		desc = index_oids_get_btree_descr(oids, page_desc->type);
-
-		if (desc == NULL)
-		{
-			unlock_page(blkno);
-			return OWalkPageSkipped;
-		}
 	}
 
 	/* Try to merge sparse page instead of eviction */
@@ -2800,7 +2801,8 @@ cleanup_btree_files(Oid datoid, Oid relnode)
 static void
 fsync_callback(const char *filename, uint32 segno, char *ext, void *arg)
 {
-	fsync_fname(filename, false);
+	if (ext == NULL || strcmp(ext, "tmp") != 0)
+		fsync_fname(filename, false);
 }
 
 bool
