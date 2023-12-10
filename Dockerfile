@@ -232,6 +232,10 @@ ENV PGDATA /var/lib/postgresql/data
 RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PGDATA"
 VOLUME /var/lib/postgresql/data
 
+RUN mkdir -p /etc/postgresql && chown -R postgres:postgres /etc/postgresql && chmod 700 /etc/postgresql
+COPY --chown=postgres:postgres postgresql.docker.conf /etc/postgresql/postgresql.conf
+ENV PG_CONF=/etc/postgresql/postgresql.conf
+
 COPY docker-entrypoint.sh /usr/local/bin/
 ENTRYPOINT ["docker-entrypoint.sh"]
 
@@ -266,4 +270,4 @@ STOPSIGNAL SIGINT
 # that even 90 seconds may not be long enough in many instances.
 
 EXPOSE 5432
-CMD ["postgres"]
+CMD ["postgres", "-D", "/etc/postgresql"]

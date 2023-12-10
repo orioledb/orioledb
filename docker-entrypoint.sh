@@ -90,12 +90,6 @@ docker_init_database_dir() {
 
 	eval 'initdb --username="$POSTGRES_USER" --pwfile=<(echo "$POSTGRES_PASSWORD") '"$POSTGRES_INITDB_ARGS"' "$@"'
 
-	sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" $PGDATA/postgresql.conf;
-	echo "shared_preload_libraries = 'orioledb'" >>  $PGDATA/postgresql.conf;
-	echo "orioledb.main_buffers = 512MB" >>  $PGDATA/postgresql.conf;
-	echo "orioledb.undo_buffers = 256MB" >>  $PGDATA/postgresql.conf;
-	echo "max_wal_size = 8GB" >>  $PGDATA/postgresql.conf;
-
 	# unset/cleanup "nss_wrapper" bits
 	if [[ "${LD_PRELOAD:-}" == */libnss_wrapper.so ]]; then
 		rm -f "$NSS_WRAPPER_PASSWD" "$NSS_WRAPPER_GROUP"
