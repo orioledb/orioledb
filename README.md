@@ -88,7 +88,7 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [13 (tag: patches13_16)](https://github.com/orioledb/postgres/tree/patches13_16), [14 (tag: patches14_16)](https://github.com/orioledb/postgres/tree/patches14_16), [15 (tag: patches15_18)](https://github.com/orioledb/postgres/tree/patches15_18), or [16 (tag: patches16_18)](https://github.com/orioledb/postgres/tree/patches16_18);
+ * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [15 (tag: patches15_19)](https://github.com/orioledb/postgres/tree/patches15_19) or [16 (tag: patches16_21)](https://github.com/orioledb/postgres/tree/patches16_21);
    * for versions before 16 ``./config`` script should be run with `--with-icu`
  * Development package of libzstd;
  * python 3.5+ with testgres package.
@@ -121,10 +121,7 @@ So that you don't have to write COLLATE for every "text" field of tables you hav
 initdb --locale=C -D..
 # OR
 initdb --locale=POSIX -D..
-```
-For postgres >=15 you have option:
-```bash
-# en - ICU locale name
+# OR
 initdb --locale-provider=icu --icu-locale=en -D...
 ```
 
@@ -133,7 +130,7 @@ initdb --locale-provider=icu --icu-locale=en -D...
 createdb --locale=C --template template0 ...
 # OR
 createdb --locale=POSIX --template template0 ... 
-# For postgres >=15 you have option:
+# OR
 createdb --locale-provider=icu --icu-locale=en --template template0 ... 
 ```
 Or using `CREATE DATABASE` with `LOCALE` or `ICU_LOCALE` parameters.

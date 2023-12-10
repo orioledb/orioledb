@@ -27,7 +27,7 @@ Connect to the server via psql:
 
 You should expect a similar psql message:
 ```
-psql (15.4 OrioleDB public beta 3 PGTAG=patches15_18 alpine:3.17+clang build:2023-11-01T22:43:27+00:00)
+psql (15.5 OrioleDB public beta 4 PGTAG=patches15_19 alpine:3.17+clang build:2023-11-01T22:43:27+00:00)
 Type "help" for help.
 
 postgres=#
@@ -42,7 +42,7 @@ Test some commands:
 postgres=# select orioledb_version();
     orioledb_version
 ------------------------
- OrioleDB public beta 3
+ OrioleDB public beta 4
 (1 row)
 
 postgres=# \d+
@@ -144,16 +144,6 @@ docker build -t orioletest:16 --pull --network=host --progress=plain --build-arg
 docker build -t orioletest:15 --pull --network=host --progress=plain --build-arg PG_MAJOR="15" .
 ```
 
-#### To build PostgreSQL 14 + OrieleDB extension
-```
-docker build -t orioletest:14 --pull --network=host --progress=plain --build-arg PG_MAJOR="14" .
-```
-
-#### To build PostgreSQL 13 + OrieleDB extension
-```
-docker build -t orioletest:13 --pull --network=host --progress=plain --build-arg PG_MAJOR="13" .
-```
-
 ## Supported environment variables:
 
 This project aims to maintain compatibility with the Docker Official PostgreSQL image, and therefore, it also supports the environmental variables found there:
@@ -178,8 +168,8 @@ Read more:  https://github.com/docker-library/docs/blob/master/postgres/README.m
   * You can choose either `clang` or `gcc`.
 
 * `--build-arg PG_MAJOR="16"`
-  * Choose the main version of PostgreSQL. Default is `14`.
-  * You can choose from `16`, `15`, `14`, `13`.
+  * Choose the main version of PostgreSQL. Default is `15`.
+  * You can choose from `16`, `15`.
 * `--build-arg DOCKER_PG_LLVM_DEPS='lvm15-dev clang15'`
   * Choose the LLVM build environment. Default is `llvm-dev clang`.
   * If you're using Alpine version `3.18` or higher, use `llvm15` because `llvm16` is not supported yet.
