@@ -225,16 +225,6 @@ RUN set -eux; \
 	\
 	postgres --version
 
-# make the sample config easier to munge (and "correct by default")
-RUN set -eux; \
-	cp -v /usr/local/share/postgresql/postgresql.conf.sample /usr/local/share/postgresql/postgresql.conf.sample.orig; \
-	sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "shared_preload_libraries = 'orioledb'" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "orioledb.main_buffers = 512MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "orioledb.undo_buffers = 256MB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	echo "max_wal_size=8GB" >>  /usr/local/share/postgresql/postgresql.conf.sample; \
-	grep -F "listen_addresses = '*'" /usr/local/share/postgresql/postgresql.conf.sample
-
 RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
 
 ENV PGDATA /var/lib/postgresql/data
