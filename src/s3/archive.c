@@ -159,6 +159,9 @@ s3_archive_preload_file(const char *file, const char *path)
 	bool		found;
 	PreloadHashItem *item;
 
+	if (!orioledb_s3_mode)
+		return;
+
 	elog(DEBUG1, "archive preload %s", file);
 
 	item = hash_search(preloadHash, &file, HASH_ENTER, &found);
@@ -188,6 +191,9 @@ s3_archive_file(const char *file, const char *path)
 	S3TaskLocation location;
 	bool		found;
 	PreloadHashItem *item;
+
+	if (!orioledb_s3_mode)
+		return false;
 
 	elog(DEBUG1, "archive %s", file);
 
