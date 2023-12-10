@@ -34,6 +34,7 @@ typedef struct
 	OXid		checkpointRetainXmin;
 	OXid		checkpointRetainXmax;
 	uint32		binaryVersion;
+	bool		s3Mode;
 	pg_crc32c	crc;
 } CheckpointControl;
 

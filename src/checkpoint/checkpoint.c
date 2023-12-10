@@ -328,6 +328,14 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 							   control.binaryVersion, ORIOLEDB_BINARY_VERSION),
 					 errhint("It looks like you need to initdb.")));
 
+		if (control.s3Mode != orioledb_s3_mode)
+			ereport(FATAL,
+					(errmsg("database files are incompatible with server"),
+					 errdetail("OrioleDB was initialized with S3 mode %s,"
+							   " but the extension was configure with S3 mode %s.",
+							   control.s3Mode ? "on" : "off",
+							   orioledb_s3_mode ? "on" : "off")));
+
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;
 		checkpoint_state->controlReplayStartPtr = control.replayStartPtr;
@@ -1002,6 +1010,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	control.checkpointRetainXmin = pg_atomic_read_u64(&xid_meta->checkpointRetainXmin);
 	control.checkpointRetainXmax = pg_atomic_read_u64(&xid_meta->checkpointRetainXmax);
 	control.binaryVersion = ORIOLEDB_BINARY_VERSION;
+	control.s3Mode = orioledb_s3_mode;
 
 	write_checkpoint_control(&control);
 
