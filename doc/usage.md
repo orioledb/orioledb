@@ -186,6 +186,7 @@ To use S3 functionality, the following parameters should be set before creating 
 * `orioledb.s3_accesskey` -- specify AWS access key to authenticate the bucket.
 * `orioledb.s3_secretkey` -- specify AWS secret key to authenticate the bucket.
 * `orioledb.s3_num_workers` -- specify the number of AWS workers syncing data to S3 bucket. More workers could make sync faster. 20 - is a recommended value that is enough in most cases.
+* `orioledb.s3_desired_size` -- This parameter defines the total desired size of OrioleDB tables on the local storage. Once this limit is exceeded, OrioleDB's background workers will begin evicting local data to the S3 bucket. This mechanism ensures efficient use of local storage and seamless data transfer to S3. Effective support for this limit requires a filesystem that supports sparse files.
 * `max_worker_processes` -- PostgreSQL limit for maximum number of workers. Should be set to accommodate extra `orioledb.s3_num_workers` and all other Postgres workers. To start set it to `orioledb.s3_num_workers` plus the previous `max_worker_processes` value.
 
 After setting the GUC parameters above restart the postmaster. Then all tables and materialized views created `using orioledb` will be synced with the S3 bucket.
