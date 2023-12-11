@@ -350,6 +350,8 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 			minLoaded = i;
 		if (S3_PART_GET_STATUS(oldValue) == S3PartStatusLoading)
 			haveLoadedPart = true;
+		if (S3_PART_GET_LOCKS_NUM(oldValue) > 0)
+			haveLoadedPart = true;
 		Assert(S3_PART_GET_CHANGE_COUNT(oldValue) == prevChangeCount);
 		dirty = dirty || (oldValue & S3_PART_DIRTY_BIT);
 		oldValues[i] = S3_PART_GET_LOWER(oldValue);
