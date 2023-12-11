@@ -31,7 +31,7 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 class S3Test(BaseTest):
 	bucket_name = "test-bucket"
 	host="localhost"
-	port=5000
+	port=5002
 	iam_port=5001
 	user="ORDB_USER"
 	region="us-east-1"
@@ -381,7 +381,7 @@ class OrioledbS3Loader:
 		testgres.utils.execute_utility(args, logfile)
 
 class MotoServerSSL:
-	def __init__(self, host: str = "localhost", port: int = 5000,
+	def __init__(self, host: str = "localhost", port: int = 5002,
 				 service: Optional[str] = None, ssl_context=None):
 		self._host = host
 		self._port = port
