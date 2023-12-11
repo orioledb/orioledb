@@ -217,9 +217,9 @@ Run the script with the same parameters as from your S3 Postgres cluster config:
 * `AWS_ACCESS_KEY_ID` - same as `orioledb.s3_accesskey`
 * `AWS_SECRET_ACCESS_KEY` - same as `orioledb.s3_secretkey`
 * `AWS_DEFAULT_REGION` - same as `orioledb.s3_region`
-* `--endpoint` - same as `orioledb.s3_host` (full URL with `https://` prefix) E.g `--endpoint=https://mybucket.s3-accelerate.amazonaws.com`
-* `--bucket-name` - your S3 bucket name. e.g E.g `--bucket-name=mybucket`
-* `--data-dir` - destination directory you want to sync data to. E.g. `--data-dir=mydata/`
+* `--endpoint` - prefix from `orioledb.s3_host` (full URL with `https://` but without a bucket name) Should be either `--endpoint=https://s3-accelerate.amazonaws.com` or `--endpoint=https://s3.amazonaws.com`
+* `--bucket-name` - S3 bucket name from `orioledb.s3_host` E.g `--bucket-name=mybucket`
+* `--data-dir` - destination directory on local machine you want to write data to. E.g. `--data-dir=mydata/`
 * `--verbose` - optionally print extended info.
 
 `
