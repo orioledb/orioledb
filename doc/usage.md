@@ -168,3 +168,60 @@ Settings
  * `orioledb.use_mmap` -- specify whether use `mmap` to work with the block device.  It could be `on` and `off`.  We recommend setting `on` value for NVRAM.  The default is `off`.
 
 All the GUC parameters above require the postmaster restart.
+
+S3 database storage (experimental)
+----------------------------------
+
+OrioleDB has experimental support for the storage of all OrioleDB tables and materialized views data in the S3 bucket. It is useful for splitting compute and data storage instances, for increasing data safety, for scaling and changing architecture of compute instances preserving all data, and for replication.
+
+Local storage implements caching of the data most often accessed. Also, it ensures that adding and updating data will be done at the speed of writing to local storage, rather than the S3 transfer rate. Data are synced with S3 asynchronously. However, all requirements of data integrity are ensured for all the data on S3 storage as well. So you can re-connect to the S3 bucket by another empty PostgreSQL instance with the OrioleDB extension configured to use S3 with this bucket and get back all the data from S3 in the state of the last PostgreSQL checkpoint.
+
+To use S3 functionality, the following parameters should be set before creating orioledb tables and materialized views:
+
+* `orioledb.s3_mode` -- whether to use S3 mode. It could be `on` and `off`. The default is `off`
+* `archive_library = 'orioledb'` -- set it to use s3 mode
+* `archive_mode = on` -- set it to use S3 mode
+* `orioledb.s3_region` -- specify S3 region, where the S3 bucket is created.
+* `orioledb.s3_host` -- access endpoint address for S3 bucket (without `https://` prefix). E.g. mybucket.s3-accelerate.amazonaws.com
+* `orioledb.s3_accesskey` -- specify AWS access key to authenticate the bucket.
+* `orioledb.s3_secretkey` -- specify AWS secret key to authenticate the bucket.
+* `orioledb.s3_num_workers` -- specify the number of AWS workers syncing data to S3 bucket. More workers could make sync faster. 20 - is a recommended value that is enough in most cases.
+* `max_worker_processes` -- PostgreSQL limit for maximum number of workers. Should be set to accommodate extra `orioledb.s3_num_workers` and all other Postgres workers. For start set it to `orioledb.s3_num_workers` plus the previous `max_worker_processes` value.
+
+After setting the GUC parameters above restart the postmaster. Then all tables and materialized views created `using orioledb` will be synced with S3 bucket.
+
+```sql
+CREATE TABLE s3_test
+(
+  id int8 NOT NULL,
+  value1 float8 NOT NULL,
+  value2 text NOT NULL,
+  PRIMARY KEY(id)
+)  USING orioledb
+```
+
+NB: Any table/materialized view not created with `using orioledb` will be stored locally and will not survive restoring into the new database cluster.
+
+For best results, it's recommended to turn on `Transfer acceleration` in **General** AWS S3 bucket settings (endpoint address will be given with `s3-accelerate.amazonaws.com` suffix) and have the bucket and compute instance within the same AWS region. Even better is to use **Directory** AWS bucket within the same AWS region and sub-region as the compute instance.
+
+S3 loader utility
+-----------------
+
+The S3 loader utility allows getting data from the S3 bucket to any local machine into the specified directory.
+
+To use it you need to install `boto3` and `testgres` into your python:
+
+`pip install boto3 testgres`
+
+Run the script with the same parameters as from your S3 Postgres cluster config:
+* `AWS_ACCESS_KEY_ID` - same as `orioledb.s3_accesskey`
+* `AWS_SECRET_ACCESS_KEY` - same as `orioledb.s3_secretkey`
+* `AWS_DEFAULT_REGION` - same as `orioledb.s3_region`
+* `--endpoint` - same as `orioledb.s3_host` (full URL with `https://` prefix) E.g `--endpoint=https://mybucket.s3-accelerate.amazonaws.com`
+* `--bucket-name` - your S3 bucket name. e.g E.g `--bucket-name=mybucket`
+* `--data-dir` - destination directory you want to sync data to. E.g. `--data-dir=mydata/`
+* `--verbose` - optionally print extended info.
+
+`
+AWS_ACCESS_KEY_ID=<your access key> AWS_SECRET_ACCESS_KEY='<your secret key>' AWS_DEFAULT_REGION=<your region> python orioledb_s3_loader.py --endpoint=https://<your-bucket-endpoint> --bucket-name=<your-bucket-name> --data-dir='orioledb_data' --verbose
+`
