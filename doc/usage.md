@@ -172,7 +172,7 @@ All the GUC parameters above require the postmaster restart.
 S3 database storage (experimental)
 ----------------------------------
 
-OrioleDB has experimental support for the storage of all OrioleDB tables and materialized views data in the S3 bucket. It is useful for splitting compute and data storage instances, for increasing data safety, for scaling and changing architecture of compute instances preserving all data, and for replication.
+OrioleDB has experimental support for the storage of all OrioleDB tables and materialized views data in the S3 bucket. It is useful for splitting compute and data storage instances, for increasing data safety, for scaling and changing the architecture of compute instances preserving all data, and for replication.
 
 Local storage implements caching of the data most often accessed. Also, it ensures that adding and updating data will be done at the speed of writing to local storage, rather than the S3 transfer rate. Data are synced with S3 asynchronously. However, all requirements of data integrity are ensured for all the data on S3 storage as well. So you can re-connect to the S3 bucket by another empty PostgreSQL instance with the OrioleDB extension configured to use S3 with this bucket and get back all the data from S3 in the state of the last PostgreSQL checkpoint.
 
@@ -186,9 +186,9 @@ To use S3 functionality, the following parameters should be set before creating 
 * `orioledb.s3_accesskey` -- specify AWS access key to authenticate the bucket.
 * `orioledb.s3_secretkey` -- specify AWS secret key to authenticate the bucket.
 * `orioledb.s3_num_workers` -- specify the number of AWS workers syncing data to S3 bucket. More workers could make sync faster. 20 - is a recommended value that is enough in most cases.
-* `max_worker_processes` -- PostgreSQL limit for maximum number of workers. Should be set to accommodate extra `orioledb.s3_num_workers` and all other Postgres workers. For start set it to `orioledb.s3_num_workers` plus the previous `max_worker_processes` value.
+* `max_worker_processes` -- PostgreSQL limit for maximum number of workers. Should be set to accommodate extra `orioledb.s3_num_workers` and all other Postgres workers. To start set it to `orioledb.s3_num_workers` plus the previous `max_worker_processes` value.
 
-After setting the GUC parameters above restart the postmaster. Then all tables and materialized views created `using orioledb` will be synced with S3 bucket.
+After setting the GUC parameters above restart the postmaster. Then all tables and materialized views created `using orioledb` will be synced with the S3 bucket.
 
 ```sql
 CREATE TABLE s3_test
@@ -219,7 +219,7 @@ Run the script with the same parameters as from your S3 Postgres cluster config:
 * `AWS_DEFAULT_REGION` - same as `orioledb.s3_region`
 * `--endpoint` - prefix from `orioledb.s3_host` (full URL with `https://` but without a bucket name) Should be either `--endpoint=https://s3-accelerate.amazonaws.com` or `--endpoint=https://s3.amazonaws.com`
 * `--bucket-name` - S3 bucket name from `orioledb.s3_host` E.g `--bucket-name=mybucket`
-* `--data-dir` - destination directory on local machine you want to write data to. E.g. `--data-dir=mydata/`
+* `--data-dir` - destination directory on the local machine you want to write data to. E.g. `--data-dir=mydata/`
 * `--verbose` - optionally print extended info.
 
 `
