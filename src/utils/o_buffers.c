@@ -34,6 +34,7 @@ typedef struct
 {
 	LWLock		bufferCtlLock;
 	int64		blockNum;
+	int64		shadowBlockNum;
 	uint32		usageCount;
 	bool		dirty;
 	char		data[ORIOLEDB_BLCKSZ];
@@ -218,6 +219,16 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 			return buffer;
 		}
 
+		if (buffer->shadowBlockNum == blockNum)
+		{
+			/*
+			 * There is an in-progress operation with required tag.  We must
+			 * wait till it's completed.
+			 */
+			if (LWLockAcquireOrWait(&buffer->bufferCtlLock, LW_SHARED))
+				LWLockRelease(&buffer->bufferCtlLock);
+		}
+
 		if (i == 0 || buffer->usageCount < victimUsageCount)
 		{
 			victim = i;
@@ -234,6 +245,7 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 	buffer->usageCount = 1;
 	buffer->dirty = false;
 	buffer->blockNum = blockNum;
+	buffer->shadowBlockNum = prevBlockNum;
 
 	LWLockRelease(&group->groupCtlLock);
 
@@ -241,6 +253,8 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 		write_buffer_data(desc, buffer->data, prevBlockNum);
 
 	read_buffer(desc, buffer);
+
+	buffer->shadowBlockNum = -1;
 
 	return buffer;
 }

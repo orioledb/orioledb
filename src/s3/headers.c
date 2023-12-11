@@ -48,6 +48,7 @@ typedef struct
 {
 	LWLock		bufferCtlLock;
 	S3HeaderTag tag;
+	S3HeaderTag shadowTag;
 	uint32		changeCount;
 	uint32		usageCount;
 	pg_atomic_uint64 data[S3_HEADER_NUM_VALUES];
@@ -324,6 +325,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	else
 		buffer->changeCount++;
 	buffer->tag = tag;
+	buffer->shadowTag = prevTag;
 
 	LWLockRelease(&group->groupCtlLock);
 
@@ -392,6 +394,10 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 
 	LWLockRelease(&buffer->bufferCtlLock);
 
+	buffer->shadowTag.datoid = InvalidOid;
+	buffer->shadowTag.relnode = InvalidOid;
+	buffer->shadowTag.segNum = 0;
+	buffer->shadowTag.checkpointNum = 0;
 }
 
 static void
@@ -418,6 +424,16 @@ load_header_buffer(S3HeaderTag tag)
 			buffer->usageCount++;
 			LWLockRelease(&group->groupCtlLock);
 			return;
+		}
+
+		if (S3HeaderTagsIsEqual(buffer->shadowTag, tag))
+		{
+			/*
+			 * There is an in-progress operation with required tag.  We must
+			 * wait till it's completed.
+			 */
+			if (LWLockAcquireOrWait(&buffer->bufferCtlLock, LW_SHARED))
+				LWLockRelease(&buffer->bufferCtlLock);
 		}
 
 		if (i == 0 || buffer->usageCount < victimUsageCount)
