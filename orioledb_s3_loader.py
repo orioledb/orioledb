@@ -12,6 +12,7 @@ from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import ClientError
 from threading import Event
 from typing import Callable
+from urllib.parse import urlparse
 
 class OrioledbS3ObjectLoader:
 	def parse_args(self):
@@ -47,6 +48,10 @@ class OrioledbS3ObjectLoader:
 		else:
 			verify = None
 
+		parsed_url = urlparse(args.endpoint)
+		bucket = parsed_url.netloc.split('.')[0]
+		if bucket == args.bucket_name:
+			args.endpoint = f"{parsed_url.scheme}://{'.'.join(parsed_url.netloc.split('.')[1:])}"
 		self.s3 = boto3.client("s3", endpoint_url=args.endpoint,
 							   verify=verify)
 		self._error_occurred = Event()
