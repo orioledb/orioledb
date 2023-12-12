@@ -2044,7 +2044,8 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	/*
 	 * Free all private seq buf pages and get their offsets
 	 */
-	btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
+	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
+		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
 	filename = get_eviction_filename(desc->oids, checkpoint_number);
 
 	file = PathNameOpenFile(filename, O_WRONLY | O_CREAT | PG_BINARY);
