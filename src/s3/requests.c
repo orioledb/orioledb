@@ -266,7 +266,7 @@ read_file_part(const char *filename, uint64 offset,
 	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 	if (file < 0)
 	{
-		ereport(ERROR,
+		ereport(WARNING,
 				(errcode_for_file_access(),
 				 errmsg("could not open file \"%s\": %m", filename)));
 		return NULL;
@@ -432,20 +432,22 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 /*
  * Put the whole file as S3 object.
  */
-void
+bool
 s3_put_file(char *objectname, char *filename)
 {
 	Pointer		data;
 	uint64		dataSize = 0;
 
 	data = read_file(filename, &dataSize);
-	s3_put_object_with_contents(objectname, data, dataSize);
+	if (data)
+		s3_put_object_with_contents(objectname, data, dataSize);
+	return data != NULL;
 }
 
 /*
  * Put the file part as S3 object.
  */
-void
+bool
 s3_put_file_part(char *objectname, char *filename, int partnum)
 {
 	Pointer		data;
@@ -455,8 +457,9 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 						  partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
 						  ORIOLEDB_S3_PART_SIZE,
 						  &dataSize);
-
-	s3_put_object_with_contents(objectname, data, dataSize);
+	if (data)
+		s3_put_object_with_contents(objectname, data, dataSize);
+	return data != NULL;
 }
 
 /*

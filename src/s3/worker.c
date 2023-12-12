@@ -99,6 +99,7 @@ s3process_task(uint64 taskLocation)
 	if (task->type == S3TaskTypeWriteFile)
 	{
 		char	   *filename = task->typeSpecific.writeFile.filename;
+		bool		result;
 
 		if (filename[0] == '.' && filename[1] == '/')
 			filename += 2;
@@ -109,11 +110,11 @@ s3process_task(uint64 taskLocation)
 
 		elog(DEBUG1, "S3 put %s %s", objectname, filename);
 
-		s3_put_file(objectname, filename);
+		result = s3_put_file(objectname, filename);
 
 		pfree(objectname);
 
-		if (task->typeSpecific.writeFile.delete)
+		if (result && task->typeSpecific.writeFile.delete)
 			unlink(filename);
 	}
 	else if (task->type == S3TaskTypeWriteEmptyDir)
@@ -168,6 +169,7 @@ s3process_task(uint64 taskLocation)
 	{
 		char	   *filename;
 		S3HeaderTag tag;
+		bool		result;
 
 		filename = btree_filename(task->typeSpecific.filePart.datoid,
 								  task->typeSpecific.filePart.relnode,
@@ -190,9 +192,10 @@ s3process_task(uint64 taskLocation)
 
 		s3_header_mark_part_writing(tag, task->typeSpecific.filePart.partNum);
 
-		s3_put_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+		result = s3_put_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
 
-		s3_header_mark_part_written(tag, task->typeSpecific.filePart.partNum);
+		if (result)
+			s3_header_mark_part_written(tag, task->typeSpecific.filePart.partNum);
 
 		pfree(filename);
 		pfree(objectname);
