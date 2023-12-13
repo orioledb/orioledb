@@ -172,9 +172,9 @@ All the GUC parameters above require the postmaster restart.
 S3 database storage (experimental)
 ----------------------------------
 
-OrioleDB has experimental support for the storage of all OrioleDB tables and materialized views data in the S3 bucket. It is useful for splitting compute and data storage instances, for increasing data safety, for scaling and changing the architecture of compute instances preserving all data, and for replication.
+OrioleDB has experimental support for the storage of all tables and materialized views data in the S3 bucket.  It is useful for splitting compute and data storage instances, for increasing data safety, and for scaling and changing the architecture of compute instances preserving all data.
 
-Local storage implements caching of the data most often accessed. Also, it ensures that adding and updating data will be done at the speed of writing to local storage, rather than the S3 transfer rate. Data are synced with S3 asynchronously. However, all requirements of data integrity are ensured for all the data on S3 storage as well. So you can re-connect to the S3 bucket by another empty PostgreSQL instance with the OrioleDB extension configured to use S3 with this bucket and get back all the data from S3 in the state of the last PostgreSQL checkpoint.
+Local storage implements caching of the data most often accessed. Also, it ensures that adding and updating data will be done at the speed of writing to local storage, rather than the S3 transfer rate. Data are synced with S3 asynchronously. However, all requirements of data integrity are ensured for all the data on S3 storage as well. So you can re-connect to the S3 bucket by another empty PostgreSQL instance (initialized with the utility described below) with the OrioleDB extension configured to use S3 with this bucket and get back all the data from S3 in the state of the last PostgreSQL checkpoint.
 
 To use S3 functionality, the following parameters should be set before creating orioledb tables and materialized views:
 
@@ -201,9 +201,17 @@ CREATE TABLE s3_test
 )  USING orioledb
 ```
 
-NB: Any table/materialized view not created with `using orioledb` will be stored locally and will not survive restoring into the new database cluster.
+In S3 mode all the tables and materialized views created with `using orioledb` are synchronized with S3 incrementally.  That is, only modified blocks are to be put into S3 bucked.  The table/materialized view not created with `using orioledb` will be saved completely at every checkpoint.  So, it's recommended to use S3 mode when you store the majority of your data using the OrioleDB engine.
 
 For best results, it's recommended to turn on `Transfer acceleration` in **General** AWS S3 bucket settings (endpoint address will be given with `s3-accelerate.amazonaws.com` suffix) and have the bucket and compute instance within the same AWS region. Even better is to use **Directory** AWS bucket within the same AWS region and sub-region as the compute instance.
+
+As mentioned above S3 mode is currently experimental.  The major limitations of this mode are the following.
+
+1. While OrioleDB tables and materialized views are stored incrementally in the S3 bucket, the history is kept forever.  There is currently no mechanism to safely remove the old data.
+2. In the primary/replica setup, each should have a separate S3 bucket.
+3. The user is responsible for ensuring that only one instance is working with the same S3 bucket.  Connecting multiple database instances simultaneously to the same bucket leads to data corruption.
+
+All of the limitations above are temporary and will be removed in further releases.
 
 S3 loader utility
 -----------------
