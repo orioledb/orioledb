@@ -331,7 +331,20 @@ btree_open_smgr(BTreeDescr *descr)
 {
 	if (orioledb_s3_mode)
 	{
+		int			i;
+		int			j;
+
 		descr->smgr.hash = s3Files_create(TopMemoryContext, 16, NULL);
+
+		for (i = 0; i < 2; i++)
+		{
+			descr->buildPartsInfo[i].writeMaxLocation = 0;
+			for (j = 0; j < MAX_NUM_DIRTY_PARTS; j++)
+			{
+				descr->buildPartsInfo[i].dirtyParts[j].segNum = -1;
+				descr->buildPartsInfo[i].dirtyParts[j].partNum = -1;
+			}
+		}
 	}
 	else
 	{
@@ -356,6 +369,36 @@ btree_close_smgr(BTreeDescr *descr)
 
 	if (orioledb_s3_mode)
 	{
+		int			j;
+
+		for (j = 0; j < 2; j++)
+		{
+			for (i = 0; i < MAX_NUM_DIRTY_PARTS; i++)
+			{
+				S3TaskLocation location;
+				uint32		chkpNum;
+				int32		segNum,
+							partNum;
+
+				chkpNum = descr->buildPartsInfo[j].dirtyParts[i].chkpNum;
+				segNum = descr->buildPartsInfo[j].dirtyParts[i].segNum;
+				partNum = descr->buildPartsInfo[j].dirtyParts[i].partNum;
+				if (segNum >= 0 && partNum >= 0)
+				{
+					location = s3_schedule_file_part_write(chkpNum,
+														   descr->oids.datoid,
+														   descr->oids.relnode,
+														   segNum,
+														   partNum);
+					descr->buildPartsInfo[j].writeMaxLocation =
+						Max(descr->buildPartsInfo[j].writeMaxLocation, location);
+				}
+				descr->buildPartsInfo[j].dirtyParts[i].chkpNum = 0;
+				descr->buildPartsInfo[j].dirtyParts[i].segNum = -1;
+				descr->buildPartsInfo[j].dirtyParts[i].partNum = -1;
+			}
+		}
+
 		if (descr->smgr.hash)
 		{
 			s3Files_iterator i;
@@ -397,6 +440,7 @@ btree_s3_flush(BTreeDescr *desc, uint32 chkpNum)
 		partNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum;
 		if (segNum >= 0 && partNum >= 0)
 		{
+			Assert(chkpNum == meta->partsInfo[chkpNum % 2].dirtyParts[i].chkpNum);
 			location = s3_schedule_file_part_write(chkpNum,
 												   desc->oids.datoid,
 												   desc->oids.relnode,
@@ -417,35 +461,55 @@ btree_smgr_schedule_s3_write(BTreeDescr *desc, uint32 chkpNum,
 	int			i;
 	int32		curSegNum,
 				curPartNum,
+				curChkpNum,
 				tmpSegNum,
-				tmpPartNum;
-	BTreeMetaPage *meta = BTREE_GET_META(desc);
+				tmpPartNum,
+				tmpChkpNum;
+	BTreeS3PartsInfo *partsInfo = NULL;
+
+	if (OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
+	{
+		BTreeMetaPage *meta = BTREE_GET_META(desc);
+
+		partsInfo = meta->partsInfo;
+	}
+	else
+	{
+		partsInfo = desc->buildPartsInfo;
+	}
 
 	curSegNum = segNum;
 	curPartNum = partNum;
+	curChkpNum = chkpNum;
 	for (i = 0; i < MAX_NUM_DIRTY_PARTS; i++)
 	{
-		tmpSegNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].segNum;
-		tmpPartNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum;
-		meta->partsInfo[chkpNum % 2].dirtyParts[i].segNum = curSegNum;
-		meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum = curPartNum;
+		tmpSegNum = partsInfo[chkpNum % 2].dirtyParts[i].segNum;
+		tmpPartNum = partsInfo[chkpNum % 2].dirtyParts[i].partNum;
+		tmpChkpNum = partsInfo[chkpNum % 2].dirtyParts[i].chkpNum;
+		partsInfo[chkpNum % 2].dirtyParts[i].segNum = curSegNum;
+		partsInfo[chkpNum % 2].dirtyParts[i].partNum = curPartNum;
+		partsInfo[chkpNum % 2].dirtyParts[i].chkpNum = curChkpNum;
 		curSegNum = tmpSegNum;
 		curPartNum = tmpPartNum;
+		curChkpNum = tmpChkpNum;
 
-		if ((curSegNum == segNum && curPartNum == partNum) || curSegNum < 0)
+		if ((curSegNum == segNum &&
+			 curPartNum == partNum &&
+			 curChkpNum == chkpNum) ||
+			curSegNum < 0)
 			break;
 
 		if (i == MAX_NUM_DIRTY_PARTS - 1)
 		{
 			S3TaskLocation location;
 
-			location = s3_schedule_file_part_write(chkpNum,
+			location = s3_schedule_file_part_write(curChkpNum,
 												   desc->oids.datoid,
 												   desc->oids.relnode,
 												   curSegNum,
 												   curPartNum);
-			meta->partsInfo[chkpNum % 2].writeMaxLocation =
-				Max(meta->partsInfo[chkpNum % 2].writeMaxLocation, location);
+			partsInfo[chkpNum % 2].writeMaxLocation =
+				Max(partsInfo[chkpNum % 2].writeMaxLocation, location);
 		}
 	}
 }
@@ -1661,6 +1725,8 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 				   (extent->off + threshold - 1 + extent->len) / threshold);
 			s3_headers_increase_loaded_parts(1);
 		}
+
+		extent->off |= (uint64) chkpNum << S3_CHKP_NUM_SHIFT;
 	}
 
 	Assert(FileExtentIsValid(*extent));

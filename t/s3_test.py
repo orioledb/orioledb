@@ -237,6 +237,31 @@ class S3Test(BaseTest):
 						 node.execute("SELECT * FROM o_test_1"))
 		node.stop()
 
+	def test_s3_ddl_recovery(self):
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+
+		node.safe_psql("""
+			CREATE TABLE o_test_1(
+				val_1 text NOT NULL COLLATE "C",
+				PRIMARY KEY (val_1)
+			) USING orioledb;
+			ALTER TABLE o_test_1 ALTER val_1 TYPE text COLLATE "POSIX";
+		""")
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
 	def get_file_occupied_size(self, path):
 		try:
 			result = 0

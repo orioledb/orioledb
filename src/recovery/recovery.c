@@ -1925,8 +1925,19 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
 		{
 			uint32		file_reloid,
-						file_chkp;
+						file_chkp,
+						file_segno;
 			bool		cleanup = false;
+
+			if (orioledb_s3_mode &&
+				(sscanf(dbFile->d_name, "%10u-%10u",
+						&file_reloid, &file_chkp) == 2 ||
+				 sscanf(dbFile->d_name, "%10u.%10u-%10u",
+						&file_reloid, &file_segno, &file_chkp) == 3) &&
+				file_chkp > chkp_num)
+			{
+				cleanup = true;
+			}
 
 			if (sscanf(dbFile->d_name, "%10u-%10u.%4s",
 					   &file_reloid, &file_chkp, ext) == 3)

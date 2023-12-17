@@ -132,6 +132,8 @@ typedef struct
 	Oid			relnode;
 } ORelOids;
 
+typedef uint64 S3TaskLocation;
+
 #if PG_VERSION_NUM >= 160000
 typedef RelFileLocator RelFileNode;
 #define PG_FUNCNAME_MACRO   __func__

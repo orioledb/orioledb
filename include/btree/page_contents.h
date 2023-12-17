@@ -17,7 +17,6 @@
 #include "s3/queue.h"
 
 #define NUM_SEQ_SCANS_ARRAY_SIZE	32
-#define MAX_NUM_DIRTY_PARTS			4
 
 /* The structure of BTree meta page.  Referenced by metaPageBlkno. */
 typedef struct
@@ -44,18 +43,7 @@ typedef struct
 	/* Number of running sequential scans depending on the checkpoint number */
 	pg_atomic_uint32 numSeqScans[NUM_SEQ_SCANS_ARRAY_SIZE];
 
-	/*
-	 * Pending data file parts to be synchronized with S3.
-	 */
-	struct
-	{
-		struct
-		{
-			int32		segNum;
-			int32		partNum;
-		}			dirtyParts[MAX_NUM_DIRTY_PARTS];
-		S3TaskLocation writeMaxLocation;
-	}			partsInfo[2];
+	BTreeS3PartsInfo partsInfo[2];
 } BTreeMetaPage;
 
 StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,

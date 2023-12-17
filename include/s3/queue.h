@@ -17,8 +17,6 @@
 
 #include "orioledb.h"
 
-typedef uint64 S3TaskLocation;
-
 #define InvalidS3TaskLocation (UINT64_MAX)
 
 extern Size s3_queue_shmem_needs(void);

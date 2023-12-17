@@ -149,6 +149,22 @@ typedef struct
 	OBTreeKeyCmp cmp;
 } BTreeOps;
 
+#define MAX_NUM_DIRTY_PARTS			4
+
+/*
+ * Pending data file parts to be synchronized with S3.
+ */
+typedef struct
+{
+	struct
+	{
+		uint32		chkpNum;
+		int32		segNum;
+		int32		partNum;
+	}			dirtyParts[MAX_NUM_DIRTY_PARTS];
+	S3TaskLocation writeMaxLocation;
+} BTreeS3PartsInfo;
+
 struct BTreeDescr
 {
 	BTreeRootInfo rootInfo;
@@ -163,6 +179,7 @@ struct BTreeDescr
 	SeqBufDescPrivate freeBuf;
 	SeqBufDescPrivate nextChkp[2];
 	SeqBufDescPrivate tmpBuf[2];
+	BTreeS3PartsInfo buildPartsInfo[2];
 	OXid		createOxid;
 	BTreeOps   *ops;
 };
