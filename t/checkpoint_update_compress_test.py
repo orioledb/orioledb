@@ -3,7 +3,9 @@
 
 from .checkpoint_update_base_test import CheckpointUpdateBaseTest
 
+
 class CheckpointUpdateCompressTest(CheckpointUpdateBaseTest):
+
 	def test_compress_concurrent_update_eviction_single_checkpoint(self):
 		self.concurrent_update_eviction_base(True, False, False, 0)
 

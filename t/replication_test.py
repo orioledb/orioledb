@@ -10,11 +10,15 @@ import subprocess
 
 from .base_test import BaseTest
 
+
 def catchup_orioledb(replica):
 	replica.catchup()
-	replica.poll_query_until("SELECT orioledb_recovery_synchronized();", expected = True)
+	replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
+	                         expected=True)
+
 
 class ReplicationTest(BaseTest):
+
 	def test_replication_simple(self):
 		with self.node as master:
 			master.start()
@@ -23,15 +27,17 @@ class ReplicationTest(BaseTest):
 			with self.getReplica().start() as replica:
 				master.execute("CREATE EXTENSION orioledb;")
 				master.execute("CREATE TABLE o_test\n"
-							   "    (id integer NOT NULL)\n"
-							   "USING orioledb;")
+				               "    (id integer NOT NULL)\n"
+				               "USING orioledb;")
 				master.execute("INSERT INTO o_test VALUES (1);")
 
 				# wait for synchronization
 				catchup_orioledb(replica)
-				self.assertEqual(1, replica.execute("SELECT * FROM o_test;")[0][0])
-				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
-										 expected = False)
+				self.assertEqual(
+				    1,
+				    replica.execute("SELECT * FROM o_test;")[0][0])
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
 
 	def test_replication_in_progress(self):
 		with self.node as master:
@@ -59,12 +65,17 @@ class ReplicationTest(BaseTest):
 				replica.catchup()
 
 				# ensure that we do not see in-progress transaction on the replica
-				count = replica.execute("""SELECT COUNT(*) FROM o_test;""")[0][0]
-				self.assertTrue(count == 0 or count == 10000 or count == 5000 or count == 7500)
-				count = replica.execute("""SELECT count(*) FROM (SELECT * FROM o_test ORDER BY id DESC) id;""")[0][0]
-				self.assertTrue(count == 0 or count == 10000 or count == 5000 or count == 7500)
-				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
-										 expected = False)
+				count = replica.execute(
+				    """SELECT COUNT(*) FROM o_test;""")[0][0]
+				self.assertTrue(count == 0 or count == 10000 or count == 5000
+				                or count == 7500)
+				count = replica.execute(
+				    """SELECT count(*) FROM (SELECT * FROM o_test ORDER BY id DESC) id;"""
+				)[0][0]
+				self.assertTrue(count == 0 or count == 10000 or count == 5000
+				                or count == 7500)
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
 
 	def test_replication_drop(self):
 		with self.node as master:
@@ -91,7 +102,9 @@ class ReplicationTest(BaseTest):
 
 				# check that DROP replicated
 				self.assertTrue(self.all_tables_dropped(replica))
-				self.assertFalse(replica.execute("SELECT orioledb_has_retained_undo();")[0][0])
+				self.assertFalse(
+				    replica.execute("SELECT orioledb_has_retained_undo();")[0]
+				    [0])
 
 	def test_replication_create_drop_commit(self):
 		with self.node as master:
@@ -123,7 +136,9 @@ class ReplicationTest(BaseTest):
 
 				# check that DROP replicated
 				self.assertTrue(self.all_tables_dropped(replica))
-				self.assertFalse(replica.execute("SELECT orioledb_has_retained_undo();")[0][0])
+				self.assertFalse(
+				    replica.execute("SELECT orioledb_has_retained_undo();")[0]
+				    [0])
 
 	def test_replication_create_rollback(self):
 		with self.node as master:
@@ -151,7 +166,9 @@ class ReplicationTest(BaseTest):
 
 				# check that drop replicated
 				self.assertTrue(self.all_tables_dropped(replica))
-				self.assertFalse(replica.execute("SELECT orioledb_has_retained_undo();")[0][0])
+				self.assertFalse(
+				    replica.execute("SELECT orioledb_has_retained_undo();")[0]
+				    [0])
 
 	def test_replication_create_truncate_commit(self):
 		with self.node as master:
@@ -185,7 +202,9 @@ class ReplicationTest(BaseTest):
 				self.assertEqual(1, self.get_tbl_count(replica))
 				self.assertTrue(self.has_only_one_relnode(replica))
 
-				self.assertFalse(replica.execute("SELECT orioledb_has_retained_undo();")[0][0])
+				self.assertFalse(
+				    replica.execute("SELECT orioledb_has_retained_undo();")[0]
+				    [0])
 
 	def test_replication_drop_truncate_rollback(self):
 		with self.node as master:
@@ -232,7 +251,9 @@ class ReplicationTest(BaseTest):
 				self.assertTrue(self.has_only_one_relnode(replica))
 				self.assertEqual(1, self.get_tbl_count(replica))
 
-				self.assertFalse(replica.execute("SELECT orioledb_has_retained_undo();")[0][0])
+				self.assertFalse(
+				    replica.execute("SELECT orioledb_has_retained_undo();")[0]
+				    [0])
 
 	def test_replication_non_transactional_truncate(self):
 		node = self.node
@@ -256,53 +277,59 @@ class ReplicationTest(BaseTest):
 
 	def test_replication_non_root_eviction(self):
 		with self.node as master:
-			self.node.append_conf('postgresql.conf',
-								  "log_min_messages = notice\n"
-								  "max_worker_processes = 64\n"
-								  "orioledb.undo_buffers = 256MB\n"
-								  "orioledb.recovery_pool_size = 50\n")
+			self.node.append_conf(
+			    'postgresql.conf', "log_min_messages = notice\n"
+			    "max_worker_processes = 64\n"
+			    "orioledb.undo_buffers = 256MB\n"
+			    "orioledb.recovery_pool_size = 50\n")
 			master.start()
 
 			# create a backup
 			with self.getReplica().start() as replica:
-				master.safe_psql('postgres',
-								 "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-								 "CREATE TABLE IF NOT EXISTS o_test (\n"
-								 "	key integer NOT NULL,\n"
-								 "	val integer NOT NULL,\n"
-								 "	val2 text NOT NULL,\n"
-								 "	PRIMARY KEY (key)\n"
-								 ") USING orioledb;\n")
+				master.safe_psql(
+				    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+				    "CREATE TABLE IF NOT EXISTS o_test (\n"
+				    "	key integer NOT NULL,\n"
+				    "	val integer NOT NULL,\n"
+				    "	val2 text NOT NULL,\n"
+				    "	PRIMARY KEY (key)\n"
+				    ") USING orioledb;\n")
 
 				n = 500000
 				con = master.connect()
 				con.begin()
-				con.execute("INSERT INTO o_test (SELECT id, %s - id, repeat('x', 1000) FROM generate_series(%s, %s, 1) id);" %
-							(str(n), str(1), str(n)))
+				con.execute(
+				    "INSERT INTO o_test (SELECT id, %s - id, repeat('x', 1000) FROM generate_series(%s, %s, 1) id);"
+				    % (str(n), str(1), str(n)))
 				con.commit()
 				con.close()
 
 				# wait for synchronization
 				catchup_orioledb(replica)
 
-				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
-										 expected = False)
-				self.assertEqual(500000, replica.execute("SELECT count(*) FROM (SELECT * FROM o_test ORDER BY key) x;")[0][0])
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
+				self.assertEqual(
+				    500000,
+				    replica.execute(
+				        "SELECT count(*) FROM (SELECT * FROM o_test ORDER BY key) x;"
+				    )[0][0])
 
 	def test_replication_root_eviction(self):
 		INDEX_NOT_LOADED = "Index o_evicted_pkey: not loaded"
 		with self.node as master:
-			master.append_conf('postgresql.conf',
-							   "orioledb.main_buffers = 8MB\n"
-							   "checkpoint_timeout = 86400\n"
-							   "max_wal_size = 1GB\n"
-							   "enable_seqscan = off\n"
-							   "orioledb.recovery_pool_size = 1\n"
-							   "orioledb.debug_disable_bgwriter = true\n")
+			master.append_conf(
+			    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+			    "checkpoint_timeout = 86400\n"
+			    "max_wal_size = 1GB\n"
+			    "enable_seqscan = off\n"
+			    "orioledb.recovery_pool_size = 1\n"
+			    "orioledb.debug_disable_bgwriter = true\n")
 			master.start()
 			# create a backup
 			with self.getReplica().start() as replica:
-				master.safe_psql('postgres', """
+				master.safe_psql(
+				    'postgres', """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
 					CREATE TABLE IF NOT EXISTS o_test (
 						key integer NOT NULL,
@@ -320,14 +347,17 @@ class ReplicationTest(BaseTest):
 					INSERT INTO o_evicted (val)
 						SELECT val id FROM generate_series(1001, 1500, 1) val;
 				""")
-				self.assertEqual(500, master.execute("SELECT count(*) FROM o_evicted;")[0][0])
+				self.assertEqual(
+				    500,
+				    master.execute("SELECT count(*) FROM o_evicted;")[0][0])
 
 				n = 400000
 				step = 1000
 
 				self.assertNotEqual(
-					master.execute("SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');")[0][0].split('\n')[0],
-					INDEX_NOT_LOADED)
+				    master.execute(
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
 				with master.connect('postgres') as con:
 					for i in range(1, n, step):
@@ -336,49 +366,59 @@ class ReplicationTest(BaseTest):
 								(SELECT id, %s - id, %s - id,
 										%s - id, %s - id FROM
 									generate_series(%s, %s, 1) id);
-						""" % (str(n), str(i), str(i), str(i), str(i),
-							str(i + step - 1)))
+						""" % (str(n), str(i), str(i), str(i), str(i), str(i + step - 1)))
 					con.commit()
 
-				self.assertEqual(n, master.execute(
-					"SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(n, master.execute(
-					"SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    n,
+				    master.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    n,
+				    master.execute("SELECT count(*) FROM o_test;")[0][0])
 
 				self.assertEqual(
-					master.execute("SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');")[0][0].split('\n')[0],
-					INDEX_NOT_LOADED)
+				    master.execute(
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
 				# wait for synchronization
 				catchup_orioledb(replica)
 				replica.poll_query_until(
-					"SELECT orioledb_has_retained_undo();",
-					expected = False)
-
-				self.assertEqual(500, replica.execute(
-					"SELECT count(*) FROM o_evicted;")[0][0])
-				self.assertNotEqual(
-					replica.execute("SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');")[0][0].split('\n')[0],
-					INDEX_NOT_LOADED)
-
-				self.assertEqual(n, replica.execute(
-					"SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(n, replica.execute(
-					"SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(n, replica.execute(
-					"SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(n, replica.execute(
-					"SELECT count(*) FROM o_test;")[0][0])
+				    "SELECT orioledb_has_retained_undo();", expected=False)
 
 				self.assertEqual(
-					replica.execute("SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');")[0][0].split('\n')[0],
-					INDEX_NOT_LOADED)
-				self.assertEqual(500, replica.execute(
-					"SELECT count(*) FROM o_evicted;")[0][0])
+				    500,
+				    replica.execute("SELECT count(*) FROM o_evicted;")[0][0])
+				self.assertNotEqual(
+				    replica.execute(
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+
+				self.assertEqual(
+				    n,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    n,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    n,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    n,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+
+				self.assertEqual(
+				    replica.execute(
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+				self.assertEqual(
+				    500,
+				    replica.execute("SELECT count(*) FROM o_evicted;")[0][0])
 
 				self.assertNotEqual(
-					replica.execute("SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');")[0][0].split('\n')[0],
-					INDEX_NOT_LOADED)
+				    replica.execute(
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
 	def test_replica_checkpoint(self):
 		with self.node as master:
@@ -415,46 +455,46 @@ class ReplicationTest(BaseTest):
 				replica.catchup()
 
 				# ensure that we do not see in-progress transaction on the replica
-				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
-										 expected = False)
-				count = replica.execute("""SELECT COUNT(*) FROM o_test;""")[0][0]
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
+				count = replica.execute(
+				    """SELECT COUNT(*) FROM o_test;""")[0][0]
 				self.assertEqual(count, 20000)
 
 	def test_remote_apply(self):
 		with self.node as master:
 			master.append_conf(filename='postgresql.conf',
-						synchronous_commit = 'remote_apply',
-						default_table_access_method = 'orioledb')
+			                   synchronous_commit='remote_apply',
+			                   default_table_access_method='orioledb')
 			master.start()
 
 			# create a backup
 			with self.getReplica() as replica:
 				master.safe_psql("""CREATE EXTENSION orioledb;""")
 				pgbench = master.pgbench(options=["-i", "-s", "1"],
-										stdout=subprocess.DEVNULL,
-										stderr=subprocess.DEVNULL)
+				                         stdout=subprocess.DEVNULL,
+				                         stderr=subprocess.DEVNULL)
 				self.assertEqual(pgbench.wait(), 0)
 				replica.start()
 				master.stop()
-				master.append_conf(filename='postgresql.conf',
-						synchronous_standby_names = 'FIRST 1 (replica)')
+				master.append_conf(
+				    filename='postgresql.conf',
+				    synchronous_standby_names='FIRST 1 (replica)')
 				master.start()
-				pgbench = master.pgbench(options=["--client", "16",
-												  "--jobs", "4",
-												  "--protocol", "prepared",
-												  "--progress", "10",
-												  "--time", "20"],
-										 stdout=subprocess.DEVNULL,
-										 stderr=subprocess.DEVNULL)
+				pgbench = master.pgbench(options=[
+				    "--client", "16", "--jobs", "4", "--protocol", "prepared",
+				    "--progress", "10", "--time", "20"
+				],
+				                         stdout=subprocess.DEVNULL,
+				                         stderr=subprocess.DEVNULL)
 				self.assertEqual(pgbench.wait(), 0)
 
-				pgbench = master.pgbench(options=["--client", "16",
-												  "--jobs", "4",
-												  "--protocol", "prepared",
-												  "--progress", "10",
-												  "--time", "20"],
-										 stdout=subprocess.DEVNULL,
-										 stderr=subprocess.DEVNULL)
+				pgbench = master.pgbench(options=[
+				    "--client", "16", "--jobs", "4", "--protocol", "prepared",
+				    "--progress", "10", "--time", "20"
+				],
+				                         stdout=subprocess.DEVNULL,
+				                         stderr=subprocess.DEVNULL)
 				self.assertEqual(pgbench.wait(), 0)
 
 	def test_replication_column_ddl(self):
@@ -464,19 +504,22 @@ class ReplicationTest(BaseTest):
 			with self.getReplica().start() as replica:
 				master.execute("CREATE EXTENSION orioledb;")
 				master.execute("CREATE TABLE o_test\n"
-							"    (id integer NOT NULL)\n"
-							"USING orioledb;")
+				               "    (id integer NOT NULL)\n"
+				               "USING orioledb;")
 				master.execute("INSERT INTO o_test VALUES (1);")
 
 				master.execute("ALTER TABLE o_test ADD COLUMN val int;")
-				master.execute("ALTER TABLE o_test RENAME COLUMN val TO val_2;")
+				master.execute(
+				    "ALTER TABLE o_test RENAME COLUMN val TO val_2;")
 				master.execute("ALTER TABLE o_test DROP COLUMN val_2")
 
 				# wait for synchronization
 				catchup_orioledb(replica)
-				self.assertEqual(1, replica.execute("SELECT * FROM o_test;")[0][0])
-				replica.poll_query_until("SELECT orioledb_has_retained_undo();",
-										expected = False)
+				self.assertEqual(
+				    1,
+				    replica.execute("SELECT * FROM o_test;")[0][0])
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
 
 	def test_replication_create_table_add_column_same_trx(self):
 		node = self.node
@@ -502,9 +545,9 @@ class ReplicationTest(BaseTest):
 
 				catchup_orioledb(replica)
 				self.assertEqual(master.execute("SELECT * FROM o_test_1"),
-								 [(1, 1), (2, 2), (3, 3)])
+				                 [(1, 1), (2, 2), (3, 3)])
 				self.assertEqual(replica.execute("SELECT * FROM o_test_1"),
-								 [(1, 1), (2, 2), (3, 3)])
+				                 [(1, 1), (2, 2), (3, 3)])
 
 	def test_replication_default_domain(self):
 		node = self.node
@@ -548,15 +591,15 @@ class ReplicationTest(BaseTest):
 					con1.execute("INSERT INTO o_test_1 VALUES (1), (3);")
 					con1.commit()
 
-				self.assertEqual([(1,),(3,)],
-								 master.execute("""
+				self.assertEqual([(1, ), (3, )],
+				                 master.execute("""
 									SELECT * FROM o_test_1 ORDER BY val_2;
 								 """))
 
 				catchup_orioledb(replica)
 
-				self.assertEqual([(1,),(3,)],
-								 replica.execute("""
+				self.assertEqual([(1, ), (3, )],
+				                 replica.execute("""
 									SELECT * FROM o_test_1 ORDER BY val_2;
 								 """))
 
@@ -642,11 +685,10 @@ class ReplicationTest(BaseTest):
 				""")
 
 				self.assertEqual(master.execute("TABLE o_test_1"),
-								 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
+				                 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
 				self.catchup_orioledb(replica)
 				self.assertEqual(replica.execute("TABLE o_test_1"),
-								 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
-
+				                 [('(1,2)', 5, 'abc'), ('(2,4)', 5, 'abc')])
 
 	def test_replication_table_rewrite(self):
 		node = self.node
@@ -734,59 +776,58 @@ class ReplicationTest(BaseTest):
 						CHECKPOINT;
 					""")
 					self.assertEqual([('1A', 'A'), ('2B', 'B')],
-									 con1.execute("TABLE o_test_3"))
+					                 con1.execute("TABLE o_test_3"))
 
 					con1.commit()
 					self.assertEqual([('1A', 'A'), ('2B', 'B')],
-									 con1.execute("TABLE o_test_3"))
+					                 con1.execute("TABLE o_test_3"))
 
 					self.catchup_orioledb(replica)
-					self.assertEqual(master.execute("""
+					self.assertEqual(
+					    master.execute("""
 										SELECT c.relname
 										FROM orioledb_table ot JOIN
 											pg_database db ON db.oid = ot.datoid JOIN
 											pg_class c ON c.oid = ot.reloid
 										WHERE db.datname = current_database()
 										ORDER BY c.relname
-									"""),
-									[('o_test_3',)])
-					self.assertEqual(replica.execute("""
+									"""), [('o_test_3', )])
+					self.assertEqual(
+					    replica.execute("""
 										SELECT c.relname
 										FROM orioledb_table ot JOIN
 											pg_database db ON db.oid = ot.datoid JOIN
 											pg_class c ON c.oid = ot.reloid
 										WHERE db.datname = current_database()
 										ORDER BY c.relname
-									"""),
-									[])
+									"""), [])
 
 					master.stop(['-m', 'immediate'])
 					master.start()
 					master.stop(['-m', 'immediate'])
 
 					master.start()
-					self.assertEqual(master.execute("""
+					self.assertEqual(
+					    master.execute("""
 											SELECT c.relname
 											FROM orioledb_table ot JOIN
 												pg_database db ON db.oid = ot.datoid JOIN
 												pg_class c ON c.oid = ot.reloid
 											WHERE db.datname = current_database()
 											ORDER BY c.relname
-									"""),
-									[])
-					self.assertEqual(replica.execute("""
+									"""), [])
+					self.assertEqual(
+					    replica.execute("""
 										SELECT c.relname
 										FROM orioledb_table ot JOIN
 											pg_database db ON db.oid = ot.datoid JOIN
 											pg_class c ON c.oid = ot.reloid
 										WHERE db.datname = current_database()
 										ORDER BY c.relname
-									"""),
-									[])
+									"""), [])
 					master.stop()
 					self.assertTrue(self.all_tables_dropped(master))
 					self.assertTrue(self.all_tables_dropped(replica))
-
 
 	def test_replication_temp_table_pkey(self):
 		node = self.node
@@ -827,15 +868,16 @@ class ReplicationTest(BaseTest):
 
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
-		oid_list = [re.match(r'(\d+_\d+).*', x).group(1) for x
-					in orioledb_files]
+		oid_list = [
+		    re.match(r'(\d+_\d+).*', x).group(1) for x in orioledb_files
+		]
 		if len(list(set(oid_list))) != 1:
 			print(oid_list)
 		return len(list(set(oid_list))) == 1
 
 	def get_tbl_count(self, node):
-		return node.execute('postgres',
-			'SELECT count(*) FROM orioledb_table_oids();')[0][0]
+		return node.execute(
+		    'postgres', 'SELECT count(*) FROM orioledb_table_oids();')[0][0]
 
 	def get_orioledb_files(self, node):
 		orioledb_dir = node.data_dir + "/orioledb_data"

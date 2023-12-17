@@ -4,7 +4,9 @@
 import unittest
 from .base_test import BaseTest
 
+
 class RecoveryOpclassTest(BaseTest):
+
 	def setUp(self):
 		super().setUp()
 		self.node.append_conf('orioledb.recovery_pool_size = 1')
@@ -12,7 +14,8 @@ class RecoveryOpclassTest(BaseTest):
 	def test_simple_sql_cmp_function(self):
 		with self.node as node:
 			node.start()
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE OR REPLACE FUNCTION my_int_cmp(a int, b int) RETURNS int
@@ -42,24 +45,27 @@ class RecoveryOpclassTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 5);
 			""")
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(2,),(1,),(3,),(4,),(5,)])
+			"""), [(2, ), (1, ), (3, ), (4, ), (5, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(2,),(1,),(3,),(4,),(5,)])
+			"""), [(2, ), (1, ), (3, ), (4, ), (5, )])
 
 			node.stop()
 
 	def test_deep_sql_cmp_function(self):
 		with self.node as node:
 			node.start()
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE OR REPLACE FUNCTION my_int_cmp(a int, b int) RETURNS int
@@ -107,24 +113,27 @@ class RecoveryOpclassTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 5);
 			""")
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(2,),(1,),(3,),(4,),(5,)])
+			"""), [(2, ), (1, ), (3, ), (4, ), (5, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(2,),(1,),(3,),(4,),(5,)])
+			"""), [(2, ), (1, ), (3, ), (4, ), (5, )])
 
 			node.stop()
 
 	def test_simple_expression_cmp_function(self):
 		with self.node as node:
 			node.start()
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_simple_expression(a int, b int)
@@ -154,24 +163,27 @@ class RecoveryOpclassTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 5);
 			""")
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(1,),(3,),(5,),(2,),(4,)])
+			"""), [(1, ), (3, ), (5, ), (2, ), (4, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(1,),(3,),(5,),(2,),(4,)])
+			"""), [(1, ), (3, ), (5, ), (2, ), (4, )])
 
 			node.stop()
 
 	def test_values_cmp_function(self):
 		with self.node as node:
 			node.start()
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_values(a int, b int)
@@ -201,17 +213,19 @@ class RecoveryOpclassTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 5);
 			""")
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(1,),(5,),(2,),(4,),(3,)])
+			"""), [(1, ), (5, ), (2, ), (4, ), (3, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(1,),(5,),(2,),(4,),(3,)])
+			"""), [(1, ), (5, ), (2, ), (4, ), (3, )])
 
 			node.stop()
 
@@ -219,7 +233,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_generate_series(a int, b int)
@@ -250,17 +265,21 @@ class RecoveryOpclassTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 10);
 			""")
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(7,),(1,),(8,),(2,),(9,),(3,),(10,),(4,),(5,),(6,)])
+			"""), [(7, ), (1, ), (8, ), (2, ), (9, ), (3, ), (10, ), (4, ), (5, ),
+			(6, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(7,),(1,),(8,),(2,),(9,),(3,),(10,),(4,),(5,),(6,)])
+			"""), [(7, ), (1, ), (8, ), (2, ), (9, ), (3, ), (10, ), (4, ), (5, ),
+			(6, )])
 
 			node.stop()
 
@@ -268,7 +287,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_subselect(a int, b int)
@@ -300,17 +320,21 @@ class RecoveryOpclassTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 10);
 			""")
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(5,),(10,),(1,),(6,),(2,),(7,),(3,),(8,),(4,),(9,)])
+			"""), [(5, ), (10, ), (1, ), (6, ), (2, ), (7, ), (3, ), (8, ), (4, ),
+			(9, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
-			self.assertEqual(node.execute("""
+			self.assertEqual(
+			    node.execute("""
 				SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-			"""), [(5,),(10,),(1,),(6,),(2,),(7,),(3,),(8,),(4,),(9,)])
+			"""), [(5, ), (10, ), (1, ), (6, ), (2, ), (7, ), (3, ), (8, ), (4, ),
+			(9, )])
 
 			node.stop()
 
@@ -318,7 +342,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_cte(a int, b int)
@@ -352,22 +377,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(6,), (1,), (7,), (2,), (8,), (3,), (9,), (4,), (10,), (5,)]
-			)
+				"""), [(6, ), (1, ), (7, ), (2, ), (8, ), (3, ), (9, ), (4, ), (10, ),
+			(5, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(6,), (1,), (7,), (2,), (8,), (3,), (9,), (4,), (10,), (5,)]
-			)
+				"""), [(6, ), (1, ), (7, ), (2, ), (8, ), (3, ), (9, ), (4, ), (10, ),
+			(5, )])
 
 			node.stop()
 
@@ -375,7 +398,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_test_func(a int, b int) RETURNS int AS $$
@@ -409,22 +433,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(8,), (1,), (9,), (2,), (10,), (3,), (4,), (5,), (6,), (7,)]
-			)
+				"""), [(8, ), (1, ), (9, ), (2, ), (10, ), (3, ), (4, ), (5, ), (6, ),
+			(7, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(8,), (1,), (9,), (2,), (10,), (3,), (4,), (5,), (6,), (7,)]
-			)
+				"""), [(8, ), (1, ), (9, ), (2, ), (10, ), (3, ), (4, ), (5, ), (6, ),
+			(7, )])
 
 			node.stop()
 
@@ -432,7 +454,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_join(a int, b int)
@@ -464,22 +487,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(3,), (6,), (9,), (1,), (4,), (7,), (10,), (2,), (5,), (8,)]
-			)
+				"""), [(3, ), (6, ), (9, ), (1, ), (4, ), (7, ), (10, ), (2, ), (5, ),
+			(8, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(3,), (6,), (9,), (1,), (4,), (7,), (10,), (2,), (5,), (8,)]
-			)
+				"""), [(3, ), (6, ), (9, ), (1, ), (4, ), (7, ), (10, ), (2, ), (5, ),
+			(8, )])
 
 			node.stop()
 
@@ -487,7 +508,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_complex(a int, b int)
@@ -526,32 +548,31 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(1,), (10,), (5,), (6,), (2,), (9,), (4,), (7,), (3,), (8,)]
-			)
+				"""), [(1, ), (10, ), (5, ), (6, ), (2, ), (9, ), (4, ), (7, ), (3, ),
+			(8, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(1,), (10,), (5,), (6,), (2,), (9,), (4,), (7,), (3,), (8,)]
-			)
+				"""), [(1, ), (10, ), (5, ), (6, ), (2, ), (9, ), (4, ), (7, ), (3, ),
+			(8, )])
 
 			node.stop()
 
 	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-					 'SQL-standard function bodies added in postgres 14')
+	                 'SQL-standard function bodies added in postgres 14')
 	def test_sqlbody_cmp_function(self):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_sqlbody(a int, b int)
@@ -584,22 +605,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(3,), (6,), (9,), (1,), (4,), (7,), (10,), (2,), (5,), (8,)]
-			)
+				"""), [(3, ), (6, ), (9, ), (1, ), (4, ), (7, ), (10, ), (2, ), (5, ),
+			(8, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(3,), (6,), (9,), (1,), (4,), (7,), (10,), (2,), (5,), (8,)]
-			)
+				"""), [(3, ), (6, ), (9, ), (1, ), (4, ), (7, ), (10, ), (2, ), (5, ),
+			(8, )])
 
 			node.stop()
 
@@ -607,7 +626,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_init_plan(a int, b int)
@@ -639,22 +659,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(4,), (8,), (1,), (5,), (9,), (2,), (6,), (10,), (3,), (7,)]
-			)
+				"""), [(4, ), (8, ), (1, ), (5, ), (9, ), (2, ), (6, ), (10, ), (3, ),
+			(7, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(4,), (8,), (1,), (5,), (9,), (2,), (6,), (10,), (3,), (7,)]
-			)
+				"""), [(4, ), (8, ), (1, ), (5, ), (9, ), (2, ), (6, ), (10, ), (3, ),
+			(7, )])
 
 			node.stop()
 
@@ -662,7 +680,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_cast(a int, b int)
@@ -694,22 +713,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(1,), (10,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,)]
-			)
+				"""), [(1, ), (10, ), (2, ), (3, ), (4, ), (5, ), (6, ), (7, ), (8, ),
+			(9, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(1,), (10,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,)]
-			)
+				"""), [(1, ), (10, ), (2, ), (3, ), (4, ), (5, ), (6, ), (7, ), (8, ),
+			(9, )])
 
 			node.stop()
 
@@ -717,7 +734,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_windowagg(a int, b int)
@@ -754,22 +772,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(4,), (8,), (1,), (5,), (9,), (2,), (6,), (10,), (3,), (7,)]
-			)
+				"""), [(4, ), (8, ), (1, ), (5, ), (9, ), (2, ), (6, ), (10, ), (3, ),
+			(7, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(4,), (8,), (1,), (5,), (9,), (2,), (6,), (10,), (3,), (7,)]
-			)
+				"""), [(4, ), (8, ), (1, ), (5, ), (9, ), (2, ), (6, ), (10, ), (3, ),
+			(7, )])
 
 			node.stop()
 
@@ -777,7 +793,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp(a int, b int)
@@ -810,22 +827,20 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(10,), (8,), (2,), (1,), (3,), (9,), (4,), (6,), (7,), (5,)]
-			)
+				"""), [(10, ), (8, ), (2, ), (1, ), (3, ), (9, ), (4, ), (6, ), (7, ),
+			(5, )])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY val USING OPERATOR(<^);
-				"""),
-				[(10,), (8,), (2,), (1,), (3,), (9,), (4,), (6,), (7,), (5,)]
-			)
+				"""), [(10, ), (8, ), (2, ), (1, ), (3, ), (9, ), (4, ), (6, ), (7, ),
+			(5, )])
 
 			node.stop()
 
@@ -833,7 +848,8 @@ class RecoveryOpclassTest(BaseTest):
 		with self.node as node:
 			node.start()
 
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE TYPE my_rec_arr AS (arr char[]);
@@ -913,27 +929,23 @@ class RecoveryOpclassTest(BaseTest):
 			""")
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY rec_val USING OPERATOR(#<#);
-				"""),
-				[(4,'(1,"({A})")'), (1,'(2,"({A})")'),
-				 (10,'(3,"({A})")'), (7,'(4,"({A})")'),
-				 (8,'(1,"({B})")'), (5,'(2,"({B})")'), (2,'(3,"({B})")'),
-				 (9,'(2,"({C})")'), (6,'(3,"({C})")'), (3,'(4,"({C})")')]
-			)
+				"""), [(4, '(1,"({A})")'), (1, '(2,"({A})")'), (10, '(3,"({A})")'),
+			(7, '(4,"({A})")'), (8, '(1,"({B})")'), (5, '(2,"({B})")'),
+			(2, '(3,"({B})")'), (9, '(2,"({C})")'), (6, '(3,"({C})")'),
+			(3, '(4,"({C})")')])
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 
 			self.assertEqual(
-				node.execute("""
+			    node.execute("""
 					SELECT * FROM o_test ORDER BY rec_val USING OPERATOR(#<#);
-				"""),
-				[(4,'(1,"({A})")'), (1,'(2,"({A})")'),
-				 (10,'(3,"({A})")'), (7,'(4,"({A})")'),
-				 (8,'(1,"({B})")'), (5,'(2,"({B})")'), (2,'(3,"({B})")'),
-				 (9,'(2,"({C})")'), (6,'(3,"({C})")'), (3,'(4,"({C})")')]
-			)
+				"""), [(4, '(1,"({A})")'), (1, '(2,"({A})")'), (10, '(3,"({A})")'),
+			(7, '(4,"({A})")'), (8, '(1,"({B})")'), (5, '(2,"({B})")'),
+			(2, '(3,"({B})")'), (9, '(2,"({C})")'), (6, '(3,"({C})")'),
+			(3, '(4,"({C})")')])
 
 			node.stop()

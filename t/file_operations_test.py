@@ -7,6 +7,7 @@ from .base_test import BaseTest
 
 from testgres.enums import NodeStatus
 
+
 class FileOperationsTest(BaseTest):
 	###
 	#  Check create checkpoint file error and release of pages which belong to
@@ -14,16 +15,16 @@ class FileOperationsTest(BaseTest):
 	###
 	def test_can_not_create_checkpoint_file(self):
 		node = self.node
-		node.start() # start PostgreSQL
-		node.safe_psql('postgres',
-			"CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-			"CREATE TABLE IF NOT EXISTS o_test (\n"
-			"	id integer NOT NULL,\n"
-			"	val text\n"
-			") USING orioledb;\n"
-		)
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text\n"
+		    ") USING orioledb;\n")
 
-		was_busy = node.execute('postgres', "SELECT orioledb_page_stats();")[0][0]
+		was_busy = node.execute('postgres',
+		                        "SELECT orioledb_page_stats();")[0][0]
 
 		# have not access to create checkpoint file, exception
 		try:
@@ -32,12 +33,14 @@ class FileOperationsTest(BaseTest):
 			self.assertEqual("We should not be here", "")
 		except Exception as e:
 			message = re.sub('[0-9]+', 'x', e.message)
-			self.assertTrue("FATAL:  could not open data file orioledb_data/x/x\n" in message)
+			self.assertTrue(
+			    "FATAL:  could not open data file orioledb_data/x/x\n" in
+			    message)
 
 		# checks that all pages has been released
 		self.assertEqual(
-			node.execute('postgres', "SELECT orioledb_page_stats();")[0][0],
-			was_busy)
+		    node.execute('postgres', "SELECT orioledb_page_stats();")[0][0],
+		    was_busy)
 
 		# have access to create checkpoint file, no exception
 		try:

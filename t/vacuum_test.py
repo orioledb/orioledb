@@ -2,7 +2,9 @@ import unittest
 from .base_test import BaseTest
 from testgres.connection import DatabaseError
 
+
 class VacuumTest(BaseTest):
+
 	def test_vacuum_parallel(self):
 		node = self.node
 		node.start()
@@ -165,7 +167,7 @@ class VacuumTest(BaseTest):
 		node.stop()
 
 	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-					 'PROCESS_TOAST option added in postgres 14')
+	                 'PROCESS_TOAST option added in postgres 14')
 	def test_7(self):
 		node = self.node
 		node.start()
@@ -182,7 +184,9 @@ class VacuumTest(BaseTest):
 			con1 = node.connect(autocommit=True)
 			con1.execute("VACUUM (PROCESS_TOAST) o_test_1(val_1);")
 
-		self.assertErrorMessageEquals(e, "ANALYZE option must be specified when a column list is provided")
+		self.assertErrorMessageEquals(
+		    e,
+		    "ANALYZE option must be specified when a column list is provided")
 		con1.close()
 		node.stop(['-m', 'immediate'])
 
@@ -200,7 +204,8 @@ class VacuumTest(BaseTest):
 		""")
 
 		con1 = node.connect(autocommit=True)
-		con1.execute("VACUUM (DISABLE_PAGE_SKIPPING, ANALYZE) o_test_1(val_1);")
+		con1.execute(
+		    "VACUUM (DISABLE_PAGE_SKIPPING, ANALYZE) o_test_1(val_1);")
 		con1.close()
 
 		node.stop(['-m', 'immediate'])

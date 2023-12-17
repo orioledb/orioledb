@@ -18,6 +18,7 @@ from threading import Thread
 from testgres.enums import NodeStatus
 from testgres.utils import get_pg_version, get_pg_config
 
+
 class BaseTest(unittest.TestCase):
 	replica = None
 	basePort = None
@@ -27,20 +28,23 @@ class BaseTest(unittest.TestCase):
 		testFullName = inspect.getfile(self.__class__)
 		names = []
 		for entry in os.scandir(os.path.dirname(testFullName)):
-			if entry.is_file() and entry.name.endswith('_test.py') and entry.name != 'base_test.py':
+			if entry.is_file() and entry.name.endswith(
+			    '_test.py') and entry.name != 'base_test.py':
 				names.append(entry.name)
 		names.sort()
 		return names.index(os.path.basename(testFullName))
 
 	def getBasePort(self):
 		if self.basePort is None:
-			self.basePort = int(os.getenv('TESTGRES_BASE_PORT', '20000')) + self.getTestNum() * 2
+			self.basePort = int(os.getenv('TESTGRES_BASE_PORT',
+			                              '20000')) + self.getTestNum() * 2
 		return self.basePort
 
 	def getReplica(self) -> testgres.PostgresNode:
 		if self.replica is None:
-			baseDir = mkdtemp(prefix = self.myName + '_tgsb_')
-			replica = self.node.backup(base_dir = baseDir).spawn_replica('replica')
+			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
+			replica = self.node.backup(
+			    base_dir=baseDir).spawn_replica('replica')
 			replica.port = self.getBasePort() + 1
 			replica.append_conf(port=replica.port)
 			self.replica = replica
@@ -58,14 +62,14 @@ class BaseTest(unittest.TestCase):
 		return self._myName
 
 	def setUp(self):
-		baseDir = mkdtemp(prefix = self.myName + '_tgsn_')
+		baseDir = mkdtemp(prefix=self.myName + '_tgsn_')
 		self.startTime = time.time()
 		self.node = testgres.get_new_node('test',
-										  port = self.getBasePort(),
-										  base_dir = baseDir)
+		                                  port=self.getBasePort(),
+		                                  base_dir=baseDir)
 		self.node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		self.node.append_conf('postgresql.conf',
-							  "shared_preload_libraries = orioledb\n")
+		                      "shared_preload_libraries = orioledb\n")
 
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:
@@ -74,7 +78,8 @@ class BaseTest(unittest.TestCase):
 	def tearDown(self):
 		if hasattr(self._outcome, 'errors'):
 			# Python 3.4 - 3.10  (These two methods have no side effects)
-			result = self.defaultTestResult()  # these 2 methods have no side effects
+			result = self.defaultTestResult(
+			)  # these 2 methods have no side effects
 			self._feedErrorsToResult(result, self._outcome.errors)
 		else:
 			# Python 3.11+
@@ -83,7 +88,8 @@ class BaseTest(unittest.TestCase):
 		failure = self.list2reason(result.failures)
 		ok = not error and not failure
 		if self.node.status() == NodeStatus.Running:
-			self.node.stop()  # just comment it if node should not stops on fails
+			self.node.stop(
+			)  # just comment it if node should not stops on fails
 			pass
 		if ok:
 			self.node.cleanup()
@@ -91,7 +97,8 @@ class BaseTest(unittest.TestCase):
 			print("\nBase directory: " + self.node.base_dir)
 		if self.replica:
 			if self.replica.status() == NodeStatus.Running:
-				self.replica.stop()  # just comment it if node should not stops on fails
+				self.replica.stop(
+				)  # just comment it if node should not stops on fails
 				pass
 			if ok:
 				self.replica._custom_base_dir = None
@@ -99,7 +106,7 @@ class BaseTest(unittest.TestCase):
 			else:
 				print("\nReplica base directory: " + self.replica.base_dir)
 		t = time.time() - self.startTime
-		sys.stderr.write('%.3f s ' % (t,))
+		sys.stderr.write('%.3f s ' % (t, ))
 
 	def genString(self, id, length):
 		i = 0
@@ -112,11 +119,13 @@ class BaseTest(unittest.TestCase):
 			i = i + 1
 		return result[0:length].decode('ascii')
 
-	def assertErrorMessageEquals(self, e: Exception, err_msg: str,
-								 second_msg: str = None,
-								 second_title: str = 'HINT',
-								 third_msg: str = None,
-								 third_title: str = 'HINT'):
+	def assertErrorMessageEquals(self,
+	                             e: Exception,
+	                             err_msg: str,
+	                             second_msg: str = None,
+	                             second_title: str = 'HINT',
+	                             third_msg: str = None,
+	                             third_title: str = 'HINT'):
 		if (hasattr(e, 'exception')):
 			e = e.exception
 
@@ -142,7 +151,8 @@ class BaseTest(unittest.TestCase):
 
 	@staticmethod
 	def pg_with_icu():
-		with open(os.path.join(get_pg_config()["INCLUDEDIR"], 'pg_config.h')) as file:
+		with open(os.path.join(get_pg_config()["INCLUDEDIR"],
+		                       'pg_config.h')) as file:
 			for line in file:
 				if re.match(r'#define USE_ICU 1.*', line):
 					return True
@@ -152,12 +162,16 @@ class BaseTest(unittest.TestCase):
 		# wait for synchronization
 		replica.catchup()
 		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
-								 expected = True)
+		                         expected=True)
+
 
 # execute SQL query Thread for PostgreSql node's connection
 class ThreadQueryExecutor(Thread):
+
 	def __init__(self, connection, sql_query):
-		Thread.__init__(self, target=ThreadQueryExecutor.execute_con, args=(connection, sql_query))
+		Thread.__init__(self,
+		                target=ThreadQueryExecutor.execute_con,
+		                args=(connection, sql_query))
 		self._return = None
 
 	def run(self):
@@ -167,8 +181,8 @@ class ThreadQueryExecutor(Thread):
 		finally:
 			del self._target, self._args
 
-	def join(self,timeout=None):
-		Thread.join(self,timeout)
+	def join(self, timeout=None):
+		Thread.join(self, timeout)
 		if isinstance(self._return, Exception):
 			raise self._return
 		return self._return
@@ -180,11 +194,13 @@ class ThreadQueryExecutor(Thread):
 		except Exception as e:
 			return e
 
-def generate_string(size, seed = None):
+
+def generate_string(size, seed=None):
 	if seed:
 		random.seed(seed)
 	chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
 	return ''.join(random.choice(chars) for _ in range(size))
+
 
 def wait_stopevent(node, blocked_pid):
 	while node.execute("""SELECT EXISTS(
@@ -195,27 +211,34 @@ def wait_stopevent(node, blocked_pid):
 		time.sleep(0.1)
 		continue
 
+
 # waits for blocking checkpointer process on breakpoint by process with pid = block_pid
 def wait_checkpointer_stopevent(node):
 	checkpointer_pid = None
 	while checkpointer_pid == None:
-		select_list = node.execute("SELECT pid FROM pg_stat_activity WHERE backend_type = 'checkpointer';")
+		select_list = node.execute(
+		    "SELECT pid FROM pg_stat_activity WHERE backend_type = 'checkpointer';"
+		)
 		# checkpointer may not start yet, check list range
 		if len(select_list) > 0 and len(select_list[0]) > 0:
 			checkpointer_pid = select_list[0][0]
 
 	wait_stopevent(node, checkpointer_pid)
 
+
 # waits for blocking bgwriter process on breakpoint by process with pid = block_pid
 def wait_bgwriter_stopevent(node):
 	bgwriter_pid = None
 	while bgwriter_pid == None:
-		select_list = node.execute("SELECT pid FROM pg_stat_activity WHERE backend_type = 'orioledb background writer';")
+		select_list = node.execute(
+		    "SELECT pid FROM pg_stat_activity WHERE backend_type = 'orioledb background writer';"
+		)
 		# checkpointer may not start yet, check list range
 		if len(select_list) > 0 and len(select_list[0]) > 0:
 			bgwriter_pid = select_list[0][0]
 
 	wait_stopevent(node, bgwriter_pid)
+
 
 # workaround for testgres error messages on empty results
 def new_execute(self, query, *args):
@@ -229,5 +252,6 @@ def new_execute(self, query, *args):
 		return res
 	except Exception as e:
 		return None
+
 
 testgres.NodeConnection.execute = new_execute

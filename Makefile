@@ -298,6 +298,9 @@ pgindent: orioledb.typedefs
 	include/*.h \
 	include/*/*.h
 
+yapf:
+	yapf -i t/*.py
+
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck pgindent \
 	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2)

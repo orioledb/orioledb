@@ -15,29 +15,31 @@ from testgres.enums import NodeStatus
 import string
 import random
 
+
 class CheckpointerTest(BaseTest):
+
 	def test_checkpoint_by_time(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-						 "orioledb.debug_checkpoint_timeout = 2s\n"
-						 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "orioledb.debug_checkpoint_timeout = 2s\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		con1 = node.connect()
 
 		node.safe_psql('postgres',
-					   "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
 
-		node.safe_psql('postgres',
-					   "CREATE TABLE IF NOT EXISTS o_test (\n"
-					   "	id integer NOT NULL,\n"
-					   "	val text,\n"
-					   "	PRIMARY KEY (id)\n"
-					   ") USING orioledb;\n")
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
 		con1.execute("SELECT pg_stopevent_set('checkpoint_step', 'true');")
 
-		node.safe_psql('postgres',
-					   "INSERT INTO o_test\n"
-					   "	(SELECT id, id || 'val' FROM generate_series(1, 1000, 1) id);\n")
+		node.safe_psql(
+		    'postgres', "INSERT INTO o_test\n"
+		    "	(SELECT id, id || 'val' FROM generate_series(1, 1000, 1) id);\n")
 
 		wait_checkpointer_stopevent(node)
 
@@ -50,28 +52,29 @@ class CheckpointerTest(BaseTest):
 
 		node.start()
 		self.assertEqual(
-			str(node.execute('postgres',
-							 'SELECT * FROM o_test WHERE id BETWEEN 1 and 8;')),
-			"[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val'),"
-			" (6, '6val'), (7, '7val'), (8, '8val')]")
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test WHERE id BETWEEN 1 and 8;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val'),"
+		    " (6, '6val'), (7, '7val'), (8, '8val')]")
 		node.stop()
 
 	def test_checkpoint_by_wal_size(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-						 "orioledb.main_buffers = 500MB\n"
-						 "max_wal_size = 32MB\n"
-						 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 500MB\n"
+		    "max_wal_size = 32MB\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql('postgres',
-					   "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
 		con1 = node.connect()
-		node.safe_psql('postgres',
-					   "CREATE TABLE IF NOT EXISTS o_test (\n"
-					   "    val text\n"
-					   ") USING orioledb;\n"
-					   "TRUNCATE o_test;\n"
-		)
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "    val text\n"
+		    ") USING orioledb;\n"
+		    "TRUNCATE o_test;\n")
 		con1.execute("SELECT pg_stopevent_set('checkpoint_step', 'true');")
 
 		con2 = node.connect()
@@ -91,7 +94,9 @@ class CheckpointerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_test;')[0][0], 10000)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_test;')[0][0],
+		    10000)
 		node.stop()
 
 	def is_checkpoint_exist(self):

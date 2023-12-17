@@ -10,11 +10,14 @@ import os
 import re
 import unittest
 
+
 class IndicesBuildTest(BaseTest):
+
 	def test_index_build_checkpoint(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION orioledb;
 			CREATE TABLE o_indices0
 			(
@@ -28,24 +31,38 @@ class IndicesBuildTest(BaseTest):
 										   3000 + i FROM
 												generate_series(1, 500) AS i;
 		""")
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE INDEX o_indices0_idx1 ON o_indices0 (val2);
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop()
 
 		node.start()
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop()
 
 	def test_index_build_recovery(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
-						 "shared_preload_libraries = orioledb\n")
+		                 "shared_preload_libraries = orioledb\n")
 		node.start()
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION orioledb;
 			CREATE TABLE o_indices0
 			(
@@ -58,11 +75,18 @@ class IndicesBuildTest(BaseTest):
 										   3000 + i FROM
 												generate_series(1, 500) AS i;
 		""")
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE INDEX o_indices0_idx1 ON o_indices0 (val2);
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
@@ -72,14 +96,21 @@ class IndicesBuildTest(BaseTest):
 				WHERE val2 > 0 ORDER BY val2;""").decode('utf-8')
 		self.assertEqual(explain.find('o_indices0_pkey'), -1)
 		self.assertNotEqual(explain.find('o_indices0_idx1'), -1)
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop()
 
 	def test_drop_primary_recovery(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION orioledb;
 			CREATE TABLE o_indices0
 			(
@@ -92,27 +123,48 @@ class IndicesBuildTest(BaseTest):
 										   3000 + i FROM
 												generate_series(1, 500) AS i;
 		""")
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE INDEX o_indices0_idx1 ON o_indices0 (val2);
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
-		node.safe_psql('postgres',"""
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
+		node.safe_psql(
+		    'postgres', """
 			ALTER TABLE o_indices0 DROP CONSTRAINT o_indices0_pkey;
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop()
 
 	def test_create_primary_recovery(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION orioledb;
 			CREATE TABLE o_indices0
 			(
@@ -125,26 +177,47 @@ class IndicesBuildTest(BaseTest):
 										   3000 + i FROM
 												generate_series(1, 500) AS i;
 		""")
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE INDEX o_indices0_idx1 ON o_indices0 (val2);
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
-		node.safe_psql('postgres',"""
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
+		node.safe_psql(
+		    'postgres', """
 			ALTER TABLE o_indices0 DROP CONSTRAINT o_indices0_pkey;
 		""")
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			ALTER TABLE o_indices0
 				ADD CONSTRAINT o_indices0_pkey
 					PRIMARY KEY (key);
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual(node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0], 500)
-		self.assertEqual(node.execute('postgres', 'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0], 500)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM o_indices0;')[0][0],
+		    500)
+		self.assertEqual(
+		    node.execute(
+		        'postgres',
+		        'SELECT count(val2) FROM o_indices0 WHERE val2 > 0;')[0][0],
+		    500)
 		node.stop()
 
 	def test_toast_recovery(self):
@@ -152,7 +225,8 @@ class IndicesBuildTest(BaseTest):
 		node.start()
 		string = self.genString(1, 4000)
 		test_tuple = (2, 'test', string)
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION orioledb;
 			CREATE TABLE o_indices0
 			(
@@ -164,25 +238,36 @@ class IndicesBuildTest(BaseTest):
 
 			INSERT INTO o_indices0 VALUES(2, 'test', '%s');
 		""" % string)
-		self.assertEqual(node.execute('postgres', 'SELECT * FROM o_indices0;')[0], test_tuple)
-		node.safe_psql('postgres',"""
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT * FROM o_indices0;')[0],
+		    test_tuple)
+		node.safe_psql(
+		    'postgres', """
 			ALTER TABLE o_indices0 DROP CONSTRAINT o_indices0_pkey;
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT * FROM o_indices0;')[0], test_tuple)
-		node.safe_psql('postgres',"""
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT * FROM o_indices0;')[0],
+		    test_tuple)
+		node.safe_psql(
+		    'postgres', """
 			ALTER TABLE o_indices0
 				ADD CONSTRAINT o_indices0_pkey
 					PRIMARY KEY (key);
 		""")
-		self.assertEqual(node.execute('postgres', 'SELECT * FROM o_indices0;')[0], test_tuple)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT * FROM o_indices0;')[0],
+		    test_tuple)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual(node.execute('postgres', 'SELECT * FROM o_indices0;')[0], test_tuple)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT * FROM o_indices0;')[0],
+		    test_tuple)
 		node.stop()
 
 	def check_used_index(self, node, query, expected_index):
-		explain = node.safe_psql("SET enable_seqscan = off; EXPLAIN %s;" % query).decode('utf-8')
+		explain = node.safe_psql("SET enable_seqscan = off; EXPLAIN %s;" %
+		                         query).decode('utf-8')
 		groups = re.search(r'index (?:only )?scan of: (\w+).*', explain)
 		if groups:
 			used_index = groups.group(1)
@@ -190,13 +275,14 @@ class IndicesBuildTest(BaseTest):
 			groups = re.search(r'Seq Scan on (\w+).*', explain)
 			used_index = groups.group(1)
 		self.assertEqual(expected_index, used_index)
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 			WITH o_test_cte AS (
 				%s
 			) SELECT COUNT(*) FROM o_test_cte;
 		""" % query)[0][0], 500)
 		node.poll_query_until("SELECT orioledb_has_retained_undo();",
-									expected = False)
+		                      expected=False)
 
 	def test_index_build_replication(self):
 		with self.node as master:
@@ -204,7 +290,8 @@ class IndicesBuildTest(BaseTest):
 
 			# create a backup
 			with self.getReplica().start() as replica:
-					master.safe_psql('postgres', """
+				master.safe_psql(
+				    'postgres', """
 						CREATE EXTENSION IF NOT EXISTS orioledb;
 						CREATE TABLE o_indices0
 						(
@@ -218,112 +305,111 @@ class IndicesBuildTest(BaseTest):
 								   3000 + i FROM generate_series(1, 500) AS i;
 					""")
 
-					# CREATE INDEX replication of rollback and commit
-					with master.connect() as con:
-						con.execute("""
+				# CREATE INDEX replication of rollback and commit
+				with master.connect() as con:
+					con.execute("""
 							CREATE UNIQUE INDEX o_indices0_idx1
 							ON o_indices0 (val2);
 						""")
-						con.rollback()
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"""SELECT * FROM o_indices0
-							WHERE val2 > 0 AND val > 0 ORDER BY key""",
-						'o_indices0_pkey')
+					con.rollback()
+				self.catchup_orioledb(replica)
+				self.check_used_index(
+				    replica, """SELECT * FROM o_indices0
+							WHERE val2 > 0 AND val > 0 ORDER BY key""", 'o_indices0_pkey')
 
-					master.safe_psql('postgres', """
+				master.safe_psql(
+				    'postgres', """
 						CREATE UNIQUE INDEX o_indices0_idx1
 							ON o_indices0 (val2);
 						""")
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"""SELECT * FROM o_indices0
-							WHERE val2 > 0 AND val > 0 ORDER BY val2""",
-						'o_indices0_idx1')
+				self.catchup_orioledb(replica)
+				self.check_used_index(
+				    replica, """SELECT * FROM o_indices0
+							WHERE val2 > 0 AND val > 0 ORDER BY val2""", 'o_indices0_idx1')
 
-					# primary index drop replication of rollback and commit
-					with master.connect() as con:
-						con.execute("""
+				# primary index drop replication of rollback and commit
+				with master.connect() as con:
+					con.execute("""
 							ALTER TABLE o_indices0
 								DROP CONSTRAINT o_indices0_pkey;
 						""")
-						con.rollback()
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"SELECT * FROM o_indices0 ORDER BY key",
-						'o_indices0_pkey')
+					con.rollback()
+				self.catchup_orioledb(replica)
+				self.check_used_index(replica,
+				                      "SELECT * FROM o_indices0 ORDER BY key",
+				                      'o_indices0_pkey')
 
-					master.safe_psql('postgres', """
+				master.safe_psql(
+				    'postgres', """
 						ALTER TABLE o_indices0 DROP CONSTRAINT o_indices0_pkey;
 					""")
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"SELECT * FROM o_indices0",
-						'o_indices0')
+				self.catchup_orioledb(replica)
+				self.check_used_index(replica, "SELECT * FROM o_indices0",
+				                      'o_indices0')
 
-					# primary index creation replication of rollback and commit
-					with master.connect() as con:
-						con.execute("""
+				# primary index creation replication of rollback and commit
+				with master.connect() as con:
+					con.execute("""
 							ALTER TABLE o_indices0
 								ADD CONSTRAINT o_indices0_pkey
 									PRIMARY KEY (key);
 						""")
-						con.rollback()
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"SELECT * FROM o_indices0",
-						'o_indices0')
+					con.rollback()
+				self.catchup_orioledb(replica)
+				self.check_used_index(replica, "SELECT * FROM o_indices0",
+				                      'o_indices0')
 
-					master.safe_psql('postgres', """
+				master.safe_psql(
+				    'postgres', """
 						ALTER TABLE o_indices0
 							ADD CONSTRAINT o_indices0_pkey
 								PRIMARY KEY (key);
 					""")
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"SELECT * FROM o_indices0 ORDER BY key",
-						'o_indices0_pkey')
+				self.catchup_orioledb(replica)
+				self.check_used_index(replica,
+				                      "SELECT * FROM o_indices0 ORDER BY key",
+				                      'o_indices0_pkey')
 
-					# DROP INDEX replication of rollback and commit
-					with master.connect() as con:
-						con.execute("""
+				# DROP INDEX replication of rollback and commit
+				with master.connect() as con:
+					con.execute("""
 							DROP INDEX o_indices0_idx1;
 						""")
-						con.rollback()
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"""SELECT * FROM o_indices0
-							WHERE val2 > 0 AND val > 0 ORDER BY val2""",
-						'o_indices0_idx1')
+					con.rollback()
+				self.catchup_orioledb(replica)
+				self.check_used_index(
+				    replica, """SELECT * FROM o_indices0
+							WHERE val2 > 0 AND val > 0 ORDER BY val2""", 'o_indices0_idx1')
 
-					master.safe_psql('postgres', """
+				master.safe_psql(
+				    'postgres', """
 						DROP INDEX o_indices0_idx1;
 					""")
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"""SELECT * FROM o_indices0
-							WHERE val2 > 0 AND val > 0 ORDER BY key""",
-						'o_indices0_pkey')
+				self.catchup_orioledb(replica)
+				self.check_used_index(
+				    replica, """SELECT * FROM o_indices0
+							WHERE val2 > 0 AND val > 0 ORDER BY key""", 'o_indices0_pkey')
 
-					# primary index drop without any indices
-					master.safe_psql('postgres', """
+				# primary index drop without any indices
+				master.safe_psql(
+				    'postgres', """
 						ALTER TABLE o_indices0 DROP CONSTRAINT o_indices0_pkey;
 					""")
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"SELECT * FROM o_indices0",
-						'o_indices0')
+				self.catchup_orioledb(replica)
+				self.check_used_index(replica, "SELECT * FROM o_indices0",
+				                      'o_indices0')
 
-					# primary index create without any indices
-					master.safe_psql('postgres', """
+				# primary index create without any indices
+				master.safe_psql(
+				    'postgres', """
 						ALTER TABLE o_indices0
 							ADD CONSTRAINT o_indices0_pkey
 								PRIMARY KEY (key);
 					""")
-					self.catchup_orioledb(replica)
-					self.check_used_index(replica,
-						"SELECT * FROM o_indices0 ORDER BY key",
-						'o_indices0_pkey')
+				self.catchup_orioledb(replica)
+				self.check_used_index(replica,
+				                      "SELECT * FROM o_indices0 ORDER BY key",
+				                      'o_indices0_pkey')
 
 	def test_multiple_indices_build_replication(self):
 		with self.node as master:
@@ -331,12 +417,12 @@ class IndicesBuildTest(BaseTest):
 
 			# create a backup
 			with self.getReplica().start() as replica:
-				columns = ",\n".join(
-					["val%d int" % x for x in range(1, 10)])
+				columns = ",\n".join(["val%d int" % x for x in range(1, 10)])
 				values = ", ".join(
-					["i + %d" % ((x + 1) * 1000) for x in range(0, 10)])
+				    ["i + %d" % ((x + 1) * 1000) for x in range(0, 10)])
 
-				master.safe_psql('postgres', f"""
+				master.safe_psql(
+				    'postgres', f"""
 					CREATE EXTENSION IF NOT EXISTS orioledb;
 					CREATE TABLE o_indices0
 					(
@@ -359,23 +445,21 @@ class IndicesBuildTest(BaseTest):
 					con.commit()
 				self.catchup_orioledb(replica)
 				for i in range(1, 10):
-						self.check_used_index(replica,
-							f"""SELECT * FROM o_indices0
-								WHERE val{i} > 0 ORDER BY val{i}""",
-							f'o_indices0_idx{i}')
+					self.check_used_index(
+					    replica, f"""SELECT * FROM o_indices0
+								WHERE val{i} > 0 ORDER BY val{i}""", f'o_indices0_idx{i}')
 
 	def test_indices_build_xip(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
-						 "orioledb.enable_stopevents = true\n")
+		                 "orioledb.enable_stopevents = true\n")
 		node.start()
 
-		columns = ",\n".join(
-			["val%d int" % x for x in range(1, 10)])
-		values = ", ".join(
-			["i + %d" % ((x + 1) * 1000) for x in range(0, 10)])
+		columns = ",\n".join(["val%d int" % x for x in range(1, 10)])
+		values = ", ".join(["i + %d" % ((x + 1) * 1000) for x in range(0, 10)])
 
-		node.safe_psql('postgres', f"""
+		node.safe_psql(
+		    'postgres', f"""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE o_indices0
 			(
@@ -396,7 +480,9 @@ class IndicesBuildTest(BaseTest):
 				CREATE UNIQUE INDEX o_indices0_idx{i}
 				ON o_indices0 (val{i});
 			""")
-		con1.execute("SELECT pg_stopevent_set('checkpoint_index_start', '$.treeName == \"o_indices0_idx1\"');")
+		con1.execute(
+		    "SELECT pg_stopevent_set('checkpoint_index_start', '$.treeName == \"o_indices0_idx1\"');"
+		)
 		chkp_thread = ThreadQueryExecutor(chkp_con, "CHECKPOINT;")
 		chkp_thread.start()
 		wait_checkpointer_stopevent(node)
@@ -416,10 +502,9 @@ class IndicesBuildTest(BaseTest):
 
 		node.start()
 		for i in range(1, 10):
-			self.check_used_index(node,
-				f"""SELECT * FROM o_indices0
-					WHERE val{i} > 0 ORDER BY val{i}""",
-				f'o_indices0_idx{i}')
+			self.check_used_index(
+			    node, f"""SELECT * FROM o_indices0
+					WHERE val{i} > 0 ORDER BY val{i}""", f'o_indices0_idx{i}')
 		node.stop()
 
 	def test_alter_column_type(self):
@@ -440,69 +525,58 @@ class IndicesBuildTest(BaseTest):
 			INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.safe_psql("""
 			ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.stop(['-m', 'immediate'])
 		node.start()
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.safe_psql("""
 			ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.stop(['-m', 'immediate'])
 		node.start()
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.safe_psql("""
 			ALTER TABLE o_ddl_check ALTER f2 TYPE char
 				USING substr(f2, substr(f2,4,1)::int / 2, 1);
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'A', None),
-						  ('ABC2', 'B', None),
-						  ('ABC3', 'C', None)])
+		                 [('ABC1', 'A', None), ('ABC2', 'B', None),
+		                  ('ABC3', 'C', None)])
 		node.safe_psql("""
 			INSERT INTO o_ddl_check VALUES ('ABC4', 'D', NULL);
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'A', None),
-						  ('ABC2', 'B', None),
-						  ('ABC3', 'C', None),
-						  ('ABC4', 'D', None)])
+		                 [('ABC1', 'A', None), ('ABC2', 'B', None),
+		                  ('ABC3', 'C', None), ('ABC4', 'D', None)])
 		node.stop(['-m', 'immediate'])
 		node.start()
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'A', None),
-						  ('ABC2', 'B', None),
-						  ('ABC3', 'C', None),
-						  ('ABC4', 'D', None)])
+		                 [('ABC1', 'A', None), ('ABC2', 'B', None),
+		                  ('ABC3', 'C', None), ('ABC4', 'D', None)])
 		node.stop()
 
 	@unittest.skipIf(not BaseTest.pg_with_icu(),
-					 'postgres built without ICU support')
+	                 'postgres built without ICU support')
 	def test_alter_column_collation(self):
 		node = self.node
 		node.start()
@@ -521,44 +595,37 @@ class IndicesBuildTest(BaseTest):
 			INSERT INTO o_ddl_check VALUES ('ABC3', 'ABC6', NULL);
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 
 		node.safe_psql("""
 			ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "en-x-icu";
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.stop(['-m', 'immediate'])
 		node.start()
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None)])
 		node.safe_psql("""
 			INSERT INTO o_ddl_check VALUES ('ABC4', 'D', NULL);
 		""")
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None),
-						  ('ABC4', 'D', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None), ('ABC4', 'D', None)])
 		node.stop(['-m', 'immediate'])
 		node.start()
 		self.assertEqual(node.execute('SELECT * FROM o_ddl_check;'),
-						 [('ABC1', 'ABC2', None),
-						  ('ABC2', 'ABC4', None),
-						  ('ABC3', 'ABC6', None),
-						  ('ABC4', 'D', None)])
+		                 [('ABC1', 'ABC2', None), ('ABC2', 'ABC4', None),
+		                  ('ABC3', 'ABC6', None), ('ABC4', 'D', None)])
 		node.stop()
 
 	def test_indices_build_concurrent_checkpoint(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
-						 "orioledb.enable_stopevents = true\n")
+		                 "orioledb.enable_stopevents = true\n")
 		node.start()
 
 		node.safe_psql("""
@@ -590,7 +657,8 @@ class IndicesBuildTest(BaseTest):
 			SELECT pg_stopevent_set('build_index_placeholder_inserted',
 									'$.treeName == \"o_indices_ix1\"');
 		""")
-		con1_thread = ThreadQueryExecutor(con1, """
+		con1_thread = ThreadQueryExecutor(
+		    con1, """
 			CREATE UNIQUE INDEX o_indices_ix1 ON o_indices (val);
 		""")
 		con1_thread.start()
@@ -612,17 +680,17 @@ class IndicesBuildTest(BaseTest):
 		con2.close()
 		# single o_indices_ix1 map file should present
 		self.assertEqual(self.get_map_files(filter_files),
-		   				 {f"{dboid}_{ix_oid}": [3]})
+		                 {f"{dboid}_{ix_oid}": [3]})
 
 		node.stop(['-m', 'immediate'])
 		node.start()
 		node.execute("CHECKPOINT;")
 
 		self.assertEqual(self.get_map_files(filter_files),
-		   				 {f"{dboid}_{ix_oid}": [5, 3]})
-		self.check_used_index(node,
-			"SELECT * FROM o_indices WHERE val > 0 ORDER BY val",
-			'o_indices_ix1')
+		                 {f"{dboid}_{ix_oid}": [5, 3]})
+		self.check_used_index(
+		    node, "SELECT * FROM o_indices WHERE val > 0 ORDER BY val",
+		    'o_indices_ix1')
 		node.stop()
 
 	def get_map_files(self, filter_files):
@@ -641,9 +709,10 @@ class IndicesBuildTest(BaseTest):
 		map_files = sorted(map_files, reverse=True)
 		map_files = [f for f in map_files if f[0] != 1]
 		map_files = [f for f in map_files if (f[0], f[1]) not in filter_files]
-		map_files = {k: [x[2] for x in v]
-						for k, v in groupby(map_files,
-											key=(lambda x:
-												'_'.join([str(x[0]),
-														  str(x[1])])))}
+		map_files = {
+		    k: [x[2] for x in v]
+		    for k, v in groupby(
+		        map_files, key=(
+		            lambda x: '_'.join([str(x[0]), str(x[1])])))
+		}
 		return map_files

@@ -10,6 +10,7 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/postgresql/src/tools/
 
 cd orioledb
 make USE_PGXS=1 -s pgindent
+make USE_PGXS=1 -s yapf
 git diff > pgindent.diff
 cd ..
 

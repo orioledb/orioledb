@@ -2,7 +2,9 @@ from .base_test import BaseTest
 from testgres.connection import ProgrammingError
 from testgres.exceptions import QueryException
 
+
 class ReindexTest(BaseTest):
+
 	def test_2(self):
 		node = self.node
 		node.start()
@@ -103,7 +105,9 @@ class ReindexTest(BaseTest):
 		node.start()
 		node.stop()
 
+
 #NOTICE:  table "o_test_1" has no indexes to reindex
+
 	def test_5(self):
 		node = self.node
 		node.start()

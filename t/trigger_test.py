@@ -5,7 +5,9 @@ from testgres.connection import DatabaseError
 import re
 from .base_test import ThreadQueryExecutor
 
+
 class TriggerTest(BaseTest):
+
 	def test_self_modified_update_deleted(self):
 		node = self.node
 		node.start()
@@ -27,33 +29,33 @@ class TriggerTest(BaseTest):
 			$$
 			LANGUAGE 'plpgsql';
 		""")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		node.safe_psql("""
 			CREATE TRIGGER trig_o_test_11 BEFORE UPDATE
 				ON o_test_1 FOR EACH ROW
 				EXECUTE PROCEDURE func_trig_o_test_11();
 		""")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("""
 				UPDATE o_test_1 SET val_1 = val_1 + 1000 WHERE val_1 % 2 = 0;
 			""")
-		self.assertErrorMessageEquals(e, "tuple to be updated was already "
-										 "modified by an operation triggered "
-										 "by the current command",
-									   "Consider using an AFTER trigger "
-									   "instead of a BEFORE trigger to "
-									   "propagate changes to other rows.")
-		self.assertEqual(node.execute("""
+		self.assertErrorMessageEquals(
+		    e, "tuple to be updated was already "
+		    "modified by an operation triggered "
+		    "by the current command", "Consider using an AFTER trigger "
+		    "instead of a BEFORE trigger to "
+		    "propagate changes to other rows.")
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 
 	def test_self_modified_delete_updated(self):
 		node = self.node
@@ -76,33 +78,33 @@ class TriggerTest(BaseTest):
 			$$
 			LANGUAGE 'plpgsql';
 		""")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		node.safe_psql("""
 			CREATE TRIGGER trig_o_test_1 BEFORE DELETE
 				ON o_test_1 FOR EACH ROW
 				EXECUTE PROCEDURE func_trig_o_test_1();
 		""")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("""
 				DELETE FROM o_test_1 WHERE val_2 % 1 = 0;
 			""")
-		self.assertErrorMessageEquals(e, "tuple to be deleted was already "
-										 "modified by an operation triggered "
-										 "by the current command",
-									   "Consider using an AFTER trigger "
-									   "instead of a BEFORE trigger to "
-									   "propagate changes to other rows.")
-		self.assertEqual(node.execute("""
+		self.assertErrorMessageEquals(
+		    e, "tuple to be deleted was already "
+		    "modified by an operation triggered "
+		    "by the current command", "Consider using an AFTER trigger "
+		    "instead of a BEFORE trigger to "
+		    "propagate changes to other rows.")
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 
 	def test_saved_undo_locations_cleanup(self):
 		node = self.node
@@ -124,45 +126,45 @@ class TriggerTest(BaseTest):
 			END;
 			$$ LANGUAGE 'plpgsql';
 		""")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		node.safe_psql("""
 			CREATE TRIGGER trig_o_test_11 BEFORE UPDATE
 				ON o_test_1 FOR EACH ROW
 				EXECUTE PROCEDURE func_trig_o_test_11();
 		""")
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		con1 = node.connect()
 		with self.assertRaises(DatabaseError) as e:
 			con1.execute("""
 				UPDATE o_test_1 SET val_1 = val_1 + 1000
 					WHERE mod(val_1, 2) = 0;
 			""")
-		self.assertErrorMessageEquals(e, "tuple to be updated was already "
-										 "modified by an operation triggered "
-										 "by the current command",
-									   "Consider using an AFTER trigger "
-									   "instead of a BEFORE trigger to "
-									   "propagate changes to other rows.")
+		self.assertErrorMessageEquals(
+		    e, "tuple to be updated was already "
+		    "modified by an operation triggered "
+		    "by the current command", "Consider using an AFTER trigger "
+		    "instead of a BEFORE trigger to "
+		    "propagate changes to other rows.")
 		con1.rollback()
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(1, 1), (2, 1)])
+						 """), [(1, 1), (2, 1)])
 		node.safe_psql("DROP TRIGGER trig_o_test_11 ON o_test_1;")
 		con1.execute("""
 			UPDATE o_test_1 SET val_1 = val_1 + 1000 WHERE val_1 = 1;
 		""")
 		con1.commit()
-		self.assertEqual(node.execute("""
+		self.assertEqual(
+		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
-						 """),
-						 [(2, 1), (1001, 1)])
+						 """), [(2, 1), (1001, 1)])
 
 	def test_4(self):
 		node = self.node
@@ -259,10 +261,11 @@ class TriggerTest(BaseTest):
 				CREATE TABLE o_test_2 (val_3, val_4) USING orioledb
 					AS (SELECT * FROM o_test_1);
 			""")
-		self.assertErrorMessageEquals(e, "command CREATE TABLE AS is disabled",
-									  "PL/pgSQL function func_trig_1() "
-									  "line 3 at RAISE",
-									  second_title="CONTEXT")
+		self.assertErrorMessageEquals(e,
+		                              "command CREATE TABLE AS is disabled",
+		                              "PL/pgSQL function func_trig_1() "
+		                              "line 3 at RAISE",
+		                              second_title="CONTEXT")
 		node.stop()
 
 	def test_8(self):
@@ -290,10 +293,11 @@ class TriggerTest(BaseTest):
 				CREATE TABLE o_test_2 (val_3, val_4) USING orioledb
 					AS (SELECT * FROM o_test_1);
 			""")
-		self.assertErrorMessageEquals(e, "command CREATE TABLE AS is disabled",
-									  "PL/pgSQL function func_trig_1() "
-									  "line 3 at RAISE",
-									  second_title="CONTEXT")
+		self.assertErrorMessageEquals(e,
+		                              "command CREATE TABLE AS is disabled",
+		                              "PL/pgSQL function func_trig_1() "
+		                              "line 3 at RAISE",
+		                              second_title="CONTEXT")
 		node.stop()
 
 	def test_10(self):
@@ -330,11 +334,14 @@ class TriggerTest(BaseTest):
 					(SELECT val_1, val_1 + 100 FROM generate_series (1, 5) val_1);
 			""")
 
-		m=[x.group(0) for x in list(re.finditer(r'.*\n', e.exception.message))[0:3]]
-		self.assertEqual("".join(m),
-						"ERROR:  stack depth limit exceeded\n" +
-						"HINT:  Increase the configuration parameter \"max_stack_depth\" (currently 2048kB), after ensuring the platform's stack depth limit is adequate.\n" +
-						"CONTEXT:  SQL statement \"INSERT INTO o_test_1(val_1)\n")
+		m = [
+		    x.group(0)
+		    for x in list(re.finditer(r'.*\n', e.exception.message))[0:3]
+		]
+		self.assertEqual(
+		    "".join(m), "ERROR:  stack depth limit exceeded\n" +
+		    "HINT:  Increase the configuration parameter \"max_stack_depth\" (currently 2048kB), after ensuring the platform's stack depth limit is adequate.\n"
+		    + "CONTEXT:  SQL statement \"INSERT INTO o_test_1(val_1)\n")
 
 		node.stop(['-m', 'immediate'])
 
@@ -382,9 +389,17 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,201), (2,202),
-			(3,203), (4,204), (5,205), (1, None), (2, None), (3, None), (4, None),
-			(5, None), (1,1)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 201),
+		                                                          (2, 202),
+		                                                          (3, 203),
+		                                                          (4, 204),
+		                                                          (5, 205),
+		                                                          (1, None),
+		                                                          (2, None),
+		                                                          (3, None),
+		                                                          (4, None),
+		                                                          (5, None),
+		                                                          (1, 1)])
 
 		node.stop()
 
@@ -423,8 +438,12 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105), (1,1)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105),
+		                                                          (1, 1)])
 
 		node.stop()
 
@@ -471,8 +490,11 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105)])
 
 		node.stop()
 
@@ -518,9 +540,16 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105), (1, None), (2, None), (3, None), (4, None),
-			(5, None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105),
+		                                                          (1, None),
+		                                                          (2, None),
+		                                                          (3, None),
+		                                                          (4, None),
+		                                                          (5, None)])
 
 		node.stop()
 
@@ -563,9 +592,16 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105), (1, None), (2, None), (3, None), (4, None),
-			(5, None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105),
+		                                                          (1, None),
+		                                                          (2, None),
+		                                                          (3, None),
+		                                                          (4, None),
+		                                                          (5, None)])
 
 		node.stop()
 
@@ -608,8 +644,11 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105)])
 
 		node.stop()
 
@@ -658,8 +697,9 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,201), (2,202),
-			(3,203), (4,204), (5,205), (None, None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"),
+		                 [(1, 201), (2, 202), (3, 203), (4, 204), (5, 205),
+		                  (None, None)])
 
 		node.stop()
 
@@ -706,8 +746,11 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105)])
 
 		node.stop()
 
@@ -761,9 +804,16 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105), (1, None), (2, None), (3, None), (4, None),
-			(5, None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105),
+		                                                          (1, None),
+		                                                          (2, None),
+		                                                          (3, None),
+		                                                          (4, None),
+		                                                          (5, None)])
 
 		node.stop()
 
@@ -801,9 +851,16 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"),
-						 [(1,101), (2,102), (3,103), (4,104), (5,105),
-						  (1,None), (2,None), (3,None), (4,None), (5,None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1, 101),
+		                                                          (2, 102),
+		                                                          (3, 103),
+		                                                          (4, 104),
+		                                                          (5, 105),
+		                                                          (1, None),
+		                                                          (2, None),
+		                                                          (3, None),
+		                                                          (4, None),
+		                                                          (5, None)])
 
 		node.stop()
 
@@ -841,8 +898,9 @@ class TriggerTest(BaseTest):
 
 		node.start()
 
-		self.assertEqual(node.execute("SELECT * FROM o_test_1"), [(1,101), (2,102),
-			(3,103), (4,104), (5,105), (None, None)])
+		self.assertEqual(node.execute("SELECT * FROM o_test_1"),
+		                 [(1, 101), (2, 102), (3, 103), (4, 104), (5, 105),
+		                  (None, None)])
 
 		node.stop()
 
@@ -898,7 +956,7 @@ class TriggerTest(BaseTest):
 		node.stop()
 
 	@unittest.skipIf(BaseTest.get_pg_version() < 15,
-					 'MERGE command added in postgres 15')
+	                 'MERGE command added in postgres 15')
 	def test_trigger_lock_delete_updated(self):
 		node = self.node
 		node.start()
@@ -942,7 +1000,8 @@ class TriggerTest(BaseTest):
 			with node.connect() as con2:
 				con1.begin()
 				con2.begin()
-				t1 = ThreadQueryExecutor(con1, """
+				t1 = ThreadQueryExecutor(
+				    con1, """
 					MERGE INTO o_test_2 t
 						USING (SELECT 1 AS val_1) s ON s.val_1 = t.val_1
 						WHEN MATCHED AND val_2 < 200 THEN DELETE;

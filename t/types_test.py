@@ -8,6 +8,7 @@ from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
 from testgres.exceptions import QueryException
 
+
 class TypesTest(BaseTest):
 	sys_tree_nums = {}
 
@@ -25,7 +26,8 @@ class TypesTest(BaseTest):
 		while line:
 			search_result = re.search(pattern, line)
 			if search_result and search_result.group(1) != 'NUM':
-				cls.sys_tree_nums[search_result.group(1)] = int(search_result.group(2))
+				cls.sys_tree_nums[search_result.group(1)] = int(
+				    search_result.group(2))
 			line = f.readline()
 		f.close()
 
@@ -46,7 +48,8 @@ class TypesTest(BaseTest):
 		enumoid_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy',
 											 'ecstatic');
@@ -60,7 +63,8 @@ class TypesTest(BaseTest):
 			ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
 		""")
 
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			INSERT INTO o_holidays(num_weeks, happiness)
 				VALUES (2, 'happy');
 			INSERT INTO o_holidays(num_weeks, happiness)
@@ -71,8 +75,8 @@ class TypesTest(BaseTest):
 				VALUES (8, 'ecstatic');
 		""")
 
-		enum_amount += 4 # 'happy', 'sad', 'very happy', 'ecstatic'
-		enumoid_amount += 4 # 'happy', 'sad', 'very happy', 'ecstatic'
+		enum_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+		enumoid_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.safe_psql('postgres', "DROP TABLE o_holidays;")
@@ -94,7 +98,8 @@ class TypesTest(BaseTest):
 		node = self.node
 		node.start()
 
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy',
 											 'ecstatic');
@@ -108,7 +113,8 @@ class TypesTest(BaseTest):
 			ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
 		""")
 
-		node.safe_psql('postgres',"""
+		node.safe_psql(
+		    'postgres', """
 			INSERT INTO o_holidays(num_weeks, happiness)
 				VALUES (2, 'happy');
 			INSERT INTO o_holidays(num_weeks, happiness)
@@ -123,29 +129,31 @@ class TypesTest(BaseTest):
 			ALTER TYPE o_happiness RENAME VALUE 'sad' TO 'depressed';
 		""")
 
-		enum_amount += 5 # 'happy', 'sad', 'very happy', 'ecstatic', 'depressed'
-		enumoid_amount += 4 # 'happy', 'depressed', 'very happy', 'ecstatic'
+		enum_amount += 5  # 'happy', 'sad', 'very happy', 'ecstatic', 'depressed'
+		enumoid_amount += 4  # 'happy', 'depressed', 'very happy', 'ecstatic'
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.safe_psql('postgres', "DROP TABLE o_holidays;")
 		node.safe_psql('postgres', "DROP TYPE o_happiness;")
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
-		self.assertEqual(['depressed', 'ecstatic', 'happy',
-		    			  'sad', 'very happy'],
-						 [x[0] for x in node.execute("""
+		self.assertEqual(
+		    ['depressed', 'ecstatic', 'happy', 'sad', 'very happy'], [
+		        x[0] for x in node.execute("""
 							SELECT k->'key'->'keys'->1
 								FROM orioledb_sys_tree_rows(%d) k ORDER BY 1;
-						 """ % self.sys_tree_name_to_num('ENUM_CACHE'))])
+						 """ % self.sys_tree_name_to_num('ENUM_CACHE'))
+		    ])
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual(['depressed', 'ecstatic', 'happy',
-		    			  'sad', 'very happy'],
-						 [x[0] for x in node.execute("""
+		self.assertEqual(
+		    ['depressed', 'ecstatic', 'happy', 'sad', 'very happy'], [
+		        x[0] for x in node.execute("""
 							SELECT k->'key'->'keys'->1
 								FROM orioledb_sys_tree_rows(%d) k ORDER BY 1;
-						 """ % self.sys_tree_name_to_num('ENUM_CACHE'))])
+						 """ % self.sys_tree_name_to_num('ENUM_CACHE'))
+		    ])
 		# deleted records in o_enum_cache physically deleted during checkpoint
 		# performed after recovery
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 5)
@@ -156,18 +164,19 @@ class TypesTest(BaseTest):
 		type_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE IF NOT EXISTS o_test (
 				arr integer[] NOT NULL,
 				PRIMARY KEY (arr)
 			) USING orioledb;
 		""")
-		type_amount += 3 # int2, int4, tid - types needed for all our tables
-		type_amount += 1 # int8 - hash_array_extended return type
-		type_amount += 1 # anyarray
-		type_amount += 1 # internal - argument of sort support function
-		type_amount += 1 # void - return type of sort support function
+		type_amount += 3  # int2, int4, tid - types needed for all our tables
+		type_amount += 1  # int8 - hash_array_extended return type
+		type_amount += 1  # anyarray
+		type_amount += 1  # internal - argument of sort support function
+		type_amount += 1  # void - return type of sort support function
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
 		node.execute("INSERT INTO o_test VALUES ('{1, 2}');")
@@ -184,7 +193,8 @@ class TypesTest(BaseTest):
 		range_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE custom_range as range (subtype=int8);
 			CREATE TABLE o_test_custom_range
@@ -209,22 +219,23 @@ class TypesTest(BaseTest):
 			DROP TYPE custom_range_removed CASCADE;
 		""")
 
-		range_amount += 2 # custom_range, custom_range_removed
+		range_amount += 2  # custom_range, custom_range_removed
 		self.check_total_deleted(node, 'RANGE_CACHE', range_amount, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 		self.check_total_deleted(node, 'RANGE_CACHE', range_amount, 1)
 		self.assertEqual(
-			node.execute("SELECT COUNT(*) FROM o_test_custom_range;")[0][0],
-			10)
+		    node.execute("SELECT COUNT(*) FROM o_test_custom_range;")[0][0],
+		    10)
 		node.stop()
 
 	def test_parallel_sys_cache_insert(self):
 		range_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE custom_range as range (subtype=int8);
 			CREATE TABLE o_test_custom_range
@@ -246,14 +257,16 @@ class TypesTest(BaseTest):
 								 $.reloid == %d');
 						""" % (self.sys_tree_name_to_num('RANGE_CACHE')))
 
-					t1 = ThreadQueryExecutor(con1, """
+					t1 = ThreadQueryExecutor(
+					    con1, """
 						CREATE INDEX o_test_custom_range_idx1 ON
 							o_test_custom_range (area);
 					""")
 					t1.start()
 					wait_stopevent(node, connection1_pid)
 
-					t2 = ThreadQueryExecutor(con2, """
+					t2 = ThreadQueryExecutor(
+					    con2, """
 						CREATE TABLE o_test_custom_range2
 						(
 							area custom_range NOT NULL,
@@ -267,7 +280,7 @@ class TypesTest(BaseTest):
 					t2.join()
 					con1.commit()
 					con2.commit()
-		range_amount += 1 # single custom_range
+		range_amount += 1  # single custom_range
 		self.check_total_deleted(node, 'RANGE_CACHE', range_amount, 0)
 		node.stop()
 
@@ -276,7 +289,8 @@ class TypesTest(BaseTest):
 		type_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE coordinates AS (
 				x int,
@@ -294,19 +308,20 @@ class TypesTest(BaseTest):
 				PRIMARY KEY(location)
 			) USING orioledb;
 		""")
-		class_amount += 1 # coordinates
-		class_amount += 2 # pg_type
-		class_amount += 2 # pg_proc
-		class_amount += 4 # pg_amproc, pg_opclass, pg_amop, pg_authid
-		type_amount += 3 # int2, int4, tid - types needed for all our tables
-		type_amount += 1 # int8 - hash_array_extended return type
-		type_amount += 1 # record
-		type_amount += 1 # internal - argument of sort support function
-		type_amount += 1 # void - return type of sort support function
-		type_amount += 1 # coordinates
+		class_amount += 1  # coordinates
+		class_amount += 2  # pg_type
+		class_amount += 2  # pg_proc
+		class_amount += 4  # pg_amproc, pg_opclass, pg_amop, pg_authid
+		type_amount += 3  # int2, int4, tid - types needed for all our tables
+		type_amount += 1  # int8 - hash_array_extended return type
+		type_amount += 1  # record
+		type_amount += 1  # internal - argument of sort support function
+		type_amount += 1  # void - return type of sort support function
+		type_amount += 1  # coordinates
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			ALTER TYPE coordinates2 RENAME TO coordinates_renamed;
 			CREATE TYPE custom_type AS (a int, b float);
 			ALTER TYPE coordinates_renamed ADD ATTRIBUTE z custom_type;
@@ -327,26 +342,30 @@ class TypesTest(BaseTest):
 				PRIMARY KEY(key)
 			) USING orioledb;
 		""")
-		class_amount += 1 # coordinates_removed
-		type_amount += 1 # coordinates_removed
+		class_amount += 1  # coordinates_removed
+		type_amount += 1  # coordinates_removed
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE TYPE custom_type_removed AS (a char, b text);
 		""")
 		with self.assertRaises(QueryException):
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				ALTER TYPE coordinates_removed
 					ALTER ATTRIBUTE y TYPE custom_type_removed;
 			""")
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			DROP TABLE o_test_record_type_removed;
 			ALTER TYPE coordinates_removed
 				ALTER ATTRIBUTE y TYPE custom_type_removed;
 		""")
 
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE TABLE o_test_record_type_removed2
 			(
 				key coordinates_removed NOT NULL,
@@ -360,16 +379,18 @@ class TypesTest(BaseTest):
 					 )::coordinates_removed
 					FROM generate_series(1, 10) id;
 		""")
-		class_amount += 1 # custom_type_removed
-		type_amount += 3 # custom_type_removed, bpchar, text
+		class_amount += 1  # custom_type_removed
+		type_amount += 3  # custom_type_removed, bpchar, text
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
 		with self.assertRaises(QueryException):
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 				DROP TYPE custom_type_removed CASCADE;
 			""")
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			ALTER TABLE o_test_record_type_removed2
 				DROP CONSTRAINT o_test_record_type_removed2_pkey;
 			DROP TYPE custom_type_removed CASCADE;
@@ -382,8 +403,7 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 1)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 1)
 		self.assertEqual(
-			node.execute("SELECT COUNT(*) FROM o_test_record_type;")[0][0],
-			10)
+		    node.execute("SELECT COUNT(*) FROM o_test_record_type;")[0][0], 10)
 		node.stop()
 
 	def test_record_array_index_recovery(self):
@@ -391,7 +411,8 @@ class TypesTest(BaseTest):
 		type_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TYPE coordinates AS (
 				x int,
@@ -421,17 +442,17 @@ class TypesTest(BaseTest):
 		node.safe_psql('postgres', """
 			DROP TYPE coordinates_removed CASCADE;
 		""")
-		class_amount += 1 # coordinates
-		class_amount += 1 # coordinates_removed
-		class_amount += 2 # pg_type
-		class_amount += 2 # pg_proc
-		class_amount += 4 # pg_amproc, pg_opclass, pg_amop, pg_authid
-		type_amount += 3 # int2, int4, tid - types needed for all our tables
-		type_amount += 1 # int8
-		type_amount += 2 # record, anyarray
-		type_amount += 1 # internal - argument of sort support function
-		type_amount += 1 # void - return type of sort support function
-		type_amount += 2 # coordinates, coordinates_removed
+		class_amount += 1  # coordinates
+		class_amount += 1  # coordinates_removed
+		class_amount += 2  # pg_type
+		class_amount += 2  # pg_proc
+		class_amount += 4  # pg_amproc, pg_opclass, pg_amop, pg_authid
+		type_amount += 3  # int2, int4, tid - types needed for all our tables
+		type_amount += 1  # int8
+		type_amount += 2  # record, anyarray
+		type_amount += 1  # internal - argument of sort support function
+		type_amount += 1  # void - return type of sort support function
+		type_amount += 2  # coordinates, coordinates_removed
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 		node.stop(['-m', 'immediate'])
@@ -440,14 +461,14 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 1)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 1)
 		self.assertEqual(
-			node.execute("SELECT COUNT(*) FROM o_test_array;")[0][0],
-			10)
+		    node.execute("SELECT COUNT(*) FROM o_test_array;")[0][0], 10)
 		node.stop()
 
 	def test_complex_index_recovery(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TYPE happiness AS ENUM ('happy', 'very happy',
@@ -531,23 +552,22 @@ class TypesTest(BaseTest):
 
 		node.start()
 		self.assertEqual(
-			node.execute("SELECT COUNT(*) FROM o_test_complex_type;")[0][0],
-			10)
+		    node.execute("SELECT COUNT(*) FROM o_test_complex_type;")[0][0],
+		    10)
 		self.assertEqual(
-			node.execute("""SELECT structure[1].a[1].a
-							FROM o_test_complex_type LIMIT 1;""")[0][0],
-			'1')
+		    node.execute("""SELECT structure[1].a[1].a
+							FROM o_test_complex_type LIMIT 1;""")[0][0], '1')
 		self.assertEqual(
-			node.execute("""SELECT structure[1].a[1].coc[1].p[1]
-							FROM o_test_complex_type LIMIT 1;""")[0][0],
-			'(2,3)')
+		    node.execute("""SELECT structure[1].a[1].coc[1].p[1]
+							FROM o_test_complex_type LIMIT 1;""")[0][0], '(2,3)')
 		node.stop()
 
 	def test_collation_recovery(self):
 		collation_amount = 0
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE COLLATION test_coll (LOCALE="POSIX");
 			CREATE COLLATION test_coll2 (LOCALE="POSIX");
@@ -560,9 +580,9 @@ class TypesTest(BaseTest):
 			CREATE INDEX o_test_ix2
 				ON o_test ((val || 'U') COLLATE test_coll2);
 		""")
-		collation_amount += 1 # default
-		collation_amount += 1 # test_coll
-		collation_amount += 1 # test_coll2
+		collation_amount += 1  # default
+		collation_amount += 1  # test_coll
+		collation_amount += 1  # test_coll2
 		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
 
 		node.execute("""
@@ -574,13 +594,13 @@ class TypesTest(BaseTest):
 		node.start()
 
 		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
-		self.assertEqual([('A', 'T'), ('C', 'N'), ('V', 'C'),
-						  ('W', 'A'), ('X', 'R')],
-						 node.execute("SELECT * FROM o_test ORDER BY key;"))
+		self.assertEqual([('A', 'T'), ('C', 'N'), ('V', 'C'), ('W', 'A'),
+		                  ('X', 'R')],
+		                 node.execute("SELECT * FROM o_test ORDER BY key;"))
 		node.stop()
 
 	@unittest.skipIf(not BaseTest.pg_with_icu(),
-					 'postgres built without ICU support')
+	                 'postgres built without ICU support')
 	def test_collation_icu_recovery(self):
 		collation_amount = 0
 		node = self.node
@@ -598,9 +618,9 @@ class TypesTest(BaseTest):
 			CREATE INDEX o_test_ix2
 				ON o_test ((val || 'U') COLLATE test_coll2);
 		""")
-		collation_amount += 1 # default
-		collation_amount += 1 # test_coll
-		collation_amount += 1 # test_coll2
+		collation_amount += 1  # default
+		collation_amount += 1  # test_coll
+		collation_amount += 1  # test_coll2
 		self.check_total_deleted(node, 'COLLATION_CACHE', collation_amount, 0)
 
 		node.execute("""
@@ -617,9 +637,9 @@ class TypesTest(BaseTest):
 			plan = plan['Plans'][0]
 		self.assertEqual('Custom Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
-		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'),
-						  ('C', 'N'), ('A', 'T')],
-						 node.execute("""
+		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
+		                  ('A', 'T')],
+		                 node.execute("""
 							SET LOCAL enable_seqscan = off;
 						 	SELECT * FROM o_test
 								ORDER BY val COLLATE test_coll2;
@@ -637,9 +657,9 @@ class TypesTest(BaseTest):
 			plan = plan['Plans'][0]
 		self.assertEqual('Custom Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
-		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'),
-						  ('C', 'N'), ('A', 'T')],
-						 node.execute("""
+		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
+		                  ('A', 'T')],
+		                 node.execute("""
 							SET LOCAL enable_seqscan = off;
 						 	SELECT * FROM o_test
 								ORDER BY val COLLATE test_coll2;
@@ -647,7 +667,7 @@ class TypesTest(BaseTest):
 		node.stop()
 
 	@unittest.skipIf(not BaseTest.pg_with_icu(),
-					 'postgres built without ICU support')
+	                 'postgres built without ICU support')
 	def test_collation_multiple_dbs_recovery(self):
 		node = self.node
 		node.start()
@@ -679,7 +699,8 @@ class TypesTest(BaseTest):
 			INSERT INTO o_test VALUES ('X', 'â'), ('A', 'T'), ('W', 'A'),
 									  ('V', 'a'), ('C', 'N');
 		""")
-		node.safe_psql('encoding_test', """
+		node.safe_psql(
+		    'encoding_test', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE COLLATION test_coll (LOCALE="C");
 			CREATE COLLATION test_coll2 (LOCALE="POSIX");
@@ -704,9 +725,9 @@ class TypesTest(BaseTest):
 			plan = plan['Plans'][0]
 		self.assertEqual('Custom Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
-		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'),
-						  ('C', 'N'), ('A', 'T')],
-						 node.execute("""
+		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
+		                  ('A', 'T')],
+		                 node.execute("""
 							SET LOCAL enable_seqscan = off;
 						 	SELECT * FROM o_test
 								ORDER BY val COLLATE test_coll2;
@@ -722,9 +743,9 @@ class TypesTest(BaseTest):
 				plan = plan['Plans'][0]
 			self.assertEqual('Custom Scan', plan["Node Type"])
 			self.assertEqual('o_test_ix1', plan['Index Name'])
-			self.assertEqual([('W', 'A'), ('C', 'N'), ('A', 'T'),
-							  ('V', 'a'), ('X', 'a')],
-							con.execute("""
+			self.assertEqual([('W', 'A'), ('C', 'N'), ('A', 'T'), ('V', 'a'),
+			                  ('X', 'a')],
+			                 con.execute("""
 								SET LOCAL enable_seqscan = off;
 								SELECT * FROM o_test
 									ORDER BY val COLLATE test_coll2;
@@ -741,9 +762,9 @@ class TypesTest(BaseTest):
 			plan = plan['Plans'][0]
 		self.assertEqual('Custom Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
-		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'),
-						  ('C', 'N'), ('A', 'T')],
-						 node.execute("""
+		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
+		                  ('A', 'T')],
+		                 node.execute("""
 							SET LOCAL enable_seqscan = off;
 						 	SELECT * FROM o_test
 								ORDER BY val COLLATE test_coll2;
@@ -759,9 +780,9 @@ class TypesTest(BaseTest):
 				plan = plan['Plans'][0]
 			self.assertEqual('Custom Scan', plan["Node Type"])
 			self.assertEqual('o_test_ix1', plan['Index Name'])
-			self.assertEqual([('W', 'A'), ('C', 'N'), ('A', 'T'),
-							  ('V', 'a'), ('X', 'a')],
-							con.execute("""
+			self.assertEqual([('W', 'A'), ('C', 'N'), ('A', 'T'), ('V', 'a'),
+			                  ('X', 'a')],
+			                 con.execute("""
 								SET LOCAL enable_seqscan = off;
 								SELECT * FROM o_test
 									ORDER BY val COLLATE test_coll2;
@@ -769,7 +790,7 @@ class TypesTest(BaseTest):
 		node.stop()
 
 	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-					 'Multiranges added in postgres 14')
+	                 'Multiranges added in postgres 14')
 	def test_multirange_index_recovery(self):
 		node = self.node
 		node.start()
@@ -798,11 +819,11 @@ class TypesTest(BaseTest):
 			""")
 			con.commit()
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_test_1")[0][0],
-						 1000)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_test_1")[0][0], 1000)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_test_1")[0][0],
-						 1000)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_test_1")[0][0], 1000)
 		node.stop()

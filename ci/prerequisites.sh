@@ -15,6 +15,8 @@ sudo apt-get update -qq
 apt_packages="build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev libcurl4-openssl-dev libssl-dev"
 if [ $GITHUB_JOB = "run-benchmark" ]; then
 	pip_packages="psycopg2-binary six testgres==1.8.9 python-telegram-bot matplotlib"
+elif [ $GITHUB_JOB = "pgindent" ]; then
+	pip_packages="psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL yapf"
 else
 	pip_packages="psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL"
 fi

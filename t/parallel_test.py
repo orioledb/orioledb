@@ -3,7 +3,9 @@
 
 from .base_test import BaseTest
 
+
 class ParallelTest(BaseTest):
+
 	def test_parallel_empty_select(self):
 		with self.node as node:
 			node.start()
@@ -15,11 +17,11 @@ class ParallelTest(BaseTest):
 					) USING orioledb;
 				""")
 				self.assertEqual([],
-								 con.execute("""
+				                 con.execute("""
 									 SELECT * FROM o_test;
 								 """))
 				self.assertEqual([],
-								 con.execute("""
+				                 con.execute("""
 									SET LOCAL parallel_setup_cost = 0;
 									SET LOCAL parallel_tuple_cost = 0;
 									SET LOCAL min_parallel_table_scan_size = 0;
@@ -31,7 +33,8 @@ class ParallelTest(BaseTest):
 	def test_not_using_gather_during_recovery_for_sql_opclass_function(self):
 		with self.node as node:
 			node.start()
-			node.safe_psql('postgres', """
+			node.safe_psql(
+			    'postgres', """
 
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
@@ -63,7 +66,7 @@ class ParallelTest(BaseTest):
 				INSERT INTO o_test SELECT generate_series(1, 5);
 			""")
 
-			node.stop(['-m','immediate'])
+			node.stop(['-m', 'immediate'])
 
 			node.start()
 

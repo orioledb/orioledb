@@ -13,16 +13,18 @@ from .base_test import wait_stopevent
 import string
 import random
 
+
 class SplitTest(BaseTest):
+
 	def setUp(self):
 		super().setUp()
-		self.node.append_conf('postgresql.conf',
-							  "orioledb.main_buffers = 8MB\n"
-							  "log_min_messages = notice\n")
+		self.node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    "log_min_messages = notice\n")
 
-		self.node.start() # start PostgreSQL
-		self.node.safe_psql('postgres',
-							"""
+		self.node.start()  # start PostgreSQL
+		self.node.safe_psql(
+		    'postgres', """
 							CREATE EXTENSION IF NOT EXISTS orioledb;
 							CREATE TABLE IF NOT EXISTS o_split (
 							     id text NOT NULL,
@@ -35,7 +37,7 @@ class SplitTest(BaseTest):
 	def tearDown(self):
 		# stops node if tests fails
 		if self.node.status() == NodeStatus.Running:
-			self.stopAll() # just comment it if node should not stops on fails
+			self.stopAll()  # just comment it if node should not stops on fails
 			pass
 		super().tearDown()
 
@@ -49,7 +51,8 @@ class SplitTest(BaseTest):
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 11)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 11)
 
 		self.failedInsertToSplitTable(con1, 51, 90, 4)
 
@@ -76,7 +79,8 @@ class SplitTest(BaseTest):
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
 
 		self.failedInsertToSplitTable(con1, 510, 515, 1)
 
@@ -106,7 +110,8 @@ class SplitTest(BaseTest):
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 58)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 58)
 
 		self.failedInsertToSplitTable(con1, 91, 99, 1)
 
@@ -136,7 +141,8 @@ class SplitTest(BaseTest):
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 11)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 11)
 
 		self.failedInsertToSplitTable(con1, 51, 90, 4)
 
@@ -172,7 +178,8 @@ class SplitTest(BaseTest):
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', '$.level == 1');")
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
 
 		self.failedInsertToSplitTable(con1, 1650, 1685, 1)
 
@@ -197,7 +204,8 @@ class SplitTest(BaseTest):
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', '$.level == 1');")
 
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
 
 		self.failedInsertToSplitTable(con1, 1650, 1685, 1)
 
@@ -239,7 +247,8 @@ class SplitTest(BaseTest):
 		con1 = self.createConnection()
 		con1.execute("SET orioledb.enable_stopevents = true;")
 		self.insertToSplitTable(con1, 1, 400, 4)
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 100)
 
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', '$.level == 1');")
@@ -271,7 +280,7 @@ class SplitTest(BaseTest):
 		con1_pid = con1.pid
 		con1.execute("SET orioledb.enable_stopevents = true;")
 
-		self.insertToSplitTable(con1, 1, 1000, 4);
+		self.insertToSplitTable(con1, 1, 1000, 4)
 
 		con2 = self.createConnection()
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
@@ -282,12 +291,16 @@ class SplitTest(BaseTest):
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 
 		con1.execute("SET orioledb.enable_stopevents = true;")
-		con2.execute("SELECT pg_stopevent_set('page_read', '$.level == 0 && $pid == %d');" % (con1_pid,))
+		con2.execute(
+		    "SELECT pg_stopevent_set('page_read', '$.level == 0 && $pid == %d');"
+		    % (con1_pid, ))
 
 		# this thread fix incomplete split on leaf and than root
 		# breakpoint helps us to avoid root split fix first (???)
-		t1 = ThreadQueryExecutor(con1, "INSERT INTO o_split "
-								 "(SELECT repeat('x', 708) || id FROM generate_series(10100, 10130, 1) id);")
+		t1 = ThreadQueryExecutor(
+		    con1, "INSERT INTO o_split "
+		    "(SELECT repeat('x', 708) || id FROM generate_series(10100, 10130, 1) id);"
+		)
 		t1.start()
 
 		wait_stopevent(node, con1_pid)
@@ -297,12 +310,18 @@ class SplitTest(BaseTest):
 
 		# makes an incomplete split of root
 		con3.execute("SET orioledb.enable_stopevents = true;")
-		con2.execute("SELECT pg_stopevent_set('split_fail', '$.level == 2 && $pid == %d');" % (con3_pid,))
+		con2.execute(
+		    "SELECT pg_stopevent_set('split_fail', '$.level == 2 && $pid == %d');"
+		    % (con3_pid, ))
 		# this breakpoint helps us to avoid root split fix on apply_undo()
-		con2.execute("SELECT pg_stopevent_set('before_apply_undo', '$.commit == false');")
+		con2.execute(
+		    "SELECT pg_stopevent_set('before_apply_undo', '$.commit == false');"
+		)
 
-		t3 = ThreadQueryExecutor(con3, "INSERT INTO o_split "
-								 "(SELECT repeat('x', 708) || id FROM generate_series(90000, 99999, 4) id);")
+		t3 = ThreadQueryExecutor(
+		    con3, "INSERT INTO o_split "
+		    "(SELECT repeat('x', 708) || id FROM generate_series(90000, 99999, 4) id);"
+		)
 		t3.start()
 
 		wait_stopevent(node, con3_pid)
@@ -335,28 +354,30 @@ class SplitTest(BaseTest):
 		con1.rollback()
 
 		con1.execute("SET orioledb.enable_stopevents = true;")
-		con2.execute("SELECT pg_stopevent_set('page_read', '$.level == 0 && $pid == %d');" % (con1.pid,))
-		t1 = ThreadQueryExecutor(con1,
-								 "SELECT COUNT(*) FROM o_split "
-								 "WHERE id > repeat('x', 708) || 14;")
+		con2.execute(
+		    "SELECT pg_stopevent_set('page_read', '$.level == 0 && $pid == %d');"
+		    % (con1.pid, ))
+		t1 = ThreadQueryExecutor(
+		    con1, "SELECT COUNT(*) FROM o_split "
+		    "WHERE id > repeat('x', 708) || 14;")
 		t1.start()
 
 		self.insertToSplitTable(node, 100, 105, 1)
 
-		node.safe_psql('postgres',
-			"CREATE TABLE IF NOT EXISTS o_eviction (\n"
-			"	key integer NOT NULL,\n"
-			"	val integer NOT NULL,\n"
-			"	PRIMARY KEY (key)\n"
-			") USING orioledb;\n"
-			"CREATE UNIQUE INDEX o_eviction_ix1 ON o_eviction (val);")
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_eviction (\n"
+		    "	key integer NOT NULL,\n"
+		    "	val integer NOT NULL,\n"
+		    "	PRIMARY KEY (key)\n"
+		    ") USING orioledb;\n"
+		    "CREATE UNIQUE INDEX o_eviction_ix1 ON o_eviction (val);")
 
 		n = 100000
 		con3 = self.createConnection()
 		con3.execute(
-			"INSERT INTO o_eviction\n"
-			"	(SELECT id, %s - id FROM generate_series(%s, %s, 1) id);\n" %
-			(str(n), str(1), str(n)))
+		    "INSERT INTO o_eviction\n"
+		    "	(SELECT id, %s - id FROM generate_series(%s, %s, 1) id);\n" %
+		    (str(n), str(1), str(n)))
 		con3.commit()
 
 		con2.execute("SELECT pg_stopevent_reset('page_read');")
@@ -379,10 +400,11 @@ class SplitTest(BaseTest):
 
 	def checkSplitTable(self, expected_count, expected_check_result):
 		con = self.node.connect()
-		self.assertEqual(con.execute("SELECT COUNT(*) FROM o_split;")[0][0],
-						 expected_count)
-		self.assertEqual(con.execute("SELECT orioledb_tbl_check('o_split'::regclass)")[0][0],
-						 expected_check_result)
+		self.assertEqual(
+		    con.execute("SELECT COUNT(*) FROM o_split;")[0][0], expected_count)
+		self.assertEqual(
+		    con.execute("SELECT orioledb_tbl_check('o_split'::regclass)")[0]
+		    [0], expected_check_result)
 		con.close()
 
 	# insert data to the split table
@@ -391,9 +413,9 @@ class SplitTest(BaseTest):
 			node_or_con.begin()
 		try:
 			node_or_con.execute("INSERT INTO o_split"
-								"       (SELECT repeat('x', 708) || id\n"
-										"FROM generate_series(%d, %d, %d) id);"
-								% (insert_from, insert_to, step))
+			                    "       (SELECT repeat('x', 708) || id\n"
+			                    "FROM generate_series(%d, %d, %d) id);" %
+			                    (insert_from, insert_to, step))
 		finally:
 			if isinstance(node_or_con, NodeConnection):
 				node_or_con.commit()
@@ -406,4 +428,4 @@ class SplitTest(BaseTest):
 		except AssertionError:
 			raise
 		except Exception:
-			self.assertTrue(True);
+			self.assertTrue(True)

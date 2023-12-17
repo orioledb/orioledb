@@ -4,16 +4,21 @@
 from .base_test import BaseTest
 from testgres.connection import ProgrammingError
 
+
 class OTablesTest(BaseTest):
+
 	def assertTblCount(self, size):
-		self.assertEqual(size,
-						 self.node.execute('postgres',
-										   'SELECT count(*) FROM orioledb_table_oids();')[0][0])
+		self.assertEqual(
+		    size,
+		    self.node.execute(
+		        'postgres',
+		        'SELECT count(*) FROM orioledb_table_oids();')[0][0])
 
 	def test_o_tables_wal_commit_1(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name(
@@ -26,7 +31,8 @@ class OTablesTest(BaseTest):
 		""")
 		self.assertTblCount(1)
 
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name_2(
@@ -50,7 +56,8 @@ class OTablesTest(BaseTest):
 	def test_o_tables_wal_commit_2(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name(
@@ -69,7 +76,9 @@ class OTablesTest(BaseTest):
 		""")
 
 		self.assertTblCount(1)
-		self.assertEqual(node.execute('postgres','SELECT count(*) FROM table_name')[0][0], 3)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM table_name')[0][0],
+		    3)
 
 		node.stop(['-m', 'immediate'])
 		node.start()
@@ -80,13 +89,16 @@ class OTablesTest(BaseTest):
 			DELETE FROM table_name WHERE num_1 = 1;
 		""")
 		self.assertTblCount(1)
-		self.assertEqual(node.execute('postgres','SELECT count(*) FROM table_name')[0][0], 2)
+		self.assertEqual(
+		    node.execute('postgres', 'SELECT count(*) FROM table_name')[0][0],
+		    2)
 		node.stop()
 
 	def test_o_tables_wal_commit_3(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TYPE type_name AS ENUM('one','two');
@@ -120,7 +132,8 @@ class OTablesTest(BaseTest):
 	def test_o_tables_wal_rollback_1(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name(
@@ -158,7 +171,8 @@ class OTablesTest(BaseTest):
 	def test_o_tables_wal_drop_rollback_2(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name(
@@ -201,7 +215,8 @@ class OTablesTest(BaseTest):
 	def test_o_tables_wal_drop_extension_rollback_1(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name(
@@ -235,7 +250,8 @@ class OTablesTest(BaseTest):
 	def test_o_tables_mix_1(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TABLE IF NOT EXISTS table_name(
@@ -317,8 +333,9 @@ class OTablesTest(BaseTest):
 		con1.begin()
 		con2.begin()
 		con1.execute("CREATE EXTENSION IF NOT EXISTS orioledb;")
-		self.assertEqual(0,
-						 con1.execute('SELECT count(*) FROM orioledb_table_oids();')[0][0])
+		self.assertEqual(
+		    0,
+		    con1.execute('SELECT count(*) FROM orioledb_table_oids();')[0][0])
 		con1.execute("""
 			CREATE TABLE IF NOT EXISTS table_name(
 				num_1 int NOT NULL,
@@ -378,7 +395,8 @@ class OTablesTest(BaseTest):
 	def test_o_tables_mix_5(self):
 		node = self.node
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
 			CREATE TYPE type_name AS ENUM('one','two');
@@ -432,7 +450,8 @@ class OTablesTest(BaseTest):
 		node.start()
 		self.assertTblCount(2)
 
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			DROP EXTENSION orioledb CASCADE;
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 		""")

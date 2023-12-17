@@ -9,19 +9,22 @@ from .base_test import wait_checkpointer_stopevent
 
 import time
 import os
+
+
 class CheckpointEvictionTest(BaseTest):
 
 	def test_checkpoint_compressed_indices(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-					"""
+		node.append_conf(
+		    'postgresql.conf', """
 						orioledb.debug_disable_pools_limit = true
 						orioledb.main_buffers = 1MB
 						orioledb.free_tree_buffers = 256kB
 						orioledb.debug_disable_bgwriter = true
 					""")
 		node.start()
-		node.safe_psql('postgres', """
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE IF NOT EXISTS o_test (
 			key SERIAL NOT NULL,
@@ -64,11 +67,12 @@ class CheckpointEvictionTest(BaseTest):
 
 	def concurrent_eviction_base(self, compressed, bp_value):
 		node = self.node
-		node.append_conf('postgresql.conf',
-						 "orioledb.main_buffers = 8MB\n"
-						 "orioledb.enable_stopevents = true\n")
-		node.start() # start PostgreSQL
-		node.safe_psql('postgres', """
+		node.append_conf(
+		    'postgresql.conf', "orioledb.main_buffers = 8MB\n"
+		    "orioledb.enable_stopevents = true\n")
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE IF NOT EXISTS o_test (
 				key SERIAL NOT NULL,
@@ -82,32 +86,33 @@ class CheckpointEvictionTest(BaseTest):
 				key SERIAL NOT NULL,
 				val int NOT NULL,
 				PRIMARY KEY (key)
-			) USING orioledb %s;"""
-			% ("WITH (primary_compress)" if compressed else "")
-		)
+			) USING orioledb %s;""" % ("WITH (primary_compress)" if compressed else ""))
 		con1 = node.connect()
 		con2 = node.connect()
 
 		con2.execute("SELECT pg_stopevent_set('checkpoint_step',\n"
-											 "'$.action == \"walkDownwards\" && "
-											  "$.treeName == \"o_evicted_pkey\" && "
-											  "$.lokey.key > %s');" % bp_value)
+		             "'$.action == \"walkDownwards\" && "
+		             "$.treeName == \"o_evicted_pkey\" && "
+		             "$.lokey.key > %s');" % bp_value)
 
-		con1.execute("INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1, 1000, 1) val;\n")
+		con1.execute(
+		    "INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1, 1000, 1) val;\n"
+		)
 		con1.commit()
 
 		t1 = ThreadQueryExecutor(con1, "CHECKPOINT;")
 		t1.start()
 		wait_checkpointer_stopevent(node)
 
-
-		con2.execute("INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1001, 15000, 1) val;\n")
+		con2.execute(
+		    "INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1001, 15000, 1) val;\n"
+		)
 		con2.commit()
 
 		n = 100000
 		con2.execute("INSERT INTO o_test (val)\n"
-						"	(SELECT val FROM generate_series(%s, %s, 1) val);\n" %
-			(str(1), str(n)))
+		             "	(SELECT val FROM generate_series(%s, %s, 1) val);\n" %
+		             (str(1), str(n)))
 		con2.commit()
 
 		con2.execute("SELECT pg_stopevent_reset('checkpoint_step')")
@@ -117,7 +122,8 @@ class CheckpointEvictionTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual(node.execute("SELECT COUNT(*) FROM o_evicted;")[0][0], 15000);
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_evicted;")[0][0], 15000)
 		node.stop()
 
 	def test_concurrent_eviction_10(self):
