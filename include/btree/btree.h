@@ -71,6 +71,8 @@ typedef enum
 	BTreeStorageInMemory,
 	/* no checkpoint support, but pages can be evicted into a disk */
 	BTreeStorageTemporary,
+	/* like BTreeStoragePersistence, but no wal for data modifications */
+	BTreeStorageUnlogged,
 	/* checkpoint and eviction for pages support */
 	BTreeStoragePersistence
 } BTreeStorageType;

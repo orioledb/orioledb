@@ -807,6 +807,12 @@ class ReplicationTest(BaseTest):
 					master.stop(['-m', 'immediate'])
 
 					master.start()
+					master.stop()
+					master.start()
+					master.stop()
+					master.start()
+					master.stop()
+					master.start()
 					self.assertEqual(
 					    master.execute("""
 											SELECT c.relname

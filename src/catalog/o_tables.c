@@ -22,6 +22,7 @@
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "tableam/operations.h"
 #include "transam/oxid.h"
 #include "tuple/toast.h"
 #include "utils/planner.h"
@@ -635,7 +636,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence)
 	o_table->default_compress = InvalidOCompress;
 	o_table->primary_compress = InvalidOCompress;
 	o_table->toast_compress = InvalidOCompress;
-	o_table->temp = relpersistence == RELPERSISTENCE_TEMP;
+	o_table->persistence = relpersistence;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -972,8 +973,8 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_delete_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, oxid, csn,
-											   sys_tree, !table->temp);
-	systrees_modify_end(!table->temp);
+											   sys_tree, table->persistence != RELPERSISTENCE_TEMP);
+	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	if (result)
 	{
@@ -1035,8 +1036,8 @@ o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_insert_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
-											   csn, sys_tree, !table->temp);
-	systrees_modify_end(!table->temp);
+											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
+	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 	pfree(data);
 
 	return result;
@@ -1151,8 +1152,8 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
-											   csn, sys_tree, !table->temp);
-	systrees_modify_end(!table->temp);
+											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
+	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	pfree(data);
 	o_table_free(old_table);
@@ -1464,7 +1465,7 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 {
 	OTablesDropAllArg *drop_arg = (OTablesDropAllArg *) arg;
 
-	if (o_table->temp)
+	if (o_table->persistence == RELPERSISTENCE_TEMP)
 	{
 		OTableChunkKey key;
 		bool		result;
@@ -1487,7 +1488,7 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 													   get_current_oxid(),
 													   drop_arg->csn,
 													   sys_tree,
-													   !o_table->temp);
+													   false);
 			if (result)
 			{
 				ORelOids   *treeOids;
@@ -1512,6 +1513,11 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 		PG_END_TRY();
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		finish_autonomous_transaction(&state);
+	}
+	else if (o_table->persistence == RELPERSISTENCE_UNLOGGED)
+	{
+		o_truncate_table(o_table->oids);
+		AcceptInvalidationMessages();
 	}
 }
 

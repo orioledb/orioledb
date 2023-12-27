@@ -1031,7 +1031,7 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 		return false;
 	}
 
-	if (desc->storageType == BTreeStoragePersistence &&
+	if ((desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged) &&
 		checkpoint_state->treeType == desc->type &&
 		checkpoint_state->datoid == desc->oids.datoid &&
 		checkpoint_state->relnode == desc->oids.relnode &&

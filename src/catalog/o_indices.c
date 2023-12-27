@@ -184,7 +184,7 @@ make_ctid_o_index(OTable *table)
 	result->indexType = oIndexPrimary;
 	namestrcpy(&result->name, "ctid_primary");
 	result->tableOids = table->oids;
-	result->temp_table = table->temp;
+	result->table_persistence = table->persistence;
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
 	result->nLeafFields = table->nfields + 1;
@@ -240,7 +240,7 @@ make_primary_o_index(OTable *table)
 	namestrcpy(&result->name, tableIndex->name.data);
 	Assert(tableIndex->type == oIndexPrimary);
 	result->tableOids = table->oids;
-	result->temp_table = table->temp;
+	result->table_persistence = table->persistence;
 	result->primaryIsCtid = false;
 	if (OCompressIsValid(tableIndex->compress))
 		result->compress = tableIndex->compress;
@@ -358,7 +358,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->indexType = tableIndex->type;
 	namestrcpy(&result->name, tableIndex->name.data);
 	result->tableOids = table->oids;
-	result->temp_table = table->temp;
+	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
@@ -415,7 +415,7 @@ make_toast_o_index(OTable *table)
 	result->indexType = oIndexToast;
 	namestrcpy(&result->name, "toast");
 	result->tableOids = table->oids;
-	result->temp_table = table->temp;
+	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
 	if (table->has_primary)
@@ -866,7 +866,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	result = generic_toast_insert_optional_wal(&oIndicesToastAPI,
 											   (Pointer) &key, data, len, oxid,
-											   csn, sys_tree, !table->temp);
+											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
 	pfree(data);
 	return result;
 }
@@ -888,7 +888,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	result = generic_toast_delete_optional_wal(&oIndicesToastAPI,
 											   (Pointer) &key, oxid, csn,
-											   sys_tree, !table->temp);
+											   sys_tree, table->persistence != RELPERSISTENCE_TEMP);
 	return result;
 }
 
@@ -938,8 +938,8 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	result = generic_toast_update_optional_wal(&oIndicesToastAPI,
 											   (Pointer) &key, data, len, oxid,
-											   csn, sys_tree, !table->temp);
-	systrees_modify_end(!table->temp);
+											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
+	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
 
 	pfree(data);
 

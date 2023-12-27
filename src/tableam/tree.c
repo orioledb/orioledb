@@ -85,7 +85,7 @@ static BTreeOps primaryOps = {
 
 void
 index_btree_desc_init(BTreeDescr *desc, OCompress compress, ORelOids oids,
-					  OIndexType type, bool temp_table,
+					  OIndexType type, char persistence,
 					  OXid createOxid, void *arg)
 {
 	if (type == oIndexPrimary)
@@ -109,8 +109,10 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, ORelOids oids,
 	desc->tmpBuf[0].file = -1;
 	desc->tmpBuf[0].file = -1;
 	desc->ppool = get_ppool(OPagePoolMain);
-	if (temp_table)
+	if (persistence == RELPERSISTENCE_TEMP)
 		desc->storageType = BTreeStorageTemporary;
+	else if (persistence == RELPERSISTENCE_UNLOGGED)
+		desc->storageType = BTreeStorageUnlogged;
 	else
 		desc->storageType = BTreeStoragePersistence;
 	desc->undoType = UndoReserveTxn;

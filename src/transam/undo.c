@@ -1655,6 +1655,17 @@ orioledb_snapshot_hook(Snapshot snapshot)
 	OXid		curXmin;
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
+	/*
+	 * It means that there was a crash recovery and we need to cleanup. This
+	 * is probably not the best place for this kind of work, but here we can
+	 * do truncate of unlogged tables.
+	 */
+	if (*was_in_recovery &&
+		!pg_atomic_exchange_u32(after_recovery_cleaned, true))
+	{
+		o_tables_drop_all_temporary();
+	}
+
 	lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 	lastUsedUndoLocationWhenUpdatedMinLocation = pg_atomic_read_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation);
 	if (lastUsedLocation - lastUsedUndoLocationWhenUpdatedMinLocation > undo_circular_buffer_size / 10)

@@ -23,7 +23,7 @@ typedef struct
 	ORelOids	indexOids;
 	OIndexType	indexType;
 	ORelOids	tableOids;
-	bool		temp_table;
+	char		table_persistence;
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;

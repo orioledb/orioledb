@@ -1701,7 +1701,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("temp orioledb tables does not "
+								 errmsg("temp and unlogged orioledb tables does not "
 										"support compression options")));
 					}
 

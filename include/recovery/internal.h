@@ -140,6 +140,9 @@ extern pg_atomic_uint64 *recovery_main_retain_ptr;
 extern bool *recovery_single_process;
 extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 
+extern bool *was_in_recovery;
+extern pg_atomic_uint32 *after_recovery_cleaned;
+
 /*
  * Recovery master/workers functions.
  */

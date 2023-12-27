@@ -492,5 +492,5 @@ class NotSupportedYetTest(BaseTest):
 			""")
 
 		self.assertErrorMessageEquals(
-		    e, "temp orioledb tables does not "
+		    e, "temp and unlogged orioledb tables does not "
 		    "support compression options")

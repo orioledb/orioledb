@@ -94,7 +94,7 @@ typedef struct
 	uint16		nindices;
 	Oid			tid_btree_ops_oid;	/* have to store it here */
 	bool		has_primary;
-	bool		temp;
+	char		persistence;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
@@ -261,7 +261,7 @@ extern void o_tables_meta_lock_no_wal(void);
 static inline void
 o_tables_rel_meta_lock(Relation rel)
 {
-	if (!rel || rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
+	if (!rel || rel->rd_rel->relpersistence != RELPERSISTENCE_TEMP)
 		o_tables_meta_lock();
 	else
 		o_tables_meta_lock_no_wal();
@@ -269,7 +269,7 @@ o_tables_rel_meta_lock(Relation rel)
 static inline void
 o_tables_table_meta_lock(OTable *o_table)
 {
-	if (!o_table || !o_table->temp)
+	if (!o_table || o_table->persistence != RELPERSISTENCE_TEMP)
 		o_tables_meta_lock();
 	else
 		o_tables_meta_lock_no_wal();
@@ -287,7 +287,7 @@ o_tables_rel_meta_unlock(Relation rel, Oid oldRelnode)
 
 		o_tables_meta_unlock(tmpOids, oldRelnode);
 	}
-	else if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
+	else if (rel->rd_rel->relpersistence != RELPERSISTENCE_TEMP)
 	{
 		ORelOids	oids;
 
@@ -308,7 +308,7 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 
 		o_tables_meta_unlock(tmpOids, oldRelnode);
 	}
-	else if (!o_table->temp)
+	else if (o_table->persistence != RELPERSISTENCE_TEMP)
 	{
 		o_tables_meta_unlock(o_table->oids, oldRelnode);
 	}

@@ -171,6 +171,7 @@ TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
 						t/s3_test.py \
 						t/schema_test.py \
 						t/trigger_test.py \
+						t/unlogged_test.py \
 						t/vacuum_test.py
 
 ifdef USE_PGXS

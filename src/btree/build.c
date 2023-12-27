@@ -448,12 +448,13 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 	S3TaskLocation result = 0;
 
 	Assert(desc->storageType == BTreeStoragePersistence ||
-		   desc->storageType == BTreeStorageTemporary);
+		   desc->storageType == BTreeStorageTemporary ||
+		   desc->storageType == BTreeStorageUnlogged);
 
 	checkpoint_number = get_cur_checkpoint_number(&desc->oids, desc->type,
 												  &checkpoint_concurrent);
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
 	{
 		SeqBufTag	prev_chkp_tag;
 

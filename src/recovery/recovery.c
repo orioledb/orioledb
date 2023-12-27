@@ -256,6 +256,8 @@ pg_atomic_uint64 *recovery_ptr;
 pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
 bool	   *recovery_single_process;
+bool	   *was_in_recovery;
+pg_atomic_uint32 *after_recovery_cleaned;
 
 static void delay_rels_queued_for_idxbuild(ORelOids oids);
 static void delay_if_queued_for_idxbuild(void);
@@ -307,6 +309,8 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3)));
 	size = add_size(size, CACHELINEALIGN(_o_index_parallel_estimate_shared(0)));
 	size = add_size(size, CACHELINEALIGN(tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1)));
+	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
+	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 
 	return size;
 }
@@ -356,6 +360,12 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_sharedsort = (Sharedsort *) ptr;
 	ptr += CACHELINEALIGN(tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1));
 
+	was_in_recovery = (bool *) ptr;
+	ptr += CACHELINEALIGN(sizeof(bool));
+
+	after_recovery_cleaned = (pg_atomic_uint32 *) ptr;
+	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
+
 	if (!found)
 	{
 		int			i;
@@ -384,6 +394,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 		ConditionVariableInit(&recovery_oidxshared->recoverycv);
 		recovery_oidxshared->new_position = 0;
 		recovery_oidxshared->completed_position = 0;
+
+		pg_atomic_init_u32(after_recovery_cleaned, 0);
 	}
 }
 

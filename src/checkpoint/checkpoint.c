@@ -858,7 +858,8 @@ checkpoint_sys_trees(int flags, uint32 cur_chkp_num,
 		checkpoint_ix_init_state(checkpoint_state, desc);
 		checkpoint_init_new_seq_bufs(desc, cur_chkp_num);
 
-		if (desc->storageType == BTreeStoragePersistence)
+		if (desc->storageType == BTreeStoragePersistence ||
+			desc->storageType == BTreeStorageUnlogged)
 		{
 			success = checkpoint_ix(flags, desc);
 			/* System trees can't be concurrently deleted */
@@ -1403,11 +1404,9 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 void
 o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 {
-	/* called in StartupXLOG */
-	if (flags == 0)
-	{
-		o_tables_drop_all_temporary();
-	}
+	/* called at the end of StartupXLOG */
+	*was_in_recovery = flags == 0;
+
 	if (!(flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY)))
 	{
 		o_sys_caches_delete_by_lsn(checkPointRedo);
@@ -4541,7 +4540,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		{
 			if (!orioledb_s3_mode)
 			{
-				if (td->storageType == BTreeStoragePersistence)
+				if (td->storageType == BTreeStoragePersistence ||
+					td->storageType == BTreeStorageUnlogged)
 				{
 					free_seq_buf_pages(td, td->nextChkp[cur_chkp_index].shared);
 					seq_buf_close_file(&td->nextChkp[cur_chkp_index]);
@@ -4551,7 +4551,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			}
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
-		else if (td->storageType == BTreeStoragePersistence)
+		else if (td->storageType == BTreeStoragePersistence ||
+				 td->storageType == BTreeStorageUnlogged)
 		{
 			success = checkpoint_ix(tbl_arg->flags, td);
 
