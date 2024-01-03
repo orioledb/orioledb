@@ -270,6 +270,14 @@ class S3Test(BaseTest):
 		node.stop(['-m', 'immediate'])
 		node.start()
 
+		node.safe_psql("""
+			ALTER TABLE o_test_1
+				DROP CONSTRAINT o_test_1_pkey;
+		""")
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
 	def get_file_occupied_size(self, path):
 		try:
 			result = 0

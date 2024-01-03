@@ -1686,14 +1686,9 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 	write_img = get_write_img(desc, img, &write_size);
 
 	if (orioledb_s3_mode)
-	{
-		/* FIXME: concurrency */
-		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
-	}
+		chkpNum = checkpoint_state->lastCheckpointNumber;
 	else
-	{
 		chkpNum = 0;
-	}
 
 	if (!OCompressIsValid(desc->compress))
 	{
@@ -1721,8 +1716,20 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 		if ((extent->off + threshold - 1) / threshold !=
 			(extent->off + threshold - 1 + extent->len) / threshold)
 		{
+			S3HeaderTag tag;
+			uint64		offset = (extent->off + extent->len - 1) * (OCompressIsValid(desc->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ);
+			int			index;
+
 			Assert((extent->off + threshold - 1) / threshold + 1 ==
 				   (extent->off + threshold - 1 + extent->len) / threshold);
+
+			tag.datoid = desc->oids.datoid;
+			tag.relnode = desc->oids.relnode;
+			tag.checkpointNum = chkpNum;
+			tag.segNum = offset / ORIOLEDB_SEGMENT_SIZE;
+			index = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
+			s3_header_mark_part_loading(tag, index);
+			s3_header_mark_part_loaded(tag, index);
 			s3_headers_increase_loaded_parts(1);
 		}
 

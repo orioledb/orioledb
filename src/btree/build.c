@@ -21,6 +21,7 @@
 #include "btree/split.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
+#include "s3/worker.h"
 #include "tableam/descr.h"
 #include "tuple/toast.h"
 #include "tuple/sort.h"
@@ -437,13 +438,14 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	file_header->ctid = pg_atomic_read_u64(&metaPageBlkno.ctid);
 }
 
-void
+S3TaskLocation
 btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 {
 	File		file;
 	uint32		checkpoint_number;
 	bool		checkpoint_concurrent;
 	char	   *filename;
+	S3TaskLocation result = 0;
 
 	Assert(desc->storageType == BTreeStoragePersistence ||
 		   desc->storageType == BTreeStorageTemporary);
@@ -476,6 +478,15 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 					 errmsg("Could not write checkpoint header to file: %s",
 							filename)));
 		}
+
+		if (orioledb_s3_mode)
+		{
+			result = s3_schedule_file_part_write(checkpoint_number,
+												 desc->oids.datoid,
+												 desc->oids.relnode,
+												 -1,
+												 -1);
+		}
 	}
 	else
 	{
@@ -506,4 +517,6 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 	}
 	FileClose(file);
 	pfree(filename);
+
+	return result;
 }

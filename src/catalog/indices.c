@@ -1404,6 +1404,8 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	uint64		ctid;
 	CheckpointFileHeader *fileHeaders;
 	CheckpointFileHeader toastFileHeader;
+	S3TaskLocation maxLocation = 0,
+				location;
 
 	sortstates = (Tuplesortstate **) palloc(sizeof(Tuplesortstate *) *
 											descr->nIndices);
@@ -1502,13 +1504,18 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
-		btree_write_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
+		location = btree_write_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
+		maxLocation = Max(maxLocation, location);
 		o_drop_shared_root_info(descr->indices[i]->desc.oids.datoid,
 								descr->indices[i]->desc.oids.relnode);
 	}
-	btree_write_file_header(&descr->toast->desc, &toastFileHeader);
+	location = btree_write_file_header(&descr->toast->desc, &toastFileHeader);
+	maxLocation = Max(maxLocation, location);
 	o_drop_shared_root_info(descr->toast->desc.oids.datoid,
 							descr->toast->desc.oids.relnode);
+
+	if (orioledb_s3_mode)
+		s3_queue_wait_for_location(maxLocation);
 
 	o_tables_table_meta_unlock(o_table, old_o_table->oids.relnode);
 

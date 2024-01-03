@@ -20,7 +20,7 @@ typedef struct Tuplesortstate Tuplesortstate;
 extern void btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 								   Tuplesortstate *sortstate, uint64 ctid,
 								   CheckpointFileHeader *file_header);
-extern void btree_write_file_header(BTreeDescr *desc,
-									CheckpointFileHeader *file_header);
+extern S3TaskLocation btree_write_file_header(BTreeDescr *desc,
+											  CheckpointFileHeader *file_header);
 
 #endif							/* __BTREE_BUILD_H__ */
