@@ -185,7 +185,7 @@ static ShmemItem shmemItems[] = {
 static Size orioledb_memsize(void);
 static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
-static bool verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found);
+static void verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
 static void orioledb_get_relation_info_hook(PlannerInfo *root,
@@ -248,9 +248,9 @@ _PG_init(void)
 	if (!process_shared_preload_libraries_in_progress)
 		return;
 
-	verify_dir_is_empty_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
-	verify_dir_is_empty_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
-	verify_dir_is_empty_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
+	verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
+	verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
+	verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
 
 	/* See InitializeMaxBackends(), InitProcGlobal() */
 	max_procs = MaxConnections + autovacuum_max_workers + 2 +
@@ -834,14 +834,14 @@ _PG_init(void)
 void
 o_check_init_db_dir(Oid dbOid)
 {
-	static bool initializedOid = InvalidOid;
+	static Oid	initializedOid = InvalidOid;
 
 	if (initializedOid == dbOid)
 		return;
 
-	verify_dir_is_empty_or_create(psprintf("%s/%u",
-										   ORIOLEDB_DATA_DIR,
-										   dbOid), NULL, NULL);
+	verify_dir_exists_or_create(psprintf("%s/%u",
+										 ORIOLEDB_DATA_DIR,
+										 dbOid), NULL, NULL);
 	initializedOid = dbOid;
 }
 
@@ -1065,16 +1065,37 @@ orioledb_check_shmem(void)
 }
 
 /*
- * Verify that the given directory exists and is empty. If it does not
- * exist, it is created. If it exists but is not empty, an error will
- * be give and the process ended.
+ * Test to see if a directory exists.
+ *
+ * Returns:
+ *		0 if nonexistent
+ *		1 if exists
+ *		-1 if trouble accessing directory (errno reflects the error)
  */
-static bool
-verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found)
+static int
+o_check_dir(const char *dir)
+{
+	DIR		   *chkdir;
+
+	chkdir = opendir(dir);
+	if (chkdir == NULL)
+		return (errno == ENOENT) ? 0 : -1;
+
+	if (closedir(chkdir))
+		return -1;				/* error executing closedir */
+
+	return 1;
+}
+
+/*
+ * Verify that the given directory exists. If it does not exist, it is created.
+ */
+static void
+verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 {
 	const char *errstr;
 
-	switch (pg_check_dir(dirname))
+	switch (o_check_dir(dirname))
 	{
 		case 0:
 
@@ -1084,113 +1105,31 @@ verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found)
 			if (pg_mkdir_p(dirname, S_IRWXU) == -1)
 			{
 				errstr = strerror(errno);
-				elog(WARNING, "could not access directory \"%s\": %s",
+				elog(ERROR, "could not access directory \"%s\": %s",
 					 dirname, errstr);
-				return false;
 			}
 			if (created)
 				*created = true;
-			return true;
+			return;
 		case 1:
 
 			/*
-			 * Exists, empty
+			 * Exists
 			 */
 			if (found)
 				*found = true;
-			return true;
-		case 2:
-		case 3:
-		case 4:
-
-			/*
-			 * Exists, not empty
-			 */
-			return false;
+			return;
 		case -1:
 
 			/*
 			 * Access problem
 			 */
 			errstr = strerror(errno);
-			elog(WARNING, "could not access directory \"%s\": %s",
+			elog(ERROR, "could not access directory \"%s\": %s",
 				 dirname, errstr);
-			return false;
+			return;
 	}
-	return false;				/* keep compiler quiet */
-}
-
-/*
- * Test to see if a directory exists and is empty or not.
- *
- * Returns:
- *		0 if nonexistent
- *		1 if exists and empty
- *		2 if exists and contains _only_ dot files
- *		3 if exists and contains a mount point
- *		4 if exists and not empty
- *		-1 if trouble accessing directory (errno reflects the error)
- */
-int
-pg_check_dir(const char *dir)
-{
-	int			result = 1;
-	DIR		   *chkdir;
-	struct dirent *file;
-	bool		dot_found = false;
-	bool		mount_found = false;
-	int			readdir_errno;
-
-	chkdir = opendir(dir);
-	if (chkdir == NULL)
-		return (errno == ENOENT) ? 0 : -1;
-
-	while (errno = 0, (file = readdir(chkdir)) != NULL)
-	{
-		if (strcmp(".", file->d_name) == 0 ||
-			strcmp("..", file->d_name) == 0)
-		{
-			/* skip this and parent directory */
-			continue;
-		}
-#ifndef WIN32
-		/* file starts with "." */
-		else if (file->d_name[0] == '.')
-		{
-			dot_found = true;
-		}
-		/* lost+found directory */
-		else if (strcmp("lost+found", file->d_name) == 0)
-		{
-			mount_found = true;
-		}
-#endif
-		else
-		{
-			result = 4;			/* not empty */
-			break;
-		}
-	}
-
-	if (errno)
-		result = -1;			/* some kind of I/O error? */
-
-	/* Close chkdir and avoid overwriting the readdir errno on success */
-	readdir_errno = errno;
-	if (closedir(chkdir))
-		result = -1;			/* error executing closedir */
-	else
-		errno = readdir_errno;
-
-	/* We report on mount point if we find a lost+found directory */
-	if (result == 1 && mount_found)
-		result = 3;
-
-	/* We report on dot-files if we _only_ find dot files */
-	if (result == 1 && dot_found)
-		result = 2;
-
-	return result;
+	return;						/* keep compiler quiet */
 }
 
 /*

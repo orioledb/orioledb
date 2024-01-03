@@ -34,8 +34,8 @@ class FileOperationsTest(BaseTest):
 		except Exception as e:
 			message = re.sub('[0-9]+', 'x', e.message)
 			self.assertTrue(
-			    "FATAL:  could not open data file orioledb_data/x/x\n" in
-			    message)
+			    "ERROR:  could not access directory \"orioledb_data/x\": Permission denied\n"
+			    in message)
 
 		# checks that all pages has been released
 		self.assertEqual(
