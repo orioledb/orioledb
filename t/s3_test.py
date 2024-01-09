@@ -13,6 +13,7 @@ from moto.server import DomainDispatcherApplication, create_backend_app
 from testgres.consts import DATA_DIR
 from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
+from testgres.exceptions import StartNodeException
 
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
 import urllib3
@@ -146,6 +147,29 @@ class S3Test(BaseTest):
 			self.assertEqual(file_content, orioledb_object_body)
 		node.stop(['-m', 'immediate'])
 		os.unlink(s3_test_file)
+
+	def test_s3_credential_check(self):
+		node = self.node
+
+		node.append_conf(
+		    'postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = 'BOB:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+		""")
+		with self.assertRaises(StartNodeException) as e:
+			node.start()
+		self.assertEqual(e.exception.message, "Cannot start node")
+		with open(node.pg_log_file) as f:
+			log = f.readlines()
+		message = log[0].split('] ')[-1].strip()
+		self.assertEqual(
+		    message,
+		    "FATAL:  could not list objects in S3 bucket, check orioledb s3 configs"
+		)
 
 	def test_s3_checkpoint(self):
 		node = self.node

@@ -73,6 +73,8 @@ register_s3worker(int num)
 {
 	BackgroundWorker worker;
 
+	s3_list_objects();
+
 	/* Set up background worker parameters */
 	memset(&worker, 0, sizeof(worker));
 	worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_CLASS_SYSTEM;

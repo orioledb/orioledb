@@ -169,6 +169,71 @@ write_data_to_buf(void *buffer, size_t size, size_t nmemb, void *userp)
 	return segsize;
 }
 
+void
+s3_list_objects(void)
+{
+	CURL	   *curl;
+	char	   *url;
+	char	   *datestring;
+	char	   *datetimestring;
+	char	   *signature;
+	struct curl_slist *slist;
+	char	   *tmp;
+	int			sc;
+	unsigned char hash[32];
+	char	   *contenthash;
+	long		http_code = 0;
+	StringInfo	str = makeStringInfo();
+
+	(void) SHA256(NULL, 0, hash);
+	contenthash = hex_string((Pointer) hash, sizeof(hash));
+
+	url = psprintf("https://%s/%s", s3_host, "");
+	datestring = httpdate(NULL);
+	datetimestring = httpdatetime(NULL);
+	signature = s3_signature("GET", datetimestring, datestring, "",
+							 s3_secretkey, contenthash);
+
+	slist = NULL;
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
+	pfree(tmp);
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
+	pfree(tmp);
+	slist = curl_slist_append(slist,
+							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
+											  s3_accesskey, datestring, s3_region, signature)));
+	pfree(tmp);
+
+	curl = curl_easy_init();
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if (s3_cainfo)
+		curl_easy_setopt(curl, CURLOPT_CAINFO, s3_cainfo);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_buf);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, str);
+
+	sc = curl_easy_perform(curl);
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+	if (sc != 0 || http_code != 200)
+	{
+		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+						errmsg("could not list objects in S3 bucket, check orioledb s3 configs"),
+						errdetail("return code = %d, http code = %ld, response = %s",
+								  sc, http_code, str->data)));
+	}
+
+	curl_easy_cleanup(curl);
+
+	curl_slist_free_all(slist);
+	pfree(url);
+	pfree(datestring);
+	pfree(datetimestring);
+	pfree(signature);
+	pfree(str->data);
+	pfree(str);
+}
+
 /*
  * Get the binary content of an object from S3 into 'str'.
  */
