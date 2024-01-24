@@ -155,7 +155,9 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 
 		tag.datoid = desc->oids.datoid;
 		tag.relnode = desc->oids.relnode;
-		tag.num = checkpoint_number - 1;
+		tag.num = o_get_latest_chkp_num(desc->oids.datoid,
+										desc->oids.relnode,
+										checkpoint_number - 1);
 		tag.type = 'm';
 
 
@@ -238,7 +240,9 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		 * Reads free blocks from map file.
 		 */
 		chkp_tag.type = 'm';
-		chkp_tag.num = chkp_num;
+		chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
+											 desc->oids.relnode,
+											 chkp_num);
 
 		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
 								   free_extents, is_compressed);

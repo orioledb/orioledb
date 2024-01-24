@@ -87,24 +87,32 @@ extern void ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock
 #define IS_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 #define CLEAN_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 
-#define MARK_DIRTY(pool, blkno) \
+#define MARK_DIRTY_EXTENDED(desc, blkno, skipMeta) \
 	do \
 	{ \
+		if (!(skipMeta)) \
+		{ \
+			BTREE_GET_META(desc)->dirtyFlag1 = true; \
+			BTREE_GET_META(desc)->dirtyFlag2 = true; \
+		} \
 		if (!IS_DIRTY(blkno)) { \
 			O_GET_IN_MEMORY_PAGEDESC(blkno)->flags |= PAGE_DESC_FLAG_BOTH_DIRTY; \
-			pg_atomic_fetch_add_u32(pool->dirtyPagesCount, 1); \
+			pg_atomic_fetch_add_u32((desc)->ppool->dirtyPagesCount, 1); \
 		} \
 		else if (!IS_DIRTY_CONCURRENT(blkno)) \
 		{ \
 			O_GET_IN_MEMORY_PAGEDESC(blkno)->flags |= PAGE_DESC_FLAG_CONCURRENT_DIRTY; \
 		} \
 	} \
-	while (0); \
+	while (0);
+
+#define MARK_DIRTY(desc, blkno) \
+	MARK_DIRTY_EXTENDED(desc, blkno, false)
 
 #define CLEAN_DIRTY(pool, blkno) \
 	if (IS_DIRTY(blkno)) { \
 		O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_BOTH_DIRTY; \
-		pg_atomic_fetch_sub_u32(pool->dirtyPagesCount, 1); \
+		pg_atomic_fetch_sub_u32((pool)->dirtyPagesCount, 1); \
 	}
 
 #define FREE_PAGE_IF_VALID(pool, blkno) \

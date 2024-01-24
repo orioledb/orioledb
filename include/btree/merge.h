@@ -21,7 +21,8 @@ extern bool btree_try_merge_pages(BTreeDescr *desc,
 								  bool *merge_parent,
 								  OInMemoryBlkno left_blkno,
 								  BTreePageItemLocator right_loc,
-								  OInMemoryBlkno right_blkno);
+								  OInMemoryBlkno right_blkno,
+								  bool checkpoint);
 extern bool btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 									   bool nested, bool wait_io);
 extern bool is_page_too_sparse(BTreeDescr *desc, Page p);

@@ -22,6 +22,7 @@
 #include "catalog/free_extents.h"
 #include "catalog/indices.h"
 #include "catalog/o_sys_cache.h"
+#include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
@@ -1944,15 +1945,21 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 			{
 				if (before_recovery)
 				{
-					/*
-					 * Before recovery We should cleanup: 1. All *.evt files.
-					 * 2. *.map and *.tmp files which were not created by
-					 * checkpointer. 3. All free extents tree files.
+					/*---
+					 * Before recovery we should cleanup:
 					 *
-					 * Otherwise: 1. BTree will be loaded from evicted state,
-					 * not from checkpoint state. 2. In some cases wrong *.map
-					 * files will be created. (if size of old *.map or *.tmp
-					 * file is more than will be created by checkpointer).
+					 * 1. All *.evt files.
+					 * 2. *.map and *.tmp files which were not created by
+					 * checkpointer.
+					 * 3. All free extents tree files.
+					 *
+					 * Otherwise:
+					 *
+					 * 1. BTree will be loaded from evicted state,
+					 * not from checkpoint state.
+					 * 2. In some cases wrong *.map files will be created.
+					 * (if size of old *.map or *.tmp file is more than will
+					 * be created by checkpointer).
 					 */
 					cleanup = strcmp(ext, ORIOLEDB_EVT_EXTENSION) == 0;
 
@@ -1974,10 +1981,18 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					 * After recovery we should cleanup old *.tmp and *.map
 					 * files.
 					 */
-					if (file_chkp < chkp_num)
-						cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
-					else if (file_chkp == chkp_num)
-						cleanup = !strcmp(ext, "tmp");
+					if (!strcmp(ext, "tmp"))
+					{
+						cleanup = (file_chkp <= chkp_num);
+					}
+					else if (!strcmp(ext, "map"))
+					{
+						uint32		my_chkp_num;
+
+						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid, chkp_num);
+
+						cleanup = (file_chkp < my_chkp_num);
+					}
 				}
 			}
 			else if (before_recovery &&

@@ -687,7 +687,7 @@ class IndicesBuildTest(BaseTest):
 		node.execute("CHECKPOINT;")
 
 		self.assertEqual(self.get_map_files(filter_files),
-		                 {f"{dboid}_{ix_oid}": [5, 3]})
+		                 {f"{dboid}_{ix_oid}": [3]})
 		self.check_used_index(
 		    node, "SELECT * FROM o_indices WHERE val > 0 ORDER BY val",
 		    'o_indices_ix1')

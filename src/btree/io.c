@@ -1973,7 +1973,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			else
 			{
 				if (dirty_parent)
-					MARK_DIRTY(desc->ppool, parent_blkno);
+					MARK_DIRTY(desc, parent_blkno);
 
 				if (evict)
 				{
@@ -2113,6 +2113,8 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	evicted_tree_data.file_header = file_header;
 	evicted_tree_data.maxLocation[0] = metaPage->partsInfo[0].writeMaxLocation;
 	evicted_tree_data.maxLocation[1] = metaPage->partsInfo[1].writeMaxLocation;
+	evicted_tree_data.dirtyFlag1 = metaPage->dirtyFlag1;
+	evicted_tree_data.dirtyFlag2 = metaPage->dirtyFlag2;
 
 	/*
 	 * Free all private seq buf pages and get their offsets

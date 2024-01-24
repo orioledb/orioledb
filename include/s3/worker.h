@@ -74,5 +74,7 @@ extern S3TaskLocation s3_schedule_downlink_load(struct BTreeDescr *desc,
 												uint64 downlink);
 extern void s3_load_file_part(uint32 chkpNum, Oid datoid, Oid relnode,
 							  int32 segNum, int32 partNum);
+extern void s3_load_map_file(uint32 chkpNum, Oid datoid, Oid relnode);
+
 
 #endif							/* __S3_WORKER_H__ */

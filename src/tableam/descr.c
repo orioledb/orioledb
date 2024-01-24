@@ -175,6 +175,12 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	key.datoid = desc->oids.datoid;
 	key.relnode = desc->oids.relnode;
 
+	/*
+	 * evictable_tree_init() needs that.  Initialized it before we get one of
+	 * checkpoint_state->oSharedRootInfoInsertLocks.
+	 */
+	(void) get_sys_tree(SYS_TREES_CHKP_NUM);
+
 	sharedRootInfo = o_find_shared_root_info(&key);
 	if (sharedRootInfo == NULL)
 	{

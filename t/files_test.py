@@ -219,8 +219,8 @@ class FilesTest(BaseTest):
 		    f for f in list(chain.from_iterable(map_files.values()))
 		    if f != last_xid
 		]
-		self.assertEqual([0], old_map_files)
-		self.assertEqual(['2'], [f[2] for f in tmp_files])
+		self.assertEqual([0, 2], old_map_files)
+		self.assertEqual(['2', '2'], [f[2] for f in tmp_files])
 
 		node.start()
 		node.safe_psql('postgres', 'CHECKPOINT;')
@@ -233,7 +233,7 @@ class FilesTest(BaseTest):
 		    f for f in list(chain.from_iterable(map_files.values()))
 		    if f != last_xid
 		]
-		self.assertEqual([4, 4], old_map_files)
+		self.assertEqual([0, 2], old_map_files)
 		self.assertEqual([], [f[2] for f in tmp_files])
 
 	def test_multiple_checkpoint_tmp_map_cleanup(self):
@@ -286,7 +286,7 @@ class FilesTest(BaseTest):
 		map_file_key = "%s_%s" % (datoid, o_test_pkey_relnode)
 		self.assertEqual([8], map_files[map_file_key])
 		map_file_key = "%s_%s" % (datoid, o_test_toast_relnode)
-		self.assertEqual([8, 4], map_files[map_file_key])
+		self.assertEqual([0], map_files[map_file_key])
 
 	def test_tmp_map_cleanup_no_error(self):
 		node = self.node

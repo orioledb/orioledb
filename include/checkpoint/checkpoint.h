@@ -236,6 +236,9 @@ extern CheckpointState *checkpoint_state;
 extern Size checkpoint_shmem_size(void);
 extern void checkpoint_shmem_init(Pointer ptr, bool found);
 extern char *get_eviction_filename(ORelOids oids, uint32 chkp_num);
+extern uint32 o_get_latest_chkp_num(Oid datoid, Oid relnode, uint32 max_chkp_num);
+extern void o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num);
+extern void o_delete_chkp_num(Oid datoid, Oid relnode);
 
 extern void o_perform_checkpoint(XLogRecPtr redo_pos, int flags);
 extern void o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo,

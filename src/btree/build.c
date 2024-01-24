@@ -478,6 +478,12 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 					 errmsg("Could not write checkpoint header to file: %s",
 							filename)));
 		}
+		FileClose(file);
+		pfree(filename);
+
+		o_update_latest_chkp_num(desc->oids.datoid,
+								 desc->oids.relnode,
+								 checkpoint_number);
 
 		if (orioledb_s3_mode)
 		{
@@ -514,9 +520,9 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 							errmsg("Could not write eviction data to file: %s",
 								   filename)));
 		}
+		FileClose(file);
+		pfree(filename);
 	}
-	FileClose(file);
-	pfree(filename);
 
 	return result;
 }

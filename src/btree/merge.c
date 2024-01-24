@@ -52,7 +52,9 @@ btree_try_merge_pages(BTreeDescr *desc,
 					  OInMemoryBlkno parent_blkno, OFixedKey *parent_hikey,
 					  bool *merge_parent,
 					  OInMemoryBlkno left_blkno,
-					  BTreePageItemLocator right_loc, OInMemoryBlkno right_blkno)
+					  BTreePageItemLocator right_loc,
+					  OInMemoryBlkno right_blkno,
+					  bool checkpoint)
 {
 	Page		parent = O_GET_IN_MEMORY_PAGE(parent_blkno),
 				left = O_GET_IN_MEMORY_PAGE(left_blkno),
@@ -103,7 +105,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	page_block_reads(parent_blkno);
 
 	page_locator_delete_item(parent, &right_loc);
-	MARK_DIRTY(desc->ppool, parent_blkno);
+	MARK_DIRTY_EXTENDED(desc, parent_blkno, checkpoint);
 
 	/* unlocks the parent page */
 	if (*merge_parent && is_page_too_sparse(desc, parent))
@@ -151,7 +153,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	 */
 	merge_pages(desc, left_blkno, right, csn);
 	btree_page_update_max_key_len(desc, left);
-	MARK_DIRTY(desc->ppool, left_blkno);
+	MARK_DIRTY_EXTENDED(desc, left_blkno, checkpoint);
 
 	/* the right page can not be found in B-Tree after this line */
 
@@ -380,7 +382,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno, &key,
 												   &merge_parent, target_blkno,
-												   right_loc, right_blkno);
+												   right_loc, right_blkno,
+												   false);
 					if (!merged)
 						unlock_page(right_blkno);
 				}
@@ -440,7 +443,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 					merged = btree_try_merge_pages(desc, parent_blkno,
 												   &key, &merge_parent,
 												   left_blkno,
-												   target_loc, target_blkno);
+												   target_loc, target_blkno,
+												   false);
 					if (!merged)
 						unlock_page(left_blkno);
 				}

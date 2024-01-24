@@ -119,6 +119,9 @@ static void free_tree_print(BTreeDescr *desc, StringInfo buf,
 static JsonbValue *free_tree_key_to_jsonb(BTreeDescr *desc, OTuple tup,
 										  JsonbParseState **state);
 
+static void o_chkp_num_print(BTreeDescr *desc, StringInfo buf,
+							 OTuple tup, Pointer arg);
+
 
 static SysTreeMeta sysTreesMeta[] =
 {
@@ -355,6 +358,18 @@ static SysTreeMeta sysTreesMeta[] =
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
 		.undoReserveType = UndoReserveTxn,
+		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
+	},
+	{							/* SYS_TREES_CHKP_NUM */
+		.keyLength = sizeof(SharedRootInfoKey),
+		.tupleLength = sizeof(ChkpNumTuple),
+		.cmpFunc = shared_root_info_key_cmp,
+		.keyPrint = idx_descr_key_print,
+		.tupPrint = o_chkp_num_print,
+		.keyToJsonb = idx_descr_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoReserveType = UndoReserveNone,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -1108,4 +1123,16 @@ free_tree_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state)
 	jsonb_push_int8_key(state, "offset", key->extent.offset);
 	jsonb_push_int8_key(state, "length", key->extent.length);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
+}
+
+static void
+o_chkp_num_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
+{
+	ChkpNumTuple *chkpNumTup = (ChkpNumTuple *) tup.data;
+
+	appendStringInfo(buf, "((%u, %u), %u, %u)",
+					 chkpNumTup->key.datoid,
+					 chkpNumTup->key.relnode,
+					 chkpNumTup->checkpointNumbers[0],
+					 chkpNumTup->checkpointNumbers[1]);
 }

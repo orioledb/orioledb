@@ -581,9 +581,34 @@ SELECT regexp_replace(regexp_replace(
  
 (1 row)
 
--- SYS_TREES_MULTIRANGE_CACHE
+-- SYS_TREES_CHKP_NUM
 SELECT regexp_replace(regexp_replace(
 			orioledb_sys_tree_structure(20, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+                           regexp_replace                            
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 192              +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: deleted, offset = 272, tuple = ((16384, 16449), 0, 0)  +
+     Item 1: deleted, offset = 304, tuple = ((16384, 16452), 0, 0)  +
+     Item 2: deleted, offset = 336, tuple = ((16384, 16462), 0, 0)  +
+     Item 3: deleted, offset = 368, tuple = ((16384, 16500), 0, 0)  +
+     Item 4: deleted, offset = 400, tuple = ((16384, 16503), 0, 0)  +
+     Item 5: deleted, offset = 432, tuple = ((16384, 16506), 0, 0)  +
+                                                                    +
+ 
+(1 row)
+
+-- SYS_TREES_MULTIRANGE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(21, 'ne'),
 			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
 			'NNN, (NNN), X/X, ',
 			'g'),
@@ -602,9 +627,9 @@ SELECT regexp_replace(regexp_replace(
 
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
-ERROR:  Value num must be in the range from 1 to 20
+ERROR:  Value num must be in the range from 1 to 21
 SELECT orioledb_sys_tree_check(-1111);
-ERROR:  Value num must be in the range from 1 to 20
+ERROR:  Value num must be in the range from 1 to 21
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_sys_check CASCADE;
 RESET search_path;

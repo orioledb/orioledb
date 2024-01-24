@@ -53,7 +53,7 @@ o_btree_init(BTreeDescr *desc)
 	init_page_first_chunk(desc, O_GET_IN_MEMORY_PAGE(desc->rootInfo.rootPageBlkno), 0);
 	unlock_page(desc->rootInfo.rootPageBlkno);
 	init_meta_page(desc->rootInfo.metaPageBlkno, 1);
-	MARK_DIRTY(desc->ppool, desc->rootInfo.rootPageBlkno);
+	MARK_DIRTY(desc, desc->rootInfo.rootPageBlkno);
 }
 
 static bool

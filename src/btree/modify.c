@@ -493,7 +493,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 										&context->conflictTupHdr,
 										context->conflictUndoLocation))
 					context->cmp = -1;
-				MARK_DIRTY(desc->ppool, blkno);
+				MARK_DIRTY(desc, blkno);
 				END_CRIT_SECTION();
 			}
 			else if (COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
@@ -652,7 +652,7 @@ o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 	applyResult = page_item_rollback(desc, page, &loc, false,
 									 &context->conflictTupHdr,
 									 context->conflictUndoLocation);
-	MARK_DIRTY(desc->ppool, blkno);
+	MARK_DIRTY(desc, blkno);
 	END_CRIT_SECTION();
 
 	if (!applyResult)
@@ -829,7 +829,7 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 
 	PAGE_ADD_N_VACATED(page, BTREE_PAGE_GET_ITEM_SIZE(page, &loc));
 
-	MARK_DIRTY(desc->ppool, blkno);
+	MARK_DIRTY(desc, blkno);
 
 	END_CRIT_SECTION();
 
@@ -909,7 +909,7 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 										  true);
 	tuphdr->deleted = BTreeLeafTupleNonDeleted;
 
-	MARK_DIRTY(desc->ppool, blkno);
+	MARK_DIRTY(desc, blkno);
 	END_CRIT_SECTION();
 	unlock_release(context, true);
 

@@ -223,8 +223,8 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 	ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
 	memcpy(ptr, &internal_header, BTreeNonLeafTuphdrSize);
 
-	MARK_DIRTY(desc->ppool, left_blkno);
-	MARK_DIRTY(desc->ppool, desc->rootInfo.rootPageBlkno);
+	MARK_DIRTY(desc, left_blkno);
+	MARK_DIRTY(desc, desc->rootInfo.rootPageBlkno);
 
 	btree_split_mark_finished(left_blkno, false, true);
 	insert_item->left_blkno = OInvalidInMemoryBlkno;
@@ -607,7 +607,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 			page_split_chunk_if_needed(desc, p, &loc);
 
-			MARK_DIRTY(desc->ppool, blkno);
+			MARK_DIRTY(desc, blkno);
 			END_CRIT_SECTION();
 			unlock_page(blkno);
 

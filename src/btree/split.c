@@ -520,6 +520,6 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 	o_btree_page_calculate_statistics(desc, left_page);
 	o_btree_page_calculate_statistics(desc, right_page);
 
-	MARK_DIRTY(desc->ppool, blkno);
-	MARK_DIRTY(desc->ppool, new_blkno);
+	MARK_DIRTY(desc, blkno);
+	MARK_DIRTY(desc, new_blkno);
 }

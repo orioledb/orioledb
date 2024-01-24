@@ -39,11 +39,12 @@
 #define SYS_TREES_COLLATION_CACHE		(17)
 #define SYS_TREES_DATABASE_CACHE		(18)
 #define SYS_TREES_AMOP_STRAT_CACHE		(19)
+#define SYS_TREES_CHKP_NUM				(20)
 #if PG_VERSION_NUM >= 140000
-#define SYS_TREES_MULTIRANGE_CACHE		(20)
-#define SYS_TREES_NUM					(20)
+#define SYS_TREES_MULTIRANGE_CACHE		(21)
+#define SYS_TREES_NUM					(21)
 #else
-#define SYS_TREES_NUM					(19)
+#define SYS_TREES_NUM					(20)
 #endif
 
 #define IS_SYS_TREE_OIDS(oids) \
@@ -120,6 +121,12 @@ typedef struct
 	Oid			datoid;
 	Oid			relnode;
 } FreeTreeTuple;
+
+typedef struct
+{
+	SharedRootInfoKey key;
+	uint32		checkpointNumbers[2];
+} ChkpNumTuple;
 
 extern Size sys_trees_shmem_needs(void);
 extern void sys_trees_shmem_init(Pointer ptr, bool found);

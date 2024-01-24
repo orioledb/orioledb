@@ -205,7 +205,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 
 	deleted_tup = *cur_tup;
 
-	MARK_DIRTY(len_off_tree->ppool, context.items[context.index].blkno);
+	MARK_DIRTY(len_off_tree, context.items[context.index].blkno);
 
 	if (is_page_too_sparse(len_off_tree, p))
 		(void) btree_try_merge_and_unlock(len_off_tree,

@@ -482,7 +482,7 @@ modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 								  &nonLockTupHdr, nonLockUndoLocation);
 	}
 
-	MARK_DIRTY(desc->ppool, blkno);
+	MARK_DIRTY(desc, blkno);
 	if (blkno != desc->rootInfo.rootPageBlkno && is_page_too_sparse(desc, p))
 	{
 		/* We can try to merge this page */
@@ -596,7 +596,7 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 				page_tuphdr->undoLocation = prev_tuphdr.undoLocation;
 				page_tuphdr->chainHasLocks = prev_tuphdr.chainHasLocks;
 				tuphdr = *page_tuphdr;
-				MARK_DIRTY(desc->ppool, blkno);
+				MARK_DIRTY(desc, blkno);
 			}
 			else
 			{
@@ -839,6 +839,7 @@ btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 				o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, false);
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
 			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
+			o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);

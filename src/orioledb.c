@@ -131,6 +131,7 @@ char	   *s3_cainfo = NULL;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
+static emit_log_hook_type prev_emit_log_hook;
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
 
@@ -150,6 +151,7 @@ OPagePool	page_pools[OPagePoolTypesCount];
 
 static size_t page_pools_size[OPagePoolTypesCount];
 
+static void o_emit_log_hook(ErrorData *edata);
 static Size o_proc_shmem_needs(void);
 static void o_proc_shmem_init(Pointer ptr, bool found);
 static Size ppools_shmem_needs(void);
@@ -186,6 +188,7 @@ static Size orioledb_memsize(void);
 static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
 static void verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
+static void o_emit_log_hook(ErrorData *edata);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
 static void orioledb_get_relation_info_hook(PlannerInfo *root,
@@ -827,8 +830,31 @@ _PG_init(void)
 	get_relation_info_hook = orioledb_get_relation_info_hook;
 	xact_redo_hook = o_xact_redo_hook;
 	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
+	prev_emit_log_hook = emit_log_hook;
+	emit_log_hook = o_emit_log_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
+}
+
+static void
+o_emit_log_hook(ErrorData *edata)
+{
+	const char *target_str = "database system was";
+
+	if (!memcmp(edata->message_id, target_str, strlen(target_str)) &&
+		!strcmp(edata->funcname, "StartupXLOG"))
+	{
+		if (remove_old_checkpoint_files)
+		{
+			recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
+									   true);
+			recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
+									   false);
+		}
+	}
+
+	if (prev_emit_log_hook)
+		prev_emit_log_hook(edata);
 }
 
 void
@@ -1036,10 +1062,6 @@ orioledb_shmem_startup(void)
 	btree_seqscan_context = AllocSetContextCreate(TopTransactionContext,
 												  "orioledb B-tree seqential scans context",
 												  ALLOCSET_DEFAULT_SIZES);
-
-	if (remove_old_checkpoint_files)
-		recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
-								   false);
 }
 
 uint64

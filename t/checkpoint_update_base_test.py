@@ -51,6 +51,9 @@ class CheckpointUpdateBaseTest(BaseTest):
 
 		if is_chkp_after_insert:
 			node.execute("CHECKPOINT;")
+			# Do spurious modification to trigger a checkpoint for the tree
+			con1.execute("UPDATE o_evicted SET val = val WHERE id = 1;\n")
+			con1.commit()
 
 		# uses random to detect more problems
 		con2.execute("SELECT pg_stopevent_set('checkpoint_step',\n"

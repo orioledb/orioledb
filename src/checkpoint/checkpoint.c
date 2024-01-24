@@ -21,7 +21,9 @@
 
 #include "btree/insert.h"
 #include "btree/io.h"
+#include "btree/iterator.h"
 #include "btree/merge.h"
+#include "btree/modify.h"
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
 #include "catalog/free_extents.h"
@@ -168,6 +170,7 @@ static int	file_extents_writeback_cmp(const void *a, const void *b);
 static void sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index);
 static void sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index);
 static inline void checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr);
+static void checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum);
 static void checkpoint_temporary_tree(int flags, BTreeDescr *descr);
 static bool checkpoint_ix(int flags, BTreeDescr *descr);
 static uint64 checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
@@ -825,6 +828,217 @@ finish_write_xids(uint32 chkpnum)
 	}
 }
 
+static void
+checkpoint_sys_trees(int flags, uint32 cur_chkp_num,
+					 CheckpointTablesArg *chkp_tbl_arg)
+{
+	int			sys_tree_num;
+
+	for (sys_tree_num = 1; sys_tree_num <= SYS_TREES_NUM; sys_tree_num++)
+	{
+		BTreeDescr *desc;
+		bool		success PG_USED_FOR_ASSERTS_ONLY;
+
+		if (sys_tree_get_storage_type(sys_tree_num) == BTreeStorageInMemory ||
+			sys_tree_num == SYS_TREES_CHKP_NUM)
+			continue;
+
+		desc = get_sys_tree(sys_tree_num);
+
+		checkpoint_ix_init_state(checkpoint_state, desc);
+		checkpoint_init_new_seq_bufs(desc, cur_chkp_num);
+
+		if (desc->storageType == BTreeStoragePersistence)
+		{
+			success = checkpoint_ix(flags, desc);
+			/* System trees can't be concurrently deleted */
+			Assert(success);
+			if (!orioledb_s3_mode)
+			{
+				sort_checkpoint_map_file(desc, cur_chkp_num % 2);
+				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+				chkp_tbl_arg->cleanupMap = add_map_cleanup_item(chkp_tbl_arg->cleanupMap,
+																desc);
+			}
+		}
+		else
+		{
+			checkpoint_temporary_tree(flags, desc);
+			if (!orioledb_s3_mode)
+				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+		}
+	}
+}
+
+static void
+checkpoint_chkp_nums(int flags, uint32 cur_chkp_num,
+					 CheckpointTablesArg *chkp_tbl_arg)
+{
+	BTreeDescr *desc;
+	bool		success PG_USED_FOR_ASSERTS_ONLY;
+
+	desc = get_sys_tree(SYS_TREES_CHKP_NUM);
+
+	checkpoint_ix_init_state(checkpoint_state, desc);
+	checkpoint_init_new_seq_bufs(desc, cur_chkp_num);
+
+	success = checkpoint_ix(flags, desc);
+
+	/* System trees can't be concurrently deleted */
+	Assert(success);
+	if (!orioledb_s3_mode)
+	{
+		sort_checkpoint_map_file(desc, cur_chkp_num % 2);
+		sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
+		chkp_tbl_arg->cleanupMap = add_map_cleanup_item(chkp_tbl_arg->cleanupMap,
+														desc);
+	}
+}
+
+static uint32
+o_get_latest_chkp_num_internal(Oid datoid, Oid relnode, uint32 max_chkp_num,
+							   bool *found)
+{
+	OTuple		key_tuple,
+				result_tuple;
+	SharedRootInfoKey key;
+	uint32		chkp_num;
+	ChkpNumTuple *result;
+
+	if (datoid == SYS_TREES_DATOID)
+		return max_chkp_num;
+
+	key.datoid = datoid;
+	key.relnode = relnode;
+	key_tuple.data = (Pointer) &key;
+
+	result_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_CHKP_NUM),
+											 &key_tuple, BTreeKeyNonLeafKey,
+											 COMMITSEQNO_INPROGRESS, NULL,
+											 CurrentMemoryContext, NULL);
+
+	if (O_TUPLE_IS_NULL(result_tuple))
+	{
+		if (found)
+			*found = false;
+		return max_chkp_num;
+	}
+	if (found)
+		*found = true;
+
+	result = (ChkpNumTuple *) result_tuple.data;
+	chkp_num = 0;
+	if (result->checkpointNumbers[0] <= max_chkp_num &&
+		result->checkpointNumbers[0] > chkp_num)
+		chkp_num = result->checkpointNumbers[0];
+	if (result->checkpointNumbers[1] <= max_chkp_num &&
+		result->checkpointNumbers[1] > chkp_num)
+		chkp_num = result->checkpointNumbers[1];
+	pfree(result_tuple.data);
+
+	return chkp_num;
+}
+
+uint32
+o_get_latest_chkp_num(Oid datoid, Oid relnode, uint32 max_chkp_num)
+{
+	return o_get_latest_chkp_num_internal(datoid, relnode,
+										  max_chkp_num, NULL);
+}
+
+void
+o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num)
+{
+	OTuple		key_tuple,
+				tuple,
+				newTuple;
+	SharedRootInfoKey key;
+	ChkpNumTuple data;
+	static BTreeModifyCallbackInfo callbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyCallback = recovery_insert_overwrite_callback,
+		.modifyDeletedCallback = NULL,
+		.needsUndoForSelfCreated = false,
+		.arg = NULL
+	};
+
+	BTreeDescr *desc = get_sys_tree(SYS_TREES_CHKP_NUM);
+	OBTreeModifyResult result;
+
+	key.datoid = datoid;
+	key.relnode = relnode;
+	key_tuple.data = (Pointer) &key;
+
+	tuple = o_btree_find_tuple_by_key(desc,
+									  &key_tuple, BTreeKeyNonLeafKey,
+									  COMMITSEQNO_INPROGRESS, NULL,
+									  CurrentMemoryContext, NULL);
+	if (O_TUPLE_IS_NULL(tuple))
+	{
+		data.key = key;
+		data.checkpointNumbers[0] = chkp_num;
+		data.checkpointNumbers[1] = 0;
+	}
+	else
+	{
+		data = *((ChkpNumTuple *) tuple.data);
+		pfree(tuple.data);
+		if (data.checkpointNumbers[0] >= chkp_num)
+			data.checkpointNumbers[0] = 0;
+		if (data.checkpointNumbers[1] >= chkp_num)
+			data.checkpointNumbers[1] = 0;
+		data.checkpointNumbers[1] = Max(data.checkpointNumbers[0],
+										data.checkpointNumbers[1]);
+		data.checkpointNumbers[0] = chkp_num;
+	}
+	newTuple.formatFlags = 0;
+	newTuple.data = (Pointer) &data;
+
+	result = o_btree_modify(desc,
+							O_TUPLE_IS_NULL(tuple) ? BTreeOperationInsert : BTreeOperationUpdate,
+							newTuple, BTreeKeyLeafTuple,
+							(Pointer) &key_tuple, BTreeKeyNonLeafKey,
+							InvalidOXid,
+							COMMITSEQNO_INPROGRESS,
+							RowLockUpdate,
+							NULL,
+							&callbackInfo);
+
+	Assert(result == OBTreeModifyResultInserted ||
+		   result == OBTreeModifyResultUpdated);
+}
+
+void
+o_delete_chkp_num(Oid datoid, Oid relnode)
+{
+	OTuple		key_tuple;
+	SharedRootInfoKey key;
+	static BTreeModifyCallbackInfo nullCallbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyCallback = NULL,
+		.modifyDeletedCallback = NULL,
+		.needsUndoForSelfCreated = false,
+		.arg = NULL
+	};
+
+	key.datoid = datoid;
+	key.relnode = relnode;
+	key_tuple.data = (Pointer) &key;
+	key_tuple.formatFlags = 0;
+
+	(void) o_btree_modify(get_sys_tree(SYS_TREES_CHKP_NUM),
+						  BTreeOperationDelete,
+						  key_tuple, BTreeKeyNonLeafKey,
+						  (Pointer) NULL, BTreeKeyNone,
+						  InvalidOXid,
+						  COMMITSEQNO_INPROGRESS,
+						  RowLockUpdate,
+						  NULL,
+						  &nullCallbackInfo);
+}
+
 void
 o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 {
@@ -834,14 +1048,17 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	uint32		cur_chkp_num = checkpoint_state->lastCheckpointNumber + 1,
 				prev_chkp_num = checkpoint_state->lastCheckpointNumber;
 	MemoryContext prev_context;
-	int			sys_tree_num;
 	ODBProcData *my_proc_info = GET_CUR_PROCDATA();
 	UndoLocation checkpoint_start_loc,
 				checkpoint_end_loc;
 	OXid		checkpoint_xmin,
 				checkpoint_xmax;
+	int			i;
 
 	orioledb_check_shmem();
+
+	for (i = 1; i <= SYS_TREES_NUM; i++)
+		(void) get_sys_tree(i);
 
 	maxLocation = 0;
 
@@ -895,39 +1112,11 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	before_writing_xids_file(cur_chkp_num);
 	start_write_xids(cur_chkp_num);
 
+
 	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
 
-	for (sys_tree_num = 1; sys_tree_num <= SYS_TREES_NUM; sys_tree_num++)
-	{
-		BTreeDescr *desc;
-		bool		success PG_USED_FOR_ASSERTS_ONLY;
-
-		if (sys_tree_get_storage_type(sys_tree_num) == BTreeStorageInMemory)
-			continue;
-
-		desc = get_sys_tree(sys_tree_num);
-
-		if (desc->storageType == BTreeStoragePersistence)
-		{
-			success = checkpoint_ix(flags, desc);
-			/* System trees can't be concurrently deleted */
-			Assert(success);
-			if (!orioledb_s3_mode)
-			{
-				sort_checkpoint_map_file(desc, cur_chkp_num % 2);
-				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
-				chkp_tbl_arg.cleanupMap = add_map_cleanup_item(chkp_tbl_arg.cleanupMap,
-															   desc);
-			}
-		}
-		else
-		{
-			checkpoint_temporary_tree(flags, desc);
-			if (!orioledb_s3_mode)
-				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
-		}
-	}
+	checkpoint_sys_trees(flags, cur_chkp_num, &chkp_tbl_arg);
 
 	/*
 	 * We get start position for replay changes to system trees while holding
@@ -946,6 +1135,12 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);
+
+	LWLockRelease(&checkpoint_state->oTablesMetaLock);
+
+	checkpoint_chkp_nums(flags, cur_chkp_num, &chkp_tbl_arg);
+
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
 
 	chkp_inc_changecount_before(checkpoint_state);
 	checkpoint_state->lastCheckpointNumber++;
@@ -1083,35 +1278,23 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		next_CheckPoint_hook(redo_pos, flags);
 }
 
-/*
- * Make checkpoint of an index.
- */
 static void
-checkpoint_temporary_tree(int flags, BTreeDescr *descr)
+checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 {
-	BTreeMetaPage *meta_page;
-	SeqBufTag	next_tmp_tag = {0};
-	int			cur_chkp_index,
-				next_chkp_index;
+	BTreeMetaPage *meta_page = BTREE_GET_META(descr);
 	Oid			datoid = descr->oids.datoid;
 	Oid			relnode = descr->oids.relnode;
+	int			next_chkp_index = (chkpNum + 1) % 2;
+	SeqBufTag	next_chkp_tag = {0},
+				next_tmp_tag = {0};
 	bool		success;
-	CheckpointWriteBack writeback;
 
-	Assert(!OCompressIsValid(descr->compress));
+	if (orioledb_s3_mode)
+	{
+		pg_atomic_write_u64(&meta_page->datafileLength[next_chkp_index], 0);
+		return;
+	}
 
-	/*
-	 * TODO: can we make checkpoint on evicted or unloaded tree?
-	 */
-	checkpoint_ix_init_state(checkpoint_state, descr);
-
-	cur_chkp_index = (checkpoint_state->lastCheckpointNumber + 1) % 2;
-	next_chkp_index = (checkpoint_state->lastCheckpointNumber + 2) % 2;
-	meta_page = BTREE_GET_META(descr);
-
-	Assert(ORootPageIsValid(descr) && OMetaPageIsValid(descr));
-
-	/* Initialize next tmp file */
 	if (!init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]))
 	{
 		free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
@@ -1121,7 +1304,7 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 	memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
 	next_tmp_tag.datoid = datoid;
 	next_tmp_tag.relnode = relnode;
-	next_tmp_tag.num = checkpoint_state->lastCheckpointNumber + 2;
+	next_tmp_tag.num = chkpNum + 1;
 	next_tmp_tag.type = 't';
 
 	success = init_seq_buf(&descr->tmpBuf[next_chkp_index],
@@ -1132,6 +1315,50 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 				(errcode_for_file_access(),
 				 errmsg("could not init a new sequence buffer file %s",
 						get_seq_buf_filename(&next_tmp_tag))));
+
+	if (descr->storageType != BTreeStoragePersistence)
+		return;
+
+	if (!init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]))
+	{
+		free_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
+		free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
+		elog(FATAL, "Unable to get pages for sequence buffers.");
+	}
+
+	memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
+	next_chkp_tag.datoid = datoid;
+	next_chkp_tag.relnode = relnode;
+	next_chkp_tag.num = chkpNum + 1;
+	next_chkp_tag.type = 'm';
+
+	success = init_seq_buf(&descr->nextChkp[next_chkp_index],
+						   &meta_page->nextChkp[next_chkp_index],
+						   &next_chkp_tag, true, true, sizeof(CheckpointFileHeader), NULL);
+	if (!success)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not create a new sequence buffer file %s",
+						get_seq_buf_filename(&next_chkp_tag))));
+}
+
+/*
+ * Make checkpoint of an temporary index.
+ */
+static void
+checkpoint_temporary_tree(int flags, BTreeDescr *descr)
+{
+	BTreeMetaPage *meta_page;
+	uint32		chkp_num = checkpoint_state->lastCheckpointNumber + 1;
+	int			cur_chkp_index = chkp_num % 2;
+	CheckpointWriteBack writeback;
+
+	Assert(!OCompressIsValid(descr->compress));
+
+	meta_page = BTREE_GET_META(descr);
+	meta_page->dirtyFlag1 = false;
+
+	Assert(ORootPageIsValid(descr) && OMetaPageIsValid(descr));
 
 	/* Make checkpoint of the tree itself */
 	init_writeback(&writeback, flags, false);
@@ -1155,15 +1382,17 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 	chkp_inc_changecount_after(checkpoint_state);
 	LWLockRelease(&meta_page->copyBlknoLock);
 
-	/* finalizes *.tmp file */
-	seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
-	free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);
+	if (!orioledb_s3_mode)
+	{
+		/* finalizes *.tmp file */
+		seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
+		free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);
+	}
 
 	chkp_inc_changecount_before(checkpoint_state);
 	checkpoint_state->completed = true;
 	chkp_inc_changecount_after(checkpoint_state);
 }
-
 
 void
 o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
@@ -1756,6 +1985,14 @@ static int
 chkp_ordering_cmp(OIndexType type1, Oid datoid1, Oid relnode1,
 				  OIndexType type2, Oid datoid2, Oid relnode2)
 {
+	if (datoid1 == SYS_TREES_DATOID && relnode1 == SYS_TREES_CHKP_NUM &&
+		!(datoid2 == SYS_TREES_DATOID && relnode2 == SYS_TREES_CHKP_NUM))
+		return 1;
+
+	if (datoid2 == SYS_TREES_DATOID && relnode2 == SYS_TREES_CHKP_NUM &&
+		!(datoid1 == SYS_TREES_DATOID && relnode1 == SYS_TREES_CHKP_NUM))
+		return -1;
+
 	if (datoid1 <= SYS_TREES_DATOID && datoid2 > SYS_TREES_DATOID)
 		return -1;
 
@@ -1955,75 +2192,18 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 				root_downlink;
 	CheckpointFileHeader header = {0};
 	File		file = -1;
-	SeqBufTag	next_chkp_tag = {0},
-				next_tmp_tag = {0},
-				free_buf_tag;
-	int			cur_chkp_index,
-				next_chkp_index;
+	SeqBufTag	free_buf_tag;
 	Oid			datoid = descr->oids.datoid;
 	Oid			relnode = descr->oids.relnode;
-	bool		success,
-				is_compressed = OCompressIsValid(descr->compress);
+	bool		is_compressed = OCompressIsValid(descr->compress);
 	CheckpointWriteBack writeback;
 	off_t		file_length;
 	uint32		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
-
-	/*
-	 * TODO: can we make checkpoint on evicted or unloaded tree?
-	 */
-	checkpoint_ix_init_state(checkpoint_state, descr);
-
-	cur_chkp_index = (checkpoint_state->lastCheckpointNumber + 1) % 2;
-	next_chkp_index = (checkpoint_state->lastCheckpointNumber + 2) % 2;
-	meta_page = BTREE_GET_META(descr);
+	int			cur_chkp_index = (chkpNum) % 2;
 
 	Assert(ORootPageIsValid(descr) && OMetaPageIsValid(descr));
-
-	/* Initialize next checkpoint file and next tmp file */
-	if (orioledb_s3_mode)
-	{
-		pg_atomic_write_u64(&meta_page->datafileLength[next_chkp_index], 0);
-	}
-	else
-	{
-		memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
-		next_chkp_tag.datoid = datoid;
-		next_chkp_tag.relnode = relnode;
-		next_chkp_tag.num = checkpoint_state->lastCheckpointNumber + 2;
-		next_chkp_tag.type = 'm';
-
-		if (!init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]) ||
-			!init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]))
-		{
-			free_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
-			free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
-			elog(FATAL, "Unable to get pages for sequence buffers.");
-		}
-
-		success = init_seq_buf(&descr->nextChkp[next_chkp_index],
-							   &meta_page->nextChkp[next_chkp_index],
-							   &next_chkp_tag, true, true, sizeof(CheckpointFileHeader), NULL);
-		if (!success)
-			ereport(FATAL,
-					(errcode_for_file_access(),
-					 errmsg("could not create a new sequence buffer file %s",
-							get_seq_buf_filename(&next_chkp_tag))));
-
-		memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
-		next_tmp_tag.datoid = datoid;
-		next_tmp_tag.relnode = relnode;
-		next_tmp_tag.num = chkpNum + 1;
-		next_tmp_tag.type = 't';
-
-		success = init_seq_buf(&descr->tmpBuf[next_chkp_index],
-							   &meta_page->tmpBuf[next_chkp_index],
-							   &next_tmp_tag, true, true, 0, NULL);
-		if (!success)
-			ereport(FATAL,
-					(errcode_for_file_access(),
-					 errmsg("could not init a new sequence buffer file %s",
-							get_seq_buf_filename(&next_tmp_tag))));
-	}
+	meta_page = BTREE_GET_META(descr);
+	meta_page->dirtyFlag1 = false;
 
 	/* Make checkpoint of the tree itself */
 	init_writeback(&writeback, flags, is_compressed);
@@ -2109,10 +2289,12 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	}
 	else
 	{
+		SeqBufTag	next_chkp_tag;
+
 		memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
 		next_chkp_tag.datoid = datoid;
 		next_chkp_tag.relnode = relnode;
-		next_chkp_tag.num = checkpoint_state->lastCheckpointNumber + 1;
+		next_chkp_tag.num = chkpNum;
 		next_chkp_tag.type = 'm';
 
 		filename = get_seq_buf_filename(&next_chkp_tag);
@@ -2291,7 +2473,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	{
 		S3TaskLocation location;
 
-		location = s3_schedule_file_part_write(checkpoint_state->lastCheckpointNumber + 1,
+		location = s3_schedule_file_part_write(chkpNum,
 											   datoid,
 											   relnode,
 											   -1,
@@ -2304,7 +2486,13 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 	chkp_inc_changecount_before(checkpoint_state);
 	checkpoint_state->completed = true;
+	BTREE_GET_META(descr)->dirtyFlag2 = false;
 	chkp_inc_changecount_after(checkpoint_state);
+
+	if (!IS_SYS_TREE_OIDS(descr->oids))
+		o_update_latest_chkp_num(descr->oids.datoid,
+								 descr->oids.relnode,
+								 chkpNum);
 	return true;
 }
 
@@ -2413,7 +2601,7 @@ checkpointer_update_autonomous(BTreeDescr *desc, CheckpointState *state)
 			{
 				/* the offset will not be used in current checkpoint */
 				free_extent_for_checkpoint(desc, &page_desc->fileExtent, cur_chkp_num);
-				MARK_DIRTY(desc->ppool, state->stack[i].blkno);
+				MARK_DIRTY(desc, state->stack[i].blkno);
 			}
 		}
 	}
@@ -2621,7 +2809,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
-							  blkno, loc, rightBlkno))
+							  blkno, loc, rightBlkno, true))
 	{
 		release_undo_size(UndoReserveTxn);
 		free_retained_undo_location();
@@ -2958,7 +3146,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 						/* the offset will not be used in current checkpoint */
 						free_extent_for_checkpoint(descr, &page_desc->fileExtent,
 												   chkpNum);
-						MARK_DIRTY(descr->ppool, blkno);
+						MARK_DIRTY(descr, blkno);
 					}
 				}
 			}
@@ -3156,7 +3344,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			page = O_GET_IN_MEMORY_PAGE(blkno);
 
 			if (message.content.upwards.parentDirty)
-				MARK_DIRTY(descr->ppool, blkno);
+				MARK_DIRTY_EXTENDED(descr, blkno, true);
 		}
 		else if (message.action == WalkContinue)
 		{
@@ -4218,7 +4406,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 {
 	CheckpointTablesArg *tbl_arg = (CheckpointTablesArg *) arg;
 	OIndexDescr *descr;
-	int			cur_chkp_index = (checkpoint_state->lastCheckpointNumber + 1) % 2;
+	uint32		chkpNum = (checkpoint_state->lastCheckpointNumber + 1);
+	int			cur_chkp_index = chkpNum % 2;
 	MemoryContext prev_context;
 	Jsonb	   *params;
 
@@ -4232,7 +4421,9 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	if (descr != NULL && o_btree_load_shmem_checkpoint(&descr->desc))
 	{
 		BTreeDescr *td = &descr->desc;
+		BTreeMetaPage *meta = BTREE_GET_META(td);
 		bool		success;
+		bool		skip = false;
 
 		elog(DEBUG3, "CHKP %u, (%u, %u, %u) => (%u, %u, %u)",
 			 type, treeOids.datoid, treeOids.reloid, treeOids.relnode,
@@ -4252,7 +4443,41 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		if (STOPEVENTS_ENABLED())
 			params = prepare_checkpoint_tree_start_params(td);
 		STOPEVENT(STOPEVENT_CHECKPOINT_INDEX_START, params);
-		if (td->storageType == BTreeStoragePersistence)
+
+		checkpoint_ix_init_state(checkpoint_state, td);
+		checkpoint_init_new_seq_bufs(td, chkpNum);
+
+		if (!meta->dirtyFlag1 && !meta->dirtyFlag2)
+		{
+			chkp_inc_changecount_before(checkpoint_state);
+			if (!meta->dirtyFlag1 && !meta->dirtyFlag2)
+			{
+				checkpoint_state->treeType = td->type;
+				checkpoint_state->datoid = td->oids.datoid;
+				checkpoint_state->reloid = td->oids.reloid;
+				checkpoint_state->relnode = td->oids.relnode;
+				checkpoint_state->completed = true;
+				checkpoint_state->curKeyType = CurKeyFinished;
+				skip = true;
+			}
+			chkp_inc_changecount_after(checkpoint_state);
+		}
+
+		if (skip)
+		{
+			if (!orioledb_s3_mode)
+			{
+				if (td->storageType == BTreeStoragePersistence)
+				{
+					free_seq_buf_pages(td, td->nextChkp[cur_chkp_index].shared);
+					seq_buf_close_file(&td->nextChkp[cur_chkp_index]);
+				}
+				free_seq_buf_pages(td, td->tmpBuf[cur_chkp_index].shared);
+				seq_buf_close_file(&td->tmpBuf[cur_chkp_index]);
+			}
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+		}
+		else if (td->storageType == BTreeStoragePersistence)
 		{
 			success = checkpoint_ix(tbl_arg->flags, td);
 
@@ -4272,7 +4497,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		else
 		{
 			checkpoint_temporary_tree(tbl_arg->flags, td);
-			sort_checkpoint_tmp_file(td, cur_chkp_index);
+			if (!orioledb_s3_mode)
+				sort_checkpoint_tmp_file(td, cur_chkp_index);
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
 
@@ -4398,7 +4624,7 @@ free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 static bool
 checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 									 EvictedTreeData *evicted_tree_data,
-									 uint32 chkp_num)
+									 uint32 chkp_num, uint32 map_chkp_num)
 {
 	EvictedSeqBufData *evicted_free,
 			   *evicted_next,
@@ -4426,7 +4652,7 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 	{
 		prev_chkp_tag.datoid = td->oids.datoid;
 		prev_chkp_tag.relnode = td->oids.relnode;
-		prev_chkp_tag.num = chkp_num;
+		prev_chkp_tag.num = map_chkp_num;
 		prev_chkp_tag.type = 'm';
 	}
 
@@ -4502,10 +4728,11 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
  */
 static void
 evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
-						 uint32 chkp_num, bool clear_tree)
+						 uint32 *map_chkp_num, bool clear_tree)
 {
 	CheckpointFileHeader file_header = {0};
 	BTreeMetaPage *meta_page;
+	uint32		chkp_num = *map_chkp_num;
 
 	Assert(TREE_HAS_OIDS(desc));
 	Assert(evicted_data);
@@ -4541,16 +4768,35 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		File		prev_chkp_file;
 		SeqBufTag	prev_chkp_tag;
 		bool		prev_chkp_file_exist,
-					ferror = false;
+					ferror = false,
+					found;
 
 		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
 		prev_chkp_tag.datoid = desc->oids.datoid;
 		prev_chkp_tag.relnode = desc->oids.relnode;
-		prev_chkp_tag.num = chkp_num;
+		prev_chkp_tag.num = o_get_latest_chkp_num_internal(desc->oids.datoid,
+														   desc->oids.relnode,
+														   chkp_num,
+														   &found);
 		prev_chkp_tag.type = 'm';
 		prev_chkp_fname = get_seq_buf_filename(&prev_chkp_tag);
 		prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDONLY | PG_BINARY);
 		prev_chkp_file_exist = prev_chkp_file >= 0;
+
+		if (orioledb_s3_mode &&
+			!prev_chkp_file_exist &&
+			prev_chkp_tag.num < chkp_num)
+		{
+			s3_load_map_file(prev_chkp_tag.num, desc->oids.datoid, desc->oids.relnode);
+
+			prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDONLY | PG_BINARY);
+			prev_chkp_file_exist = prev_chkp_file >= 0;
+		}
+
+		if (!IS_SYS_TREE_OIDS(desc->oids) && !found && prev_chkp_file_exist)
+			o_update_latest_chkp_num(desc->oids.datoid,
+									 desc->oids.relnode,
+									 chkp_num);
 
 		if (!prev_chkp_file_exist && desc->storageType != BTreeStorageTemporary)
 		{
@@ -4563,10 +4809,14 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			file_header.leafPagesNum = 1;
 			file_header.ctid = 0;
 
+			pfree(prev_chkp_fname);
+			prev_chkp_tag.num = chkp_num;
+			prev_chkp_fname = get_seq_buf_filename(&prev_chkp_tag);
 			prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
 
 			if (prev_chkp_file < 0)
 			{
+				Assert(0);
 				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not create map file %s", prev_chkp_fname)));
 			}
@@ -4574,6 +4824,26 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			ferror = OFileWrite(prev_chkp_file, (Pointer) &file_header, sizeof(file_header), 0,
 								WAIT_EVENT_SLRU_WRITE) != sizeof(file_header) ||
 				FileSync(prev_chkp_file, WAIT_EVENT_SLRU_SYNC) != 0;
+
+			if (!IS_SYS_TREE_OIDS(desc->oids))
+			{
+				if (orioledb_s3_mode)
+				{
+					/*
+					 * We don't wait, but should be finished before completion
+					 * of the next checkpoint, which could reference it.
+					 */
+					(void) s3_schedule_file_part_write(chkp_num,
+													   desc->oids.datoid,
+													   desc->oids.relnode,
+													   -1,
+													   -1);
+				}
+
+				o_update_latest_chkp_num(desc->oids.datoid,
+										 desc->oids.relnode,
+										 chkp_num);
+			}
 
 			if (ferror)
 				ereport(FATAL, (errcode_for_file_access(),
@@ -4600,6 +4870,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			}
 			else
 			{
+				*map_chkp_num = prev_chkp_tag.num;
 				ferror = OFileRead(prev_chkp_file, (Pointer) &file_header,
 								   sizeof(file_header), 0, WAIT_EVENT_SLRU_READ) != sizeof(file_header);
 				if (ferror)
@@ -4627,8 +4898,15 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 	pg_atomic_write_u64(&meta_page->ctid, file_header.ctid);
 	if (evicted_data && *evicted_data)
 	{
+		meta_page->dirtyFlag1 = (*evicted_data)->dirtyFlag1;
+		meta_page->dirtyFlag2 = (*evicted_data)->dirtyFlag2;
 		meta_page->partsInfo[0].writeMaxLocation = (*evicted_data)->maxLocation[0];
 		meta_page->partsInfo[1].writeMaxLocation = (*evicted_data)->maxLocation[1];
+	}
+	else
+	{
+		meta_page->dirtyFlag1 = false;
+		meta_page->dirtyFlag2 = false;
 	}
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(meta_page, ORIOLEDB_BLCKSZ);
@@ -4689,7 +4967,8 @@ tbl_data_exists(ORelOids *oids)
 void
 evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 {
-	uint32		chkp_num;
+	uint32		chkp_num,
+				map_chkp_num;
 	int			chkp_index;
 	SeqBufTag	tmp_tag = {0};
 	bool		checkpoint_concurrent;
@@ -4701,8 +4980,10 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
+	map_chkp_num = chkp_num;
 	if (init_shmem)
-		evictable_tree_init_meta(desc, &evicted_tree_data, chkp_num, true);
+		evictable_tree_init_meta(desc, &evicted_tree_data,
+								 &map_chkp_num, true);
 
 	chkp_index = (chkp_num + 1) % 2;
 	tmp_tag.datoid = desc->oids.datoid;
@@ -4775,10 +5056,12 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 {
 	bool		checkpoint_concurrent;
 	uint32		chkp_num;
+	uint32		map_chkp_num;
 	EvictedTreeData *evicted_tree_data = NULL;
 
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
+	map_chkp_num = chkp_num;
 
 	/*
 	 * We shouldn't initialize shared memory concurrently to checkpoint.
@@ -4790,11 +5073,12 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 	btree_open_smgr(desc);
 
 	if (init_shmem)
-		evictable_tree_init_meta(desc, &evicted_tree_data, chkp_num, false);
+		evictable_tree_init_meta(desc, &evicted_tree_data, &map_chkp_num, false);
 
 	if (!orioledb_s3_mode &&
 		!checkpointable_tree_fill_seq_buffers(desc, init_shmem,
-											  evicted_tree_data, chkp_num))
+											  evicted_tree_data, chkp_num,
+											  map_chkp_num))
 	{
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not fill sequence buffers.")));

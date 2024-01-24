@@ -353,6 +353,15 @@ read_file(const char *filename, uint64 *size)
 }
 
 /*
+ * Write the whole file.
+ */
+static void
+write_file(const char *filename, Pointer data, uint64 size)
+{
+	write_file_part(filename, 0, data, size);
+}
+
+/*
  * Put object with given binary contents to S3.
  */
 static void
@@ -442,6 +451,24 @@ s3_put_file(char *objectname, char *filename)
 	if (data)
 		s3_put_object_with_contents(objectname, data, dataSize);
 	return data != NULL;
+}
+
+/*
+ * Get the whole file from S3 object.
+ */
+void
+s3_get_file(char *objectname, char *filename)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+	s3_get_object(objectname, &buf);
+
+	write_file(filename,
+			   (Pointer) buf.data,
+			   buf.len);
+
+	pfree(buf.data);
 }
 
 /*

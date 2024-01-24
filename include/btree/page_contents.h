@@ -43,6 +43,9 @@ typedef struct
 	/* Number of running sequential scans depending on the checkpoint number */
 	pg_atomic_uint32 numSeqScans[NUM_SEQ_SCANS_ARRAY_SIZE];
 
+	bool		dirtyFlag1;
+	bool		dirtyFlag2;
+
 	BTreeS3PartsInfo partsInfo[2];
 } BTreeMetaPage;
 

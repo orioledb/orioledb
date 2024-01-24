@@ -42,6 +42,9 @@ typedef struct
 	 */
 	EvictedSeqBufData nextChkp;
 	EvictedSeqBufData tmpBuf;
+
+	bool		dirtyFlag1;
+	bool		dirtyFlag2;
 } EvictedTreeData;
 
 
