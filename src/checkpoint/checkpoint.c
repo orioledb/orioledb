@@ -964,7 +964,7 @@ o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num)
 	};
 
 	BTreeDescr *desc = get_sys_tree(SYS_TREES_CHKP_NUM);
-	OBTreeModifyResult result;
+	OBTreeModifyResult result PG_USED_FOR_ASSERTS_ONLY;
 
 	key.datoid = datoid;
 	key.relnode = relnode;
