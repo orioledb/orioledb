@@ -239,7 +239,7 @@ COMMIT_HASH = $(shell git rev-parse HEAD)
 override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declarations
 
 ifdef VALGRIND
-override with_temp_install += PGCTLTIMEOUT=1200 \
+override with_temp_install += PGCTLTIMEOUT=3000 \
 	valgrind --leak-check=no --gen-suppressions=all \
 	--suppressions=valgrind.supp --time-stamp=yes \
 	--log-file=pid-%p.log --trace-children=yes \
