@@ -324,8 +324,18 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		buffer->changeCount = 0;
 	else
 		buffer->changeCount++;
+
+	pg_write_barrier();
+
 	buffer->tag = tag;
 	buffer->shadowTag = prevTag;
+
+	pg_write_barrier();
+
+	if (buffer->changeCount == S3_HEADER_MAX_CHANGE_COUNT)
+		buffer->changeCount = 0;
+	else
+		buffer->changeCount++;
 
 	LWLockRelease(&group->groupCtlLock);
 
@@ -360,7 +370,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		oldValues[i] = S3_PART_GET_LOWER(oldValue);
 	}
 
-	if (checkUnlink)
+	if (checkUnlink && !haveLoadedPart)
 	{
 		char	   *filename;
 		int			fd;
@@ -612,7 +622,7 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
 				{
 					buffer->usageCount++;
 					if (S3_PART_GET_STATUS(fullValue) == S3PartStatusLoaded &&
-						S3_PART_GET_STATUS(newFullValue) == S3PartStatusNotLoaded)
+						S3_PART_GET_STATUS(newFullValue) == S3PartStatusEvicting)
 						sync_buffer(buffer);
 					return true;
 				}
@@ -823,6 +833,7 @@ s3_header_mark_not_loaded(S3HeaderTag tag, int index)
 		uint32		newValue = value;
 
 		Assert(S3_PART_GET_STATUS(value) == S3PartStatusEvicting);
+		Assert(S3_PART_GET_LOCKS_NUM(value) == 0);
 		newValue = S3_PART_SET_STATUS(newValue, S3PartStatusNotLoaded);
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
