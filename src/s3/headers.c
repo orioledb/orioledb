@@ -350,7 +350,8 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 													   newDirty));
 		if (S3_PART_GET_STATUS(oldValue) == S3PartStatusLoaded && minLoaded < 0)
 			minLoaded = i;
-		if (S3_PART_GET_STATUS(oldValue) == S3PartStatusLoading)
+		if (S3_PART_GET_STATUS(oldValue) == S3PartStatusLoading ||
+			S3_PART_GET_STATUS(oldValue) == S3PartStatusEvicting)
 			haveLoadedPart = true;
 		if (S3_PART_GET_LOCKS_NUM(oldValue) > 0)
 			haveLoadedPart = true;
