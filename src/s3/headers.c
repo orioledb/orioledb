@@ -392,12 +392,14 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		write_to_file(prevTag, oldValues);
 	}
 
-	LWLockRelease(&buffer->bufferCtlLock);
+	pg_write_barrier();
 
 	buffer->shadowTag.datoid = InvalidOid;
 	buffer->shadowTag.relnode = InvalidOid;
 	buffer->shadowTag.segNum = 0;
 	buffer->shadowTag.checkpointNum = 0;
+
+	LWLockRelease(&buffer->bufferCtlLock);
 }
 
 static void
