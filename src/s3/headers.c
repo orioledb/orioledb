@@ -299,6 +299,23 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 	close(fd);
 }
 
+/*
+ * Truncate an open file to a given length.
+ */
+static int
+pg_ftruncate(int fd, off_t length)
+{
+	int			ret;
+
+retry:
+	ret = ftruncate(fd, length);
+
+	if (ret == -1 && errno == EINTR)
+		goto retry;
+
+	return ret;
+}
+
 static void
 change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 {
@@ -313,6 +330,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	int			minLoaded = -1;
 	bool		haveLoadedPart = false;
 	bool		checkUnlink = false;
+	bool		doneUnlink = false;
 	off_t		prevFileSize = ORIOLEDB_SEGMENT_SIZE;
 
 	buffer = &group->buffers[index];
@@ -382,23 +400,19 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		if (fd > 0)
 		{
 			prevFileSize = lseek(fd, 0, SEEK_END);
+			if (minLoaded >= 0 && minLoaded * ORIOLEDB_S3_PART_SIZE < prevFileSize)
+				haveLoadedPart = true;
+
+			if (!haveLoadedPart)
+			{
+				doneUnlink = (pg_ftruncate(fd, 0) == 0);
+			}
+
 			close(fd);
 		}
-
-		if (minLoaded >= 0 && minLoaded * ORIOLEDB_S3_PART_SIZE < prevFileSize)
-			haveLoadedPart = true;
 	}
 
-	if (checkUnlink && !haveLoadedPart)
-	{
-		char	   *filename;
-
-		filename = btree_filename(prevTag.datoid, prevTag.relnode,
-								  prevTag.segNum, prevTag.checkpointNum);
-		unlink(filename);
-		pfree(filename);
-	}
-	else if (OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
+	if (!doneUnlink && OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
 	{
 		write_to_file(prevTag, oldValues);
 	}
