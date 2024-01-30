@@ -16,9 +16,9 @@ apt_packages="build-essential flex bison pkg-config libreadline-dev make gdb lib
 if [ $GITHUB_JOB = "run-benchmark" ]; then
 	pip_packages="psycopg2-binary six testgres==1.8.9 python-telegram-bot matplotlib"
 elif [ $GITHUB_JOB = "pgindent" ]; then
-	pip_packages="psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL yapf"
+	pip_packages="psycopg2 six testgres==1.8.9 moto[s3]==4.2.14 flask flask_cors boto3 pyOpenSSL yapf"
 else
-	pip_packages="psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL"
+	pip_packages="psycopg2 six testgres==1.8.9 moto[s3]==4.2.14 flask flask_cors boto3 pyOpenSSL"
 fi
 
 if [ $COMPILER = "clang" ]; then
