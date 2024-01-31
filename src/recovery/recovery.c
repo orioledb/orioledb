@@ -51,6 +51,8 @@
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 
+#include <unistd.h>
+
 /*
  * Recovery worker state in pool.
  */
@@ -1913,15 +1915,18 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 	{
 		Oid			dbOid;
 		char	   *dbDirName;
+		bool		fsyncDbDir = false;
 
 		if (sscanf(file->d_name, "%u", &dbOid) != 1)
 			continue;
 
 		dbDirName = psprintf(ORIOLEDB_DATA_DIR "/%u", dbOid);
 		dbDir = opendir(dbDirName);
-		pfree(dbDirName);
 		if (dbDir == NULL)
+		{
+			pfree(dbDirName);
 			continue;
+		}
 
 		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
 		{
@@ -2009,11 +2014,20 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 			if (cleanup)
 			{
 				filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%s", dbOid, dbFile->d_name);
-				durable_unlink(filename, FATAL);
-				pfree(filename);
+				if (unlink(filename) < 0)
+				{
+					ereport(FATAL,
+							(errcode_for_file_access(),
+							 errmsg("could not remove file \"%s\": %m",
+									filename)));
+				}
+				fsyncDbDir = true;
 			}
 		}
 		closedir(dbDir);
+		if (fsyncDbDir)
+			fsync_fname_ext(dbDirName, true, false, FATAL);
+		pfree(dbDirName);
 	}
 
 	if (errno != 0)
