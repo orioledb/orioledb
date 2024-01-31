@@ -291,6 +291,9 @@ s3_schedule_file_write(uint32 chkpNum, char *filename, bool delete)
 
 	location = s3_queue_put_task((Pointer) task, taskLen);
 
+	elog(DEBUG1, "S3 schedule file write: %s %u %u (%llu)",
+		 filename, chkpNum, delete ? 1 : 0, (unsigned long long) location);
+
 	pfree(task);
 
 	return location;
@@ -317,6 +320,9 @@ s3_schedule_empty_dir_write(uint32 chkpNum, char *dirname)
 
 	location = s3_queue_put_task((Pointer) task, taskLen);
 
+	elog(DEBUG1, "S3 schedule empty dir write: %s %u (%llu)",
+		 dirname, chkpNum, (unsigned long long) location);
+
 	pfree(task);
 
 	return location;
@@ -331,6 +337,10 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
 {
 	S3Task	   *task;
 	S3TaskLocation location;
+	S3HeaderTag tag = {.datoid = datoid,.relnode = relnode,.checkpointNum = chkpNum,.segNum = segNum};
+
+	if (partNum >= 0 && !s3_header_mark_part_scheduled_for_write(tag, partNum))
+		return (S3TaskLocation) 0;
 
 	task = (S3Task *) palloc0(sizeof(S3Task));
 	task->type = S3TaskTypeWriteFilePart;
@@ -341,6 +351,9 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
 	task->typeSpecific.filePart.partNum = partNum;
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
+
+	elog(DEBUG1, "S3 schedule file part write: %u %u %u %d %d (%llu)",
+		 datoid, relnode, chkpNum, segNum, partNum, (unsigned long long) location);
 
 	pfree(task);
 
@@ -384,6 +397,9 @@ s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
 
+	elog(DEBUG1, "S3 schedule file part read: %u %u %u %d %d (%llu)",
+		 datoid, relnode, chkpNum, segNum, partNum, (unsigned long long) location);
+
 	pfree(task);
 
 	return location;
@@ -407,6 +423,9 @@ s3_schedule_wal_file_write(char *filename)
 	memcpy(task->typeSpecific.walFilename, filename, filenameLen + 1);
 
 	location = s3_queue_put_task((Pointer) task, taskLen);
+
+	elog(DEBUG1, "S3 schedule WAL file write: %s (%llu)",
+		 filename, (unsigned long long) location);
 
 	pfree(task);
 

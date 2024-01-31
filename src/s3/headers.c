@@ -86,16 +86,18 @@ static S3HeadersBuffersGroup *groups;
 #define S3_PART_LOCKS_ONE		   (1)
 #define S3_PART_LOCKS_NUM_SHIFT	   (0)
 #define S3_PART_GET_LOCKS_NUM(p) (((p) & S3_PART_LOCKS_NUM_MASK) >> S3_PART_LOCKS_NUM_SHIFT)
+#define S3_PART_STATUS_MASK		   UINT64CONST(0x00000000001C0000)
+#define S3_PART_STATUS_SHIFT	   (18)
+#define S3_PART_GET_STATUS(p) ((S3PartStatus) (((p) & S3_PART_STATUS_MASK) >> S3_PART_STATUS_SHIFT))
+#define S3_PART_SET_STATUS(p, s) (((p) & (~S3_PART_STATUS_MASK)) | ((uint64) (s) << S3_PART_STATUS_SHIFT))
+#define S3_PART_DIRTY_FLAG		   UINT64CONST(0x0000000000200000)
+#define S3_PART_WRITING_FLAG	   UINT64CONST(0x0000000000400000)
+#define S3_PART_SCHEDULED_FOR_WRITE_FLAG UINT64CONST(0x0000000000800000)
 #define S3_PART_USAGE_COUNT_MASK   UINT64CONST(0x00000000FE000000)
+#define S3_PART_USAGE_COUNT_MAX    (0x7F)
 #define S3_PART_USAGE_COUNT_SHIFT  (25)
 #define S3_PART_GET_USAGE_COUNT(p) (((p) & S3_PART_USAGE_COUNT_MASK) >> S3_PART_USAGE_COUNT_SHIFT)
 #define S3_PART_SET_USAGE_COUNT(p, u) (((p) & (~S3_PART_USAGE_COUNT_MASK)) | ((uint64) (u) << S3_PART_USAGE_COUNT_SHIFT))
-#define S3_PART_WRITING_FLAG	   UINT64CONST(0x0000000001000000)
-#define S3_PART_DIRTY_FLAG		   UINT64CONST(0x0000000000800000)
-#define S3_PART_STATUS_MASK		   UINT64CONST(0x0000000000700000)
-#define S3_PART_STATUS_SHIFT	   (20)
-#define S3_PART_GET_STATUS(p) ((S3PartStatus) (((p) & S3_PART_STATUS_MASK) >> S3_PART_STATUS_SHIFT))
-#define S3_PART_SET_STATUS(p, s) (((p) & (~S3_PART_STATUS_MASK)) | ((uint64) (s) << S3_PART_STATUS_SHIFT))
 
 static void initial_parts_conting(void);
 static void sync_buffer(S3HeaderBuffer *buffer);
@@ -702,7 +704,9 @@ s3_header_lock_part(S3HeaderTag tag, int index)
 		{
 			Assert(status == S3PartStatusLoaded);
 			newValue += S3_PART_LOCKS_ONE;
-			newValue = S3_PART_SET_USAGE_COUNT(newValue, usageCount + 1);
+			if (usageCount < S3_PART_USAGE_COUNT_MAX)
+				usageCount++;
+			newValue = S3_PART_SET_USAGE_COUNT(newValue, usageCount);
 		}
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
@@ -814,6 +818,32 @@ s3_header_unlock_part(S3HeaderTag tag, int index, bool setDirty)
 	}
 }
 
+bool
+s3_header_mark_part_scheduled_for_write(S3HeaderTag tag, int index)
+{
+	uint32		value;
+
+	value = s3_header_read_value(tag, index);
+
+	while (true)
+	{
+		uint32		newValue = value;
+
+		if (!(value & S3_PART_DIRTY_FLAG))
+			return false;
+
+		if (value & S3_PART_SCHEDULED_FOR_WRITE_FLAG)
+			return false;
+
+		newValue |= S3_PART_SCHEDULED_FOR_WRITE_FLAG;
+
+		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			return true;
+		}
+	}
+}
+
 void
 s3_header_mark_part_writing(S3HeaderTag tag, int index)
 {
@@ -825,7 +855,10 @@ s3_header_mark_part_writing(S3HeaderTag tag, int index)
 	{
 		uint32		newValue = value;
 
-		newValue &= ~S3_PART_DIRTY_FLAG;
+		Assert(value & S3_PART_DIRTY_FLAG);
+		Assert(value & S3_PART_SCHEDULED_FOR_WRITE_FLAG);
+
+		newValue &= ~(S3_PART_DIRTY_FLAG | S3_PART_SCHEDULED_FOR_WRITE_FLAG);
 		newValue |= S3_PART_WRITING_FLAG;
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))

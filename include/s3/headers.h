@@ -44,6 +44,7 @@ extern bool s3_header_lock_part(S3HeaderTag tag, int index);
 extern S3PartStatus s3_header_mark_part_loading(S3HeaderTag tag, int index);
 extern void s3_header_mark_part_loaded(S3HeaderTag tag, int index);
 extern void s3_header_unlock_part(S3HeaderTag tag, int index, bool setDirty);
+extern bool s3_header_mark_part_scheduled_for_write(S3HeaderTag tag, int index);
 extern void s3_header_mark_part_writing(S3HeaderTag tag, int index);
 extern void s3_header_mark_part_written(S3HeaderTag tag, int index);
 extern void s3_headers_sync(void);
