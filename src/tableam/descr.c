@@ -61,6 +61,7 @@ static void recreate_index_descr(OIndexDescr *descr);
 
 PG_FUNCTION_INFO_V1(orioledb_get_table_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_index_descrs);
+PG_FUNCTION_INFO_V1(orioledb_get_evicted_trees);
 
 struct OComparatorKey
 {
@@ -110,31 +111,111 @@ create_shared_root_info(OPagePool *pool, SharedRootInfoKey *key)
 }
 
 EvictedTreeData *
-read_evicted_data(ORelOids oids, uint32 chkp_num)
+read_evicted_data(Oid datoid, Oid relnode, bool delete)
 {
-	char	   *filename;
-	File		eviction_file;
-	EvictedTreeData *evicted_tree_data = NULL;
+	SharedRootInfoKey key;
+	OTuple		keyTuple;
+	OTuple		result;
 
-	filename = get_eviction_filename(oids, chkp_num);
-	eviction_file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	/*
+	 * Don't do lookup for system trees.  This is essential for initialization
+	 * sequence.  This is correct because we don't evict root pages of system
+	 * trees.
+	 */
+	if (datoid == SYS_TREES_DATOID)
+		return NULL;
 
-	if (eviction_file != -1)
+	key.datoid = datoid;
+	key.relnode = relnode;
+	keyTuple.formatFlags = 0;
+	keyTuple.data = (Pointer) &key;
+
+	result = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_EVICTED_DATA),
+									   &keyTuple, BTreeKeyNonLeafKey,
+									   COMMITSEQNO_INPROGRESS, NULL,
+									   CurrentMemoryContext, NULL);
+	if (O_TUPLE_IS_NULL(result))
+		return NULL;
+
+	if (delete)
 	{
-		evicted_tree_data = palloc(sizeof(EvictedTreeData));
-		if (OFileRead(eviction_file, (Pointer) evicted_tree_data, sizeof(EvictedTreeData), 0, WAIT_EVENT_DATA_FILE_READ) !=
-			sizeof(EvictedTreeData))
-		{
-			pfree(evicted_tree_data);
-			ereport(ERROR, (errcode_for_file_access(),
-							errmsg("could not read evicted tree data from file %s",
-								   filename)));
-		}
-		FileClose(eviction_file);
-	}
-	pfree(filename);
+		bool		success PG_USED_FOR_ASSERTS_ONLY;
 
-	return evicted_tree_data;
+		success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_EVICTED_DATA),
+											keyTuple, BTreeKeyNonLeafKey, NULL);
+		Assert(success);
+	}
+
+	return (EvictedTreeData *) result.data;
+}
+
+void
+insert_evicted_data(EvictedTreeData *data)
+{
+	OTuple		tuple;
+	bool		success PG_USED_FOR_ASSERTS_ONLY;
+
+	tuple.formatFlags = 0;
+	tuple.data = (Pointer) data;
+
+	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_EVICTED_DATA),
+										tuple);
+	Assert(success);
+}
+
+Datum
+orioledb_get_evicted_trees(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	BTreeIterator *it;
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	it = o_btree_iterator_create(get_sys_tree(SYS_TREES_EVICTED_DATA),
+								 NULL, BTreeKeyNone,
+								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+
+	while (true)
+	{
+		OTuple		tuple;
+		CommitSeqNo tupCsn;
+		Datum		values[4];
+		bool		nulls[4] = {false};
+		EvictedTreeData *data;
+
+		tuple = o_btree_iterator_fetch(it, &tupCsn, NULL,
+									   BTreeKeyNone, false, NULL);
+		if (O_TUPLE_IS_NULL(tuple))
+			break;
+
+		data = (EvictedTreeData *) tuple.data;
+		values[0] = ObjectIdGetDatum(data->key.datoid);
+		values[1] = ObjectIdGetDatum(data->key.relnode);
+		values[2] = UInt64GetDatum(data->file_header.rootDownlink);
+		values[3] = UInt64GetDatum(data->file_header.datafileLength);
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+	}
+
+	btree_iterator_free(it);
+	tuplestore_donestoring(tupstore);
+
+	return (Datum) 0;
 }
 
 /*

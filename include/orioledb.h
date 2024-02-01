@@ -36,7 +36,6 @@
 #define ORIOLEDB_BINARY_VERSION 4
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
-#define ORIOLEDB_EVT_EXTENSION "evt"
 #define ORIOLEDB_RMGR_ID (129)
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
 

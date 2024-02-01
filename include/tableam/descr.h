@@ -32,6 +32,8 @@
 
 typedef struct
 {
+	SharedRootInfoKey key;
+
 	CheckpointFileHeader file_header;
 	S3TaskLocation maxLocation[2];
 	EvictedSeqBufData freeBuf;
@@ -259,7 +261,8 @@ extern int	o_call_comparator(OComparator *comparator, Datum left,
 extern void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
 										  Oid righttype);
 
-extern EvictedTreeData *read_evicted_data(ORelOids oids, uint32 chkp_num);
+extern EvictedTreeData *read_evicted_data(Oid datoid, Oid relnode, bool delete);
+extern void insert_evicted_data(EvictedTreeData *data);
 
 extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid);
 extern void o_finish_sort_support_function(OComparator *comparator, SortSupport ssup);

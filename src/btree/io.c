@@ -2047,9 +2047,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	CheckpointFileHeader file_header = {0};
 	EvictedTreeData evicted_tree_data = {{0}};
 	uint64		new_downlink;
-	char	   *filename,
-				img[ORIOLEDB_BLCKSZ];
-	File		file;
+	char		img[ORIOLEDB_BLCKSZ];
 	bool		was_dirty;
 	int			i PG_USED_FOR_ASSERTS_ONLY;
 	uint32		chkpNum = 0;
@@ -2110,6 +2108,8 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		Assert(pg_atomic_read_u32(&metaPage->numSeqScans[i]) == 0);
 #endif
 
+	evicted_tree_data.key.datoid = desc->oids.datoid;
+	evicted_tree_data.key.relnode = desc->oids.relnode;
 	evicted_tree_data.file_header = file_header;
 	evicted_tree_data.maxLocation[0] = metaPage->partsInfo[0].writeMaxLocation;
 	evicted_tree_data.maxLocation[1] = metaPage->partsInfo[1].writeMaxLocation;
@@ -2121,29 +2121,6 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 */
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
 		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
-	filename = get_eviction_filename(desc->oids, checkpoint_number);
-
-	file = PathNameOpenFile(filename, O_WRONLY | O_CREAT | PG_BINARY);
-	if (file < 0)
-	{
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not open eviction file: %s",
-							   filename)));
-	}
-
-	if (OFileWrite(file,
-				   (Pointer) &evicted_tree_data,
-				   sizeof(evicted_tree_data),
-				   0,
-				   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(evicted_tree_data))
-	{
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not write eviction data to file: %s",
-							   filename)));
-	}
-
-	FileClose(file);
-	pfree(filename);
 
 	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, NULL);
 
@@ -2151,6 +2128,14 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 
 	perform_writeback(&io_writeback);
+
+	/*
+	 * Check if we can skip the evicted data if tree has no modification after
+	 * writing the last *.map file.
+	 */
+	if (desc->storageType != BTreeStoragePersistence ||
+		metaPage->dirtyFlag1 || metaPage->dirtyFlag2)
+		insert_evicted_data(&evicted_tree_data);
 
 	/*
 	 * Shared descr drops to signalize other backends that tree is evicted.

@@ -2,7 +2,7 @@
 
 MODULE_big = orioledb
 EXTENSION = orioledb
-DATA = orioledb--1.0.sql orioledb--1.0--1.1.sql
+DATA = orioledb--1.0.sql orioledb--1.0--1.1.sql orioledb--1.1--1.2.sql
 PGFILEDESC = "orioledb - orioledb transactional storage engine via TableAm"
 SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
 

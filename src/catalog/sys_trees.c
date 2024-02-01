@@ -122,6 +122,9 @@ static JsonbValue *free_tree_key_to_jsonb(BTreeDescr *desc, OTuple tup,
 static void o_chkp_num_print(BTreeDescr *desc, StringInfo buf,
 							 OTuple tup, Pointer arg);
 
+static void o_evicted_data_print(BTreeDescr *desc, StringInfo buf,
+								 OTuple tup, Pointer arg);
+
 
 static SysTreeMeta sysTreesMeta[] =
 {
@@ -359,6 +362,18 @@ static SysTreeMeta sysTreesMeta[] =
 		.poolType = OPagePoolCatalog,
 		.undoReserveType = UndoReserveTxn,
 		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
+	},
+	{							/* SYS_TREES_EVICTED_DATA */
+		.keyLength = sizeof(SharedRootInfoKey),
+		.tupleLength = sizeof(EvictedTreeData),
+		.cmpFunc = shared_root_info_key_cmp,
+		.keyPrint = idx_descr_key_print,
+		.tupPrint = o_evicted_data_print,
+		.keyToJsonb = idx_descr_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoReserveType = UndoReserveNone,
+		.storageType = BTreeStorageTemporary,
 		.needs_undo = NULL
 	},
 	{							/* SYS_TREES_CHKP_NUM */
@@ -1135,4 +1150,16 @@ o_chkp_num_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 					 chkpNumTup->key.relnode,
 					 chkpNumTup->checkpointNumbers[0],
 					 chkpNumTup->checkpointNumbers[1]);
+}
+
+static void
+o_evicted_data_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
+{
+	EvictedTreeData *evictedData = (EvictedTreeData *) tup.data;
+
+	appendStringInfo(buf, "((%u, %u), %llu, %llu)",
+					 evictedData->key.datoid,
+					 evictedData->key.relnode,
+					 (unsigned long long) evictedData->file_header.rootDownlink,
+					 (unsigned long long) evictedData->file_header.datafileLength);
 }

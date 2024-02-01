@@ -223,7 +223,7 @@ SELECT regexp_replace(regexp_replace(
 		': NNN',
 		'g');
 
--- SYS_TREES_CHKP_NUM
+-- SYS_TREES_EVICTED_DATA
 SELECT regexp_replace(regexp_replace(
 			orioledb_sys_tree_structure(20, 'ne'),
 			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
@@ -233,9 +233,19 @@ SELECT regexp_replace(regexp_replace(
 		': NNN',
 		'g');
 
--- SYS_TREES_MULTIRANGE_CACHE
+-- SYS_TREES_CHKP_NUM
 SELECT regexp_replace(regexp_replace(
 			orioledb_sys_tree_structure(21, 'ne'),
+			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
+			'NNN, (NNN), X/X, ',
+			'g'),
+		': \d+',
+		': NNN',
+		'g');
+
+-- SYS_TREES_MULTIRANGE_CACHE
+SELECT regexp_replace(regexp_replace(
+			orioledb_sys_tree_structure(22, 'ne'),
 			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
 			'NNN, (NNN), X/X, ',
 			'g'),

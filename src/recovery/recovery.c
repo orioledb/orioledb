@@ -1953,25 +1953,18 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					/*---
 					 * Before recovery we should cleanup:
 					 *
-					 * 1. All *.evt files.
-					 * 2. *.map and *.tmp files which were not created by
+					 * 1. *.map and *.tmp files which were not created by
 					 * checkpointer.
-					 * 3. All free extents tree files.
+					 * 2. All free extents tree files.
 					 *
 					 * Otherwise:
 					 *
-					 * 1. BTree will be loaded from evicted state,
-					 * not from checkpoint state.
-					 * 2. In some cases wrong *.map files will be created.
+					 * 1. In some cases wrong *.map files will be created.
 					 * (if size of old *.map or *.tmp file is more than will
 					 * be created by checkpointer).
 					 */
-					cleanup = strcmp(ext, ORIOLEDB_EVT_EXTENSION) == 0;
-
-					if (!cleanup && file_chkp > chkp_num)
-					{
+					if (file_chkp > chkp_num)
 						cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
-					}
 
 					if (!cleanup)
 					{

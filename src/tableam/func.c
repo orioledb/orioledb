@@ -195,8 +195,9 @@ print_unloaded_tree(StringInfoData *buf, BTreeDescr *td, const char *treeName,
 	prev_chkp_tag.num = checkpoint_state->lastCheckpointNumber;
 	prev_chkp_tag.type = 'm';
 
-	evicted_data = read_evicted_data(td->oids,
-									 checkpoint_state->lastCheckpointNumber + 1);
+	evicted_data = read_evicted_data(td->oids.datoid,
+									 td->oids.relnode,
+									 false);
 
 	/*
 	 * If found in eviction hash then use cached file_header to initialize

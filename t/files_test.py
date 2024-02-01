@@ -500,6 +500,13 @@ class FilesTest(BaseTest):
 
 		con1.execute("CHECKPOINT")
 
+		# Make o_evicted dirty after checkpoint
+		con1.begin()
+		con1.execute(
+		    "INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1501, 1501, 1) val;\n"
+		)
+		con1.commit()
+
 		con1.begin()
 		con1.execute("""CREATE TABLE IF NOT EXISTS o_evicted_after_chkp (
 							key SERIAL NOT NULL,
@@ -520,10 +527,9 @@ class FilesTest(BaseTest):
 		             (str(1), str(n)))
 		con1.commit()
 
-		evt_files = [
-		    f for f in glob.glob(node.data_dir + "/orioledb_data/*/*.evt")
-		]
-		self.assertNotEqual(len(evt_files), 0)
+		self.assertNotEqual(
+		    con1.execute("SELECT count(*) FROM orioledb_get_evicted_trees();")
+		    [0][0], 0)
 
 		con1.close()
 		node.stop()
@@ -531,7 +537,9 @@ class FilesTest(BaseTest):
 		node.append_conf('postgresql.conf', "orioledb.main_buffers = 100MB\n")
 		node.start()
 		node.safe_psql('postgres', 'CHECKPOINT;')
-		evt_files = [
-		    f for f in glob.glob(node.data_dir + "/orioledb_data/*/*.evt")
-		]
-		self.assertEqual(len(evt_files), 0)
+		con1 = node.connect()
+		self.assertEqual(
+		    con1.execute("SELECT count(*) FROM orioledb_get_evicted_trees();")
+		    [0][0], 0)
+		con1.close()
+		node.stop()

@@ -498,30 +498,10 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 	{
 		EvictedTreeData evicted_tree_data = {{0}};
 
+		evicted_tree_data.key.datoid = desc->oids.datoid;
+		evicted_tree_data.key.relnode = desc->oids.relnode;
 		evicted_tree_data.file_header = *file_header;
-		filename = get_eviction_filename(desc->oids, checkpoint_number + 1);
-
-		file = PathNameOpenFile(filename, O_WRONLY | O_CREAT | PG_BINARY);
-		if (file < 0)
-		{
-			pfree(filename);
-			ereport(FATAL,
-					(errcode_for_file_access(),
-					 errmsg("Could not open eviction file: %s", filename)));
-		}
-
-		if (OFileWrite(file, (Pointer) &evicted_tree_data,
-					   sizeof(evicted_tree_data), 0,
-					   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(evicted_tree_data))
-		{
-			FileClose(file);
-			pfree(filename);
-			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("Could not write eviction data to file: %s",
-								   filename)));
-		}
-		FileClose(file);
-		pfree(filename);
+		insert_evicted_data(&evicted_tree_data);
 	}
 
 	return result;

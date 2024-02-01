@@ -45,6 +45,7 @@
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
 
+#include "common/hashfn.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
@@ -4510,14 +4511,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	MemoryContextResetOnly(chkp_mem_context);
 }
 
-char *
-get_eviction_filename(ORelOids oids, uint32 chkp_num)
-{
-	/* this format is used by recovery_cleanup_old_files() */
-	return psprintf(ORIOLEDB_DATA_DIR "/%u/%u-%u." ORIOLEDB_EVT_EXTENSION,
-					oids.datoid, oids.relnode, chkp_num);
-}
-
 /*
  * Returns actual lastCheckpointNumber for current tree.
  */
@@ -4739,20 +4732,11 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 	if (clear_tree)
 	{
-		*evicted_data = read_evicted_data(desc->oids, chkp_num + 1);
+		*evicted_data = read_evicted_data(desc->oids.datoid,
+										  desc->oids.relnode,
+										  true);
 
-		if (*evicted_data != NULL)
-		{
-			char	   *filename = get_eviction_filename(desc->oids, chkp_num + 1);
-
-			if (unlink(filename) < 0)
-				ereport(WARNING,
-						(errcode_for_file_access(),
-						 errmsg("could not unlink eviction file \"%s\": %m", filename)));
-			file_header = (*evicted_data)->file_header;
-			pfree(filename);
-		}
-		else
+		if (*evicted_data == NULL)
 		{
 			/* No need to create or read a map file */
 			file_header.rootDownlink = InvalidDiskDownlink;
@@ -4760,6 +4744,10 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			file_header.numFreeBlocks = 0;
 			file_header.leafPagesNum = 1;
 			file_header.ctid = 0;
+		}
+		else
+		{
+			file_header = (*evicted_data)->file_header;
 		}
 	}
 	else
@@ -4855,20 +4843,11 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			/*
 			 * Reads header from file.
 			 */
-			*evicted_data = read_evicted_data(desc->oids, chkp_num + 1);
+			*evicted_data = read_evicted_data(desc->oids.datoid,
+											  desc->oids.relnode,
+											  true);
 
-			if (*evicted_data != NULL)
-			{
-				char	   *filename = get_eviction_filename(desc->oids, chkp_num + 1);
-
-				if (unlink(filename) < 0)
-					ereport(WARNING,
-							(errcode_for_file_access(),
-							 errmsg("could not unlink eviction file \"%s\": %m", filename)));
-				file_header = (*evicted_data)->file_header;
-				pfree(filename);
-			}
-			else
+			if (*evicted_data == NULL)
 			{
 				*map_chkp_num = prev_chkp_tag.num;
 				ferror = OFileRead(prev_chkp_file, (Pointer) &file_header,
@@ -4879,6 +4858,10 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 									errmsg("could not to read header of map file %s",
 										   prev_chkp_fname)));
 				}
+			}
+			else
+			{
+				file_header = (*evicted_data)->file_header;
 			}
 		}
 		if (prev_chkp_file_exist)
