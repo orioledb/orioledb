@@ -1963,8 +1963,18 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					 * (if size of old *.map or *.tmp file is more than will
 					 * be created by checkpointer).
 					 */
-					if (file_chkp > chkp_num)
-						cleanup = !strcmp(ext, "tmp") || !strcmp(ext, "map");
+					if (!strcmp(ext, "tmp"))
+					{
+						cleanup = (file_chkp > chkp_num);
+					}
+					else if (!strcmp(ext, "map"))
+					{
+						uint32		my_chkp_num;
+
+						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid, chkp_num);
+
+						cleanup = (file_chkp > my_chkp_num);
+					}
 
 					if (!cleanup)
 					{
