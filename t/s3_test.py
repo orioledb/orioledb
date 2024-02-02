@@ -9,9 +9,6 @@ from typing import Optional
 
 import boto3
 import testgres
-from botocore import UNSIGNED
-from botocore.config import Config
-from moto.core import set_initial_no_auth_action_count
 from moto.server import DomainDispatcherApplication, create_backend_app
 from testgres.consts import DATA_DIR
 from testgres.defaults import default_dbname
@@ -32,28 +29,22 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 class S3Test(BaseTest):
 	bucket_name = "test-bucket"
 	host = "localhost"
-	port = 5002
-	iam_port = 5001
+	port = 5001
 	user = "ORDB_USER"
 	region = "us-east-1"
 
 	@classmethod
-	@set_initial_no_auth_action_count(4)
 	def setUpClass(cls):
 		urllib3.util.connection.HAS_IPV6 = False
 		cls.ssl_key = make_ssl_devcert('/tmp/ordb_test_key', cn=cls.host)
 		cls.s3_server = MotoServerSSL(ssl_context=cls.ssl_key)
 		cls.s3_server.start()
-		cls.iam_server = MotoServerSSL(port=cls.iam_port,
-		                               service='iam',
-		                               ssl_context=cls.ssl_key)
-		cls.iam_server.start()
-
-		iam_config = Config(signature_version=UNSIGNED)
 
 		iam = boto3.client('iam',
-		                   config=iam_config,
-		                   endpoint_url=f"https://{cls.host}:{cls.iam_port}",
+		                   endpoint_url=f"https://{cls.host}:{cls.port}",
+		                   aws_access_key_id="",
+		                   aws_secret_access_key="",
+		                   region_name=cls.region,
 		                   verify=cls.ssl_key[0])
 		iam.create_user(UserName=cls.user)
 		policy_document = {
@@ -75,7 +66,6 @@ class S3Test(BaseTest):
 	@classmethod
 	def tearDownClass(cls):
 		cls.s3_server.stop()
-		cls.iam_server.stop()
 
 	def setUp(self):
 		super().setUp()
@@ -433,19 +423,17 @@ class MotoServerSSL:
 
 	def __init__(self,
 	             host: str = "localhost",
-	             port: int = 5002,
-	             service: Optional[str] = None,
+	             port: int = 5001,
 	             ssl_context=None):
 		self._host = host
 		self._port = port
-		self._service = service
 		self._thread: Optional[Thread] = None
 		self._server: Optional[BaseWSGIServer] = None
 		self._server_ready = False
 		self._ssl_context = ssl_context
 
 	def _server_entry(self) -> None:
-		app = DomainDispatcherApplication(create_backend_app, self._service)
+		app = DomainDispatcherApplication(create_backend_app)
 
 		self._server = make_server(self._host,
 		                           self._port,
