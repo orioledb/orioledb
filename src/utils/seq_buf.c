@@ -32,6 +32,8 @@
 #include "sys/stat.h"
 #include "utils/memdebug.h"
 
+#include <unistd.h>
+
 /*
  * We does not use orioledb page header and should not
  * write it to sequence buffer files.
@@ -193,6 +195,7 @@ seq_buf_check_open_file(SeqBufDescPrivate *private)
 
 		if (file_exists)
 			FileClose(private->file);
+
 		private->file = PathNameOpenFile(filename, flags);
 		pfree(filename);
 
@@ -719,7 +722,7 @@ seq_buf_remove_file(SeqBufTag *tag)
 	if ((filename = seq_buf_filename_if_exist(tag)) == NULL)
 		return false;
 
-	durable_unlink(filename, FATAL);
+	unlink(filename);
 	pfree(filename);
 	return true;
 }

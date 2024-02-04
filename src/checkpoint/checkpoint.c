@@ -113,6 +113,7 @@ typedef struct
 {
 	ORelOids	oids;
 	OIndexType	type;
+	uint32		chkpNum;
 } IndexIdItem;
 
 typedef struct
@@ -521,7 +522,7 @@ free_writeback(CheckpointWriteBack *writeback)
 }
 
 static inline List *
-add_index_id_item(List *list, BTreeDescr *desc)
+add_index_id_item(List *list, BTreeDescr *desc, uint32 chkpNum)
 {
 	IndexIdItem *item;
 	MemoryContext old_context;
@@ -539,23 +540,30 @@ add_index_id_item(List *list, BTreeDescr *desc)
 static inline List *
 add_free_extents_item(List *free, BTreeDescr *desc)
 {
-	return add_index_id_item(free, desc);
+	return add_index_id_item(free, desc,
+							 checkpoint_state->lastCheckpointNumber);
 }
 
 static inline List *
 add_map_cleanup_item(List *cleanup, BTreeDescr *desc)
 {
+	uint32		chkpNum;
+
 	if (!remove_old_checkpoint_files)
 		return cleanup;
 
-	if (!OCompressIsValid(desc->compress) && desc->freeBuf.tag.type == 'm'
-		&& desc->freeBuf.tag.num == checkpoint_state->lastCheckpointNumber)
+	chkpNum = o_get_latest_chkp_num(desc->oids.datoid, desc->oids.relnode,
+									checkpoint_state->lastCheckpointNumber);
+
+	if (!OCompressIsValid(desc->compress) &&
+		desc->freeBuf.tag.type == 'm' &&
+		desc->freeBuf.tag.num == chkpNum)
 	{
 		return cleanup;
 	}
 	else
 	{
-		return add_index_id_item(cleanup, desc);
+		return add_index_id_item(cleanup, desc, chkpNum);
 	}
 }
 
@@ -963,7 +971,6 @@ o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num)
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
-
 	BTreeDescr *desc = get_sys_tree(SYS_TREES_CHKP_NUM);
 	OBTreeModifyResult result PG_USED_FOR_ASSERTS_ONLY;
 
@@ -2470,6 +2477,9 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 						errmsg("could not write checkpoint header to file %s", filename)));
 	}
 
+	FileClose(file);
+	pfree(filename);
+
 	if (orioledb_s3_mode)
 	{
 		S3TaskLocation location;
@@ -2481,9 +2491,6 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 											   -1);
 		maxLocation = Max(maxLocation, location);
 	}
-
-	FileClose(file);
-	pfree(filename);
 
 	chkp_inc_changecount_before(checkpoint_state);
 	checkpoint_state->completed = true;
@@ -4804,7 +4811,6 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 			if (prev_chkp_file < 0)
 			{
-				Assert(0);
 				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not create map file %s", prev_chkp_fname)));
 			}
@@ -4879,17 +4885,12 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		pg_atomic_write_u64(&meta_page->datafileLength[0], file_header.datafileLength);
 	pg_atomic_write_u32(&meta_page->leafPagesNum, file_header.leafPagesNum);
 	pg_atomic_write_u64(&meta_page->ctid, file_header.ctid);
-	if (evicted_data && *evicted_data)
+	if (*evicted_data)
 	{
 		meta_page->dirtyFlag1 = (*evicted_data)->dirtyFlag1;
 		meta_page->dirtyFlag2 = (*evicted_data)->dirtyFlag2;
 		meta_page->partsInfo[0].writeMaxLocation = (*evicted_data)->maxLocation[0];
 		meta_page->partsInfo[1].writeMaxLocation = (*evicted_data)->maxLocation[1];
-	}
-	else
-	{
-		meta_page->dirtyFlag1 = false;
-		meta_page->dirtyFlag2 = false;
 	}
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(meta_page, ORIOLEDB_BLCKSZ);
@@ -4917,6 +4918,11 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);
 		CLEAN_DIRTY(desc->ppool, desc->rootInfo.rootPageBlkno);
+		if (!*evicted_data)
+		{
+			meta_page->dirtyFlag1 = false;
+			meta_page->dirtyFlag2 = false;
+		}
 		Assert(root_desc->flags == 0);
 
 		unlock_page(desc->rootInfo.rootPageBlkno);

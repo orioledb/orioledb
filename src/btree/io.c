@@ -854,7 +854,20 @@ get_free_disk_offset(BTreeDescr *desc)
 											use_device ? sizeof(FileExtent) : sizeof(uint32));
 		if (replaceResult == SeqBufReplaceSuccess)
 		{
-			seq_buf_remove_file(&old_tag);
+			if (old_tag.type == 'm')
+			{
+				uint32		chkpNum = o_get_latest_chkp_num(tag.datoid,
+															tag.relnode,
+															checkpoint_state->lastCheckpointNumber);
+
+				if (old_tag.num < chkpNum)
+					seq_buf_remove_file(&old_tag);
+			}
+			else
+			{
+				Assert(old_tag.type == 't');
+				seq_buf_remove_file(&old_tag);
+			}
 		}
 		LWLockRelease(metaLock);
 		if (replaceResult == SeqBufReplaceError)
@@ -1996,7 +2009,8 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 }
 
 static void
-btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
+btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
+								bool notModified)
 {
 	int			chkp_index;
 	bool		is_compressed = OCompressIsValid(desc->compress);
@@ -2024,12 +2038,18 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
 	}
 
 	evicted_data->nextChkp.tag = desc->nextChkp[chkp_index].shared->tag;
-	evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
+	if (notModified)
+		seq_buf_close_file(&desc->nextChkp[chkp_index]);
+	else
+		evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
 	FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[0]);
 	FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[1]);
 
 	evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
-	evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+	if (notModified)
+		seq_buf_close_file(&desc->nextChkp[chkp_index]);
+	else
+		evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
 	FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
 	FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
 }
@@ -2051,6 +2071,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	bool		was_dirty;
 	int			i PG_USED_FOR_ASSERTS_ONLY;
 	uint32		chkpNum = 0;
+	bool		notModified;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
 		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u32(&(O_PAGE_HEADER(rootPageBlkno)->state))));
@@ -2116,11 +2137,13 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	evicted_tree_data.dirtyFlag1 = metaPage->dirtyFlag1;
 	evicted_tree_data.dirtyFlag2 = metaPage->dirtyFlag2;
 
+	notModified = (!metaPage->dirtyFlag1 && !metaPage->dirtyFlag2);
+
 	/*
 	 * Free all private seq buf pages and get their offsets
 	 */
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
-		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
+		btree_finalize_private_seq_bufs(desc, &evicted_tree_data, notModified);
 
 	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, NULL);
 
@@ -2133,8 +2156,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 * Check if we can skip the evicted data if tree has no modification after
 	 * writing the last *.map file.
 	 */
-	if (desc->storageType != BTreeStoragePersistence ||
-		metaPage->dirtyFlag1 || metaPage->dirtyFlag2)
+	if (desc->storageType != BTreeStoragePersistence || !notModified)
 		insert_evicted_data(&evicted_tree_data);
 
 	/*
