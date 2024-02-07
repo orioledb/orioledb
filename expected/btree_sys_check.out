@@ -611,16 +611,12 @@ SELECT regexp_replace(regexp_replace(
 		'g');
                            regexp_replace                            
 ---------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 192              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 64               +
  state = free, datoid equal, relnode equal, ix_type = primary, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: deleted, offset = 272, tuple = ((16384, 16450), 0, 0)  +
-     Item 1: deleted, offset = 304, tuple = ((16384, 16453), 0, 0)  +
-     Item 2: deleted, offset = 336, tuple = ((16384, 16463), 0, 0)  +
-     Item 3: deleted, offset = 368, tuple = ((16384, 16502), 0, 0)  +
-     Item 4: deleted, offset = 400, tuple = ((16384, 16505), 0, 0)  +
-     Item 5: deleted, offset = 432, tuple = ((16384, 16508), 0, 0)  +
+     Item 0: deleted, offset = 264, tuple = ((16384, 16505), 0, 0)  +
+     Item 1: deleted, offset = 296, tuple = ((16384, 16508), 0, 0)  +
                                                                     +
  
 (1 row)

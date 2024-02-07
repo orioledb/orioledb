@@ -1971,7 +1971,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					{
 						uint32		my_chkp_num;
 
-						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid, chkp_num);
+						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+															chkp_num, NULL);
 
 						cleanup = (file_chkp > my_chkp_num);
 					}
@@ -1997,7 +1998,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					{
 						uint32		my_chkp_num;
 
-						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid, chkp_num);
+						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+															chkp_num, NULL);
 
 						cleanup = (file_chkp < my_chkp_num);
 					}

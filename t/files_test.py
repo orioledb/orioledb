@@ -219,7 +219,7 @@ class FilesTest(BaseTest):
 		    f for f in list(chain.from_iterable(map_files.values()))
 		    if f != last_xid
 		]
-		self.assertEqual([1, 0, 2], old_map_files)
+		self.assertEqual([2], old_map_files)
 		self.assertEqual(['2', '2'], [f[2] for f in tmp_files])
 
 		node.start()
@@ -233,7 +233,7 @@ class FilesTest(BaseTest):
 		    f for f in list(chain.from_iterable(map_files.values()))
 		    if f != last_xid
 		]
-		self.assertEqual([1, 2], old_map_files)
+		self.assertEqual([2], old_map_files)
 		self.assertEqual([], [f[2] for f in tmp_files])
 
 	def test_multiple_checkpoint_tmp_map_cleanup(self):
@@ -286,7 +286,7 @@ class FilesTest(BaseTest):
 		map_file_key = "%s_%s" % (datoid, o_test_pkey_relnode)
 		self.assertEqual([8, 4], map_files[map_file_key])
 		map_file_key = "%s_%s" % (datoid, o_test_toast_relnode)
-		self.assertEqual([1], map_files[map_file_key])
+		self.assertFalse(map_file_key in map_files)
 
 	def test_tmp_map_cleanup_no_error(self):
 		node = self.node
@@ -352,7 +352,6 @@ class FilesTest(BaseTest):
 				tmp_files = tmp_files + " " + f
 
 		# all files should exists
-		self.assertTrue(bool(re.match(".*-0\.map.*", map_files)))
 		self.assertTrue(bool(re.match(".*-1\.map.*", map_files)))
 		self.assertTrue(bool(re.match(".*-2\.map.*", map_files)))
 		self.assertTrue(bool(re.match(".*-2\.tmp.*", tmp_files)))

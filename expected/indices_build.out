@@ -4795,13 +4795,13 @@ SELECT orioledb_tbl_structure('o_indices2'::regclass, 'nue');
 ---------------------------------------------------------------------
  Index o_indices2_pkey contents                                     +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
                                                                     +
  Index o_indices2_idx1 contents                                     +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+ state = free, datoid equal, relnode equal, ix_type = regular, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
                                                                     +

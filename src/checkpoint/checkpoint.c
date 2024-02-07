@@ -553,7 +553,8 @@ add_map_cleanup_item(List *cleanup, BTreeDescr *desc)
 		return cleanup;
 
 	chkpNum = o_get_latest_chkp_num(desc->oids.datoid, desc->oids.relnode,
-									checkpoint_state->lastCheckpointNumber);
+									checkpoint_state->lastCheckpointNumber,
+									NULL);
 
 	if (!OCompressIsValid(desc->compress) &&
 		desc->freeBuf.tag.type == 'm' &&
@@ -904,9 +905,9 @@ checkpoint_chkp_nums(int flags, uint32 cur_chkp_num,
 	}
 }
 
-static uint32
-o_get_latest_chkp_num_internal(Oid datoid, Oid relnode, uint32 max_chkp_num,
-							   bool *found)
+uint32
+o_get_latest_chkp_num(Oid datoid, Oid relnode, uint32 max_chkp_num,
+					  bool *found)
 {
 	OTuple		key_tuple,
 				result_tuple;
@@ -946,13 +947,6 @@ o_get_latest_chkp_num_internal(Oid datoid, Oid relnode, uint32 max_chkp_num,
 	pfree(result_tuple.data);
 
 	return chkp_num;
-}
-
-uint32
-o_get_latest_chkp_num(Oid datoid, Oid relnode, uint32 max_chkp_num)
-{
-	return o_get_latest_chkp_num_internal(datoid, relnode,
-										  max_chkp_num, NULL);
 }
 
 void
@@ -4624,7 +4618,8 @@ free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 static bool
 checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 									 EvictedTreeData *evicted_tree_data,
-									 uint32 chkp_num, uint32 map_chkp_num)
+									 uint32 chkp_num, uint32 map_chkp_num,
+									 bool map_file_exists)
 {
 	EvictedSeqBufData *evicted_free,
 			   *evicted_next,
@@ -4648,12 +4643,16 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 	{
 		prev_chkp_tag = evicted_free->tag;
 	}
-	else
+	else if (init)
 	{
 		prev_chkp_tag.datoid = td->oids.datoid;
 		prev_chkp_tag.relnode = td->oids.relnode;
 		prev_chkp_tag.num = map_chkp_num;
-		prev_chkp_tag.type = 'm';
+		prev_chkp_tag.type = map_file_exists ? 'm' : 't';
+	}
+	else
+	{
+		prev_chkp_tag = meta_page->freeBuf.tag;
 	}
 
 	cur_chkp_tag.datoid = td->oids.datoid;
@@ -4725,37 +4724,37 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
  *
  * We can try to use exist on-disk data for the B-tree metaPageBlkno information or
  * initialize clear tree.
+ *
+ * Returns true if map file existed.
  */
-static void
+static bool
 evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 						 uint32 *map_chkp_num, bool clear_tree)
 {
 	CheckpointFileHeader file_header = {0};
 	BTreeMetaPage *meta_page;
 	uint32		chkp_num = *map_chkp_num;
+	bool		result = false;
 
 	Assert(TREE_HAS_OIDS(desc));
 	Assert(evicted_data);
 
-	if (clear_tree)
-	{
-		*evicted_data = read_evicted_data(desc->oids.datoid,
-										  desc->oids.relnode,
-										  true);
+	*evicted_data = read_evicted_data(desc->oids.datoid,
+									  desc->oids.relnode,
+									  true);
 
-		if (*evicted_data == NULL)
-		{
-			/* No need to create or read a map file */
-			file_header.rootDownlink = InvalidDiskDownlink;
-			file_header.datafileLength = 0;
-			file_header.numFreeBlocks = 0;
-			file_header.leafPagesNum = 1;
-			file_header.ctid = 0;
-		}
-		else
-		{
-			file_header = (*evicted_data)->file_header;
-		}
+	if (*evicted_data != NULL)
+	{
+		file_header = (*evicted_data)->file_header;
+	}
+	else if (clear_tree)
+	{
+		/* No need to create or read a map file */
+		file_header.rootDownlink = InvalidDiskDownlink;
+		file_header.datafileLength = 0;
+		file_header.numFreeBlocks = 0;
+		file_header.leafPagesNum = 1;
+		file_header.ctid = 0;
 	}
 	else
 	{
@@ -4769,10 +4768,10 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
 		prev_chkp_tag.datoid = desc->oids.datoid;
 		prev_chkp_tag.relnode = desc->oids.relnode;
-		prev_chkp_tag.num = o_get_latest_chkp_num_internal(desc->oids.datoid,
-														   desc->oids.relnode,
-														   chkp_num,
-														   &found);
+		prev_chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
+												  desc->oids.relnode,
+												  chkp_num,
+												  &found);
 		prev_chkp_tag.type = 'm';
 		prev_chkp_fname = get_seq_buf_filename(&prev_chkp_tag);
 		prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDONLY | PG_BINARY);
@@ -4793,7 +4792,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 									 desc->oids.relnode,
 									 chkp_num);
 
-		if (!prev_chkp_file_exist && desc->storageType != BTreeStorageTemporary)
+		if (!prev_chkp_file_exist)
 		{
 			/*
 			 * Creates file with default header
@@ -4803,76 +4802,22 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			file_header.numFreeBlocks = 0;
 			file_header.leafPagesNum = 1;
 			file_header.ctid = 0;
-
-			pfree(prev_chkp_fname);
-			prev_chkp_tag.num = chkp_num;
-			prev_chkp_fname = get_seq_buf_filename(&prev_chkp_tag);
-			prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
-
-			if (prev_chkp_file < 0)
-			{
-				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not create map file %s", prev_chkp_fname)));
-			}
-
-			ferror = OFileWrite(prev_chkp_file, (Pointer) &file_header, sizeof(file_header), 0,
-								WAIT_EVENT_SLRU_WRITE) != sizeof(file_header) ||
-				FileSync(prev_chkp_file, WAIT_EVENT_SLRU_SYNC) != 0;
-
-			if (!IS_SYS_TREE_OIDS(desc->oids))
-			{
-				if (orioledb_s3_mode)
-				{
-					/*
-					 * We don't wait, but should be finished before completion
-					 * of the next checkpoint, which could reference it.
-					 */
-					(void) s3_schedule_file_part_write(chkp_num,
-													   desc->oids.datoid,
-													   desc->oids.relnode,
-													   -1,
-													   -1);
-				}
-
-				o_update_latest_chkp_num(desc->oids.datoid,
-										 desc->oids.relnode,
-										 chkp_num);
-			}
-
-			if (ferror)
-				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to write header to map file %s",
-									   prev_chkp_fname)));
 		}
 		else					/* if checkpoint file exist */
 		{
-			/*
-			 * Reads header from file.
-			 */
-			*evicted_data = read_evicted_data(desc->oids.datoid,
-											  desc->oids.relnode,
-											  true);
-
-			if (*evicted_data == NULL)
+			*map_chkp_num = prev_chkp_tag.num;
+			ferror = OFileRead(prev_chkp_file, (Pointer) &file_header,
+							   sizeof(file_header), 0, WAIT_EVENT_SLRU_READ) != sizeof(file_header);
+			if (ferror)
 			{
-				*map_chkp_num = prev_chkp_tag.num;
-				ferror = OFileRead(prev_chkp_file, (Pointer) &file_header,
-								   sizeof(file_header), 0, WAIT_EVENT_SLRU_READ) != sizeof(file_header);
-				if (ferror)
-				{
-					ereport(FATAL, (errcode_for_file_access(),
-									errmsg("could not to read header of map file %s",
-										   prev_chkp_fname)));
-				}
+				ereport(FATAL, (errcode_for_file_access(),
+								errmsg("could not to read header of map file %s",
+									   prev_chkp_fname)));
 			}
-			else
-			{
-				file_header = (*evicted_data)->file_header;
-			}
-		}
-		if (prev_chkp_file_exist)
 			FileClose(prev_chkp_file);
+		}
 		pfree(prev_chkp_fname);
+		result = prev_chkp_file_exist;
 	}
 
 	o_btree_init(desc);
@@ -4927,6 +4872,8 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 		unlock_page(desc->rootInfo.rootPageBlkno);
 	}
+
+	return result;
 }
 
 /* TODO: move this method ? */
@@ -4971,8 +4918,8 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 										 &checkpoint_concurrent);
 	map_chkp_num = chkp_num;
 	if (init_shmem)
-		evictable_tree_init_meta(desc, &evicted_tree_data,
-								 &map_chkp_num, true);
+		(void) evictable_tree_init_meta(desc, &evicted_tree_data,
+										&map_chkp_num, true);
 
 	chkp_index = (chkp_num + 1) % 2;
 	tmp_tag.datoid = desc->oids.datoid;
@@ -5047,6 +4994,7 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 	uint32		chkp_num;
 	uint32		map_chkp_num;
 	EvictedTreeData *evicted_tree_data = NULL;
+	bool		map_file_exists = false;
 
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
@@ -5062,12 +5010,14 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 	btree_open_smgr(desc);
 
 	if (init_shmem)
-		evictable_tree_init_meta(desc, &evicted_tree_data, &map_chkp_num, false);
+		map_file_exists = evictable_tree_init_meta(desc, &evicted_tree_data,
+												   &map_chkp_num, false);
 
 	if (!orioledb_s3_mode &&
 		!checkpointable_tree_fill_seq_buffers(desc, init_shmem,
 											  evicted_tree_data, chkp_num,
-											  map_chkp_num))
+											  map_chkp_num,
+											  map_file_exists))
 	{
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not fill sequence buffers.")));

@@ -60,7 +60,8 @@ static bool check_extents(ExtentsArray *busy, ExtentsArray *free);
 static void get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 							 bool force_file_check, uint32 chkp_num);
 static void get_free_extents_from_file(SeqBufTag *tag, off_t offset,
-									   ExtentsArray *free_extents, bool compressed);
+									   ExtentsArray *free_extents,
+									   bool compressed, bool should_exists);
 static bool is_sorted_by_off(ExtentsArray *array);
 static bool is_sorted_by_len_off(ExtentsArray *array);
 
@@ -149,6 +150,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 		SeqBufTag	tag;
 		ExtentsArray map_extents,
 					tmp_extents;
+		bool		found;
 
 		memset(&map_extents, 0, sizeof(ExtentsArray));
 		memset(&tmp_extents, 0, sizeof(ExtentsArray));
@@ -157,16 +159,17 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 		tag.relnode = desc->oids.relnode;
 		tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 										desc->oids.relnode,
-										checkpoint_number - 1);
+										checkpoint_number - 1,
+										&found);
 		tag.type = 'm';
 
 
 		if (seq_buf_file_exist(&tag))
 		{
 			get_free_extents_from_file(&tag, sizeof(CheckpointFileHeader),
-									   &map_extents, is_compressed);
+									   &map_extents, is_compressed, false);
 		}
-		else
+		else if (found)
 		{
 			elog(NOTICE, "%s not exist", get_seq_buf_filename(&tag));
 			status.hasError = true;
@@ -175,7 +178,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 		tag.type = 't';
 		if (!is_compressed && seq_buf_file_exist(&tag))
 		{
-			get_free_extents_from_file(&tag, 0, &tmp_extents, false);
+			get_free_extents_from_file(&tag, 0, &tmp_extents, false, false);
 		}
 
 		if (map_extents.size != 0)
@@ -236,16 +239,19 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 
 	if (force_file_check)
 	{
+		bool		found;
+
 		/*
 		 * Reads free blocks from map file.
 		 */
 		chkp_tag.type = 'm';
 		chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 											 desc->oids.relnode,
-											 chkp_num);
+											 chkp_num,
+											 &found);
 
 		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
-								   free_extents, is_compressed);
+								   free_extents, is_compressed, found);
 	}
 	else if (!is_compressed)
 	{
@@ -258,12 +264,12 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		chkp_tag = desc->freeBuf.shared->tag;
 		freebuf_offset = seq_buf_get_offset(&desc->freeBuf);
 
-		get_free_extents_from_file(&chkp_tag, freebuf_offset, free_extents, false);
+		get_free_extents_from_file(&chkp_tag, freebuf_offset, free_extents, false, false);
 		for (num = chkp_tag.num; num < chkp_num; num++)
 		{
 			chkp_tag.num = num + 1;
 			chkp_tag.type = 't';
-			get_free_extents_from_file(&chkp_tag, 0, free_extents, false);
+			get_free_extents_from_file(&chkp_tag, 0, free_extents, false, false);
 		}
 	}
 	else
@@ -275,7 +281,7 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		chkp_tag.num = chkp_num + 1;
 		chkp_tag.type = 't';
 		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
-								   free_extents, true);
+								   free_extents, true, false);
 	}
 }
 
@@ -284,7 +290,8 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
  */
 static void
 get_free_extents_from_file(SeqBufTag *tag, off_t offset,
-						   ExtentsArray *free_extents, bool compressed)
+						   ExtentsArray *free_extents, bool compressed,
+						   bool should_exists)
 {
 	char		buf[ORIOLEDB_BLCKSZ],
 			   *filename;
@@ -298,8 +305,10 @@ get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 	if (file == -1)
 	{
-		ereport(NOTICE, (errcode_for_file_access(),
-						 errmsg("could not open map file %s.", filename)));
+		if (should_exists)
+			ereport(NOTICE, (errcode_for_file_access(),
+							 errmsg("could not open map file %s.", filename)));
+		pfree(filename);
 		return;
 	}
 

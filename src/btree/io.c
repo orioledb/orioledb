@@ -858,7 +858,8 @@ get_free_disk_offset(BTreeDescr *desc)
 			{
 				uint32		chkpNum = o_get_latest_chkp_num(tag.datoid,
 															tag.relnode,
-															checkpoint_state->lastCheckpointNumber);
+															checkpoint_state->lastCheckpointNumber,
+															NULL);
 
 				if (old_tag.num < chkpNum)
 					seq_buf_remove_file(&old_tag);
