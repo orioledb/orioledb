@@ -451,8 +451,9 @@ class IndicesBuildTest(BaseTest):
 
 	def test_indices_build_xip(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 
 		columns = ",\n".join(["val%d int" % x for x in range(1, 10)])
@@ -468,7 +469,7 @@ class IndicesBuildTest(BaseTest):
 				{columns}
 			) USING orioledb;
 			INSERT INTO o_indices0
-				SELECT {values} FROM generate_series(1, 500) AS i;
+				SELECT {values} FROM generate_series(1, 499) AS i;
 		""")
 
 		con1 = node.connect()
@@ -480,6 +481,9 @@ class IndicesBuildTest(BaseTest):
 				CREATE UNIQUE INDEX o_indices0_idx{i}
 				ON o_indices0 (val{i});
 			""")
+		con1.execute(
+		    f"INSERT INTO o_indices0 SELECT {values} FROM generate_series(500, 500) AS i;"
+		)
 		con1.execute(
 		    "SELECT pg_stopevent_set('checkpoint_index_start', '$.treeName == \"o_indices0_idx1\"');"
 		)

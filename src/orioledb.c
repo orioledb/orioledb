@@ -99,6 +99,7 @@ uint32		undo_buffers_count;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
 bool		remove_old_checkpoint_files = true;
+bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
 bool		use_mmap = false;
 bool		use_device = false;
@@ -363,6 +364,17 @@ _PG_init(void)
 							 "Remove temporary *.tmp and *.map files after checkpoint.",
 							 NULL,
 							 &remove_old_checkpoint_files,
+							 true,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.skip_unmodified_trees",
+							 "Skip reading of unmodified trees during checkpointing.",
+							 NULL,
+							 &skip_unmodified_trees,
 							 true,
 							 PGC_POSTMASTER,
 							 0,

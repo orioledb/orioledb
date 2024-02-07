@@ -155,8 +155,9 @@ class RecoveryTest(BaseTest):
 
 	def test_primary_xip_secondary_tuples_insert(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -219,8 +220,9 @@ class RecoveryTest(BaseTest):
 
 	def test_primary_xip_secondary_tuples_delete(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -286,8 +288,9 @@ class RecoveryTest(BaseTest):
 
 	def test_primary_xip_secondary_tuples_update(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -358,8 +361,9 @@ class RecoveryTest(BaseTest):
 
 	def test_primary_xip_secondary_tuples_mix(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -466,8 +470,9 @@ class RecoveryTest(BaseTest):
 
 	def test_primary_empty_secondary_tuples(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -480,6 +485,7 @@ class RecoveryTest(BaseTest):
 					   ) USING orioledb;
 					   CREATE UNIQUE INDEX o_test_ix1 ON o_test (id2);
 					   CREATE INDEX o_test_ix2 ON o_test (id3);
+					   INSERT INTO o_test (SELECT id, id + 1, id + 3 FROM generate_series(11, 11, 1) id);
 					   """)
 		# insert-update-delete-commit
 		con1 = node.connect()
@@ -1650,8 +1656,9 @@ class RecoveryTest(BaseTest):
 
 	def test_checkpoint_concurrent_no_wal_undo(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
@@ -1690,8 +1697,9 @@ class RecoveryTest(BaseTest):
 
 	def test_checkpoint_concurrent_no_wal_undo_secondary(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
@@ -1733,8 +1741,9 @@ class RecoveryTest(BaseTest):
 
 	def test_apply_branches(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
@@ -1751,6 +1760,8 @@ class RecoveryTest(BaseTest):
 		    "CREATE UNIQUE INDEX o_test_val_idx ON o_test(val);\n")
 		node.safe_psql("INSERT INTO o_test\n"
 		               "(SELECT id, id FROM generate_series(1, 100, 1) id);\n")
+		node.safe_psql("INSERT INTO o_test2\n"
+		               "(SELECT id, id FROM generate_series(1, 1, 1) id);\n")
 
 		con1 = node.connect()
 		con2 = node.connect()
@@ -2082,9 +2093,11 @@ class RecoveryTest(BaseTest):
 					junk float,
 					unique(b, i)
 				) USING orioledb;
+				INSERT INTO o_test_4 VALUES (true, 1.1, 2.222);
 			""")
 			con1.execute("""
 				CREATE TEMP TABLE o_test_9 (c1 int, c2 text) USING orioledb;
+				INSERT INTO o_test_9 VALUES (1, 'abc');
 			""")
 			self.assertEqual([(1, 'A'), (2, 'B')],
 			                 con1.execute("TABLE o_test_3"))
@@ -2106,9 +2119,8 @@ class RecoveryTest(BaseTest):
 
 			node.stop(['-m', 'immediate'])
 
-		file_num = 3  # table num
-		file_num += 3  # toast num
-		file_num += 1  # ix num
+		file_num = 3  # PK trees
+		file_num += 1  # Indexes
 		db_dir = f"{node.data_dir}/orioledb_data/{cur_database}"
 		self.assertEqual(len(sorted(os.listdir(db_dir))), file_num)
 		node.start()

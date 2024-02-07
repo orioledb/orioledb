@@ -1970,11 +1970,16 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 					else if (!strcmp(ext, "map"))
 					{
 						uint32		my_chkp_num;
+						bool		found;
 
 						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
-															chkp_num, NULL);
+															chkp_num, &found);
 
 						cleanup = (file_chkp > my_chkp_num);
+
+						if (!found && file_chkp == chkp_num)
+							o_update_latest_chkp_num(dbOid, file_reloid,
+													 file_chkp);
 					}
 
 					if (!cleanup)

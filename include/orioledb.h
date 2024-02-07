@@ -232,6 +232,7 @@ extern ODBProcData *oProcData;
 extern int	max_procs;
 extern OrioleDBPageDesc *page_descs;
 extern bool remove_old_checkpoint_files;
+extern bool skip_unmodified_trees;
 extern bool debug_disable_bgwriter;
 extern MemoryContext btree_insert_context;
 extern MemoryContext btree_seqscan_context;

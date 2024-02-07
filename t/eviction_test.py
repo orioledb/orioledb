@@ -265,6 +265,7 @@ class EvictionTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "checkpoint_timeout = 1d\n"
 		    "orioledb.main_buffers = 8MB\n"
 		    "bgwriter_delay = 400\n"
 		    "orioledb.enable_stopevents = true\n")
@@ -281,12 +282,12 @@ class EvictionTest(BaseTest):
 		    "CREATE TABLE IF NOT EXISTS o_test (\n"
 		    "	key SERIAL NOT NULL,\n"
 		    "	val int NOT NULL\n"
-		    ") USING orioledb;\n")
+		    ") USING orioledb;\n"
+		    "INSERT INTO o_second VALUES ('aaaaa');")
 
 		con1 = node.connect()
 		con2 = node.connect()
 
-		con1.execute("CHECKPOINT;")
 		con2.execute("SELECT pg_stopevent_set('checkpoint_table_start',\n"
 		             "format(E'$.table.reloid == \\045s',\n"
 		             "'o_second'::regclass::oid)::jsonpath);")

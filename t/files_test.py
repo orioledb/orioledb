@@ -183,6 +183,7 @@ class FilesTest(BaseTest):
 		map_files = sorted(map_files, reverse=True)
 		if filter_sys_trees:
 			map_files = [f for f in map_files if f[0] != 1]
+			tmp_files = [f for f in tmp_files if f[0] != '1']
 		map_files = {
 		    k: [x[2] for x in v]
 		    for k, v in groupby(
@@ -220,7 +221,7 @@ class FilesTest(BaseTest):
 		    if f != last_xid
 		]
 		self.assertEqual([2], old_map_files)
-		self.assertEqual(['2', '2'], [f[2] for f in tmp_files])
+		self.assertEqual(['2'], [f[2] for f in tmp_files])
 
 		node.start()
 		node.safe_psql('postgres', 'CHECKPOINT;')
@@ -525,6 +526,10 @@ class FilesTest(BaseTest):
 		             "	(SELECT val FROM generate_series(%s, %s, 1) val);\n" %
 		             (str(1), str(n)))
 		con1.commit()
+		self.assertEqual(
+		    con1.execute(
+		        "SELECT count(*) FROM (SELECT * FROM o_test ORDER BY key) x;")
+		    [0][0], n)
 
 		self.assertNotEqual(
 		    con1.execute("SELECT count(*) FROM orioledb_get_evicted_trees();")

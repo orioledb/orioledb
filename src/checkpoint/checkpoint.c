@@ -916,7 +916,11 @@ o_get_latest_chkp_num(Oid datoid, Oid relnode, uint32 max_chkp_num,
 	ChkpNumTuple *result;
 
 	if (datoid == SYS_TREES_DATOID)
+	{
+		if (found)
+			*found = true;
 		return max_chkp_num;
+	}
 
 	key.datoid = datoid;
 	key.relnode = relnode;
@@ -4402,6 +4406,67 @@ prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
 	unlock_page(blkno);
 }
 
+/*
+ * Check if tree needs to be passed during checkpointing.  Is should be
+ * presented in SYS_TREES_SHARED_ROOT_INFO or in SYS_TREES_EVICTED_DATA.  That
+ * is, it should be either loaded to memory or evicted.  Others are guaranteed
+ * to be unmodified since last checkpoint.  If tree is to be skipped, updates
+ * checkpoint_state.
+ */
+static bool
+check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
+{
+	SharedRootInfoKey key;
+	OTuple		keyTuple;
+	OTuple		resultTuple;
+	int			lockNo;
+
+	if (!skip_unmodified_trees)
+		return true;
+
+	/*
+	 * Check if we need to deal with this tree.  If tress have no shared root
+	 * info and no evicted data, skip it.
+	 */
+	key.datoid = treeOids.datoid;
+	key.relnode = treeOids.relnode;
+
+	lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
+	LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
+				  LW_EXCLUSIVE);
+
+	keyTuple.formatFlags = 0;
+	keyTuple.data = (Pointer) &key;
+	resultTuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_EVICTED_DATA),
+											&keyTuple, BTreeKeyNonLeafKey,
+											COMMITSEQNO_INPROGRESS, NULL,
+											CurrentMemoryContext, NULL);
+
+	if (O_TUPLE_IS_NULL(resultTuple))
+	{
+		resultTuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+												&keyTuple, BTreeKeyNonLeafKey,
+												COMMITSEQNO_INPROGRESS, NULL,
+												CurrentMemoryContext, NULL);
+		if (O_TUPLE_IS_NULL(resultTuple))
+		{
+			chkp_inc_changecount_before(checkpoint_state);
+			checkpoint_state->treeType = type;
+			checkpoint_state->datoid = treeOids.datoid;
+			checkpoint_state->reloid = treeOids.reloid;
+			checkpoint_state->relnode = treeOids.relnode;
+			checkpoint_state->completed = true;
+			checkpoint_state->curKeyType = CurKeyFinished;
+			chkp_inc_changecount_after(checkpoint_state);
+			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+			return false;
+		}
+	}
+	LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+
+	return true;
+}
+
 static void
 checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 						   ORelOids tableOids, void *arg)
@@ -4414,6 +4479,13 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	Jsonb	   *params;
 
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
+
+	if (!check_tree_needs_checkpointing(type, treeOids))
+	{
+		MemoryContextSwitchTo(prev_context);
+		MemoryContextResetOnly(chkp_mem_context);
+		return;
+	}
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_checkpoint_table_start_params(tableOids, treeOids);
@@ -4545,20 +4617,27 @@ get_cur_checkpoint_number(ORelOids *oids, OIndexType type,
 
 		if (OidIsValid(datoid))
 		{
+			int			cmp;
+
 			/* datoid, relnode and ix_num setups inside changecount section */
 			Assert(OidIsValid(relnode));
 
-			if (chkp_ordering_cmp(type, oids->datoid, oids->relnode,
-								  chkp_tree_type, datoid, relnode) < 0)
+			cmp = chkp_ordering_cmp(type, oids->datoid, oids->relnode,
+									chkp_tree_type, datoid, relnode);
+
+			if (cmp < 0 || (cmp == 0 && completed))
 			{
 				/* BTree is already processed by current checkpoint */
 				result += 1;
 			}
+
+			*checkpoint_concurrent = (cmp == 0) && !completed;
+		}
+		else
+		{
+			*checkpoint_concurrent = false;
 		}
 		/* else checkpoint is not in progress */
-
-		*checkpoint_concurrent = oids->datoid == datoid && oids->relnode == relnode
-			&& type == chkp_tree_type && !completed;
 		chkp_save_changecount_after(checkpoint_state, after_changecount);
 		if (before_changecount == after_changecount)
 			break;
@@ -4882,6 +4961,24 @@ tbl_data_exists(ORelOids *oids)
 {
 	char	   *filename;
 	File		file;
+	SharedRootInfoKey key;
+	OTuple		keyTuple;
+	OTuple		resultTuple;
+
+	key.datoid = oids->datoid;
+	key.relnode = oids->relnode;
+	keyTuple.formatFlags = 0;
+	keyTuple.data = (Pointer) &key;
+
+	resultTuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+											&keyTuple, BTreeKeyNonLeafKey,
+											COMMITSEQNO_INPROGRESS, NULL,
+											CurrentMemoryContext, NULL);
+	if (!O_TUPLE_IS_NULL(resultTuple))
+	{
+		pfree(resultTuple.data);
+		return true;
+	}
 
 	/* TODO: more smart check */
 	filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%u", oids->datoid, oids->relnode);

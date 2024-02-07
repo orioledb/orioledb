@@ -2073,6 +2073,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	int			i PG_USED_FOR_ASSERTS_ONLY;
 	uint32		chkpNum = 0;
 	bool		notModified;
+	bool		hasMetaLock = LWLockHeldByMe(&checkpoint_state->oTablesMetaLock);
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
 		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u32(&(O_PAGE_HEADER(rootPageBlkno)->state))));
@@ -2153,6 +2154,9 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	perform_writeback(&io_writeback);
 
+	if (!hasMetaLock)
+		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
+
 	/*
 	 * Check if we can skip the evicted data if tree has no modification after
 	 * writing the last *.map file.
@@ -2165,6 +2169,9 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 * Backends and workers can create a new SharedRootInfo* after this.
 	 */
 	o_drop_shared_root_info(desc->oids.datoid, desc->oids.relnode);
+
+	if (!hasMetaLock)
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 }
 
 BTreeDescr *

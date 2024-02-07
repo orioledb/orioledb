@@ -103,6 +103,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "checkpoint_timeout = 1d\n"
 		    "orioledb.main_buffers = 8MB\n"
 		    "orioledb.enable_stopevents = true\n"
 		    "bgwriter_delay = 400\n")
@@ -115,7 +116,8 @@ class CheckpointConcurrentTest(BaseTest):
 		    ") USING orioledb;\n"
 		    "CREATE TABLE IF NOT EXISTS o_second (\n"
 		    "	id text  NOT NULL\n"
-		    ") USING orioledb;\n")
+		    ") USING orioledb;\n"
+		    "INSERT INTO o_second VALUES ('abc');\n")
 
 		con1 = node.connect()
 		con2 = node.connect()
@@ -191,8 +193,9 @@ class CheckpointConcurrentTest(BaseTest):
 
 	def test_checkpoint_primary_insert_commit(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
@@ -201,7 +204,8 @@ class CheckpointConcurrentTest(BaseTest):
 		    "	secid int NOT NULL,\n"
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n"
-		    "CREATE UNIQUE INDEX o_checkpont_ix1 ON o_checkpoint (secid);\n")
+		    "CREATE UNIQUE INDEX o_checkpont_ix1 ON o_checkpoint (secid);\n"
+		    "INSERT INTO o_checkpoint VALUES (0, 1);\n")
 		con1 = node.connect()
 		con2 = node.connect()
 
@@ -223,7 +227,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node.start()
 		con1 = node.connect()
 		self.assertEqual(
-		    con1.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 1)
+		    con1.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 2)
 		con1.close()
 
 	def test_checkpoint_rightlink_ok(self):
@@ -276,6 +280,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', """
+						 checkpoint_timeout = 1d
 						 orioledb.debug_disable_bgwriter = true
 						 orioledb.main_buffers = 8MB
 						 log_min_messages = notice
@@ -503,6 +508,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "log_min_messages = notice\n"
+		    "checkpoint_timeout = 1d\n"
 		    "orioledb.main_buffers = 48MB\n"
 		    "orioledb.enable_stopevents = true\n"
 		    "max_parallel_workers_per_gather = 0\n")
@@ -563,6 +569,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', """
+							checkpoint_timeout = 1d
 							orioledb.debug_disable_bgwriter = true
 							orioledb.enable_stopevents = true
 						 """)
@@ -638,6 +645,7 @@ class CheckpointConcurrentTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', """
+							checkpoint_timeout = 1d
 							orioledb.debug_disable_bgwriter = true
 							orioledb.enable_stopevents = true
 						 """)
