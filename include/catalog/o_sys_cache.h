@@ -35,10 +35,7 @@
 #include "utils/catcache.h"
 #include "utils/pg_locale.h"
 #include "utils/resowner_private.h"
-
-#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
-#endif
 
 /*
  * Database oid to be used for sys cache entries comparison.
@@ -436,7 +433,6 @@ extern void o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid,
 extern void o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									OTuple tup, Pointer arg);
 
-#if PG_VERSION_NUM >= 140000
 typedef struct
 {
 	OSysCacheKey1 key;
@@ -448,7 +444,6 @@ extern HeapTuple o_multirange_cache_search_htup(TupleDesc tupdesc,
 												Oid rngmultitypid);
 extern void o_multirange_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 										 OTuple tup, Pointer arg);
-#endif
 
 /* o_class_cache.c */
 typedef struct OClass OClass;
@@ -518,9 +513,7 @@ typedef struct OType
 	char		typdelim;
 	Oid			typbasetype;
 	int32		typtypmod;
-#if PG_VERSION_NUM >= 140000
 	Oid			typsubscript;
-#endif
 	Oid			default_btree_opclass;
 	Oid			default_hash_opclass;
 } OType;

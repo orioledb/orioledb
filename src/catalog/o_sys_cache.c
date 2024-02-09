@@ -28,9 +28,6 @@
 
 #include "access/heaptoast.h"
 #include "commands/defrem.h"
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
@@ -167,9 +164,7 @@ o_sys_caches_init(void)
 	o_type_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_collation_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_database_cache_init(sys_cache_cxt, sys_cache_fastcache);
-#if PG_VERSION_NUM >= 140000
 	o_multirange_cache_init(sys_cache_cxt, sys_cache_fastcache);
-#endif
 	orioledb_setup_syscache_hooks();
 }
 
@@ -1239,7 +1234,6 @@ custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 				o_range_cache_add_rngsubopc(datoid, typeform->oid, insert_lsn);
 			}
 			break;
-#if PG_VERSION_NUM >= 140000
 		case TYPTYPE_MULTIRANGE:
 			{
 				XLogRecPtr	sys_lsn;
@@ -1255,7 +1249,6 @@ custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 										   NULL);
 			}
 			break;
-#endif
 		case TYPTYPE_ENUM:
 			{
 				XLogRecPtr	sys_lsn;
@@ -1479,9 +1472,7 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 		case OperatorOidIndexId:
 		case ProcedureOidIndexId:
 		case RangeTypidIndexId:
-#if PG_VERSION_NUM >= 140000
 		case RangeMultirangeTypidIndexId:
-#endif
 		case TypeOidIndexId:
 			if (cache->cc_tupdesc)
 				tupdesc = cache->cc_tupdesc;
@@ -1652,7 +1643,6 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 				hook_tuple = o_range_cache_search_htup(tupdesc, rngtypid);
 			}
 			break;
-#if PG_VERSION_NUM >= 140000
 		case RangeMultirangeTypidIndexId:
 			{
 				Oid			rngmultitypid;
@@ -1665,7 +1655,6 @@ o_SearchCatCacheInternal_hook(CatCache *cache, int nkeys, Datum v1, Datum v2,
 															rngmultitypid);
 			}
 			break;
-#endif
 		case TypeOidIndexId:
 			{
 				Oid			typeoid;

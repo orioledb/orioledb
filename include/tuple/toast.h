@@ -15,9 +15,7 @@
 
 #include "access/htup.h"
 #include "access/detoast.h"
-#if PG_VERSION_NUM >= 140000
 #include "access/toast_compression.h"
-#endif
 
 #include "orioledb.h"
 
@@ -56,10 +54,8 @@ typedef struct OToastValue
 {
 	/* always TOAST pointer (0x80 for big-endian or 0x01 for little-endian) */
 	uint8		pointer;
-#if PG_VERSION_NUM >= 140000
 	/* compression method of TOASTed data */
 	uint8		compression;
-#endif
 	/* raw size of TOASTed data without headers */
 	int32		raw_size;
 	/* size of TOASTed data */
@@ -190,11 +186,7 @@ o_get_raw_size(Datum value)
 	else if (VARATT_IS_EXTERNAL(value))
 		return toast_raw_datum_size(value) - VARHDRSZ;
 	else if (VARATT_IS_COMPRESSED(attr))
-#if PG_VERSION_NUM >= 140000
 		return VARDATA_COMPRESSED_GET_EXTSIZE(attr);
-#else
-		return VARRAWSIZE_4B_C(attr);
-#endif
 	else
 		return VARSIZE_ANY_EXHDR(value);
 }

@@ -63,9 +63,7 @@ static void o_collect_function_walker(Oid functionId, Oid inputcollid,
 									  List *args, void *context);
 static bool plan_tree_walker(Plan *plan, WalkerFunc, void *context);
 
-#if PG_VERSION_NUM >= 150000
 #define pg_analyze_and_rewrite_params pg_analyze_and_rewrite_withcb
-#endif
 
  /*
   * error context callback to let us supply a call-stack traceback
@@ -146,7 +144,6 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 	sqlerrcontext.previous = error_context_stack;
 	error_context_stack = &sqlerrcontext;
 
-#if PG_VERSION_NUM >= 140000
 	/* If we have prosqlbody, pay attention to that not prosrc */
 	proc_body = SysCacheGetAttr(PROCOID, procedureTuple,
 								Anum_pg_proc_prosqlbody, &isNull);
@@ -174,7 +171,6 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 		}
 	}
 	else
-#endif
 	{
 		List	   *raw_parsetree_list;
 
@@ -1070,7 +1066,6 @@ plan_tree_walker(Plan *plan, WalkerFunc walker, void *context)
 			}
 			break;
 
-#if PG_VERSION_NUM >= 140000
 		case T_TidRangeScan:
 			{
 				TidRangeScan *tid_range_scan = (TidRangeScan *) plan;
@@ -1080,7 +1075,6 @@ plan_tree_walker(Plan *plan, WalkerFunc walker, void *context)
 					return true;
 			}
 			break;
-#endif
 
 		case T_SubqueryScan:
 			{
@@ -1205,7 +1199,6 @@ plan_tree_walker(Plan *plan, WalkerFunc walker, void *context)
 			}
 			break;
 
-#if PG_VERSION_NUM >= 140000
 		case T_Memoize:
 			{
 				Memoize    *memoize = (Memoize *) plan;
@@ -1215,7 +1208,6 @@ plan_tree_walker(Plan *plan, WalkerFunc walker, void *context)
 					return true;
 			}
 			break;
-#endif
 
 		case T_WindowAgg:
 			{

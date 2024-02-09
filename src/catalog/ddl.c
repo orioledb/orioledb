@@ -27,9 +27,7 @@
 #include "access/heapam.h"
 #include "access/reloptions.h"
 #include "access/tableam.h"
-#if PG_VERSION_NUM >= 140000
 #include "access/toast_compression.h"
-#endif
 #include "access/transam.h"
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
@@ -101,9 +99,7 @@ static List *alter_type_exprs = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
-#if PG_VERSION_NUM >= 140000
 									 bool readOnlyTree,
-#endif
 									 ProcessUtilityContext context,
 									 ParamListInfo params,
 									 QueryEnvironment *env,
@@ -159,10 +155,8 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "ALTER COLUMN ... RESET";
 		case AT_SetStorage:
 			return "ALTER COLUMN ... SET STORAGE";
-#if PG_VERSION_NUM >= 140000
 		case AT_SetCompression:
 			return "ALTER COLUMN ... SET COMPRESSION";
-#endif
 		case AT_DropColumn:
 		case AT_AddIndex:
 		case AT_ReAddIndex:
@@ -189,10 +183,8 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "CLUSTER ON";
 		case AT_DropCluster:
 			return "SET WITHOUT CLUSTER";
-#if PG_VERSION_NUM >= 150000
 		case AT_SetAccessMethod:
 			return "SET ACCESS METHOD";
-#endif
 		case AT_SetLogged:
 			return "SET LOGGED";
 		case AT_SetUnLogged:
@@ -255,10 +247,8 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "ATTACH PARTITION";
 		case AT_DetachPartition:
 			return "DETACH PARTITION";
-#if PG_VERSION_NUM >= 140000
 		case AT_DetachPartitionFinalize:
 			return "DETACH PARTITION ... FINALIZE";
-#endif
 		case AT_AddIdentity:
 			return "ALTER COLUMN ... ADD IDENTITY";
 		case AT_SetIdentity:
@@ -277,10 +267,8 @@ alter_table_type_to_string(AlterTableType cmdtype)
 		case AT_DropConstraintRecurse:
 			return "DROP CONSTRAINT";
 #endif
-#if PG_VERSION_NUM >= 140000
 		case AT_ReAddStatistics:
 			return NULL;		/* not real grammar */
-#endif
 	}
 
 	return NULL;
@@ -700,9 +688,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
-#if PG_VERSION_NUM >= 140000
 						 bool readOnlyTree,
-#endif
 						 ProcessUtilityContext context,
 						 ParamListInfo params,
 						 QueryEnvironment *env,
@@ -715,11 +701,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
 #endif
 
-#if PG_VERSION_NUM >= 140000
 	/* copied from standard_ProcessUtility */
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
-#endif
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -729,11 +713,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		LOCKMODE	lockmode;
 		ObjectType	objtype;
 
-#if PG_VERSION_NUM < 140000
-		objtype = atstmt->relkind;
-#else
 		objtype = atstmt->objtype;
-#endif
 
 		/*
 		 * alter_type_exprs is expected to be allocated in PortalContext so it
@@ -897,22 +877,15 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		ReindexStmt *stmt = (ReindexStmt *) pstmt->utilityStmt;
 		bool		concurrently = false;
+		ListCell   *lc;
 
-#if PG_VERSION_NUM >= 140000
+		foreach(lc, stmt->params)
 		{
-			ListCell   *lc;
+			DefElem    *opt = (DefElem *) lfirst(lc);
 
-			foreach(lc, stmt->params)
-			{
-				DefElem    *opt = (DefElem *) lfirst(lc);
-
-				if (strcmp(opt->defname, "concurrently") == 0)
-					concurrently = defGetBoolean(opt);
-			}
+			if (strcmp(opt->defname, "concurrently") == 0)
+				concurrently = defGetBoolean(opt);
 		}
-#else
-		concurrently = stmt->concurrent;
-#endif
 
 		if (concurrently)
 		{
@@ -993,16 +966,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		if (next_ProcessUtility_hook)
 			(*next_ProcessUtility_hook) (pstmt, queryString,
-#if PG_VERSION_NUM >= 140000
 										 readOnlyTree,
-#endif
 										 context, params, env,
 										 dest, qc);
 		else
 			standard_ProcessUtility(pstmt, queryString,
-#if PG_VERSION_NUM >= 140000
 									readOnlyTree,
-#endif
 									context, params, env,
 									dest, qc);
 	}
@@ -1447,11 +1416,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 												   rel->rd_rel->relname.data);
 					if (ix_num != InvalidIndexNumber)
 					{
-#if PG_VERSION_NUM >= 150000
 						String	   *relname;
-#else
-						Value	   *relname;
-#endif
 
 						if (descr->indices[ix_num]->primaryIsCtid)
 							ix_num--;
@@ -1630,13 +1595,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				Relation	tbl = NULL;
 
 				/* This is faster than dependency scan */
-#if PG_VERSION_NUM >= 150000
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
 												'_') + 1);
-#else
-				tbl_oid = pg_strtouint64(strrchr(rel->rd_rel->relname.data,
-												 '_') + 1, NULL, 0);
-#endif
 
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
@@ -1886,11 +1846,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								}
 								if (changed && has_field)
 								{
-#if PG_VERSION_NUM >= 150000
 									String	   *ix_name;
-#else
-									Value	   *ix_name;
-#endif
 
 									ix_name =
 										makeString(pstrdup(index->name.data));

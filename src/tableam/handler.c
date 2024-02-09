@@ -58,26 +58,12 @@
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
-#if PG_VERSION_NUM >= 140000
 #include "utils/backend_progress.h"
-#else
-#include "pgstat.h"
-#endif
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
 #include "utils/syscache.h"
-
-
-#if PG_VERSION_NUM < 140000
-/*
- * RelationIsPermanent
- *		True if relation is permanent.
- */
-#define RelationIsPermanent(relation) \
-	((relation)->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
-#endif
 
 typedef struct OScanDescData
 {
@@ -686,11 +672,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 	*freezeXid = InvalidTransactionId;
 	*minmulti = InvalidMultiXactId;
 
-#if PG_VERSION_NUM >= 150000
 	srel = RelationCreateStorage(*newrnode, persistence, false);
-#else
-	srel = RelationCreateStorage(*newrnode, persistence);
-#endif
 	smgrclose(srel);
 }
 
@@ -1245,22 +1227,11 @@ orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 	/* nothing to do */
 }
 
-#if PG_VERSION_NUM >= 140000
 static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
 	elog(ERROR, "Not implemented");
 }
-#else
-static TransactionId
-orioledb_compute_xid_horizon_for_tuples(Relation rel,
-										ItemPointerData *tids,
-										int nitems)
-{
-	elog(ERROR, "Not implemented");
-	return 0;
-}
-#endif
 
 static bool
 orioledb_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
@@ -1355,11 +1326,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 					 * Found a suitable tuple, so save it, replacing one old
 					 * tuple at random
 					 */
-#if PG_VERSION_NUM >= 150000
 					int			k = (int) (targrows * sampler_random_fract(&rstate.randstate));
-#else
-					int			k = (int) (targrows * sampler_random_fract(rstate.randstate));
-#endif
 					Assert(k >= 0 && k < targrows);
 					heap_freetuple(rows[k]);
 					rows[k] = ExecCopySlotHeapTuple(slot);
@@ -1463,7 +1430,6 @@ validate_index_compress(const char *value)
 		validate_compress(o_parse_compress(value), "Index");
 }
 
-#if PG_VERSION_NUM >= 140000
 /* values from StdRdOptIndexCleanup */
 static relopt_enum_elt_def StdRdOptIndexCleanupValues[] =
 {
@@ -1498,7 +1464,6 @@ static relopt_enum_elt_def StdRdOptIndexCleanupValues[] =
 		(const char *) NULL
 	}							/* list terminator */
 };
-#endif
 
 /*
  * Option parser for anything that uses StdRdOptions.
@@ -1670,7 +1635,6 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 								-1, 0, 1024,
 								offsetof(ORelOptions, std_options) +
 								offsetof(StdRdOptions, parallel_workers));
-#if PG_VERSION_NUM >= 140000
 		add_local_enum_reloption(&relopts, "vacuum_index_cleanup",
 								 "Controls index vacuuming and index cleanup",
 								 StdRdOptIndexCleanupValues,
@@ -1680,14 +1644,6 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 								 offsetof(ORelOptions, std_options) +
 								 offsetof(StdRdOptions,
 										  vacuum_index_cleanup));
-#else
-		add_local_bool_reloption(&relopts, "vacuum_index_cleanup",
-								 "Enables index vacuuming and index cleanup",
-								 true,
-								 offsetof(ORelOptions, std_options) +
-								 offsetof(StdRdOptions,
-										  vacuum_index_cleanup));
-#endif
 		add_local_bool_reloption(&relopts, "vacuum_truncate",
 								 "Enables vacuum to truncate empty pages at "
 								 "the end of this table",
@@ -1831,9 +1787,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.index_fetch_reset = orioledb_index_fetch_reset,
 	.index_fetch_end = orioledb_index_fetch_end,
 	.index_fetch_tuple = orioledb_index_fetch_tuple,
-#if PG_VERSION_NUM >= 140000
 	.index_delete_tuples = orioledb_index_delete_tuples,
-#endif
 
 	.tuple_insert = orioledb_tuple_insert,
 	.tuple_insert_with_arbiter = orioledb_tuple_insert_with_arbiter,
@@ -1847,9 +1801,6 @@ static const TableAmRoutine orioledb_am_methods = {
 	.tuple_get_latest_tid = orioledb_get_latest_tid,
 	.tuple_tid_valid = orioledb_tuple_tid_valid,
 	.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
-#if PG_VERSION_NUM < 140000
-	.compute_xid_horizon_for_tuples = orioledb_compute_xid_horizon_for_tuples,
-#endif
 
 #if PG_VERSION_NUM >= 160000
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,

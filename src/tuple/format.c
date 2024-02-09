@@ -625,7 +625,6 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			toastValue.raw_size = o_get_raw_size(value);
 			toastValue.toasted_size = o_get_src_size(value);
 
-#if PG_VERSION_NUM >= 140000
 			{
 				if (VARATT_IS_COMPRESSED(value))
 				{
@@ -646,7 +645,6 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 				else
 					toastValue.compression = TOAST_INVALID_COMPRESSION_ID;
 			}
-#endif
 
 			data_length = sizeof(OToastValue);
 			memcpy(data, &toastValue, data_length);

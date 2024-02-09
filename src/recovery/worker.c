@@ -37,10 +37,7 @@
 #include "utils/inval.h"
 #include "utils/syscache.h"
 #include "utils/timeout.h"
-
-#if PG_VERSION_NUM >= 140000
 #include "utils/wait_event.h"
-#endif
 
 #define QUEUE_READ_USLEEP_BASE		(10)
 #define QUEUE_READ_USLEEP_MULTIPLER	(2)
@@ -345,7 +342,6 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				}
 				data_pos += tuple_len;
 			}
-#if PG_VERSION_NUM >= 140000
 			else if (recovery_header->type & (RECOVERY_LEADER_PARALLEL_INDEX_BUILD | RECOVERY_WORKER_PARALLEL_INDEX_BUILD))
 			{
 				RecoveryOidsMsgIdxBuild *msg = (RecoveryOidsMsgIdxBuild *) (data + data_pos);
@@ -388,7 +384,6 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
 				pfree(o_table);
 			}
-#endif
 			else if (recovery_header->type & RECOVERY_COMMIT)
 			{
 				oxid_csn_record = (RecoveryMsgOXidPtr *) (data + data_pos);
@@ -419,10 +414,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 			}
 			else if (recovery_header->type & RECOVERY_FINISHED)
 			{
-#if PG_VERSION_NUM >= 140000
 				if (id == index_build_leader)
 					idx_workers_shutdown();
-#endif
 				finished = true;
 				break;
 			}

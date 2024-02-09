@@ -41,12 +41,8 @@
 #define SYS_TREES_AMOP_STRAT_CACHE		(19)
 #define SYS_TREES_EVICTED_DATA			(20)
 #define SYS_TREES_CHKP_NUM				(21)
-#if PG_VERSION_NUM >= 140000
 #define SYS_TREES_MULTIRANGE_CACHE		(22)
 #define SYS_TREES_NUM					(22)
-#else
-#define SYS_TREES_NUM					(21)
-#endif
 
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)

@@ -19,10 +19,6 @@
 
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
-
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_operator.h"
 #include "catalog/pg_am.h"
 #include "commands/defrem.h"

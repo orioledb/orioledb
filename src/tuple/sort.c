@@ -31,12 +31,7 @@ typedef struct
 } OIndexBuildSortArg;
 
 #define COPYTUP(state,stup,tup) ((*(state)->copytup) (state, stup, tup))
-
-#if PG_VERSION_NUM < 150000
-#define SortHaveRandomAccess(state) (TuplesortstateGetPublic(state)->randomAccess)
-#else
 #define SortHaveRandomAccess(state) (TuplesortstateGetPublic(state)->sortopt & TUPLESORT_RANDOMACCESS)
-#endif
 
 static void
 write_o_tuple(void *ptr, OTuple tup, int tupsize)
@@ -155,28 +150,17 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 	return 0;
 }
 
-#if PG_VERSION_NUM >= 150000
 #define TAPEDECL LogicalTape *tape
 #define TAPEREAD(ptr, len) \
 	LogicalTapeReadExact(tape, (ptr), (len))
 #define TAPEWRITE(ptr, len) \
 	LogicalTapeWrite(tape, (ptr), (len))
-#else
-#define TAPEDECL int tapenum
-#define TAPEREAD(ptr, len) \
-	LogicalTapeReadExact(tapeset, tapenum, (ptr), (len))
-#define TAPEWRITE(ptr, len) \
-	LogicalTapeWrite(tapeset, tapenum, (ptr), (len))
-#endif
 
 static void
 writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
 {
 	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) TuplesortstateGetPublic(state)->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
-#if PG_VERSION_NUM < 150000
-	LogicalTapeSet *tapeset = tuplesort_get_tapeset(state);
-#endif
 	OTuple		tuple;
 	int			tuplen;
 
@@ -200,9 +184,6 @@ readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
 	uint32		tuplen = len - sizeof(int) - 1;
 	Pointer		tup = (Pointer) tuplesort_readtup_alloc(state, MAXIMUM_ALIGNOF + tuplen);
 	OTuple		tuple;
-#if PG_VERSION_NUM < 150000
-	LogicalTapeSet *tapeset = tuplesort_get_tapeset(state);
-#endif
 
 	/* read in the tuple proper */
 	TAPEREAD(tup + MAXIMUM_ALIGNOF, tuplen);

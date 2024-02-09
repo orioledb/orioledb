@@ -1168,9 +1168,7 @@ create_o_toast_external(OTableDescr *descr,
 	ote.attnum = attnum;
 	ote.data_size = tupSize;
 	ote.formatFlags = idx_tup.formatFlags;
-#if PG_VERSION_NUM >= 140000
 	ote.formatFlags |= toasted->compression << ORIOLEDB_EXT_FORMAT_FLAGS_BITS;
-#endif
 
 	memcpy(VARDATA_EXTERNAL(result), &ote, sizeof(ote));
 	memcpy(VARDATA_EXTERNAL(result) + O_TOAST_EXTERNAL_SZ, idx_tup.data, tupSize);

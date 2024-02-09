@@ -13,10 +13,7 @@
 #ifndef __PAGE_POOL_H__
 #define __PAGE_POOL_H__
 
-#if PG_VERSION_NUM >= 150000
 #include "common/pg_prng.h"
-#endif
-
 #include "utils/ucm.h"
 
 /*
@@ -57,11 +54,7 @@ struct OPagePool
 	UsageCountMap ucm;
 	Size		ucmShmemSize;
 	/* seed for random values */
-#if PG_VERSION_NUM >= 150000
 	pg_prng_state prngSeed;
-#else
-	unsigned short xseed[3];
-#endif
 };
 
 extern Size ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);

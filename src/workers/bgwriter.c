@@ -82,11 +82,7 @@ bgwriter_main(Datum main_arg)
 
 	/* show the bgwriter in pg_stat_activity, used for tests */
 	InitializeSessionUserIdStandalone();
-#if PG_VERSION_NUM >= 140000
 	pgstat_beinit();
-#else
-	pgstat_initialize();
-#endif
 	pgstat_bestart();
 
 	SetProcessingMode(NormalProcessing);

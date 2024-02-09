@@ -18,10 +18,6 @@
 #include "orioledb.h"
 
 #include "catalog/o_sys_cache.h"
-
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_collation.h"
 #include "utils/syscache.h"
 
@@ -35,9 +31,7 @@ typedef struct OCollation
 	NameData	collname;
 	char	   *collcollate;
 	char	   *collctype;
-#if PG_VERSION_NUM >= 150000
 	char	   *colliculocale;
-#endif
 #if PG_VERSION_NUM >= 160000
 	char	   *collicurules;
 #endif
@@ -97,10 +91,8 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	valid = collform->collprovider == COLLPROVIDER_ICU ||
 		lc_collate_is_c(colloid);
 
-#if PG_VERSION_NUM >= 150000
 	valid = valid || (colloid == DEFAULT_COLLATION_OID &&
 					  default_locale.provider == COLLPROVIDER_ICU);
-#endif
 	if (!valid)
 		elog(ERROR,
 			 "Only C, POSIX and ICU collations supported for orioledb tables");
@@ -120,7 +112,6 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	o_collation->collprovider = collform->collprovider;
 	o_collation->collisdeterministic = collform->collisdeterministic;
 
-#if PG_VERSION_NUM >= 150000
 	datum = SysCacheGetAttr(COLLOID, collationtup,
 							Anum_pg_collation_collcollate, &isNull);
 	if (!isNull)
@@ -149,10 +140,6 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 		o_collation->collicurules = TextDatumGetCString(datum);
 	else
 		o_collation->collicurules = NULL;
-#endif
-#else
-	o_collation->collcollate = pstrdup(NameStr(collform->collcollate));
-	o_collation->collctype = pstrdup(NameStr(collform->collctype));
 #endif
 	datum = SysCacheGetAttr(COLLOID, collationtup,
 							Anum_pg_collation_collversion, &isNull);
@@ -183,11 +170,9 @@ o_collation_cache_serialize_entry(Pointer entry, int *len)
 
 	o_serialize_string(o_collation->collcollate, &str);
 	o_serialize_string(o_collation->collctype, &str);
-#if PG_VERSION_NUM >= 150000
 	o_serialize_string(o_collation->colliculocale, &str);
 #if PG_VERSION_NUM >= 160000
 	o_serialize_string(o_collation->collicurules, &str);
-#endif
 #endif
 	o_serialize_string(o_collation->collversion, &str);
 
@@ -211,11 +196,9 @@ o_collation_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 
 	o_collation->collcollate = o_deserialize_string(&ptr);
 	o_collation->collctype = o_deserialize_string(&ptr);
-#if PG_VERSION_NUM >= 150000
 	o_collation->colliculocale = o_deserialize_string(&ptr);
 #if PG_VERSION_NUM >= 160000
 	o_collation->collicurules = o_deserialize_string(&ptr);
-#endif
 #endif
 	o_collation->collversion = o_deserialize_string(&ptr);
 
@@ -246,7 +229,6 @@ o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid)
 			BoolGetDatum(o_collation->collisdeterministic);
 
 		nulls[Anum_pg_collation_collversion - 1] = true;
-#if PG_VERSION_NUM >= 150000
 		if (o_collation->collcollate)
 			values[Anum_pg_collation_collcollate - 1] =
 				CStringGetTextDatum(o_collation->collcollate);
@@ -270,19 +252,6 @@ o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid)
 				CStringGetTextDatum(o_collation->collicurules);
 		else
 			nulls[Anum_pg_collation_collicurules - 1] = true;
-#endif
-#else
-		{
-			NameData	name_collate,
-						name_ctype;
-
-			namestrcpy(&name_collate, o_collation->collcollate);
-			values[Anum_pg_collation_collcollate - 1] =
-				NameGetDatum(&name_collate);
-			namestrcpy(&name_ctype, o_collation->collctype);
-			values[Anum_pg_collation_collctype - 1] =
-				NameGetDatum(&name_ctype);
-		}
 #endif
 		if (o_collation->collversion)
 			values[Anum_pg_collation_collversion - 1] =

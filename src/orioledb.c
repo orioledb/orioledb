@@ -115,9 +115,7 @@ ODBProcData *oProcData;
 int			default_compress = InvalidOCompress;
 int			default_primary_compress = InvalidOCompress;
 int			default_toast_compress = InvalidOCompress;
-#if PG_VERSION_NUM >= 140000
 bool		orioledb_table_description_compress = false;
-#endif
 bool		orioledb_s3_mode = false;
 int			s3_num_workers = 3;
 int			s3_desired_size = 10000;
@@ -204,7 +202,6 @@ PG_FUNCTION_INFO_V1(orioledb_ucm_check);
 PG_FUNCTION_INFO_V1(orioledb_parallel_debug_start);
 PG_FUNCTION_INFO_V1(orioledb_parallel_debug_stop);
 
-#if PG_VERSION_NUM >= 150000
 static void
 orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 {
@@ -240,7 +237,6 @@ static RmgrData rmgr =
 	.rm_mask = NULL,
 	.rm_decode = NULL
 };
-#endif
 
 void
 _PG_init(void)
@@ -423,15 +419,9 @@ _PG_init(void)
 							"Sets the number of recovery index build workers.",
 							NULL,
 							&recovery_idx_pool_size_guc,
-#if PG_VERSION_NUM >= 140000
 							3,
 							1,
 							128,
-#else
-							0,
-							0,
-							0,
-#endif
 							PGC_POSTMASTER,
 							0,
 							NULL,
@@ -572,7 +562,6 @@ _PG_init(void)
 							NULL,
 							NULL);
 
-#if PG_VERSION_NUM >= 140000
 	DefineCustomBoolVariable("orioledb.table_description_compress",
 							 "Display compression column in "
 							 "orioledb_table_description",
@@ -584,7 +573,6 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
-#endif
 
 	DefineCustomBoolVariable("orioledb.s3_mode",
 							 "The OrioleDB function mode on top of S3 storage",
@@ -760,10 +748,6 @@ _PG_init(void)
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
 
-#if PG_VERSION_NUM < 150000
-	orioledb_shmem_request();
-#endif
-
 	if (device_filename)
 	{
 		device_fd = BasicOpenFile(device_filename, O_RDWR);
@@ -809,10 +793,8 @@ _PG_init(void)
 	RegisterCustomScanMethods(&o_scan_methods);
 
 	/* Setup the required hooks. */
-#if PG_VERSION_NUM >= 150000
 	prev_shmem_request_hook = shmem_request_hook;
 	shmem_request_hook = orioledb_shmem_request;
-#endif
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = orioledb_shmem_startup;
 	next_CheckPoint_hook = CheckPoint_hook;
@@ -825,14 +807,8 @@ _PG_init(void)
 	CheckPoint_hook = o_perform_checkpoint;
 	after_checkpoint_cleanup_hook = o_after_checkpoint_cleanup_hook;
 
-#if PG_VERSION_NUM >= 150000
 	RegisterCustomRmgr(ORIOLEDB_RMGR_ID, &rmgr);
 	RedoShutdownHook = o_recovery_shutdown_hook;
-#else
-	logicalmsg_redo_hook = o_recovery_logicalmsg_redo_hook;
-	RedoStartHook = o_recovery_start_hook;
-	RedoFinishHook = o_recovery_finish_hook;
-#endif
 	snapshot_hook = orioledb_snapshot_hook;
 	CustomErrorCleanupHook = orioledb_error_cleanup_hook;
 	snapshot_register_hook = undo_snapshot_register_hook;

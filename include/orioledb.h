@@ -247,9 +247,7 @@ extern Size device_length;
 extern int	default_compress;
 extern int	default_primary_compress;
 extern int	default_toast_compress;
-#if PG_VERSION_NUM >= 140000
 extern bool orioledb_table_description_compress;
-#endif
 extern bool orioledb_s3_mode;
 extern int	s3_num_workers;
 extern int	s3_desired_size;

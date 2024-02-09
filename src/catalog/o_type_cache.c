@@ -20,9 +20,6 @@
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_am.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
@@ -103,9 +100,7 @@ o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_type->typdelim = typeform->typdelim;
 	o_type->typbasetype = typeform->typbasetype;
 	o_type->typtypmod = typeform->typtypmod;
-#if PG_VERSION_NUM >= 140000
 	o_type->typsubscript = typeform->typsubscript;
-#endif
 
 	o_type->default_btree_opclass = GetDefaultOpClass(typeoid, BTREE_AM_OID);
 	if (!OidIsValid(o_type->default_btree_opclass) &&
@@ -172,10 +167,8 @@ o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid)
 		values[Anum_pg_type_typbasetype - 1] =
 			ObjectIdGetDatum(o_type->typbasetype);
 		values[Anum_pg_type_typtypmod - 1] = Int32GetDatum(o_type->typtypmod);
-#if PG_VERSION_NUM >= 140000
 		values[Anum_pg_type_typsubscript - 1] =
 			ObjectIdGetDatum(o_type->typsubscript);
-#endif
 
 		nulls[Anum_pg_type_typdefault - 1] = true;
 		nulls[Anum_pg_type_typdefaultbin - 1] = true;
@@ -269,9 +262,7 @@ o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					 ", typdelim: '%c'"
 					 ", typbasetype: %u"
 					 ", typtypmod: %d"
-#if PG_VERSION_NUM >= 140000
 					 ", typsubscript: %u"
-#endif
 					 ", default_btree_opclass: %u"
 					 ", default_hash_opclass: %u"
 					 ")",
@@ -294,9 +285,7 @@ o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 					 o_type->typdelim,
 					 o_type->typbasetype,
 					 o_type->typtypmod,
-#if PG_VERSION_NUM >= 140000
 					 o_type->typsubscript,
-#endif
 					 o_type->default_btree_opclass,
 					 o_type->default_hash_opclass);
 }

@@ -25,12 +25,7 @@
 #include "recovery/recovery.h"
 
 #include "access/table.h"
-#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
-#endif
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_enum.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
