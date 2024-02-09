@@ -150,9 +150,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 {
 	Oid			heap_relid,
 				toast_relid;
-#if PG_VERSION_NUM >= 140000
 	ReindexParams params;
-#endif
 	CheckTableForSerializableConflictIn(rel);
 
 	toast_relid = rel->rd_rel->reltoastrelid;
@@ -171,13 +169,9 @@ assign_new_oids(OTable *oTable, Relation rel)
 	PG_TRY();
 	{
 		in_indexes_rebuild = true;
-#if PG_VERSION_NUM >= 140000
 		params.options = 0;
 		params.tablespaceOid = InvalidOid;
 		reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, &params);
-#else
-		reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, 0);
-#endif
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}
 	PG_CATCH();
@@ -604,9 +598,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	if (!reuse)
 	{
 		index->type = ix_type;
-#if PG_VERSION_NUM >= 150000
 		index->nulls_not_distinct = index_rel->rd_index->indnullsnotdistinct;
-#endif
 		o_table_fill_index(o_table, ix_num, index_rel);
 	}
 
@@ -800,17 +792,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		 * recovery_send_oids() and doesn't occupy space in btshared
 		 */
 		btshared = recovery_oidxshared;
-#if PG_VERSION_NUM >= 140000
 		btshared->nrecoveryworkers = *recovery_single_process ? 0 : (recovery_idx_pool_size_guc - 1);
-#else
-
-		/*
-		 * In PG13 parallel index build in recovery is disabled due to
-		 * tuplesort_initialize_shared() can not work with NULL seg. This is
-		 * corrected by 808e13b282ef since PG14.
-		 */
-		btshared->nrecoveryworkers = 0;
-#endif
 		scantuplesortstates = leaderparticipates ? btshared->nrecoveryworkers + 1 : btshared->nrecoveryworkers;
 		btshared->o_table_size = 0;
 		sharedsort = recovery_sharedsort;
@@ -865,14 +847,12 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		bufferusage = 0;
 		btleader->nparticipanttuplesorts = btshared->scantuplesortstates;
 
-#if PG_VERSION_NUM >= 140000
 		if (btshared->nrecoveryworkers != 0)
 		{
 			tuplesort_initialize_shared(sharedsort, btshared->scantuplesortstates, NULL);
 			recovery_send_oids(btspool->o_table->oids, buildstate->ix_num,
 							   btspool->o_table->version, btspool->o_table->nindices, false);
 		}
-#endif
 		elog(DEBUG4, "Parallel index build uses %d recovery workers", btshared->nrecoveryworkers);
 	}
 

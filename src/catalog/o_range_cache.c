@@ -23,12 +23,7 @@
 
 #include "access/hash.h"
 #include "access/htup_details.h"
-#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
-#endif
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_range.h"
@@ -184,8 +179,6 @@ o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid, XLogRecPtr insert_lsn)
 								 NULL);
 }
 
-#if PG_VERSION_NUM >= 140000
-
 static OSysCache *multirange_cache = NULL;
 
 static void o_multirange_cache_free_entry(Pointer entry);
@@ -283,4 +276,3 @@ o_multirange_cache_search_htup(TupleDesc tupdesc, Oid rngmultitypid)
 	}
 	return result;
 }
-#endif

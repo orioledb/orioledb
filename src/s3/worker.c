@@ -529,11 +529,7 @@ s3worker_main(Datum main_arg)
 
 	/* show the s3 worker in pg_stat_activity, */
 	InitializeSessionUserIdStandalone();
-#if PG_VERSION_NUM >= 140000
 	pgstat_beinit();
-#else
-	pgstat_initialize();
-#endif
 	pgstat_bestart();
 
 	SetProcessingMode(NormalProcessing);

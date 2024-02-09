@@ -35,9 +35,7 @@
 
 #include "access/hash.h"
 #include "access/xlog_internal.h"
-#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
-#endif
 #include "lib/ilist.h"
 #include "lib/pairingheap.h"
 #include "miscadmin.h"
@@ -621,7 +619,6 @@ o_recovery_start_hook(void)
 		apply_xids_branches();
 }
 
-#if PG_VERSION_NUM >= 150000
 void
 orioledb_redo(XLogReaderState *record)
 {
@@ -651,47 +648,6 @@ orioledb_redo(XLogReaderState *record)
 		elog(ERROR, "orioledb recovery worker detached unexpectedly.");
 	}
 }
-#else
-void
-o_recovery_logicalmsg_redo_hook(XLogReaderState *record)
-{
-	char	   *rec = XLogRecGetData(record);
-	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-
-	if (info == XLOG_LOGICAL_MESSAGE)
-	{
-		xl_logical_message *xlrec = (xl_logical_message *) rec;
-
-		if (xlrec->prefix_size == (ORIOLEDB_WAL_PREFIX_SIZE + 1)
-			&& strncmp(xlrec->message, ORIOLEDB_WAL_PREFIX, ORIOLEDB_WAL_PREFIX_SIZE) == 0)
-		{
-			Pointer		msg_start = xlrec->message + xlrec->prefix_size;
-			bool		recovery_single;
-
-			recovery_single = *recovery_single_process;
-
-			if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr)
-			{
-				toast_consistent = true;
-				if (!recovery_single)
-					workers_notify_toast_consistent();
-			}
-
-			if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
-			{
-				replay_container(msg_start, msg_start + xlrec->message_size,
-								 recovery_single, record->ReadRecPtr);
-			}
-
-			if (unexpected_worker_detach)
-			{
-				abort_recovery(workers_pool, false);
-				elog(ERROR, "orioledb recovery worker detached unexpectedly.");
-			}
-		}
-	}
-}
-#endif
 
 void
 o_recovery_finish_hook(bool cleanup)
@@ -2096,7 +2052,6 @@ clean_workers_oids(void)
 	}
 }
 
-#if PG_VERSION_NUM >= 140000
 void
 recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 				   int nindices, bool send_to_leader)
@@ -2143,7 +2098,6 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 	}
 	pfree(msg);
 }
-#endif
 
 static void
 handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
@@ -2224,7 +2178,6 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				o_tables_meta_unlock_no_wal();
 
 				Assert(is_recovery_in_progress());
-#if PG_VERSION_NUM >= 140000
 
 				/*
 				 * In main recovery worker send message to main index creation
@@ -2238,9 +2191,6 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				}
 				else
 					build_secondary_index(new_o_table, &tmp_descr, ix_num, false);
-#else
-				build_secondary_index(new_o_table, &tmp_descr, ix_num, false);
-#endif
 			}
 			o_free_tmp_table_descr(&tmp_descr);
 		}
@@ -3006,11 +2956,7 @@ worker_queue_flush(int worker_id)
 	RecoveryWorkerState *state = &workers_pool[worker_id];
 	shm_mq_result result;
 
-#if PG_VERSION_NUM >= 150000
 	result = shm_mq_send(state->queue, state->queue_buf_len, state->queue_buf, false, true);
-#else
-	result = shm_mq_send(state->queue, state->queue_buf_len, state->queue_buf, false);
-#endif
 	state->queue_buf_len = 0;
 	Assert(result != SHM_MQ_WOULD_BLOCK);
 	if (result == SHM_MQ_DETACHED)

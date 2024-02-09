@@ -612,9 +612,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 	field->byval = attr->attbyval;
 	field->align = attr->attalign;
 	field->storage = attr->attstorage;
-#if PG_VERSION_NUM >= 140000
 	field->compression = attr->attcompression;
-#endif
 	field->droped = attr->attisdropped;
 	field->notnull = attr->attnotnull;
 	field->hasmissing = attr->atthasmissing;
@@ -1320,10 +1318,8 @@ describe_table(ORelOids oids)
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
-#if PG_VERSION_NUM >= 140000
 	if (orioledb_table_description_compress)
 		appendStringInfo(&title, "| Compression ");
-#endif
 	appendStringInfo(&title, "\n");
 	initStringInfo(&format);
 	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%6s ",
@@ -1345,7 +1341,6 @@ describe_table(ORelOids oids)
 						 colname ? colname : "(null)",
 						 field->notnull ? "false" : "true",
 						 field->droped ? "true" : "false");
-#if PG_VERSION_NUM >= 140000
 		if (orioledb_table_description_compress)
 		{
 			const char *compression = "";
@@ -1354,7 +1349,6 @@ describe_table(ORelOids oids)
 				compression = GetCompressionMethodName(field->compression);
 			appendStringInfo(&buf, "| %11s ", compression);
 		}
-#endif
 		appendStringInfo(&buf, "\n");
 	}
 
@@ -1605,9 +1599,7 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 	att->attbyval = field->byval;
 	att->attalign = field->align;
 	att->attstorage = field->storage;
-#if PG_VERSION_NUM >= 140000
 	att->attcompression = field->compression;
-#endif
 	att->attcollation = field->collation;
 }
 

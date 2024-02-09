@@ -19,9 +19,6 @@
 
 #include "catalog/o_sys_cache.h"
 
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_database.h"
 #include "utils/syscache.h"
 #include "mb/pg_wchar.h"

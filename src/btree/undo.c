@@ -30,11 +30,7 @@
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "utils/inval.h"
-#if PG_VERSION_NUM >= 140000
 #include "utils/wait_event.h"
-#else
-#include "pgstat.h"
-#endif
 
 /* Undo records */
 typedef struct

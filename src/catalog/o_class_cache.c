@@ -23,12 +23,7 @@
 
 #include "access/htup_details.h"
 #include "access/relation.h"
-#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
-#endif
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_class.h"
 #include "commands/defrem.h"
 #include "miscadmin.h"

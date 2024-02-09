@@ -28,9 +28,6 @@
 #include "utils/stopevent.h"
 
 #include "access/nbtree.h"
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_am.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"

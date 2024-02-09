@@ -38,9 +38,7 @@ typedef struct
 	int16		typlen;
 	char		align;
 	char		storage;
-#if PG_VERSION_NUM >= 140000
 	char		compression;
-#endif
 	bool		hasmissing;
 	bool		hasdef;
 } OTableField;

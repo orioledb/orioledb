@@ -23,15 +23,8 @@
 #include "recovery/recovery.h"
 
 #include "access/htup_details.h"
-#if PG_VERSION_NUM >= 140000
 #include "access/toast_compression.h"
-#endif
-#if PG_VERSION_NUM >= 150000
 #include "access/xlogrecovery.h"
-#endif
-#if PG_VERSION_NUM < 140000
-#include "catalog/indexing.h"
-#endif
 #include "catalog/pg_am.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_language.h"
@@ -42,9 +35,6 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
-#if PG_VERSION_NUM < 140000
-#include "nodes/print.h"
-#endif
 #include "rewrite/rewriteHandler.h"
 #include "pgstat.h"
 #include "tcop/tcopprot.h"
@@ -99,118 +89,7 @@ struct OProc
 	MemoryContext cxt;
 };
 
-#if PG_VERSION_NUM < 140000
-/*
- * Data structure needed by the parser callback hooks to resolve parameter
- * references during parsing of a SQL function's body.  This is separate from
- * SQLFunctionCache since we sometimes do parsing separately from execution.
- */
-typedef struct SQLFunctionParseInfo
-{
-	char	   *fname;			/* function's name */
-	int			nargs;			/* number of input arguments */
-	Oid		   *argtypes;		/* resolved types of input arguments */
-	char	  **argnames;		/* names of input arguments; NULL if none */
-	/* Note that argnames[i] can be NULL, if some args are unnamed */
-	Oid			collation;		/* function's input collation, if known */
-} SQLFunctionParseInfo;
-
-
-/*
- * Perform rewriting of a query produced by parse analysis.
- *
- * Note: query must just have come from the parser, because we do not do
- * AcquireRewriteLocks() on it.
- */
-static List *
-pg_rewrite_query(Query *query)
-{
-	List	   *querytree_list;
-
-	if (Debug_print_parse)
-		elog_node_display(LOG, "parse tree", query,
-						  Debug_pretty_print);
-
-	if (log_parser_stats)
-		ResetUsage();
-
-	if (query->commandType == CMD_UTILITY)
-	{
-		/* don't rewrite utilities, just dump 'em into result list */
-		querytree_list = list_make1(query);
-	}
-	else
-	{
-		/* rewrite regular queries */
-		querytree_list = QueryRewrite(query);
-	}
-
-	if (log_parser_stats)
-		ShowUsage("REWRITER STATISTICS");
-
-#ifdef COPY_PARSE_PLAN_TREES
-	/* Optional debugging check: pass querytree through copyObject() */
-	{
-		List	   *new_list;
-
-		new_list = copyObject(querytree_list);
-		/* This checks both copyObject() and the equal() routines... */
-		if (!equal(new_list, querytree_list))
-			elog(WARNING, "copyObject() failed to produce equal parse tree");
-		else
-			querytree_list = new_list;
-	}
-#endif
-
-#ifdef WRITE_READ_PARSE_PLAN_TREES
-	/* Optional debugging check: pass querytree through outfuncs/readfuncs */
-	{
-		List	   *new_list = NIL;
-		ListCell   *lc;
-
-		/*
-		 * We currently lack outfuncs/readfuncs support for most utility
-		 * statement types, so only attempt to write/read non-utility queries.
-		 */
-		foreach(lc, querytree_list)
-		{
-			Query	   *query = castNode(Query, lfirst(lc));
-
-			if (query->commandType != CMD_UTILITY)
-			{
-				char	   *str = nodeToString(query);
-				Query	   *new_query = stringToNodeWithLocations(str);
-
-				/*
-				 * queryId is not saved in stored rules, but we must preserve
-				 * it here to avoid breaking pg_stat_statements.
-				 */
-				new_query->queryId = query->queryId;
-
-				new_list = lappend(new_list, new_query);
-				pfree(str);
-			}
-			else
-				new_list = lappend(new_list, query);
-		}
-
-		/* This checks both outfuncs/readfuncs and the equal() routines... */
-		if (!equal(new_list, querytree_list))
-			elog(WARNING, "outfuncs/readfuncs failed to produce equal parse tree");
-		else
-			querytree_list = new_list;
-	}
-#endif
-
-	if (Debug_print_rewritten)
-		elog_node_display(LOG, "rewritten parse tree", querytree_list,
-						  Debug_pretty_print);
-
-	return querytree_list;
-}
-#elif PG_VERSION_NUM >= 150000
 #define pg_analyze_and_rewrite_params pg_analyze_and_rewrite_withcb
-#endif
 
 /*
  * An SQLFunctionCache record is built during the first call,
@@ -783,9 +662,7 @@ jf_cleanTupType_init_entry(TupleDesc desc,
 	o_type_cache_fill_info(jf_atttypid, &att->attlen, &att->attbyval,
 						   &att->attalign, &att->attstorage,
 						   &att->attcollation);
-#if PG_VERSION_NUM >= 140000
 	att->attcompression = InvalidCompressionMethod;
-#endif
 }
 
 /*
@@ -1004,15 +881,11 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 			elog(ERROR, "null prosrc for function %u", foid);
 		fcache->src = TextDatumGetCString(tmp);
 
-#if PG_VERSION_NUM < 140000
-		isNull = true;
-#elif PG_VERSION_NUM >= 140000
 		/* If we have prosqlbody, pay attention to that not prosrc. */
 		tmp = SysCacheGetAttr(PROCOID,
 							  procedureTuple,
 							  Anum_pg_proc_prosqlbody,
 							  &isNull);
-#endif
 
 		/*
 		 * Parse and rewrite the queries in the function text.  Use sublists
@@ -1456,9 +1329,7 @@ postquel_getnext(execution_state *es, SQLFunctionCachePtr fcache)
 	{
 		ProcessUtility(es->qd->plannedstmt,
 					   fcache->src,
-#if PG_VERSION_NUM >= 140000
 					   false,
-#endif
 					   PROCESS_UTILITY_QUERY,
 					   es->qd->params,
 					   es->qd->queryEnv,
@@ -2209,9 +2080,7 @@ o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid)
 		nulls[Anum_pg_proc_proargnames - 1] = true;
 		nulls[Anum_pg_proc_proargdefaults - 1] = true;
 		nulls[Anum_pg_proc_protrftypes - 1] = true;
-#if PG_VERSION_NUM >= 140000
 		nulls[Anum_pg_proc_prosqlbody - 1] = true;
-#endif
 		nulls[Anum_pg_proc_proconfig - 1] = true;
 		nulls[Anum_pg_proc_proacl - 1] = true;
 		result = heap_form_tuple(tupdesc, values, nulls);
