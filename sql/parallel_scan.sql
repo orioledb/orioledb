@@ -421,6 +421,34 @@ SELECT array_agg(val_1), array_agg(val_2)
 
 COMMIT;
 
+BEGIN;
+
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+
+CREATE TABLE o_test_no_parallel_bitmap_scan (
+    val_1 int4
+) USING orioledb;
+
+INSERT INTO o_test_no_parallel_bitmap_scan SELECT val_1 FROM generate_series(1,100) val_1;
+CREATE INDEX o_test_no_parallel_bitmap_scan_ix1 ON o_test_no_parallel_bitmap_scan (val_1);
+
+SET LOCAL enable_seqscan = off;
+
+EXPLAIN (COSTS OFF)
+    SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 < 50;
+SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 < 50;
+-- Parallel Bitmap Heap Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF)
+    SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+-- Parallel Bitmap Heap Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

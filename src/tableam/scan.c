@@ -383,6 +383,21 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					i++;
 				}
 			}
+
+			i = 0;
+			while (i < list_length(rel->partial_pathlist))
+			{
+				Path	   *path = list_nth(rel->partial_pathlist, i);
+
+				/*
+				 * TODO: Remove when parallel bitmap heap scan will be
+				 * implemented
+				 */
+				if (!IsA(path, Path))
+					rel->partial_pathlist = list_delete_nth_cell(rel->partial_pathlist, i);
+				else
+					i++;
+			}
 		}
 
 		if (relation != NULL)

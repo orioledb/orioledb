@@ -860,8 +860,106 @@ SELECT array_agg(val_1), array_agg(val_2)
 (1 row)
 
 COMMIT;
+BEGIN;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+CREATE TABLE o_test_no_parallel_bitmap_scan (
+    val_1 int4
+) USING orioledb;
+INSERT INTO o_test_no_parallel_bitmap_scan SELECT val_1 FROM generate_series(1,100) val_1;
+CREATE INDEX o_test_no_parallel_bitmap_scan_ix1 ON o_test_no_parallel_bitmap_scan (val_1);
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+    SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 < 50;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_no_parallel_bitmap_scan
+         Forward index only scan of: o_test_no_parallel_bitmap_scan_ix1
+         Conds: ((val_1 >= 10) AND (val_1 < 50))
+(4 rows)
+
+SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 < 50;
+ count 
+-------
+    40
+(1 row)
+
+-- Parallel Bitmap Heap Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF)
+    SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on o_test_no_parallel_bitmap_scan
+         Filter: (val_1 <@ '[10,50)'::int4range)
+         Forward index only scan of: o_test_no_parallel_bitmap_scan_ix1
+(4 rows)
+
+SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+ count 
+-------
+    40
+(1 row)
+
+-- Parallel Bitmap Heap Scan is not implemented yet, so it doesn't used here
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_no_parallel_bitmap_scan
+   Filter: (val_1 <@ '[10,50)'::int4range)
+   Forward index only scan of: o_test_no_parallel_bitmap_scan_ix1
+(3 rows)
+
+SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
+ val_1 
+-------
+    10
+    11
+    12
+    13
+    14
+    15
+    16
+    17
+    18
+    19
+    20
+    21
+    22
+    23
+    24
+    25
+    26
+    27
+    28
+    29
+    30
+    31
+    32
+    33
+    34
+    35
+    36
+    37
+    38
+    39
+    40
+    41
+    42
+    43
+    44
+    45
+    46
+    47
+    48
+    49
+(40 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 18 other objects
+NOTICE:  drop cascades to 19 other objects
 DETAIL:  drop cascades to table seq_scan_test
 drop cascades to table o_test_o_scan_register
 drop cascades to table o_test_1
@@ -880,6 +978,7 @@ drop cascades to table o_test_parallelscan_reinitialize2
 drop cascades to table o_test_parallel_join
 drop cascades to table o_test_parallel_join2
 drop cascades to table o_test_no_parallel_index_scan
+drop cascades to table o_test_no_parallel_bitmap_scan
 DROP SCHEMA parallel_scan CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
