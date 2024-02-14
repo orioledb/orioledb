@@ -829,7 +829,8 @@ o_emit_log_hook(ErrorData *edata)
 {
 	const char *target_str = "database system was";
 
-	if (strlen(edata->message_id) >= strlen(target_str) &&
+	if (edata->message_id &&
+		strlen(edata->message_id) >= strlen(target_str) &&
 		!memcmp(edata->message_id, target_str, strlen(target_str)) &&
 		!strcmp(edata->funcname, "StartupXLOG"))
 	{
