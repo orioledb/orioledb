@@ -39,10 +39,14 @@ jobs:
       - name: Build
         run: bash ./orioledb/ci/build.sh
       - name: Check
+        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 120 || 20 }}
         run: bash ./orioledb/ci/check.sh
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
         if: ${{ success() || failure() }}
+      - name: Show stuck processes
+        run: bash ./orioledb/ci/list_stuck.sh
+        if: ${{ always() }}
       - name: Codecov
         run: bash ./orioledb/ci/codecov.sh
         env:
