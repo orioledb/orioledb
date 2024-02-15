@@ -241,7 +241,7 @@ override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declara
 
 ifdef VALGRIND
 override with_temp_install += PGCTLTIMEOUT=3000 \
-	valgrind --leak-check=no --gen-suppressions=all \
+	valgrind --vgdb=yes --leak-check=no --gen-suppressions=all \
 	--suppressions=valgrind.supp --time-stamp=yes \
 	--log-file=pid-%p.log --trace-children=yes \
 	--trace-children-skip=*/initdb
