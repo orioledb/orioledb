@@ -301,23 +301,6 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 	close(fd);
 }
 
-/*
- * Truncate an open file to a given length.
- */
-static int
-pg_ftruncate(int fd, off_t length)
-{
-	int			ret;
-
-retry:
-	ret = ftruncate(fd, length);
-
-	if (ret == -1 && errno == EINTR)
-		goto retry;
-
-	return ret;
-}
-
 static void
 change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 {
@@ -332,7 +315,6 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	int			minLoaded = -1;
 	bool		haveLoadedPart = false;
 	bool		checkUnlink = false;
-	bool		doneUnlink = false;
 	off_t		prevFileSize = ORIOLEDB_SEGMENT_SIZE;
 
 	buffer = &group->buffers[index];
@@ -402,19 +384,23 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		if (fd > 0)
 		{
 			prevFileSize = lseek(fd, 0, SEEK_END);
-			if (minLoaded >= 0 && minLoaded * ORIOLEDB_S3_PART_SIZE < prevFileSize)
-				haveLoadedPart = true;
-
-			if (!haveLoadedPart)
-			{
-				doneUnlink = (pg_ftruncate(fd, 0) == 0);
-			}
-
 			close(fd);
 		}
+
+		if (minLoaded >= 0 && minLoaded * ORIOLEDB_S3_PART_SIZE < prevFileSize)
+			haveLoadedPart = true;
 	}
 
-	if (!doneUnlink && OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
+	if (checkUnlink && !haveLoadedPart)
+	{
+		char	   *filename;
+
+		filename = btree_filename(prevTag.datoid, prevTag.relnode,
+								  prevTag.segNum, prevTag.checkpointNum);
+		unlink(filename);
+		pfree(filename);
+	}
+	else if (OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
 	{
 		write_to_file(prevTag, oldValues);
 	}
@@ -578,9 +564,46 @@ s3_header_read_value(S3HeaderTag tag, int index)
 	}
 }
 
+uint32
+s3_header_get_change_count(S3HeaderTag tag)
+{
+	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
+	int			i;
+
+	while (true)
+	{
+		for (i = 0; i < S3_HEADER_BUFFERS_PER_GROUP; i++)
+		{
+			S3HeaderBuffer *buffer = &group->buffers[i];
+
+			if (S3HeaderTagsIsEqual(buffer->tag, tag))
+			{
+				/* check there is no read collision */
+				uint32		changeCount = buffer->changeCount;
+
+				pg_read_barrier();
+
+				if (!S3HeaderTagsIsEqual(buffer->tag, tag))
+					break;
+
+				pg_read_barrier();
+
+				if (buffer->changeCount != changeCount)
+					break;
+
+				return changeCount;
+			}
+		}
+
+		load_header_buffer(tag);
+	}
+}
+
 static bool
-s3_header_compare_and_swap(S3HeaderTag tag, int index,
-						   uint32 *oldValue, uint32 newValue)
+s3_header_compare_and_swap_extended(S3HeaderTag tag, int index,
+									uint32 *oldValue, uint32 newValue,
+									uint32 *bufferChangeCount)
 {
 	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
@@ -636,6 +659,8 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
 				if (pg_atomic_compare_exchange_u64(&buffer->data[index],
 												   &fullValue, newFullValue))
 				{
+					if (bufferChangeCount)
+						*bufferChangeCount = changeCount;
 					buffer->usageCount++;
 					if (S3_PART_GET_STATUS(fullValue) == S3PartStatusLoaded &&
 						S3_PART_GET_STATUS(newFullValue) == S3PartStatusEvicting)
@@ -655,6 +680,15 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
 	}
 }
 
+static bool
+s3_header_compare_and_swap(S3HeaderTag tag, int index,
+						   uint32 *oldValue, uint32 newValue)
+{
+	return s3_header_compare_and_swap_extended(tag, index, oldValue,
+											   newValue, NULL);
+}
+
+
 /*
  * We allow only one part to be locked simultaneosly.
  */
@@ -666,7 +700,7 @@ static int	curLockedIndex = 0;
  * evict the same file part.
  */
 bool
-s3_header_lock_part(S3HeaderTag tag, int index)
+s3_header_lock_part(S3HeaderTag tag, int index, uint32 *changeCount)
 {
 	uint32		value;
 
@@ -709,7 +743,8 @@ s3_header_lock_part(S3HeaderTag tag, int index)
 			newValue = S3_PART_SET_USAGE_COUNT(newValue, usageCount);
 		}
 
-		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		if (s3_header_compare_and_swap_extended(tag, index, &value,
+												newValue, changeCount))
 		{
 			curLockedTag = tag;
 			curLockedIndex = index;

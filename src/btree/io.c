@@ -191,6 +191,7 @@ typedef struct
 {
 	FileHashKey key;
 	File		file;
+	uint32		changeCount;
 	char		status;			/* for simplehash use */
 } FileHashElement;
 
@@ -253,7 +254,8 @@ btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 }
 
 static File
-btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum)
+btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
+					 uint32 changeCount)
 {
 	if (orioledb_s3_mode)
 	{
@@ -266,12 +268,18 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum)
 		key.segmentNumber = num;
 		hashElem = s3Files_insert(desc->smgr.hash, key, &found);
 		if (found)
-			return hashElem->file;
+		{
+			if (hashElem->changeCount == changeCount)
+				return hashElem->file;
+			else
+				FileClose(hashElem->file);
+		}
 
 		filename = btree_smgr_filename(desc,
 									   (off_t) num * ORIOLEDB_SEGMENT_SIZE,
 									   chkpNum);
 		hashElem->file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+		hashElem->changeCount = changeCount;
 		if (hashElem->file <= 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
@@ -358,7 +366,7 @@ btree_open_smgr(BTreeDescr *descr)
 															  sizeof(File) * descr->smgr.array.filesAllocated);
 		for (i = 0; i < descr->smgr.array.filesAllocated; i++)
 			descr->smgr.array.files[i] = -1;
-		(void) btree_open_smgr_file(descr, 0, 0);
+		(void) btree_open_smgr_file(descr, 0, 0, 0);
 	}
 }
 
@@ -555,15 +563,16 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		int			segno = curOffset / ORIOLEDB_SEGMENT_SIZE;
 		int			partno = 0;
 		File		file;
+		uint32		changeCount = 0;
 
 		if (orioledb_s3_mode)
 		{
 			tag.segNum = segno;
 			partno = (curOffset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_lock_part(tag, partno);
+			s3_header_lock_part(tag, partno, &changeCount);
 		}
 
-		file = btree_open_smgr_file(desc, segno, chkpNum);
+		file = btree_open_smgr_file(desc, segno, chkpNum, changeCount);
 		if ((curOffset + amount) / granularity == curOffset / granularity)
 		{
 			result += OFileWrite(file, buffer, amount,
@@ -646,15 +655,16 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 		int			partno = 0;
 		File		file;
+		uint32		changeCount = 0;
 
 		if (orioledb_s3_mode)
 		{
 			tag.segNum = segno;
 			partno = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_lock_part(tag, partno);
+			s3_header_lock_part(tag, partno, &changeCount);
 		}
 
-		file = btree_open_smgr_file(desc, segno, chkpNum);
+		file = btree_open_smgr_file(desc, segno, chkpNum, changeCount);
 		if ((offset + amount) / granularity == offset / granularity)
 		{
 			result += OFileRead(file, buffer, amount,
@@ -703,8 +713,19 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 	{
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 		File		file;
+		uint32		changeCount = 0;
 
-		file = btree_open_smgr_file(desc, segno, chkpNum);
+		if (orioledb_s3_mode)
+		{
+			S3HeaderTag tag = {.datoid = desc->oids.datoid,
+				.relnode = desc->oids.relnode,
+				.checkpointNum = chkpNum,
+			.segNum = segno};
+
+			changeCount = s3_header_get_change_count(tag);
+		}
+
+		file = btree_open_smgr_file(desc, segno, chkpNum, changeCount);
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
 			FileWriteback(file,
@@ -740,8 +761,19 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 	for (num = 0; num < length / ORIOLEDB_SEGMENT_SIZE; num++)
 	{
 		File		file;
+		uint32		changeCount = 0;
 
-		file = btree_open_smgr_file(desc, num, chkpNum);
+		if (orioledb_s3_mode)
+		{
+			S3HeaderTag tag = {.datoid = desc->oids.datoid,
+				.relnode = desc->oids.relnode,
+				.checkpointNum = chkpNum,
+			.segNum = num};
+
+			changeCount = s3_header_get_change_count(tag);
+		}
+
+		file = btree_open_smgr_file(desc, num, chkpNum, changeCount);
 		FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
 	}
 }
