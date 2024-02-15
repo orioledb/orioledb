@@ -1327,6 +1327,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 					 * tuple at random
 					 */
 					int			k = (int) (targrows * sampler_random_fract(&rstate.randstate));
+
 					Assert(k >= 0 && k < targrows);
 					heap_freetuple(rows[k]);
 					rows[k] = ExecCopySlotHeapTuple(slot);

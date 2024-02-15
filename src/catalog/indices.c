@@ -151,6 +151,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 	Oid			heap_relid,
 				toast_relid;
 	ReindexParams params;
+
 	CheckTableForSerializableConflictIn(rel);
 
 	toast_relid = rel->rd_rel->reltoastrelid;
