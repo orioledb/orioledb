@@ -733,6 +733,9 @@ sys_tree_init(int i, bool init_shmem)
 	descr->storageType = meta->storageType;
 	descr->createOxid = InvalidOXid;
 
+	if (init_shmem)
+		ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 6);
+
 	if (descr->storageType == BTreeStoragePersistence)
 	{
 		checkpointable_tree_init(descr, init_shmem, NULL);
@@ -746,6 +749,9 @@ sys_tree_init(int i, bool init_shmem)
 		if (init_shmem)
 			o_btree_init(descr);
 	}
+
+	if (init_shmem)
+		ppool_release_reserved(descr->ppool, PPOOL_RESERVE_META);
 
 	sysTreesDescrs[i].initialized = true;
 }

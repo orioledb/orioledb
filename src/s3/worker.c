@@ -73,8 +73,6 @@ register_s3worker(int num)
 {
 	BackgroundWorker worker;
 
-	s3_list_objects();
-
 	/* Set up background worker parameters */
 	memset(&worker, 0, sizeof(worker));
 	worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_CLASS_SYSTEM;
@@ -197,7 +195,6 @@ s3process_task(uint64 taskLocation)
 	{
 		char	   *filename;
 		S3HeaderTag tag;
-		bool		result;
 
 		filename = btree_filename(task->typeSpecific.filePart.datoid,
 								  task->typeSpecific.filePart.relnode,
@@ -220,11 +217,18 @@ s3process_task(uint64 taskLocation)
 
 		s3_header_mark_part_writing(tag, task->typeSpecific.filePart.partNum);
 
-		result = s3_put_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+		PG_TRY();
+		{
+			(void) s3_put_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
+		}
+		PG_CATCH();
+		{
+			s3_header_mark_part_not_written(tag, task->typeSpecific.filePart.partNum);
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
 
-		if (result)
-			s3_header_mark_part_written(tag, task->typeSpecific.filePart.partNum);
-
+		s3_header_mark_part_written(tag, task->typeSpecific.filePart.partNum);
 		pfree(filename);
 		pfree(objectname);
 	}

@@ -50,8 +50,6 @@ static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
-static void cleanup_shared_root_info_pages(OPagePool *pool,
-										   SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
 static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation);
 static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
@@ -266,6 +264,17 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	if (sharedRootInfo == NULL)
 	{
 		lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
+
+		/*---
+		 * Reserve 8 pages:
+		 *
+		 * - root page
+		 * - meta page
+		 * - 2 for nextChkp seq bufs
+		 * - 2 for tmp seq bufs
+		 * - 2 for free seq bufs
+		 */
+		ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_META, 8);
 		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
 					  LW_EXCLUSIVE);
 		hasLock = true;
@@ -275,7 +284,10 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	if (sharedRootInfo && sharedRootInfo->placeholder)
 	{
 		if (hasLock)
+		{
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+			ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
+		}
 		pfree(sharedRootInfo);
 		return false;
 	}
@@ -290,7 +302,8 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		Assert(desc->storageType == BTreeStoragePersistence ||
 			   desc->storageType == BTreeStorageTemporary ||
 			   desc->storageType == BTreeStorageUnlogged);
-		if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
+		if (desc->storageType == BTreeStoragePersistence ||
+			desc->storageType == BTreeStorageUnlogged)
 		{
 			checkpointable_tree_init(desc, true, &was_evicted);
 		}
@@ -364,6 +377,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	Assert(sharedRootInfo != NULL);
 	Assert(!sharedRootInfo->placeholder);
 	pfree(sharedRootInfo);
+	ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
 	return true;
 }
 
@@ -760,32 +774,6 @@ o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 	return index_descr;
 }
 
-
-static void
-cleanup_shared_root_info_pages(OPagePool *pool, SharedRootInfo *sharedRootInfo)
-{
-	BTreeRootInfo *rootInfo = &sharedRootInfo->rootInfo;
-
-	FREE_PAGE_IF_VALID(pool, rootInfo->rootPageBlkno);
-	if (OInMemoryBlknoIsValid(rootInfo->metaPageBlkno))
-	{
-		int			blkno,
-					bufnum;
-		BTreeMetaPage *meta_page = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(rootInfo->metaPageBlkno);
-
-		for (blkno = 0; blkno < 2; blkno++)
-		{
-			FREE_PAGE_IF_VALID(pool, meta_page->freeBuf.pages[blkno]);
-			for (bufnum = 0; bufnum < 2; bufnum++)
-			{
-				FREE_PAGE_IF_VALID(pool, meta_page->nextChkp[bufnum].pages[blkno]);
-				FREE_PAGE_IF_VALID(pool, meta_page->tmpBuf[bufnum].pages[blkno]);
-			}
-		}
-	}
-	FREE_PAGE_IF_VALID(pool, rootInfo->metaPageBlkno);
-}
-
 static void
 init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 {
@@ -795,21 +783,12 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = ppool_get_metapage(pool);
-	rootInfo->metaPageBlkno = ppool_get_metapage(pool);
+	rootInfo->rootPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
+	rootInfo->metaPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
-	if (!OInMemoryBlknoIsValid(rootInfo->rootPageBlkno) ||
-		!OInMemoryBlknoIsValid(rootInfo->metaPageBlkno))
-	{
-		if (rootInfo->metaPageBlkno != OInvalidInMemoryBlkno)
-		{
-			ppool_free_page(pool, rootInfo->metaPageBlkno, NULL);
-			rootInfo->metaPageBlkno = OInvalidInMemoryBlkno;
-		}
-		cleanup_shared_root_info_pages(pool, sharedRootInfo);
-		elog(ERROR, "out of space for shared cache");
-	}
+	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
+	Assert(OInMemoryBlknoIsValid(rootInfo->metaPageBlkno));
 
 	meta_page = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(rootInfo->metaPageBlkno);
 	for (blkno = 0; blkno < 2; blkno++)

@@ -26,6 +26,7 @@
 #include "recovery/wal.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
+#include "s3/requests.h"
 #include "s3/worker.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
@@ -783,6 +784,9 @@ _PG_init(void)
 	for (i = 0; i < bgwriter_num_workers; i++)
 		register_bgwriter();
 
+	if (orioledb_s3_mode)
+		s3_list_objects();
+
 	/* Register S3 workers */
 	for (i = 0; orioledb_s3_mode && (i < s3_num_workers); i++)
 		register_s3worker(i);
@@ -1041,9 +1045,6 @@ orioledb_shmem_startup(void)
 	LWLockRelease(AddinShmemInitLock);
 
 	shared_segment_initialized = true;
-
-	if (!found)
-		elog(LOG, "%s started", ORIOLEDB_VERSION);
 
 	btree_insert_context = AllocSetContextCreate(TopMemoryContext,
 												 "orioledb B-tree insert context",

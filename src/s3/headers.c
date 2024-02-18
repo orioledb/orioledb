@@ -945,6 +945,30 @@ s3_header_mark_part_written(S3HeaderTag tag, int index)
 	}
 }
 
+/*
+ * Called on write failure
+ */
+void
+s3_header_mark_part_not_written(S3HeaderTag tag, int index)
+{
+	uint32		value;
+
+	value = s3_header_read_value(tag, index);
+
+	while (true)
+	{
+		uint32		newValue = value;
+
+		newValue &= ~S3_PART_WRITING_FLAG;
+		newValue |= S3_PART_DIRTY_FLAG | S3_PART_SCHEDULED_FOR_WRITE_FLAG;
+
+		if (s3_header_compare_and_swap(tag, index, &value, newValue))
+		{
+			return;
+		}
+	}
+}
+
 static void
 sync_buffer(S3HeaderBuffer *buffer)
 {

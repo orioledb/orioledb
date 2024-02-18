@@ -193,7 +193,7 @@ static void checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 								 int level);
 static void checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 									   ORelOids tableOids, void *arg);
-static inline bool init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
+static inline void init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static inline void free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static FileExtentsArray *file_extents_array_init(void);
 static void file_extents_array_free(FileExtentsArray *array);
@@ -1302,11 +1302,9 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 		return;
 	}
 
-	if (!init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]))
-	{
-		free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
-		elog(FATAL, "Unable to get pages for sequence buffers.");
-	}
+	ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 4);
+
+	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
 
 	memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
 	next_tmp_tag.datoid = datoid;
@@ -1326,12 +1324,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 	if (descr->storageType != BTreeStoragePersistence)
 		return;
 
-	if (!init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]))
-	{
-		free_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
-		free_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
-		elog(FATAL, "Unable to get pages for sequence buffers.");
-	}
+	init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
 
 	memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
 	next_chkp_tag.datoid = datoid;
@@ -4669,23 +4662,17 @@ can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num)
 	return true;
 }
 
-static inline bool
+static inline void
 init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 {
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
-	shared->pages[0] = ppool_get_metapage(desc->ppool);
-	if (!OInMemoryBlknoIsValid(shared->pages[0]))
-		return false;
+	shared->pages[0] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);;
+	shared->pages[1] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);;
 
-	shared->pages[1] = ppool_get_metapage(desc->ppool);
-	if (!OInMemoryBlknoIsValid(shared->pages[1]))
-	{
-		ppool_free_page(desc->ppool, shared->pages[0], NULL);
-		return false;
-	}
-	return true;
+	Assert(OInMemoryBlknoIsValid(shared->pages[0]));
+	Assert(OInMemoryBlknoIsValid(shared->pages[1]));
 }
 
 static inline void
@@ -4753,10 +4740,7 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 		int			i;
 
 		for (i = 0; i < (is_compressed ? 2 : 3); i++)
-		{
-			if (!init_seq_buf_pages(td, shareds[i]))
-				return false;
-		}
+			init_seq_buf_pages(td, shareds[i]);
 	}
 
 	if (is_compressed)
@@ -5034,11 +5018,7 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		int			i;
 
 		for (i = 0; i < (is_compressed ? 2 : 3); i++)
-		{
-			if (!init_seq_buf_pages(desc, shareds[i]))
-				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not init sequence buffer pages.")));
-		}
+			init_seq_buf_pages(desc, shareds[i]);
 	}
 
 	if (is_compressed)
