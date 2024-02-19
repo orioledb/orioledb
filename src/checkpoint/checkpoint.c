@@ -384,6 +384,12 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 						  "CopyBlknoTranche");
 	LWLockRegisterTranche(checkpoint_state->oMetaTrancheId,
 						  "orioledb_meta");
+	LWLockRegisterTranche(checkpoint_state->oXidQueueTrancheId,
+						  "OXidQueueTranche");
+	LWLockRegisterTranche(checkpoint_state->oXidQueueFlushTrancheId,
+						  "OXidQueueFlushTrancheId");
+	LWLockRegisterTranche(checkpoint_state->oSharedRootInfoInsertTrancheId,
+						  "OSharedRootInfoInsertTranche");
 }
 
 static void

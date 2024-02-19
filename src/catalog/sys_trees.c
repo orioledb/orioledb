@@ -665,18 +665,22 @@ sys_tree_init_if_needed(int i)
 
 		header = &sysTreesShmemHeaders[i];
 
-		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[0],
-					  LW_EXCLUSIVE);
 		if (!OInMemoryBlknoIsValid(header->rootInfo.rootPageBlkno))
 		{
+			OPagePool  *pool = get_ppool(sysTreesMeta[i].poolType);
+
+			ppool_reserve_pages(pool, PPOOL_RESERVE_META, 8);
+			LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[0],
+						  LW_EXCLUSIVE);
 			Assert(!OInMemoryBlknoIsValid(header->rootInfo.metaPageBlkno));
 			sys_tree_init(i, true);
+			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[0]);
+			ppool_release_reserved(pool, PPOOL_RESERVE_META);
 		}
 		else
 		{
 			sys_tree_init(i, false);
 		}
-		LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[0]);
 	}
 }
 
@@ -707,8 +711,8 @@ sys_tree_init(int i, bool init_shmem)
 
 	if (init_shmem)
 	{
-		header->rootInfo.rootPageBlkno = ppool_get_metapage(pool);
-		header->rootInfo.metaPageBlkno = ppool_get_metapage(pool);
+		header->rootInfo.rootPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);
+		header->rootInfo.metaPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);
 		header->rootInfo.rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(header->rootInfo.rootPageBlkno));
 	}
 	descr->rootInfo = header->rootInfo;
@@ -733,9 +737,6 @@ sys_tree_init(int i, bool init_shmem)
 	descr->storageType = meta->storageType;
 	descr->createOxid = InvalidOXid;
 
-	if (init_shmem)
-		ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 6);
-
 	if (descr->storageType == BTreeStoragePersistence)
 	{
 		checkpointable_tree_init(descr, init_shmem, NULL);
@@ -749,9 +750,6 @@ sys_tree_init(int i, bool init_shmem)
 		if (init_shmem)
 			o_btree_init(descr);
 	}
-
-	if (init_shmem)
-		ppool_release_reserved(descr->ppool, PPOOL_RESERVE_META);
 
 	sysTreesDescrs[i].initialized = true;
 }

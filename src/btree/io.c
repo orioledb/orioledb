@@ -2090,7 +2090,7 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 /*
  * Evict the tree, assuming rootPageBlkno page is locked.
  */
-static void
+static bool
 evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 {
 	OInMemoryBlkno root_blkno = desc->rootInfo.rootPageBlkno;
@@ -2147,6 +2147,13 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		unlock_page(root_blkno);
 	}
 
+	if (!hasMetaLock)
+	{
+		if (!LWLockConditionalAcquire(&checkpoint_state->oTablesMetaLock,
+									  LW_SHARED))
+			return false;
+	}
+
 	file_header.rootDownlink = new_downlink;
 
 	ppool_free_page(desc->ppool, root_blkno, NULL);
@@ -2186,9 +2193,6 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	perform_writeback(&io_writeback);
 
-	if (!hasMetaLock)
-		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_SHARED);
-
 	/*
 	 * Check if we can skip the evicted data if tree has no modification after
 	 * writing the last *.map file.
@@ -2204,6 +2208,8 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	if (!hasMetaLock)
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
+
+	return true;
 }
 
 BTreeDescr *
@@ -2460,9 +2466,8 @@ retry:
 					if (desc != NULL &&
 						desc->rootInfo.rootPageBlkno == blkno)
 					{
-						evict_btree(desc, checkpoint_number);
+						result = evict_btree(desc, checkpoint_number);
 						o_invalidate_oids(oids);
-						result = true;
 					}
 					else
 					{

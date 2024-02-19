@@ -17,6 +17,7 @@
 #include "btree/io.h"
 #include "btree/page_contents.h"
 #include "btree/undo.h"
+#include "checkpoint/checkpoint.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
