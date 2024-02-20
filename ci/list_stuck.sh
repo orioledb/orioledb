@@ -11,6 +11,13 @@ for process in $(pgrep postgres); do
         echo -e $psout
         sudo gdb --batch --quiet -ex "thread apply all bt full" -ex "quit" -p $process
         echo ::endgroup::
+        echo $psout
+        if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
+            logfile="/tmp/${BASH_REMATCH[1]}/logs/postgresql.log"
+            echo ::group::tail -n 100 $logfile
+            tail -n 100 $logfile
+            echo ::endgroup::
+        fi
     fi
 done
 
@@ -25,6 +32,12 @@ for process in $(pgrep memcheck); do
             echo -e $psout
             gdb --batch --quiet -ex "target remote | vgdb --pid=$process" -ex "thread apply all bt full" -ex "quit" $(which postgres)
             echo ::endgroup::
+            if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
+                logfile="/tmp/${BASH_REMATCH[1]}/logs/postgresql.log"
+                echo ::group::tail -n 100 $logfile
+                tail -n 100 $logfile
+                echo ::endgroup::
+            fi
         fi
     fi
 done
