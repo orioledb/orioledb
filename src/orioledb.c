@@ -1117,6 +1117,12 @@ verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 			 */
 			if (pg_mkdir_p(dirname, S_IRWXU) == -1)
 			{
+				if (errno == EEXIST)
+				{
+					if (found)
+						*found = true;
+					return;
+				}
 				errstr = strerror(errno);
 				elog(ERROR, "could not access directory \"%s\": %s",
 					 dirname, errstr);
