@@ -70,9 +70,19 @@ class OrioledbS3ObjectLoader:
 										   transform=self.transform_orioledb)
 
 		control = get_control_data(self.data_dir)
+		orioledb_control = get_orioledb_control_data(self.data_dir)
+		self.download_undo(orioledb_control)
 		wal_file = control["Latest checkpoint's REDO WAL file"]
 		loader.download_file(self.bucket_name, f"wal/{wal_file}",
 							 f"{wal_dir}/{wal_file}")
+
+	def download_undo(self, orioledb_control):
+		UNDO_FILE_SIZE = 0x4000000
+		if orioledb_control['undoStartLocation'] > orioledb_control['undoEndLocation']:
+			return
+		for fileNum in range(orioledb_control['undoStartLocation'] // UNDO_FILE_SIZE, (orioledb_control['undoEndLocation'] - 1) // UNDO_FILE_SIZE):
+			fileName = "orioledb_data/%02X%08X" % (fileNum >> 32, fileNum & 0xFFFFFFFF)
+			loader.download_file(self.bucket_name, fileName, fileName)
 
 	def list_objects_last_checkpoint(self, bucket_name, directory):
 		objects = []
@@ -237,6 +247,23 @@ def get_control_data(data_dir: str):
 		out_dict[key.strip()] = value.strip()
 
 	return out_dict
+
+def get_orioledb_control_data(data_dir: str):
+	"""
+	Return contents of OrioleDB control file.
+	"""
+
+	f = open(f"{data_dir}/orioledb_data/control", 'rb')
+	data = f.read(80)
+	(undoStartLocation, undoEndLocation) = struct.unpack('QQ', data[64:])
+	f.close()
+
+	dict = {
+		'undoStartLocation': undoStartLocation,
+		'undoEndLocation': undoEndLocation
+	}
+
+	return dict
 
 if __name__ == '__main__':
 	loader = OrioledbS3ObjectLoader()

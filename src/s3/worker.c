@@ -270,6 +270,23 @@ s3process_task(uint64 taskLocation)
 		pfree(filename);
 		pfree(objectname);
 	}
+	else if (task->type == S3TaskTypeWriteUndoFile)
+	{
+		uint64		fileNum = task->typeSpecific.writeUndoFile.fileNum;
+		char	   *filename;
+
+		filename = psprintf(ORIOLEDB_UNDO_FILENAME_TEMPLATE,
+							(uint32) (fileNum >> 32),
+							(uint32) fileNum);
+		objectname = psprintf("orioledb_undo/%02X%08X",
+							  (uint32) (fileNum >> 32),
+							  (uint32) fileNum);
+
+		s3_put_file(objectname, filename);
+
+		pfree(filename);
+		pfree(objectname);
+	}
 
 	pfree(task);
 
@@ -437,6 +454,30 @@ s3_schedule_wal_file_write(char *filename)
 
 	return location;
 }
+
+/*
+ * Schedule a synchronization of given UNDO file to S3.
+ */
+S3TaskLocation
+s3_schedule_undo_file_write(uint64 fileNum)
+{
+	S3Task	   *task;
+	S3TaskLocation location;
+
+	task = (S3Task *) palloc0(sizeof(S3Task));
+	task->type = S3TaskTypeWriteUndoFile;
+	task->typeSpecific.writeUndoFile.fileNum = fileNum;
+
+	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
+
+	elog(DEBUG1, "S3 schedule UNDO file write: %llu (%llu)",
+		 (unsigned long long) fileNum, (unsigned long long) location);
+
+	pfree(task);
+
+	return location;
+}
+
 
 /*
  * Schedule the load of given downlink from S3 to local storage.

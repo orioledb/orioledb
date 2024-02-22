@@ -37,7 +37,6 @@
 #include "utils/memutils.h"
 
 #define GET_UNDO_REC(loc) (o_undo_buffers + (loc) % undo_circular_buffer_size)
-#define UNDO_FILE_SIZE (0x4000000)
 
 static int	undoLocCmp(const pairingheap_node *a, const pairingheap_node *b, void *arg);
 
@@ -111,7 +110,7 @@ static Size reserved_undo_size = 0;
 
 static OBuffersDesc buffersDesc = {
 	.singleFileSize = UNDO_FILE_SIZE,
-	.filenameTemplate = ORIOLEDB_UNDO_DIR "/%02X%08X",
+	.filenameTemplate = ORIOLEDB_UNDO_FILENAME_TEMPLATE,
 	.groupCtlTrancheName = "undoBuffersGroupCtlTranche",
 	.bufferCtlTrancheName = "undoBuffersCtlTranche"
 };

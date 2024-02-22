@@ -1187,6 +1187,21 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 					 checkpoint_end_loc,
 					 WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);
 
+	if (orioledb_s3_mode && checkpoint_end_loc > checkpoint_start_loc)
+	{
+		uint64		undoFileNum;
+
+		for (undoFileNum = checkpoint_start_loc / UNDO_FILE_SIZE;
+			 undoFileNum <= (checkpoint_end_loc - 1) / UNDO_FILE_SIZE;
+			 undoFileNum++)
+		{
+			S3TaskLocation location;
+
+			location = s3_schedule_undo_file_write(undoFileNum);
+			maxLocation = Max(maxLocation, location);
+		}
+	}
+
 	fsync_xidmap_range(checkpoint_xmin,
 					   checkpoint_xmax,
 					   WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);

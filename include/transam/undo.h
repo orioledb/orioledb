@@ -150,6 +150,9 @@ typedef enum
 extern bool oxid_needs_wal_flush;
 extern UndoLocation curRetainUndoLocation;
 
+#define ORIOLEDB_UNDO_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08X")
+#define UNDO_FILE_SIZE (0x4000000)
+
 #define UNDO_REC_EXISTS(location) ((location) >= pg_atomic_read_u64(&undo_meta->minProcRetainLocation) || \
 								   ((location) >= pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation) && \
 									(location) < pg_atomic_read_u64(&undo_meta->checkpointRetainEndLocation)))

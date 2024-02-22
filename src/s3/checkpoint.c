@@ -131,6 +131,9 @@ static const char *const excludeDirContents[] =
 	/* Contents of OrioleDB data is handled in a different way */
 	"orioledb_data",
 
+	/* Contents of OrioleDB undo is also handled separately */
+	"orioledb_undo",
+
 	/* end of list */
 	NULL
 };
