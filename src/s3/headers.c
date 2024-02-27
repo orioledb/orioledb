@@ -1246,7 +1246,7 @@ eviction_callback(S3HeaderTag tag)
 
 					s3_header_mark_not_loaded(tag, i);
 				}
-				if (S3_PART_GET_STATUS(newValue) != S3PartStatusEvicting)
+				else if (S3_PART_GET_STATUS(newValue) != S3PartStatusNotLoaded)
 					haveLoadedParts = true;
 				break;
 			}
