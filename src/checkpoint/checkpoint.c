@@ -643,7 +643,11 @@ flush_xids_queue(void)
 		location++;
 	endPos = location;
 
-	if (startPos % XID_RECS_QUEUE_SIZE < endPos % XID_RECS_QUEUE_SIZE)
+	if (endPos <= startPos)
+	{
+		/* Do nothing */
+	}
+	else if (startPos % XID_RECS_QUEUE_SIZE <= (endPos - 1) % XID_RECS_QUEUE_SIZE)
 	{
 		if (OFileWrite(xidFile,
 					   (Pointer) &checkpoint_state->xidRecQueue[startPos % XID_RECS_QUEUE_SIZE],
@@ -660,6 +664,8 @@ flush_xids_queue(void)
 
 		len1 = XID_RECS_QUEUE_SIZE - startPos % XID_RECS_QUEUE_SIZE;
 		len2 = endPos % XID_RECS_QUEUE_SIZE;
+		Assert(len1 > 0);
+		Assert(len2 > 0);
 		if (OFileWrite(xidFile,
 					   (Pointer) &checkpoint_state->xidRecQueue[startPos % XID_RECS_QUEUE_SIZE],
 					   sizeof(XidFileRec) * len1,
