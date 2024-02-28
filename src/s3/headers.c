@@ -35,6 +35,7 @@
 #endif
 
 #define S3_HEADER_BUFFERS_PER_GROUP 4
+#define S3_HEADER_BUFFERS_PER_GROUP_NUM_BITS 2
 #define S3_HEADER_NUM_VALUES (ORIOLEDB_SEGMENT_SIZE / ORIOLEDB_S3_PART_SIZE)
 
 typedef struct
@@ -565,7 +566,7 @@ s3_header_read_value(S3HeaderTag tag, int index)
 }
 
 uint32
-s3_header_get_change_count(S3HeaderTag tag)
+s3_header_get_load_id(S3HeaderTag tag)
 {
 	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
@@ -592,7 +593,7 @@ s3_header_get_change_count(S3HeaderTag tag)
 				if (buffer->changeCount != changeCount)
 					break;
 
-				return changeCount;
+				return (changeCount << S3_HEADER_BUFFERS_PER_GROUP_NUM_BITS) + (uint32) i;;
 			}
 		}
 
@@ -603,7 +604,7 @@ s3_header_get_change_count(S3HeaderTag tag)
 static bool
 s3_header_compare_and_swap_extended(S3HeaderTag tag, int index,
 									uint32 *oldValue, uint32 newValue,
-									uint32 *bufferChangeCount)
+									uint32 *bufferLoadId)
 {
 	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
@@ -659,8 +660,8 @@ s3_header_compare_and_swap_extended(S3HeaderTag tag, int index,
 				if (pg_atomic_compare_exchange_u64(&buffer->data[index],
 												   &fullValue, newFullValue))
 				{
-					if (bufferChangeCount)
-						*bufferChangeCount = changeCount;
+					if (bufferLoadId)
+						*bufferLoadId = (changeCount << S3_HEADER_BUFFERS_PER_GROUP_NUM_BITS) + (uint32) i;
 					buffer->usageCount++;
 					if (S3_PART_GET_STATUS(fullValue) == S3PartStatusLoaded &&
 						S3_PART_GET_STATUS(newFullValue) == S3PartStatusEvicting)
@@ -700,7 +701,7 @@ static int	curLockedIndex = 0;
  * evict the same file part.
  */
 bool
-s3_header_lock_part(S3HeaderTag tag, int index, uint32 *changeCount)
+s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 {
 	uint32		value;
 
@@ -744,7 +745,7 @@ s3_header_lock_part(S3HeaderTag tag, int index, uint32 *changeCount)
 		}
 
 		if (s3_header_compare_and_swap_extended(tag, index, &value,
-												newValue, changeCount))
+												newValue, loadId))
 		{
 			curLockedTag = tag;
 			curLockedIndex = index;

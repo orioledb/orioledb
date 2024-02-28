@@ -191,7 +191,7 @@ typedef struct
 {
 	FileHashKey key;
 	File		file;
-	uint32		changeCount;
+	uint32		loadId;
 	char		status;			/* for simplehash use */
 } FileHashElement;
 
@@ -255,7 +255,7 @@ btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 
 static File
 btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
-					 uint32 changeCount)
+					 uint32 loadId)
 {
 	if (orioledb_s3_mode)
 	{
@@ -269,7 +269,7 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 		hashElem = s3Files_insert(desc->smgr.hash, key, &found);
 		if (found)
 		{
-			if (hashElem->changeCount == changeCount)
+			if (hashElem->loadId == loadId)
 				return hashElem->file;
 			else
 				FileClose(hashElem->file);
@@ -279,7 +279,7 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 									   (off_t) num * ORIOLEDB_SEGMENT_SIZE,
 									   chkpNum);
 		hashElem->file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
-		hashElem->changeCount = changeCount;
+		hashElem->loadId = loadId;
 		if (hashElem->file <= 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
@@ -563,16 +563,16 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		int			segno = curOffset / ORIOLEDB_SEGMENT_SIZE;
 		int			partno = 0;
 		File		file;
-		uint32		changeCount = 0;
+		uint32		loadId = 0;
 
 		if (orioledb_s3_mode)
 		{
 			tag.segNum = segno;
 			partno = (curOffset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_lock_part(tag, partno, &changeCount);
+			s3_header_lock_part(tag, partno, &loadId);
 		}
 
-		file = btree_open_smgr_file(desc, segno, chkpNum, changeCount);
+		file = btree_open_smgr_file(desc, segno, chkpNum, loadId);
 		if ((curOffset + amount) / granularity == curOffset / granularity)
 		{
 			result += OFileWrite(file, buffer, amount,
@@ -655,16 +655,16 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 		int			partno = 0;
 		File		file;
-		uint32		changeCount = 0;
+		uint32		loadId = 0;
 
 		if (orioledb_s3_mode)
 		{
 			tag.segNum = segno;
 			partno = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_lock_part(tag, partno, &changeCount);
+			s3_header_lock_part(tag, partno, &loadId);
 		}
 
-		file = btree_open_smgr_file(desc, segno, chkpNum, changeCount);
+		file = btree_open_smgr_file(desc, segno, chkpNum, loadId);
 		if ((offset + amount) / granularity == offset / granularity)
 		{
 			result += OFileRead(file, buffer, amount,
@@ -713,7 +713,7 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 	{
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 		File		file;
-		uint32		changeCount = 0;
+		uint32		loadId = 0;
 
 		if (orioledb_s3_mode)
 		{
@@ -722,10 +722,10 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 				.checkpointNum = chkpNum,
 			.segNum = segno};
 
-			changeCount = s3_header_get_change_count(tag);
+			loadId = s3_header_get_load_id(tag);
 		}
 
-		file = btree_open_smgr_file(desc, segno, chkpNum, changeCount);
+		file = btree_open_smgr_file(desc, segno, chkpNum, loadId);
 		if ((offset + amount) / ORIOLEDB_SEGMENT_SIZE == segno)
 		{
 			FileWriteback(file,
@@ -761,7 +761,7 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 	for (num = 0; num < length / ORIOLEDB_SEGMENT_SIZE; num++)
 	{
 		File		file;
-		uint32		changeCount = 0;
+		uint32		loadId = 0;
 
 		if (orioledb_s3_mode)
 		{
@@ -770,10 +770,10 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 				.checkpointNum = chkpNum,
 			.segNum = num};
 
-			changeCount = s3_header_get_change_count(tag);
+			loadId = s3_header_get_load_id(tag);
 		}
 
-		file = btree_open_smgr_file(desc, num, chkpNum, changeCount);
+		file = btree_open_smgr_file(desc, num, chkpNum, loadId);
 		FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
 	}
 }
@@ -2504,7 +2504,7 @@ retry:
 }
 
 static bool
-write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 changeCount,
+write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 loadId,
 						   int maxLevel, bool evict)
 {
 	Page		p;
@@ -2520,7 +2520,7 @@ write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 changeCount,
 
 	lock_page(blkno);
 	p = O_GET_IN_MEMORY_PAGE(blkno);
-	if (O_PAGE_GET_CHANGE_COUNT(p) != changeCount)
+	if (O_PAGE_GET_CHANGE_COUNT(p) != loadId)
 	{
 		unlock_page(blkno);
 		return false;
