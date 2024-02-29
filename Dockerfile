@@ -1,13 +1,13 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.18 3.17 3.16 3.15 3.14 3.13 ]
-ARG ALPINE_VERSION=3.17
+# set ALPINE_VERSION= [ edge 3.19 3.18 3.17 3.16 3.15 3.14 3.13 ]
+ARG ALPINE_VERSION=3.19
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION
 # Set PG_MAJOR = [16 15]
-ARG PG_MAJOR=15
+ARG PG_MAJOR=16
 ENV PG_MAJOR ${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
@@ -53,7 +53,7 @@ RUN set -eux; \
 # https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
 # https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18 | 3.19* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
+		3.16 | 3.17 | 3.18 | 3.19 | 3.20* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
 		*) : ;; \
 	esac ; \
 	\
@@ -76,22 +76,6 @@ RUN set -eux; \
 			export BUILD_CC_COMPILER=clang-${CUSTOM_LLVM_VERSION} ; \
 			echo "fix: BUILD_CC_COMPILER=clang-${CUSTOM_LLVM_VERSION}" ; \
 		fi ; \
-	fi ; \
-	\
-# temporary not allowing LLVM 16 to be used
-# reason: we can't overwrite and fix the DOCKER_PG_LLVM_DEPS
-# and the future downstream extensions like PostGIS need a correct build information (DOCKER_PG_LLVM_DEPS)
-	if \
-	# if the custom llvm version is set ( via DOCKER_PG_LLVM_DEPS ), and it is 16, then halt operation
-		( [ ! -z "${CUSTOM_LLVM_VERSION}" ] && [ "$CUSTOM_LLVM_VERSION" == "16" ] ) \
-	# or - if the custom llvm version is not set, and the Alpine version is >=3.18, then halt operation
-	  ||  ( [ -z "${CUSTOM_LLVM_VERSION}" ] && ( [ "$ALPINE_VERSION" == "3.18" ] || [ "$ALPINE_VERSION" == "3.19" ]) ) \
-	  ;  then \
-			set +x ; \
-			echo "------------------------------" ; \
-			echo "Error: The LLVM 16 is not compatible with the current PostgreSQL! Halting operation." ; \
-			echo "Suggested workarounds: use --build-arg DOCKER_PG_LLVM_DEPS='llvm15-dev clang15' " ; \
-			exit 1; \
 	fi ; \
 	\
 	apk add --no-cache --virtual .build-deps \

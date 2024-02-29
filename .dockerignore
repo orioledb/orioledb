@@ -1,3 +1,15 @@
+# Exclude files and directories to minimize
+# the Docker build context size.
+# This practice limits the scope of COPY commands in the Dockerfile.
+# When not using multi-layer builds, it can effectively reduce the final image size.
+
+# The first part of this file is should be the same as the .gitignore file
+# The second part is the extra not needed content for .dockerignore
+
+########################################################
+# first part: .gitignore contents
+########################################################
+
 # Global excludes across all subdirectories
 **/*.o
 **/*.obj
@@ -32,9 +44,6 @@
 **/lib*dll.def
 **/lib*.pc
 
-# documnetation files
-doc/
-
 # Local excludes in root directory
 t/__pycache__/
 log/
@@ -46,4 +55,26 @@ output_iso/
 include/utils/stopevents_defs.h
 include/utils/stopevents_data.h
 orioledb.typedefs
-!**/ci/antithesis/libvoidstar.so
+ci/antithesis
+
+
+
+#######################################################
+# second part: extra .dockerignore contents
+#######################################################
+
+# Exclude version control and continuous integration (CI) directories
+.git
+.github
+
+# Exclude Dockerfiles
+Dockerfile
+Dockerfile.ubuntu
+
+# Exclude OrioleDB Docker test definitions and code
+# as they are not needed inside the Docker image.
+test/
+ci/local_docker_matrix.sh
+
+# Documentation files, which are not needed inside the Docker image.
+doc/

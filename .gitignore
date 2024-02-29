@@ -1,3 +1,6 @@
+# When adding new definitions here,
+#     please also include them in the first part of the .dockerignore file.
+
 # Global excludes across all subdirectories
 *.o
 *.obj

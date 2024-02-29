@@ -1,11 +1,15 @@
 # This is modified Dockerfile from 16/bookworm in
 # https://github.com/docker-library/postgres
 
+# Set UBUNTU_VERSION = [ devel 23.10  22.04 20.04 ]
+#                   or [ devel mantic jammy focal ]
 ARG UBUNTU_VERSION=focal
 FROM ubuntu:${UBUNTU_VERSION}
 
-# Set PG_MAJOR = [16 15 14 13 ]
-ARG PG_MAJOR=14
+ARG UBUNTU_VERSION
+
+# Set PG_MAJOR = [16 15]
+ARG PG_MAJOR=16
 ENV PG_MAJOR ${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
@@ -28,16 +32,33 @@ RUN set -eux; \
 	mkdir -p /var/lib/postgresql; \
 	chown -R postgres:postgres /var/lib/postgresql
 
-RUN set -ex; \
+RUN set -eux; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends \
+	DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y; \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+		ca-certificates \
 		gnupg \
-	; \
-	rm -rf /var/lib/apt/lists/*
+		locales \
+		tzdata \
+		\
+		# Ensures compatibility with the official PostgreSQL Docker image
+		libnss-wrapper \
+		xz-utils \
+		zstd \
+		; \
+	echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen; \
+	locale-gen; \
+	locale -a | grep 'en_US.utf8' ; \
+	\
+	rm -rf /var/lib/apt/lists/* ; \
+	apt-get clean
+
+# make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
+ENV LANG en_US.utf8
 
 # grab gosu for easy step-down from root
 # https://github.com/tianon/gosu/releases
-ENV GOSU_VERSION 1.16
+ENV GOSU_VERSION 1.17
 RUN set -eux; \
 	savedAptMark="$(apt-mark showmanual)"; \
 	apt-get update; \
@@ -57,20 +78,6 @@ RUN set -eux; \
 	chmod +x /usr/local/bin/gosu; \
 	gosu --version; \
 	gosu nobody true
-
-RUN set -eux; \
-	apt-get update; \
-	DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y; \
-	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-		locales \
-		tzdata \
-		curl \
-		ca-certificates \
-		; \
-	localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8;
-
-# make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
-ENV LANG en_US.utf8
 
 RUN mkdir -p /usr/src/postgresql/contrib/orioledb
 
@@ -92,11 +99,16 @@ RUN set -eux; \
 	echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
 	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
 	\
+	LLVM_RUNTIME_DEPS=$(echo "$DOCKER_PG_LLVM_DEPS" | grep -o 'llvm[0-9]*') ; \
+	echo "LLVM_RUNTIME_DEPS=$LLVM_RUNTIME_DEPS" ; \
+	\
 	apt-get update; \
 	DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
 		build-essential \
+		${LLVM_RUNTIME_DEPS} \
 		${DOCKER_PG_LLVM_DEPS} \
 		bison \
+		curl \
 		flex \
 		gdb \
 		git \
@@ -113,7 +125,8 @@ RUN set -eux; \
 		libuuid1 \
 		libxml2 \
 		libxml2-dev \
-		libxslt-dev \
+		libxslt1.1 \
+		libxslt1-dev \
 		libzstd1 \
 		libzstd-dev \
 		make \
@@ -179,7 +192,7 @@ RUN set -eux; \
 		--with-llvm \
 		--with-lz4 \
 		--with-zstd \
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:focal+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME}" \
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	make -j "$(nproc)"; \
@@ -190,11 +203,26 @@ RUN set -eux; \
 	make -C contrib/orioledb install; \
 	\
 	apt-get -y remove \
-				build-essential flex bison pkg-config \
-				libreadline-dev libipc-run-perl \
-				libicu-dev python3-dev python3-pip \
-				libzstd-dev \
-				curl wget liblz4-dev uuid-dev \
+		${DOCKER_PG_LLVM_DEPS} \
+		bison \
+		build-essential \
+		curl \
+		flex \
+		gdb \
+		git \
+		libicu-dev \
+		libipc-run-perl \
+		liblz4-dev \
+		libreadline-dev \
+		libxml2-dev \
+		libxslt1-dev \
+		libzstd-dev \
+		make \
+		pkg-config \
+		python3-dev \
+		python3-pip \
+		uuid-dev \
+		wget \
 	; \
 	apt-get -y autoremove; \
 	rm -rf /var/cache/apt/archives /var/lib/apt/lists/*; \
@@ -220,6 +248,7 @@ COPY --chown=postgres:postgres postgresql.docker.conf /etc/postgresql/postgresql
 ENV PG_CONF=/etc/postgresql/postgresql.conf
 
 COPY docker-entrypoint.sh /usr/local/bin/
+RUN sed -i -e 's/su-exec/gosu/g' "/usr/local/bin/docker-entrypoint.sh"
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL
