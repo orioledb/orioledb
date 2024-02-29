@@ -841,10 +841,10 @@ o_base_init_startup_hook(void)
 			recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
 									   false);
 		}
-
-		if (prev_base_init_startup_hook)
-			prev_base_init_startup_hook();
 	}
+
+	if (prev_base_init_startup_hook)
+		prev_base_init_startup_hook();
 }
 
 void
