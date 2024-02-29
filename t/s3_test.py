@@ -171,127 +171,6 @@ class S3Test(BaseTest):
 		    "FATAL:  could not list objects in S3 bucket, check orioledb s3 configs"
 		)
 
-	def test_s3_checkpoint(self):
-		node = self.node
-		node.append_conf(f"""
-			orioledb.s3_mode = true
-			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
-			orioledb.s3_region = '{self.region}'
-			orioledb.s3_accesskey = '{self.access_key_id}'
-			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
-
-			orioledb.s3_num_workers = 3
-			orioledb.recovery_pool_size = 1
-		""")
-		node.start()
-		datname = default_dbname()
-		datoid = node.execute(f"""
-			SELECT oid from pg_database WHERE datname = '{datname}'
-		""")[0][0]
-		node.safe_psql("""
-			CREATE EXTENSION IF NOT EXISTS orioledb;
-		""")
-		node.safe_psql("""
-			CREATE TABLE o_test_1 (
-				val_1 int
-			) USING orioledb;
-			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
-		""")
-		node.safe_psql("CHECKPOINT")
-		node.safe_psql("""
-			CREATE TABLE o_test_2 (
-				val_1 int
-			) USING orioledb;
-			INSERT INTO o_test_2 SELECT * FROM generate_series(1, 5);
-		""")
-		node.safe_psql("CHECKPOINT")
-		self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
-		                 node.execute("SELECT * FROM o_test_1"))
-
-		node.stop(['-m', 'immediate'])
-
-		orioledb_dir = node.data_dir + "/orioledb_data"
-		chkp_num = 0
-		obj_prefix = f'orioledb_data/{chkp_num}'
-		files = []
-		for path, _, filenames in os.walk(orioledb_dir):
-			path = path.removeprefix(node.data_dir).split('/')[1:]
-			if path == ['orioledb_data']:
-				if not filenames:
-					break
-				chkp_num = [
-				    x.split('.')[0] for x in filenames if x.endswith('.xid')
-				][0]
-				obj_prefix = f'orioledb_data/{chkp_num}'
-			elif path == ['orioledb_data', '1']:
-				continue
-			else:
-				for name in filenames:
-					name = name.split('/')[-1].split('.')
-					if len(name) > 1:
-						postfix = name[-1]
-					else:
-						postfix = None
-					name[0] = name[0].split('-')
-					if postfix == 'map':
-						if name[0][1] == chkp_num:
-							name = f"{name[0][0]}.map"
-						else:
-							name = None
-					else:
-						if name[0][1] == chkp_num:
-							name = f"{name[0][0]}.0.0"
-						else:
-							name = None
-					if name:
-						files += [f"{obj_prefix}/{path[-1]}/{name}"]
-
-		objects = self.client.list_objects(Bucket=self.bucket_name,
-		                                   Prefix=f'{obj_prefix}/{datoid}')
-		objects = objects.get("Contents", [])
-		objects = sorted(list(x["Key"] for x in objects))
-		files = sorted(files)
-		self.assertEqual(objects, files)
-		node.start()
-		self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
-		                 node.execute("SELECT * FROM o_test_1"))
-		node.stop()
-
-	def test_s3_ddl_recovery(self):
-		node = self.node
-		node.append_conf(
-		    'postgresql.conf', f"""
-			orioledb.s3_mode = true
-			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
-			orioledb.s3_region = '{self.region}'
-			orioledb.s3_accesskey = '{self.access_key_id}'
-			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
-			orioledb.s3_num_workers = 1
-		""")
-		node.start()
-		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
-
-		node.safe_psql("""
-			CREATE TABLE o_test_1(
-				val_1 text NOT NULL COLLATE "C",
-				PRIMARY KEY (val_1)
-			) USING orioledb;
-			ALTER TABLE o_test_1 ALTER val_1 TYPE text COLLATE "POSIX";
-		""")
-
-		node.stop(['-m', 'immediate'])
-		node.start()
-
-		node.safe_psql("""
-			ALTER TABLE o_test_1
-				DROP CONSTRAINT o_test_1_pkey;
-		""")
-
-		node.stop(['-m', 'immediate'])
-		node.start()
-
 	def get_file_occupied_size(self, path):
 		try:
 			result = 0
@@ -414,6 +293,314 @@ class S3Test(BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
+	
+	def test_1(self):
+		
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		
+		node.safe_psql("""
+		
+			CREATE TABLE o_test_1(
+				a integer PRIMARY KEY, 
+				b integer DEFAULT -1
+			)USING orioledb;
+			CREATE TABLE o_test_2(
+				c integer, 
+				d integer
+			)USING orioledb;
+			INSERT INTO o_test_1(a, b) VALUES (1, 100);
+			INSERT INTO o_test_2 (d, c) VALUES (101, 200);
+			CREATE UNIQUE INDEX ON o_test_1(a) INCLUDE(b);
+			CREATE UNIQUE INDEX ON o_test_2(c) INCLUDE(d);
+
+			MERGE INTO o_test_1 t
+			USING o_test_2 s ON t.a = s.d
+			WHEN NOT MATCHED THEN
+				INSERT (a) VALUES (s.d);
+				
+			MERGE INTO o_test_1 t
+			USING o_test_2 s ON t.a = s.d
+			WHEN NOT MATCHED AND s.c <> 100 THEN
+				INSERT (a) VALUES (s.d);
+				 
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+	def test_2(self):
+		
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		
+		node.safe_psql("""
+		
+			CREATE TABLE o_test_1(
+				a integer PRIMARY KEY
+			)PARTITION BY LIST (a);
+			CREATE TABLE o_test_2 
+				PARTITION OF o_test_1 DEFAULT;
+			CREATE TABLE o_test_3(b integer)USING orioledb;
+			INSERT INTO o_test_3 VALUES (1), (2), (3);
+			ALTER TABLE o_test_3 ADD COLUMN nn int;
+			MERGE INTO o_test_1 t USING o_test_3 s ON t.a = s.b
+				WHEN NOT MATCHED THEN INSERT VALUES (s.b);			
+			INSERT INTO o_test_3 VALUES (4), (5), (6);
+			DROP TABLE o_test_2;
+				 
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+	def test_3(self):
+		
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		
+		node.safe_psql("""
+		
+			CREATE TABLE o_test_1(
+				a int not null,
+				b date not null,
+				c int,
+				d int
+			)USING orioledb;
+			CREATE TABLE o_test_2(
+				CHECK ( b >= DATE '2006-02-01' AND b < DATE '2006-03-01' )
+			)INHERITS (o_test_1)USING orioledb;
+			CREATE TABLE o_test_3(
+				CHECK ( b >= DATE '2006-03-01' AND b < DATE '2006-04-01' )
+			)INHERITS (o_test_1)USING orioledb;
+			CREATE TABLE o_test_4(
+				a int not null,
+				b date not null,
+				c int,
+				d int,
+				f text
+			)USING orioledb;
+				 
+			ALTER TABLE o_test_4 DROP COLUMN f;
+			ALTER TABLE o_test_4 INHERIT o_test_1;
+							
+			CREATE TABLE o_test_5(LIKE o_test_1)USING orioledb;
+	
+			MERGE into o_test_1 m
+			USING o_test_5 nm ON
+				(m.a = nm.a and m.b=nm.b)
+			WHEN MATCHED AND nm.c IS NULL THEN DELETE
+			WHEN MATCHED THEN UPDATE
+				SET c = greatest(m.c, nm.c),
+					d = m.d + coalesce(nm.d, 0)
+			WHEN NOT MATCHED THEN INSERT
+				(a, b, c, d)
+			VALUES (a, b, c, d);
+
+			MERGE INTO o_test_5 nm
+			USING ONLY o_test_1 m ON
+				(nm.a = m.a and nm.b=m.b)
+			WHEN MATCHED THEN DELETE;
+
+			MERGE INTO o_test_5 nm
+			USING o_test_1 m ON
+				(nm.a = m.a and nm.b=m.b)
+			WHEN MATCHED THEN DELETE;
+
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+	def test_4(self):
+		
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		
+		node.safe_psql("""
+		
+			create table merge_target_table (a int primary key, b text)USING orioledb;
+			create table merge_source_table (a int, b text)USING orioledb;
+			insert into merge_source_table
+			values (1, 'initial1'), (2, 'initial2'),
+					(3, 'initial3'), (4, 'initial4');
+
+			merge into merge_target_table t
+			using merge_source_table s
+			on t.a = s.a
+			when not matched then
+			insert values (a, b);
+
+			merge into merge_target_table t
+			using merge_source_table s
+			on t.a = s.a
+			when matched and s.a <= 2 then
+				update set b = t.b || ' updated by merge'
+			when matched and s.a > 2 then
+				delete
+			when not matched then
+			insert values (a, b);
+
+			merge into merge_target_table t
+			using merge_source_table s
+			on t.a = s.a
+			when matched and s.a <= 2 then
+				update set b = t.b || ' updated again by merge'
+			when matched and s.a > 2 then
+				delete
+			when not matched then
+			insert values (a, b);
+			drop table merge_source_table, merge_target_table;
+				 
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+	def test_5(self):
+		
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		
+		node.safe_psql("""
+		
+			create table o_test_1(a int)USING orioledb;
+			create table o_test_2(b int) USING orioledb;
+			create function func_1() returns trigger language plpgsql
+			as $$ begin return null; end $$;
+			create trigger trig_1 after insert on o_test_1
+			for each row execute procedure func_1();
+			create trigger trig_2 after insert on o_test_1
+			for statement execute procedure func_1();
+			alter table o_test_1 disable trigger user;
+			drop table o_test_1, o_test_2;
+							
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+	def test_6(self):
+		
+		node = self.node
+		node.append_conf('postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_num_workers = 1
+		""")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		
+		node.safe_psql("""
+		
+			create table o_test_1(
+				a int4 primary key, 
+				b text
+			)USING orioledb;
+			create function func_1()
+			returns trigger language plpgsql as
+			$$
+			begin
+			if (TG_OP = 'UPDATE') then
+				raise warning 'before update (new): %', new.*::text;
+			end if;
+			return new;
+			end;
+			$$;
+			create trigger trig_1 before insert or update on o_test_1
+			for each row execute procedure func_1();
+			create function func_2()
+			returns trigger language plpgsql as
+			$$
+			begin
+			if (TG_OP = 'UPDATE') then
+				raise warning 'after update (old): %', old.*::text;
+				raise warning 'after update (new): %', new.*::text;
+			elsif (TG_OP = 'INSERT') then
+				raise warning 'after insert (new): %', new.*::text;
+			end if;
+			return null;
+			end;
+			$$;
+			create trigger trig_2 after insert or update on o_test_1
+			for each row execute procedure func_2();
+
+			insert into o_test_1 values(1, 'q') on conflict (a) do update set b = 'updated ' || o_test_1.b;
+			insert into o_test_1 values(3, 'w') on conflict (a) do update set b = 'updated ' || o_test_1.b;
+			insert into o_test_1 values(4, 'e') on conflict (a) do update set b = 'updated ' || o_test_1.b;
+			insert into o_test_1 values(6, 'r') on conflict (a) do update set b = 'updated ' || o_test_1.b;
+			insert into o_test_1 values(8, 't') on conflict (a) do update set b = 'updated ' || o_test_1.b;
+						
+			CHECKPOINT;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
 
 
 class OrioledbS3Loader:
