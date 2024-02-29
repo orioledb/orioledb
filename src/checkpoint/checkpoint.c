@@ -710,6 +710,8 @@ write_to_xids_queue(XidFileRec *rec)
 	uint64		location = pg_atomic_fetch_add_u64(&checkpoint_state->xidRecLastPos, 1);
 	XidFileRec *target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
 
+	Assert(OXidIsValid(rec->oxid));
+
 	/*
 	 * Flush queue to the file till our position is available for write.
 	 */
@@ -817,9 +819,9 @@ finish_write_xids(uint32 chkpnum)
 		{
 			while (true)
 			{
-				if (OXidIsValid(oProcData[i].vxids[j].oxid))
+				xidRec.oxid = oProcData[i].vxids[j].oxid;
+				if (OXidIsValid(xidRec.oxid))
 				{
-					xidRec.oxid = oProcData[i].vxids[j].oxid;
 					pg_read_barrier();
 
 					read_shared_undo_locations(&xidRec.undoLocation, &oProcData[i].undoStackLocations[j]);
