@@ -9,6 +9,7 @@ set -Eeo pipefail
 pg_major_list=( 16 15)
 compiler_list=( clang gcc )
 base_list=(
+   # alpine versions
    alpine:3.19
    alpine:3.18
    alpine:3.17
@@ -17,11 +18,13 @@ base_list=(
    alpine:3.14
    alpine:3.13
 
+   # ubuntu versions
    ubuntu:23.10
    ubuntu:22.04
    ubuntu:20.04
 
-  # alpine:edge  not working yet
+   # developer versions
+   alpine:edge
    ubuntu:devel
   )
 
