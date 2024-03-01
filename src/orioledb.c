@@ -835,7 +835,7 @@ o_base_init_startup_hook(void)
 		if (remove_old_checkpoint_files)
 		{
 			elog(LOG, "Cleanup of old files at startup. Checkpoint %d",
-					checkpoint_state->lastCheckpointNumber);
+				 checkpoint_state->lastCheckpointNumber);
 			recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
 									   true);
 			recovery_cleanup_old_files(checkpoint_state->lastCheckpointNumber,
