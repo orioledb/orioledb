@@ -85,7 +85,6 @@ REGRESSCHECKS = btree_sys_check \
 				bitmap_scan \
 				btree_compression \
 				btree_print \
-				collate \
 				createas \
 				ddl \
 				explain \
@@ -189,7 +188,7 @@ ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
   ISOLATIONCHECKS += isol_merge
 endif
 
-PG_REGRESS_ARGS=--no-locale --encoding=UTF8
+PG_REGRESS_ARGS=--no-locale
 
 regresscheck: | install
 	$(pg_regress_check) \

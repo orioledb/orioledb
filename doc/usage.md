@@ -123,6 +123,7 @@ OrioleDB is currently in the development stage.  Therefore it has the following 
  7. OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
  8. `REINDEX CONCURRENTLY` now is not supported.
  9. OrioleDB tables doesn't support `Sample Scans` yet.
+ 10. All databases of cluster should use same encoding.
 
 Data deletion
 -------------

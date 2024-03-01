@@ -310,7 +310,7 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(_o_index_parallel_estimate_shared(0)));
 	size = add_size(size, CACHELINEALIGN(tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1) * (recovery_parallel_indices_rebuild_limit_guc + 1)));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
-	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
+	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 
 	return size;
 }

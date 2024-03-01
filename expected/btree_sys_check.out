@@ -525,6 +525,7 @@ SELECT regexp_replace(regexp_replace(
      Leftmost, Rightmost                                                +
    Chunk 0: offset = 0, location = 256, hikey location = 64             +
      Item 0: offset = 264, tuple = ((NNN, (NNN), X/X, N), encoding: NNN)+
+     Item 1: offset = 320, tuple = ((NNN, (NNN), X/X, N), encoding: NNN)+
                                                                         +
  
 (1 row)

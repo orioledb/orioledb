@@ -608,7 +608,8 @@ typedef struct ODatabase
 } ODatabase;
 
 O_SYS_CACHE_DECLS(database_cache, ODatabase, 1);
-extern void o_database_cache_set_database_encoding(Oid dboid);
+extern int32 o_database_cache_get_database_encoding(void);
+extern void o_database_cache_set_database_encoding(void);
 extern void o_database_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									   OTuple tup, Pointer arg);
 
@@ -618,9 +619,9 @@ o_set_sys_cache_search_datoid(Oid datoid)
 	if (o_sys_cache_search_datoid != datoid)
 	{
 		o_sys_cache_search_datoid = datoid;
-		if (is_recovery_process())
+		if (!OidIsValid(MyDatabaseId))
 		{
-			o_database_cache_set_database_encoding(datoid);
+			o_database_cache_set_database_encoding();
 		}
 	}
 }

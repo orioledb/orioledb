@@ -6455,9 +6455,9 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
 (1 row)
 
 EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=12)
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=9)
    Forward index only scan of: o_test_reuse_multiple_indices_ix4
 (2 rows)
 

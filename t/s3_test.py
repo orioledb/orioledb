@@ -67,8 +67,7 @@ class S3Test(S3BaseTest):
 		node.stop(['-m', 'immediate'])
 		os.unlink(s3_test_file)
 
-	# TODO: Other tests not working on MacOs because of credential check, fix it
-	def _test_s3_credential_check(self):
+	def test_s3_credential_check(self):
 		node = self.node
 
 		node.append_conf(

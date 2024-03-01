@@ -31,6 +31,7 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
+#include "catalog/pg_database.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -129,6 +130,8 @@ o_opclass_cache_add_table(OTable *o_table)
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 	datoid = o_table->oids.datoid;
+
+	o_database_cache_add_if_needed(Template1DbOid, Template1DbOid, cur_lsn, NULL);
 
 	/*
 	 * Inserts opclasses for TOAST index.

@@ -90,18 +90,24 @@ o_database_cache_free_entry(Pointer entry)
 	pfree(entry);
 }
 
-void
-o_database_cache_set_database_encoding(Oid dboid)
+int32
+o_database_cache_get_database_encoding()
 {
 	XLogRecPtr	cur_lsn;
-	Oid			datoid;
 	ODatabase  *o_database;
 
-	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-	o_database = o_database_cache_search(datoid, dboid, cur_lsn,
+	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+	o_database = o_database_cache_search(Template1DbOid, Template1DbOid, cur_lsn,
 										 database_cache->nkeys);
-	Assert(o_database);
-	SetDatabaseEncoding(o_database->encoding);
+	return o_database ? o_database->encoding : PG_SQL_ASCII;
+}
+
+void
+o_database_cache_set_database_encoding()
+{
+	int32		encoding = o_database_cache_get_database_encoding();
+
+	SetDatabaseEncoding(encoding);
 }
 
 /*

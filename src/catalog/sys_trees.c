@@ -415,10 +415,14 @@ PG_FUNCTION_INFO_V1(orioledb_sys_tree_rows);
 Size
 sys_trees_shmem_needs(void)
 {
+	Size		size = 0;
+
 	StaticAssertStmt(SYS_TREES_NUM == sizeof(sysTreesMeta) / sizeof(SysTreeMeta),
 					 "mismatch between size of sysTreesMeta and SYS_TREES_NUM");
 
-	return mul_size(sizeof(SysTreeShmemHeader), SYS_TREES_NUM);
+	size = add_size(size, mul_size(sizeof(SysTreeShmemHeader), SYS_TREES_NUM));
+
+	return size;
 }
 
 /*
@@ -443,6 +447,7 @@ sys_trees_shmem_init(Pointer ptr, bool found)
 		}
 	}
 	memset(sysTreesDescrs, 0, sizeof(sysTreesDescrs));
+	ptr += mul_size(sizeof(SysTreeShmemHeader), SYS_TREES_NUM);
 }
 
 

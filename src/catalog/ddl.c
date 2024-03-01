@@ -61,6 +61,7 @@
 #include "commands/view.h"
 #include "commands/tablecmds.h"
 #include "fmgr.h"
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/makefuncs.h"
@@ -2008,6 +2009,39 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				break;
 		}
 		ReleaseSysCache(typeTuple);
+	}
+	else if (access == OAT_POST_CREATE && classId == DatabaseRelationId)
+	{
+		HeapTuple	dbTuple;
+		Form_pg_database dbform;
+		int32		cluster_encoding;
+
+
+		if (IsTransactionState())
+		{
+			XLogRecPtr	cur_lsn;
+
+			o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+			o_database_cache_add_if_needed(Template1DbOid, Template1DbOid, cur_lsn, NULL);
+		}
+
+		CommandCounterIncrement();
+		dbTuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(objectId));
+
+		if (!HeapTupleIsValid(dbTuple))
+			elog(ERROR, "cache lookup failed for database %u", objectId);
+		dbform = (Form_pg_database) GETSTRUCT(dbTuple);
+
+		cluster_encoding = o_database_cache_get_database_encoding();
+		if (cluster_encoding != dbform->encoding)
+			ereport(ERROR,
+					errmsg("Cannot create database with encoding \"%s\" "
+						   "that is different from cluster encoding \"%s\"",
+						   pg_encoding_to_char(dbform->encoding),
+						   pg_encoding_to_char(cluster_encoding)),
+					errdetail("OrioleDB now only supports single encoding for all databases. "
+							  "It is easier to use single one during checkpoint."));
+		ReleaseSysCache(dbTuple);
 	}
 	else if (access == OAT_DROP && classId == OperatorClassRelationId)
 	{
