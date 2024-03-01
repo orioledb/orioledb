@@ -44,7 +44,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v4
         with:
           images: orioledb/orioledb
           tags: ${{ github.event.inputs.tags }}
@@ -54,7 +54,7 @@ jobs:
             suffix=${{ contains(github.ref, 's3') && '-s3' || '' }}-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
@@ -67,4 +67,4 @@ jobs:
             UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
             PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
-            DOCKER_PG_LLVM_DEPS="llvm-dev clang"
+            DOCKER_PG_LLVM_DEPS=llvm-dev clang
