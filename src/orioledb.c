@@ -793,7 +793,18 @@ _PG_init(void)
 	/* Register custom deTOAST function */
 	register_o_detoast_func(o_detoast);
 
+	o_tableam_descr_init();
+	o_compress_init();
+	o_sys_caches_init();
 	RegisterCustomScanMethods(&o_scan_methods);
+
+	btree_insert_context = AllocSetContextCreate(TopMemoryContext,
+												 "orioledb B-tree insert context",
+												 ALLOCSET_DEFAULT_SIZES);
+
+	btree_seqscan_context = AllocSetContextCreate(TopTransactionContext,
+												  "orioledb B-tree seqential scans context",
+												  ALLOCSET_DEFAULT_SIZES);
 
 	/* Setup the required hooks. */
 	prev_shmem_request_hook = shmem_request_hook;
@@ -1032,23 +1043,11 @@ orioledb_shmem_startup(void)
 	init_btree_io_lwlocks();
 	o_btree_init_unique_lwlocks();
 
-	o_tableam_descr_init();
-	o_compress_init();
-	o_sys_caches_init();
-
 	before_shmem_exit(orioledb_on_shmem_exit, (Datum) 0);
 
 	LWLockRelease(AddinShmemInitLock);
 
 	shared_segment_initialized = true;
-
-	btree_insert_context = AllocSetContextCreate(TopMemoryContext,
-												 "orioledb B-tree insert context",
-												 ALLOCSET_DEFAULT_SIZES);
-
-	btree_seqscan_context = AllocSetContextCreate(TopTransactionContext,
-												  "orioledb B-tree seqential scans context",
-												  ALLOCSET_DEFAULT_SIZES);
 }
 
 uint64
