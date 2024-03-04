@@ -424,6 +424,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 				Assert(!poscan->dsmHandle);
 				scan->dsmSeg = dsm_create(MAXALIGN(poscan->downlinksCount * sizeof(scan->diskDownlinks[0])), 0);
+				poscan->dsmSegAttached = 0;
 				poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
 				memcpy((Pointer) dsm_segment_address(scan->dsmSeg), scan->diskDownlinks,
 					   scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
@@ -448,6 +449,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 				LWLockRelease(&poscan->downlinksPublish);
 
+				Assert(poscan->dsmSegAttached == 0);
 				qsort(dsm_segment_address(scan->dsmSeg), poscan->downlinksCount,
 					  sizeof(scan->diskDownlinks[0]), cmp_downlinks);
 			}
@@ -466,6 +468,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 			{
 				Assert(poscan->dsmHandle && !scan->dsmSeg);
 				scan->dsmSeg = dsm_attach(poscan->dsmHandle);
+				poscan->dsmSegAttached++;
 			}
 			if (scan->downlinksCount > 0)
 			{
@@ -473,6 +476,8 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				memcpy((Pointer) dsm_segment_address(scan->dsmSeg) + index * sizeof(scan->diskDownlinks[0]),
 					   scan->diskDownlinks, scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
 				index += scan->downlinksCount;
+				dsm_detach(scan->dsmSeg);
+				poscan->dsmSegAttached--;
 			}
 			LWLockRelease(&poscan->downlinksPublish);
 
@@ -1620,7 +1625,10 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 	END_CRIT_SECTION();
 
 	if (scan->dsmSeg)
+	{
+		Assert(scan->poscan->dsmSegAttached == 0); /* All workers should have already detached */
 		dsm_detach(scan->dsmSeg);
+	}
 	pfree(scan->diskDownlinks);
 	pfree(scan);
 }
@@ -1648,7 +1656,10 @@ seq_scans_cleanup(void)
 		}
 		dlist_delete(&scan->listNode);
 		if (scan->dsmSeg)
+		{
+			Assert(scan->poscan->dsmSegAttached == 0);
 			dsm_detach(scan->dsmSeg);
+		}
 		pfree(scan);
 	}
 	dlist_init(&listOfScans);

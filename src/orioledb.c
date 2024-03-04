@@ -245,6 +245,7 @@ _PG_init(void)
 	int			i;
 	int			min_pool_size;
 
+
 	if (!process_shared_preload_libraries_in_progress)
 		return;
 
