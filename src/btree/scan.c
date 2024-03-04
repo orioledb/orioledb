@@ -424,6 +424,9 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 				Assert(!poscan->dsmHandle);
 				scan->dsmSeg = dsm_create(MAXALIGN(poscan->downlinksCount * sizeof(scan->diskDownlinks[0])), 0);
+#ifdef USE_ASSERT_CHECKING
+				pg_atomic_init_u32(&poscan->dsmSegNumAttached, 0);
+#endif
 				poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
 				memcpy((Pointer) dsm_segment_address(scan->dsmSeg), scan->diskDownlinks,
 					   scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
@@ -448,6 +451,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 				LWLockRelease(&poscan->downlinksPublish);
 
+				Assert(pg_atomic_read_u32(&poscan->dsmSegNumAttached) == 0);
 				qsort(dsm_segment_address(scan->dsmSeg), poscan->downlinksCount,
 					  sizeof(scan->diskDownlinks[0]), cmp_downlinks);
 			}
@@ -459,20 +463,22 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 		}
 		else
 		{
-			uint64		index = 0;
+			uint64		index;
 
 			LWLockAcquire(&poscan->downlinksPublish, LW_SHARED);
 			if (poscan->downlinksCount > 0)
 			{
 				Assert(poscan->dsmHandle && !scan->dsmSeg);
 				scan->dsmSeg = dsm_attach(poscan->dsmHandle);
+#ifdef USE_ASSERT_CHECKING
+				(void) pg_atomic_fetch_add_u32(&poscan->dsmSegNumAttached, 1);
+#endif
 			}
 			if (scan->downlinksCount > 0)
 			{
 				index = pg_atomic_fetch_add_u64(&poscan->downlinkIndex, scan->downlinksCount);
 				memcpy((Pointer) dsm_segment_address(scan->dsmSeg) + index * sizeof(scan->diskDownlinks[0]),
 					   scan->diskDownlinks, scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
-				index += scan->downlinksCount;
 			}
 			LWLockRelease(&poscan->downlinksPublish);
 
@@ -929,6 +935,14 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 
 		if (index >= poscan->downlinksCount)
 		{
+			if (scan->dsmSeg)
+			{
+				dsm_detach(scan->dsmSeg);
+				scan->dsmSeg = NULL;
+#ifdef USE_ASSERT_CHECKING
+				(void) pg_atomic_fetch_sub_u32(&poscan->dsmSegNumAttached, 1);
+#endif
+			}
 			return false;
 		}
 		downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
@@ -1620,7 +1634,11 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 	END_CRIT_SECTION();
 
 	if (scan->dsmSeg)
+	{
+		Assert(pg_atomic_read_u32(&scan->poscan->dsmSegNumAttached) == 0);	/* All workers should
+																			 * have already detached */
 		dsm_detach(scan->dsmSeg);
+	}
 	pfree(scan->diskDownlinks);
 	pfree(scan);
 }
@@ -1649,6 +1667,7 @@ seq_scans_cleanup(void)
 		dlist_delete(&scan->listNode);
 		if (scan->dsmSeg)
 			dsm_detach(scan->dsmSeg);
+
 		pfree(scan);
 	}
 	dlist_init(&listOfScans);

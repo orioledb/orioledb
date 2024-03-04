@@ -199,6 +199,11 @@ typedef struct ParallelOScanDescData
 	pg_atomic_uint64 downlinkIndex;
 	int			workersReportedCount;	/* number of workers that reported
 										 * disk downlinks number */
+#ifdef USE_ASSERT_CHECKING
+	pg_atomic_uint32 dsmSegNumAttached; /* number of workers currenly attached
+										 * to dsm segment during disk scan
+										 * stage */
+#endif
 	bits8		flags;
 	int			nworkers;
 	dsm_handle	dsmHandle;
