@@ -27,6 +27,7 @@
 #include <time.h>
 
 #include "access/xlog_internal.h"
+#include "access/xlogarchive.h"
 #include "access/xlogbackup.h"
 #include "access/xloginsert.h"
 #include "catalog/pg_control.h"
@@ -220,7 +221,7 @@ static List *get_tablespaces(StringInfo tblspcmapfile);
  * clobbered by longjmp" from stupider versions of gcc.
  */
 void
-s3_perform_backup(S3TaskLocation maxLocation)
+s3_perform_backup(int flags, S3TaskLocation maxLocation)
 {
 	uint32		chkpNum = checkpoint_state->lastCheckpointNumber;
 	S3BackupState state;
@@ -260,16 +261,12 @@ s3_perform_backup(S3TaskLocation maxLocation)
 			/* Then the bulk of the files... */
 			s3_backup_scan_dir(&state, ".", 1, NULL);
 
-			location = s3_schedule_file_write(chkpNum, XLOG_CONTROL_FILE, false);
-			maxLocation = Max(maxLocation, location);
-			location = s3_schedule_file_write(chkpNum, ORIOLEDB_DATA_DIR "/control", false);
-			maxLocation = Max(maxLocation, location);
-
 			xidFilename = psprintf(XID_FILENAME_FORMAT,
 								   checkpoint_state->lastCheckpointNumber);
 			location = s3_schedule_file_write(chkpNum, xidFilename, false);
 			maxLocation = Max(maxLocation, location);
 			pfree(xidFilename);
+
 		}
 		else
 		{
@@ -282,7 +279,6 @@ s3_perform_backup(S3TaskLocation maxLocation)
 	}
 	location = flush_small_files(&state);
 	maxLocation = Max(maxLocation, location);
-
 
 	pfree(tablespaceMapData.data);
 	s3_queue_wait_for_location(maxLocation);

@@ -45,6 +45,8 @@
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
 
+#include "access/xlog_internal.h"
+#include "access/xlogarchive.h"
 #include "common/hashfn.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -1308,7 +1310,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		 checkpoint_state->lastCheckpointNumber);
 
 	if (orioledb_s3_mode)
-		s3_perform_backup(maxLocation);
+		s3_perform_backup(flags, maxLocation);
 
 	if (next_CheckPoint_hook)
 		next_CheckPoint_hook(redo_pos, flags);
@@ -1423,9 +1425,76 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 	chkp_inc_changecount_after(checkpoint_state);
 }
 
+/*
+ * Same as XLogArchiveCheckDone(), but without notifying archiver.
+ */
+static bool
+check_archive_done(const char *xlog)
+{
+	char		archiveStatusPath[MAXPGPATH];
+	struct stat stat_buf;
+
+	/* The file is always deletable if archive_mode is "off". */
+	if (!XLogArchivingActive())
+		return true;
+
+	/*
+	 * During archive recovery, the file is deletable if archive_mode is not
+	 * "always".
+	 */
+	if (!XLogArchivingAlways() &&
+		GetRecoveryState() == RECOVERY_STATE_ARCHIVE)
+		return true;
+
+	/*
+	 * At this point of the logic, note that we are either a primary with
+	 * archive_mode set to "on" or "always", or a standby with archive_mode
+	 * set to "always".
+	 */
+
+	/* First check for .done --- this means archiver is done with it */
+	StatusFilePath(archiveStatusPath, xlog, ".done");
+	if (stat(archiveStatusPath, &stat_buf) == 0)
+		return true;
+
+	return false;
+}
+
+static S3TaskLocation
+after_checkpoint_sync_wal(void)
+{
+	DIR		   *xldir;
+	struct dirent *xlde;
+	S3TaskLocation maxLocation = 0;
+	S3TaskLocation location;
+
+	xldir = AllocateDir(XLOGDIR);
+
+	while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL)
+	{
+		/* Ignore files that are not XLOG segments */
+		if (!IsXLogFileName(xlde->d_name))
+			continue;
+
+		/* Ignore already arhieved files */
+		if (check_archive_done(xlde->d_name))
+			continue;
+
+		location = s3_schedule_wal_file_write(xlde->d_name);
+		maxLocation = Max(location, maxLocation);
+	}
+
+	FreeDir(xldir);
+	return maxLocation;
+}
+
 void
 o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 {
+	S3TaskLocation maxLocation = 0;
+	S3TaskLocation location;
+	uint32		chkpNum = checkpoint_state->lastCheckpointNumber;
+
 	/* called at the end of StartupXLOG */
 	*was_in_recovery = flags == 0;
 
@@ -1433,6 +1502,42 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 	{
 		o_sys_caches_delete_by_lsn(checkPointRedo);
 	}
+
+	if (!orioledb_s3_mode)
+		return;
+
+	if (GetRecoveryState() != RECOVERY_STATE_DONE)
+		return;
+
+	if (XLogInsertAllowed())
+	{
+		XLogRecPtr	switchpoint;
+		XLogSegNo	xlogsegno;
+		char		xlogfilename[MAXFNAMELEN];
+
+		/*
+		 * Wait till archiver finishes with the checkpoint record.
+		 */
+		switchpoint = RequestXLogSwitch(false);
+		XLByteToPrevSeg(switchpoint, xlogsegno, wal_segment_size);
+		XLogFileName(xlogfilename, 1,
+					 xlogsegno, wal_segment_size);
+		while (!check_archive_done(xlogfilename))
+		{
+			pg_usleep(100000L);
+		}
+	}
+	else
+	{
+		location = after_checkpoint_sync_wal();
+		maxLocation = Max(maxLocation, location);
+	}
+
+	location = s3_schedule_file_write(chkpNum, XLOG_CONTROL_FILE, false);
+	maxLocation = Max(maxLocation, location);
+	location = s3_schedule_file_write(chkpNum, ORIOLEDB_DATA_DIR "/control", false);
+	maxLocation = Max(maxLocation, location);
+	s3_queue_wait_for_location(maxLocation);
 }
 
 /*
