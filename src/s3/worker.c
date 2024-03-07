@@ -81,9 +81,18 @@ register_s3worker(int num)
 	worker.bgw_main_arg = Int32GetDatum(num);
 	strcpy(worker.bgw_library_name, "orioledb");
 	strcpy(worker.bgw_function_name, "s3worker_main");
-	pg_snprintf(worker.bgw_name, sizeof(worker.bgw_name),
-				"orioledb s3 worker %d", num);
-	strcpy(worker.bgw_type, "orioledb s3 worker");
+	if (num < s3_num_priority_workers)
+	{
+		pg_snprintf(worker.bgw_name, sizeof(worker.bgw_name),
+						"orioledb s3 priority worker %d", num);
+		strcpy(worker.bgw_type, "orioledb s3 priority worker");
+	}
+	else
+	{
+		pg_snprintf(worker.bgw_name, sizeof(worker.bgw_name),
+						"orioledb s3 worker %d", num);
+		strcpy(worker.bgw_type, "orioledb s3 worker");
+	}
 	RegisterBackgroundWorker(&worker);
 }
 

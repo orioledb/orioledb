@@ -118,7 +118,8 @@ int			default_primary_compress = InvalidOCompress;
 int			default_toast_compress = InvalidOCompress;
 bool		orioledb_table_description_compress = false;
 bool		orioledb_s3_mode = false;
-int			s3_num_workers = 3;
+int			s3_num_workers = 4;
+int 		s3_num_priority_workers = 1;
 int			s3_desired_size = 10000;
 int			s3_queue_size_guc;
 char	   *s3_host = NULL;
@@ -615,8 +616,21 @@ _PG_init(void)
 							"The number of workers to make S3 requests",
 							NULL,
 							&s3_num_workers,
-							3,
+							4,
 							1,
+							MAX_BACKENDS,
+							PGC_POSTMASTER,
+							GUC_UNIT_KB,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.s3_num_priority_workers",
+							"The number of priority workers to make urgent S3 requests",
+							NULL,
+							&s3_num_priority_workers,
+							1,
+							0,
 							MAX_BACKENDS,
 							PGC_POSTMASTER,
 							GUC_UNIT_KB,
