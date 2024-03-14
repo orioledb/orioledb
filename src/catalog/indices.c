@@ -1665,8 +1665,6 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 							   (uint32) (*ctid >> 16));
 					(*ctid)++;
 				}
-				else
-					Assert(ctid == NULL);
 
 				newTup = tts_orioledb_form_orphan_tuple(primarySlot, descr);
 			}
