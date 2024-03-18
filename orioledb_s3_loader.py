@@ -14,7 +14,9 @@ from threading import Event
 from typing import Callable
 from urllib.parse import urlparse
 
+
 class OrioledbS3ObjectLoader:
+
 	def parse_args(self):
 		epilog = """
 			This util uses boto3 under the hood.
@@ -24,17 +26,28 @@ class OrioledbS3ObjectLoader:
 			https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html#using-environment-variables
 		"""
 		parser = argparse.ArgumentParser(usage=argparse.SUPPRESS,
-										 epilog=epilog)
-		parser.add_argument('--endpoint', dest='endpoint',
-							required=True, help="AWS url")
-		parser.add_argument('-d', '--data-dir', dest='data_dir',
-							required=True, help="Destination data directory")
-		parser.add_argument('--bucket-name', dest='bucket_name',
-							required=True, help="Bucket name")
-		parser.add_argument('--cert-file', dest='cert_file',
-							help="Path to crt file")
-		parser.add_argument('--verbose', dest='verbose', action='store_true',
-							help="More verbose output. Downloaded files displayed.")
+		                                 epilog=epilog)
+		parser.add_argument('--endpoint',
+		                    dest='endpoint',
+		                    required=True,
+		                    help="AWS url")
+		parser.add_argument('-d',
+		                    '--data-dir',
+		                    dest='data_dir',
+		                    required=True,
+		                    help="Destination data directory")
+		parser.add_argument('--bucket-name',
+		                    dest='bucket_name',
+		                    required=True,
+		                    help="Bucket name")
+		parser.add_argument('--cert-file',
+		                    dest='cert_file',
+		                    help="Path to crt file")
+		parser.add_argument(
+		    '--verbose',
+		    dest='verbose',
+		    action='store_true',
+		    help="More verbose output. Downloaded files displayed.")
 
 		try:
 			args = parser.parse_args()
@@ -52,8 +65,7 @@ class OrioledbS3ObjectLoader:
 		bucket = parsed_url.netloc.split('.')[0]
 		if bucket == args.bucket_name:
 			args.endpoint = f"{parsed_url.scheme}://{'.'.join(parsed_url.netloc.split('.')[1:])}"
-		self.s3 = boto3.client("s3", endpoint_url=args.endpoint,
-							   verify=verify)
+		self.s3 = boto3.client("s3", endpoint_url=args.endpoint, verify=verify)
 		self._error_occurred = Event()
 		self.data_dir = args.data_dir
 		self.bucket_name = args.bucket_name
@@ -61,52 +73,82 @@ class OrioledbS3ObjectLoader:
 
 	def run(self):
 		wal_dir = os.path.join(self.data_dir, 'pg_wal')
-		loader.download_files_in_directory(self.bucket_name, 'data/',
-										   self.data_dir)
+		chkp_num = loader.last_checkpoint_number(self.bucket_name)
+		loader.download_files_in_directory(self.bucket_name, 'data/', chkp_num,
+		                                   self.data_dir)
 		loader.download_files_in_directory(self.bucket_name,
-										   'orioledb_data/',
-										   f"{self.data_dir}/orioledb_data",
-										   suffix='',
-										   transform=self.transform_orioledb)
+		                                   'orioledb_data/',
+		                                   chkp_num,
+		                                   f"{self.data_dir}/orioledb_data",
+		                                   suffix='',
+		                                   transform=self.transform_orioledb)
 
 		control = get_control_data(self.data_dir)
 		orioledb_control = get_orioledb_control_data(self.data_dir)
 		self.download_undo(orioledb_control)
 		wal_file = control["Latest checkpoint's REDO WAL file"]
 		loader.download_file(self.bucket_name, f"wal/{wal_file}",
-							 f"{wal_dir}/{wal_file}")
+		                     f"{wal_dir}/{wal_file}")
 
 	def download_undo(self, orioledb_control):
 		UNDO_FILE_SIZE = 0x4000000
-		if orioledb_control['undoStartLocation'] > orioledb_control['undoEndLocation']:
+		if orioledb_control['undoStartLocation'] > orioledb_control[
+		    'undoEndLocation']:
 			return
-		for fileNum in range(orioledb_control['undoStartLocation'] // UNDO_FILE_SIZE, (orioledb_control['undoEndLocation'] - 1) // UNDO_FILE_SIZE):
-			fileName = "orioledb_data/%02X%08X" % (fileNum >> 32, fileNum & 0xFFFFFFFF)
+		for fileNum in range(
+		    orioledb_control['undoStartLocation'] // UNDO_FILE_SIZE,
+		    (orioledb_control['undoEndLocation'] - 1) // UNDO_FILE_SIZE):
+			fileName = "orioledb_data/%02X%08X" % (fileNum >> 32,
+			                                       fileNum & 0xFFFFFFFF)
 			loader.download_file(self.bucket_name, fileName, fileName)
 
-	def list_objects_last_checkpoint(self, bucket_name, directory):
-		objects = []
+	def last_checkpoint_number(self, bucket_name):
 		paginator = self.s3.get_paginator('list_objects_v2')
 
-		greatest_number = -1
-		greatest_number_dir = None
-		for page in paginator.paginate(Bucket=bucket_name, Prefix=directory,
-									   Delimiter='/'):
+		numbers = []
+		for page in paginator.paginate(Bucket=bucket_name,
+		                               Prefix='data/',
+		                               Delimiter='/'):
 			if 'CommonPrefixes' in page:
 				for prefix in page['CommonPrefixes']:
 					prefix_key = prefix['Prefix'].rstrip('/')
 					subdirectory = prefix_key.split('/')[-1]
 					try:
 						number = int(subdirectory)
-						if number > greatest_number:
-							greatest_number = number
-							greatest_number_dir = prefix['Prefix']
+						numbers += [number]
 					except ValueError:
 						pass
-		if greatest_number_dir:
-			objects = self.list_objects(bucket_name, greatest_number_dir)
 
-		return objects
+		numbers = sorted(numbers)
+
+		found = False
+		chkp_list_index = len(numbers) - 1
+
+		last_chkp_data_dir = os.path.join('data',
+		                                  str(numbers[chkp_list_index]))
+
+		while not found and chkp_list_index >= 0:
+			try:
+				self.s3.head_object(
+				    Bucket=bucket_name,
+				    Key=f'{last_chkp_data_dir}/global/pg_control')
+				self.s3.head_object(
+				    Bucket=bucket_name,
+				    Key=f'{last_chkp_data_dir}/orioledb_data/control')
+				found = True
+			except ClientError as e:
+				if e.response['Error']['Code'] == "404":
+					chkp_list_index -= 1
+					if chkp_list_index >= 0:
+						last_chkp_data_dir = os.path.join(
+						    'data', str(numbers[chkp_list_index]))
+				else:
+					raise
+
+		if chkp_list_index < 0:
+			raise Exception("Failed to find valid checkpoint in s3 bucket")
+
+		return numbers[chkp_list_index]
 
 	def list_objects(self, bucket_name, directory):
 		objects = []
@@ -142,7 +184,7 @@ class OrioledbS3ObjectLoader:
 			cdir = os.curdir
 			if isinstance(tail, bytes):
 				cdir = bytes(os.curdir, 'ASCII')
-			if tail == cdir:           # xxx/newdir/. exists if xxx/newdir exists
+			if tail == cdir:  # xxx/newdir/. exists if xxx/newdir exists
 				return
 		try:
 			os.mkdir(name, mode)
@@ -155,16 +197,17 @@ class OrioledbS3ObjectLoader:
 	def download_file(self, bucket_name, file_key, local_path):
 		try:
 			transfer_config = TransferConfig(use_threads=False,
-											 max_concurrency=1)
+			                                 max_concurrency=1)
 			if file_key[-1] == '/':
 				dirs = local_path
 			else:
 				dirs = '/'.join(local_path.split('/')[:-1])
 			self.makedirs(dirs, exist_ok=True, mode=0o700)
 			if file_key[-1] != '/':
-				self.s3.download_file(
-					bucket_name, file_key, local_path, Config=transfer_config
-				)
+				self.s3.download_file(bucket_name,
+				                      file_key,
+				                      local_path,
+				                      Config=transfer_config)
 			if self.verbose:
 				print(f"{file_key} -> {local_path}", flush=True)
 			if re.match(r'.*/orioledb_data/small_files_\d+$', local_path):
@@ -173,14 +216,19 @@ class OrioledbS3ObjectLoader:
 					data = file.read()
 				numFiles = struct.unpack('i', data[0:4])[0]
 				for i in range(0, numFiles):
-					(nameOffset, dataOffset, dataLength) = struct.unpack('iii', data[4 + i * 12: 16 + i * 12])
-					name = data[nameOffset: data.find(b'\0', nameOffset)].decode('ascii')
+					(nameOffset, dataOffset,
+					 dataLength) = struct.unpack('iii',
+					                             data[4 + i * 12:16 + i * 12])
+					name = data[nameOffset:data.find(b'\0', nameOffset
+					                                 )].decode('ascii')
 					fullname = f"{base_dir}/{name}"
 					if self.verbose:
 						print(f"{file_key} -> {fullname}", flush=True)
-					self.makedirs(os.path.dirname(fullname), exist_ok=True, mode=0o700)
+					self.makedirs(os.path.dirname(fullname),
+					              exist_ok=True,
+					              mode=0o700)
 					with open(fullname, 'wb') as file:
-						file.write(data[dataOffset: dataOffset + dataLength])
+						file.write(data[dataOffset:dataOffset + dataLength])
 					os.chmod(fullname, 0o600)
 				os.unlink(local_path)
 
@@ -202,10 +250,16 @@ class OrioledbS3ObjectLoader:
 	def transform_pg(val: str) -> str:
 		return '/'.join(val.split('/')[2:])
 
-	def download_files_in_directory(self, bucket_name, directory,
-									local_directory, suffix='',
-									transform: Callable[[str], str] = transform_pg):
-		objects = self.list_objects_last_checkpoint(bucket_name, directory)
+	def download_files_in_directory(self,
+	                                bucket_name,
+	                                directory,
+	                                chkp_num,
+	                                local_directory,
+	                                suffix='',
+	                                transform: Callable[[str],
+	                                                    str] = transform_pg):
+		last_chkp_dir = os.path.join(directory, str(chkp_num))
+		objects = self.list_objects(bucket_name, last_chkp_dir)
 		max_threads = os.cpu_count()
 
 		with ThreadPoolExecutor(max_threads) as executor:
@@ -217,7 +271,7 @@ class OrioledbS3ObjectLoader:
 				local_file = transform(file_key)
 				local_path = f"{local_directory}/{local_file}"
 				future = executor.submit(self.download_file, bucket_name,
-										 file_key, local_path)
+				                         file_key, local_path)
 				futures.append(future)
 
 			for future in futures:
@@ -227,6 +281,7 @@ class OrioledbS3ObjectLoader:
 					print("An error occurred. Stopping all downloads.")
 					executor.shutdown(wait=False, cancel_futures=True)
 					break
+
 
 def get_control_data(data_dir: str):
 	"""
@@ -248,6 +303,7 @@ def get_control_data(data_dir: str):
 
 	return out_dict
 
+
 def get_orioledb_control_data(data_dir: str):
 	"""
 	Return contents of OrioleDB control file.
@@ -259,11 +315,12 @@ def get_orioledb_control_data(data_dir: str):
 	f.close()
 
 	dict = {
-		'undoStartLocation': undoStartLocation,
-		'undoEndLocation': undoEndLocation
+	    'undoStartLocation': undoStartLocation,
+	    'undoEndLocation': undoEndLocation
 	}
 
 	return dict
+
 
 if __name__ == '__main__':
 	loader = OrioledbS3ObjectLoader()
