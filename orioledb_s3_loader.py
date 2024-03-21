@@ -80,8 +80,8 @@ class OrioledbS3ObjectLoader:
 		                                   'orioledb_data/',
 		                                   chkp_num,
 		                                   f"{self.data_dir}/orioledb_data",
-		                                   suffix='',
-		                                   transform=self.transform_orioledb)
+		                                   transform=self.transform_orioledb,
+		                                   filter=self.filter_orioledb)
 
 		control = get_control_data(self.data_dir)
 		orioledb_control = get_orioledb_control_data(self.data_dir)
@@ -247,6 +247,12 @@ class OrioledbS3ObjectLoader:
 			result += '.map'
 		return result
 
+	def filter_orioledb(self, val: str) -> bool:
+		parts = val.split('/')
+		file_parts = parts[3].split('.')
+		is_map = file_parts[-1] == 'map'
+		return is_map
+
 	def transform_pg(val: str) -> str:
 		return '/'.join(val.split('/')[2:])
 
@@ -255,9 +261,10 @@ class OrioledbS3ObjectLoader:
 	                                directory,
 	                                chkp_num,
 	                                local_directory,
-	                                suffix='',
 	                                transform: Callable[[str],
-	                                                    str] = transform_pg):
+	                                                    str] = transform_pg,
+	                                filter: Callable[[str],
+	                                                    bool] = None):
 		last_chkp_dir = os.path.join(directory, str(chkp_num))
 		objects = self.list_objects(bucket_name, last_chkp_dir)
 		max_threads = os.cpu_count()
@@ -266,9 +273,9 @@ class OrioledbS3ObjectLoader:
 			futures = []
 
 			for file_key in objects:
-				if not file_key.endswith(suffix):
-					continue
 				local_file = transform(file_key)
+				if filter and not filter(file_key):
+					continue
 				local_path = f"{local_directory}/{local_file}"
 				future = executor.submit(self.download_file, bucket_name,
 				                         file_key, local_path)
