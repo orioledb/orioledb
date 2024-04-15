@@ -64,7 +64,7 @@ For example, page number `7` was modified.  It was marked as `7*`.
 
 ![Copy-on-write checkpoint 1](images/cow_1.svg)
 
-Checkpoint has written `7*` to the storage.  It has written to the free space according to the copy-on-write principle.  When checkpoint considers writing a non-leaf page, it replaces in-memory downlinks with storage ones.  Therefore, page `3` is also considered modified because we need to reference the new `7*` from the storage page.  So, page 3*` is also written to the free storage space.  Similar to `1*`.
+Checkpoint has written `7*` to the storage.  It has written to the free space according to the copy-on-write principle.  When checkpoint considers writing a non-leaf page, it replaces in-memory downlinks with storage ones.  Therefore, page `3` is also considered modified because we need to reference the new `7*` from the storage page.  So, page 3*` is also written to the free storage space. Similar to 1*`.
 
 ![Copy-on-write checkpoint 2](images/cow_2.svg)
 
