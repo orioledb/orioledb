@@ -76,7 +76,7 @@ Therefore, a consistent tree image exists in storage every moment.
 
 OrioleDB supports fuzzy checkpointing.  That is, we allow tree modification concurrent to checkpointing.  That is essential because too fast or frequent checkpoints could cause a write flood.
 
-Consider the following example.  The tree contains pages 1 – 7`.  Pages 1 – 6` are present in both main memory and storage (checkpoint 1), while pages 7 are present in storage only.  Page `4` was modified (`4*`).
+Consider the following example.  The tree contains pages 1 – 7.  `Pages 1 – 6` are present in both main memory and storage (checkpoint 1), while pages 7 are present in storage only.  Page `4` was modified (`4*`).
 
 ![Concurrent checkpoint 1](images/checkpoint_concurrent_1.svg)
 
