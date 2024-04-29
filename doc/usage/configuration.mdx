@@ -1,0 +1,222 @@
+---
+id: configuration
+sidebar_label: Configuration
+---
+
+# Configuration
+
+## Main parameters
+
+All the GUC parameters require the postmaster restart.
+
+### `orioledb.main_buffers`
+
+|             |       |
+| ----------- | ----- |
+| **Default** | 64 MB |
+
+the size of shared memory, where hot data pages of OrioleDB tables are cached.  This parameter is analog of the built-in `shared_buffers` GUC parameter. A good starting point for this parameter if only OrioleDB tables are used is 1/4 of RAM and setting `shared_buffers` to default value `128 MB`. If OrioleDB and heap tables are used equally, then 1/8 of RAM for this parameter and 1/8 of RAM for `shared_buffers`.
+
+### `orioledb.undo_buffers`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 1 MB |
+
+The shared memory ring buffer size for older versions of rows and pages.
+
+### `orioledb.recovery_pool_size`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 3   |
+
+The number of recovery workers row-level WAL based recovery. We recommend increasing the value of this parameter for systems with a large number of CPU cores.
+
+### `orioledb.recovery_idx_pool_size`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 3   |
+
+The number of recovery index build workers. We recommend increasing the value of this parameter for the systems with a large number of CPU cores.
+
+### `orioledb.recovery_parallel_indices_rebuild_limit`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 3   |
+
+Sets the maximum number of indices that could be rebuilt in parallel in recovery.
+
+### `orioledb.recovery_queue_size`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 8 MB |
+
+The size of shared memory for message queues related to recovery workers.
+
+### `orioledb.checkpoint_completion_ratio`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 0.5 |
+
+The fraction of OrioleDB tables checkpoint time within the whole checkpoint time. We recommend setting this value to `1.0` if only OrioleDB tables are used.
+
+## Advanced config options
+
+### `orioledb.free_tree_buffers`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 8 MB |
+
+Shared memory size for metadata of block allocators for compressed tables. We recommend increasing the value of this parameter to work with large compressed tables.
+
+### `orioledb.catalog_buffers`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 8 MB |
+
+Shared memory size of table metadata. We recommend increasing the value of this parameter to work with a large number of tables.
+
+### `orioledb.undo_system_buffers`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 1 MB |
+
+The shared memory ring buffer size for older versions of rows and pages in system tables. We recommend increasing the value of this parameter for DDL-intensive workloads.
+
+### `orioledb.bgwriter_num_workers`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 1   |
+
+The number of background writer processes, which flushes dirty pages of OrioleDB tables in the background. We recommend setting values greater than `1` for systems with a large number of CPU cores.
+
+### `orioledb.max_io_concurrency`
+
+|             |         |
+| ----------- | ------- |
+| **Default** | 0 (off) |
+
+Maximum number of concurrent IO operations issued by OrioleDB in parallel. We recommend setting this parameter when the OS kernel becomes a bottleneck for high concurrent IO.
+
+### `orioledb.device_filename`
+
+|             |         |
+| ----------- | ------- |
+| **Default** | Not set |
+
+Path to the block device for block device mode.
+
+### `orioledb.device_length`
+
+|             |      |
+| ----------- | ---- |
+| **Default** | 1 GB |
+
+The length of the block device.
+
+### `orioledb.use_mmap`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Specify whether to use `mmap` to work with the block device. We recommend setting `on` value for NVRAM.
+
+### `orioledb.default_compress`
+
+|             |                     |
+| ----------- | ------------------- |
+| **Default** | -1 (no compression) |
+
+Default block-level compression level for all tables' data structures.
+
+### `orioledb.primary_compress`
+
+|             |                     |
+| ----------- | ------------------- |
+| **Default** | -1 (no compression) |
+
+Default block-level compression level for all tables' primary keys.
+
+### `orioledb.toast_compress`
+
+|             |                     |
+| ----------- | ------------------- |
+| **Default** | -1 (no compression) |
+
+Default block-level compression level for all tables' TOASTed values.
+
+### `orioledb.table_description_compress`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Display compression column in orioledb_table_description.
+
+## Debugging options
+
+### `orioledb.debug_disable_pools_limit`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Disable minimal limit for `orioledb.main_buffers`, `orioledb.free_tree_buffers`, `orioledb.catalog_buffers` for debug.
+
+### `orioledb.enable_stopevents`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Enable stop events.
+
+### `orioledb.trace_stopevents`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Trace all the stop events to the system log.
+
+### `orioledb.debug_disable_bgwriter`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Disable bgwriter for debug.
+
+### `orioledb.debug_checkpoint_timeout`
+
+|             |                      |
+| ----------- | -------------------- |
+| **Default** | `checkpoint_timeout` |
+
+Sets the maximum time between automatic WAL checkpoints. Setting this value to a lower value than `checkpoint_timeout` can make OrioleDB checkpoints more often for testing.
+
+### `orioledb.remove_old_checkpoint_files`
+
+|             |    |
+| ----------- | -- |
+| **Default** | on |
+
+Remove temporary \*.tmp and \*.map files after checkpoint.
+
+### `orioledb.skip_unmodified_trees`
+
+|             |    |
+| ----------- | -- |
+| **Default** | on |
+
+Skip reading of unmodified trees during checkpointing.

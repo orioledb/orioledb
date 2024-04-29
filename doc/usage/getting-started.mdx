@@ -1,0 +1,186 @@
+---
+id: getting-started
+sidebar_label: Getting Started
+---
+
+# Usage
+
+OrioleDB uses PosgreSQL's built-in Table Access Method API. When you create a table you can specify `USING orioledb;`.
+
+## Quick start
+
+### Starting PostgreSQL
+
+The OrioleDB extension requires PostgreSQL pluggable Storage. Until the PostgreSQL community merges the [required patches](../intro.mdx#patch-set), you can use the OrioleDB docker image to start PostgreSQL on your machine:
+
+```bash title="bash"
+docker run -d --name orioledb -p 5432:5432 orioledb/orioledb
+```
+
+### Enabling the extension
+
+You can enable the OrioleDB extension by running the following command:
+
+```sql title="psql"
+CREATE EXTENSION orioledb;
+```
+
+### Creating tables
+
+Let's define a `blog_post` table, which stores blog posts and has two indices: primary key on the `id` column and secondary key by `published_at` column.
+
+```sql title="psql"
+-- Create a table
+CREATE TABLE blog_post
+(
+    id int8 NOT NULL,
+    title text NOT NULL,
+    body text NOT NULL,
+    author text NOT NULL,
+    published_at timestamptz  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    views bigint NOT NULL,
+    PRIMARY KEY(id)
+) USING orioledb; -- Define the storage engine
+
+-- Create an index
+CREATE INDEX blog_post_published_at ON blog_post(published_at);
+```
+
+OrioleDB uses index-organized tables. So, the selection of the primary key is a very critical decision affecting performance. If you do not specify a primary key, a hidden surrogate primary key will be created over the virtual `ctid` column.
+
+### Querying tables
+
+Query your tables using regular DML queries, including `SELECT`, `INSERT`, `UPDATE`, `DELETE` and `INSERT ON CONFLICT`.
+
+For example:
+
+```sql title="psql"
+INSERT INTO blog_post (id, title, body, author, views)
+VALUES (1, 'Hello, World!', 'This is my first blog post.', 'John Doe', 1000);
+
+SELECT * FROM blog_post ORDER BY published_at DESC LIMIT 10;
+
+```
+
+### View query plans
+
+Plans of queries involving OrioleDB tables could be viewed using `EXPLAIN` clause as usual.
+
+```sql
+EXPLAIN SELECT * FROM blog_post ORDER BY published_at DESC LIMIT 10;
+```
+
+```bash title="Result"
+                                                 QUERY PLAN
+------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.15..1.67 rows=10 width=120)
+   ->  Index Scan Backward using blog_post_published_at on blog_post  (cost=0.15..48.95 rows=320 width=120)
+(2 rows)
+```
+
+```sql
+EXPLAIN SELECT * FROM blog_post WHERE id = 1;
+```
+
+```bash title="Result"
+                                    QUERY PLAN
+----------------------------------------------------------------------------------
+ Index Scan using blog_post_pkey on blog_post  (cost=0.15..8.17 rows=1 width=120)
+   Index Cond: (id = 1)
+(2 rows)
+```
+
+`EXPLAIN (ANALYZE, BUFFERS)` clause allows to view page access statistics.
+
+```sql
+# EXPLAIN (ANALYZE, BUFFERS)
+  SELECT * FROM blog_post ORDER BY published_at DESC LIMIT 10;
+                                                                       QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.29..0.54 rows=10 width=42) (actual time=0.100..0.210 rows=10 loops=1)
+   ->  Index Scan Backward using blog_post_published_at on blog_post  (cost=0.29..251.27 rows=9999 width=42) (actual time=0.097..0.202 rows=10 loops=1)
+ Planning:
+   Buffers: shared hit=35
+ Planning Time: 1.147 ms
+ Execution Time: 0.284 ms
+(6 rows)
+```
+
+## Collations
+
+OrioleDB tables support only ICU, C, and POSIX collations. So, make sure the cluster or database is set up with default collations that fall under those options, otherwise you have to write COLLATE for every "text" field of the table.
+
+ALTER COLLATION REFRESH VERSION is also disabled for collations that used for fields and indexes of orioledb tables.
+
+## Block-level data compression
+
+OrioleDB implements block-level compression. The following options control the compression level of a table:
+
+- `compress` – compression level for all table data structures,
+- `primary_compress` – compression level for the table primary key,
+- `toast_compress` – compression level for the table TOASTed values.
+
+Individual indexes also have the `compress` option, which controls the compression level of a particular index overriding the value of the table `compress` option.
+
+Each of the options above should have integer values from `-1` to `22`. The value of `-1` means no compression (default), values between 0 and 22 specified compression levels of zstd library.
+
+_Example_
+
+```sql
+CREATE TABLE compression_test
+(
+  id int8 NOT NULL,
+  value1 float8 NOT NULL,
+  value2 text NOT NULL,
+  PRIMARY KEY(id)
+)  USING orioledb
+   WITH (compress = 5, toast_compress = 10, primary_compress = -1);
+
+CREATE INDEX compression_test_value1_idx ON compression_test(value1)
+    WITH (compress = 22)
+CREATE INDEX compression_test_value2_idx ON compression_test(value2);
+```
+
+In this example primary key of `compression_test` table is uncompressed, TOAST values are compressed with level of `10`, `compression_test_value1_idx` index is compressed with level of `22`, index `compression_test_value2_idx` is compressed with level of `5`.
+
+## Current limitations
+
+OrioleDB is currently in the development stage. Therefore it has the following temporary limitations.
+
+1.  `pg_rewind` copies OrioleDB tables completely. Shortly OrioleDB will implement incremental copying of OrioleDB tables using `pg_rewind`.
+2.  OrioleDB supports parallel sequential scan, but not other types of scan.
+3.  OrioleDB doesn't support prepared transactions.
+4.  OrioleDB supports just B-tree indexes. OrioleDB roadmap contains the implementation of analogs of GiST, GIN, and BRIN.
+5.  OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
+6.  Row-level concurrency in OrioleDB has some [differences](../architecture/row-level-concurrency.mdx).
+7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
+8.  `REINDEX CONCURRENTLY` now is not supported.
+9.  OrioleDB tables doesn't support `Sample Scans` yet.
+
+## Data deletion
+
+OrioleDB automatically merges sparse pages. Therefore, when many rows are deleted, data pages are freed and available for future usage. Data files aren't currently shrunk in such a situation, but that would be implemented soon.
+
+## Checkpoints, WAL & recovery
+
+OrioleDB has its own recovery mechanism: copy-on-write checkpoints and row-level WAL. However, both OrioleDB's checkpoints and WAL are integrated into PostgreSQL. PostgreSQL checkpointer process handles OrioleDB's tables as well. PostgreSQL WAL stream contains both WAL-records of built-in PostgreSQL tables and row-level WAL-records of OrioleDB's tables.
+
+Recovery using row-level WAL records might require significant CPU resources. Therefore parallel recovery of OrioleDB's tables is implemented. OrioleDB launches its own pool of recovery workers, each of them responsible for replaying a particular part of WAL records.
+
+OrioleDB has its own pool background writer processes (the `orioledb.bgwriter_num_workers` GUC parameter defines the pool size). Usage of multiple background writers increases the effectiveness of IO-utilization on modern hardware.
+
+## Experimental support of the block devices
+
+OrioleDB implements experimental support of direct interaction with block devices mode. This mode removes the overhead of the filesystem.
+
+In this mode, the main part of table data is stored in the filesystem, but small metadata is still stored in the data directory.
+
+The current implementation of block devices support contains memory leaks, resulting in the error message `device file overflow` even if the actual data size is much less than block device size. In this case, only the re-initialization of the data directory could help.
+
+We plan to fix memory leaks soon and develop tools for monitoring free block device space.
+
+In order to activate block device mode, one should specify `orioledb.device_filename` and `orioledb.device_length` GUC parameters. When the `orioledb.use_mmap` GUC parameter is enabled, the block device is connected using `mmap`. This mode is optimal for NVRAM, which directly connects to the data bus. `mmap` mode is not recommended for regular devices because the current `mmap` implementation in Linux has very bug concurrency.
+
+## Links
+
+See [description of OrioleDB's settings](configuration.mdx) and [experimental decoupled storage and compute mode](decoupled-storage.mdx).

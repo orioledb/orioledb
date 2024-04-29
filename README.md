@@ -56,9 +56,9 @@ The key technical differentiations of OrioleDB are as follows:
    parallelize (done), compact and suitable for active-active
    multimaster (planned).
 
-See [usage](doc/usage.md), [architecture](doc/arch.md), and
-[project structure](doc/structure.md) documentation as well as
-[PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).  To start the development see [OrioleDB development quickstart](doc/dev_quickstart.md).
+See [introduction](doc/intro.mdx), [getting started](doc/usage/getting-started.mdx), and [architecture](doc/architecture/overview.mdx)
+ documentation as well as
+[PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).  To start the development see [OrioleDB development quickstart](doc/contributing/local-builds.mdx), and [project structure](doc/contributing/structure.mdx).
 
 ## Status
 
@@ -82,7 +82,7 @@ For example it can be started same as postgres server:
 docker run --name some-postgres -e POSTGRES_PASSWORD=... -e POSTGRES_INITDB_ARGS="--locale=C" -d -p5432:5432 orioledb/orioledb:latest-pg16
 ```
 
-See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
+See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details on our docker container usage.  See [the docker build guide](doc/contributing/docker-builds.mdx) for information on how to build the docker images locally.
 
 ### Build from source
 
@@ -144,7 +144,7 @@ CREATE EXTENSION orioledb;
 ```
 
 Once the above steps are complete, you can start using OrioleDB's tables.
-See [usage](doc/usage.md) documentation for details.
+See [getting started](doc/usage/getting-started.mdx) documentation for details.
 
 ```sql
 CREATE TABLE table_name (...) USING orioledb;
