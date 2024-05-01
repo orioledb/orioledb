@@ -47,14 +47,13 @@ SELECT smart_explain(
     WHERE val2 > 0 AND ABS(val2) IS NOT NULL
     ORDER BY val2
 ) SELECT COUNT(*) FROM o_test_subquery_all;');
-                      smart_explain                       
-----------------------------------------------------------
+                            smart_explain                            
+---------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Only Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (abs(val2) IS NOT NULL)
-         Forward index only scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 -- returns 500
 WITH o_test_subquery_all AS (
@@ -74,14 +73,13 @@ SELECT smart_explain(
     WHERE val2 > 0 AND ABS(val2) IS NOT NULL
     ORDER BY val2
 ) SELECT * FROM o_test_subquery_all LIMIT 10;');
-                    smart_explain                    
------------------------------------------------------
+                         smart_explain                          
+----------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (abs(val2) IS NOT NULL)
-         Forward index scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 WITH o_test_subquery_all AS (
     SELECT * FROM o_test_subquery
@@ -109,14 +107,13 @@ SELECT smart_explain(
     WHERE val2 > 0 AND val > 0
     ORDER BY val2
 ) SELECT COUNT(*) FROM o_test_subquery_all;');
-                    smart_explain                    
------------------------------------------------------
+                         smart_explain                          
+----------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (val > 0)
-         Forward index scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 -- returns 500
 WITH o_test_subquery_all AS (
@@ -135,14 +132,13 @@ EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
     WHERE val2 > 0 AND val > 0
     ORDER BY val2
 ) SELECT * FROM o_test_subquery_all LIMIT 10;
-                     QUERY PLAN                      
------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (val > 0)
-         Forward index scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 WITH o_test_subquery_all AS (
     SELECT * FROM o_test_subquery
@@ -169,14 +165,13 @@ EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
     WHERE val2 > 0 AND ABS(val2) IS NOT NULL
     ORDER BY val2
 ) SELECT COUNT(o_test_subquery_all.val2) FROM o_test_subquery_all;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Only Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (abs(val2) IS NOT NULL)
-         Forward index only scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 -- returns 500
 WITH o_test_subquery_all AS (
@@ -195,14 +190,13 @@ EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
     WHERE val2 > 0 AND ABS(val2) IS NOT NULL
     ORDER BY val2
 ) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Only Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (abs(val2) IS NOT NULL)
-         Forward index only scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 WITH o_test_subquery_all AS (
     SELECT val2 FROM o_test_subquery
@@ -229,14 +223,13 @@ EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
     WHERE val2 > 0 AND val > 4
     ORDER BY val2
 ) SELECT COUNT(o_test_subquery_all.val2) FROM o_test_subquery_all;
-                     QUERY PLAN                      
------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (val > 4)
-         Forward index scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 -- returns 500
 WITH o_test_subquery_all AS (
@@ -255,14 +248,13 @@ EXPLAIN (COSTS off) WITH o_test_subquery_all AS (
     WHERE val2 > 0 AND val > 4
     ORDER BY val2
 ) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
-                     QUERY PLAN                      
------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on o_test_subquery
+   ->  Index Scan using o_test_subquery_idx2 on o_test_subquery
+         Index Cond: (val2 > 0)
          Filter: (val > 4)
-         Forward index scan of: o_test_subquery_idx2
-         Conds: (val2 > 0)
-(5 rows)
+(4 rows)
 
 WITH o_test_subquery_all AS (
     SELECT val2 FROM o_test_subquery

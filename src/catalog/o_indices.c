@@ -23,6 +23,7 @@
 #include "commands/defrem.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
+#include "tuple/slot.h"
 #include "tuple/toast.h"
 
 #include "access/genam.h"
@@ -282,11 +283,11 @@ make_primary_o_index(OTable *table)
 }
 
 static void
-add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
-				 uint16 *nKeyFields, bool fillPrimary)
+add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nadded, bool fillPrimary)
 {
 	int			i;
 	int			expr_field = 0;
+	int			init_nKeyFields = index->nKeyFields;
 
 	if (tableIndex)
 	{
@@ -295,47 +296,51 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *j,
 		for (i = 0; i < nFields; i++)
 		{
 			int			attnum = tableIndex->fields[i].attnum;
-			int			k;
+			int			found_attnum;
 
-			if (i == tableIndex->nkeyfields && nKeyFields)
-				(*nKeyFields) = *j;
-
-			k = find_existing_field(index, *j, &tableIndex->fields[i]);
-			if (k >= 0)
+			found_attnum = find_existing_field(index, *nadded, &tableIndex->fields[i]);
+			if (found_attnum >= 0)
 			{
 				if (fillPrimary)
-					index->primaryFieldsAttnums[index->nPrimaryFields++] = k + 1;
-				else if (i < index->nKeyFields)
-					index->nKeyFields--;
+					index->primaryFieldsAttnums[index->nPrimaryFields++] = found_attnum + 1;
 				else
-					index->nIncludedFields--;
+				{
+					List	   *duplicate;
+
+					if (i < init_nKeyFields)
+						index->nKeyFields--;
+					else
+						index->nIncludedFields--;
+
+					Assert(CurrentMemoryContext == OGetIndexContext(index));
+					/* (fieldnum, original fieldnum) */
+					duplicate = list_make2_int(*nadded, found_attnum);
+					elog(DEBUG4, "field duplicated: %d %d", *nadded, found_attnum);
+					index->duplicates = lappend(index->duplicates, duplicate);
+				}
+
 				continue;
 			}
 
 			if (attnum != EXPR_ATTNUM)
-				index->leafFields[*j] = table->fields[attnum];
+				index->leafFields[*nadded] = table->fields[attnum];
 			else
-				index->leafFields[*j] = tableIndex->exprfields[expr_field++];
-			Assert(index->leafFields[*j].typid);
-			index->nonLeafFields[*j] = tableIndex->fields[i];
+				index->leafFields[*nadded] = tableIndex->exprfields[expr_field++];
+			Assert(index->leafFields[*nadded].typid);
+			index->nonLeafFields[*nadded] = tableIndex->fields[i];
 			if (fillPrimary)
-				index->primaryFieldsAttnums[index->nPrimaryFields++] = *j + 1;
-			(*j)++;
+				index->primaryFieldsAttnums[index->nPrimaryFields++] = *nadded + 1;
+			(*nadded)++;
 		}
-
-		if (i == tableIndex->nkeyfields && nKeyFields)
-			(*nKeyFields) = *j;
 	}
 	else
 	{
-		make_builtin_field(&index->leafFields[*j], &index->nonLeafFields[*j],
+		make_builtin_field(&index->leafFields[*nadded], &index->nonLeafFields[*nadded],
 						   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 						   table->tid_btree_ops_oid);
 		if (fillPrimary)
-			index->primaryFieldsAttnums[index->nPrimaryFields++] = *j + 1;
-		(*j)++;
-		if (nKeyFields)
-			(*nKeyFields) = 1;
+			index->primaryFieldsAttnums[index->nPrimaryFields++] = *nadded + 1;
+		(*nadded)++;
 	}
 }
 
@@ -344,7 +349,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	int			j;
+	int			nadded;
 	MemoryContext mcxt;
 	MemoryContext old_mcxt;
 
@@ -375,20 +380,22 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 														 result->nNonLeafFields);
 	result->nKeyFields = tableIndex->nkeyfields;
 
-	j = 0;
+	nadded = 0;
 	mcxt = OGetIndexContext(result);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	result->predicate = list_copy_deep(tableIndex->predicate);
 	if (result->predicate)
 		result->predicate_str = pstrdup(tableIndex->predicate_str);
 	result->expressions = list_copy_deep(tableIndex->expressions);
+	add_index_fields(result, table, tableIndex, &nadded, false);
+	if (tableIndex->nfields == tableIndex->nkeyfields)
+		result->nKeyFields = nadded;
+	Assert(nadded <= tableIndex->nfields);
+	add_index_fields(result, table, primary, &nadded, true);
+	Assert(nadded <= result->nLeafFields);
 	MemoryContextSwitchTo(old_mcxt);
-	add_index_fields(result, table, tableIndex, &j, &result->nKeyFields, false);
-	Assert(j <= tableIndex->nfields);
-	add_index_fields(result, table, primary, &j, NULL, true);
-	Assert(j <= result->nLeafFields);
-	result->nLeafFields = j;
-	result->nNonLeafFields = j;
+	result->nLeafFields = nadded;
+	result->nNonLeafFields = nadded;
 
 	if (tableIndex->type == oIndexUnique)
 		result->nUniqueFields = result->nKeyFields;
@@ -403,7 +410,7 @@ make_toast_o_index(OTable *table)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	int			j;
+	int			nadded;
 
 	if (table->has_primary)
 	{
@@ -439,25 +446,25 @@ make_toast_o_index(OTable *table)
 	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
 														 result->nNonLeafFields);
 
-	j = 0;
-	add_index_fields(result, table, primary, &j, NULL, true);
-	make_builtin_field(&result->leafFields[j], &result->nonLeafFields[j],
+	nadded = 0;
+	add_index_fields(result, table, primary, &nadded, true);
+	make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
 					   INT2OID, "attnum", FirstLowInvalidHeapAttributeNumber,
 					   INT2_BTREE_OPS_OID);
-	j++;
-	make_builtin_field(&result->leafFields[j], &result->nonLeafFields[j],
+	nadded++;
+	make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
 					   INT4OID, "chunknum", FirstLowInvalidHeapAttributeNumber,
 					   INT4_BTREE_OPS_OID);
-	j++;
-	Assert(j <= result->nNonLeafFields);
-	result->nUniqueFields = j;
-	result->nNonLeafFields = j;
-	make_builtin_field(&result->leafFields[j], NULL,
+	nadded++;
+	Assert(nadded <= result->nNonLeafFields);
+	result->nUniqueFields = nadded;
+	result->nNonLeafFields = nadded;
+	make_builtin_field(&result->leafFields[nadded], NULL,
 					   BYTEAOID, "data", FirstLowInvalidHeapAttributeNumber,
 					   InvalidOid);
-	j++;
-	Assert(j <= result->nLeafFields);
-	result->nLeafFields = j;
+	nadded++;
+	Assert(nadded <= result->nLeafFields);
+	result->nLeafFields = nadded;
 
 	return result;
 }
@@ -553,6 +560,7 @@ serialize_o_index(OIndex *o_index, int *size)
 	if (o_index->predicate)
 		o_serialize_string(o_index->predicate_str, &str);
 	o_serialize_node((Node *) o_index->expressions, &str);
+	o_serialize_node((Node *) o_index->duplicates, &str);
 
 	*size = str.len;
 	return str.data;
@@ -594,6 +602,7 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	if (oIndex->predicate)
 		oIndex->predicate_str = o_deserialize_string(&ptr);
 	oIndex->expressions = (List *) o_deserialize_node(&ptr);
+	oIndex->duplicates = (List *) o_deserialize_node(&ptr);
 	MemoryContextSwitchTo(old_mcxt);
 
 	Assert((ptr - data) == length);
@@ -664,6 +673,73 @@ attrnumber_cmp(const void *p1, const void *p2)
 	return 0;
 }
 
+static void
+cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
+{
+	ListCell   *lc = NULL;
+	List	   *duplicate = NIL;
+	int			nfields;
+	int			pk_nfields;
+	int			i;
+	int			pk_from = oIndex->nKeyFields + oIndex->nIncludedFields;
+	int			nduplicates = list_length(oIndex->duplicates);
+	int			cur_attr;
+
+	/*
+	 * TODO: Check why this called multiple times for ctid_primary during
+	 * single CREATE INDEX
+	 */
+
+	if (!index_descr->primaryIsCtid)
+	{
+
+		pk_nfields = oIndex->nPrimaryFields;
+		for (i = 0; i < oIndex->nPrimaryFields; i++)
+		{
+			AttrNumber	pk_attnum = oIndex->primaryFieldsAttnums[i] - 1;
+
+			if (pk_attnum < pk_from)
+				pk_nfields--;
+		}
+	}
+	else
+	{
+		pk_nfields = 0;
+	}
+
+	nfields = pk_from + nduplicates + pk_nfields;
+	index_descr->itupdesc = CreateTemplateTupleDesc(nfields);
+
+	if (oIndex->duplicates != NIL)
+		lc = list_head(oIndex->duplicates);
+	if (lc != NULL)
+		duplicate = (List *) lfirst(lc);
+
+	cur_attr = 0;
+	for (i = 0; i < nfields; i++)
+	{
+		if (duplicate != NIL && linitial_int(duplicate) == i)
+		{
+			int			src_attnum = lsecond_int(duplicate);
+
+			lc = lnext(oIndex->duplicates, lc);
+			if (lc != NULL)
+				duplicate = (List *) lfirst(lc);
+			else
+				duplicate = NIL;
+
+			TupleDescCopyEntry(index_descr->itupdesc, i + 1, index_descr->itupdesc, src_attnum + 1);
+		}
+		else
+		{
+			TupleDescCopyEntry(index_descr->itupdesc, i + 1, index_descr->nonLeafTupdesc, cur_attr + 1);
+			cur_attr++;
+		}
+	}
+
+	index_descr->index_slot = MakeSingleTupleTableSlot(index_descr->itupdesc, &TTSOpsOrioleDB);
+}
+
 void
 o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 {
@@ -682,6 +758,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	namestrcpy(&descr->name, oIndex->name.data);
 	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafFields,
 													 oIndex->nLeafFields);
+
 	if (oIndex->indexType == oIndexPrimary)
 	{
 		bool		free_oTable = false;
@@ -800,6 +877,12 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	if (descr->predicate)
 		descr->predicate_str = pstrdup(oIndex->predicate_str);
 	descr->expressions = list_copy_deep(oIndex->expressions);
+	if (!(oIndex->indexType == oIndexToast || (oIndex->indexType == oIndexPrimary && oIndex->primaryIsCtid)))
+	{
+		descr->old_leaf_slot = MakeSingleTupleTableSlot(descr->leafTupdesc, &TTSOpsOrioleDB);
+		descr->new_leaf_slot = MakeSingleTupleTableSlot(descr->leafTupdesc, &TTSOpsOrioleDB);
+		cache_scan_tupdesc_and_slot(descr, oIndex);
+	}
 
 	o_set_syscache_hooks();
 	descr->predicate_state = ExecInitQual(descr->predicate, NULL);

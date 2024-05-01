@@ -97,9 +97,17 @@ orioledb_slot_callbacks(Relation relation)
 }
 
 /* ------------------------------------------------------------------------
- * Index Scan Callbacks for heap AM
+ * Index Scan Callbacks for orioledb AM
  * ------------------------------------------------------------------------
  */
+
+/*
+ * Descriptor for fetches from orioledb table.
+ */
+typedef struct OrioledbIndexFetchData
+{
+	IndexFetchTableData xs_base;	/* AM independent part of the descriptor */
+} OrioledbIndexFetchData;
 
 /*
  * Returns NULL to prevent index scan from inside of standard_planner
@@ -108,30 +116,78 @@ orioledb_slot_callbacks(Relation relation)
 static IndexFetchTableData *
 orioledb_index_fetch_begin(Relation rel)
 {
-	return NULL;
+	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
+
+
+	o_scan->xs_base.rel = rel;
+
+	return &o_scan->xs_base;
 }
 
 static void
 orioledb_index_fetch_reset(IndexFetchTableData *scan)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	/* OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan; */
 }
 
 static void
 orioledb_index_fetch_end(IndexFetchTableData *scan)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
+
+	orioledb_index_fetch_reset(scan);
+
+	pfree(o_scan);
 }
 
 static bool
 orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
-						   ItemPointer tid,
+						   Datum tupleid,
 						   Snapshot snapshot,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return false;
+	OTableDescr *descr;
+	OBTreeKeyBound pkey;
+	OTuple		tuple;
+	BTreeLocationHint hint;
+	CommitSeqNo tupleCsn;
+	CommitSeqNo csn;
+	uint32		version;
+
+	Assert(slot->tts_ops == &TTSOpsOrioleDB);
+
+	*call_again = false;
+	*all_dead = false;
+
+	descr = relation_get_descr(scan->rel);
+	Assert(descr != NULL);
+
+	if (GET_PRIMARY(descr)->primaryIsCtid)
+		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
+						&csn, &version);
+
+	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+									  (Pointer) &pkey,
+									  BTreeKeyBound,
+									  csn, &tupleCsn,
+									  slot->tts_mcxt,
+									  &hint);
+
+	if (O_TUPLE_IS_NULL(tuple))
+		return false;
+
+	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn,
+							 PrimaryIndexNumber, true, &hint);
+	slot->tts_tableOid = descr->oids.reloid;
+
+	/* FIXME? */
+	if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
+		snapshot->xmin = snapshot->xmax = InvalidTransactionId;
+
+	return true;
 }
 
 
@@ -285,16 +341,17 @@ orioledb_get_row_ref_type(Relation rel)
 
 static TupleTableSlot *
 orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
-					  CommandId cid, int options, BulkInsertState bistate,
-					  bool *insert_indexes)
+					  CommandId cid, int options, BulkInsertState bistate)
 {
 	OTableDescr *descr;
 	CommitSeqNo csn;
 	OXid		oxid;
 
+	if (OidIsValid(relation->rd_rel->relrewrite))
+		return slot;
+
 	descr = relation_get_descr(relation);
 	fill_current_oxid_csn(&oxid, &csn);
-	*insert_indexes = false;
 	return o_tbl_insert(descr, relation, slot, oxid, csn);
 }
 
@@ -357,6 +414,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
+	CommitSeqNo csn = snapshot ? snapshot->snapshotcsn : COMMITSEQNO_INPROGRESS;
 
 	descr = relation_get_descr(relation);
 
@@ -379,7 +437,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL);
 
 	mres = o_tbl_delete(descr, &pkey, oxid,
-						snapshot->snapshotcsn, &hint, &marg);
+						csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
@@ -443,6 +501,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
+	CommitSeqNo csn = snapshot ? snapshot->snapshotcsn : COMMITSEQNO_INPROGRESS;
 
 	descr = relation_get_descr(relation);
 
@@ -451,9 +510,9 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 #if PG_VERSION_NUM >= 160000
-	*update_indexes = TU_None;
+	*update_indexes = TU_All;
 #else
-	*update_indexes = false;
+	*update_indexes = true;
 #endif
 	oxid = get_current_oxid();
 
@@ -477,7 +536,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 											   INDEX_ATTR_BITMAP_KEY);
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation,
-						oxid, snapshot->snapshotcsn, &hint, &marg);
+						oxid, csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
@@ -677,6 +736,38 @@ orioledb_relation_set_new_filenode(Relation rel,
 }
 
 static void
+drop_indices_for_rel(Relation rel, bool primary)
+{
+	ListCell   *index;
+	Oid			indexOid;
+
+	foreach(index, RelationGetIndexList(rel))
+	{
+		Relation	ind;
+		bool		closed = false;
+
+		indexOid = lfirst_oid(index);
+		ind = relation_open(indexOid, AccessShareLock);
+
+		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
+		{
+			OIndexNumber ix_num;
+			OTableDescr *descr = relation_get_descr(rel);
+
+			Assert(descr != NULL);
+			ix_num = o_find_ix_num_by_name(descr, ind->rd_rel->relname.data);
+			if (GET_PRIMARY(descr)->primaryIsCtid)
+				ix_num--;
+			relation_close(ind, AccessShareLock);
+			o_index_drop(rel, ix_num);
+			closed = true;
+		}
+		if (!closed)
+			relation_close(ind, AccessShareLock);
+	}
+}
+
+static void
 orioledb_relation_nontransactional_truncate(Relation rel)
 {
 	ORelOids	oids;
@@ -686,6 +777,10 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 		return;
 
 	o_truncate_table(oids);
+
+	drop_indices_for_rel(rel, false);
+	/* drop primary after all indices to not rebuild them */
+	drop_indices_for_rel(rel, true);
 
 	if (RelationIsPermanent(rel))
 		add_truncate_wal_record(oids);
@@ -895,10 +990,9 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	}
 
 	/* estimate number of tuples from previous tuple density */
-	if (relpages > 0)
+	if (reltuples >= 0 && relpages > 0)
 	{
 		density = reltuples / (double) relpages;
-		*tuples = rint(density * (double) curpages);
 	}
 	else
 	{
@@ -1176,6 +1270,9 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	OTableDescr *descr;
 	bool		result;
 
+	if (OidIsValid(o_saved_relrewrite))
+		return false;
+
 	do
 	{
 		OTuple		tuple = {0};
@@ -1206,14 +1303,12 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 
 static void
 orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
-					  CommandId cid, int options, BulkInsertState bistate,
-					  bool *insert_indexes)
+					  CommandId cid, int options, BulkInsertState bistate)
 {
 	int			i;
 
 	for (i = 0; i < ntuples; i++)
-		orioledb_tuple_insert(relation, slots[i],
-							  cid, options, bistate, insert_indexes);
+		orioledb_tuple_insert(relation, slots[i], cid, options, bistate);
 }
 
 static void
@@ -1234,25 +1329,6 @@ static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
 	elog(ERROR, "Not implemented");
-}
-
-static bool
-orioledb_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
-							   void **arg)
-{
-	o_define_index_validate(rel, stmt, skip_build,
-							(ODefineIndexContext **) arg);
-	return true;
-}
-
-static bool
-orioledb_define_index(Relation rel, Oid indoid, bool reindex,
-					  bool skip_constraint_checks, bool skip_build, void *arg)
-{
-	if (!is_in_indexes_rebuild())
-		o_define_index(rel, indoid, reindex, skip_constraint_checks,
-					   skip_build, (ODefineIndexContext *) arg);
-	return true;
 }
 
 void
@@ -1395,18 +1471,6 @@ orioledb_analyze_table(Relation relation,
 }
 
 static void
-validate_compress(OCompress compress, char *prefix)
-{
-	OCompress	max_compress = o_compress_max_lvl();
-
-	if (compress < -1 || compress > max_compress)
-	{
-		elog(ERROR, "%s compression level must be between %d and %d",
-			 prefix, -1, max_compress);
-	}
-}
-
-static void
 validate_default_compress(const char *value)
 {
 	if (value)
@@ -1425,13 +1489,6 @@ validate_toast_compress(const char *value)
 {
 	if (value)
 		validate_compress(o_parse_compress(value), "TOAST");
-}
-
-static void
-validate_index_compress(const char *value)
-{
-	if (value)
-		validate_compress(o_parse_compress(value), "Index");
 }
 
 /* values from StdRdOptIndexCleanup */
@@ -1680,56 +1737,6 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
 }
 
-/*
- * Option parser for anything that uses StdRdOptions.
- */
-static bytea *
-orioledb_indexoptions(amoptions_function amoptions, char relkind,
-					  Datum reloptions, bool validate)
-{
-	static bool relopts_set = false;
-	static local_relopts relopts = {0};
-
-	if (!relopts_set)
-	{
-		MemoryContext oldcxt;
-
-		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-		init_local_reloptions(&relopts, sizeof(OBTOptions));
-
-		/* Options from default_reloptions */
-		add_local_int_reloption(&relopts, "fillfactor",
-								"Packs btree index pages only to "
-								"this percentage",
-								BTREE_DEFAULT_FILLFACTOR, BTREE_MIN_FILLFACTOR,
-								100,
-								offsetof(OBTOptions, bt_options) +
-								offsetof(BTOptions, fillfactor));
-		add_local_real_reloption(&relopts, "vacuum_cleanup_index_scale_factor",
-								 "Deprecated B-Tree parameter.",
-								 -1, 0.0, 1e10,
-								 offsetof(OBTOptions, bt_options) +
-								 offsetof(BTOptions,
-										  vacuum_cleanup_index_scale_factor));
-		add_local_bool_reloption(&relopts, "deduplicate_items",
-								 "Enables \"deduplicate items\" feature for "
-								 "this btree index",
-								 true,
-								 offsetof(OBTOptions, bt_options) +
-								 offsetof(BTOptions, deduplicate_items));
-
-		/* Options for orioledb tables */
-		add_local_string_reloption(&relopts, "compress",
-								   "Compression level of a particular index",
-								   NULL, validate_index_compress, NULL,
-								   offsetof(OBTOptions, compress_offset));
-		MemoryContextSwitchTo(oldcxt);
-		relopts_set = true;
-	}
-
-	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
-}
-
 static bytea *
 orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 {
@@ -1830,11 +1837,8 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_sample_next_block = orioledb_scan_sample_next_block,
 	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
 	.tuple_is_current = orioledb_tuple_is_current,
-	.define_index_validate = orioledb_define_index_validate,
-	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table,
-	.reloptions = orioledb_reloptions,
-	.indexoptions = orioledb_indexoptions
+	.reloptions = orioledb_reloptions
 };
 
 bool

@@ -20,6 +20,7 @@
 
 typedef struct OScanState
 {
+	IndexScanDescData scandesc;
 	OIndexNumber ixNum;
 	MemoryContext cxt;
 	ScanDirection scanDir;
@@ -31,7 +32,6 @@ typedef struct OScanState
 	bool		exact;
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
-	IndexScanDescData *scandesc;
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;
@@ -44,15 +44,12 @@ typedef struct OScanState
 extern void init_index_scan_state(OScanState *ostate, Relation index,
 								  ExprContext *econtext);
 extern OTuple o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
-							  CommitSeqNo csn, CommitSeqNo *tupleCsn,
-							  MemoryContext tupleCxt, BTreeLocationHint *hint);
+							  CommitSeqNo *tupleCsn, MemoryContext tupleCxt,
+							  BTreeLocationHint *hint);
 extern OTuple o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
-								   CommitSeqNo csn,
 								   CommitSeqNo *tupleCsn,
 								   bool scan_primary, MemoryContext tupleCxt,
 								   BTreeLocationHint *hint);
-extern TupleTableSlot *o_exec_fetch(OScanState *ostate, ScanState *ss,
-									CommitSeqNo csn);
 extern bool o_exec_qual(ExprContext *econtext, ExprState *qual,
 						TupleTableSlot *slot);
 extern TupleTableSlot *o_exec_project(ProjectionInfo *projInfo,

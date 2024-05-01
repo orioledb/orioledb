@@ -154,6 +154,12 @@ struct OIndexDescr
 	int			maxTableAttnum;
 
 	AttrNumberMap *tbl_attnums;
+
+	/* tupdesc and slots needed for indexam operations */
+	TupleDesc	itupdesc;
+	TupleTableSlot *index_slot;
+	TupleTableSlot *old_leaf_slot;
+	TupleTableSlot *new_leaf_slot;
 };
 
 #define OIndexKeyAttnumToTupleAttnum(keyType, idx, attnum) \

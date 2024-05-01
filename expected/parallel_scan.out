@@ -371,12 +371,11 @@ SELECT orioledb_parallel_debug_start();
 
 EXPLAIN (COSTS OFF) SELECT val_1, val_2 FROM o_test_o_scan_register
     WHERE val_1 IN ('A', 'B') ORDER BY val_1;
-                      QUERY PLAN                      
-------------------------------------------------------
- Custom Scan (o_scan) on o_test_o_scan_register
-   Forward index scan of: o_test_o_scan_register_pkey
-   Conds: (val_1 = ANY ('{A,B}'::text[]))
-(3 rows)
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Index Scan using o_test_o_scan_register_pkey on o_test_o_scan_register
+   Index Cond: (val_1 = ANY ('{A,B}'::text[]))
+(2 rows)
 
 SELECT val_1, val_2 FROM o_test_o_scan_register
     WHERE val_1 IN ('A', 'B') ORDER BY val_1;
@@ -497,16 +496,15 @@ FROM query_to_text($$
 		SELECT * FROM o_test_parallel_bitmap_scan_explain_buffers
 			ORDER BY val_1;
 $$) as t;
-                                                       regexp_replace                                                        
------------------------------------------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_parallel_bitmap_scan_explain_buffers  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_test_parallel_bitmap_scan_explain_buffers_pkey
-   Buffers: shared hit=x
+                                                                                regexp_replace                                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_parallel_bitmap_scan_explain_buffers_pkey on o_test_parallel_bitmap_scan_explain_buffers  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Heap Fetches: x
  Planning:
-   Buffers: shared hit=x read=x
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(7 rows)
+(6 rows)
 
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
@@ -531,11 +529,10 @@ SELECT orioledb_parallel_debug_start();
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_parallel_unique_index_scan
-   Forward index scan of: o_test_parallel_unique_index_scan_val_1_key
-(2 rows)
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Index Scan using o_test_parallel_unique_index_scan_val_1_key on o_test_parallel_unique_index_scan
+(1 row)
 
 SELECT * FROM o_test_parallel_unique_index_scan ORDER BY val_1;
  val_1 | val_2 
@@ -826,11 +823,10 @@ SET LOCAL enable_seqscan = off;
 SET LOCAL enable_bitmapscan = off;
 -- Parallel Index Only Scan is not implemented yet, so it doesn't used here
 EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_no_parallel_index_scan;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_no_parallel_index_scan
-   Forward index only scan of: o_test_no_parallel_index_scan_pkey
-(2 rows)
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_no_parallel_index_scan_pkey on o_test_no_parallel_index_scan
+(1 row)
 
 SELECT val_1 FROM o_test_no_parallel_index_scan;
  val_1 
@@ -844,13 +840,12 @@ SET LOCAL enable_indexonlyscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT array_agg(val_1), array_agg(val_2)
 		FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
-                            QUERY PLAN                             
--------------------------------------------------------------------
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_no_parallel_index_scan
-         Forward index scan of: o_test_no_parallel_index_scan_pkey
-         Conds: (val_1 > 0)
-(4 rows)
+   ->  Index Scan using o_test_no_parallel_index_scan_pkey on o_test_no_parallel_index_scan
+         Index Cond: (val_1 > 0)
+(3 rows)
 
 SELECT array_agg(val_1), array_agg(val_2)
 	FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
@@ -871,13 +866,12 @@ CREATE INDEX o_test_no_parallel_bitmap_scan_ix1 ON o_test_no_parallel_bitmap_sca
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 < 50;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_no_parallel_bitmap_scan
-         Forward index only scan of: o_test_no_parallel_bitmap_scan_ix1
-         Conds: ((val_1 >= 10) AND (val_1 < 50))
-(4 rows)
+   ->  Index Only Scan using o_test_no_parallel_bitmap_scan_ix1 on o_test_no_parallel_bitmap_scan
+         Index Cond: ((val_1 >= 10) AND (val_1 < 50))
+(3 rows)
 
 SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 < 50;
  count 
@@ -888,13 +882,12 @@ SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 >= 10 AND val_1 
 -- Parallel Bitmap Heap Scan is not implemented yet, so it doesn't used here
 EXPLAIN (COSTS OFF)
     SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_no_parallel_bitmap_scan
+   ->  Index Only Scan using o_test_no_parallel_bitmap_scan_ix1 on o_test_no_parallel_bitmap_scan
          Filter: (val_1 <@ '[10,50)'::int4range)
-         Forward index only scan of: o_test_no_parallel_bitmap_scan_ix1
-(4 rows)
+(3 rows)
 
 SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
  count 
@@ -905,12 +898,11 @@ SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,
 -- Parallel Bitmap Heap Scan is not implemented yet, so it doesn't used here
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_no_parallel_bitmap_scan
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_no_parallel_bitmap_scan_ix1 on o_test_no_parallel_bitmap_scan
    Filter: (val_1 <@ '[10,50)'::int4range)
-   Forward index only scan of: o_test_no_parallel_bitmap_scan_ix1
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
  val_1 

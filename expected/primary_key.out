@@ -36,12 +36,11 @@ SELECT * FROM o_pk1;
 (20 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1;
-             QUERY PLAN              
--------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = 1)
-(3 rows)
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 1)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = 1;
  key | payload 
@@ -50,12 +49,11 @@ SELECT * FROM o_pk1 WHERE key = 1;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 4;
-             QUERY PLAN              
--------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = 4)
-(3 rows)
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 4)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = 4;
  key | payload 
@@ -64,12 +62,11 @@ SELECT * FROM o_pk1 WHERE key = 4;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 20;
-             QUERY PLAN              
--------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = 20)
-(3 rows)
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 20)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = 20;
  key | payload 
@@ -77,12 +74,11 @@ SELECT * FROM o_pk1 WHERE key = 20;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT payload FROM o_pk1 WHERE key = 19;
-             QUERY PLAN              
--------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = 19)
-(3 rows)
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 19)
+(2 rows)
 
 SELECT payload FROM o_pk1 WHERE key = 19;
  payload 
@@ -91,12 +87,11 @@ SELECT payload FROM o_pk1 WHERE key = 19;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
-                   QUERY PLAN                    
--------------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = ANY ('{1,4,13,20}'::integer[]))
-(3 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{1,4,13,20}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
  key | payload 
@@ -122,12 +117,11 @@ SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
-              QUERY PLAN              
---------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key > 10) AND (key > 19))
-(3 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key > 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
  key | payload 
@@ -148,12 +142,11 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
 (13 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key >= 10) AND (key > 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key > 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
  key | payload 
@@ -174,12 +167,11 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
 (13 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key > 10) AND (key >= 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key >= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
  key | payload 
@@ -201,12 +193,11 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
 (14 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key >= 10) AND (key >= 19))
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key >= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
  key | payload 
@@ -228,12 +219,11 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
 (14 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
-              QUERY PLAN              
---------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key > 10) AND (key < 19))
-(3 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key < 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
  key | payload 
@@ -243,12 +233,11 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key >= 10) AND (key < 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key < 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
  key | payload 
@@ -259,12 +248,11 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key > 10) AND (key <= 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key <= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
  key | payload 
@@ -275,12 +263,11 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key >= 10) AND (key <= 19))
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key <= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
  key | payload 
@@ -292,12 +279,11 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
-              QUERY PLAN              
---------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key < 10) AND (key > 19))
-(3 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key > 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
  key | payload 
@@ -305,12 +291,11 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key <= 10) AND (key > 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key > 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
  key | payload 
@@ -318,12 +303,11 @@ SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key < 10) AND (key >= 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key >= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
  key | payload 
@@ -331,12 +315,11 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key <= 10) AND (key >= 19))
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key >= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
  key | payload 
@@ -344,12 +327,11 @@ SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
-              QUERY PLAN              
---------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key < 10) AND (key < 19))
-(3 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key < 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
  key | payload 
@@ -360,12 +342,11 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key <= 10) AND (key < 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key < 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
  key | payload 
@@ -377,12 +358,11 @@ SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
-              QUERY PLAN               
----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key < 10) AND (key <= 19))
-(3 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key <= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
  key | payload 
@@ -393,12 +373,11 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key <= 19;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key <= 10) AND (key <= 19))
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key <= 19))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key <= 19;
  key | payload 
@@ -771,14 +750,13 @@ SELECT * FROM o_pk1 WHERE key <= 10 OR  key <= 19 AND payload LIKE '%7*%';
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1
 WHERE key >  10 AND key <  19 AND key = (SELECT i FROM generate_series(13,13) AS i);
-                     QUERY PLAN                      
------------------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: ((key > 10) AND (key < 19) AND (key = $0))
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key < 19) AND (key = $0))
    InitPlan 1 (returns $0)
      ->  Function Scan on generate_series i
-(5 rows)
+(4 rows)
 
 SELECT * FROM o_pk1
 WHERE key >  10 AND key <  19 AND key = (SELECT i FROM generate_series(13,13) AS i);
@@ -821,12 +799,11 @@ WHERE key <  10 OR  key >  19 OR key = (SELECT i FROM generate_series(13,13) AS 
 (17 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4]);
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = ANY ('{4}'::integer[]))
-(3 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{4}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4]);
  key | payload 
@@ -835,12 +812,11 @@ SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4]);
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
-                 QUERY PLAN                 
---------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = ANY ('{4,10}'::integer[]))
-(3 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{4,10}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
  key | payload 
@@ -850,12 +826,11 @@ SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10, NULL]);
-                   QUERY PLAN                    
--------------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key = ANY ('{4,10,NULL}'::integer[]))
-(3 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{4,10,NULL}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10, NULL]);
  key | payload 
@@ -902,12 +877,11 @@ SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10, NULL]);
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key < ANY ('{4}'::integer[]))
-(3 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key < ANY ('{4}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
  key | payload 
@@ -916,12 +890,11 @@ SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
-                 QUERY PLAN                 
---------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key < ANY ('{4,10}'::integer[]))
-(3 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key < ANY ('{4,10}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
  key | payload 
@@ -932,12 +905,11 @@ SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10, NULL]);
-                   QUERY PLAN                    
--------------------------------------------------
- Custom Scan (o_scan) on o_pk1
-   Forward index scan of: o_pk1_pkey
-   Conds: (key < ANY ('{4,10,NULL}'::integer[]))
-(3 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key < ANY ('{4,10,NULL}'::integer[]))
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10, NULL]);
  key | payload 
@@ -1140,11 +1112,10 @@ SELECT count(*) FROM o_pk2;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 ORDER BY id;
-             QUERY PLAN              
--------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-(2 rows)
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+(1 row)
 
 SELECT id, value FROM o_pk2 ORDER BY id;
  id  |   value   
@@ -1252,11 +1223,10 @@ SELECT id, value FROM o_pk2 ORDER BY id;
 (100 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 ORDER BY id DESC;
-              QUERY PLAN              
---------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Backward index scan of: o_pk2_pkey
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+(1 row)
 
 SELECT id, value FROM o_pk2 ORDER BY id DESC;
  id  |   value   
@@ -1364,12 +1334,11 @@ SELECT id, value FROM o_pk2 ORDER BY id DESC;
 (100 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id = 71;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id = '71'::double precision)
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id = '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id = 71;
  id |   value   
@@ -1378,12 +1347,11 @@ SELECT id, value FROM o_pk2 WHERE id = 71;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id = '71'::double precision)
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id = '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id;
  id |   value   
@@ -1392,12 +1360,11 @@ SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id DESC;
-               QUERY PLAN               
-----------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id = '71'::double precision)
-(3 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id = '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id DESC;
  id |   value   
@@ -1406,12 +1373,11 @@ SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id DESC;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71;
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id <= '71'::double precision)
-(3 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id <= '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71;
  id |   value   
@@ -1490,12 +1456,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71;
 (71 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id;
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id <= '71'::double precision)
-(3 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id <= '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id;
  id |   value   
@@ -1574,12 +1539,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id;
 (71 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id DESC;
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Backward index scan of: o_pk2_pkey
-   Conds: (id <= '71'::double precision)
-(3 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: (id <= '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id DESC;
  id |   value   
@@ -1658,12 +1622,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id DESC;
 (71 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71;
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id >= '71'::double precision)
-(3 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id >= '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71;
  id  |   value   
@@ -1701,12 +1664,11 @@ SELECT id, value FROM o_pk2 WHERE id >= 71;
 (30 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id;
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: (id >= '71'::double precision)
-(3 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id >= '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id;
  id  |   value   
@@ -1744,12 +1706,11 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id;
 (30 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id DESC;
-               QUERY PLAN                
------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Backward index scan of: o_pk2_pkey
-   Conds: (id >= '71'::double precision)
-(3 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: (id >= '71'::double precision)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id DESC;
  id  |   value   
@@ -1787,12 +1748,11 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id DESC;
 (30 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: ((id <= '71'::double precision) AND (id > '19'::double precision))
-(3 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id <= '71'::double precision) AND (id > '19'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19;
  id |   value   
@@ -1852,12 +1812,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19;
 (52 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: ((id <= '71'::double precision) AND (id > '19'::double precision))
-(3 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id <= '71'::double precision) AND (id > '19'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id;
  id |   value   
@@ -1917,12 +1876,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id;
 (52 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id DESC;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Backward index scan of: o_pk2_pkey
-   Conds: ((id <= '71'::double precision) AND (id > '19'::double precision))
-(3 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: ((id <= '71'::double precision) AND (id > '19'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id DESC;
  id |   value   
@@ -1982,12 +1940,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id DESC;
 (52 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: ((id >= '71'::double precision) AND (id < '91'::double precision))
-(3 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id >= '71'::double precision) AND (id < '91'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91;
  id |   value   
@@ -2015,12 +1972,11 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91;
 (20 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Forward index scan of: o_pk2_pkey
-   Conds: ((id >= '71'::double precision) AND (id < '91'::double precision))
-(3 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id >= '71'::double precision) AND (id < '91'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id;
  id |   value   
@@ -2048,12 +2004,11 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id;
 (20 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id DESC;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Backward index scan of: o_pk2_pkey
-   Conds: ((id >= '71'::double precision) AND (id < '91'::double precision))
-(3 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: ((id >= '71'::double precision) AND (id < '91'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id DESC;
  id |   value   
@@ -2175,10 +2130,9 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
+ Index Scan using o_pk2_pkey on o_pk2
    Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
-   Forward index scan of: o_pk2_pkey
-(3 rows)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id;
  id  |   value   
@@ -2268,10 +2222,9 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id;
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id DESC;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
+ Index Scan Backward using o_pk2_pkey on o_pk2
    Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
-   Backward index scan of: o_pk2_pkey
-(3 rows)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id DESC;
  id  |   value   
@@ -2421,10 +2374,9 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
+ Index Scan using o_pk2_pkey on o_pk2
    Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
-   Forward index scan of: o_pk2_pkey
-(3 rows)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id;
  id  |   value   
@@ -2482,10 +2434,9 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id;
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id DESC;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
+ Index Scan Backward using o_pk2_pkey on o_pk2
    Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
-   Backward index scan of: o_pk2_pkey
-(3 rows)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id DESC;
  id  |   value   
@@ -2824,12 +2775,11 @@ INSERT INTO o_pk5
 SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
 SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk5
-   Forward index only scan of: o_pk5_pkey
-   Conds: ((i = 2) AND (dt >= 'Mon Mar 01 00:00:00 2021'::timestamp without time zone))
-(3 rows)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Only Scan using o_pk5_pkey on o_pk5
+   Index Cond: ((i = 2) AND (dt >= 'Mon Mar 01 00:00:00 2021'::timestamp without time zone))
+(2 rows)
 
 SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
  i |     dt     
@@ -2840,12 +2790,11 @@ SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
-                    QUERY PLAN                     
----------------------------------------------------
- Custom Scan (o_scan) on o_pk5
-   Forward index only scan of: o_pk5_pkey
-   Conds: ((i = 2) AND (dt >= '03-01-2021'::date))
-(3 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Index Only Scan using o_pk5_pkey on o_pk5
+   Index Cond: ((i = 2) AND (dt >= '03-01-2021'::date))
+(2 rows)
 
 SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
  i |     dt     

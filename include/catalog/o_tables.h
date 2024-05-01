@@ -41,6 +41,7 @@ typedef struct
 	char		compression;
 	bool		hasmissing;
 	bool		hasdef;
+	char		generated;
 } OTableField;
 
 /*
@@ -228,7 +229,9 @@ o_tables_rel_unlock(ORelOids *oids, int lockmode)
 extern void o_table_fill_oids(OTable *oTable, Relation rel,
 							  const RelFileNode *newrnode);
 extern void o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table);
-
+extern Datum o_eval_default(OTable *o_table, Relation rel,
+							Node *expr, TupleTableSlot *scantuple,
+							bool byval, int16 typlen, bool *isNull);
 extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 								OTableField *old_field, OTableField *field);
@@ -313,5 +316,7 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 	else
 		o_tables_meta_unlock_no_wal();
 }
+
+extern Oid	o_saved_relrewrite;
 
 #endif							/* __O_TABLES_H__ */

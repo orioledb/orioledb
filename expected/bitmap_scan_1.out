@@ -283,9 +283,7 @@ FROM query_to_text('EXPLAIN (COSTS OFF, BUFFERS)
          Recheck Cond: (i < x)
          ->  Bitmap Index Scan on bitmap_test_ixx
                Index Cond: (i < x)
- Planning:
-   Buffers: shared hit=x
-(8 rows)
+(6 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
@@ -300,11 +298,9 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
                Index Cond: (i < x)
                Secondary index (bitmap_test_ixx) pages: read=x
          Primary pages: read=x
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(12 rows)
+(10 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
@@ -324,11 +320,9 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
                      Index Cond: (i > x)
                      Secondary index (bitmap_test_ixx) pages: read=x
          Primary pages: read=x
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(16 rows)
+(14 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
@@ -348,11 +342,9 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
                      Index Cond: (j < x)
                      Secondary index (bitmap_test_ixx) pages: read=x
          Primary pages: read=x
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(16 rows)
+(14 rows)
 
 -- Tests for bitmap EXPLAIN FORMAT JSON
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -2208,12 +2200,11 @@ INSERT INTO pkey_bitmap_test (i)
 	SELECT pseudo_random(5, v) * 20000 FROM generate_series(1,5000) v
 		ON CONFLICT DO NOTHING;
 EXPLAIN (COSTS OFF) SELECT * FROM pkey_bitmap_test WHERE i < 100;
-                     QUERY PLAN                      
------------------------------------------------------
- Custom Scan (o_scan) on pkey_bitmap_test
-   Forward index only scan of: pkey_bitmap_test_pkey
-   Conds: (i < 100)
-(3 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Only Scan using pkey_bitmap_test_pkey on pkey_bitmap_test
+   Index Cond: (i < 100)
+(2 rows)
 
 -- Test ctid bitmap
 CREATE TABLE bitmap_test_ctid
@@ -3700,13 +3691,12 @@ INSERT INTO bitmap_test_multi (i)
 ANALYZE bitmap_test_multi;
 CREATE INDEX bitmap_test_multi_ix1 ON bitmap_test_multi (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
-                        QUERY PLAN                         
------------------------------------------------------------
+                               QUERY PLAN                               
+------------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on bitmap_test_multi
-         Forward index only scan of: bitmap_test_multi_ix1
-         Conds: (i < 100)
-(4 rows)
+   ->  Index Only Scan using bitmap_test_multi_ix1 on bitmap_test_multi
+         Index Cond: (i < 100)
+(3 rows)
 
 SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
  count 
@@ -3718,13 +3708,12 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
-                        QUERY PLAN                         
------------------------------------------------------------
+                               QUERY PLAN                               
+------------------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on bitmap_test_multi
-         Forward index only scan of: bitmap_test_multi_ix1
-         Conds: (i < 100)
-(4 rows)
+   ->  Index Only Scan using bitmap_test_multi_ix1 on bitmap_test_multi
+         Index Cond: (i < 100)
+(3 rows)
 
 SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
    id   |  id2   | i  
@@ -3768,13 +3757,12 @@ INSERT INTO bitmap_test_multi_inval (i)
 ANALYZE bitmap_test_multi_inval;
 CREATE INDEX bitmap_test_multi_inval_ix1 ON bitmap_test_multi_inval (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on bitmap_test_multi_inval
-         Forward index only scan of: bitmap_test_multi_inval_ix1
-         Conds: (i < 100)
-(4 rows)
+   ->  Index Only Scan using bitmap_test_multi_inval_ix1 on bitmap_test_multi_inval
+         Index Cond: (i < 100)
+(3 rows)
 
 SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
  count 
@@ -3786,13 +3774,12 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi_inval WHERE i < 100 ORDER BY i LIMIT 20;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on bitmap_test_multi_inval
-         Forward index only scan of: bitmap_test_multi_inval_ix1
-         Conds: (i < 100)
-(4 rows)
+   ->  Index Only Scan using bitmap_test_multi_inval_ix1 on bitmap_test_multi_inval
+         Index Cond: (i < 100)
+(3 rows)
 
 SELECT * FROM bitmap_test_multi_inval WHERE i < 100 ORDER BY i LIMIT 20;
    id   | id2  | i  
@@ -3871,8 +3858,8 @@ SELECT smart_explain(
 	 (SELECT id * 500 FROM bitmap_test_complex WHERE id = 1),
 	 GREATEST(1,2), LEAST(11,12), COALESCE (NULL, NULL, 12),
 	 15) ORDER BY id;');
-                               smart_explain                               
----------------------------------------------------------------------------
+                                           smart_explain                                            
+----------------------------------------------------------------------------------------------------
  Sort
    Sort Key: bitmap_test_complex.id
    InitPlan 1 (returns $0)
@@ -3882,15 +3869,14 @@ SELECT smart_explain(
            ->  Bitmap Index Scan on bitmap_test_complex_ix2
                  Index Cond: (id2 = 1)
    InitPlan 2 (returns $1)
-     ->  Custom Scan (o_scan) on bitmap_test_complex bitmap_test_complex_2
-           Forward index only scan of: bitmap_test_complex_ix4
-           Conds: (id = 1)
+     ->  Index Only Scan using bitmap_test_complex_ix4 on bitmap_test_complex bitmap_test_complex_2
+           Index Cond: (id = 1)
    ->  Custom Scan (o_scan) on bitmap_test_complex
          Bitmap heap scan
          Recheck Cond: (id = ANY (ARRAY[abs($0), $1, 2, 11, 12, 15]))
          ->  Bitmap Index Scan on bitmap_test_complex_ix4
                Index Cond: (id = ANY (ARRAY[abs($0), $1, 2, 11, 12, 15]))
-(17 rows)
+(16 rows)
 
 SELECT * FROM bitmap_test_complex WHERE id IN
 	(ABS((SELECT id FROM bitmap_test_complex WHERE id2 = 1)),

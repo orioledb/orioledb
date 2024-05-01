@@ -22,6 +22,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "indexam/handler.h"
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -138,6 +139,7 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
+static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
 
@@ -200,6 +202,7 @@ static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											Oid relationObjectId,
 											bool inhparent,
 											RelOptInfo *rel);
+static bool orioledb_skip_tree_height_hook(Relation indexRelation);
 
 PG_FUNCTION_INFO_V1(orioledb_page_stats);
 PG_FUNCTION_INFO_V1(orioledb_version);
@@ -909,10 +912,13 @@ _PG_init(void)
 	reset_xmin_hook = orioledb_reset_xmin_hook;
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
+	prev_skip_tree_height_hook = skip_tree_height_hook;
+	skip_tree_height_hook = orioledb_skip_tree_height_hook;
 	xact_redo_hook = o_xact_redo_hook;
 	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
 	prev_base_init_startup_hook = base_init_startup_hook;
 	base_init_startup_hook = o_base_init_startup_hook;
+	IndexAMRoutineHook = orioledb_indexam_routine_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }
@@ -1577,11 +1583,7 @@ orioledb_error_cleanup_hook(void)
 	unset_skip_ucm();
 	btree_io_error_cleanup();
 	o_reset_syscache_hooks();
-	if (drop_index_list)
-	{
-		list_free_deep(drop_index_list);
-		drop_index_list = NIL;
-	}
+	o_rewrite_cleanup();
 	if (orioledb_s3_mode)
 		s3_headers_error_cleanup();
 }
@@ -1618,6 +1620,10 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 				{
 					IndexOptInfo *info = lfirst_node(IndexOptInfo, lc);
 					bool		hasbitmap;
+					OIndexNumber ix_num;
+					OIndexDescr *index_descr = NULL;
+					OInMemoryBlkno rootPageBlkno;
+					Page		root_page;
 
 					/*
 					 * TODO: Remove when parallel index scan will be
@@ -1637,12 +1643,40 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 						hasbitmap = hasbitmap && valid;
 					}
 					info->amhasgetbitmap = hasbitmap;
+
+					for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+					{
+						index_descr = descr->indices[ix_num];
+						if (index_descr->oids.reloid == info->indexoid)
+							break;
+					}
+					Assert(ix_num < descr->nIndices);
+					Assert(index_descr);
+					o_btree_load_shmem(&index_descr->desc);
+					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
+					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);
+					info->tree_height = PAGE_GET_LEVEL(root_page);
 				}
 			}
 		}
 	}
 
 	table_close(relation, NoLock);
+}
+
+static bool
+orioledb_skip_tree_height_hook(Relation indexRelation)
+{
+	bool		result = false;
+	Relation	tbl;
+
+	tbl = table_open(indexRelation->rd_index->indrelid, NoLock);
+
+	if (is_orioledb_rel(tbl))
+		result = true;
+
+	table_close(tbl, NoLock);
+	return result;
 }
 
 Datum

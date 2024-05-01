@@ -531,6 +531,47 @@ o_table_resize_constr(OTable *o_table)
 	MemoryContextSwitchTo(oldcxt);
 }
 
+Datum
+o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantuple,
+			   bool byval, int16 typlen, bool *isNull)
+{
+	MemoryContext oldcxt;
+	MemoryContext tbl_cxt = OGetTableContext(o_table);
+	Datum		new_val;
+	Expr	   *expr2;
+	ParseNamespaceItem *nsitem;
+	ParseState *pstate;
+	EState	   *estate = NULL;
+	ExprContext *econtext;
+	ExprState  *exprState;
+	Datum		result = 0;
+
+	pstate = make_parsestate(NULL);
+	pstate->p_sourcetext = NULL;
+	nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
+										   NULL, false, true);
+	addNSItemToQuery(pstate, nsitem, true, true, true);
+
+	expr2 = expression_planner((Expr *) expr);
+
+	oldcxt = MemoryContextSwitchTo(tbl_cxt);
+	estate = CreateExecutorState();
+	exprState = ExecPrepareExpr(expr2, estate);
+	econtext = GetPerTupleExprContext(estate);
+
+	if (scantuple)
+		econtext->ecxt_scantuple = scantuple;
+	new_val = ExecEvalExpr(exprState, econtext, isNull);
+
+	FreeExecutorState(estate);
+	free_parsestate(pstate);
+
+	if (!*isNull)
+		result = datumCopy(new_val, byval, typlen);
+	MemoryContextSwitchTo(oldcxt);
+	return result;
+}
+
 void
 o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 					OTableField *old_field, OTableField *field)
@@ -548,40 +589,13 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 
 	if (!old_field->hasmissing && field->hasmissing)
 	{
-		Datum		missingval;
-		Expr	   *expr2;
-		ParseNamespaceItem *nsitem;
-		ParseState *pstate;
-		EState	   *estate = NULL;
-		ExprContext *econtext;
-		ExprState  *exprState;
 		bool		missingIsNull = true;
 
-		pstate = make_parsestate(NULL);
-		pstate->p_sourcetext = NULL;
-		nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
-											   NULL, false, true);
-		addNSItemToQuery(pstate, nsitem, true, true, true);
-
-		expr2 = expression_planner((Expr *) defaultexpr);
-
-		oldcxt = MemoryContextSwitchTo(tbl_cxt);
-		estate = CreateExecutorState();
-		exprState = ExecPrepareExpr(expr2, estate);
-		econtext = GetPerTupleExprContext(estate);
-
-		missingval = ExecEvalExpr(exprState, econtext,
-								  &missingIsNull);
-
-		FreeExecutorState(estate);
-		free_parsestate(pstate);
-
-		attrmiss_temp.am_value = datumCopy(missingval, field->byval,
-										   field->typlen);
-		MemoryContextSwitchTo(oldcxt);
+		attrmiss_temp.am_value = o_eval_default(o_table, rel, defaultexpr, NULL,
+												field->byval, field->typlen,
+												&missingIsNull);
 		attrmiss_temp.am_present = true;
 		attrmiss = &attrmiss_temp;
-		defaultexpr = (Node *) expr2;
 	}
 
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
@@ -617,6 +631,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 	field->notnull = attr->attnotnull;
 	field->hasmissing = attr->atthasmissing;
 	field->hasdef = attr->atthasdef;
+	field->generated = attr->attgenerated;
 }
 
 OTable *
@@ -868,7 +883,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 				new_keys_num = 0,
 				i = 0,
 				j = 0;
-	bool		reuse = false;
+	bool		reuse_relnode = false;
 
 	old_keys = o_table_make_index_keys(old_table, &old_keys_num);
 	new_keys = o_table_make_index_keys(new_table, &new_keys_num);
@@ -900,7 +915,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 					 old_keys[i].oids.reloid != new_keys[j].oids.reloid &&
 					 old_keys[i].oids.relnode == new_keys[j].oids.relnode)
 			{
-				reuse = true;
+				reuse_relnode = true;
 			}
 		}
 
@@ -909,7 +924,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			bool		result;
 
 			Assert(old_table);
-			if (!reuse)
+			if (!reuse_relnode)
 			{
 				elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
 					 old_keys[i].type,
@@ -933,7 +948,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			bool		result PG_USED_FOR_ASSERTS_ONLY;
 
 			Assert(new_table);
-			if (!reuse)
+			if (!reuse_relnode)
 			{
 				elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
 					 new_keys[j].type,
@@ -948,7 +963,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 									   oxid, csn);
 				Assert(result);
 			}
-			reuse = false;
+			reuse_relnode = false;
 			j++;
 		}
 	}
@@ -1182,6 +1197,8 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 								   O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
 	}
+	o_add_invalidate_undo_item(o_table->oids,
+							   O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);
 	if (ORelOidsIsValid(o_table->toast_oids))
 	{
@@ -1587,6 +1604,7 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 
 	att->attnotnull = field->notnull;
 	att->atthasdef = field->hasdef;
+	att->attgenerated = field->generated;
 	att->atthasmissing = field->hasmissing;
 	att->attidentity = '\0';
 	att->attisdropped = field->droped;

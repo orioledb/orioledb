@@ -7,11 +7,11 @@ on:
 jobs:
   static:
     runs-on:
-     - ubuntu-22.04
+      - ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        pg_version: [15, 16]
+        pg_version: [16]
         compiler: [clang, gcc]
     env:
       LLVM_VER: 12

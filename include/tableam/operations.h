@@ -14,6 +14,7 @@
 #define __TABLEAM_OPERATIONS_H__
 
 #include "btree/btree.h"
+#include "btree/modify.h"
 #include "catalog/o_tables.h"
 #include "tableam/descr.h"
 #include "tuple/slot.h"
@@ -93,6 +94,12 @@ extern TupleTableSlot *o_tbl_insert_with_arbiter(Relation rel,
 												 List *arbiterIndexes,
 												 LockTupleMode lockmode,
 												 TupleTableSlot *lockedSlot);
+extern OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
+											 OIndexDescr *id,
+											 OTuple *own_tup,
+											 TupleTableSlot *slot,
+											 OXid oxid, CommitSeqNo csn,
+											 BTreeModifyCallbackInfo *callbackInfo);
 extern OBTreeModifyResult o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey,
 									 LockTupleMode mode, OXid oxid,
 									 OLockCallbackArg *larg,
@@ -103,11 +110,24 @@ extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 									   CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg);
+extern OTableModifyResult o_update_secondary_index(OIndexDescr *id,
+												   OIndexNumber ix_num,
+												   bool new_valid,
+												   bool old_valid,
+												   TupleTableSlot *newSlot,
+												   OTuple new_ix_tup,
+												   TupleTableSlot *oldSlot,
+												   OXid oxid,
+												   CommitSeqNo csn);
 extern OTableModifyResult o_tbl_delete(OTableDescr *descr,
 									   OBTreeKeyBound *primary_key,
 									   OXid oxid, CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg);
+extern OTableModifyResult o_tbl_index_delete(OIndexDescr *id,
+											 OIndexNumber ix_num,
+											 TupleTableSlot *slot,
+											 OXid oxid, CommitSeqNo csn);
 extern void o_check_tbl_update_mres(OTableModifyResult mres,
 									OTableDescr *descr,
 									Relation rel,

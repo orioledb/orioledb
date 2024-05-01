@@ -376,6 +376,102 @@ SELECT * FROM o_ddl_check;
  ABC3 | C  |   
 (3 rows)
 
+-- Check rewrite with NULL fields
+CREATE INDEX o_ddl_check_ix1 ON o_ddl_check(f2, f3);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ Index o_ddl_check_ix1                         +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: f2, f3, f1         +
+     Leaf tuple fields: f2, f3, f1             +
+ 
+(1 row)
+
+ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C" USING substr(f2::text, 1, 1),
+						ALTER f3 TYPE char USING substr(f3::text, 4, 1);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Only Scan using o_ddl_check_ix1 on o_ddl_check
+(1 row)
+
+SELECT * FROM o_ddl_check ORDER BY f2, f3;
+  f1  | f2 | f3 
+------+----+----
+ ABC1 | A  | 
+ ABC2 | B  | 
+ ABC3 | C  | 
+(3 rows)
+
+COMMIT;
+-- Check rewrite of index with multiple columns
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ Index o_ddl_check_ix1                         +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: f2, f3, f1         +
+     Leaf tuple fields: f2, f3, f1             +
+ 
+(1 row)
+
+ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || f2::text,
+						ALTER f3 TYPE int USING substr(f1::text, 4, 1)::int;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Only Scan using o_ddl_check_ix1 on o_ddl_check
+(1 row)
+
+SELECT * FROM o_ddl_check ORDER BY f2, f3;
+  f1  | f2  | f3 
+------+-----+----
+ ABC1 | AOA |  1
+ ABC2 | BOB |  2
+ ABC3 | COC |  3
+(3 rows)
+
+COMMIT;
+ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || f2::text,
+						ALTER f3 TYPE int;
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_ddl_check_pkey                        +
+     Index type: primary, unique               +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: f1                 +
+ Index o_ddl_check_ix1                         +
+     Index type: secondary                     +
+     Leaf tuple size: 3, non-leaf tuple size: 3+
+     Non-leaf tuple fields: f2, f3, f1         +
+     Leaf tuple fields: f2, f3, f1             +
+ 
+(1 row)
+
+TABLE o_ddl_check;
+  f1  |   f2    | f3 
+------+---------+----
+ ABC1 | AOAOAOA |  1
+ ABC2 | BOBOBOB |  2
+ ABC3 | COCOCOC |  3
+(3 rows)
+
 CREATE TABLE o_test_alter_change_byval (
     val_1 int
 ) USING orioledb;
@@ -458,11 +554,10 @@ ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
 CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-                      QUERY PLAN                      
-------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_alter_type
-   Forward index scan of: o_test_pkey_alter_type_pkey
-(2 rows)
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Index Scan using o_test_pkey_alter_type_pkey on o_test_pkey_alter_type
+(1 row)
 
 SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
  val_1 | val_2 
@@ -475,11 +570,10 @@ SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
 (5 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_alter_type
-   Forward index only scan of: o_test_pkey_alter_type_ix1
-(2 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Only Scan using o_test_pkey_alter_type_ix1 on o_test_pkey_alter_type
+(1 row)
 
 SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
  val_1 | val_2 
@@ -611,19 +705,15 @@ SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
                                orioledb_tbl_structure                                
 -------------------------------------------------------------------------------------
  Index o_test_pkey_alter_type_pkey contents                                         +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                +
      Leftmost, Rightmost                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')          +
-     Item 0: offset = 264, tuple = ('1', '10ROR')                                   +
-   Chunk 1: offset = 1, location = 304, hikey location = 88, hikey = ('3')          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                         +
+     Item 0: offset = 272, tuple = ('1', '10ROR')                                   +
      Item 1: offset = 312, tuple = ('2', '20ROR')                                   +
-   Chunk 2: offset = 2, location = 352, hikey location = 96, hikey = ('4')          +
-     Item 2: offset = 360, tuple = ('3', '30ROR')                                   +
-   Chunk 3: offset = 3, location = 400, hikey location = 104, hikey = ('5')         +
-     Item 3: offset = 408, tuple = ('4', '40ROR')                                   +
-   Chunk 4: offset = 4, location = 448, hikey location = 112                        +
-     Item 4: offset = 456, tuple = ('5', '50ROR')                                   +
+     Item 2: offset = 352, tuple = ('3', '30ROR')                                   +
+     Item 3: offset = 392, tuple = ('4', '40ROR')                                   +
+     Item 4: offset = 432, tuple = ('5', '50ROR')                                   +
                                                                                     +
  Index o_test_pkey_alter_type_ix1 contents                                          +
  Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                               +
@@ -669,19 +759,15 @@ SELECT orioledb_tbl_structure('o_test_pkey_alter_type'::regclass, 'nue');
                                  orioledb_tbl_structure                                 
 ----------------------------------------------------------------------------------------
  Index o_test_pkey_alter_type_pkey contents                                            +
- Page 0: level = 0, maxKeyLen = 13, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                   +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                   +
      Leftmost, Rightmost                                                               +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2BOB')          +
-     Item 0: offset = 264, tuple = ('1BOB', '10ROR')                                   +
-   Chunk 1: offset = 1, location = 304, hikey location = 96, hikey = ('3BOB')          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                            +
+     Item 0: offset = 272, tuple = ('1BOB', '10ROR')                                   +
      Item 1: offset = 312, tuple = ('2BOB', '20ROR')                                   +
-   Chunk 2: offset = 2, location = 352, hikey location = 112, hikey = ('4BOB')         +
-     Item 2: offset = 360, tuple = ('3BOB', '30ROR')                                   +
-   Chunk 3: offset = 3, location = 400, hikey location = 128, hikey = ('5BOB')         +
-     Item 3: offset = 408, tuple = ('4BOB', '40ROR')                                   +
-   Chunk 4: offset = 4, location = 448, hikey location = 144                           +
-     Item 4: offset = 456, tuple = ('5BOB', '50ROR')                                   +
+     Item 2: offset = 352, tuple = ('3BOB', '30ROR')                                   +
+     Item 3: offset = 392, tuple = ('4BOB', '40ROR')                                   +
+     Item 4: offset = 432, tuple = ('5BOB', '50ROR')                                   +
                                                                                        +
  Index o_test_pkey_alter_type_ix1 contents                                             +
  Page 0: level = 0, maxKeyLen = 19, nVacatedBytes = 0                                  +
@@ -1024,11 +1110,10 @@ INSERT INTO o_test_alter_type_ix_included_rollback
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
 		ORDER BY val_3;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_alter_type_ix_included_rollback
-   Forward index only scan of: o_test_alter_type_ix_included_rollback_ix1
-(2 rows)
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_alter_type_ix_included_rollback_ix1 on o_test_alter_type_ix_included_rollback
+(1 row)
 
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
  val_2 | val_3 
@@ -1045,11 +1130,10 @@ ALTER TABLE o_test_alter_type_ix_included_rollback
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
 		ORDER BY val_3;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_alter_type_ix_included_rollback
-   Forward index only scan of: o_test_alter_type_ix_included_rollback_ix1
-(2 rows)
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_alter_type_ix_included_rollback_ix1 on o_test_alter_type_ix_included_rollback
+(1 row)
 
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
  val_2 | val_3 

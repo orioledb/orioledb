@@ -124,7 +124,7 @@ extern XLogRecPtr flush_local_wal(bool commit);
 extern void wal_commit(OXid oxid, TransactionId logicalXid,
 					   TransactionId logicalNextXid);
 extern void wal_joint_commit(OXid oxid, TransactionId logicalXid,
-							 TransactionId logicalNextXid,TransactionId xid);
+							 TransactionId logicalNextXid, TransactionId xid);
 extern void wal_after_commit(void);
 extern void wal_rollback(OXid oxid, TransactionId logicalXid,
 						 TransactionId logicalNextXid);

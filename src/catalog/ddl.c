@@ -14,14 +14,17 @@
 
 #include "orioledb.h"
 
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/indices.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "tableam/operations.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "tuple/slot.h"
 #include "utils/compress.h"
 #include "recovery/wal.h"
 
@@ -40,6 +43,7 @@
 #include "catalog/pg_authid.h"
 #endif
 #include "catalog/pg_class.h"
+#include "catalog/pg_constraint.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_depend.h"
@@ -74,6 +78,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
+#include "pgstat.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
@@ -101,6 +106,11 @@ UndoLocation saved_undo_location[(int) UndoLogsCount] =
 static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
+Oid			o_saved_relrewrite = InvalidOid;
+static ORelOids saved_oids;
+static bool in_rewrite = false;
+List	   *reindex_list = NIL;
+Query	   *savedDataQuery = NULL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -120,6 +130,8 @@ static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
 static void o_find_collation_dependencies(Oid colloid);
+static void redefine_indices(Relation rel, OTable *new_o_table, bool primary);
+static void redefine_pkey_for_rel(Relation rel);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -487,7 +499,7 @@ reindex_concurrently_not_supported(Relation tbl)
 }
 
 static void
-check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
+check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
 {
 	Oid			objectOid;
 	Relation	relationRelation;
@@ -679,7 +691,22 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 
 		tbl = relation_open(relid, AccessShareLock);
 		if (is_orioledb_rel(tbl))
-			reindex_concurrently_not_supported(tbl);
+		{
+			ListCell   *index;
+
+			foreach(index, RelationGetIndexList(tbl))
+			{
+				Oid			indexOid = lfirst_oid(index);
+				Relation	ind = relation_open(indexOid, AccessShareLock);
+				String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+
+				reindex_list = list_append_unique(reindex_list, ix_name);
+				relation_close(ind, AccessShareLock);
+			}
+
+			if (concurrently)
+				reindex_concurrently_not_supported(tbl);
+		}
 		relation_close(tbl, AccessShareLock);
 
 		MemoryContextSwitchTo(old);
@@ -710,6 +737,16 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
 
+	in_rewrite = false;
+	o_saved_relrewrite = InvalidOid;
+	savedDataQuery = NULL;
+
+	/*
+	 * reindex_list is expected to be allocated in PortalContext so it isn't
+	 * freed by us and pointer may be invalid there
+	 */
+	reindex_list = NIL;
+
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
 	{
@@ -725,7 +762,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		 * isn't freed by us and pointer may be invalid there
 		 */
 		alter_type_exprs = NIL;
-
 
 		/*
 		 * Figure out lock mode, and acquire lock.  This also does basic
@@ -892,50 +928,69 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				concurrently = defGetBoolean(opt);
 		}
 
-		if (concurrently)
+		switch (stmt->kind)
 		{
-			switch (stmt->kind)
-			{
-				case REINDEX_OBJECT_INDEX:
-					{
-						Oid			indOid = RangeVarGetRelid(stmt->relation,
-															  AccessShareLock,
-															  false);
-						Relation	iRel,
-									tbl;
+			case REINDEX_OBJECT_INDEX:
+				{
+					Oid			indOid = RangeVarGetRelid(stmt->relation,
+														  AccessShareLock,
+														  false);
+					Relation	iRel,
+								tbl;
 
-						iRel = index_open(indOid, AccessShareLock);
-						tbl = relation_open(iRel->rd_index->indrelid,
-											AccessShareLock);
-						if (is_orioledb_rel(tbl))
-							reindex_concurrently_not_supported(tbl);
-						relation_close(tbl, AccessShareLock);
-						relation_close(iRel, AccessShareLock);
-					}
-					break;
-				case REINDEX_OBJECT_TABLE:
+					iRel = index_open(indOid, AccessShareLock);
+					tbl = relation_open(iRel->rd_index->indrelid,
+										AccessShareLock);
+					if (is_orioledb_rel(tbl))
 					{
-						Oid			tblOid = RangeVarGetRelid(stmt->relation,
-															  AccessShareLock,
-															  false);
-						Relation	tbl;
+						String	   *ix_name;
 
-						tbl = relation_open(tblOid, AccessShareLock);
-						if (is_orioledb_rel(tbl))
+						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
+						reindex_list = list_append_unique(reindex_list, ix_name);
+						if (concurrently)
 							reindex_concurrently_not_supported(tbl);
-						relation_close(tbl, AccessShareLock);
 					}
-					break;
-				case REINDEX_OBJECT_SCHEMA:
-				case REINDEX_OBJECT_SYSTEM:
-				case REINDEX_OBJECT_DATABASE:
-					check_multiple_tables(stmt->name, stmt->kind);
-					break;
-				default:
-					elog(ERROR, "unrecognized object type: %d",
-						 (int) stmt->kind);
-					break;
-			}
+					relation_close(tbl, AccessShareLock);
+					relation_close(iRel, AccessShareLock);
+				}
+				break;
+			case REINDEX_OBJECT_TABLE:
+				{
+					Oid			tblOid = RangeVarGetRelid(stmt->relation,
+														  AccessShareLock,
+														  false);
+					Relation	tbl;
+
+					tbl = relation_open(tblOid, AccessShareLock);
+					if (is_orioledb_rel(tbl))
+					{
+						ListCell   *index;
+
+						foreach(index, RelationGetIndexList(tbl))
+						{
+							Oid			indexOid = lfirst_oid(index);
+							Relation	ind = relation_open(indexOid, AccessShareLock);
+							String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+
+							reindex_list = list_append_unique(reindex_list, ix_name);
+							relation_close(ind, AccessShareLock);
+						}
+						if (concurrently)
+							reindex_concurrently_not_supported(tbl);
+					}
+					relation_close(tbl, AccessShareLock);
+				}
+				break;
+			case REINDEX_OBJECT_SCHEMA:
+			case REINDEX_OBJECT_SYSTEM:
+			case REINDEX_OBJECT_DATABASE:
+				if (concurrently)
+					check_multiple_tables(stmt->name, stmt->kind, concurrently);
+				break;
+			default:
+				elog(ERROR, "unrecognized object type: %d",
+					 (int) stmt->kind);
+				break;
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))
@@ -957,6 +1012,23 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		o_find_collation_dependencies(collOid);
 	}
+	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
+	{
+		RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
+
+		if (!stmt->skipData)
+		{
+			Oid			matviewOid;
+			Relation	matviewRel;
+
+			matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
+												  RangeVarCallbackOwnsTable, NULL);
+			matviewRel = table_open(matviewOid, AccessShareLock);
+			savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
+			table_close(matviewRel, AccessShareLock);
+		}
+		stmt->skipData = true;
+	}
 
 	if (call_next)
 	{
@@ -970,6 +1042,68 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									readOnlyTree,
 									context, params, env,
 									dest, qc);
+	}
+
+
+	if (IsA(pstmt->utilityStmt, TruncateStmt))
+	{
+		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
+		List	   *relids = NIL;
+		ListCell   *cell;
+
+		/*
+		 * Open, exclusive-lock, and check all the explicitly-specified
+		 * relations
+		 */
+		foreach(cell, tstmt->relations)
+		{
+			RangeVar   *rv = lfirst(cell);
+			Relation	rel;
+			bool		recurse = rv->inh;
+			Oid			myrelid;
+			LOCKMODE	lockmode = AccessShareLock;
+
+			myrelid = RangeVarGetRelid(rv, lockmode, false);
+
+			/* don't throw error for "TRUNCATE foo, foo" */
+			if (list_member_oid(relids, myrelid))
+				continue;
+
+			/* open the relation, we already hold a lock on it */
+			rel = table_open(myrelid, NoLock);
+			if (is_orioledb_rel(rel))
+			{
+				redefine_pkey_for_rel(rel);
+			}
+
+			relids = lappend_oid(relids, myrelid);
+
+			if (recurse)
+			{
+				Relation	child_rel;
+				ListCell   *child;
+				List	   *children;
+
+				children = find_all_inheritors(myrelid, lockmode, NULL);
+
+				foreach(child, children)
+				{
+					Oid			childrelid = lfirst_oid(child);
+
+					if (list_member_oid(relids, childrelid))
+						continue;
+
+					/* find_all_inheritors already got lock */
+					child_rel = table_open(childrelid, NoLock);
+					if (is_orioledb_rel(child_rel))
+					{
+						redefine_pkey_for_rel(child_rel);
+					}
+					table_close(child_rel, lockmode);
+				}
+			}
+			table_close(rel, NoLock);
+		}
 	}
 }
 
@@ -1207,6 +1341,7 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	Node	   *expr = NULL;
 	bool		rewrite = false;
 	ListCell   *lc;
+	bool		append_transform = false;
 
 	foreach(lc, alter_type_exprs)
 	{
@@ -1224,12 +1359,15 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	{
 		expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
 								old_field->collation, 0);
+		append_transform = true;
 	}
 	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
 								 field->typmod, COERCION_EXPLICIT,
 								 COERCE_IMPLICIT_CAST, -1);
 	if (expr != NULL)
 	{
+		if (append_transform)
+			alter_type_exprs = lappend(alter_type_exprs, list_make2(makeInteger(subId), expr));
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
 
@@ -1313,6 +1451,449 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 }
 
 static void
+set_toast_oids_and_compress(Relation rel, Relation toast_rel)
+{
+	ORelOids	oids,
+				toastOids,
+			   *treeOids;
+	int			numTreeOids;
+	OTable	   *o_table;
+	ORelOptions *options = (ORelOptions *) rel->rd_options;
+	OCompress	compress = default_compress,
+				primary_compress = default_primary_compress,
+				toast_compress = default_toast_compress;
+	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
+	OXid		oxid = InvalidOXid;
+
+	Assert(RelIsInMyDatabase(rel));
+	ORelOidsSetFromRel(oids, rel);
+	ORelOidsSetFromRel(toastOids, toast_rel);
+
+	o_table = o_tables_get(oids);
+	o_table->toast_oids = toastOids;
+
+	if (options)
+	{
+		if (options->compress_offset > 0)
+		{
+			char	   *str;
+
+			str = (char *) (((Pointer) options) +
+							options->compress_offset);
+			if (str)
+				compress = o_parse_compress(str);
+		}
+		if (options->primary_compress_offset > 0)
+		{
+			char	   *str;
+
+			str = (char *) (((Pointer) options) +
+							options->primary_compress_offset);
+			if (str)
+				primary_compress = o_parse_compress(str);
+		}
+		if (options->toast_compress_offset > 0)
+		{
+			char	   *str;
+
+			str = (char *) (((Pointer) options) +
+							options->toast_compress_offset);
+			if (str)
+				toast_compress = o_parse_compress(str);
+		}
+	}
+
+	if (rel->rd_rel->relpersistence !=
+		RELPERSISTENCE_PERMANENT &&
+		(OCompressIsValid(compress) ||
+		 OCompressIsValid(primary_compress) ||
+		 OCompressIsValid(toast_compress)))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("temp and unlogged orioledb tables does not "
+						"support compression options")));
+	}
+
+	if (OCompressIsValid(compress))
+	{
+		if (!OCompressIsValid(primary_compress))
+			primary_compress = compress;
+		if (!OCompressIsValid(toast_compress))
+			toast_compress = compress;
+	}
+	o_table->default_compress = compress;
+	o_table->toast_compress = toast_compress;
+	o_table->primary_compress = primary_compress;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	o_tables_rel_meta_lock(rel);
+	o_tables_update(o_table, oxid, csn);
+	o_tables_after_update(o_table, oxid, csn);
+
+	treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+	add_undo_create_relnode(oids, treeOids, numTreeOids);
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+	pfree(treeOids);
+	o_table_free(o_table);
+}
+
+static void
+create_o_table_for_rel(Relation rel)
+{
+	ORelOids	oids;
+	TupleDesc	tupdesc;
+	OTable	   *o_table;
+	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
+	OXid		oxid = InvalidOXid;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	Assert(RelIsInMyDatabase(rel));
+	ORelOidsSetFromRel(oids, rel);
+	tupdesc = RelationGetDescr(rel);
+
+	o_tables_rel_meta_lock(rel);
+	o_table = o_table_tableam_create(oids, tupdesc,
+									 rel->rd_rel->relpersistence);
+	o_opclass_cache_add_table(o_table);
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
+
+	o_tables_add(o_table, oxid, csn);
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+	o_table_free(o_table);
+}
+
+typedef struct
+{
+	DestReceiver pub;			/* publicly-known function pointers */
+	Relation	rel;
+	OTableDescr *descr;
+	CommitSeqNo csn;
+	OXid		oxid;
+} DR_transientrel;
+
+/*
+ * transientrel_startup --- executor startup
+ */
+static void
+transientrel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
+{
+	DR_transientrel *myState = (DR_transientrel *) self;
+
+	fill_current_oxid_csn(&myState->oxid, &myState->csn);
+}
+
+/*
+ * transientrel_receive --- receive one tuple
+ */
+static bool
+transientrel_receive(TupleTableSlot *slot, DestReceiver *self)
+{
+	DR_transientrel *myState = (DR_transientrel *) self;
+
+	o_tbl_insert(myState->descr, myState->rel, slot, myState->oxid, myState->csn);
+
+	/* We know this is a newly created relation, so there are no indexes */
+
+	return true;
+}
+
+/*
+ * transientrel_shutdown --- executor end
+ */
+static void
+transientrel_shutdown(DestReceiver *self)
+{
+}
+
+/*
+ * transientrel_destroy --- release DestReceiver object
+ */
+static void
+transientrel_destroy(DestReceiver *self)
+{
+	pfree(self);
+}
+
+static DestReceiver *
+CreateOrioledbDestReceiver(Relation rel)
+{
+	DR_transientrel *self = (DR_transientrel *) palloc0(sizeof(DR_transientrel));
+
+	self->pub.receiveSlot = transientrel_receive;
+	self->pub.rStartup = transientrel_startup;
+	self->pub.rShutdown = transientrel_shutdown;
+	self->pub.rDestroy = transientrel_destroy;
+	self->pub.mydest = DestTransientRel;
+	self->rel = rel;
+	self->descr = relation_get_descr(rel);
+	Assert(self->descr != NULL);
+
+	return (DestReceiver *) self;
+}
+
+static void
+drop_table(ORelOids oids)
+{
+	CommitSeqNo csn;
+	OXid		oxid;
+	OTable	   *table;
+	ORelOids   *treeOids;
+	int			numTreeOids;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	o_tables_table_meta_lock(NULL);
+	table = o_tables_drop_by_oids(oids, oxid, csn);
+	o_tables_table_meta_unlock(NULL, InvalidOid);
+	treeOids = o_table_make_index_oids(table, &numTreeOids);
+	add_undo_drop_relnode(oids, treeOids, numTreeOids);
+	pfree(treeOids);
+	o_table_free(table);
+}
+
+static void
+rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
+{
+	DestReceiver *dest = CreateOrioledbDestReceiver(rel);
+	List	   *rewritten;
+	PlannedStmt *plan;
+	QueryDesc  *queryDesc;
+	Query	   *copied_query;
+	Query	   *query;
+
+	/* Lock and rewrite, using a copy to preserve the original query. */
+	copied_query = copyObject(savedDataQuery);
+	AcquireRewriteLocks(copied_query, true, false);
+	rewritten = QueryRewrite(copied_query);
+
+	/* SELECT should never rewrite to more or less than one SELECT query */
+	if (list_length(rewritten) != 1)
+		elog(ERROR, "unexpected rewrite result for REFRESH MATERIALIZED VIEW");
+	query = (Query *) linitial(rewritten);
+
+	/* Check for user-requested abort. */
+	CHECK_FOR_INTERRUPTS();
+
+	/* Plan the query which will generate data for the refresh. */
+	plan = pg_plan_query(query, "ORIOLEDB rewrite_matview", CURSOR_OPT_PARALLEL_OK, NULL);
+
+	/*
+	 * Use a snapshot with an updated command ID to ensure this query sees
+	 * results of any previously executed queries.  (This could only matter if
+	 * the planner executed an allegedly-stable function that changed the
+	 * database contents, but let's do it anyway to be safe.)
+	 */
+	PushCopiedSnapshot(GetActiveSnapshot());
+	UpdateActiveSnapshotCommandId();
+
+	/* Create a QueryDesc, redirecting output to our tuple receiver */
+	queryDesc = CreateQueryDesc(plan, "ORIOLEDB rewrite_matview",
+								GetActiveSnapshot(), InvalidSnapshot,
+								dest, NULL, NULL, 0);
+
+	/* call ExecutorStart to prepare the plan for execution */
+	ExecutorStart(queryDesc, 0);
+
+	/* run the plan */
+	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
+
+	pgstat_count_heap_insert(rel, queryDesc->estate->es_processed);
+
+	/* and clean up */
+	ExecutorFinish(queryDesc);
+	ExecutorEnd(queryDesc);
+
+	FreeQueryDesc(queryDesc);
+
+	PopActiveSnapshot();
+
+	SetMatViewPopulatedState(rel, true);
+}
+
+static void
+rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
+{
+	OTableDescr *old_descr = NULL;
+	void	   *sscan;
+	TupleTableSlot *old_slot;
+	TupleTableSlot *new_slot;
+	OTuple		tup;
+	CommitSeqNo tupleCsn;
+	BTreeLocationHint hint;
+	OTableDescr *descr;
+	CommitSeqNo csn;
+	OXid		oxid;
+	int			primary_init_nfields = old_o_table->primary_init_nfields;
+
+	if (!old_o_table->has_primary)
+		primary_init_nfields--;
+
+	old_descr = o_fetch_table_descr(old_o_table->oids);
+	descr = relation_get_descr(rel);
+	old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
+	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, COMMITSEQNO_INPROGRESS, NULL);
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
+	{
+		tts_orioledb_store_tuple(old_slot, tup, old_descr,
+								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+								 true, &hint);
+		slot_getallattrs(old_slot);
+		tts_orioledb_detoast(old_slot);
+
+		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
+		{
+			Node	   *expr = NULL;
+			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+
+			ListCell   *lc;
+
+			foreach(lc, alter_type_exprs)
+			{
+				AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+
+				if (attnum == i + 1)
+				{
+					expr = (Node *) lsecond((List *) lfirst(lc));
+					break;
+				}
+			}
+
+			if (!expr && attr->atthasdef && !attr->atthasmissing &&
+				i >= primary_init_nfields &&
+				old_slot->tts_isnull[i])
+			{
+				Node	   *defaultexpr = build_column_default(rel, i + 1);
+
+				expr = defaultexpr;
+			}
+
+			if (!expr && attr->attgenerated && old_slot->tts_isnull[i])
+			{
+				Node	   *defaultexpr = build_column_default(rel, i + 1);
+
+				expr = defaultexpr;
+			}
+
+			if (!expr && DomainHasConstraints(attr->atttypid) &&
+				old_slot->tts_isnull[i])
+			{
+				Oid			baseTypeId;
+				int32		baseTypeMod;
+				Oid			baseTypeColl;
+				Node	   *defval;
+
+				defval = build_column_default(rel, i + 1);
+
+				if (!defval)
+				{
+					baseTypeMod = attr->atttypmod;
+					baseTypeId = getBaseTypeAndTypmod(attr->atttypid, &baseTypeMod);
+					baseTypeColl = get_typcollation(baseTypeId);
+					defval = (Node *) makeNullConst(baseTypeId, baseTypeMod, baseTypeColl);
+				}
+				else
+				{
+					baseTypeId = exprType(defval);
+				}
+				defval = (Node *) coerce_to_target_type(NULL,
+														defval,
+														baseTypeId,
+														attr->atttypid,
+														attr->atttypmod,
+														COERCION_ASSIGNMENT,
+														COERCE_IMPLICIT_CAST,
+														-1);
+				if (defval == NULL) /* should not happen */
+					elog(ERROR, "failed to coerce base type to domain");
+				expr = defval;
+			}
+
+			attr = &new_slot->tts_tupleDescriptor->attrs[i];
+			if (expr)
+			{
+				new_slot->tts_values[i] = o_eval_default(new_o_table, rel, expr, old_slot,
+														 attr->attbyval, attr->attlen,
+														 &new_slot->tts_isnull[i]);
+			}
+			else
+			{
+				if (!old_slot->tts_isnull[i])
+				{
+					new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
+					new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
+				}
+				else
+				{
+					new_slot->tts_values[i] = 0;
+					new_slot->tts_isnull[i] = true;
+				}
+			}
+		}
+		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
+
+		o_tbl_insert(descr, rel, new_slot, oxid, csn);
+
+		ExecClearTuple(old_slot);
+		ExecClearTuple(new_slot);
+	}
+
+	ExecDropSingleTupleTableSlot(old_slot);
+	ExecDropSingleTupleTableSlot(new_slot);
+	free_btree_seq_scan(sscan);
+
+	drop_table(old_o_table->oids);
+}
+
+static void
+redefine_indices(Relation rel, OTable *new_o_table, bool primary)
+{
+	ListCell   *index;
+
+	foreach(index, RelationGetIndexList(rel))
+	{
+		bool		closed = false;
+		Oid			indexOid = lfirst_oid(index);
+		Relation	ind = relation_open(indexOid, AccessShareLock);
+
+		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
+		{
+			o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+			relation_close(ind, AccessShareLock);
+			o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
+			closed = true;
+		}
+		if (!closed)
+			relation_close(ind, AccessShareLock);
+	}
+}
+
+static void
+redefine_pkey_for_rel(Relation rel)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	Assert(o_table != NULL);
+
+	redefine_indices(rel, o_table, true);
+
+	o_table_free(o_table);
+}
+
+static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
 {
@@ -1341,27 +1922,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 			if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 				 rel->rd_rel->relkind == RELKIND_MATVIEW) &&
-				(subId == 0) && is_orioledb_rel(rel))
+				(subId == 0) && is_orioledb_rel(rel) &&
+				!OidIsValid(rel->rd_rel->relrewrite))
 			{
-				CommitSeqNo csn;
-				OXid		oxid;
-				OTable	   *table;
-				ORelOids   *treeOids;
-				int			numTreeOids;
 				ORelOids	oids;
 
 				ORelOidsSetFromRel(oids, rel);
-
-				fill_current_oxid_csn(&oxid, &csn);
 				Assert(relation_get_descr(rel) != NULL);
-
-				o_tables_table_meta_lock(NULL);
-				table = o_tables_drop_by_oids(oids, oxid, csn);
-				o_tables_table_meta_unlock(NULL, InvalidOid);
-				treeOids = o_table_make_index_oids(table, &numTreeOids);
-				add_undo_drop_relnode(oids, treeOids, numTreeOids);
-				pfree(treeOids);
-				o_table_free(table);
+				drop_table(oids);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -1509,6 +2077,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_POST_CREATE && classId == RelationRelationId)
 	{
+		bool		closed = false;
+
 		rel = relation_open(objectId, AccessShareLock);
 
 		if (rel != NULL)
@@ -1569,32 +2139,21 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 					 (subId == 0) && is_orioledb_rel(rel))
 			{
-				ORelOids	oids;
-				TupleDesc	tupdesc;
-				OTable	   *o_table;
-				CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
-				OXid		oxid = InvalidOXid;
-				XLogRecPtr	cur_lsn;
-				Oid			datoid;
+				if (!OidIsValid(rel->rd_rel->relrewrite))
+				{
+					create_o_table_for_rel(rel);
+				}
+				else
+				{
+					Relation	old_rel = relation_open(rel->rd_rel->relrewrite, AccessShareLock);
 
-				fill_current_oxid_csn(&oxid, &csn);
-
-				Assert(RelIsInMyDatabase(rel));
-				ORelOidsSetFromRel(oids, rel);
-				tupdesc = RelationGetDescr(rel);
-
-				o_tables_rel_meta_lock(rel);
-				o_table = o_table_tableam_create(oids, tupdesc,
-												 rel->rd_rel->relpersistence);
-				o_opclass_cache_add_table(o_table);
-
-				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-				o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
-				o_tables_add(o_table, oxid, csn);
-				o_tables_rel_meta_unlock(rel, InvalidOid);
+					o_saved_relrewrite = rel->rd_rel->relrewrite;
+					ORelOidsSetFromRel(saved_oids, old_rel);
+					relation_close(old_rel, AccessShareLock);
+				}
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
-					 (subId == 0))
+					 (subId == 0) && !OidIsValid(rel->rd_rel->relrewrite))
 			{
 				Oid			tbl_oid;
 				Relation	tbl = NULL;
@@ -1606,96 +2165,60 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					ORelOids	oids,
-								toastOids,
-							   *treeOids;
-					OTable	   *o_table;
-					int			numTreeOids;
-					CommitSeqNo csn;
-					OXid		oxid;
-					ORelOptions *options;
-					OCompress	compress = default_compress,
-								primary_compress = default_primary_compress,
-								toast_compress = default_toast_compress;
-
-					options = (ORelOptions *) tbl->rd_options;
-
-					Assert(RelIsInMyDatabase(tbl));
-					ORelOidsSetFromRel(oids, tbl);
-					ORelOidsSetFromRel(toastOids, rel);
-
-					o_table = o_tables_get(oids);
-					o_table->toast_oids = toastOids;
-
-					if (options)
-					{
-						if (options->compress_offset > 0)
-						{
-							char	   *str;
-
-							str = (char *) (((Pointer) options) +
-											options->compress_offset);
-							if (str)
-								compress = o_parse_compress(str);
-						}
-						if (options->primary_compress_offset > 0)
-						{
-							char	   *str;
-
-							str = (char *) (((Pointer) options) +
-											options->primary_compress_offset);
-							if (str)
-								primary_compress = o_parse_compress(str);
-						}
-						if (options->toast_compress_offset > 0)
-						{
-							char	   *str;
-
-							str = (char *) (((Pointer) options) +
-											options->toast_compress_offset);
-							if (str)
-								toast_compress = o_parse_compress(str);
-						}
-					}
-
-					if (rel->rd_rel->relpersistence !=
-						RELPERSISTENCE_PERMANENT &&
-						(OCompressIsValid(compress) ||
-						 OCompressIsValid(primary_compress) ||
-						 OCompressIsValid(toast_compress)))
-					{
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("temp and unlogged orioledb tables does not "
-										"support compression options")));
-					}
-
-					if (OCompressIsValid(compress))
-					{
-						if (!OCompressIsValid(primary_compress))
-							primary_compress = compress;
-						if (!OCompressIsValid(toast_compress))
-							toast_compress = compress;
-					}
-					o_table->default_compress = compress;
-					o_table->toast_compress = toast_compress;
-					o_table->primary_compress = primary_compress;
-
-					fill_current_oxid_csn(&oxid, &csn);
-
-					o_tables_rel_meta_lock(tbl);
-					o_tables_update(o_table, oxid, csn);
-					o_tables_after_update(o_table, oxid, csn);
-
-					treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-					add_undo_create_relnode(oids, treeOids, numTreeOids);
-					o_tables_rel_meta_unlock(tbl, InvalidOid);
-					pfree(treeOids);
+					set_toast_oids_and_compress(tbl, rel);
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);
 			}
-			relation_close(rel, AccessShareLock);
+			else if (rel->rd_rel->relkind == RELKIND_INDEX)
+			{
+				Relation	tbl;
+
+				CommandCounterIncrement();
+				tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
+
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+					is_orioledb_rel(tbl))
+				{
+					OTable	   *o_table;
+					ORelOids	table_oids;
+
+					ORelOidsSetFromRel(table_oids, tbl);
+					o_table = o_tables_get(table_oids);
+					if (o_table == NULL)
+					{
+						elog(NOTICE, "orioledb table %s not found",
+							 RelationGetRelationName(tbl));
+					}
+					else
+					{
+						int			ix_num = InvalidIndexNumber;
+						int			i;
+
+						for (i = 0; i < o_table->nindices; i++)
+						{
+							if (strcmp(o_table->indices[i].name.data, rel->rd_rel->relname.data) == 0)
+							{
+								ix_num = i;
+								break;
+							}
+						}
+
+						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
+
+						if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
+							o_define_index_validate(table_oids, rel, NULL, NULL);
+						relation_close(rel, AccessShareLock);
+						closed = true;
+						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
+							o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
+					}
+				}
+				relation_close(tbl, AccessShareLock);
+			}
+			if (!closed)
+				relation_close(rel, AccessShareLock);
 		}
 	}
 	else if (access == OAT_POST_CREATE && classId == AttrDefaultRelationId)
@@ -1724,7 +2247,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTableField old_field;
 				OTableField *field;
 				bool		changed;
-				bool		rewrite = false;
 
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
@@ -1732,6 +2254,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				attr = &rel->rd_att->attrs[subId - 1];
 				orioledb_attr_to_field(field, attr);
 
+				/* TODO: Probably use CheckIndexCompatible here */
 				changed = old_field.typid != field->typid ||
 					old_field.collation != field->collation;
 
@@ -1739,10 +2262,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					if (ATColumnChangeRequiresRewrite(&old_field, field,
 													  subId))
-						rewrite = true;
+						in_rewrite = true;
 				}
 
-				if (!rewrite)
+				if (!in_rewrite)
 				{
 					o_table_fill_constr(o_table, rel, subId - 1,
 										&old_field, field);
@@ -1794,7 +2317,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OTableField old_field;
 					OTableField *field;
 					Form_pg_attribute attr;
-					bool		rewrite = false;
 					CommitSeqNo csn;
 					OXid		oxid;
 					int			ix_num;
@@ -1806,6 +2328,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					attr = &rel->rd_att->attrs[subId - 1];
 					orioledb_attr_to_field(field, attr);
 
+					/* TODO: Probably use CheckIndexCompatible here */
 					changed = old_field.typid != field->typid ||
 						old_field.collation != field->collation;
 
@@ -1813,10 +2336,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						if (ATColumnChangeRequiresRewrite(&old_field, field,
 														  subId))
-							rewrite = true;
+							in_rewrite = true;
 					}
 
-					if (!rewrite)
+					if (!in_rewrite)
 					{
 						orioledb_save_collation(field->collation);
 						fill_current_oxid_csn(&oxid, &csn);
@@ -1866,55 +2389,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_table->fields[subId - 1] = old_field;
 					o_table_free(o_table);
 				}
-			}
-			else if (rel->rd_rel->relkind == RELKIND_RELATION &&
-					 OidIsValid(rel->rd_rel->relrewrite) &&
-					 (subId == 0) && is_orioledb_rel(rel))
-			{
-				Relation	old_rel;
-				ORelOids	old_oids,
-							new_oids;
-				OTable	   *old_o_table,
-						   *new_o_table;
-				CommitSeqNo csn;
-				OXid		oxid;
-
-				old_rel = relation_open(rel->rd_rel->relrewrite, NoLock);
-
-				ORelOidsSetFromRel(old_oids, old_rel);
-				old_o_table = o_tables_get(old_oids);
-				if (old_o_table == NULL)
-				{
-					/* it does not exist */
-					elog(ERROR, "orioledb table \"%s\" not found",
-						 RelationGetRelationName(old_rel));
-				}
-
-				ORelOidsSetFromRel(new_oids, rel);
-				new_o_table = o_tables_get(new_oids);
-				if (new_o_table == NULL)
-				{
-					/* it does not exist */
-					elog(ERROR, "orioledb table \"%s\" not found",
-						 RelationGetRelationName(rel));
-				}
-
-				o_tables_rel_meta_lock(NULL);
-				fill_current_oxid_csn(&oxid, &csn);
-				o_tables_drop_by_oids(old_oids, oxid, csn);
-				o_tables_swap_relnodes(old_o_table, new_o_table);
-				o_tables_add_version(old_o_table, oxid, csn,
-									 new_o_table->version + 1);
-				o_tables_update_without_oids_indexes(new_o_table, oxid, csn);
-				o_indices_update(new_o_table, TOASTIndexNumber, oxid, csn);
-
-				o_tables_rel_meta_unlock(NULL, InvalidOid);
-
-				o_table_free(old_o_table);
-				o_table_free(new_o_table);
-				orioledb_free_rd_amcache(old_rel);
-				orioledb_free_rd_amcache(rel);
-				relation_close(old_rel, NoLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
@@ -1974,6 +2448,66 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					}
 				}
 				relation_close(tbl, AccessShareLock);
+			}
+			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
+					 OidIsValid(o_saved_relrewrite) &&
+					 OidIsValid(rel->rd_rel->relrewrite) &&
+					 (subId == 0))
+			{
+				Relation	tbl = NULL;
+
+				tbl = table_open(o_saved_relrewrite, AccessShareLock);
+				if (is_orioledb_rel(tbl))
+				{
+					ORelOids	new_oids;
+					OTable	   *old_o_table,
+							   *new_o_table;
+
+					CommandCounterIncrement();
+
+					old_o_table = o_tables_get(saved_oids);
+					Assert(old_o_table != NULL);
+
+					create_o_table_for_rel(tbl);
+
+					set_toast_oids_and_compress(tbl, rel);
+
+					ORelOidsSetFromRel(new_oids, tbl);
+					new_o_table = o_tables_get(new_oids);
+					Assert(new_o_table != NULL);
+
+					relation_close(tbl, AccessShareLock);
+					CommandCounterIncrement();
+					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
+
+					redefine_indices(tbl, new_o_table, true);
+
+					o_table_free(new_o_table);
+					new_o_table = o_tables_get(new_oids);
+					Assert(new_o_table != NULL);
+
+					switch (tbl->rd_rel->relkind)
+					{
+						case RELKIND_RELATION:
+							rewrite_table(tbl, old_o_table, new_o_table);
+							break;
+						case RELKIND_MATVIEW:
+							if (savedDataQuery != NULL)
+								rewrite_matview(tbl, old_o_table, new_o_table);
+							drop_table(old_o_table->oids);
+							break;
+						default:
+							Assert(false);
+							break;
+					}
+
+					redefine_indices(tbl, new_o_table, false);
+
+					o_table_free(old_o_table);
+					o_table_free(new_o_table);
+					o_saved_relrewrite = InvalidOid;
+				}
+				table_close(tbl, AccessShareLock);
 			}
 			relation_close(rel, AccessShareLock);
 		}
@@ -2142,4 +2676,20 @@ o_parse_compress(const char *value)
 	}
 
 	return result;
+}
+
+void
+o_rewrite_cleanup(void)
+{
+	if (drop_index_list)
+	{
+		list_free_deep(drop_index_list);
+		drop_index_list = NIL;
+	}
+	if (reindex_list)
+	{
+		list_free_deep(reindex_list);
+		reindex_list = NIL;
+	}
+	o_saved_relrewrite = InvalidOid;
 }

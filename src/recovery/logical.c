@@ -459,8 +459,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			/*
-			 * If the reorderbuffer doesn't yet have a snapshot, add one now, it will
-			 * be needed to decode the change we're currently processing.
+			 * If the reorderbuffer doesn't yet have a snapshot, add one now,
+			 * it will be needed to decode the change we're currently
+			 * processing.
 			 */
 			if (!ReorderBufferXidHasBaseSnapshot(ctx->reorder, logicalXid))
 			{

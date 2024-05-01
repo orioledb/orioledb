@@ -43,11 +43,10 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_temp_indices ORDER BY val_2;
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_temp_indices
-   Forward index scan of: o_test_temp_indices_ix1
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Scan using o_test_temp_indices_ix1 on o_test_temp_indices
+(1 row)
 
 SELECT * FROM o_test_temp_indices ORDER BY val_2;
  val_1 | val_2 | val_3 
@@ -61,11 +60,10 @@ SELECT * FROM o_test_temp_indices ORDER BY val_2;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_temp_indices ORDER BY val_3;
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_temp_indices
-   Forward index scan of: o_test_temp_indices_ix2
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Scan using o_test_temp_indices_ix2 on o_test_temp_indices
+(1 row)
 
 SELECT * FROM o_test_temp_indices ORDER BY val_3;
  val_1 | val_2 | val_3 
@@ -183,11 +181,10 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_temp_indices ORDER BY val_2;
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_temp_indices
-   Forward index scan of: o_test_temp_indices_ix1
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Scan using o_test_temp_indices_ix1 on o_test_temp_indices
+(1 row)
 
 SELECT * FROM o_test_temp_indices ORDER BY val_2;
  val_1 | val_2 | val_3 
@@ -201,11 +198,10 @@ SELECT * FROM o_test_temp_indices ORDER BY val_2;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_temp_indices ORDER BY val_3;
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_temp_indices
-   Forward index scan of: o_test_temp_indices_ix2
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Scan using o_test_temp_indices_ix2 on o_test_temp_indices
+(1 row)
 
 SELECT * FROM o_test_temp_indices ORDER BY val_3;
  val_1 | val_2 | val_3 
@@ -343,11 +339,10 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_temp_indices ORDER BY val_2;
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_temp_indices
-   Forward index scan of: o_test_temp_indices_ix1
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Scan using o_test_temp_indices_ix1 on o_test_temp_indices
+(1 row)
 
 SELECT * FROM o_test_temp_indices ORDER BY val_2;
  val_1 | val_2 | val_3 
@@ -361,11 +356,10 @@ SELECT * FROM o_test_temp_indices ORDER BY val_2;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_temp_indices ORDER BY val_3;
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_temp_indices
-   Forward index scan of: o_test_temp_indices_ix2
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Index Scan using o_test_temp_indices_ix2 on o_test_temp_indices
+(1 row)
 
 SELECT * FROM o_test_temp_indices ORDER BY val_3;
  val_1 | val_2 | val_3 

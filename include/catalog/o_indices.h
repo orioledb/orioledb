@@ -54,6 +54,13 @@ typedef struct
 	List	   *predicate;		/* list of Expr */
 	char	   *predicate_str;
 	List	   *expressions;	/* list of Expr */
+
+	/*
+	 * duplicated non-pkey fields, elements: lists of 2 elements: (fieldnum,
+	 * original fieldnum) primary index cannot have duplicate fields in
+	 * postgres
+	 */
+	List	   *duplicates;
 	MemoryContext index_mctx;
 } OIndex;
 

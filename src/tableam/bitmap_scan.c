@@ -205,8 +205,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	o_btree_load_shmem(&indexDescr->desc);
 	do
 	{
-		tuple = o_iterate_index(indexDescr, &ostate, bitmap_state->csn,
-								NULL, mcxt, NULL);
+		tuple = o_iterate_index(indexDescr, &ostate, NULL, mcxt, NULL);
 
 		if (!O_TUPLE_IS_NULL(tuple))
 		{

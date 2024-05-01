@@ -154,8 +154,7 @@ is_in_indexes_rebuild(void)
 void
 assign_new_oids(OTable *oTable, Relation rel)
 {
-	Oid			heap_relid,
-				toast_relid;
+	Oid			toast_relid;
 	ReindexParams params;
 
 	CheckTableForSerializableConflictIn(rel);
@@ -171,14 +170,41 @@ assign_new_oids(OTable *oTable, Relation rel)
 		table_close(toastrel, NoLock);
 	}
 
-	heap_relid = RelationGetRelid(rel);
-
 	PG_TRY();
 	{
+		List	   *indexIds;
+		char		persistence;
+		ListCell   *indexId;
+
 		in_indexes_rebuild = true;
 		params.options = 0;
 		params.tablespaceOid = InvalidOid;
-		reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, &params);
+
+		/* not using simple reindex_relation here anymore, */
+		/* because we hold a lock on relation already */
+		indexIds = RelationGetIndexList(rel);
+
+		persistence = rel->rd_rel->relpersistence;
+
+		/* Reindex all the indexes. */
+		foreach(indexId, indexIds)
+		{
+			Oid			indexOid = lfirst_oid(indexId);
+			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
+
+			RelationSetNewRelfilenode(iRel, persistence);
+			index_close(iRel, AccessExclusiveLock);
+		}
+
+		/*
+		 * If the relation has a secondary toast rel, reindex that too while
+		 * we still hold the lock on the main table.
+		 */
+		if (OidIsValid(toast_relid))
+		{
+			params.options &= ~(REINDEXOPT_MISSING_OK);
+			reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
+		}
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}
 	PG_CATCH();
@@ -219,94 +245,28 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 }
 
 static void
-o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
-						  Node *whereClause)
+o_validate_index_elements(OIndexType type, List *expressions, List *predicate)
 {
-	ListCell   *field_cell;
-
-	if (whereClause)
-		o_validate_funcexpr(whereClause, " are supported in "
-							"orioledb index predicate");
-
-	foreach(field_cell, index_elems)
-	{
-		OTableField *field;
-		IndexElem  *ielem = castNode(IndexElem, lfirst(field_cell));
-
-		if (!ielem->expr)
-		{
-			int			attnum = o_table_fieldnum(o_table, ielem->name);
-
-			if (attnum == o_table->nfields)
-			{
-				elog(ERROR, "indexed field %s is not found in orioledb table",
-					 ielem->name);
-			}
-			field = &o_table->fields[attnum];
-
-			if (type == oIndexPrimary && !field->notnull)
-			{
-				elog(ERROR, "primary key should include only NOT NULL columns, "
-					 "but column %s is nullable", ielem->name);
-			}
-
-			if (type_is_collatable(field->typid))
-			{
-				if (!OidIsValid(field->collation))
-					ereport(ERROR,
-							(errcode(ERRCODE_INDETERMINATE_COLLATION),
-							 errmsg("could not determine which collation to use for index expression"),
-							 errhint("Use the COLLATE clause to set the collation explicitly.")));
-			}
-			else
-			{
-				if (OidIsValid(field->collation))
-					ereport(ERROR,
-							(errcode(ERRCODE_DATATYPE_MISMATCH),
-							 errmsg("collations are not supported by type %s",
-									format_type_be(field->typid))));
-			}
-		}
-		else
-		{
-			o_validate_funcexpr(ielem->expr, " are supported in "
-								"orioledb index expressions");
-		}
-	}
+	o_validate_funcexpr((Node *) predicate, " are supported in "
+						"orioledb index predicate");
+	o_validate_funcexpr((Node *) expressions, " are supported in "
+						"orioledb index expressions");
 }
 
 void
-o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
-						ODefineIndexContext **arg)
+o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table)
 {
 	int			nattrs;
-	ORelOids	oids;
 	OIndexType	ix_type;
-	static ODefineIndexContext context;
-	OTable	   *o_table;
-	bool		reuse = OidIsValid(IndexStmtGetOldNode(stmt));
 
-	ORelOidsSetFromRel(oids, rel);
-	*arg = &context;
+	if (indexInfo && indexInfo->ii_Concurrent)
+		elog(ERROR, "concurrent indexes are not supported.");
 
-	context.oldNode = IndexStmtGetOldNode(stmt);
+	if (index->rd_index->indisexclusion)
+		elog(ERROR, "exclusion indices are not supported.");
 
-	if (!reuse)
+	if (o_table == NULL)
 	{
-		if (strcmp(stmt->accessMethod, "btree") != 0)
-			ereport(ERROR, errmsg("'%s' access method is not supported", stmt->accessMethod),
-					errhint("Only 'btree' access method supported now "
-							"for indices on orioledb tables."));
-
-		if (stmt->concurrent)
-			elog(ERROR, "concurrent indexes are not supported.");
-
-		if (stmt->tableSpace != NULL)
-			elog(ERROR, "tablespaces aren't supported");
-
-		if (stmt->excludeOpNames)
-			elog(ERROR, "exclusion indices are not supported.");
-
 		o_table = o_tables_get(oids);
 		if (o_table == NULL)
 		{
@@ -314,67 +274,51 @@ o_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
 				 (unsigned) oids.datoid, (unsigned) oids.reloid,
 				 (unsigned) oids.relnode);
 		}
-
-		/* check index type */
-		if (stmt->primary)
-			ix_type = oIndexPrimary;
-		else if (stmt->unique)
-			ix_type = oIndexUnique;
-		else
-			ix_type = oIndexRegular;
-
-		/* check index fields number */
-		nattrs = list_length(stmt->indexParams);
-		if (ix_type == oIndexPrimary && !skip_build)
-		{
-			if (o_table->nindices > 0)
-			{
-				int			nattrs_max = 0,
-							ix;
-
-				if (o_table->has_primary)
-					elog(ERROR, "table already has primary index");
-
-				for (ix = 0; ix < o_table->nindices; ix++)
-					nattrs_max = Max(nattrs_max, o_table->indices[ix].nfields);
-
-				if (nattrs_max + nattrs > INDEX_MAX_KEYS)
-				{
-					elog(ERROR, "too many fields in the primary index for exiting indices");
-				}
-			}
-		}
-		else
-		{
-			if (o_table->nindices > 0 &&
-				o_table->indices[0].type != oIndexRegular &&
-				nattrs + o_table->indices[0].nfields > INDEX_MAX_KEYS)
-			{
-				elog(ERROR, "too many fields in the index");
-			}
-		}
-
-		if (stmt->idxname == NULL)
-		{
-			List	   *allIndexParams;
-			List	   *indexColNames;
-
-			allIndexParams = list_concat_copy(stmt->indexParams,
-											  stmt->indexIncludingParams);
-			indexColNames = ChooseIndexColumnNames(allIndexParams);
-
-			stmt->idxname = ChooseIndexName(RelationGetRelationName(rel),
-											RelationGetNamespace(rel),
-											indexColNames,
-											stmt->excludeOpNames,
-											stmt->primary,
-											stmt->isconstraint);
-		}
-
-		/* check index fields */
-		o_validate_index_elements(o_table, ix_type,
-								  stmt->indexParams, stmt->whereClause);
 	}
+
+	/* check index type */
+	if (index->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (index->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else
+		ix_type = oIndexRegular;
+
+	/* check index fields number */
+	nattrs = index->rd_index->indnatts;
+	if (ix_type == oIndexPrimary)
+	{
+		if (o_table->nindices > 0)
+		{
+			int			nattrs_max = 0,
+						ix;
+
+			if (o_table->has_primary)
+				elog(ERROR, "table already has primary index");
+
+			for (ix = 0; ix < o_table->nindices; ix++)
+				nattrs_max = Max(nattrs_max, o_table->indices[ix].nfields);
+
+			if (nattrs_max + nattrs > INDEX_MAX_KEYS)
+			{
+				elog(ERROR, "too many fields in the primary index for exiting indices");
+			}
+		}
+	}
+	else
+	{
+		if (o_table->nindices > 0 &&
+			o_table->indices[0].type != oIndexRegular &&
+			nattrs + o_table->indices[0].nfields > INDEX_MAX_KEYS)
+		{
+			elog(ERROR, "too many fields in the index");
+		}
+	}
+
+	/* check index fields */
+	o_validate_index_elements(ix_type,
+							  RelationGetIndexExpressions(index),
+							  RelationGetIndexPredicate(index));
 }
 
 void
@@ -420,37 +364,31 @@ index_build_params(OTableIndex *index)
  * complete.  Also checkpoint numer in tree headers is valid.
  */
 void
-o_define_index(Relation rel, Oid indoid, bool reindex,
-			   bool skip_constraint_checks, bool skip_build,
-			   ODefineIndexContext *context)
+o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
+			   OIndexNumber old_ix_num, IndexBuildResult *result)
 {
-	Relation	index_rel;
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
 	OTable	   *o_table;
 	OIndexNumber ix_num;
-	OTableIndex *index;
+	OTableIndex *table_index;
 	OTableDescr *old_descr = NULL,
 			   *descr = NULL;
-	bool		reuse = false;
+	bool		reuse_relnode = old_ix_num != InvalidIndexNumber;
 	bool		is_build = false;
 	ORelOids	oids;
 	OIndexType	ix_type;
-	OCompress	compress = InvalidOCompress;
 	int16		indnatts;
 	int16		indnkeyatts;
+	OCompress	compress = InvalidOCompress;
 	OBTOptions *options;
 
-	if (!OidIsValid(indoid))
-		return;
+	if (OidIsValid(indoid))
+		index = index_open(indoid, AccessShareLock);
 
-	ORelOidsSetFromRel(oids, rel);
+	ORelOidsSetFromRel(oids, heap);
 
-	index_rel = index_open(indoid, AccessShareLock);
-	if (context)
-		reuse = OidIsValid(context->oldNode);
-
-	options = (OBTOptions *) index_rel->rd_options;
+	options = (OBTOptions *) index->rd_options;
 
 	if (options)
 	{
@@ -464,17 +402,18 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 		}
 	}
 
-	if (index_rel->rd_index->indisprimary)
+	if (index->rd_index->indisprimary)
 		ix_type = oIndexPrimary;
-	else if (index_rel->rd_index->indisunique)
+	else if (index->rd_index->indisunique)
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
 
-	indnatts = index_rel->rd_index->indnatts;
-	indnkeyatts = index_rel->rd_index->indnkeyatts;
+	indnatts = index->rd_index->indnatts;
+	indnkeyatts = index->rd_index->indnkeyatts;
 
-	index_close(index_rel, AccessShareLock);
+	if (OidIsValid(indoid))
+		index_close(index, AccessShareLock);
 
 	old_o_table = o_tables_get(oids);
 	if (old_o_table == NULL)
@@ -485,10 +424,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 	}
 	o_table = old_o_table;
 
-	if (!reuse && skip_build)
-		return;
-
-	if (!reuse)
+	if (!reuse_relnode)
 	{
 		if (reindex)
 		{
@@ -497,7 +433,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			ix_num = InvalidIndexNumber;
 			for (i = 0; i < o_table->nindices; i++)
 			{
-				if (o_table->indices[i].oids.reloid == indoid)
+				if (o_table->indices[i].oids.reloid == index->rd_rel->oid)
 					ix_num = i;
 			}
 			reindex = ix_num != InvalidIndexNumber &&
@@ -506,12 +442,12 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 		if (reindex)
 		{
-			o_index_drop(rel, ix_num);
+			o_index_drop(heap, ix_num);
 
 			if (ix_type == oIndexPrimary)
 			{
 				o_table_free(old_o_table);
-				ORelOidsSetFromRel(oids, rel);
+				ORelOidsSetFromRel(oids, heap);
 				old_o_table = o_tables_get(oids);
 				if (old_o_table == NULL)
 				{
@@ -539,7 +475,7 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			{
 				new_o_table = o_tables_get(oids);
 				o_table = new_o_table;
-				assign_new_oids(new_o_table, rel);
+				assign_new_oids(new_o_table, heap);
 				oids = new_o_table->oids;
 				o_table->has_primary = true;
 				o_table->primary_init_nfields = o_table->nfields;
@@ -561,76 +497,60 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 			}
 			o_table->nindices++;
 
-			index = &o_table->indices[ix_num];
+			table_index = &o_table->indices[ix_num];
 
-			memset(index, 0, sizeof(OTableIndex));
+			memset(table_index, 0, sizeof(OTableIndex));
 
-			index->type = ix_type;
-			index->nfields = indnatts;
-			index->nkeyfields = indnkeyatts;
+			table_index->type = ix_type;
+			table_index->nfields = indnatts;
+			table_index->nkeyfields = indnkeyatts;
 
 			if (OCompressIsValid(compress))
-				index->compress = compress;
+				table_index->compress = compress;
 			else if (ix_type == oIndexPrimary)
-				index->compress = o_table->primary_compress;
+				table_index->compress = o_table->primary_compress;
 			else
-				index->compress = o_table->default_compress;
+				table_index->compress = o_table->default_compress;
 		}
 		else
 		{
 			is_build = true;
+			table_index = &o_table->indices[ix_num];
 		}
 	}
 	else
 	{
-		int			i;
-
-		ix_num = InvalidIndexNumber;
-		for (i = 0; i < o_table->nindices; i++)
-		{
-			if (o_table->indices[i].oids.relnode == context->oldNode)
-				ix_num = i;
-		}
-		Assert(ix_num != InvalidIndexNumber);
+		ix_num = old_ix_num;
+		table_index = &o_table->indices[ix_num];
 	}
 
-	index_rel = index_open(indoid, AccessShareLock);
-	index = &o_table->indices[ix_num];
-	if (!reuse)
-		memcpy(&index->name, &index_rel->rd_rel->relname,
+	if (!reuse_relnode)
+		memcpy(&table_index->name, &index->rd_rel->relname,
 			   sizeof(NameData));
-	index->oids.relnode = index_rel->rd_rel->relfilenode;
+	table_index->oids.relnode = index->rd_rel->relfilenode;
 
 	/* fill index fields */
-	if (!reuse)
+	if (!reuse_relnode)
 	{
-		index->type = ix_type;
-		index->nulls_not_distinct = index_rel->rd_index->indnullsnotdistinct;
-		o_table_fill_index(o_table, ix_num, index_rel);
+		table_index->nulls_not_distinct = index->rd_index->indnullsnotdistinct;
+		o_table_fill_index(o_table, ix_num, index);
 	}
 
-	index_close(index_rel, AccessShareLock);
+	table_index->oids.datoid = MyDatabaseId;
+	table_index->oids.reloid = index->rd_rel->oid;
 
-	index->oids.datoid = MyDatabaseId;
-	index->oids.reloid = indoid;
-
-	is_build = is_build && !skip_build;
-
-	if (!reuse && is_build)
+	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);
 	else
 		o_tables_table_meta_lock(o_table);
 
 	o_opclass_cache_add_table(o_table);
-	custom_types_add_all(o_table, index);
-	if (!reuse && index->type == oIndexPrimary)
+	custom_types_add_all(o_table, table_index);
+	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
-		CommitSeqNo csn;
-		OXid		oxid;
-
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
-		fill_current_oxid_csn(&oxid, &csn);
+
 		recreate_o_table(old_o_table, o_table);
 	}
 	else
@@ -640,53 +560,53 @@ o_define_index(Relation rel, Oid indoid, bool reindex,
 
 		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_update(o_table, oxid, csn);
-		if (!reuse)
-			add_undo_create_relnode(o_table->oids, &index->oids, 1);
+		if (!reuse_relnode)
+			add_undo_create_relnode(o_table->oids, &table_index->oids, 1);
 		recreate_table_descr_by_oids(oids);
 	}
 
 	descr = o_fetch_table_descr(o_table->oids);
 
-	if (!reuse && is_build)
+	if (!reuse_relnode && is_build)
 	{
-		if (index->type == oIndexPrimary)
+		if (table_index->type == oIndexPrimary)
 			rebuild_indices_insert_placeholders(descr);
 		else
-			o_insert_shared_root_placeholder(index->oids.datoid,
-											 index->oids.relnode);
+			o_insert_shared_root_placeholder(table_index->oids.datoid,
+											 table_index->oids.relnode);
 	}
 
 	if (reindex)
 	{
-		o_invalidate_oids(index->oids);
-		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
+		o_invalidate_oids(table_index->oids);
+		o_add_invalidate_undo_item(table_index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 
-	if (!reuse && is_build)
+	if (!reuse_relnode && is_build)
 	{
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		if (STOPEVENTS_ENABLED())
 		{
 			Jsonb	   *params;
 
-			params = index_build_params(index);
+			params = index_build_params(table_index);
 			STOPEVENT(STOPEVENT_BUILD_INDEX_PLACEHOLDER_INSERTED, params);
 		}
 
-		if (index->type == oIndexPrimary)
+		if (table_index->type == oIndexPrimary)
 		{
 			Assert(old_o_table);
-			rebuild_indices(old_o_table, old_descr, o_table, descr, false);
+			rebuild_indices(old_o_table, old_descr, o_table, descr, false, result);
 		}
 		else
 		{
 			Assert(!is_recovery_in_progress());
-			build_secondary_index(o_table, descr, ix_num, false);
+			build_secondary_index(o_table, descr, ix_num, false, result);
 		}
 	}
 	else
 	{
-		o_tables_table_meta_unlock(o_table, (index->type == oIndexPrimary) ?
+		o_tables_table_meta_unlock(o_table, (table_index->type == oIndexPrimary) ?
 								   old_o_table->oids.relnode :
 								   InvalidOid);
 	}
@@ -1406,7 +1326,8 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, Par
 
 void
 build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
-					  bool in_dedicated_recovery_worker)
+					  bool in_dedicated_recovery_worker,
+					  IndexBuildResult *result)
 {
 	Tuplesortstate **sortstates;
 	Relation	tableRelation,
@@ -1504,7 +1425,12 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 	o_tables_table_meta_unlock(o_table, InvalidOid);
 
-	if (!is_recovery_in_progress())
+	if (result)
+	{
+		result->heap_tuples = heap_tuples;
+		result->index_tuples = index_tuples[0];
+	}
+	else if (!is_recovery_in_progress())
 	{
 		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
 		indexRelation = index_open(o_table->indices[ix_num].oids.reloid,
@@ -1690,7 +1616,8 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 void
 rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				OTable *o_table, OTableDescr *descr,
-				bool in_dedicated_recovery_worker)
+				bool in_dedicated_recovery_worker,
+				IndexBuildResult *result)
 {
 	Tuplesortstate **sortstates;
 	int			i;
@@ -1843,14 +1770,22 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 		for (i = PrimaryIndexNumber; i < descr->nIndices; i++)
 		{
-			OTableIndex *table_index = &o_table->indices[i];
-			Relation	indexRelation;
+			if (i == 0 && result)
+			{
+				result->heap_tuples = heap_tuples;
+				result->index_tuples = index_tuples[0];
+			}
+			else
+			{
+				OTableIndex *table_index = &o_table->indices[i];
+				Relation	indexRelation;
 
-			indexRelation = index_open(table_index->oids.reloid,
-									   AccessExclusiveLock);
+				indexRelation = index_open(table_index->oids.reloid,
+										   AccessExclusiveLock);
 
-			index_update_stats(indexRelation, false, index_tuples[i]);
-			index_close(indexRelation, AccessExclusiveLock);
+				index_update_stats(indexRelation, false, index_tuples[i]);
+				index_close(indexRelation, AccessExclusiveLock);
+			}
 		}
 
 		/* Make the updated catalog row versions visible */
@@ -1887,7 +1822,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
-	rebuild_indices(old_o_table, old_descr, o_table, descr, false);
+	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
 
 }
 

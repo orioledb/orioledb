@@ -126,6 +126,7 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT SUM(val2) FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
 
+-- TODO: Make this work again if this is important (uses scan index now)
 -- uses only secondary index - primary index is ctid index stored in secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)

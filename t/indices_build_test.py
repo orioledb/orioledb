@@ -267,7 +267,7 @@ class IndicesBuildTest(BaseTest):
 	def check_used_index(self, node, query, expected_index):
 		explain = node.safe_psql("SET enable_seqscan = off; EXPLAIN %s;" %
 		                         query).decode('utf-8')
-		groups = re.search(r'index (?:only )?scan of: (\w+).*', explain)
+		groups = re.search(r'Index (?:Only )?Scan using (\w+).*', explain)
 		if groups:
 			used_index = groups.group(1)
 		else:

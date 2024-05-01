@@ -80,6 +80,32 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
 
+-- Check rewrite with NULL fields
+CREATE INDEX o_ddl_check_ix1 ON o_ddl_check(f2, f3);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C" USING substr(f2::text, 1, 1),
+						ALTER f3 TYPE char USING substr(f3::text, 4, 1);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
+SELECT * FROM o_ddl_check ORDER BY f2, f3;
+COMMIT;
+
+-- Check rewrite of index with multiple columns
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || f2::text,
+						ALTER f3 TYPE int USING substr(f1::text, 4, 1)::int;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
+SELECT * FROM o_ddl_check ORDER BY f2, f3;
+COMMIT;
+
+ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || f2::text,
+						ALTER f3 TYPE int;
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+TABLE o_ddl_check;
+
 CREATE TABLE o_test_alter_change_byval (
     val_1 int
 ) USING orioledb;

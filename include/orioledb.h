@@ -370,9 +370,12 @@ typedef struct OTableDescr OTableDescr;
 typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
-extern void orioledb_setup_ddl_hooks(void);
 extern UndoLocation saved_undo_location[(int) UndoLogsCount];
 extern List *drop_index_list;
+extern List *reindex_list;
+
+extern void orioledb_setup_ddl_hooks(void);
+extern void o_rewrite_cleanup(void);
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;
