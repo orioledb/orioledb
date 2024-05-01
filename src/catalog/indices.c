@@ -523,6 +523,9 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		ix_num = old_ix_num;
 		table_index = &o_table->indices[ix_num];
 	}
+	o_table->indices = (OTableIndex *)
+		repalloc(o_table->indices, sizeof(OTableIndex) *
+					(o_table->nindices + 1));
 
 	if (!reuse_relnode)
 		memcpy(&table_index->name, &index->rd_rel->relname,

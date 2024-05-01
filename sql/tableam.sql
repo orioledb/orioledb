@@ -1,21 +1,4 @@
-CREATE SCHEMA tableam;
-SET SESSION search_path = 'tableam';
 CREATE EXTENSION orioledb;
-
-SELECT orioledb_version();
-
-SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
-
-CREATE VIEW db_o_tables AS (SELECT c.relname, ot.description
-FROM orioledb_table ot JOIN
-     pg_database db ON db.oid = ot.datoid JOIN
-     pg_class c ON c.oid = ot.reloid
-WHERE db.datname = current_database());
-CREATE VIEW db_o_indices AS (SELECT regexp_replace(c.relname, 'pg_toast_\d+', 'pg_toast_NNN') relname, oi.name, oi.description
-FROM orioledb_index oi JOIN
-     pg_database db ON db.oid = oi.datoid JOIN
-     pg_class c ON c.oid = oi.index_reloid
-WHERE db.datname = current_database());
 
 -- index on empty table test
 CREATE TABLE o_tableam1
@@ -24,26 +7,19 @@ CREATE TABLE o_tableam1
 	value text
 ) USING orioledb;
 
--- not supported
-CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
-CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
-ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
-
-SELECT orioledb_tbl_indices('o_tableam1'::regclass);
-
--- supported
-ALTER TABLE o_tableam1 OWNER TO current_user;
-CREATE UNIQUE INDEX o_tableam1_ix1 ON o_tableam1 (key);
-CREATE INDEX o_tableam1_ix2 on o_tableam1 (value);
+CREATE UNIQUE INDEX o_tableam1_ix1 ON o_tableam1 USING orioledb_btree (key);
+CREATE INDEX o_tableam1_ix2 on o_tableam1 USING orioledb_btree (value);
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
 ANALYZE o_tableam1;
+SELECT orioledb_tbl_structure('o_tableam1'::regclass);
 
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1;
 SELECT * FROM o_tableam1;
 SET enable_seqscan = off;
+SET log_error_verbosity = 'verbose';
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
 SELECT * FROM o_tableam1 WHERE key = 5;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 ORDER BY key DESC;
@@ -53,18 +29,11 @@ SELECT * FROM o_tableam1 WHERE value = '5text';
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
 SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
 RESET enable_seqscan;
+RESET log_error_verbosity;
 
 TRUNCATE o_tableam1;
 INSERT INTO o_tableam1 (SELECT id, id || 'text' FROM generate_series(11, 20) as id);
 SELECT * FROM o_tableam1;
-
-CREATE TABLE IF NOT EXISTS o_tableam1_like
-(LIKE o_tableam1 INCLUDING INDEXES INCLUDING CONSTRAINTS) USING orioledb;
-
-INSERT INTO o_tableam1_like (SELECT id, id || 'text' FROM generate_series(1, 20) as id);
-ANALYZE o_tableam1_like;
-SELECT * FROM o_tableam1_like;
-DROP TABLE o_tableam1_like;
 
 DROP TABLE o_tableam1;
 
