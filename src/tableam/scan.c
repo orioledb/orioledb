@@ -212,107 +212,107 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 {
 	bool		result = true;
 
-	if (rte->rtekind == RTE_RELATION &&
-		(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
-	{
-		Relation	relation = relation_open(rte->relid, NoLock);
+	// if (rte->rtekind == RTE_RELATION &&
+	// 	(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
+	// {
+	// 	Relation	relation = relation_open(rte->relid, NoLock);
 
-		if (is_orioledb_rel(relation))
-		{
-			ListCell   *lc;
-			int			i;
-			int			nfields;
-			ORelOids	oids;
-			OTable	   *o_table;
+	// 	if (is_orioledb_rel(relation))
+	// 	{
+	// 		ListCell   *lc;
+	// 		int			i;
+	// 		int			nfields;
+	// 		ORelOids	oids;
+	// 		OTable	   *o_table;
 
-			ORelOidsSetFromRel(oids, relation);
-			o_table = o_tables_get(oids);
+	// 		ORelOidsSetFromRel(oids, relation);
+	// 		o_table = o_tables_get(oids);
 
-			Assert(o_table);
+	// 		Assert(o_table);
 
-			if (o_table->has_primary)
-			{
-				/*
-				 * Additional pkey fields are added to index target list so
-				 * that the index only scan is selected
-				 */
-				nfields = o_table->indices[PrimaryIndexNumber].nfields;
+	// 		if (o_table->has_primary)
+	// 		{
+	// 			/*
+	// 			 * Additional pkey fields are added to index target list so
+	// 			 * that the index only scan is selected
+	// 			 */
+	// 			nfields = o_table->indices[PrimaryIndexNumber].nfields;
 
-				for (i = 0; i < nfields; i++)
-				{
-					OTableIndexField *pk_field;
+	// 			for (i = 0; i < nfields; i++)
+	// 			{
+	// 				OTableIndexField *pk_field;
 
-					pk_field = &o_table->indices[PrimaryIndexNumber].fields[i];
+	// 				pk_field = &o_table->indices[PrimaryIndexNumber].fields[i];
 
-					foreach(lc, rel->indexlist)
-					{
-						IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
-						int			col;
-						bool		member = false;
+	// 				foreach(lc, rel->indexlist)
+	// 				{
+	// 					IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
+	// 					int			col;
+	// 					bool		member = false;
 
-						for (col = 0; col < index->ncolumns; col++)
-						{
-							if (pk_field->attnum + 1 == index->indexkeys[col])
-							{
-								member = true;
-								break;
-							}
-						}
+	// 					for (col = 0; col < index->ncolumns; col++)
+	// 					{
+	// 						if (pk_field->attnum + 1 == index->indexkeys[col])
+	// 						{
+	// 							member = true;
+	// 							break;
+	// 						}
+	// 					}
 
-						if (!member)
-						{
-							Expr	   *indexvar;
-							const FormData_pg_attribute *att_tup;
+	// 					if (!member)
+	// 					{
+	// 						Expr	   *indexvar;
+	// 						const FormData_pg_attribute *att_tup;
 
-							index->ncolumns++;
-							index->indexkeys = (int *)
-								repalloc(index->indexkeys,
-										 sizeof(int) * index->ncolumns);
-							index->indexkeys[index->ncolumns - 1] =
-								pk_field->attnum + 1;
-							index->canreturn = (bool *)
-								repalloc(index->canreturn,
-										 sizeof(bool) * index->ncolumns);
-							index->canreturn[index->ncolumns - 1] = true;
+	// 						index->ncolumns++;
+	// 						index->indexkeys = (int *)
+	// 							repalloc(index->indexkeys,
+	// 									 sizeof(int) * index->ncolumns);
+	// 						index->indexkeys[index->ncolumns - 1] =
+	// 							pk_field->attnum + 1;
+	// 						index->canreturn = (bool *)
+	// 							repalloc(index->canreturn,
+	// 									 sizeof(bool) * index->ncolumns);
+	// 						index->canreturn[index->ncolumns - 1] = true;
 
-							att_tup = TupleDescAttr(relation->rd_att,
-													pk_field->attnum);
+	// 						att_tup = TupleDescAttr(relation->rd_att,
+	// 												pk_field->attnum);
 
-							indexvar = (Expr *) makeVar(index->rel->relid,
-														pk_field->attnum + 1,
-														att_tup->atttypid,
-														att_tup->atttypmod,
-														att_tup->attcollation,
-														0);
+	// 						indexvar = (Expr *) makeVar(index->rel->relid,
+	// 													pk_field->attnum + 1,
+	// 													att_tup->atttypid,
+	// 													att_tup->atttypmod,
+	// 													att_tup->attcollation,
+	// 													0);
 
-							index->indextlist =
-								lappend(index->indextlist,
-										makeTargetEntry(indexvar,
-														index->ncolumns,
-														NULL,
-														false));
-						}
-					}
-				}
+	// 						index->indextlist =
+	// 							lappend(index->indextlist,
+	// 									makeTargetEntry(indexvar,
+	// 													index->ncolumns,
+	// 													NULL,
+	// 													false));
+	// 					}
+	// 				}
+	// 			}
 
-				foreach(lc, rel->indexlist)
-				{
-					IndexClauseSet rclauseset;
-					IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
+	// 			foreach(lc, rel->indexlist)
+	// 			{
+	// 				IndexClauseSet rclauseset;
+	// 				IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
 
-					if (index->indpred != NIL && !index->predOK)
-						continue;
+	// 				if (index->indpred != NIL && !index->predOK)
+	// 					continue;
 
-					MemSet(&rclauseset, 0, sizeof(rclauseset));
-					match_restriction_clauses_to_index(root, index, &rclauseset);
+	// 				MemSet(&rclauseset, 0, sizeof(rclauseset));
+	// 				match_restriction_clauses_to_index(root, index, &rclauseset);
 
-					result = !rclauseset.nonempty;
-				}
-			}
-			o_table_free(o_table);
-		}
-		relation_close(relation, NoLock);
-	}
+	// 				result = !rclauseset.nonempty;
+	// 			}
+	// 		}
+	// 		o_table_free(o_table);
+	// 	}
+	// 	relation_close(relation, NoLock);
+	// }
 
 	return result;
 }
@@ -324,85 +324,85 @@ void
 orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 							   Index rti, RangeTblEntry *rte)
 {
-	if (rte->rtekind == RTE_RELATION &&
-		(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
-	{
-		Relation	relation = table_open(rte->relid, NoLock);
+	// if (rte->rtekind == RTE_RELATION &&
+	// 	(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
+	// {
+	// 	Relation	relation = table_open(rte->relid, NoLock);
 
-		/* orioledb relation */
-		if (is_orioledb_rel(relation))
-		{
-			OTableDescr *descr;
-			bool		seq_path_needed;
-			int			i;
+	// 	/* orioledb relation */
+	// 	if (is_orioledb_rel(relation))
+	// 	{
+	// 		OTableDescr *descr;
+	// 		bool		seq_path_needed;
+	// 		int			i;
 
-			descr = relation_get_descr(relation);
-			Assert(descr != NULL);
+	// 		descr = relation_get_descr(relation);
+	// 		Assert(descr != NULL);
 
-			/*
-			 * transform all postgres scans to custom scans
-			 */
-			seq_path_needed = list_length(rel->pathlist) == 1 ||
-				descr->indices[PrimaryIndexNumber]->primaryIsCtid;
-			i = 0;
-			while (i < list_length(rel->pathlist))
-			{
-				Path	   *path = list_nth(rel->pathlist, i);
+	// 		/*
+	// 		 * transform all postgres scans to custom scans
+	// 		 */
+	// 		seq_path_needed = list_length(rel->pathlist) == 1 ||
+	// 			descr->indices[PrimaryIndexNumber]->primaryIsCtid;
+	// 		i = 0;
+	// 		while (i < list_length(rel->pathlist))
+	// 		{
+	// 			Path	   *path = list_nth(rel->pathlist, i);
 
-				if (IsA(path, IndexPath) ||
-					IsA(path, Path) ||
-					IsA(path, BitmapHeapPath))
-				{
-					if (IsA(path, Path) && path->pathtype == T_SampleScan)
-					{
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("orioledb table \"%s\" does not "
-										"support TABLESAMPLE",
-										RelationGetRelationName(relation))),
-								errdetail("Sample scan is not supported for "
-										  "OrioleDB tables yet. Please send a "
-										  "bug report."));
-					}
+	// 			if (IsA(path, IndexPath) ||
+	// 				IsA(path, Path) ||
+	// 				IsA(path, BitmapHeapPath))
+	// 			{
+	// 				if (IsA(path, Path) && path->pathtype == T_SampleScan)
+	// 				{
+	// 					ereport(ERROR,
+	// 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	// 							 errmsg("orioledb table \"%s\" does not "
+	// 									"support TABLESAMPLE",
+	// 									RelationGetRelationName(relation))),
+	// 							errdetail("Sample scan is not supported for "
+	// 									  "OrioleDB tables yet. Please send a "
+	// 									  "bug report."));
+	// 				}
 
-					if (!IsA(path, Path))
-						rel->pathlist = list_delete_nth_cell(rel->pathlist, i);
-					else
-						i++;
-					if (seq_path_needed || !IsA(path, Path))
-					{
-						Path	   *custom_path = transform_path(path, descr);
+	// 				if (!IsA(path, Path))
+	// 					rel->pathlist = list_delete_nth_cell(rel->pathlist, i);
+	// 				else
+	// 					i++;
+	// 				if (seq_path_needed || !IsA(path, Path))
+	// 				{
+	// 					Path	   *custom_path = transform_path(path, descr);
 
-						rel->pathlist = list_insert_nth(rel->pathlist, i,
-														custom_path);
-						i++;
-					}
-				}
-				else
-				{
-					i++;
-				}
-			}
+	// 					rel->pathlist = list_insert_nth(rel->pathlist, i,
+	// 													custom_path);
+	// 					i++;
+	// 				}
+	// 			}
+	// 			else
+	// 			{
+	// 				i++;
+	// 			}
+	// 		}
 
-			i = 0;
-			while (i < list_length(rel->partial_pathlist))
-			{
-				Path	   *path = list_nth(rel->partial_pathlist, i);
+	// 		i = 0;
+	// 		while (i < list_length(rel->partial_pathlist))
+	// 		{
+	// 			Path	   *path = list_nth(rel->partial_pathlist, i);
 
-				/*
-				 * TODO: Remove when parallel bitmap heap scan will be
-				 * implemented
-				 */
-				if (!IsA(path, Path))
-					rel->partial_pathlist = list_delete_nth_cell(rel->partial_pathlist, i);
-				else
-					i++;
-			}
-		}
+	// 			/*
+	// 			 * TODO: Remove when parallel bitmap heap scan will be
+	// 			 * implemented
+	// 			 */
+	// 			if (!IsA(path, Path))
+	// 				rel->partial_pathlist = list_delete_nth_cell(rel->partial_pathlist, i);
+	// 			else
+	// 				i++;
+	// 		}
+	// 	}
 
-		if (relation != NULL)
-			table_close(relation, NoLock);
-	}
+	// 	if (relation != NULL)
+	// 		table_close(relation, NoLock);
+	// }
 
 	/*
 	 * else it is not relation: nothing to do
