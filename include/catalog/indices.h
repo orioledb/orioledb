@@ -34,11 +34,6 @@ typedef struct BgWorkerHandle
 	uint64		generation;
 } BgWorkerHandle;
 
-typedef struct ODefineIndexContext
-{
-	Oid			oldNode;
-} ODefineIndexContext;
-
 /*
  * Status record for spooling/sorting phase.
  */
@@ -126,12 +121,8 @@ typedef struct oIdxShared
 extern oIdxShared *recovery_oidxshared;
 extern Sharedsort *recovery_sharedsort;
 
-extern void o_define_index_validate(Relation rel, IndexStmt *stmt,
-									bool skip_build,
-									ODefineIndexContext **arg);
-extern void o_define_index(Relation rel, Oid indoid, bool reindex,
-						   bool skip_constraint_checks, bool skip_build,
-						   ODefineIndexContext *context);
+extern void o_define_index_validate(Relation heap, Relation index);
+extern void o_define_index(Relation heap, Relation index);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,

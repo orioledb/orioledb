@@ -1236,25 +1236,6 @@ orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 	elog(ERROR, "Not implemented");
 }
 
-static bool
-orioledb_define_index_validate(Relation rel, IndexStmt *stmt, bool skip_build,
-							   void **arg)
-{
-	o_define_index_validate(rel, stmt, skip_build,
-							(ODefineIndexContext **) arg);
-	return true;
-}
-
-static bool
-orioledb_define_index(Relation rel, Oid indoid, bool reindex,
-					  bool skip_constraint_checks, bool skip_build, void *arg)
-{
-	if (!is_in_indexes_rebuild())
-		o_define_index(rel, indoid, reindex, skip_constraint_checks,
-					   skip_build, (ODefineIndexContext *) arg);
-	return true;
-}
-
 void
 orioledb_free_rd_amcache(Relation rel)
 {
@@ -1830,8 +1811,6 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_sample_next_block = orioledb_scan_sample_next_block,
 	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
 	.tuple_is_current = orioledb_tuple_is_current,
-	.define_index_validate = orioledb_define_index_validate,
-	.define_index = orioledb_define_index,
 	.analyze_table = orioledb_analyze_table,
 	.reloptions = orioledb_reloptions,
 	.indexoptions = orioledb_indexoptions
