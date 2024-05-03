@@ -18,6 +18,7 @@
 #include "catalog/indices.h"
 #include "catalog/o_tables.h"
 #include "tuple/slot.h"
+#include "utils/compress.h"
 #include "utils/planner.h"
 
 #include "access/amapi.h"
@@ -491,23 +492,57 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	*indexPages = costs.numIndexPages;
 }
 
+static void
+validate_index_compress(const char *value)
+{
+	if (value)
+		validate_compress(o_parse_compress(value), "Index");
+}
+
 bytea *
 orioledb_amoptions(Datum reloptions, bool validate)
 {
-	elog(WARNING, "orioledb_amoptions");
+	static bool relopts_set = false;
+	static local_relopts relopts = {0};
 
-	static const relopt_parse_elt tab[] = {
-		{"fillfactor", RELOPT_TYPE_INT, offsetof(BTOptions, fillfactor)},
-		{"vacuum_cleanup_index_scale_factor", RELOPT_TYPE_REAL,
-		offsetof(BTOptions, vacuum_cleanup_index_scale_factor)},
-		{"deduplicate_items", RELOPT_TYPE_BOOL,
-		offsetof(BTOptions, deduplicate_items)}
-	};
+	if (!relopts_set)
+	{
+		MemoryContext oldcxt;
 
-	return (bytea *) build_reloptions(reloptions, validate,
-									  RELOPT_KIND_BTREE,
-									  sizeof(BTOptions),
-									  tab, lengthof(tab));
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(OBTOptions));
+
+		/* Options from default_reloptions */
+		add_local_int_reloption(&relopts, "fillfactor",
+								"Packs btree index pages only to "
+								"this percentage",
+								BTREE_DEFAULT_FILLFACTOR, BTREE_MIN_FILLFACTOR,
+								100,
+								offsetof(OBTOptions, bt_options) +
+								offsetof(BTOptions, fillfactor));
+		add_local_real_reloption(&relopts, "vacuum_cleanup_index_scale_factor",
+								 "Deprecated B-Tree parameter.",
+								 -1, 0.0, 1e10,
+								 offsetof(OBTOptions, bt_options) +
+								 offsetof(BTOptions,
+										  vacuum_cleanup_index_scale_factor));
+		add_local_bool_reloption(&relopts, "deduplicate_items",
+								 "Enables \"deduplicate items\" feature for "
+								 "this btree index",
+								 true,
+								 offsetof(OBTOptions, bt_options) +
+								 offsetof(BTOptions, deduplicate_items));
+
+		/* Options for orioledb tables */
+		add_local_string_reloption(&relopts, "compress",
+								   "Compression level of a particular index",
+								   NULL, validate_index_compress, NULL,
+								   offsetof(OBTOptions, compress_offset));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
 }
 
 bool
@@ -618,6 +653,8 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 										"orioledb_cs plan data",
 										ALLOCSET_DEFAULT_SIZES);
 
+	scan->xs_hitupdesc = descr->tupdesc;
+
 	return scan;
 }
 
@@ -676,8 +713,8 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	if (!o_scan->curKeyRangeIsLoaded)
 		o_scan->curKeyRange.empty = true;
 
-	tuple = o_index_scan_getnext(descr, o_scan, &tupleCsn,
-									scan_primary, tupleCxt, &hint);
+	tuple = o_index_scan_getnext(descr, o_scan, &tupleCsn, scan_primary,
+								 tupleCxt, &hint);
 
 	if (O_TUPLE_IS_NULL(tuple))
 	{

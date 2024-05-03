@@ -1433,18 +1433,6 @@ orioledb_analyze_table(Relation relation,
 }
 
 static void
-validate_compress(OCompress compress, char *prefix)
-{
-	OCompress	max_compress = o_compress_max_lvl();
-
-	if (compress < -1 || compress > max_compress)
-	{
-		elog(ERROR, "%s compression level must be between %d and %d",
-			 prefix, -1, max_compress);
-	}
-}
-
-static void
 validate_default_compress(const char *value)
 {
 	if (value)
@@ -1463,13 +1451,6 @@ validate_toast_compress(const char *value)
 {
 	if (value)
 		validate_compress(o_parse_compress(value), "TOAST");
-}
-
-static void
-validate_index_compress(const char *value)
-{
-	if (value)
-		validate_compress(o_parse_compress(value), "Index");
 }
 
 /* values from StdRdOptIndexCleanup */
@@ -1718,56 +1699,6 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
 }
 
-/*
- * Option parser for anything that uses StdRdOptions.
- */
-static bytea *
-orioledb_indexoptions(amoptions_function amoptions, char relkind,
-					  Datum reloptions, bool validate)
-{
-	static bool relopts_set = false;
-	static local_relopts relopts = {0};
-
-	if (!relopts_set)
-	{
-		MemoryContext oldcxt;
-
-		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-		init_local_reloptions(&relopts, sizeof(OBTOptions));
-
-		/* Options from default_reloptions */
-		add_local_int_reloption(&relopts, "fillfactor",
-								"Packs btree index pages only to "
-								"this percentage",
-								BTREE_DEFAULT_FILLFACTOR, BTREE_MIN_FILLFACTOR,
-								100,
-								offsetof(OBTOptions, bt_options) +
-								offsetof(BTOptions, fillfactor));
-		add_local_real_reloption(&relopts, "vacuum_cleanup_index_scale_factor",
-								 "Deprecated B-Tree parameter.",
-								 -1, 0.0, 1e10,
-								 offsetof(OBTOptions, bt_options) +
-								 offsetof(BTOptions,
-										  vacuum_cleanup_index_scale_factor));
-		add_local_bool_reloption(&relopts, "deduplicate_items",
-								 "Enables \"deduplicate items\" feature for "
-								 "this btree index",
-								 true,
-								 offsetof(OBTOptions, bt_options) +
-								 offsetof(BTOptions, deduplicate_items));
-
-		/* Options for orioledb tables */
-		add_local_string_reloption(&relopts, "compress",
-								   "Compression level of a particular index",
-								   NULL, validate_index_compress, NULL,
-								   offsetof(OBTOptions, compress_offset));
-		MemoryContextSwitchTo(oldcxt);
-		relopts_set = true;
-	}
-
-	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
-}
-
 static bytea *
 orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 {
@@ -1869,8 +1800,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
 	.tuple_is_current = orioledb_tuple_is_current,
 	.analyze_table = orioledb_analyze_table,
-	.reloptions = orioledb_reloptions,
-	.indexoptions = orioledb_indexoptions
+	.reloptions = orioledb_reloptions
 };
 
 bool

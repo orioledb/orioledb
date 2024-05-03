@@ -714,7 +714,7 @@ o_exec_custom_scan(CustomScanState *node)
 			}
 		}
 
-		if (ix_plan_state->ostate.scandesc == NULL)
+		if (ix_plan_state->ostate.scandesc.opaque == NULL)
 		{
 			Relation	rel = node->ss.ss_currentRelation;
 			OTableDescr *descr = relation_get_descr(rel);
@@ -777,7 +777,7 @@ o_rescan_custom_scan(CustomScanState *node)
 		}
 		else if (ix_plan_state->ostate.iterator != NULL)
 		{
-			btendscan(ix_plan_state->ostate.scandesc);
+			btendscan(&ix_plan_state->ostate.scandesc);
 			btree_iterator_free(ix_plan_state->ostate.iterator);
 		}
 
@@ -786,7 +786,7 @@ o_rescan_custom_scan(CustomScanState *node)
 		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
 		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
 		ix_plan_state->ostate.iterator = NULL;
-		ix_plan_state->ostate.scandesc = NULL;
+		ix_plan_state->ostate.scandesc.opaque = NULL;
 	}
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
