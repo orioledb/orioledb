@@ -34,30 +34,33 @@ init_index_scan_state(OScanState *ostate, Relation index,
 	IndexRuntimeKeyInfo *runtimeKeys = NULL;
 	int			numRuntimeKeys = 0;
 	BTScanOpaque so;
+	IndexScanDesc scan;
 
 	ExecIndexBuildScanKeys(NULL, index, ostate->indexQuals, false, &scanKeys,
 						   &numScanKeys, &runtimeKeys, &numRuntimeKeys, NULL,
 						   NULL);
 
-	ostate->scandesc = btbeginscan(index, numScanKeys, 0);
-	so = (BTScanOpaque) ostate->scandesc->opaque;
+	scan = btbeginscan(index, numScanKeys, 0);
+	ostate->scandesc = *scan;
+	pfree(scan);
+	scan = &ostate->scandesc;
+	so = (BTScanOpaque) scan->opaque;
 
-	ostate->scandesc->parallel_scan = NULL;
-	ostate->scandesc->xs_temp_snap = false;
+	scan->parallel_scan = NULL;
+	scan->xs_temp_snap = false;
 
 	if (numRuntimeKeys != 0)
 		ExecIndexEvalRuntimeKeys(econtext, runtimeKeys, numRuntimeKeys);
-	btrescan(ostate->scandesc, scanKeys, numScanKeys, NULL, 0);
+	btrescan(scan, scanKeys, numScanKeys, NULL, 0);
 	if (so->numArrayKeys && !BTScanPosIsValid(so->currPos))
 	{
 		/* punt if we have any unsatisfiable array keys */
 		if (so->numArrayKeys > 0)
 		{
-			_bt_start_array_keys(ostate->scandesc,
-								 ForwardScanDirection);
+			_bt_start_array_keys(scan, ForwardScanDirection);
 		}
 	}
-	_bt_preprocess_keys(ostate->scandesc);
+	_bt_preprocess_keys(scan);
 }
 
 static bool
@@ -164,16 +167,16 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range)
 
 static bool
 switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
-					 CommitSeqNo csn, MemoryContext tupleCxt)
+					 MemoryContext tupleCxt)
 {
 	OBTreeKeyBound *bound;
-	BTScanOpaque so = (BTScanOpaque) ostate->scandesc->opaque;
+	IndexScanDesc scan = &ostate->scandesc;
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	MemoryContext oldcontext;
 	bool		result = true;
 
 	if (ostate->curKeyRangeIsLoaded)
-		result = _bt_advance_array_keys(ostate->scandesc,
-										ForwardScanDirection);
+		result = _bt_advance_array_keys(scan, ForwardScanDirection);
 	ostate->curKeyRangeIsLoaded = true;
 
 	ostate->exact = result;
@@ -200,7 +203,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 				 ? &ostate->curKeyRange.low
 				 : &ostate->curKeyRange.high);
 		ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
-												   BTreeKeyBound, csn,
+												   BTreeKeyBound, ostate->csn,
 												   ostate->scanDir);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
 	}
@@ -212,15 +215,15 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 
 OTuple
 o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
-				CommitSeqNo csn, CommitSeqNo *tupleCsn,
-				MemoryContext tupleCxt, BTreeLocationHint *hint)
+				CommitSeqNo *tupleCsn, MemoryContext tupleCxt,
+				BTreeLocationHint *hint)
 {
 	OTuple		tup = {0};
 	bool		tup_fetched = false;
 
 	if (ostate->exact || ostate->curKeyRange.empty)
 	{
-		if (!switch_to_next_range(indexDescr, ostate, csn, tupleCxt))
+		if (!switch_to_next_range(indexDescr, ostate, tupleCxt))
 		{
 			O_TUPLE_SET_NULL(tup);
 			return tup;
@@ -239,8 +242,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 
 			tup = o_btree_find_tuple_by_key(&indexDescr->desc,
 											&ostate->curKeyRange.low,
-											BTreeKeyBound, csn, tupleCsn,
-											tupleCxt, hint);
+											BTreeKeyBound, ostate->csn,
+											tupleCsn, tupleCxt, hint);
 			if (!O_TUPLE_IS_NULL(tup))
 				tup_fetched = true;
 		}
@@ -273,7 +276,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		}
 
 		if (!tup_fetched &&
-			!switch_to_next_range(indexDescr, ostate, csn, tupleCxt))
+			!switch_to_next_range(indexDescr, ostate, tupleCxt))
 		{
 			O_TUPLE_SET_NULL(tup);
 			tup_fetched = true;
@@ -283,7 +286,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 }
 
 OTuple
-o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
+o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 					 CommitSeqNo *tupleCsn, bool scan_primary,
 					 MemoryContext tupleCxt, BTreeLocationHint *hint)
 {
@@ -293,7 +296,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
 	o_btree_load_shmem(&id->desc);
 	while (true)
 	{
-		tup = o_iterate_index(id, ostate, csn, tupleCsn, tupleCxt,
+		tup = o_iterate_index(id, ostate, tupleCsn, tupleCxt,
 							  ostate->ixNum == PrimaryIndexNumber ? hint : NULL);
 
 		if (!scan_primary || O_TUPLE_IS_NULL(tup))
@@ -321,7 +324,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
 			o_btree_load_shmem(&primary->desc);
 			ptup = o_btree_find_tuple_by_key(&primary->desc,
 											 (Pointer) &bound, BTreeKeyBound,
-											 csn, tupleCsn, tupleCxt, hint);
+											 ostate->csn, tupleCsn,
+											 tupleCxt, hint);
 			pfree(tup.data);
 			tup = ptup;
 
@@ -340,7 +344,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate, CommitSeqNo csn,
 
 /* fetches next tuple for oIterateDirectModify */
 TupleTableSlot *
-o_exec_fetch(OScanState *ostate, ScanState *ss, CommitSeqNo csn)
+o_exec_fetch(OScanState *ostate, ScanState *ss)
 {
 	OTableDescr *descr = relation_get_descr(ss->ss_currentRelation);
 	TupleTableSlot *slot;
@@ -357,7 +361,7 @@ o_exec_fetch(OScanState *ostate, ScanState *ss, CommitSeqNo csn)
 		if (!ostate->curKeyRangeIsLoaded)
 			ostate->curKeyRange.empty = true;
 
-		tuple = o_index_scan_getnext(descr, ostate, csn, &tupleCsn,
+		tuple = o_index_scan_getnext(descr, ostate, &tupleCsn,
 									 scan_primary, tupleCxt, &hint);
 
 		if (O_TUPLE_IS_NULL(tuple))

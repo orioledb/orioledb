@@ -728,7 +728,7 @@ o_exec_custom_scan(CustomScanState *node)
 			index_close(index, AccessShareLock);
 		}
 
-		slot = o_exec_fetch(&ix_plan_state->ostate, &node->ss, csn);
+		slot = o_exec_fetch(&ix_plan_state->ostate, &node->ss);
 	}
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
