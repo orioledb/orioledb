@@ -17,6 +17,7 @@
 
 #include "catalog/indices.h"
 #include "catalog/o_tables.h"
+#include "tuple/slot.h"
 #include "utils/planner.h"
 
 #include "access/amapi.h"
@@ -25,6 +26,7 @@
 #include "nodes/pathnodes.h"
 #include "optimizer/optimizer.h"
 #include "parser/parsetree.h"
+#include "tableam/index_scan.h"
 #include "utils/index_selfuncs.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
@@ -568,7 +570,54 @@ IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	elog(WARNING, "orioledb_ambeginscan");
-	IndexScanDesc scan = {0};
+	OScanState	*o_scan;
+	IndexScanDesc scan;
+	ORelOids	oids;
+	OIndexType	ix_type;
+	OIndexDescr *index_descr;
+	OTableDescr *descr;
+	OIndexNumber ix_num;
+
+	o_scan = (OScanState *) palloc0(sizeof(OScanState));
+
+	/* get the scan */
+	scan = btbeginscan(rel, nkeys, norderbys);
+	o_scan->scandesc = *scan;
+	pfree(scan);
+
+	scan = &o_scan->scandesc;
+
+	scan->parallel_scan = NULL;
+	scan->xs_temp_snap = false;
+	scan->xs_want_rowid = true;
+
+	oids.datoid = MyDatabaseId;
+	oids.reloid = rel->rd_rel->oid;
+	oids.relnode = rel->rd_rel->relfilenode;
+	if (rel->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (rel->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else
+		ix_type = oIndexRegular;
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	Assert(index_descr != NULL);
+	descr = o_fetch_table_descr(index_descr->tableOids);
+	Assert(descr != NULL);
+	/* Find ix_num */
+	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+	{
+		index_descr = descr->indices[ix_num];
+		if (index_descr->oids.reloid == rel->rd_rel->oid)
+			break;
+	}
+	Assert(ix_num < descr->nIndices);
+	o_scan->ixNum = ix_num;
+
+	o_scan->cxt = AllocSetContextCreate(CurrentMemoryContext,
+										"orioledb_cs plan data",
+										ALLOCSET_DEFAULT_SIZES);
+
 	return scan;
 }
 
@@ -577,14 +626,78 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
 	elog(WARNING, "orioledb_amrescan");
+	OScanState	*o_scan = (OScanState *) scan;
+
+	MemoryContextReset(o_scan->cxt);
+	btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 }
 
 bool
 orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 {
 	elog(WARNING, "orioledb_amgettuple");
+	bool		res;
+	OScanState	*o_scan = (OScanState *) scan;
 
-	return true;
+	o_scan->scanDir = dir;
+	o_scan->csn = scan->xs_snapshot->snapshotcsn;
+
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+
+	/* btree indexes are never lossy */
+	scan->xs_recheck = false;
+
+	/*
+	 * If we have any array keys, initialize them during first call for a
+	 * scan.  We can't do this in btrescan because we don't know the scan
+	 * direction at that time.
+	 */
+	if (so->numArrayKeys && !BTScanPosIsValid(so->currPos))
+	{
+		/* punt if we have any unsatisfiable array keys */
+		if (so->numArrayKeys < 0)
+			return false;
+
+		_bt_start_array_keys(scan, dir);
+	}
+	if (!BTScanPosIsValid(so->currPos))
+	{
+		_bt_preprocess_keys(scan);
+	}
+
+	OTableDescr *descr = relation_get_descr(scan->heapRelation);
+	OTuple		tuple;
+	bool		scan_primary = o_scan->ixNum == PrimaryIndexNumber || !o_scan->onlyCurIx;
+	MemoryContext tupleCxt = CurrentMemoryContext;
+
+	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+	CommitSeqNo tupleCsn;
+
+	if (!o_scan->curKeyRangeIsLoaded)
+		o_scan->curKeyRange.empty = true;
+
+	tuple = o_index_scan_getnext(descr, o_scan, &tupleCsn,
+									scan_primary, tupleCxt, &hint);
+
+	if (O_TUPLE_IS_NULL(tuple))
+	{
+		scan->xs_rowid.isnull = true;
+		res = false;
+	}
+	else
+	{
+		TupleTableSlot *slot;
+
+		slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+		tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn,
+								 scan_primary ? PrimaryIndexNumber : o_scan->ixNum,
+								 true, &hint);
+		scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
+
+		res = true;
+	}
+
+	return res;
 }
 
 int64
@@ -597,7 +710,11 @@ orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 void
 orioledb_amendscan(IndexScanDesc scan)
 {
+	OScanState	*o_scan = (OScanState *) scan;
+
 	elog(WARNING, "orioledb_amendscan");
+
+	MemoryContextDelete(o_scan->cxt);
 }
 
 void

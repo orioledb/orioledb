@@ -97,9 +97,17 @@ orioledb_slot_callbacks(Relation relation)
 }
 
 /* ------------------------------------------------------------------------
- * Index Scan Callbacks for heap AM
+ * Index Scan Callbacks for orioledb AM
  * ------------------------------------------------------------------------
  */
+
+/*
+ * Descriptor for fetches from orioledb table.
+ */
+typedef struct OrioledbIndexFetchData
+{
+	IndexFetchTableData xs_base;	/* AM independent part of the descriptor */
+} OrioledbIndexFetchData;
 
 /*
  * Returns NULL to prevent index scan from inside of standard_planner
@@ -108,30 +116,79 @@ orioledb_slot_callbacks(Relation relation)
 static IndexFetchTableData *
 orioledb_index_fetch_begin(Relation rel)
 {
-	return NULL;
+	elog(WARNING, "orioledb_index_fetch_begin");
+	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
+
+	o_scan->xs_base.rel = rel;
+
+	return &o_scan->xs_base;
 }
 
 static void
 orioledb_index_fetch_reset(IndexFetchTableData *scan)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	elog(WARNING, "orioledb_index_fetch_reset");
+	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 }
 
 static void
 orioledb_index_fetch_end(IndexFetchTableData *scan)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	elog(WARNING, "orioledb_index_fetch_end");
+	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
+
+	orioledb_index_fetch_reset(scan);
+
+	pfree(o_scan);
 }
 
 static bool
 orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
-						   ItemPointer tid,
+						   Datum tupleid,
 						   Snapshot snapshot,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
-	return false;
+	elog(WARNING, "orioledb_index_fetch_tuple");
+	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
+	OTableSlot *o_slot = (OTableSlot *) slot;
+	OTableDescr *descr;
+	OBTreeKeyBound pkey;
+	OTuple		tuple;
+	BTreeLocationHint hint;
+	CommitSeqNo tupleCsn;
+	CommitSeqNo csn;
+	uint32		version;
+	bool		deleted;
+
+	Assert(slot->tts_ops == &TTSOpsOrioleDB);
+
+	*call_again = false;
+
+	descr = relation_get_descr(scan->rel);
+	Assert(descr != NULL);
+
+	if (GET_PRIMARY(descr)->primaryIsCtid)
+		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
+						&csn, &version);
+
+	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+										 (Pointer) &pkey,
+										 BTreeKeyBound,
+										 csn, &tupleCsn,
+										 slot->tts_mcxt,
+										 &hint);
+
+	if (O_TUPLE_IS_NULL(tuple))
+		return false;
+
+	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn,
+							 PrimaryIndexNumber, true, &hint);
+	slot->tts_tableOid = descr->oids.reloid;
+
+	return true;
 }
 
 
