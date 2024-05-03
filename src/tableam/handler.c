@@ -127,7 +127,6 @@ orioledb_index_fetch_begin(Relation rel)
 static void
 orioledb_index_fetch_reset(IndexFetchTableData *scan)
 {
-	/* OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan; */
 }
 
 static void

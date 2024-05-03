@@ -352,7 +352,7 @@ o_exec_qual(ExprContext *econtext, ExprState *qual, TupleTableSlot *slot)
 }
 
 /*
- * executes a project for a slot fetched by o_exec_fetch function if it
+ * executes a project for a slot fetched by o_exec_bitmap_fetch function if it
  * needed.
  */
 TupleTableSlot *
