@@ -97,3 +97,15 @@ o_compress_max_lvl()
 {
 	return ZSTD_maxCLevel();
 }
+
+void
+validate_compress(OCompress compress, char *prefix)
+{
+	OCompress	max_compress = o_compress_max_lvl();
+
+	if (compress < -1 || compress > max_compress)
+	{
+		elog(ERROR, "%s compression level must be between %d and %d",
+			 prefix, -1, max_compress);
+	}
+}
