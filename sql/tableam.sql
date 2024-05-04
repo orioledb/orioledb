@@ -107,9 +107,9 @@ CREATE INDEX o_test_partial_ix7 ON o_test_partial USING orioledb_btree (key)
 CREATE INDEX o_test_partial_ix7 ON o_test_partial USING orioledb_btree (key)
 	WHERE plpgsql_func_test(-key) * 2 = 0;
 CREATE INDEX o_test_partial_ix7 ON o_test_partial USING orioledb_btree (key)
-	WHERE COALESCE(NULL, NULL, (plpgsql_func_test(-key) > 0)) != NULL;
+	WHERE COALESCE(NULL, NULL, (plpgsql_func_test(-key) > 0)) IS NOT NULL;
 CREATE INDEX o_test_partial_ix7 ON o_test_partial USING orioledb_btree (key)
-	WHERE GREATEST(NULL, NULL, (ABS(plpgsql_func_test(-key)) > 0)) != NULL;
+	WHERE GREATEST(NULL, NULL, (ABS(plpgsql_func_test(-key)) > 0)) IS NOT NULL;
 CREATE INDEX o_test_partial_ix8 ON o_test_partial USING orioledb_btree (value)
 	WHERE value > '5';
 CREATE INDEX o_test_partial_ix9 ON o_test_partial USING orioledb_btree (value)
