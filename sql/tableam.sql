@@ -71,9 +71,12 @@ DROP TABLE o_tableam1;
 -- partial index test
 CREATE TABLE o_test_partial
 (
-	key int8 NOT NULL PRIMARY KEY,
+	key int8 NOT NULL,
 	value text
 ) USING orioledb;
+
+-- CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
+-- ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
 
 CREATE FUNCTION plpgsql_func_test(in bigint) RETURNS int AS $$
 BEGIN
@@ -126,7 +129,7 @@ SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE value BETWEEN '6' AND '9';
 SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
-\q
+
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
 RESET enable_seqscan;
@@ -149,6 +152,7 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
 DROP TABLE o_test_partial;
 
+\q
 -- expression index test
 CREATE TABLE o_test_expression
 (

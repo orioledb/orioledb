@@ -642,8 +642,9 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	/* Find ix_num */
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
-		index_descr = descr->indices[ix_num];
-		if (index_descr->oids.reloid == rel->rd_rel->oid)
+		OIndexDescr *index;
+		index = descr->indices[ix_num];
+		if (index->oids.reloid == rel->rd_rel->oid)
 			break;
 	}
 	Assert(ix_num < descr->nIndices);
@@ -652,8 +653,6 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	o_scan->cxt = AllocSetContextCreate(CurrentMemoryContext,
 										"orioledb_cs plan data",
 										ALLOCSET_DEFAULT_SIZES);
-
-	scan->xs_hitupdesc = descr->tupdesc;
 
 	return scan;
 }
@@ -675,11 +674,17 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	elog(WARNING, "orioledb_amgettuple");
 	bool		res;
 	OScanState	*o_scan = (OScanState *) scan;
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+	OTableDescr *descr;
+	OTuple		tuple;
+	bool		scan_primary;
+	MemoryContext tupleCxt = CurrentMemoryContext;
+	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+	CommitSeqNo tupleCsn;
+	OIndexNumber ix_num;
 
 	o_scan->scanDir = dir;
 	o_scan->csn = scan->xs_snapshot->snapshotcsn;
-
-	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 
 	/* btree indexes are never lossy */
 	scan->xs_recheck = false;
@@ -702,13 +707,8 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 		_bt_preprocess_keys(scan);
 	}
 
-	OTableDescr *descr = relation_get_descr(scan->heapRelation);
-	OTuple		tuple;
-	bool		scan_primary = o_scan->ixNum == PrimaryIndexNumber || !o_scan->onlyCurIx;
-	MemoryContext tupleCxt = CurrentMemoryContext;
-
-	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
-	CommitSeqNo tupleCsn;
+	descr = relation_get_descr(scan->heapRelation);
+	scan_primary = o_scan->ixNum == PrimaryIndexNumber || !scan->xs_want_itup;
 
 	if (!o_scan->curKeyRangeIsLoaded)
 		o_scan->curKeyRange.empty = true;
@@ -725,11 +725,26 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	{
 		TupleTableSlot *slot;
 
-		slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
-		tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn,
-								 scan_primary ? PrimaryIndexNumber : o_scan->ixNum,
+		ix_num = scan_primary ? PrimaryIndexNumber : o_scan->ixNum;
+		if (scan_primary)
+			scan->xs_hitupdesc = descr->tupdesc;
+		else
+		{
+			OIndexDescr *index_descr = descr->indices[ix_num];
+			int nfields = index_descr->nFields - index_descr->nPrimaryFields;
+			int			i;
+
+			scan->xs_hitupdesc = CreateTemplateTupleDesc(nfields);
+			for (i = 0; i < nfields; i++)
+			{
+				TupleDescCopyEntry(scan->xs_hitupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+			}
+		}
+		slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
+		tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, ix_num,
 								 true, &hint);
 		scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
+		scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 
 		res = true;
 	}
