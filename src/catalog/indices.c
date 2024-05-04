@@ -220,12 +220,12 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 
 static void
 o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
-						  Node *whereClause)
+						  List *whereClause)
 {
 	ListCell   *field_cell;
 
 	if (whereClause)
-		o_validate_funcexpr(whereClause, " are supported in "
+		o_validate_funcexpr((Node *) whereClause, " are supported in "
 							"orioledb index predicate");
 
 	foreach(field_cell, index_elems)
@@ -343,7 +343,8 @@ o_define_index_validate(Relation heap, Relation index)
 
 	/* check index fields */
 	o_validate_index_elements(o_table, ix_type,
-							  index->rd_indexprs, (Node *) index->rd_indpred);
+							  RelationGetIndexExpressions(index),
+							  RelationGetIndexPredicate(index));
 }
 
 void

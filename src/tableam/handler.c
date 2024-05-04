@@ -116,7 +116,6 @@ typedef struct OrioledbIndexFetchData
 static IndexFetchTableData *
 orioledb_index_fetch_begin(Relation rel)
 {
-	elog(WARNING, "orioledb_index_fetch_begin");
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
 
 	o_scan->xs_base.rel = rel;
@@ -127,14 +126,12 @@ orioledb_index_fetch_begin(Relation rel)
 static void
 orioledb_index_fetch_reset(IndexFetchTableData *scan)
 {
-	elog(WARNING, "orioledb_index_fetch_reset");
 	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 }
 
 static void
 orioledb_index_fetch_end(IndexFetchTableData *scan)
 {
-	elog(WARNING, "orioledb_index_fetch_end");
 	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 
 	orioledb_index_fetch_reset(scan);
@@ -149,7 +146,6 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
 {
-	elog(WARNING, "orioledb_index_fetch_tuple");
 	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 	OTableSlot *o_slot = (OTableSlot *) slot;
 	OTableDescr *descr;
