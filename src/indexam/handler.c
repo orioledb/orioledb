@@ -1207,6 +1207,9 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
+		index = descr->indices[ix_num];
+		if (index->oids.reloid == rel->rd_rel->oid)
+		OIndexDescr *index;
 
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
