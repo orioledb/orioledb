@@ -65,6 +65,8 @@
 #include "utils/sampling.h"
 #include "utils/syscache.h"
 
+// #define LOG_AM_CALLS true // TODO: Remove
+
 typedef struct OScanDescData
 {
 	TableScanDescData rs_base;	/* AM independent part of the descriptor */
@@ -92,6 +94,10 @@ static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
 static const TupleTableSlotOps *
 orioledb_slot_callbacks(Relation relation)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	/* TODO: Create own TupleTableSlotOps */
 	return &TTSOpsOrioleDB;
 }
@@ -118,6 +124,10 @@ orioledb_index_fetch_begin(Relation rel)
 {
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
 
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	o_scan->xs_base.rel = rel;
 
 	return &o_scan->xs_base;
@@ -126,12 +136,20 @@ orioledb_index_fetch_begin(Relation rel)
 static void
 orioledb_index_fetch_reset(IndexFetchTableData *scan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 }
 
 static void
 orioledb_index_fetch_end(IndexFetchTableData *scan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 
 	orioledb_index_fetch_reset(scan);
@@ -146,6 +164,10 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 	OTableSlot *o_slot = (OTableSlot *) slot;
 	OTableDescr *descr;
@@ -221,6 +243,10 @@ orioledb_fetch_row_version(Relation relation,
 						   Snapshot snapshot,
 						   TupleTableSlot *slot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OBTreeKeyBound pkey;
 	OTableDescr *descr;
 	OTuple		tuple;
@@ -265,6 +291,10 @@ orioledb_fetch_row_version(Relation relation,
 static bool
 orioledb_tuple_tid_valid(TableScanDesc scan, ItemPointer tid)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
 }
@@ -273,6 +303,10 @@ static bool
 orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 								  Snapshot snapshot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OBTreeKeyBound pkey;
 	OTableDescr *descr;
 	OTuple		tuple;
@@ -317,6 +351,10 @@ orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 static RowRefType
 orioledb_get_row_ref_type(Relation rel)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr;
 
 	descr = relation_get_descr(rel);
@@ -341,6 +379,10 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 					  CommandId cid, int options, BulkInsertState bistate,
 					  bool *insert_indexes)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr;
 	CommitSeqNo csn;
 	OXid		oxid;
@@ -362,6 +404,10 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 								   TupleTableSlot *lockedSlot,
 								   TupleTableSlot *tempSlot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	Relation	rel = rinfo->ri_RelationDesc;
 	OTableDescr *descr;
 	OTuple		tup;
@@ -404,6 +450,10 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 					  TM_FailureData *tmfd, bool changingPart,
 					  TupleTableSlot *oldSlot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OModifyCallbackArg marg;
 	OTableModifyResult mres;
 	OBTreeKeyBound pkey;
@@ -490,6 +540,10 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 #endif
 					  TupleTableSlot *oldSlot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableModifyResult mres;
 	OModifyCallbackArg marg;
 	OBTreeKeyBound old_pkey;
@@ -583,6 +637,10 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 					LockWaitPolicy wait_policy, uint8 flags,
 					TM_FailureData *tmfd)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OLockCallbackArg larg;
 	OBTreeModifyResult res;
 	OBTreeKeyBound pkey;
@@ -654,6 +712,10 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 static void
 orioledb_finish_bulk_insert(Relation relation, int options)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	/* Do nothing here */
 }
 
@@ -670,6 +732,10 @@ orioledb_relation_set_new_filenode(Relation rel,
 								   TransactionId *freezeXid,
 								   MultiXactId *minmulti)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	SMgrRelation srel;
 
 	/* TRUNCATE case */
@@ -732,6 +798,10 @@ orioledb_relation_set_new_filenode(Relation rel,
 static void
 orioledb_relation_nontransactional_truncate(Relation rel)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	ORelOids	oids;
 
 	ORelOidsSetFromRel(oids, rel);
@@ -747,6 +817,10 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 static void
 orioledb_relation_copy_data(Relation rel, const RelFileNode *newrnode)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
@@ -760,6 +834,10 @@ orioledb_relation_copy_for_cluster(Relation OldHeap, Relation NewHeap,
 								   double *tups_vacuumed,
 								   double *tups_recently_dead)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
@@ -767,6 +845,10 @@ static bool
 orioledb_scan_analyze_next_block(TableScanDesc scan, BlockNumber blockno,
 								 BufferAccessStrategy bstrategy)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OScanDesc	oscan = (OScanDesc) scan;
 
 	ItemPointerSetBlockNumber(&oscan->iptr, blockno);
@@ -782,6 +864,10 @@ orioledb_scan_analyze_next_tuple(TableScanDesc scan, TransactionId OldestXmin,
 								 double *liverows, double *deadrows,
 								 TupleTableSlot *slot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OScanDesc	oscan = (OScanDesc) scan;
 	OTableDescr *descr;
 	BTreeLocationHint hint;
@@ -828,6 +914,10 @@ orioledb_index_build_range_scan(Relation heapRelation,
 								void *callback_state,
 								TableScanDesc scan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	/*
 	 * used for index creation
 	 */
@@ -841,6 +931,10 @@ orioledb_index_validate_scan(Relation heapRelation,
 							 Snapshot snapshot,
 							 ValidateIndexState *state)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
@@ -853,6 +947,10 @@ orioledb_index_validate_scan(Relation heapRelation,
 static uint64
 orioledb_relation_size(Relation rel, ForkNumber forkNumber)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr;
 
 	descr = relation_get_descr(rel);
@@ -872,12 +970,20 @@ orioledb_relation_size(Relation rel, ForkNumber forkNumber)
 static bool
 orioledb_relation_needs_toast_table(Relation rel)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	return true;
 }
 
 static Oid
 orioledb_relation_toast_am(Relation rel)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	return HEAP_TABLE_AM_OID;
 }
 
@@ -892,6 +998,10 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 						   BlockNumber *pages, double *tuples,
 						   double *allvisfrac)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	BlockNumber curpages;
 	BlockNumber relpages;
 	double		reltuples;
@@ -1001,6 +1111,10 @@ static bool
 orioledb_scan_bitmap_next_block(TableScanDesc scan,
 								TBMIterateResult *tbmres)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
 }
@@ -1010,6 +1124,10 @@ orioledb_scan_bitmap_next_tuple(TableScanDesc scan,
 								TBMIterateResult *tbmres,
 								TupleTableSlot *slot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
 }
@@ -1017,6 +1135,10 @@ orioledb_scan_bitmap_next_tuple(TableScanDesc scan,
 static bool
 orioledb_scan_sample_next_block(TableScanDesc scan, SampleScanState *scanstate)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
 }
@@ -1025,6 +1147,10 @@ static bool
 orioledb_scan_sample_next_tuple(TableScanDesc scan, SampleScanState *scanstate,
 								TupleTableSlot *slot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
 }
@@ -1032,6 +1158,10 @@ orioledb_scan_sample_next_tuple(TableScanDesc scan, SampleScanState *scanstate,
 Size
 orioledb_parallelscan_estimate(Relation rel)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
@@ -1042,6 +1172,10 @@ orioledb_parallelscan_estimate(Relation rel)
 static void
 orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	ParallelOScanDesc poscan = (ParallelOScanDesc) pscan;
 
 	clear_fixed_shmem_key(&poscan->intPage[0].prevHikey);
@@ -1069,6 +1203,10 @@ orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 Size
 orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	ParallelOScanDesc poscan = (ParallelOScanDesc) pscan;
 
 	if (!is_orioledb_rel(rel))
@@ -1083,6 +1221,10 @@ orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 Size
 orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	ParallelOScanDesc poscan = (ParallelOScanDesc) pscan;
 
 	SpinLockInit(&poscan->intpageAccess);
@@ -1099,6 +1241,10 @@ orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan)
 void
 orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
@@ -1113,6 +1259,10 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 				   ParallelTableScanDesc parallel_scan,
 				   uint32 flags)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr;
 	OScanDesc	scan;
 
@@ -1157,6 +1307,10 @@ static void
 orioledb_rescan(TableScanDesc sscan, ScanKey key, bool set_params,
 				bool allow_strat, bool allow_sync, bool allow_pagemode)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr;
 	OScanDesc	scan;
 
@@ -1176,6 +1330,10 @@ orioledb_rescan(TableScanDesc sscan, ScanKey key, bool set_params,
 static void
 orioledb_endscan(TableScanDesc sscan)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OScanDesc	scan = (OScanDesc) sscan;
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
@@ -1225,6 +1383,10 @@ static bool
 orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 					 TupleTableSlot *slot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OScanDesc	scan;
 	OTableDescr *descr;
 	bool		result;
@@ -1262,6 +1424,10 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 					  CommandId cid, int options, BulkInsertState bistate,
 					  bool *insert_indexes)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	int			i;
 
 	for (i = 0; i < ntuples; i++)
@@ -1273,6 +1439,10 @@ static void
 orioledb_get_latest_tid(TableScanDesc sscan,
 						ItemPointer tid)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
@@ -1280,18 +1450,30 @@ static void
 orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 					BufferAccessStrategy bstrategy)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	/* nothing to do */
 }
 
 static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	elog(ERROR, "Not implemented");
 }
 
 void
 orioledb_free_rd_amcache(Relation rel)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	if (rel->rd_amcache)
 		table_descr_dec_refcnt((OTableDescr *) rel->rd_amcache);
 	rel->rd_amcache = NULL;
@@ -1303,6 +1485,10 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 							 double *totalrows,
 							 double *totaldeadrows)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr = relation_get_descr(relation);
 	OIndexDescr *pk = GET_PRIMARY(descr);
 	BTreeSeqScan *scan;
@@ -1419,6 +1605,10 @@ orioledb_analyze_table(Relation relation,
 					   AcquireSampleRowsFunc *func,
 					   BlockNumber *totalpages)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableDescr *descr = relation_get_descr(relation);
 	OIndexDescr *pk = GET_PRIMARY(descr);
 
@@ -1490,6 +1680,10 @@ static relopt_enum_elt_def StdRdOptIndexCleanupValues[] =
 static bytea *
 orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	static bool relopts_set = false;
 	static local_relopts relopts = {0};
 
@@ -1698,6 +1892,10 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 static bytea *
 orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	StdRdOptions *rdopts;
 
 	switch (relkind)
@@ -1726,6 +1924,10 @@ orioledb_reloptions(char relkind, Datum reloptions, bool validate)
 static bool
 orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
 {
+
+#ifdef LOG_AM_CALLS
+	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
+#endif
 	OTableSlot *oslot = (OTableSlot *) slot;
 
 	return COMMITSEQNO_IS_INPROGRESS(oslot->csn);

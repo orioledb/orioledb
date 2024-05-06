@@ -276,7 +276,7 @@ o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
 }
 
 void
-o_define_index_validate(Relation heap, Relation index)
+o_define_index_validate(Relation heap, Relation index, IndexInfo *indexInfo)
 {
 	int			nattrs;
 	ORelOids	oids;
@@ -285,11 +285,8 @@ o_define_index_validate(Relation heap, Relation index)
 
 	ORelOidsSetFromRel(oids, heap);
 
-	// if (stmt->concurrent)
-	// 	elog(ERROR, "concurrent indexes are not supported.");
-
-	// if (stmt->tableSpace != NULL)
-	// 	elog(ERROR, "tablespaces aren't supported");
+	if (indexInfo->ii_Concurrent)
+		elog(ERROR, "concurrent indexes are not supported.");
 
 	if (index->rd_index->indisexclusion)
 		elog(ERROR, "exclusion indices are not supported.");

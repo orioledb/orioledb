@@ -1318,6 +1318,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 {
 	Relation	rel;
 
+	if (false && access != OAT_NAMESPACE_SEARCH && access != OAT_FUNCTION_EXECUTE)
+		elog(WARNING, "OAH: %s %u %u %d",
+			 access == OAT_POST_CREATE ? "OAT_POST_CREATE" :
+			 access == OAT_DROP ? "OAT_DROP" :
+			 access == OAT_POST_ALTER ? "OAT_POST_ALTER" :
+			 access == OAT_NAMESPACE_SEARCH ? "OAT_NAMESPACE_SEARCH" :
+			 access == OAT_FUNCTION_EXECUTE ? "OAT_FUNCTION_EXECUTE" :
+			 access == OAT_TRUNCATE ? "OAT_TRUNCATE" : "WRONG",
+			 classId, objectId, subId);
+
 	if (access == OAT_DROP && classId == RelationRelationId)
 	{
 		ObjectAccessDrop *drop_arg = (ObjectAccessDrop *) arg;

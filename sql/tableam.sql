@@ -27,7 +27,9 @@ CREATE TABLE o_tableam1
 -- not supported
 CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 USING orioledb_btree (key);
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 USING orioledb_btree (value) WITH (compression = on);
-ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
+ALTER TABLE o_tableam1 ADD EXCLUDE USING orioledb_btree (value WITH =);
+-- TODO: Don't forget to make this also not supported
+-- ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
@@ -75,8 +77,10 @@ CREATE TABLE o_test_partial
 	value text
 ) USING orioledb;
 
--- CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
--- ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
+\d+ o_test_partial
+CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
+ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
+\d+ o_test_partial
 
 CREATE FUNCTION plpgsql_func_test(in bigint) RETURNS int AS $$
 BEGIN
