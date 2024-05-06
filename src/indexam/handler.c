@@ -43,8 +43,7 @@
 
 #define DEFAULT_PAGE_CPU_MULTIPLIER 50.0
 
-#define LOG_AM_CALLS true // TODO: Remove
-#undef LOG_AM_CALLS // TODO: Remove
+// #define LOG_AM_CALLS true // TODO: Remove
 
 static IndexBuildResult *orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
 static void orioledb_ambuildempty(Relation index);
