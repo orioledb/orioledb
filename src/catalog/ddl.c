@@ -2602,6 +2602,80 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 										  o_opclass->inputtype,
 										  o_opclass->inputtype);
 	}
+	else if (access == OAT_POST_CREATE && classId == ConstraintRelationId)
+	{
+		HeapTuple	contup;
+		Form_pg_constraint conform;
+
+		CommandCounterIncrement();
+		contup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(objectId));
+		if (!HeapTupleIsValid(contup))
+			elog(ERROR, "cache lookup failed for constraint %u", objectId);
+		conform = (Form_pg_constraint) GETSTRUCT(contup);
+
+		if (conform->contype == CONSTRAINT_PRIMARY && OidIsValid(conform->conindid))
+		{
+			rel = relation_open(conform->conindid, AccessShareLock);
+
+			elog(WARNING, "rel IS %sNULL", rel ? "NOT " : "");
+			if (rel != NULL)
+			{
+				Assert(rel->rd_rel->relkind == RELKIND_INDEX);
+				/*
+				* dropflags == PERFORM_DELETION_OF_RELATION ignored, to not
+				* drop indices when whole table dropped
+				*/
+				Relation	tbl = relation_open(rel->rd_index->indrelid,
+												AccessShareLock);
+				bool		closed = false;
+
+				elog(WARNING, "tbl: %s", tbl->rd_rel->relname.data);
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+					tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+					is_orioledb_rel(tbl))
+				{
+					OIndexNumber ix_num;
+					OTableDescr *descr = relation_get_descr(tbl);
+
+
+					// TODO: Move this to postgres code where it's commented out
+					// If we'll decide to implement default indexam for tableam
+					if (rel->rd_rel->relam != get_index_am_oid("orioledb_btree", false))
+						ereport(ERROR,
+								(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+								errmsg("index \"%s\" is not a orioledb_btree", rel->rd_rel->relname.data)));
+
+					Assert(descr != NULL);
+					if (rel->rd_index->indisprimary) {
+						// NOTE: This will work when ADD PRIMARY KEY will have indexam option to use
+						o_define_index_validate(tbl, rel, NULL);
+						relation_close(rel, AccessShareLock);
+						closed = true;
+						o_define_index(tbl, rel, conform->conindid, InvalidIndexNumber);
+					} else {
+						elog(WARNING, "rel: %s", rel->rd_rel->relname.data);
+						ix_num = o_find_ix_num_by_name(descr,
+													rel->rd_rel->relname.data);
+						elog(WARNING, "ix_num: %d", ix_num);
+						if (ix_num != InvalidIndexNumber)
+						{
+							if (descr->indices[ix_num]->primaryIsCtid)
+								ix_num--;
+							o_define_index_validate(tbl, rel, NULL);
+							relation_close(rel, AccessShareLock);
+							closed = true;
+							o_define_index(tbl, rel, conform->conindid, ix_num);
+						}
+					}
+				}
+				relation_close(tbl, AccessShareLock);
+				if (!closed)
+					relation_close(rel, AccessShareLock);
+			}
+		}
+
+		ReleaseSysCache(contup);
+	}
 
 	if (old_objectaccess_hook)
 		old_objectaccess_hook(access, classId, objectId, subId, arg);

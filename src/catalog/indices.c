@@ -382,6 +382,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	int16		indnkeyatts;
 	OCompress	compress = InvalidOCompress;
 	OBTOptions *options;
+	bool		unique_as_pkey = old_ix_num != InvalidIndexNumber;
+
+	if (OidIsValid(indoid))
+		index = index_open(indoid, AccessShareLock);
 
 	if (OidIsValid(indoid))
 		index = index_open(indoid, AccessShareLock);
@@ -402,12 +406,14 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		}
 	}
 
-	if (index->rd_index->indisprimary)
+	if (index->rd_index->indisprimary || unique_as_pkey)
 		ix_type = oIndexPrimary;
 	else if (index->rd_index->indisunique)
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
+
+	elog(WARNING, "ix_type: %d", ix_type);
 
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
@@ -523,9 +529,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		ix_num = old_ix_num;
 		table_index = &o_table->indices[ix_num];
 	}
-	o_table->indices = (OTableIndex *)
-		repalloc(o_table->indices, sizeof(OTableIndex) *
-					(o_table->nindices + 1));
+	if (!unique_as_pkey)
+		o_table->indices = (OTableIndex *)
+			repalloc(o_table->indices, sizeof(OTableIndex) *
+						(o_table->nindices + 1));
 
 	if (!reuse_relnode)
 		memcpy(&table_index->name, &index->rd_rel->relname,
@@ -553,7 +560,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	{
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
-
 		recreate_o_table(old_o_table, o_table);
 	}
 	else
