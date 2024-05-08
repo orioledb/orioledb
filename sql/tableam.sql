@@ -78,8 +78,8 @@ CREATE TABLE o_test_partial
 	value text
 ) USING orioledb;
 
--- CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
--- ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
+CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
+ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
 
 CREATE FUNCTION plpgsql_func_test(in bigint) RETURNS int AS $$
 BEGIN
@@ -119,13 +119,6 @@ CREATE INDEX o_test_partial_ix9 ON o_test_partial USING orioledb_btree (value)
 	WHERE (value || 'WOW') > '5';
 
 SELECT orioledb_tbl_indices('o_test_partial'::regclass);
-\d+ o_test_partial
-
-CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
-ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
-
-SELECT orioledb_tbl_indices('o_test_partial'::regclass);
-\d+ o_test_partial
 
 INSERT INTO o_test_partial (SELECT id, id || 'text'
 								FROM generate_series(0, 20) as id);
@@ -136,7 +129,7 @@ SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 EXPLAIN (COSTS off) SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 SET enable_seqscan = OFF;
-\q
+
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE value BETWEEN '6' AND '9';
 SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
@@ -276,7 +269,7 @@ DROP TABLE o_test_expression;
 -- create table with primary key
 CREATE TABLE o_tableam3
 (
-  id integer NOT NULL,
+  id integer NOT NULL
 ) USING orioledb;
 
 CREATE UNIQUE INDEX o_tableam3_pkey ON o_tableam3 USING orioledb_btree (id);

@@ -1300,8 +1300,6 @@ custom_types_add_all(OTable *o_table, OTableIndex *o_table_index)
 			typid = o_table->fields[attnum].typid;
 		else
 			typid = o_table_index->exprfields[expr_field++].typid;
-		elog(WARNING, "attnum: %d", attnum);
-		elog(WARNING, "typid: %u", typid);
 		custom_type_add_if_needed(o_table->oids.datoid, typid, cur_lsn);
 	}
 }
