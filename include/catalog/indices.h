@@ -122,7 +122,7 @@ extern oIdxShared *recovery_oidxshared;
 extern Sharedsort *recovery_sharedsort;
 
 extern void o_define_index_validate(Relation heap, Relation index, IndexInfo *indexInfo);
-extern void o_define_index(Relation heap, Relation index);
+extern void o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_num);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,

@@ -141,8 +141,11 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
 
-	o_define_index_validate(heap, index, indexInfo);
-	o_define_index(heap, index);
+	if (!index->rd_index->indisprimary)
+	{
+		o_define_index_validate(heap, index, indexInfo);
+		o_define_index(heap, index, InvalidOid, InvalidIndexNumber);
+	}
 
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
@@ -739,6 +742,8 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 
 	descr = relation_get_descr(scan->heapRelation);
 	scan_primary = o_scan->ixNum == PrimaryIndexNumber || !scan->xs_want_itup;
+
+	elog(WARNING, "scan_primary: %c", scan_primary ? 'Y' : 'N');
 
 	if (!o_scan->curKeyRangeIsLoaded)
 		o_scan->curKeyRange.empty = true;

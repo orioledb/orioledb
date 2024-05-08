@@ -857,6 +857,7 @@ get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 		*typid = att->atttypid;
 	*isnull = slot->tts_isnull[i];
 	value = slot->tts_values[i];
+	elog(WARNING, "get_tbl_att: %d %d '%s' %u %lu", attnum, i, att->attname.data, att->atttypid, value);
 
 	if (!*isnull && att->attlen < 0 && VARATT_IS_EXTENDED(value))
 	{

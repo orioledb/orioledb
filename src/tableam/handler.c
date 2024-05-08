@@ -182,6 +182,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	Assert(slot->tts_ops == &TTSOpsOrioleDB);
 
 	*call_again = false;
+	*all_dead = false;
 
 	descr = relation_get_descr(scan->rel);
 	Assert(descr != NULL);

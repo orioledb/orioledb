@@ -178,7 +178,52 @@ assign_new_oids(OTable *oTable, Relation rel)
 		in_indexes_rebuild = true;
 		params.options = 0;
 		params.tablespaceOid = InvalidOid;
-		reindex_relation(heap_relid, REINDEX_REL_PROCESS_TOAST, &params);
+		{
+			Relation	rel;
+			Oid			toast_relid;
+			List	   *indexIds;
+			char		persistence;
+			ListCell   *indexId;
+			int			i;
+
+			rel = table_open(heap_relid, ShareLock);
+
+			if (rel)
+			{
+				toast_relid = rel->rd_rel->reltoastrelid;
+
+				indexIds = RelationGetIndexList(rel);
+
+				persistence = rel->rd_rel->relpersistence;
+
+				/* Reindex all the indexes. */
+				i = 1;
+				foreach(indexId, indexIds)
+				{
+					Oid			indexOid = lfirst_oid(indexId);
+					Relation	iRel = index_open(indexOid, AccessExclusiveLock);
+
+					RelationSetNewRelfilenode(iRel, persistence);
+					index_close(iRel, AccessExclusiveLock);
+					i++;
+				}
+
+				/*
+				* Close rel, but continue to hold the lock.
+				*/
+				table_close(rel, NoLock);
+
+				/*
+				* If the relation has a secondary toast rel, reindex that too while we
+				* still hold the lock on the main table.
+				*/
+				if (OidIsValid(toast_relid))
+				{
+					params.options &= ~(REINDEXOPT_MISSING_OK);
+					reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
+				}
+			}
+		}
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}
 	PG_CATCH();
@@ -285,7 +330,7 @@ o_define_index_validate(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	ORelOidsSetFromRel(oids, heap);
 
-	if (indexInfo->ii_Concurrent)
+	if (indexInfo && indexInfo->ii_Concurrent)
 		elog(ERROR, "concurrent indexes are not supported.");
 
 	if (index->rd_index->indisexclusion)
@@ -387,7 +432,7 @@ index_build_params(OTableIndex *index)
  * complete.  Also checkpoint numer in tree headers is valid.
  */
 void
-o_define_index(Relation heap, Relation index)
+o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_num)
 {
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
@@ -403,6 +448,10 @@ o_define_index(Relation heap, Relation index)
 	int16		indnkeyatts;
 	OCompress	compress = InvalidOCompress;
 	OBTOptions *options;
+	bool		unique_as_pkey = old_ix_num != InvalidIndexNumber;
+
+	if (OidIsValid(indoid))
+		index = index_open(indoid, AccessShareLock);
 
 	ORelOidsSetFromRel(oids, heap);
 
@@ -420,15 +469,20 @@ o_define_index(Relation heap, Relation index)
 		}
 	}
 
-	if (index->rd_index->indisprimary)
+	if (index->rd_index->indisprimary || unique_as_pkey)
 		ix_type = oIndexPrimary;
 	else if (index->rd_index->indisunique)
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
 
+	elog(WARNING, "ix_type: %d", ix_type);
+
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
+
+	if (OidIsValid(indoid))
+		index_close(index, AccessShareLock);
 
 	old_o_table = o_tables_get(oids);
 	if (old_o_table == NULL)
@@ -462,17 +516,26 @@ o_define_index(Relation heap, Relation index)
 	{
 		ix_num = o_table->nindices;
 	}
-	o_table->indices = (OTableIndex *)
-		repalloc(o_table->indices, sizeof(OTableIndex) *
-					(o_table->nindices + 1));
+	if (!unique_as_pkey)
+		o_table->indices = (OTableIndex *)
+			repalloc(o_table->indices, sizeof(OTableIndex) *
+						(o_table->nindices + 1));
 
 	/* move indices if needed */
 	if (ix_type == oIndexPrimary && o_table->nindices > 0)
 	{
-		memmove(&o_table->indices[1], &o_table->indices[0],
-				o_table->nindices * (sizeof(OTableIndex)));
+		elog(WARNING, "indices[%d].type: %d", old_ix_num, o_table->indices[old_ix_num].type);
+		if (unique_as_pkey && o_table->indices[old_ix_num].type != oIndexPrimary)
+		{
+			memmove(&o_table->indices[1], &o_table->indices[0],
+					old_ix_num * (sizeof(OTableIndex)));
+		}
+		else
+			memmove(&o_table->indices[1], &o_table->indices[0],
+					o_table->nindices * (sizeof(OTableIndex)));
 	}
-	o_table->nindices++;
+	if (!unique_as_pkey)
+		o_table->nindices++;
 
 	table_index = &o_table->indices[ix_num];
 
@@ -489,13 +552,11 @@ o_define_index(Relation heap, Relation index)
 	else
 		table_index->compress = o_table->default_compress;
 
-	table_index = &o_table->indices[ix_num];
 	memcpy(&table_index->name, &index->rd_rel->relname,
 			sizeof(NameData));
 	table_index->oids.relnode = index->rd_rel->relfilenode;
 
 	/* fill index fields */
-	table_index->type = ix_type;
 	table_index->nulls_not_distinct = index->rd_index->indnullsnotdistinct;
 	o_table_fill_index(o_table, ix_num, index);
 
@@ -517,6 +578,7 @@ o_define_index(Relation heap, Relation index)
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 		fill_current_oxid_csn(&oxid, &csn);
+		elog(WARNING, "table_index: '%s'", table_index->name.data);
 		recreate_o_table(old_o_table, o_table);
 	}
 	else
