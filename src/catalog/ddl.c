@@ -2617,7 +2617,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		{
 			rel = relation_open(conform->conindid, AccessShareLock);
 
-			elog(WARNING, "rel IS %sNULL", rel ? "NOT " : "");
 			if (rel != NULL)
 			{
 				Assert(rel->rd_rel->relkind == RELKIND_INDEX);
@@ -2629,7 +2628,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 												AccessShareLock);
 				bool		closed = false;
 
-				elog(WARNING, "tbl: %s", tbl->rd_rel->relname.data);
 				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
 					tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
 					is_orioledb_rel(tbl))
@@ -2653,10 +2651,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						closed = true;
 						o_define_index(tbl, rel, conform->conindid, InvalidIndexNumber);
 					} else {
-						elog(WARNING, "rel: %s", rel->rd_rel->relname.data);
 						ix_num = o_find_ix_num_by_name(descr,
 													rel->rd_rel->relname.data);
-						elog(WARNING, "ix_num: %d", ix_num);
 						if (ix_num != InvalidIndexNumber)
 						{
 							if (descr->indices[ix_num]->primaryIsCtid)

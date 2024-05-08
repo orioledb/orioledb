@@ -245,7 +245,7 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 }
 
 static void
-o_validate_index_elements(OIndexType type, List *expressions, List *predicate)
+o_validate_index_elements(List *expressions, List *predicate)
 {
 	o_validate_funcexpr((Node *) predicate, " are supported in "
 						"orioledb index predicate");
@@ -316,8 +316,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	}
 
 	/* check index fields */
-	o_validate_index_elements(ix_type,
-							  RelationGetIndexExpressions(index),
+	o_validate_index_elements(RelationGetIndexExpressions(index),
 							  RelationGetIndexPredicate(index));
 }
 
@@ -412,8 +411,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
-
-	elog(WARNING, "ix_type: %d", ix_type);
 
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
