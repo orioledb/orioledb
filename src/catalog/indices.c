@@ -264,60 +264,13 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 }
 
 static void
-o_validate_index_elements(OTable *o_table, OIndexType type, List *index_elems,
-						  List *whereClause)
+o_validate_index_elements(OTable *o_table, OIndexType type, List *expressions,
+						  List *predicate)
 {
-	ListCell   *field_cell;
-
-	if (whereClause)
-		o_validate_funcexpr((Node *) whereClause, " are supported in "
-							"orioledb index predicate");
-
-	foreach(field_cell, index_elems)
-	{
-		OTableField *field;
-		IndexElem  *ielem = castNode(IndexElem, lfirst(field_cell));
-
-		if (!ielem->expr)
-		{
-			int			attnum = o_table_fieldnum(o_table, ielem->name);
-
-			if (attnum == o_table->nfields)
-			{
-				elog(ERROR, "indexed field %s is not found in orioledb table",
-					 ielem->name);
-			}
-			field = &o_table->fields[attnum];
-
-			if (type == oIndexPrimary && !field->notnull)
-			{
-				elog(ERROR, "primary key should include only NOT NULL columns, "
-					 "but column %s is nullable", ielem->name);
-			}
-
-			if (type_is_collatable(field->typid))
-			{
-				if (!OidIsValid(field->collation))
-					ereport(ERROR,
-							(errcode(ERRCODE_INDETERMINATE_COLLATION),
-							 errmsg("could not determine which collation to use for index expression"),
-							 errhint("Use the COLLATE clause to set the collation explicitly.")));
-			}
-			else
-			{
-				if (OidIsValid(field->collation))
-					ereport(ERROR,
-							(errcode(ERRCODE_DATATYPE_MISMATCH),
-							 errmsg("collations are not supported by type %s",
-									format_type_be(field->typid))));
-			}
-		}
-		else
-		{
-			o_validate_funcexpr(ielem->expr, " are supported in "
-								"orioledb index expressions");
-		}
-	}
+	o_validate_funcexpr((Node *) predicate, " are supported in "
+						"orioledb index predicate");
+	o_validate_funcexpr((Node *) expressions, " are supported in "
+						"orioledb index expressions");
 }
 
 void
@@ -476,8 +429,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_nu
 	else
 		ix_type = oIndexRegular;
 
-	elog(WARNING, "ix_type: %d", ix_type);
-
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
 
@@ -524,7 +475,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_nu
 	/* move indices if needed */
 	if (ix_type == oIndexPrimary && o_table->nindices > 0)
 	{
-		elog(WARNING, "indices[%d].type: %d", old_ix_num, o_table->indices[old_ix_num].type);
 		if (unique_as_pkey && o_table->indices[old_ix_num].type != oIndexPrimary)
 		{
 			memmove(&o_table->indices[1], &o_table->indices[0],
@@ -578,7 +528,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_nu
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 		fill_current_oxid_csn(&oxid, &csn);
-		elog(WARNING, "table_index: '%s'", table_index->name.data);
 		recreate_o_table(old_o_table, o_table);
 	}
 	else

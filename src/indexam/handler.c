@@ -743,8 +743,6 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	descr = relation_get_descr(scan->heapRelation);
 	scan_primary = o_scan->ixNum == PrimaryIndexNumber || !scan->xs_want_itup;
 
-	elog(WARNING, "scan_primary: %c", scan_primary ? 'Y' : 'N');
-
 	if (!o_scan->curKeyRangeIsLoaded)
 		o_scan->curKeyRange.empty = true;
 
@@ -766,7 +764,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 		else
 		{
 			OIndexDescr *index_descr = descr->indices[ix_num];
-			int nfields = index_descr->nFields - index_descr->nPrimaryFields;
+			int nfields = index_descr->nFields;
 			int			i;
 
 			scan->xs_hitupdesc = CreateTemplateTupleDesc(nfields);

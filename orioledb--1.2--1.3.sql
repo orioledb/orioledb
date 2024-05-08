@@ -120,3 +120,15 @@ CREATE OPERATOR CLASS orioledb_text_ops DEFAULT
 	FUNCTION 1  bttextcmp(text, text),
 	FUNCTION 2  bttextsortsupport(internal),
 	FUNCTION 4  btvarstrequalimage(oid);
+
+CREATE OPERATOR FAMILY orioledb_bool_ops_fam USING orioledb_btree;
+
+CREATE OPERATOR CLASS orioledb_bool_ops DEFAULT
+	FOR TYPE bool USING orioledb_btree FAMILY orioledb_bool_ops_fam AS
+    OPERATOR        1       <,
+    OPERATOR        2       <=,
+    OPERATOR        3       =,
+    OPERATOR        4       >=,
+    OPERATOR        5       >,
+    FUNCTION        1       btboolcmp(bool,bool),
+    FUNCTION        4       btequalimage(oid);
