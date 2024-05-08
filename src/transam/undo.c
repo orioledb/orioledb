@@ -1156,7 +1156,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					TransactionId xid = GetTopTransactionIdIfAny();
 
 					if (TransactionIdIsValid(xid))
-						wal_joint_commit(oxid, xid);
+						wal_joint_commit(oxid, get_current_logical_xid(), xid);
 				}
 				break;
 			case XACT_EVENT_COMMIT:
@@ -1165,7 +1165,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					TransactionId xid = GetTopTransactionIdIfAny();
 
 					if (!TransactionIdIsValid(xid))
-						wal_commit(oxid);
+						wal_commit(oxid, get_current_logical_xid());
 				}
 
 				current_oxid_precommit();
@@ -1181,7 +1181,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				break;
 			case XACT_EVENT_ABORT:
 				if (!RecoveryInProgress())
-					wal_rollback(oxid);
+					wal_rollback(oxid, get_current_logical_xid());
 				apply_undo_stack(oxid, NULL, true);
 				reset_cur_undo_locations();
 				current_oxid_abort();
@@ -1439,7 +1439,9 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	Assert(!is_recovery_process());
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
+	state->logicalXid = get_current_logical_xid();
 	state->has_retained_undo_location = have_retained_undo_location();
+	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
 
 	if (!local_wal_is_empty())
 		flush_local_wal(false);
@@ -1456,7 +1458,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 
 	if (OXidIsValid(oxid))
 	{
-		wal_rollback(oxid);
+		wal_rollback(oxid, get_current_logical_xid());
 		current_oxid_abort();
 		apply_undo_stack(oxid, NULL, true);
 
@@ -1468,6 +1470,8 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
+	set_current_logical_xid(state->logicalXid);
+	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
 void
@@ -1479,7 +1483,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	{
 		CommitSeqNo csn;
 
-		wal_commit(oxid);
+		wal_commit(oxid, get_current_logical_xid());
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
@@ -1496,6 +1500,8 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
+	set_current_logical_xid(state->logicalXid);
+	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
 void

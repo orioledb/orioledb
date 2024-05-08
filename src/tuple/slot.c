@@ -206,7 +206,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 	res_ctidoff = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
-	if (oslot->ixnum == PrimaryIndexNumber)
+	if (oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
 	{
 		if (index_order)
 			natts = descr->tupdesc->natts;
@@ -612,6 +612,7 @@ tts_orioledb_copyslot(TupleTableSlot *dstslot, TupleTableSlot *srcslot)
 			dstslot->tts_nvalid = 0;
 			dstoslot->csn = srcoslot->csn;
 			dstoslot->ixnum = srcoslot->ixnum;
+			dstoslot->leafTuple = srcoslot->leafTuple;
 			tts_orioledb_init_reader(dstslot);
 			return;
 		}
@@ -668,12 +669,16 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 	OTableSlot *oslot = (OTableSlot *) slot;
 	OIndexDescr *idx = oslot->descr->indices[oslot->ixnum];
 
-	o_tuple_init_reader(&oslot->state, oslot->tuple,
-						idx->leafTupdesc, &idx->leafSpec);
+	if (oslot->leafTuple)
+		o_tuple_init_reader(&oslot->state, oslot->tuple,
+							idx->leafTupdesc, &idx->leafSpec);
+	else
+		o_tuple_init_reader(&oslot->state, oslot->tuple,
+							idx->nonLeafTupdesc, &idx->nonLeafSpec);
 
 	if (idx->primaryIsCtid)
 	{
-		if (oslot->ixnum == PrimaryIndexNumber)
+		if (oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
 		{
 			Datum		value;
 			bool		isnull;
@@ -686,8 +691,13 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			ItemPointer iptr;
 			bool		isnull;
 
-			iptr = o_tuple_get_last_iptr(idx->leafTupdesc, &idx->leafSpec,
-										 oslot->tuple, &isnull);
+			if (oslot->leafTuple)
+				iptr = o_tuple_get_last_iptr(idx->leafTupdesc, &idx->leafSpec,
+											 oslot->tuple, &isnull);
+			else
+				iptr = o_tuple_get_last_iptr(idx->nonLeafTupdesc,
+											 &idx->nonLeafSpec,
+											 oslot->tuple, &isnull);
 			Assert(!isnull && iptr);
 			slot->tts_tid = *iptr;
 		}
@@ -696,10 +706,11 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 	slot->tts_tableOid = oslot->descr->oids.reloid;
 }
 
-void
-tts_orioledb_store_tuple(TupleTableSlot *slot, OTuple tuple,
-						 OTableDescr *descr, CommitSeqNo csn,
-						 int ixnum, bool shouldfree, BTreeLocationHint *hint)
+static void
+tts_orioledb_store_tuple_internal(TupleTableSlot *slot, OTuple tuple,
+								  OTableDescr *descr, CommitSeqNo csn,
+								  int ixnum, bool leafTuple, bool shouldfree,
+								  BTreeLocationHint *hint)
 {
 	OTableSlot *oslot = (OTableSlot *) slot;
 
@@ -718,6 +729,7 @@ tts_orioledb_store_tuple(TupleTableSlot *slot, OTuple tuple,
 	oslot->descr = descr;
 	oslot->csn = csn;
 	oslot->ixnum = ixnum;
+	oslot->leafTuple = leafTuple;
 	oslot->version = o_tuple_get_version(tuple);
 
 	if (hint)
@@ -727,6 +739,25 @@ tts_orioledb_store_tuple(TupleTableSlot *slot, OTuple tuple,
 
 	if (shouldfree)
 		slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+}
+
+void
+tts_orioledb_store_tuple(TupleTableSlot *slot, OTuple tuple,
+						 OTableDescr *descr, CommitSeqNo csn,
+						 int ixnum, bool shouldfree, BTreeLocationHint *hint)
+{
+	tts_orioledb_store_tuple_internal(slot, tuple, descr, csn, ixnum, true,
+									  shouldfree, hint);
+}
+
+void
+tts_orioledb_store_non_leaf_tuple(TupleTableSlot *slot, OTuple tuple,
+								  OTableDescr *descr, CommitSeqNo csn,
+								  int ixnum, bool shouldfree,
+								  BTreeLocationHint *hint)
+{
+	tts_orioledb_store_tuple_internal(slot, tuple, descr, csn, ixnum, false,
+									  shouldfree, hint);
 }
 
 static Datum
@@ -1151,7 +1182,8 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 	bool		primaryIsCtid = idx->primaryIsCtid;
 	ItemPointer iptr;
 
-	if (!O_TUPLE_IS_NULL(oslot->tuple) && oslot->descr == descr && oslot->ixnum == PrimaryIndexNumber)
+	if (!O_TUPLE_IS_NULL(oslot->tuple) && oslot->descr == descr &&
+		oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
 		return oslot->tuple;
 
 	if (idx->leafTupdesc->natts > MaxTupleAttributeNumber)
@@ -1196,6 +1228,7 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 	oslot->tuple = tuple;
 	oslot->descr = descr;
 	oslot->ixnum = PrimaryIndexNumber;
+	oslot->leafTuple = true;
 	slot->tts_flags |= TTS_FLAG_SHOULDFREE;
 	tts_orioledb_init_reader(slot);
 
@@ -1612,7 +1645,9 @@ tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr)
 	OTableSlot *oslot = (OTableSlot *) slot;
 
 	slot->tts_tid = *iptr;
-	if (!O_TUPLE_IS_NULL(oslot->tuple) && oslot->ixnum == PrimaryIndexNumber)
+	if (!O_TUPLE_IS_NULL(oslot->tuple) &&
+		oslot->ixnum == PrimaryIndexNumber &&
+		oslot->leafTuple)
 		o_tuple_set_ctid(oslot->tuple, iptr);
 }
 

@@ -115,7 +115,9 @@ typedef struct
 {
 	bool		needs_wal_flush;
 	bool		has_retained_undo_location;
+	bool		local_wal_has_material_changes;
 	OXid		oxid;
+	TransactionId logicalXid;
 } OAutonomousTxState;
 
 /*

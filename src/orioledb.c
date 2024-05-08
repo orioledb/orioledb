@@ -22,6 +22,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "s3/headers.h"
@@ -235,7 +236,7 @@ static RmgrData rmgr =
 	.rm_desc = orioledb_rm_desc,
 	.rm_identify = orioledb_rm_identify,
 	.rm_mask = NULL,
-	.rm_decode = NULL
+	.rm_decode = orioledb_decode
 };
 
 void

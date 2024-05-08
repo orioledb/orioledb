@@ -32,6 +32,7 @@ typedef struct OTableSlot
 	bytea	   *rowid;
 	CommitSeqNo csn;
 	int			ixnum;
+	bool		leafTuple;
 	uint32		version;
 	OTupleReaderState state;
 	BTreeLocationHint hint;
@@ -44,6 +45,12 @@ extern void tts_orioledb_store_tuple(TupleTableSlot *slot, OTuple tuple,
 									 OTableDescr *descr, CommitSeqNo csn,
 									 int ixnum, bool shouldfree,
 									 BTreeLocationHint *hint);
+extern void tts_orioledb_store_non_leaf_tuple(TupleTableSlot *slot,
+											  OTuple tuple,
+											  OTableDescr *descr,
+											  CommitSeqNo csn,
+											  int ixnum, bool shouldfree,
+											  BTreeLocationHint *hint);
 extern OTuple tts_orioledb_make_secondary_tuple(TupleTableSlot *slot,
 												OIndexDescr *idx,
 												bool leaf);

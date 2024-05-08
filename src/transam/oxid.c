@@ -40,6 +40,7 @@
 	 ((committing) ? COMMITSEQNO_SPECIAL_COMMITTING_BIT : 0))
 
 static OXid curOxid = InvalidOXid;
+static TransactionId logicalXid = InvalidTransactionId;
 static pg_atomic_uint64 *xidBuffer;
 
 XidMeta    *xid_meta;
@@ -838,6 +839,11 @@ get_current_oxid(void)
 													 nestingLevel,
 													 false));
 		curOxid = newOxid;
+		logicalXid = RecentXmin;
+		logicalXid -= logicalXid % MaxBackends;
+		if (logicalXid < FirstNormalTransactionId + 1 + MyBackendId)
+			logicalXid = MaxTransactionId;
+		logicalXid -= (1 + MyBackendId);
 	}
 
 	return curOxid;
@@ -848,6 +854,12 @@ set_current_oxid(OXid oxid)
 {
 	curOxid = oxid;
 
+}
+
+void
+set_current_logical_xid(TransactionId xid)
+{
+	logicalXid = xid;
 }
 
 void
@@ -878,6 +890,12 @@ get_current_oxid_if_any(void)
 		return recovery_oxid;
 
 	return curOxid;
+}
+
+TransactionId
+get_current_logical_xid(void)
+{
+	return logicalXid;
 }
 
 void
