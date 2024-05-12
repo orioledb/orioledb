@@ -35,8 +35,6 @@
 
 #define DEFAULT_PAGE_CPU_MULTIPLIER 50.0
 
-// #define LOG_AM_CALLS true // TODO: Remove
-
 static IndexBuildResult *orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
 static void orioledb_ambuildempty(Relation index);
 static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
@@ -135,10 +133,6 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
 	IndexBuildResult	   *result;
 
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
-
 	result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
 
 	if (!index->rd_index->indisprimary)
@@ -156,9 +150,6 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 void
 orioledb_ambuildempty(Relation index)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 }
 
 bool
@@ -168,10 +159,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 				  bool indexUnchanged,
 				  IndexInfo *indexInfo)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
-
 	return false;
 }
 
@@ -179,27 +166,18 @@ IndexBulkDeleteResult *
 orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 					  IndexBulkDeleteCallback callback, void *callback_state)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	return stats;
 }
 
 IndexBulkDeleteResult *
 orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	return stats;
 }
 
 bool
 orioledb_amcanreturn(Relation index, int attno)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	return true;
 }
 
@@ -210,10 +188,6 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 						Selectivity *indexSelectivity, double *indexCorrelation,
 						double *indexPages)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
-
 	IndexOptInfo *index = path->indexinfo;
 	GenericCosts costs = {0};
 	Oid			relid;
@@ -568,10 +542,6 @@ bool
 orioledb_amproperty(Oid index_oid, int attno, IndexAMProperty prop,
 					const char *propname, bool *res, bool *isnull)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
-
 	switch (prop)
 	{
 		case AMPROP_RETURNABLE:
@@ -590,10 +560,6 @@ orioledb_amproperty(Oid index_oid, int attno, IndexAMProperty prop,
 char *
 orioledb_ambuildphasename(int64 phasenum)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
-
 	switch (phasenum)
 	{
 		case PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE:
@@ -613,9 +579,6 @@ orioledb_ambuildphasename(int64 phasenum)
 
 bool orioledb_amvalidate(Oid opclassoid)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	return true;
 }
 
@@ -623,17 +586,11 @@ void
 orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 						 List *functions)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 }
 
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	OScanState	*o_scan;
 	IndexScanDesc scan;
 	ORelOids	oids;
@@ -690,9 +647,6 @@ void
 orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	OScanState	*o_scan = (OScanState *) scan;
 
 	MemoryContextReset(o_scan->cxt);
@@ -702,9 +656,6 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 bool
 orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	bool		res;
 	OScanState	*o_scan = (OScanState *) scan;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
@@ -759,38 +710,62 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 		TupleTableSlot *slot;
 
 		ix_num = scan_primary ? PrimaryIndexNumber : o_scan->ixNum;
+
+		// TODO: Rewrite
 		if (scan_primary)
+		{
 			scan->xs_hitupdesc = descr->tupdesc;
+			slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
+			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, ix_num,
+									true, &hint);
+			scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
+			scan->xs_hitup = ExecCopySlotHeapTuple(slot);
+		}
 		else
 		{
 			OIndexDescr *index_descr = descr->indices[ix_num];
-			int nfields = index_descr->nFields;
+			TupleDesc	tupdesc;
+			int			nfields = index_descr->nFields;
 			int			i;
 
-			scan->xs_hitupdesc = CreateTemplateTupleDesc(nfields);
+			tupdesc = CreateTemplateTupleDesc(nfields);
 			for (i = 0; i < nfields; i++)
 			{
-				TupleDescCopyEntry(scan->xs_hitupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+				TupleDescCopyEntry(tupdesc, i + 1, index_descr->leafTupdesc, i + 1);
 			}
+
+			if (index_descr->primaryIsCtid)
+			{
+				nfields--;
+			}
+			scan->xs_itupdesc = CreateTemplateTupleDesc(nfields);
+			for (i = 0; i < nfields; i++)
+			{
+				TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+			}
+
+			slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsOrioleDB);
+			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, ix_num,
+									 true, &hint);
+			scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
+
+			slot_getallattrs(slot);
+
+			scan->xs_itup = index_form_tuple(scan->xs_itupdesc,
+											 slot->tts_values,
+											 slot->tts_isnull);
+
+			ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 		}
-		slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
-		tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, ix_num,
-								 true, &hint);
-		scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
-		scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 
 		res = true;
 	}
-
 	return res;
 }
 
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	return 0;
 }
 
@@ -799,9 +774,6 @@ orioledb_amendscan(IndexScanDesc scan)
 {
 	OScanState	*o_scan = (OScanState *) scan;
 
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 
 	MemoryContextDelete(o_scan->cxt);
 }
@@ -809,40 +781,25 @@ orioledb_amendscan(IndexScanDesc scan)
 void
 orioledb_ammarkpos(IndexScanDesc scan)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 }
 
 void
 orioledb_amrestrpos(IndexScanDesc scan)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 }
 
 Size
 orioledb_amestimateparallelscan(void)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 	return sizeof(uint8);
 }
 
 void
 orioledb_aminitparallelscan(void *target)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 }
 
 void
 orioledb_amparallelrescan(IndexScanDesc scan)
 {
-#ifdef LOG_AM_CALLS
-	elog(WARNING, "%s", PG_FUNCNAME_MACRO);
-#endif
 }
