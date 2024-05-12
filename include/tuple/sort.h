@@ -3,7 +3,7 @@
  * sort.h
  * 		Declarations for implementation of orioledb tuple sorting
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tuple/sort.h

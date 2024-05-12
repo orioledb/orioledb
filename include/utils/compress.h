@@ -3,7 +3,7 @@
  * compress.h
  *		Compression functions for BTree pages.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/utils/compress.h

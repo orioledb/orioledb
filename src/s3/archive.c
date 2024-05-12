@@ -3,7 +3,7 @@
  * archive.c
  *		Routines for S3 WAL archiving.
  *
- * Copyright (c) 2023, OrioleDATA Inc.
+ * Copyright (c) 2024, OrioleDATA Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/archive.c

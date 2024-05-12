@@ -3,7 +3,7 @@
  * planner.h
  *		Routines for query processing.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/utils/planner.h

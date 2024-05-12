@@ -3,7 +3,7 @@
  * btree.c
  *		Routines for OrioleDB B-tree initilization and cleanup.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/btree.c

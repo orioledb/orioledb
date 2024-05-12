@@ -3,7 +3,7 @@
  * headers.c
  * 		Routines for handling of S3-specific data file headers.
  *
- * Copyright (c) 2023, Oriole DB Inc.
+ * Copyright (c) 2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/headers.c

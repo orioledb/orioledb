@@ -4,7 +4,7 @@
  *		Internals of OrioleDB page chunks: routines for working with chunks
  *		and their items.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/page_chunks.c

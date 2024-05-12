@@ -3,7 +3,7 @@
  * worker.c
  *		Routines for S3 worker process.
  *
- * Copyright (c) 2023, OrioleDATA Inc.
+ * Copyright (c) 2024, OrioleDATA Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/worker.c

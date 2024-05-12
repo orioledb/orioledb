@@ -3,7 +3,7 @@
  * requests.c
  *		Implementation for S3 requests.
  *
- * Copyright (c) 2023, OrioleDATA Inc.
+ * Copyright (c) 2024, OrioleDATA Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/requests.c

@@ -3,7 +3,7 @@
  * requests.h
  *		Declarations for S3 requests.
  *
- * Copyright (c) 2023, OrioleDATA Inc.
+ * Copyright (c) 2024, OrioleDATA Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/s3/requests.h

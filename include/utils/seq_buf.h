@@ -3,7 +3,7 @@
  * seq_buf.h
  *		Decalarations for sequential buffered data access routines.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/utils/seq_buf.h

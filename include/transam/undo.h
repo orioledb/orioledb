@@ -3,7 +3,7 @@
  * undo.h
  *		Declarations of undo log routines.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/transam/undo.h

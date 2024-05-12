@@ -3,7 +3,7 @@
  * slot.h
  * 		Declarations for orioledb tuple slot implementation
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tuple/slot.h

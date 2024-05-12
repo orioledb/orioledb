@@ -3,7 +3,7 @@
  * wal.h
  * 		WAL declarations for orioledb.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/recovery/wal.h

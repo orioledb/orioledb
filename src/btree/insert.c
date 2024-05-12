@@ -3,7 +3,7 @@
  * insert.c
  *		Routines for implementation of inserting new item into B-tree page.
  *
- * Copyright (c) 2021-2023, Oriole DB Inc.
+ * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/insert.c
