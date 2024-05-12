@@ -54,6 +54,10 @@ EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
 SELECT * FROM o_tableam1 WHERE value = '5text';
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
 SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
+EXPLAIN (COSTS off) SELECT key FROM o_tableam1 WHERE key = 5;
+SELECT * FROM o_tableam1 WHERE key = 5;
+EXPLAIN (COSTS off) SELECT value FROM o_tableam1 WHERE value = '5text';
+SELECT value FROM o_tableam1 WHERE value = '5text';
 RESET enable_seqscan;
 
 TRUNCATE o_tableam1;
@@ -70,7 +74,6 @@ DROP TABLE o_tableam1_like;
 
 DROP TABLE o_tableam1;
 
--- SET log_error_verbosity = 'verbose';
 -- partial index test
 CREATE TABLE o_test_partial
 (
@@ -136,9 +139,9 @@ SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
 
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
-RESET enable_seqscan;
 SELECT value FROM o_test_partial
-	WHERE (value || 'WOW') BETWEEN '6' AND '9';
+	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
+RESET enable_seqscan;
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
 DELETE FROM o_test_partial WHERE key = 1;
