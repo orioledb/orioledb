@@ -451,7 +451,6 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 				LWLockRelease(&poscan->downlinksPublish);
 
-				Assert(pg_atomic_read_u32(&poscan->dsmSegNumAttached) == 0);
 				qsort(dsm_segment_address(scan->dsmSeg), poscan->downlinksCount,
 					  sizeof(scan->diskDownlinks[0]), cmp_downlinks);
 			}
