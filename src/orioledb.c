@@ -1578,51 +1578,67 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 	relation = table_open(relationObjectId, NoLock);
 
-	// if (is_orioledb_rel(relation))
-	// {
-	// 	/* Evade parallel scan of OrioleDB's tables */
-	// 	rel->rel_parallel_workers = RelationGetParallelWorkers(relation, -1);
-	// 	if (rel->rel_parallel_workers > 0)
-	// 		elog(WARNING, "Rel parallel workers = %d", rel->rel_parallel_workers);
+	if (is_orioledb_rel(relation))
+	{
+		/* Evade parallel scan of OrioleDB's tables */
+		rel->rel_parallel_workers = RelationGetParallelWorkers(relation, -1);
+		if (rel->rel_parallel_workers > 0)
+			elog(WARNING, "Rel parallel workers = %d", rel->rel_parallel_workers);
 
-	// 	if (relation->rd_rel->relhasindex)
-	// 	{
-	// 		int			i;
-	// 		ListCell   *lc;
-	// 		OTableDescr *descr = relation_get_descr(relation);
-	// 		OIndexDescr *primary;
+		if (relation->rd_rel->relhasindex)
+		{
+			int			i;
+			ListCell   *lc;
+			OTableDescr *descr = relation_get_descr(relation);
+			OIndexDescr *primary;
 
-	// 		if (descr)
-	// 		{
-	// 			primary = GET_PRIMARY(descr);
+			if (descr)
+			{
+				primary = GET_PRIMARY(descr);
 
-	// 			foreach(lc, rel->indexlist)
-	// 			{
-	// 				IndexOptInfo *info = lfirst_node(IndexOptInfo, lc);
-	// 				bool		hasbitmap;
+				foreach(lc, rel->indexlist)
+				{
+					IndexOptInfo *info = lfirst_node(IndexOptInfo, lc);
+					bool		hasbitmap;
+					OIndexNumber ix_num;
+					OIndexDescr *index_descr;
+					OInMemoryBlkno rootPageBlkno;
+					Page		root_page;
 
-	// 				/*
-	// 				 * TODO: Remove when parallel index scan will be
-	// 				 * implemented
-	// 				 */
-	// 				info->amcanparallel = false;
-	// 				hasbitmap = info->indexoid != primary->oids.reloid &&
-	// 					primary->nFields <= 1;
-	// 				for (i = 0;
-	// 					 hasbitmap && i < primary->nFields; i++)
-	// 				{
-	// 					Oid			typeoid = primary->fields[i].inputtype;
-	// 					bool		valid = typeoid == INT4OID ||
-	// 						typeoid == INT8OID ||
-	// 						typeoid == TIDOID;
+					/*
+					 * TODO: Remove when parallel index scan will be
+					 * implemented
+					 */
+					info->amcanparallel = false;
+					hasbitmap = info->indexoid != primary->oids.reloid &&
+						primary->nFields <= 1;
+					for (i = 0;
+						 hasbitmap && i < primary->nFields; i++)
+					{
+						Oid			typeoid = primary->fields[i].inputtype;
+						bool		valid = typeoid == INT4OID ||
+							typeoid == INT8OID ||
+							typeoid == TIDOID;
 
-	// 					hasbitmap = hasbitmap && valid;
-	// 				}
-	// 				info->amhasgetbitmap = hasbitmap;
-	// 			}
-	// 		}
-	// 	}
-	// }
+						hasbitmap = hasbitmap && valid;
+					}
+					info->amhasgetbitmap = hasbitmap;
+
+					for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+					{
+						index_descr = descr->indices[ix_num];
+						if (index_descr->oids.reloid == info->indexoid)
+							break;
+					}
+					Assert(ix_num < descr->nIndices);
+					o_btree_load_shmem(&index_descr->desc);
+					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
+					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);
+					info->tree_height = PAGE_GET_LEVEL(root_page);
+				}
+			}
+		}
+	}
 
 	table_close(relation, NoLock);
 }
