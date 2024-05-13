@@ -22,6 +22,7 @@
 #include "utils/planner.h"
 
 #include "access/amapi.h"
+#include "access/relation.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
 #include "nodes/pathnodes.h"
@@ -94,7 +95,7 @@ Datum orioledb_indexam_handler(PG_FUNCTION_ARGS)
 	amroutine->amstorage = false;
 	amroutine->amclusterable = true;
 	amroutine->ampredlocks = true;
-	amroutine->amcanparallel = true;
+	amroutine->amcanparallel = false;
 	amroutine->amcaninclude = true;
 	amroutine->amusemaintenanceworkmem = false;
 	amroutine->amsummarizing = false;
