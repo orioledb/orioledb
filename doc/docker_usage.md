@@ -27,7 +27,7 @@ Connect to the server via psql:
 
 You should expect a similar psql message:
 ```
-psql (15.5 OrioleDB public beta 4 PGTAG=patches15_19 alpine:3.17+clang build:2023-11-01T22:43:27+00:00)
+psql (15.5 OrioleDB public beta 5 PGTAG=patches15_22 alpine:3.17+clang build:2023-11-01T22:43:27+00:00)
 Type "help" for help.
 
 postgres=#
