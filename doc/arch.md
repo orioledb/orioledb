@@ -64,7 +64,7 @@ For example, page number `7` was modified.  It was marked as `7*`.
 
 ![Copy-on-write checkpoint 1](images/cow_1.svg)
 
-Checkpoint has written `7*` to the storage.  It has written to the free space according to the copy-on-write principle.  When checkpoint considers writing a non-leaf page, it replaces in-memory downlinks with storage ones.  Therefore, page `3` is also considered modified because we need to reference the new `7*` from the storage page.  So, page 3*` is also written to the free storage space.  Similar to `1*`.
+Checkpoint has written `7*` to the storage.  It has written to the free space according to the copy-on-write principle.  When checkpoint considers writing a non-leaf page, it replaces in-memory downlinks with storage ones.  Therefore, page `3` is also considered modified because we need to reference the new `7*` from the storage page.  So, page `3*` is also written to the free storage space.  Similar to `1*`.
 
 ![Copy-on-write checkpoint 2](images/cow_2.svg)
 
@@ -76,7 +76,7 @@ Therefore, a consistent tree image exists in storage every moment.
 
 OrioleDB supports fuzzy checkpointing.  That is, we allow tree modification concurrent to checkpointing.  That is essential because too fast or frequent checkpoints could cause a write flood.
 
-Consider the following example.  The tree contains pages 1 – 7`.  Pages 1 – 6` are present in both main memory and storage (checkpoint 1), while pages 7 are present in storage only.  Page `4` was modified (`4*`).
+Consider the following example.  The tree contains pages `1 – 7`.  Pages `1 – 6` are present in both main memory and storage (checkpoint 1), while page `7` are present in storage only.  Page `4` was modified (`4*`).
 
 ![Concurrent checkpoint 1](images/checkpoint_concurrent_1.svg)
 
@@ -84,7 +84,7 @@ Checkpointing was started to traverse the tree from left to right, and it passed
 
 ![Concurrent checkpoint 2](images/checkpoint_concurrent_2.svg)
 
-Concurrently, page 5 was modified (`5*`).  Background writer wrote page image `5*`.  Page `5` belongs to the tree part, which is already processed by checkpointer.  That is why we cannot write it to checkpoint 2, because it can affect its consistency.
+Concurrently, page `5` was modified (`5*`).  Background writer wrote page image `5*`.  Page `5` belongs to the tree part, which is already processed by checkpointer.  That is why we cannot write it to checkpoint 2, because it can affect its consistency.
 
 Page number `7` was also concurrently modified but was not written by a background writer.
 
