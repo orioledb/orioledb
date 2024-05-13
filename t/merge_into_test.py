@@ -1174,9 +1174,10 @@ class MergeIntoTest(BaseTest):
 					UPDATE SET val_2 = val_1 + val_2;
 			""")
 		self.assertErrorMessageEquals(
-		    e, "MERGE command cannot affect row a "
-		    "second time", "Ensure that not more than one source "
-		    "row matches any one target row.")
+		    e,
+		    "tuple to be updated or deleted was already modified by an operation triggered by the current command",
+		    "Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows."
+		)
 		self.assertEqual(
 		    node.execute("""
 							SELECT * FROM o_test_1 ORDER BY val_1 ASC;
