@@ -15,8 +15,10 @@
 
 #include "orioledb.h"
 
+#include "btree/modify.h"
 #include "catalog/indices.h"
 #include "catalog/o_tables.h"
+#include "tableam/operations.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
 #include "utils/planner.h"
@@ -39,7 +41,7 @@
 static IndexBuildResult *orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
 static void orioledb_ambuildempty(Relation index);
 static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
-							  ItemPointer ht_ctid, Relation heapRel,
+							  Datum tupleid, Relation heapRel,
 							  IndexUniqueCheck checkUnique,
 							  bool indexUnchanged,
 							  IndexInfo *indexInfo);
@@ -153,13 +155,209 @@ orioledb_ambuildempty(Relation index)
 {
 }
 
+static OBTreeModifyCallbackAction
+o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+				  OXid oxid, OTupleXactInfo xactInfo,
+				  BTreeLeafTupleDeletedStatus deleted,
+				  UndoLocation location, RowLockMode *lock_mode,
+				  BTreeLocationHint *hint, void *arg)
+{
+	OTableSlot *oslot = (OTableSlot *) arg;
+
+	if (descr->type == oIndexPrimary &&
+		XACT_INFO_OXID_IS_CURRENT(xactInfo))
+	{
+		OIndexDescr *id = (OIndexDescr *) descr->arg;
+
+		o_tuple_set_version(&id->leafSpec, newtup,
+							o_tuple_get_version(tup) + 1);
+		oslot->tuple = *newtup;
+	}
+	return OBTreeCallbackActionUpdate;
+}
+
+static void
+o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
+{
+	bool		is_ctid = id->primaryIsCtid;
+	bool		is_primary = id->desc.type == oIndexPrimary;
+
+	if (is_primary && is_ctid)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+						errmsg("ctid index key duplicate.")));
+	}
+	else
+	{
+		StringInfo	str = makeStringInfo();
+		int			i;
+
+		appendStringInfo(str, "(");
+		for (i = 0; i < id->nKeyFields; i++)
+		{
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			appendStringInfo(str, "%s",
+							 id->nonLeafTupdesc->attrs[i].attname.data);
+		}
+		appendStringInfo(str, ")=");
+
+		slot_getallattrs(slot);
+
+		appendStringInfo(str, "(");
+		for (i = 0; i < id->nUniqueFields; i++)
+		{
+			Datum		value = slot->tts_values[i];
+			bool		isnull = slot->tts_isnull[i];
+
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			if (isnull)
+				appendStringInfo(str, "null");
+			else
+			{
+				Oid			typoutput;
+				bool		typisvarlena;
+				char	   *res;
+
+				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+								&typoutput, &typisvarlena);
+				res = OidOutputFunctionCall(typoutput, value);
+				appendStringInfo(str, "'%s'", res);
+			}
+		}
+		appendStringInfo(str, ")");
+
+		ereport(ERROR,
+				(errcode(ERRCODE_UNIQUE_VIOLATION),
+				 errmsg("duplicate key value violates unique "
+						"constraint \"%s\"", id->name.data),
+				 errdetail("Key %s already exists.", str->data),
+				 errtableconstraint(rel, id->desc.type == oIndexPrimary ?
+									"pk" : "sk")));
+	}
+}
+
 bool
 orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
-				  ItemPointer ht_ctid, Relation heapRel,
+				  Datum tupleid, Relation heapRel,
 				  IndexUniqueCheck checkUnique,
 				  bool indexUnchanged,
 				  IndexInfo *indexInfo)
 {
+	ORelOids	oids;
+	OIndexType	ix_type;
+	OIndexDescr *index_descr;
+	OTableDescr *descr;
+	OIndexNumber ix_num;
+	bool		success;
+	BTreeModifyCallbackInfo callbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyDeletedCallback = o_insert_callback,
+		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = true
+	};
+	CommitSeqNo csn;
+	OXid		oxid;
+	TupleTableSlot *o_slot;
+	uint32		version;
+	OTuple		tuple;
+	bytea	   *rowid;
+	Pointer		p;
+	TupleDesc	tupdesc;
+	OTupleFixedFormatSpec *spec;
+
+	if (rel->rd_index->indisprimary)
+		return true;
+
+	ORelOidsSetFromRel(oids, rel);
+	if (rel->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (rel->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else
+		ix_type = oIndexRegular;
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	Assert(index_descr != NULL);
+	descr = o_fetch_table_descr(index_descr->tableOids);
+	Assert(descr != NULL);
+	/* Find ix_num */
+	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+	{
+		OIndexDescr *index;
+		index = descr->indices[ix_num];
+		if (index->oids.reloid == rel->rd_rel->oid)
+			break;
+	}
+	Assert(ix_num < descr->nIndices);
+
+	tupdesc = GET_PRIMARY(descr)->nonLeafTupdesc;
+	spec = &GET_PRIMARY(descr)->nonLeafSpec;
+
+	if (!index_descr->primaryIsCtid)
+	{
+		OTuple		tuple;
+		ORowIdAddendumNonCtid *add;
+
+		rowid = DatumGetByteaP(tupleid);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumNonCtid *) p;
+		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+		tuple.data = p;
+		tuple.formatFlags = add->flags;
+		csn = add->csn;
+		version = o_tuple_get_version(tuple);
+
+		if (index_descr->nPrimaryFields < index_descr->nFields)
+		{
+			int			i;
+			int			pk_from;
+
+			pk_from = index_descr->nFields - index_descr->nPrimaryFields;
+
+			/* Amount of index fields checked in o_define_index_validate */
+			for (i = 0; i < index_descr->nPrimaryFields; i++)
+			{
+				AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+				if (attnum >= pk_from)
+				{
+					values[attnum] = o_fastgetattr(tuple, i + 1, tupdesc, spec, &isnull[attnum]);
+				}
+			}
+		}
+	}
+	else
+	{
+		ORowIdAddendumCtid *add;
+		AttrNumber attnum = index_descr->nFields - 1;
+
+		rowid = DatumGetByteaP(tupleid);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumCtid *) p;
+		csn = add->csn;
+		version = add->version;
+		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+
+		values[attnum] = PointerGetDatum(p);
+		isnull[attnum] = false;
+	}
+
+	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	o_slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
+	tts_orioledb_store_tuple(o_slot, tuple, descr, csn, ix_num, true, NULL);
+	callbackInfo.arg = o_slot;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	success = (o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, o_slot,
+								  oxid, csn, &callbackInfo) == OBTreeModifyResultInserted);
+
+	if (!success)
+	{
+		o_report_duplicate(heapRel, descr->indices[ix_num], o_slot);
+	}
 	return false;
 }
 
@@ -167,6 +365,7 @@ IndexBulkDeleteResult *
 orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 					  IndexBulkDeleteCallback callback, void *callback_state)
 {
+	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return stats;
 }
 
@@ -613,9 +812,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	scan->xs_temp_snap = false;
 	scan->xs_want_rowid = true;
 
-	oids.datoid = MyDatabaseId;
-	oids.reloid = rel->rd_rel->oid;
-	oids.relnode = rel->rd_rel->relfilenode;
+	ORelOidsSetFromRel(oids, rel);
 	if (rel->rd_index->indisprimary)
 		ix_type = oIndexPrimary;
 	else if (rel->rd_index->indisunique)

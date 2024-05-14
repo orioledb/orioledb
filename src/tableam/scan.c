@@ -654,7 +654,6 @@ o_exec_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 	EPQState   *epqstate;
-	CommitSeqNo csn;
 	TupleTableSlot *slot = NULL;
 
 	if (ocstate->useEaCounters)
@@ -666,8 +665,6 @@ o_exec_custom_scan(CustomScanState *node)
 	{
 		OIndexPlanState *ix_plan_state =
 			(OIndexPlanState *) ocstate->o_plan_state;
-
-		csn = ix_plan_state->ostate.csn;
 
 		epqstate = node->ss.ps.state->es_epq_active;
 		if (epqstate)

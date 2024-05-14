@@ -14,6 +14,7 @@
 #define __TABLEAM_OPERATIONS_H__
 
 #include "btree/btree.h"
+#include "btree/modify.h"
 #include "catalog/o_tables.h"
 #include "tableam/descr.h"
 #include "tuple/slot.h"
@@ -93,6 +94,12 @@ extern TupleTableSlot *o_tbl_insert_with_arbiter(Relation rel,
 												 List *arbiterIndexes,
 												 LockTupleMode lockmode,
 												 TupleTableSlot *lockedSlot);
+extern OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
+											 OIndexDescr *id,
+											 OTuple *own_tup,
+											 TupleTableSlot *slot,
+											 OXid oxid, CommitSeqNo csn,
+											 BTreeModifyCallbackInfo *callbackInfo);
 extern OBTreeModifyResult o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey,
 									 LockTupleMode mode, OXid oxid,
 									 OLockCallbackArg *larg,
