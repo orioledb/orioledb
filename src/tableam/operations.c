@@ -44,15 +44,6 @@ static OTableModifyResult o_update_secondary_indices(OTableDescr *descr,
 													 OXid oxid,
 													 CommitSeqNo csn,
 													 bool update_all);
-static OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
-											 OIndexDescr *id,
-											 TupleTableSlot *slot,
-											 OXid oxid, CommitSeqNo csn,
-											 BTreeModifyCallbackInfo *callbackInfo);
-static OTableModifyResult o_tbl_indices_insert(TupleTableSlot *slot,
-											   OTableDescr *descr, OXid oxid,
-											   CommitSeqNo csn,
-											   BTreeModifyCallbackInfo *callbackInfo);
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
 												  OBTreeKeyBound *oldPkey,
 												  TupleTableSlot *newSlot,
@@ -204,8 +195,14 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 								RelationGetRelationName(relation),
 								false);
 
-	mres = o_tbl_indices_insert(slot, descr, oxid,
-								csn, &callbackInfo);
+	mres.success = (o_tbl_index_insert(descr, descr->indices[0], NULL, slot,
+									   oxid, csn, &callbackInfo) == OBTreeModifyResultInserted);
+	if (!mres.success)
+	{
+		mres.failedIxNum = 0;
+		mres.action = BTreeOperationInsert;
+		mres.oldTuple = NULL;
+	}
 
 	if (!mres.success)
 	{
@@ -331,7 +328,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				continue;
 
 			ioc_arg.conflictIxNum = i;
-			result = o_tbl_index_insert(descr, descr->indices[i], slot,
+			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo);
 			if (result != OBTreeModifyResultInserted)
 			{
@@ -350,7 +347,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				continue;
 
 			ioc_arg.conflictIxNum = -1;
-			result = o_tbl_index_insert(descr, descr->indices[i], slot,
+			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo);
 			if (result != OBTreeModifyResultInserted)
 			{
@@ -1042,9 +1039,10 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 	return result;
 }
 
-static OBTreeModifyResult
+OBTreeModifyResult
 o_tbl_index_insert(OTableDescr *descr,
 				   OIndexDescr *id,
+				   OTuple *own_tup,
 				   TupleTableSlot *slot,
 				   OXid oxid, CommitSeqNo csn,
 				   BTreeModifyCallbackInfo *callbackInfo)
@@ -1054,72 +1052,62 @@ o_tbl_index_insert(OTableDescr *descr,
 	OBTreeKeyBound knew;
 	bool		primary = (bd->type == oIndexPrimary);
 
-	if (primary || o_is_index_predicate_satisfied(id, slot, id->econtext))
+	OBTreeModifyResult result;
+
+	if (!primary)
 	{
-		OBTreeModifyResult result;
-
-		tts_orioledb_fill_key_bound(slot, id, &knew);
-
-		if (!primary)
+		if (own_tup)
 		{
+			int			i;
+
+			slot_getsomeattrs(slot, id->nKeyFields);
+
+			knew.nkeys = id->nonLeafTupdesc->natts;
+			for (i = 0; i < knew.nkeys; i++)
+			{
+				Oid			typid;
+
+				typid = id->nonLeafTupdesc->attrs[i].atttypid;
+
+				knew.keys[i].value = slot->tts_values[i];
+				knew.keys[i].type = typid;
+				knew.keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
+				if (slot->tts_isnull[i])
+					knew.keys[i].flags |= O_VALUE_BOUND_NULL;
+				knew.keys[i].comparator = id->fields[i].comparator;
+			}
+			tup = *own_tup;
+		}
+		else {
+			tts_orioledb_fill_key_bound(slot, id, &knew);
 			tup = tts_orioledb_make_secondary_tuple(slot, id, true);
-			o_btree_check_size_of_tuple(o_tuple_size(tup, &id->leafSpec),
-										id->name.data, true);
 		}
-		else
-		{
-			tup = tts_orioledb_form_tuple(slot, descr);
-		}
-
-		o_btree_load_shmem(bd);
-		if (primary || !id->unique ||
-			(!id->nulls_not_distinct && o_has_nulls(tup)))
-			result = o_btree_modify(bd, BTreeOperationInsert,
-									tup, BTreeKeyLeafTuple,
-									(Pointer) &knew, BTreeKeyBound,
-									oxid, csn, RowLockUpdate,
-									NULL, callbackInfo) == OBTreeModifyResultInserted;
-		else
-			result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
-										   (Pointer) &knew, BTreeKeyBound,
-										   oxid, csn, RowLockUpdate,
-										   NULL, callbackInfo) == OBTreeModifyResultInserted;
-
-		((OTableSlot *) slot)->version = o_tuple_get_version(tup);
-
-		STOPEVENT(STOPEVENT_INDEX_INSERT, NULL);
-
-		return result;
+		o_btree_check_size_of_tuple(o_tuple_size(tup, &id->leafSpec),
+									id->name.data, true);
 	}
 	else
 	{
-		return OBTreeModifyResultInserted;
+		tts_orioledb_fill_key_bound(slot, id, &knew);
+		tup = tts_orioledb_form_tuple(slot, descr);
 	}
-}
 
-static OTableModifyResult
-o_tbl_indices_insert(TupleTableSlot *slot,
-					 OTableDescr *descr,
-					 OXid oxid, CommitSeqNo csn,
-					 BTreeModifyCallbackInfo *callbackInfo)
-{
-	OTableModifyResult result;
-	int			i;
+	o_btree_load_shmem(bd);
+	if (primary || !id->unique ||
+		(!id->nulls_not_distinct && o_has_nulls(tup)))
+		result = o_btree_modify(bd, BTreeOperationInsert,
+								tup, BTreeKeyLeafTuple,
+								(Pointer) &knew, BTreeKeyBound,
+								oxid, csn, RowLockUpdate,
+								NULL, callbackInfo) == OBTreeModifyResultInserted;
+	else
+		result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
+										(Pointer) &knew, BTreeKeyBound,
+										oxid, csn, RowLockUpdate,
+										NULL, callbackInfo) == OBTreeModifyResultInserted;
 
-	result.success = true;
+	((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 
-	for (i = 0; i < descr->nIndices; i++)
-	{
-		result.success = (o_tbl_index_insert(descr, descr->indices[i], slot,
-											 oxid, csn, callbackInfo) == OBTreeModifyResultInserted);
-		if (!result.success)
-		{
-			result.failedIxNum = i;
-			result.action = BTreeOperationInsert;
-			result.oldTuple = NULL;
-			return result;
-		}
-	}
+	STOPEVENT(STOPEVENT_INDEX_INSERT, NULL);
 
 	return result;
 }
