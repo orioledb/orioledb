@@ -379,6 +379,89 @@ detoast_passed_values(OIndexDescr *index_descr, Datum *values, bool *isnull, boo
 	}
 }
 
+static OBTreeModifyCallbackAction
+o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+				  OXid oxid, OTupleXactInfo xactInfo,
+				  BTreeLeafTupleDeletedStatus deleted,
+				  UndoLocation location, RowLockMode *lock_mode,
+				  BTreeLocationHint *hint, void *arg)
+{
+	OTableSlot *oslot = (OTableSlot *) arg;
+
+	if (descr->type == oIndexPrimary &&
+		XACT_INFO_OXID_IS_CURRENT(xactInfo))
+	{
+		OIndexDescr *id = (OIndexDescr *) descr->arg;
+
+		o_tuple_set_version(&id->leafSpec, newtup,
+							o_tuple_get_version(tup) + 1);
+		oslot->tuple = *newtup;
+	}
+	return OBTreeCallbackActionUpdate;
+}
+
+static void
+o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
+{
+	bool		is_ctid = id->primaryIsCtid;
+	bool		is_primary = id->desc.type == oIndexPrimary;
+
+	if (is_primary && is_ctid)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+						errmsg("ctid index key duplicate.")));
+	}
+	else
+	{
+		StringInfo	str = makeStringInfo();
+		int			i;
+
+		appendStringInfo(str, "(");
+		for (i = 0; i < id->nKeyFields; i++)
+		{
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			appendStringInfo(str, "%s",
+							 id->nonLeafTupdesc->attrs[i].attname.data);
+		}
+		appendStringInfo(str, ")=");
+
+		slot_getallattrs(slot);
+
+		appendStringInfo(str, "(");
+		for (i = 0; i < id->nUniqueFields; i++)
+		{
+			Datum		value = slot->tts_values[i];
+			bool		isnull = slot->tts_isnull[i];
+
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			if (isnull)
+				appendStringInfo(str, "null");
+			else
+			{
+				Oid			typoutput;
+				bool		typisvarlena;
+				char	   *res;
+
+				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+								&typoutput, &typisvarlena);
+				res = OidOutputFunctionCall(typoutput, value);
+				appendStringInfo(str, "'%s'", res);
+			}
+		}
+		appendStringInfo(str, ")");
+
+		ereport(ERROR,
+				(errcode(ERRCODE_UNIQUE_VIOLATION),
+				 errmsg("duplicate key value violates unique "
+						"constraint \"%s\"", id->name.data),
+				 errdetail("Key %s already exists.", str->data),
+				 errtableconstraint(rel, id->desc.type == oIndexPrimary ?
+									"pk" : "sk")));
+	}
+}
+
 bool
 orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel,
@@ -428,7 +511,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
-
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
 			break;
