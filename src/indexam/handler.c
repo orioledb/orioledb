@@ -138,14 +138,14 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
 
+	result->heap_tuples = 0.0;
+	result->index_tuples = 0.0;
+
 	if (!index->rd_index->indisprimary)
 	{
 		o_define_index_validate(heap, index, indexInfo);
-		o_define_index(heap, index, InvalidOid, InvalidIndexNumber);
+		o_define_index(heap, index, InvalidOid, InvalidIndexNumber, result);
 	}
-
-	result->heap_tuples = 0.0;
-	result->index_tuples = 0.0;
 
 	return result;
 }
@@ -1033,6 +1033,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
+	elog(WARNING, "orioledb_amgetbitmap");
 	return 0;
 }
 

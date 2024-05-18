@@ -22,7 +22,6 @@
 
 typedef enum OPlanTag
 {
-	O_IndexPlan,
 	O_BitmapHeapPlan,
 } OPlanTag;
 

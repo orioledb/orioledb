@@ -11,13 +11,13 @@ RETURNS index_am_handler
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE ACCESS METHOD orioledb_btree TYPE INDEX
+CREATE ACCESS METHOD orioledb_btree TYPE INDEX FOR orioledb
 HANDLER orioledb_indexam_handler;
 
-CREATE OPERATOR FAMILY orioledb_integer_ops USING orioledb_btree;
+CREATE OPERATOR FAMILY integer_ops USING orioledb_btree;
 
-CREATE OPERATOR CLASS orioledb_int2_ops DEFAULT
-	FOR TYPE int2 USING orioledb_btree FAMILY orioledb_integer_ops AS
+CREATE OPERATOR CLASS int2_ops DEFAULT
+	FOR TYPE int2 USING orioledb_btree FAMILY integer_ops AS
 	OPERATOR 1  <,
 	OPERATOR 2  <=,
 	OPERATOR 3  =,
@@ -46,8 +46,8 @@ CREATE OPERATOR CLASS orioledb_int2_ops DEFAULT
 	FUNCTION 1 (int2, int8) btint28cmp(int2, int8),
 	FUNCTION 3 (int2, int8) in_range(int2, int2, int8, boolean, boolean);
 
-CREATE OPERATOR CLASS orioledb_int4_ops DEFAULT
-	FOR TYPE int4 USING orioledb_btree FAMILY orioledb_integer_ops AS
+CREATE OPERATOR CLASS int4_ops DEFAULT
+	FOR TYPE int4 USING orioledb_btree FAMILY integer_ops AS
 	OPERATOR 1  <,
 	OPERATOR 2  <=,
 	OPERATOR 3  =,
@@ -76,8 +76,8 @@ CREATE OPERATOR CLASS orioledb_int4_ops DEFAULT
 	FUNCTION 1 (int4, int8) btint48cmp(int4, int8),
 	FUNCTION 3 (int4, int8) in_range(int4, int4, int8, boolean, boolean);
 
-CREATE OPERATOR CLASS orioledb_int8_ops DEFAULT
-	FOR TYPE int8 USING orioledb_btree FAMILY orioledb_integer_ops AS
+CREATE OPERATOR CLASS int8_ops DEFAULT
+	FOR TYPE int8 USING orioledb_btree FAMILY integer_ops AS
 	OPERATOR 1  <,
 	OPERATOR 2  <=,
 	OPERATOR 3  =,
@@ -104,10 +104,10 @@ CREATE OPERATOR CLASS orioledb_int8_ops DEFAULT
 	OPERATOR 5 > (int8, int4),
 	FUNCTION 1 (int8, int4) btint84cmp(int8, int4);
 
-CREATE OPERATOR FAMILY orioledb_text_ops_fam USING orioledb_btree;
+CREATE OPERATOR FAMILY text_ops USING orioledb_btree;
 
-CREATE OPERATOR CLASS orioledb_text_ops DEFAULT
-	FOR TYPE text USING orioledb_btree FAMILY orioledb_text_ops_fam AS
+CREATE OPERATOR CLASS text_ops DEFAULT
+	FOR TYPE text USING orioledb_btree FAMILY text_ops AS
 	OPERATOR 1  <,
 	OPERATOR 2  <=,
 	OPERATOR 3  =,
@@ -117,10 +117,10 @@ CREATE OPERATOR CLASS orioledb_text_ops DEFAULT
 	FUNCTION 2  bttextsortsupport(internal),
 	FUNCTION 4  btvarstrequalimage(oid);
 
-CREATE OPERATOR FAMILY orioledb_bool_ops_fam USING orioledb_btree;
+CREATE OPERATOR FAMILY bool_ops USING orioledb_btree;
 
-CREATE OPERATOR CLASS orioledb_bool_ops DEFAULT
-	FOR TYPE bool USING orioledb_btree FAMILY orioledb_bool_ops_fam AS
+CREATE OPERATOR CLASS bool_ops DEFAULT
+	FOR TYPE bool USING orioledb_btree FAMILY bool_ops AS
     OPERATOR        1       <,
     OPERATOR        2       <=,
     OPERATOR        3       =,
@@ -129,10 +129,10 @@ CREATE OPERATOR CLASS orioledb_bool_ops DEFAULT
     FUNCTION        1       btboolcmp(bool,bool),
     FUNCTION        4       btequalimage(oid);
 
-CREATE OPERATOR FAMILY orioledb_datetime_ops USING orioledb_btree;
+CREATE OPERATOR FAMILY datetime_ops USING orioledb_btree;
 
-CREATE OPERATOR CLASS orioledb_date_ops DEFAULT
-	FOR TYPE date USING orioledb_btree FAMILY orioledb_datetime_ops AS
+CREATE OPERATOR CLASS date_ops DEFAULT
+	FOR TYPE date USING orioledb_btree FAMILY datetime_ops AS
     OPERATOR 1 <,
     OPERATOR 2 <=,
     OPERATOR 3 =,
@@ -157,8 +157,8 @@ CREATE OPERATOR CLASS orioledb_date_ops DEFAULT
     OPERATOR 5 >(date, timestamptz),
     FUNCTION 1 (date,timestamptz) date_cmp_timestamptz(date,timestamptz);
 
-CREATE OPERATOR CLASS orioledb_timestamptz_ops DEFAULT
-	FOR TYPE timestamptz USING orioledb_btree FAMILY orioledb_datetime_ops AS
+CREATE OPERATOR CLASS timestamptz_ops DEFAULT
+	FOR TYPE timestamptz USING orioledb_btree FAMILY datetime_ops AS
     OPERATOR 1 <,
     OPERATOR 2 <=,
     OPERATOR 3 =,
@@ -183,8 +183,8 @@ CREATE OPERATOR CLASS orioledb_timestamptz_ops DEFAULT
     OPERATOR 5 >(timestamptz, timestamp),
     FUNCTION 1 (timestamptz,timestamp) timestamptz_cmp_timestamp(timestamptz,timestamp);
 
-CREATE OPERATOR CLASS orioledb_timestamp_ops DEFAULT
-	FOR TYPE timestamp USING orioledb_btree FAMILY orioledb_datetime_ops AS
+CREATE OPERATOR CLASS timestamp_ops DEFAULT
+	FOR TYPE timestamp USING orioledb_btree FAMILY datetime_ops AS
     OPERATOR 1 <,
     OPERATOR 2 <=,
     OPERATOR 3 =,

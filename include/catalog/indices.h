@@ -122,7 +122,8 @@ extern oIdxShared *recovery_oidxshared;
 extern Sharedsort *recovery_sharedsort;
 
 extern void o_define_index_validate(Relation heap, Relation index, IndexInfo *indexInfo);
-extern void o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_num);
+extern void o_define_index(Relation heap, Relation index, Oid indoid,
+						   OIndexNumber old_ix_num, IndexBuildResult *result);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
@@ -131,11 +132,15 @@ extern bool is_in_indexes_rebuild(void);
 
 extern void rebuild_indices_insert_placeholders(OTableDescr *descr);
 extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
-							OTable *o_table, OTableDescr *descr, bool in_dedicated_recovery_worker);
+							OTable *o_table, OTableDescr *descr,
+							bool in_dedicated_recovery_worker,
+							IndexBuildResult *result);
 extern void assign_new_oids(OTable *oTable, Relation rel);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
 extern void build_secondary_index(OTable *o_table, OTableDescr *descr,
-								  OIndexNumber ix_num, bool in_dedicated_recovery_worker);
+								  OIndexNumber ix_num,
+								  bool in_dedicated_recovery_worker,
+								  IndexBuildResult *result);
 PGDLLEXPORT void _o_index_parallel_build_main(dsm_segment *seg, shm_toc *toc);
 extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 										  OTable *recovery_o_table, OTable *recovery_old_o_table);

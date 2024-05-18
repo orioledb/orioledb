@@ -2090,21 +2090,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OIndexNumber ix_num;
 					OTableDescr *descr = relation_get_descr(tbl);
 
-
-					// TODO: Move this to postgres code where it's commented out
-					// If we'll decide to implement default indexam for tableam
-					if (rel->rd_rel->relam != get_index_am_oid("orioledb_btree", false))
-						ereport(ERROR,
-								(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-								errmsg("index \"%s\" is not a orioledb_btree", rel->rd_rel->relname.data)));
-
 					Assert(descr != NULL);
 					if (rel->rd_index->indisprimary) {
 						// NOTE: This will work when ADD PRIMARY KEY will have indexam option to use
 						o_define_index_validate(tbl, rel, NULL);
 						relation_close(rel, AccessShareLock);
 						closed = true;
-						o_define_index(tbl, rel, conform->conindid, InvalidIndexNumber);
+						o_define_index(tbl, rel, conform->conindid,
+									   InvalidIndexNumber, NULL);
 					} else {
 						ix_num = o_find_ix_num_by_name(descr,
 													rel->rd_rel->relname.data);
@@ -2115,7 +2108,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							o_define_index_validate(tbl, rel, NULL);
 							relation_close(rel, AccessShareLock);
 							closed = true;
-							o_define_index(tbl, rel, conform->conindid, ix_num);
+							o_define_index(tbl, rel, conform->conindid,
+										   ix_num, NULL);
 						}
 					}
 				}
