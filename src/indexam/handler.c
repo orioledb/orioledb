@@ -1538,6 +1538,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
+	elog(WARNING, "orioledb_amgetbitmap");
 	return 0;
 }
 
