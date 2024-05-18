@@ -379,7 +379,8 @@ index_build_params(OTableIndex *index)
  * complete.  Also checkpoint numer in tree headers is valid.
  */
 void
-o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_num)
+o_define_index(Relation heap, Relation index, Oid indoid,
+			   OIndexNumber old_ix_num, IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
@@ -560,12 +561,12 @@ o_define_index(Relation heap, Relation index, Oid indoid, OIndexNumber old_ix_nu
 		if (table_index->type == oIndexPrimary)
 		{
 			Assert(old_o_table);
-			rebuild_indices(old_o_table, old_descr, o_table, descr);
+			rebuild_indices(old_o_table, old_descr, o_table, descr, result);
 		}
 		else
 		{
 			Assert(!is_recovery_in_progress());
-			build_secondary_index(o_table, descr, ix_num, false);
+			build_secondary_index(o_table, descr, ix_num, false, result);
 		}
 	}
 	else
@@ -1135,7 +1136,8 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, Par
 
 void
 build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
-					  bool in_dedicated_recovery_worker)
+					  bool in_dedicated_recovery_worker,
+					  IndexBuildResult *result)
 {
 	Tuplesortstate *sortstate;
 	Relation	tableRelation,
@@ -1237,7 +1239,12 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 	o_tables_table_meta_unlock(o_table, InvalidOid);
 
-	if (!is_recovery_in_progress())
+	if (result)
+	{
+		result->heap_tuples = heap_tuples;
+		result->index_tuples = index_tuples[0];
+	}
+	else if (!is_recovery_in_progress())
 	{
 		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
 		indexRelation = index_open(o_table->indices[ix_num].oids.reloid,
@@ -1261,7 +1268,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 void
 rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
-				OTable *o_table, OTableDescr *descr)
+				OTable *o_table, OTableDescr *descr, IndexBuildResult *result)
 {
 	void	   *sscan;
 	OIndexDescr *idx;
@@ -1399,14 +1406,22 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 		for (i = 0; i < o_table->nindices; i++)
 		{
-			OTableIndex *table_index = &o_table->indices[i];
-			Relation	indexRelation;
+			if (i == 0 && result)
+			{
+				result->heap_tuples = heap_tuples;
+				result->index_tuples = index_tuples[0];
+			}
+			else
+			{
+				OTableIndex *table_index = &o_table->indices[i];
+				Relation	indexRelation;
 
-			indexRelation = index_open(table_index->oids.reloid,
-									   AccessExclusiveLock);
+				indexRelation = index_open(table_index->oids.reloid,
+										AccessExclusiveLock);
 
-			index_update_stats(indexRelation, false, index_tuples[i]);
-			index_close(indexRelation, AccessExclusiveLock);
+				index_update_stats(indexRelation, false, index_tuples[i]);
+				index_close(indexRelation, AccessExclusiveLock);
+			}
 		}
 
 		/* Make the updated catalog row versions visible */
@@ -1443,7 +1458,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
-	rebuild_indices(old_o_table, old_descr, o_table, descr);
+	rebuild_indices(old_o_table, old_descr, o_table, descr, NULL);
 
 }
 

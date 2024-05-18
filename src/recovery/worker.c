@@ -360,7 +360,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					Assert(id == index_build_leader);
 					o_fill_tmp_table_descr(o_descr, o_table);
 
-					build_secondary_index(o_table, o_descr, msg->ix_num, true);
+					build_secondary_index(o_table, o_descr, msg->ix_num,
+										  true, NULL);
 
 					/*
 					 * Wake up the other recovery processes that may wait to

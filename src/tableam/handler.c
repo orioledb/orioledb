@@ -945,10 +945,9 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	}
 
 	/* estimate number of tuples from previous tuple density */
-	if (relpages > 0)
+	if (reltuples >= 0 && relpages > 0)
 	{
 		density = reltuples / (double) relpages;
-		*tuples = rint(density * (double) curpages);
 	}
 	else
 	{
