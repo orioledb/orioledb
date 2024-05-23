@@ -462,6 +462,66 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 	}
 }
 
+
+static void
+append_rowid_values(OIndexDescr *id,
+					TupleDesc	pk_tupdesc, OTupleFixedFormatSpec *pk_spec,
+					Datum pkDatum, Datum *values, bool *isnull,
+					CommitSeqNo *csn, uint32 *version)
+{
+	bytea	   *rowid;
+	Pointer		p;
+
+	if (!id->primaryIsCtid)
+	{
+		OTuple		tuple;
+		ORowIdAddendumNonCtid *add;
+
+		rowid = DatumGetByteaP(pkDatum);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumNonCtid *) p;
+		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+		tuple.data = p;
+		tuple.formatFlags = add->flags;
+		*csn = add->csn;
+		*version = o_tuple_get_version(tuple);
+
+		if (id->nPrimaryFields < id->nFields)
+		{
+			int			i;
+			int			pk_from;
+
+			pk_from = id->nFields - id->nPrimaryFields;
+
+			/* Amount of index fields checked in o_define_index_validate */
+			for (i = 0; i < id->nPrimaryFields; i++)
+			{
+				AttrNumber attnum = id->primaryFieldsAttnums[i] - 1;
+				if (attnum >= pk_from)
+				{
+					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
+				}
+			}
+		}
+	}
+	else
+	{
+		ORowIdAddendumCtid *add;
+		AttrNumber attnum = id->nFields - 1;
+
+		rowid = DatumGetByteaP(pkDatum);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumCtid *) p;
+		*csn = add->csn;
+		*version = add->version;
+		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+
+		values[attnum] = PointerGetDatum(p);
+		isnull[attnum] = false;
+	}
+}
+
 bool
 orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel,
@@ -604,7 +664,6 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
-
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
 			break;
@@ -1538,7 +1597,6 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
-	elog(WARNING, "orioledb_amgetbitmap");
 	return 0;
 }
 
