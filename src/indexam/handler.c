@@ -46,7 +46,7 @@ static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 							  IndexUniqueCheck checkUnique,
 							  bool indexUnchanged,
 							  IndexInfo *indexInfo);
-static bool orioledb_amupdate(Relation rel,
+static bool orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							  Datum *values, bool *isnull, Datum tupleid,
 							  Datum *valuesOld, bool *isnullOld,
 							  Datum oldTupleid,
@@ -388,7 +388,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 }
 
 bool
-orioledb_amupdate(Relation rel,
+orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *values, bool *isnull, Datum tupleid,
 				  Datum *valuesOld, bool *isnullOld, Datum oldTupleid,
 				  Relation heapRel,
@@ -455,7 +455,9 @@ orioledb_amupdate(Relation rel,
 
 	fill_current_oxid_csn(&oxid, &csn);
 
-	result = o_update_secondary_index(index_descr, ix_num, new_slot, new_tuple,
+	result = o_update_secondary_index(index_descr, ix_num,
+									  new_valid, old_valid,
+									  new_slot, new_tuple,
 									  old_slot, oxid, csn);
 
 	if (!result.success)
