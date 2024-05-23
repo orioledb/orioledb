@@ -730,6 +730,8 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 OTableModifyResult
 o_update_secondary_index(OIndexDescr *id,
 						 OIndexNumber ix_num,
+						 bool new_valid,
+						 bool old_valid,
 						 TupleTableSlot *newSlot,
 						 OTuple new_ix_tup,
 						 TupleTableSlot *oldSlot,
@@ -752,13 +754,16 @@ o_update_secondary_index(OIndexDescr *id,
 	o_btree_load_shmem(&id->desc);
 	O_TUPLE_SET_NULL(nullTup);
 
-	res.success = o_btree_modify(&id->desc, BTreeOperationDelete,
-								 nullTup, BTreeKeyNone,
-								 (Pointer) &old_key, BTreeKeyBound,
-								 oxid, csn, RowLockUpdate,
-								 NULL, &callbackInfo) == OBTreeModifyResultDeleted;
+	if (old_valid)
+		res.success = o_btree_modify(&id->desc, BTreeOperationDelete,
+									nullTup, BTreeKeyNone,
+									(Pointer) &old_key, BTreeKeyBound,
+									oxid, csn, RowLockUpdate,
+									NULL, &callbackInfo) == OBTreeModifyResultDeleted;
+	else
+		res.success = true;
 
-	if (res.success)
+	if (res.success && new_valid)
 	{
 		o_btree_check_size_of_tuple(o_tuple_size(new_ix_tup, &id->leafSpec),
 									id->name.data,
@@ -957,7 +962,6 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 	OTuple		nullTup;
 
 	O_TUPLE_SET_NULL(nullTup);
-
 
 	fill_key_bound(slot, id, &bound);
 	o_btree_load_shmem(&id->desc);

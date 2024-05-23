@@ -112,6 +112,8 @@ extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 									   OModifyCallbackArg *arg);
 extern OTableModifyResult o_update_secondary_index(OIndexDescr *id,
 												   OIndexNumber ix_num,
+												   bool new_valid,
+												   bool old_valid,
 												   TupleTableSlot *newSlot,
 												   OTuple new_ix_tup,
 												   TupleTableSlot *oldSlot,
