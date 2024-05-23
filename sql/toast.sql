@@ -490,6 +490,64 @@ SELECT id, substr(t, 1, 20) FROM o_test_toast_rewrite;
 SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
 COMMIT;
 
+----
+-- TOAST logical decoding
+----
+DROP TABLE if exists o_logical;
+SELECT pg_drop_replication_slot('regression_slot');
+
+-- Wrapper function, which converts result of SQL query to the text
+CREATE OR REPLACE FUNCTION query_to_text_filtered(sql TEXT, out result text)
+        RETURNS SETOF TEXT AS $$
+        BEGIN
+                FOR result IN EXECUTE sql LOOP
+			IF result NOT LIKE '%COMMIT%' AND result NOT LIKE '%BEGIN%' THEN
+				RETURN NEXT;
+			END IF;
+                END LOOP;
+        END $$
+LANGUAGE plpgsql;
+
+-- Uncompressed
+
+CREATE TABLE o_logical(id integer PRIMARY KEY, v1 text, v2 text) using orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+---- Insert
+INSERT INTO o_logical VALUES ('1', generate_string(10 + 1, 4000), generate_string(10 + 2, 5000));
+INSERT INTO o_logical VALUES ('2', generate_string(20 + 1, 4000), generate_string(20 + 2, 5000));
+--SELECT * FROM o_logical;
+---- Update TOAST->TOAST
+UPDATE o_logical SET (v1, v2) = (generate_string(50 + 1, 4000), generate_string(50 + 2, 5000)) WHERE id = 1;
+UPDATE o_logical SET v2 = generate_string(60 + 2, 5000) WHERE id = 2;
+--SELECT * FROM o_logical;
+--- Update TOAST->Inline
+UPDATE o_logical SET (v1, v2) = (generate_string(70 + 1, 4000), generate_string(70 + 2, 20)) WHERE id = 1;
+--SELECT * FROM o_logical WHERE id = 1;
+SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('regression_slot', NULL, NULL); $$);
+
+
+SELECT pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical;
+
+-- Compressed
+CREATE TABLE o_logical(id integer PRIMARY KEY, v1 text, v2 text) using orioledb WITH (compress = -1, toast_compress = -1, primary_compress = -1);
+SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);
+---- Insert
+INSERT INTO o_logical VALUES ('1', repeat('1', 4000) || generate_string(10 + 1, 4000), repeat('1', 4000) || generate_string(10 + 2, 5000));
+INSERT INTO o_logical VALUES ('2', repeat('2', 4000) || generate_string(20 + 1, 4000), repeat('2', 4000) || generate_string(20 + 2, 5000));
+--SELECT * FROM o_logical;
+---- Update TOAST->TOAST
+UPDATE o_logical SET (v1, v2) = (repeat('5', 4000) || generate_string(50 + 1, 4000), repeat('5', 4000) || generate_string(50 + 2, 5000)) WHERE id = 1;
+UPDATE o_logical SET v2 = repeat('6', 4000) || generate_string(60 + 1, 4000) WHERE id = 2;
+--SELECT * FROM o_logical;
+--- Update TOAST->Inline
+UPDATE o_logical SET (v1, v2) = (repeat('7', 4000) || generate_string(70 + 1, 4000), repeat('7', 20) || generate_string(70 + 2, 20)) WHERE id = 1;
+--SELECT * FROM o_logical WHERE id = 1;
+SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('regression_slot', NULL, NULL); $$);
+
+SELECT * FROM pg_drop_replication_slot('regression_slot');
+DROP TABLE o_logical;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast CASCADE;
