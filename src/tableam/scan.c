@@ -536,7 +536,6 @@ TupleTableSlot *
 o_exec_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
-	EPQState   *epqstate;
 	TupleTableSlot *slot = NULL;
 
 	if (ocstate->useEaCounters)
@@ -773,8 +772,6 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 	OTableDescr *descr;
-	char	   *indexName;
-	StringInfoData title;
 
 	descr = relation_get_descr(node->ss.ss_currentRelation);
 

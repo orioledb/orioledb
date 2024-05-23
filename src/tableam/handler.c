@@ -501,9 +501,9 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 #if PG_VERSION_NUM >= 160000
-	*update_indexes = TU_None;
+	*update_indexes = TU_All;
 #else
-	*update_indexes = false;
+	*update_indexes = true;
 #endif
 	oxid = get_current_oxid();
 
