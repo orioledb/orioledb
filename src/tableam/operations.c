@@ -946,6 +946,36 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 	return result;
 }
 
+OTableModifyResult
+o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
+				   OXid oxid, CommitSeqNo csn)
+{
+	OTableModifyResult result;
+	OBTreeModifyResult res;
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
+	OBTreeKeyBound bound;
+	OTuple		nullTup;
+
+	O_TUPLE_SET_NULL(nullTup);
+
+
+	fill_key_bound(slot, id, &bound);
+	o_btree_load_shmem(&id->desc);
+	res = o_btree_modify(&id->desc, BTreeOperationDelete,
+							nullTup, BTreeKeyNone,
+							(Pointer) &bound, BTreeKeyBound,
+							oxid, csn, RowLockUpdate,
+							NULL, &callbackInfo);
+
+	result.success = (res == OBTreeModifyResultDeleted);
+	if (!result.success)
+	{
+		result.success = false;
+		result.failedIxNum = ix_num;
+	}
+	return result;
+}
+
 /* Returns TupleTableSlot of old tuple as OTableModifyResult.result */
 static OTableModifyResult
 o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
@@ -955,8 +985,6 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 	OTableModifyResult result;
 	OBTreeModifyResult res;
 	TupleTableSlot *slot;
-	OBTreeKeyBound bound;
-	int			i;
 	OTuple		nullTup;
 	BTreeModifyCallbackInfo callbackInfo = {
 		.waitCallback = NULL,
@@ -1001,32 +1029,6 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 		result.oldTuple = slot;
 		result.failedIxNum = PrimaryIndexNumber;
 		return result;
-	}
-
-	/* removes from secondary indexes */
-	for (i = 1; i < descr->nIndices; i++)
-	{
-		OIndexDescr *id = descr->indices[i];
-
-		if ((i != PrimaryIndexNumber) &&
-			!o_is_index_predicate_satisfied(id, slot, id->econtext))
-			continue;
-
-		tts_orioledb_fill_key_bound(slot, id, &bound);
-		o_btree_load_shmem(&id->desc);
-		res = o_btree_modify(&id->desc, BTreeOperationDelete,
-							 nullTup, BTreeKeyNone,
-							 (Pointer) &bound, BTreeKeyBound,
-							 oxid, csn, RowLockUpdate,
-							 NULL, &callbackInfo);
-
-		result.success = (res == OBTreeModifyResultDeleted);
-		if (!result.success)
-		{
-			result.success = false;
-			result.failedIxNum = i;
-			return result;
-		}
 	}
 
 	result.success = true;

@@ -122,6 +122,10 @@ extern OTableModifyResult o_tbl_delete(OTableDescr *descr,
 									   OXid oxid, CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg);
+extern OTableModifyResult o_tbl_index_delete(OIndexDescr *id,
+											 OIndexNumber ix_num,
+											 TupleTableSlot *slot,
+											 OXid oxid, CommitSeqNo csn);
 extern void o_check_tbl_update_mres(OTableModifyResult mres,
 									OTableDescr *descr,
 									Relation rel,
