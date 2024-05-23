@@ -19,6 +19,7 @@
 #include "catalog/indices.h"
 #include "catalog/o_tables.h"
 #include "tableam/operations.h"
+#include "tableam/tree.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
 #include "utils/planner.h"
@@ -44,6 +45,13 @@ static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 							  Datum tupleid, Relation heapRel,
 							  IndexUniqueCheck checkUnique,
 							  bool indexUnchanged,
+							  IndexInfo *indexInfo);
+static bool orioledb_amupdate(Relation rel,
+							  Datum *values, bool *isnull, Datum tupleid,
+							  Datum *valuesOld, bool *isnullOld,
+							  Datum oldTupleid,
+							  Relation heapRel,
+							  IndexUniqueCheck checkUnique,
 							  IndexInfo *indexInfo);
 static IndexBulkDeleteResult *orioledb_ambulkdelete(IndexVacuumInfo *info,
 													IndexBulkDeleteResult *stats,
@@ -101,6 +109,7 @@ Datum orioledb_indexam_handler(PG_FUNCTION_ARGS)
 	amroutine->amcaninclude = true;
 	amroutine->amusemaintenanceworkmem = false;
 	amroutine->amsummarizing = false;
+	amroutine->ammvccaware = true;
 	amroutine->amparallelvacuumoptions =
 		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_COND_CLEANUP;
 	amroutine->amkeytype = InvalidOid;
@@ -108,6 +117,7 @@ Datum orioledb_indexam_handler(PG_FUNCTION_ARGS)
 	amroutine->ambuild = orioledb_ambuild;
 	amroutine->ambuildempty = orioledb_ambuildempty;
 	amroutine->aminsert = orioledb_aminsert;
+	amroutine->amupdate = orioledb_amupdate;
 	amroutine->ambulkdelete = orioledb_ambulkdelete;
 	amroutine->amvacuumcleanup = orioledb_amvacuumcleanup;
 	amroutine->amcanreturn = orioledb_amcanreturn;
@@ -238,6 +248,66 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 	}
 }
 
+
+static void
+append_rowid_values(OIndexDescr *id,
+					TupleDesc	pk_tupdesc, OTupleFixedFormatSpec *pk_spec,
+					Datum pkDatum, Datum *values, bool *isnull,
+					CommitSeqNo *csn, uint32 *version)
+{
+	bytea	   *rowid;
+	Pointer		p;
+
+	if (!id->primaryIsCtid)
+	{
+		OTuple		tuple;
+		ORowIdAddendumNonCtid *add;
+
+		rowid = DatumGetByteaP(pkDatum);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumNonCtid *) p;
+		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+		tuple.data = p;
+		tuple.formatFlags = add->flags;
+		*csn = add->csn;
+		*version = o_tuple_get_version(tuple);
+
+		if (id->nPrimaryFields < id->nFields)
+		{
+			int			i;
+			int			pk_from;
+
+			pk_from = id->nFields - id->nPrimaryFields;
+
+			/* Amount of index fields checked in o_define_index_validate */
+			for (i = 0; i < id->nPrimaryFields; i++)
+			{
+				AttrNumber attnum = id->primaryFieldsAttnums[i] - 1;
+				if (attnum >= pk_from)
+				{
+					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
+				}
+			}
+		}
+	}
+	else
+	{
+		ORowIdAddendumCtid *add;
+		AttrNumber attnum = id->nFields - 1;
+
+		rowid = DatumGetByteaP(pkDatum);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		add = (ORowIdAddendumCtid *) p;
+		*csn = add->csn;
+		*version = add->version;
+		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+
+		values[attnum] = PointerGetDatum(p);
+		isnull[attnum] = false;
+	}
+}
+
 bool
 orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel,
@@ -260,13 +330,9 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	};
 	CommitSeqNo csn;
 	OXid		oxid;
-	TupleTableSlot *o_slot;
+	TupleTableSlot *slot;
 	uint32		version;
 	OTuple		tuple;
-	bytea	   *rowid;
-	Pointer		p;
-	TupleDesc	tupdesc;
-	OTupleFixedFormatSpec *spec;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -292,73 +358,154 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	tupdesc = GET_PRIMARY(descr)->nonLeafTupdesc;
-	spec = &GET_PRIMARY(descr)->nonLeafSpec;
-
-	if (!index_descr->primaryIsCtid)
-	{
-		OTuple		tuple;
-		ORowIdAddendumNonCtid *add;
-
-		rowid = DatumGetByteaP(tupleid);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumNonCtid *) p;
-		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tuple.data = p;
-		tuple.formatFlags = add->flags;
-		csn = add->csn;
-		version = o_tuple_get_version(tuple);
-
-		if (index_descr->nPrimaryFields < index_descr->nFields)
-		{
-			int			i;
-			int			pk_from;
-
-			pk_from = index_descr->nFields - index_descr->nPrimaryFields;
-
-			/* Amount of index fields checked in o_define_index_validate */
-			for (i = 0; i < index_descr->nPrimaryFields; i++)
-			{
-				AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
-				if (attnum >= pk_from)
-				{
-					values[attnum] = o_fastgetattr(tuple, i + 1, tupdesc, spec, &isnull[attnum]);
-				}
-			}
-		}
-	}
-	else
-	{
-		ORowIdAddendumCtid *add;
-		AttrNumber attnum = index_descr->nFields - 1;
-
-		rowid = DatumGetByteaP(tupleid);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumCtid *) p;
-		csn = add->csn;
-		version = add->version;
-		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-
-		values[attnum] = PointerGetDatum(p);
-		isnull[attnum] = false;
-	}
+	append_rowid_values(index_descr,
+						GET_PRIMARY(descr)->nonLeafTupdesc,
+						&GET_PRIMARY(descr)->nonLeafSpec,
+						tupleid, values, isnull,
+						&csn, &version);
 
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
-	o_slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
-	tts_orioledb_store_tuple(o_slot, tuple, descr, csn, ix_num, true, NULL);
-	callbackInfo.arg = o_slot;
+	slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
+	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, true, NULL);
+	callbackInfo.arg = slot;
 
 	fill_current_oxid_csn(&oxid, &csn);
 
-	success = (o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, o_slot,
+	success = (o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
 								  oxid, csn, &callbackInfo) == OBTreeModifyResultInserted);
 
 	if (!success)
 	{
-		o_report_duplicate(heapRel, descr->indices[ix_num], o_slot);
+		o_report_duplicate(heapRel, descr->indices[ix_num], slot);
 	}
-	return false;
+	return success;
+}
+
+bool
+orioledb_amupdate(Relation rel,
+				  Datum *values, bool *isnull, Datum tupleid,
+				  Datum *valuesOld, bool *isnullOld, Datum oldTupleid,
+				  Relation heapRel,
+				  IndexUniqueCheck checkUnique,
+				  IndexInfo *indexInfo)
+{
+	OTableModifyResult result;
+	ORelOids	oids;
+	OIndexType	ix_type;
+	OIndexDescr *index_descr;
+	OTableDescr *descr;
+	OIndexNumber ix_num;
+	CommitSeqNo csn;
+	OXid		oxid;
+	TupleTableSlot *new_slot;
+	TupleTableSlot *old_slot;
+	uint32		version;
+	OTuple		new_tuple;
+	OTuple		old_tuple;
+
+	if (rel->rd_index->indisprimary)
+		return true;
+
+	ORelOidsSetFromRel(oids, rel);
+	if (rel->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (rel->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else
+		ix_type = oIndexRegular;
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	Assert(index_descr != NULL);
+	descr = o_fetch_table_descr(index_descr->tableOids);
+	Assert(descr != NULL);
+
+	/* Find ix_num */
+	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+	{
+		OIndexDescr *index;
+		index = descr->indices[ix_num];
+		if (index->oids.reloid == rel->rd_rel->oid)
+			break;
+	}
+	Assert(ix_num < descr->nIndices);
+
+	append_rowid_values(index_descr,
+						GET_PRIMARY(descr)->nonLeafTupdesc,
+						&GET_PRIMARY(descr)->nonLeafSpec,
+						tupleid, values, isnull,
+						&csn, &version);
+	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	new_slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
+	tts_orioledb_store_tuple(new_slot, new_tuple, descr, csn, ix_num, true, NULL);
+
+	append_rowid_values(index_descr,
+						GET_PRIMARY(descr)->nonLeafTupdesc,
+						&GET_PRIMARY(descr)->nonLeafSpec,
+						oldTupleid, valuesOld, isnullOld,
+						&csn, &version);
+	old_tuple = o_form_tuple(index_descr->nonLeafTupdesc, &index_descr->leafSpec,
+						 version, valuesOld, isnullOld);
+	old_slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
+	tts_orioledb_store_tuple(old_slot, old_tuple, descr, csn, ix_num, true, NULL);
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	result = o_update_secondary_index(index_descr, ix_num, new_slot, new_tuple,
+									  old_slot, oxid, csn);
+
+	if (!result.success)
+	{
+		switch (result.action)
+		{
+			case BTreeOperationUpdate:
+				{
+					int			i;
+					StringInfo	str = makeStringInfo();
+
+					if (result.failedIxNum == PrimaryIndexNumber)
+						break;		/* it is ok */
+
+					appendStringInfo(str, "(");
+					for (i = 0; i < index_descr->nUniqueFields; i++)
+					{
+						if (i != 0)
+							appendStringInfo(str, ", ");
+						if (isnull[i])
+							appendStringInfo(str, "null");
+						else
+						{
+							Oid			typoutput;
+							bool		typisvarlena;
+							char	   *res;
+
+							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
+											  &typoutput, &typisvarlena);
+							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
+							appendStringInfo(str, "'%s'", res);
+						}
+					}
+					appendStringInfo(str, ")");
+					ereport(ERROR,
+							(errcode(ERRCODE_INTERNAL_ERROR),
+							errmsg("unable to remove tuple from secondary index in \"%s\"",
+									RelationGetRelationName(rel)),
+							errdetail("Unable to remove %s from index \"%s\"",
+									  str->data,
+									  index_descr->name.data),
+							errtableconstraint(rel, "sk")));
+					break;
+				}
+			case BTreeOperationInsert:
+				o_report_duplicate(heapRel, index_descr, new_slot);
+				break;
+			default:
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("Unsupported BTreeOperationType.")));
+				break;
+		}
+	}
+
+	return result.success;
 }
 
 IndexBulkDeleteResult *
@@ -1033,7 +1180,6 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
-	elog(WARNING, "orioledb_amgetbitmap");
 	return 0;
 }
 

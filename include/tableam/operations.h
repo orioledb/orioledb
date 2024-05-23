@@ -110,6 +110,13 @@ extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 									   CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg);
+extern OTableModifyResult o_update_secondary_index(OIndexDescr *id,
+												   OIndexNumber ix_num,
+												   TupleTableSlot *newSlot,
+												   OTuple new_ix_tup,
+												   TupleTableSlot *oldSlot,
+												   OXid oxid,
+												   CommitSeqNo csn);
 extern OTableModifyResult o_tbl_delete(OTableDescr *descr,
 									   OBTreeKeyBound *primary_key,
 									   OXid oxid, CommitSeqNo csn,
