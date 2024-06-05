@@ -123,7 +123,9 @@ int			s3_num_workers = 3;
 int			s3_desired_size = 10000;
 int			s3_queue_size_guc;
 char	   *s3_host = NULL;
+bool		s3_use_https = true;
 char	   *s3_region = NULL;
+char	   *s3_prefix = NULL;
 char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
@@ -678,6 +680,28 @@ _PG_init(void)
 							   NULL,
 							   NULL,
 							   NULL);
+
+	DefineCustomStringVariable("orioledb.s3_prefix",
+							   "Prefix to prepend to S3 object name",
+							   NULL,
+							   &s3_prefix,
+							   NULL,
+							   PGC_POSTMASTER,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
+
+	DefineCustomBoolVariable("orioledb.s3_use_https",
+							 "Use https for S3 connections (or http otherwise)",
+							 NULL,
+							 &s3_use_https,
+							 true,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	DefineCustomStringVariable("orioledb.s3_accesskey",
 							   "S3 access key",
