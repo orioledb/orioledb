@@ -182,16 +182,18 @@ s3_list_objects(void)
 	int			sc;
 	unsigned char hash[32];
 	char	   *contenthash;
+	char	   *objectpath = s3_prefix ? s3_prefix : "";
 	long		http_code = 0;
 	StringInfo	str = makeStringInfo();
 
 	(void) SHA256(NULL, 0, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
 
-	url = psprintf("https://%s/%s", s3_host, "");
+	url = psprintf("%s://%s/%s",
+				   s3_use_https ? "https" : "http", s3_host, objectpath);
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
-	signature = s3_signature("GET", datetimestring, datestring, "",
+	signature = s3_signature("GET", datetimestring, datestring, objectpath,
 							 s3_secretkey, contenthash);
 
 	slist = NULL;
@@ -250,15 +252,22 @@ s3_get_object(char *objectname, StringInfo str)
 	int			sc;
 	unsigned char hash[32];
 	char	   *contenthash;
+	char	   *objectpath;
 	long		http_code = 0;
 
 	(void) SHA256(NULL, 0, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
 
-	url = psprintf("https://%s/%s", s3_host, objectname);
+	if (s3_prefix && strlen(s3_prefix) != 0)
+		objectpath = psprintf("%s/%s", s3_prefix, objectname);
+	else
+		objectpath = objectname;
+
+	url = psprintf("%s://%s/%s",
+				   s3_use_https ? "https" : "http", s3_host, objectpath);
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
-	signature = s3_signature("GET", datetimestring, datestring, objectname,
+	signature = s3_signature("GET", datetimestring, datestring, objectpath,
 							 s3_secretkey, contenthash);
 
 	slist = NULL;
@@ -297,6 +306,8 @@ s3_get_object(char *objectname, StringInfo str)
 	pfree(datestring);
 	pfree(datetimestring);
 	pfree(signature);
+	if (objectpath != objectname)
+		pfree(objectpath);
 }
 
 /*
@@ -438,6 +449,7 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	char	   *datetimestring;
 	char	   *signature;
 	char	   *contenthash;
+	char	   *objectpath;
 	struct curl_slist *slist;
 	char	   *tmp;
 	int			sc;
@@ -448,10 +460,16 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	(void) SHA256((unsigned char *) data, dataSize, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
 
-	url = psprintf("https://%s/%s", s3_host, objectname);
+	if (s3_prefix && strlen(s3_prefix) != 0)
+		objectpath = psprintf("%s/%s", s3_prefix, objectname);
+	else
+		objectpath = objectname;
+
+	url = psprintf("%s://%s/%s",
+				   s3_use_https ? "https" : "http", s3_host, objectpath);
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
-	signature = s3_signature("PUT", datetimestring, datestring, objectname,
+	signature = s3_signature("PUT", datetimestring, datestring, objectpath,
 							 s3_secretkey, contenthash);
 
 	slist = NULL;
@@ -501,6 +519,8 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	pfree(datetimestring);
 	pfree(signature);
 	pfree(buf.data);
+	if (objectpath != objectname)
+		pfree(objectpath);
 }
 
 /*
