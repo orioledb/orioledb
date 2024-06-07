@@ -40,7 +40,7 @@ class S3Test(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 		""")
 		node.start()
 		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
@@ -77,7 +77,7 @@ class S3Test(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 		""")
 		with self.assertRaises(StartNodeException) as e:
 			node.start()
@@ -98,7 +98,7 @@ class S3Test(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 
 			orioledb.s3_num_workers = 3
 			orioledb.recovery_pool_size = 1
@@ -186,7 +186,7 @@ class S3Test(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_num_workers = 1
 		""")
 		node.start()
@@ -246,7 +246,7 @@ class S3Test(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_desired_size = 20MB
 
 			orioledb.s3_num_workers = 3
@@ -288,7 +288,7 @@ class S3Test(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_num_workers = 3
 
 			archive_mode = on
@@ -333,3 +333,61 @@ class S3Test(S3BaseTest):
 			                 new_node.execute("SELECT * FROM o_test_1"))
 			new_node.stop()
 			new_node.cleanup()
+
+	def test_s3_http_and_prefix(self):
+		"""
+		Check http orioledb connection
+		Docstring to enable http mode: [http]
+		"""
+		node = self.node
+
+		node.append_conf(
+		    'postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}'
+			orioledb.s3_prefix = '{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_use_https = false
+
+			archive_mode = on
+			archive_library = 'orioledb'
+		""")
+		node.start()
+		archiver_pid = node.execute("""
+			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
+		""")[0][0]
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT;")
+		self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+		                 node.execute("SELECT * FROM o_test_1"))
+		node.stop(['--no-wait'])
+
+		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
+
+		while self.client.list_objects(Bucket=self.bucket_name,
+		                               Prefix='wal/') == []:
+			pass
+		os.kill(archiver_pid, signal.SIGUSR2)
+		while node.status() == NodeStatus.Running:
+			pass
+
+		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+			self.loader.download(self.bucket_name, new_node.data_dir)
+			new_node.port = self.getBasePort() + 1
+			new_node.append_conf(port=new_node.port)
+
+			new_node.start()
+			self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+			                 new_node.execute("SELECT * FROM o_test_1"))
+			new_node.stop()
+			new_node.cleanup()
+		node.stop()
