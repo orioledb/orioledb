@@ -19,7 +19,7 @@ class S3UnloggedTest(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_num_workers = 1
 		""")
 		node.start()
@@ -49,7 +49,7 @@ class S3UnloggedTest(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_num_workers = 1
 		""")
 		node.start()
@@ -77,7 +77,7 @@ class S3UnloggedTest(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_num_workers = 1
 		""")
 		node.start()
@@ -108,7 +108,7 @@ class S3UnloggedTest(S3BaseTest):
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
-			orioledb.s3_cainfo = '{self.ssl_key[0]}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
 			orioledb.s3_num_workers = 1
 		""")
 		node.start()

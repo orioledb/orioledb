@@ -27,21 +27,31 @@ class S3BaseTest(BaseTest):
 	port = 5001
 	user = "ORDB_USER"
 	region = "us-east-1"
+	policy_name = "ORDB_POLICY"
 
-	@classmethod
-	def setUpClass(cls):
+	def setUp(self):
+		protocol = 'https'
+		if self._testMethodDoc and "[http]" in self._testMethodDoc:
+			protocol = 'http'
+		super().setUp()
 		urllib3.util.connection.HAS_IPV6 = False
-		cls.ssl_key = make_ssl_devcert('/tmp/ordb_test_key', cn=cls.host)
-		cls.s3_server = MotoServerSSL(ssl_context=cls.ssl_key)
-		cls.s3_server.start()
+		if protocol == 'https':
+			ssl_key = make_ssl_devcert('/tmp/ordb_test_key', cn=self.host)
+			self.s3_cainfo = ssl_key[0]
+		else:
+			ssl_key = None
+			self.s3_cainfo = None
+		self.s3_server = MotoServerSSL(ssl_context=ssl_key)
+		self.s3_server.start()
 
-		iam = boto3.client('iam',
-		                   endpoint_url=f"https://{cls.host}:{cls.port}",
-		                   aws_access_key_id="",
-		                   aws_secret_access_key="",
-		                   region_name=cls.region,
-		                   verify=cls.ssl_key[0])
-		iam.create_user(UserName=cls.user)
+		self.iam_client = boto3.client(
+		    'iam',
+		    endpoint_url=f"{protocol}://{self.host}:{self.port}",
+		    aws_access_key_id="",
+		    aws_secret_access_key="",
+		    region_name=self.region,
+		    verify=self.s3_cainfo)
+		self.iam_client.create_user(UserName=self.user)
 		policy_document = {
 		    "Version": "2012-10-17",
 		    "Statement": {
@@ -50,31 +60,26 @@ class S3BaseTest(BaseTest):
 		        "Resource": "*"
 		    }
 		}
-		policy = iam.create_policy(PolicyName="ORDB_POLICY",
-		                           PolicyDocument=json.dumps(policy_document))
-		policy_arn = policy["Policy"]["Arn"]
-		iam.attach_user_policy(UserName=cls.user, PolicyArn=policy_arn)
-		response = iam.create_access_key(UserName=cls.user)
-		cls.access_key_id = response["AccessKey"]["AccessKeyId"]
-		cls.secret_access_key = response["AccessKey"]["SecretAccessKey"]
-
-	@classmethod
-	def tearDownClass(cls):
-		cls.s3_server.stop()
-
-	def setUp(self):
-		super().setUp()
+		policy = self.iam_client.create_policy(
+		    PolicyName=self.policy_name,
+		    PolicyDocument=json.dumps(policy_document))
+		self.policy_arn = policy["Policy"]["Arn"]
+		self.iam_client.attach_user_policy(UserName=self.user,
+		                                   PolicyArn=self.policy_arn)
+		response = self.iam_client.create_access_key(UserName=self.user)
+		self.access_key_id = response["AccessKey"]["AccessKeyId"]
+		self.secret_access_key = response["AccessKey"]["SecretAccessKey"]
 
 		session = boto3.Session(aws_access_key_id=self.access_key_id,
 		                        aws_secret_access_key=self.secret_access_key,
 		                        region_name=self.region)
-		host_port = f"https://{self.host}:{self.port}"
+		host_port = f"{protocol}://{self.host}:{self.port}"
 		self.client = session.client("s3",
 		                             endpoint_url=host_port,
-		                             verify=self.ssl_key[0])
+		                             verify=self.s3_cainfo)
 		self.loader = OrioledbS3Loader(self.access_key_id,
 		                               self.secret_access_key, self.region,
-		                               host_port, self.ssl_key[0])
+		                               host_port, self.s3_cainfo)
 		try:
 			self.client.head_bucket(Bucket=self.bucket_name)
 		except:
@@ -93,6 +98,12 @@ class S3BaseTest(BaseTest):
 
 		self.client.delete_bucket(Bucket=self.bucket_name)
 		self.client.close()
+
+		self.iam_client.detach_user_policy(UserName=self.user,
+		                                   PolicyArn=self.policy_arn)
+		self.iam_client.delete_policy(PolicyArn=self.policy_arn)
+		self.iam_client.delete_user(UserName=self.user)
+		self.s3_server.stop()
 
 
 class OrioledbS3Loader:
@@ -115,7 +126,8 @@ class OrioledbS3Loader:
 		args = [f"{dir_path}/../orioledb_s3_loader.py"]
 		args += ["--bucket-name", bucket_name]
 		args += ["--endpoint", self._endpoint_url]
-		args += ["--cert-file", self._verify]
+		if self._verify:
+			args += ["--cert-file", self._verify]
 		args += ["-d", path]
 		if verbose:
 			args += ["--verbose"]
