@@ -1006,6 +1006,7 @@ orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 	poscan->flags = 0;
 	poscan->cur_int_pageno = 0;
 	poscan->dsmHandle = 0;
+	poscan->nworkers = 0;
 #ifdef USE_ASSERT_CHECKING
 	memset(poscan->worker_active, 0, sizeof(poscan->worker_active));
 #endif
