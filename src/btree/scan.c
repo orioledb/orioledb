@@ -1039,13 +1039,18 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		 * after all workers completed their scans).
 		 */
 		SpinLockAcquire(&poscan->workerStart);
+#ifdef USE_ASSERT_CHECKING
 		for (scan->workerNumber = 0; poscan->worker_active[scan->workerNumber] == true; scan->workerNumber++)
 		{
 		}
 
 		poscan->worker_active[scan->workerNumber] = true;
 		poscan->nworkers = scan->workerNumber + 1;
-		/* leader */
+#else
+		scan->workerNumber = poscan->nworkers;
+		poscan->nworkers++;
+#endif
+		/* Scan leader */
 		if (scan->workerNumber == 0)
 		{
 			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));

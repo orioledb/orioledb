@@ -209,7 +209,9 @@ typedef struct ParallelOScanDescData
 	dsm_handle	dsmHandle;
 	/* debug only */
 	int			cur_int_pageno;
-	bool		worker_active[10];
+#ifdef USE_ASSERT_CHECKING
+	bool		worker_active[1024];
+#endif
 } ParallelOScanDescData;
 
 typedef ParallelOScanDescData *ParallelOScanDesc;
