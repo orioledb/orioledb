@@ -86,6 +86,7 @@ static bool get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 											FileExtent *extent, uint32 checkpoint_number);
 
 static bool write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
+							   uint32 curChkpNum,
 							   Pointer page, off_t page_size);
 static void write_page(OBTreeFindPageContext *context,
 					   OInMemoryBlkno blkno, Page img,
@@ -1128,14 +1129,14 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
 		read_size = len * ORIOLEDB_COMP_BLCKSZ;
 
-		err = btree_smgr_read(desc, read_buf, chkpNum, read_size, byte_offset) != read_size;;
+		err = btree_smgr_read(desc, read_buf, chkpNum, read_size, byte_offset) != read_size;
 
 		if (!err && compressed)
 		{
 			OCompressHeader header;
 
 			memcpy(&header, buf, sizeof(OCompressHeader));
-			o_decompress_page(buf + sizeof(OCompressHeader), header, img);
+			o_decompress_page(buf + sizeof(OCompressHeader), header.page_size, img);
 		}
 	}
 
@@ -1146,7 +1147,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
  * Writes a page to the disk. An array of file offsets must be valid.
  */
 static bool
-write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
+write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 				   Pointer page, off_t page_size)
 {
 
@@ -1180,6 +1181,8 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 	}
 	else
 	{
+		OCompressHeader header = {0};
+
 		byte_offset = (off_t) extent->off;
 		if (orioledb_s3_mode)
 		{
@@ -1188,30 +1191,29 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent,
 		}
 		byte_offset *= (off_t) ORIOLEDB_COMP_BLCKSZ;
 
+		/*
+		 * overflow protection
+		 */
+		Assert(sizeof(((OCompressHeader *) 0)->page_size) == sizeof(uint16));
+		Assert(ORIOLEDB_BLCKSZ < UINT16_MAX);
+
+		/* we need to write header first */
+		header.page_size = page_size;
+		header.chkpNum = curChkpNum;
+		write_size = sizeof(OCompressHeader);
+		err = btree_smgr_write(desc, (char *) &header, chkpNum, write_size, byte_offset) != write_size;
+		byte_offset += write_size;
+
+		if (err)
+			return false;
+
 		if (page_size != ORIOLEDB_BLCKSZ)
 		{
-			/* we need to write header first */
-			OCompressHeader header = page_size;
-
-			/*
-			 * overflow protection
-			 */
-			Assert(page_size < ORIOLEDB_BLCKSZ);
-			Assert(sizeof(OCompressHeader) == sizeof(uint16));
-			Assert(ORIOLEDB_BLCKSZ < UINT16_MAX);
-
-			write_size = sizeof(OCompressHeader);
-			err = btree_smgr_write(desc, (char *) &header, chkpNum, write_size, byte_offset) != write_size;
-			byte_offset += write_size;
-
-			if (err)
-				return false;
-
 			write_size = extent->len * ORIOLEDB_COMP_BLCKSZ - sizeof(OCompressHeader);
 		}
 		else
 		{
-			write_size = ORIOLEDB_BLCKSZ;
+			write_size = ORIOLEDB_BLCKSZ - sizeof(OCompressHeader);
 		}
 
 		/* write data */
@@ -1642,7 +1644,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	Assert(FileExtentIsValid(page_desc->fileExtent));
 
-	if (!write_page_to_disk(desc, &page_desc->fileExtent, write_img, write_size))
+	if (!write_page_to_disk(desc, &page_desc->fileExtent, checkpoint_number, write_img, write_size))
 	{
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not write page %d to file %s with offset %lu",
@@ -1684,7 +1686,7 @@ perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExten
 
 	Assert(FileExtentIsValid(*extent));
 
-	if (!write_page_to_disk(desc, extent, write_img, write_size))
+	if (!write_page_to_disk(desc, extent, chkpNum, write_img, write_size))
 	{
 		uint64		offset;
 
@@ -1784,7 +1786,7 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 
 	Assert(FileExtentIsValid(*extent));
 
-	if (!write_page_to_disk(desc, extent, write_img, write_size))
+	if (!write_page_to_disk(desc, extent, 0, write_img, write_size))
 	{
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not write autonomous page to file %s with offset %lu",

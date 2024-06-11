@@ -287,7 +287,11 @@ typedef int OCompress;
  *
  * The header of compressed data contains compressed data length.
  */
-typedef uint16 OCompressHeader;
+typedef struct OCompressHeader
+{
+	uint16		page_size;
+	uint32		chkpNum;
+} OCompressHeader;
 typedef struct ORelOptions
 {
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
