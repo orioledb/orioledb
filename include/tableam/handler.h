@@ -205,7 +205,8 @@ typedef struct ParallelOScanDescData
 										 * stage */
 #endif
 	bits8		flags;
-	int			nworkers;  /* number of scan workers initialized their own seq scan */
+	int			nworkers;		/* number of scan workers initialized their
+								 * own seq scan */
 	dsm_handle	dsmHandle;
 	/* debug only */
 	int			cur_int_pageno;
