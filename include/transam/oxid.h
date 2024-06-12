@@ -43,6 +43,7 @@ extern void oxid_notify(OXid oxid);
 extern void oxid_notify_all(void);
 extern void advance_oxids(OXid new_xid);
 extern OXid get_current_oxid(void);
+extern void assign_subtransaction_logical_xid(void);
 extern void set_oxid_csn(OXid oxid, CommitSeqNo csn);
 extern void set_current_oxid(OXid oxid);
 extern void set_current_logical_xid(TransactionId xid);

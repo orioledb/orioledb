@@ -2470,6 +2470,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
 			ptr += sizeof(SubTransactionId);
+			ptr += 2 * sizeof(TransactionId);
 
 			recovery_savepoint(parentSubid, -1);
 

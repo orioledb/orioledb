@@ -41,9 +41,12 @@
 
 static OXid curOxid = InvalidOXid;
 static TransactionId logicalXid = InvalidTransactionId;
+static List *prevLogicalXids = NIL;
 static pg_atomic_uint64 *xidBuffer;
 
 XidMeta    *xid_meta;
+
+pg_atomic_uint32 *logicalXidsShmemMap;
 
 static OBuffersDesc buffersDesc = {
 	.singleFileSize = XID_FILE_SIZE,
@@ -65,6 +68,7 @@ oxid_shmem_needs(void)
 	size = add_size(size, mul_size(xid_circular_buffer_size,
 								   sizeof(pg_atomic_uint64)));
 	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
+	size = add_size(size, mul_size(max_procs, sizeof(pg_atomic_uint32)));
 
 	return size;
 }
@@ -169,8 +173,9 @@ oxid_init_shmem(Pointer ptr, bool found)
 	ptr += MAXALIGN(sizeof(XidMeta));
 	xidBuffer = (pg_atomic_uint64 *) ptr;
 	ptr += xid_circular_buffer_size * sizeof(pg_atomic_uint64);
-
 	o_buffers_shmem_init(&buffersDesc, ptr, found);
+	ptr += o_buffers_shmem_needs(&buffersDesc);
+	logicalXidsShmemMap = (pg_atomic_uint32 *) ptr;
 
 	if (!found)
 	{
@@ -185,12 +190,112 @@ oxid_init_shmem(Pointer ptr, bool found)
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
 						 xid_meta->xidMapTrancheId);
 
+		for (i = 0; i < max_procs; i++)
+			pg_atomic_init_u32(&logicalXidsShmemMap[i], 0);
+
 		/* Undo positions are initialized in checkpoint_shmem_init() */
 	}
 	LWLockRegisterTranche(xid_meta->xidMapTrancheId,
 						  "OXidMapWriteTranche");
 
 	init_lock_hashes();
+}
+
+static TransactionId
+acquire_logical_xid(void)
+{
+	int			i = MyProc->pgprocno,
+				mynum;
+	int			nloops = 0;
+	TransactionId result;
+	uint32		divider = max_procs * 32;
+	uint32		sub;
+
+	Assert(i >= 0 && i < max_procs);
+
+	while (true)
+	{
+		uint32		value = pg_atomic_read_u32(&logicalXidsShmemMap[i]);
+		uint32		bit,
+					bitnum;
+
+		bit = (~value) & (value + 1);
+
+		if (bit == 0)
+		{
+			i++;
+			if (i >= max_procs)
+			{
+				i = 0;
+				nloops++;
+				if (nloops > 16)
+					elog(ERROR, "not enough logical xids");
+			}
+		}
+		bitnum = pg_ceil_log2_32(bit);
+		Assert(bit == (1 << bitnum));
+
+		value = pg_atomic_fetch_or_u32(&logicalXidsShmemMap[i], bit);
+		if ((value & bit) == 0)
+		{
+			mynum = i * 32 + bitnum;
+			break;
+		}
+	}
+
+	result = RecentXmin;
+	TransactionIdRetreat(result);
+	if (result % divider > mynum)
+		sub = (result % divider - mynum);
+	else
+		sub = (result % divider + (divider - mynum));
+
+	if (result >= FirstNormalTransactionId + sub)
+	{
+		result -= sub;
+	}
+	else
+	{
+		result = MaxTransactionId - MaxTransactionId % (max_procs * 32);
+		result -= (divider - mynum);
+	}
+
+	Assert(result % divider == mynum);
+
+	return result;
+}
+
+static void
+release_logical_xid(TransactionId xid)
+{
+	uint32		divider = max_procs * 32;
+	uint32		mynum = xid % divider;
+	uint32		value PG_USED_FOR_ASSERTS_ONLY;
+
+	Assert(TransactionIdIsNormal(xid));
+
+	value = pg_atomic_fetch_and_u32(&logicalXidsShmemMap[mynum / 32],
+									~(1 << (mynum % 32)));
+
+	Assert((value & (1 << (mynum % 32))) != 0);
+}
+
+void
+assign_subtransaction_logical_xid(void)
+{
+	if (TransactionIdIsValid(logicalXid))
+	{
+		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+#if PG_VERSION_NUM >= 160000
+		prevLogicalXids = lappend_xid(prevLogicalXids, logicalXid);
+#else
+		prevLogicalXids = lappend_oid(prevLogicalXids, (Oid) logicalXid);
+#endif
+		MemoryContextSwitchTo(mcxt);
+	}
+
+	logicalXid = acquire_logical_xid();
 }
 
 /*
@@ -839,11 +944,7 @@ get_current_oxid(void)
 													 nestingLevel,
 													 false));
 		curOxid = newOxid;
-		logicalXid = RecentXmin;
-		logicalXid -= logicalXid % MaxBackends;
-		if (logicalXid < FirstNormalTransactionId + 1 + MyBackendId)
-			logicalXid = MaxTransactionId;
-		logicalXid -= (1 + MyBackendId);
+		logicalXid = acquire_logical_xid();
 	}
 
 	return curOxid;
@@ -859,6 +960,7 @@ set_current_oxid(OXid oxid)
 void
 set_current_logical_xid(TransactionId xid)
 {
+	Assert(!TransactionIdIsValid(logicalXid));
 	logicalXid = xid;
 }
 
@@ -881,6 +983,7 @@ void
 reset_current_oxid(void)
 {
 	curOxid = InvalidOXid;
+	logicalXid = InvalidTransactionId;
 }
 
 OXid
@@ -933,6 +1036,35 @@ advance_run_xmin(OXid oxid)
 	}
 }
 
+static void
+release_assigned_logical_xids(void)
+{
+	if (TransactionIdIsValid(logicalXid))
+	{
+		release_logical_xid(logicalXid);
+		logicalXid = InvalidTransactionId;
+	}
+
+	if (GET_CUR_PROCDATA()->autonomousNestingLevel == 0)
+	{
+		ListCell   *lc;
+
+		foreach(lc, prevLogicalXids)
+		{
+			TransactionId xid;
+
+#if PG_VERSION_NUM >= 160000
+			xid = lfirst_xid(lc);
+#else
+			xid = lfirst_oid(lc);
+#endif
+			release_logical_xid(xid);
+		}
+		list_free(prevLogicalXids);
+		prevLogicalXids = NIL;
+	}
+}
+
 void
 current_oxid_commit(CommitSeqNo csn)
 {
@@ -949,6 +1081,7 @@ current_oxid_commit(CommitSeqNo csn)
 
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
+	release_assigned_logical_xids();
 }
 
 void
@@ -967,6 +1100,7 @@ current_oxid_abort(void)
 
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
+	release_assigned_logical_xids();
 }
 
 /*

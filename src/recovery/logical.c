@@ -84,6 +84,32 @@ record_buffer_tuple(ReorderBuffer *reorder, TupleTableSlot *slot)
 	return result;
 }
 
+/* entry for a hash table we use to map from xid to our transaction state */
+typedef struct ReorderBufferTXNByIdEnt
+{
+	TransactionId xid;
+	ReorderBufferTXN *txn;
+} ReorderBufferTXNByIdEnt;
+
+static ReorderBufferTXN *
+get_reorder_buffer_txn(ReorderBuffer *rb, TransactionId xid)
+{
+	ReorderBufferTXNByIdEnt *ent;
+	bool		found;
+
+	if (TransactionIdIsValid(rb->by_txn_last_xid) &&
+		rb->by_txn_last_xid == xid)
+		return rb->by_txn_last_txn;
+
+	/* search the lookup table */
+	ent = (ReorderBufferTXNByIdEnt *)
+		hash_search(rb->by_txn, &xid, HASH_FIND, &found);
+	if (found)
+		return ent->txn;
+	else
+		return NULL;
+}
+
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */
@@ -124,6 +150,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
 			OXid		xmin;
+			dlist_iter	cur_txn_i;
+			ReorderBufferTXN *txn;
 #if PG_VERSION_NUM >= 160000
 			Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
 #else
@@ -133,10 +161,25 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
 
+			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
+			if (txn->toptxn)
+				txn = txn->toptxn;
+
 			ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
 										 buf->origptr + (ptr - startPtr),
 										 snap);
 			snap->active_count++;
+
+			dlist_foreach(cur_txn_i, &txn->subtxns)
+			{
+				ReorderBufferTXN *cur_txn;
+
+				cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+
+				ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+										 buf->origptr, buf->endptr);
+
+			}
 
 			ReorderBufferCommit(ctx->reorder, logicalXid, buf->origptr, buf->endptr,
 								0, InvalidRepOriginId, buf->origptr + (ptr - startPtr));
@@ -243,9 +286,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		else if (rec_type == WAL_REC_SAVEPOINT)
 		{
 			SubTransactionId parentSubid;
+			TransactionId parentLogicalXid;
 
 			memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
 			ptr += sizeof(SubTransactionId);
+			memcpy(&logicalXid, ptr, sizeof(TransactionId));
+			ptr += sizeof(TransactionId);
+			memcpy(&parentLogicalXid, ptr, sizeof(TransactionId));
+			ptr += sizeof(TransactionId);
+
+			ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr + (ptr - startPtr));
 
 			/* Skip */
 		}

@@ -76,6 +76,8 @@ typedef struct
 {
 	uint8		recType;
 	uint8		parentSubid[sizeof(SubTransactionId)];
+	uint8		logicalXid[sizeof(TransactionId)];
+	uint8		parentLogicalXid[sizeof(TransactionId)];
 } WALRecSavepoint;
 
 typedef struct
@@ -113,7 +115,8 @@ extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
-extern void add_savepoint_wal_record(SubTransactionId parentSubid);
+extern void add_savepoint_wal_record(SubTransactionId parentSubid,
+									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
 extern bool local_wal_is_empty(void);
 extern XLogRecPtr flush_local_wal(bool commit);

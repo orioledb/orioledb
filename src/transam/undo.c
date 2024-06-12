@@ -1363,6 +1363,8 @@ void
 undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					  SubTransactionId parentSubid, void *arg)
 {
+	TransactionId prentLogicalXid;
+
 	/*
 	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
 	 * of node was interrupted by exception.
@@ -1373,8 +1375,10 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	{
 		case SUBXACT_EVENT_START_SUB:
 			(void) get_current_oxid();
+			prentLogicalXid = get_current_logical_xid();
+			assign_subtransaction_logical_xid();
 			add_subxact_undo_item(parentSubid);
-			add_savepoint_wal_record(parentSubid);
+			add_savepoint_wal_record(parentSubid, prentLogicalXid);
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
 			update_subxact_undo_location_on_commit(parentSubid);

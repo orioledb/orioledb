@@ -314,9 +314,11 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 }
 
 void
-add_savepoint_wal_record(SubTransactionId parentSubid)
+add_savepoint_wal_record(SubTransactionId parentSubid,
+						 TransactionId prentLogicalXid)
 {
 	WALRecSavepoint *rec;
+	TransactionId logicalXid = get_current_logical_xid();
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -328,6 +330,8 @@ add_savepoint_wal_record(SubTransactionId parentSubid)
 
 	rec->recType = WAL_REC_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
+	memcpy(rec->parentLogicalXid, &prentLogicalXid, sizeof(TransactionId));
+	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }
