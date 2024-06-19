@@ -1,13 +1,20 @@
+import inspect
 import json
 import logging
 import os
+import re
+from re import RegexFlag
+import runpy
+import socket
+from socket import AddressFamily, SocketKind
+import sys
 import time
-from tempfile import mkdtemp, mkstemp
 from threading import Thread
 from typing import Optional
+from urllib3.util import connection
 
 import boto3
-import testgres
+from botocore.config import Config
 from moto.server import DomainDispatcherApplication, create_backend_app
 
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
@@ -18,7 +25,14 @@ from .base_test import BaseTest
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
+
+def s3_test_attrs(**_):
+	""" Stub decorator to parse in S3BaseTest.setUp """
+
+	def attr_decorator(fn):
+		return fn
+
+	return attr_decorator
 
 
 class S3BaseTest(BaseTest):
@@ -28,29 +42,80 @@ class S3BaseTest(BaseTest):
 	user = "ORDB_USER"
 	region = "us-east-1"
 	policy_name = "ORDB_POLICY"
+	optional_prefix = "prefix/test/"
 
 	def setUp(self):
-		protocol = 'https'
-		if self._testMethodDoc and "[http]" in self._testMethodDoc:
-			protocol = 'http'
 		super().setUp()
+
+		protocol = 'https'
+		prefix = None
+		host_param = None
+
+		testMethod = getattr(self, self._testMethodName)
+		source = inspect.getsource(testMethod)
+		index = source.find("def ")
+		attrs = []
+		for raw_attrs in re.findall(r"@s3_test_attrs\(((?:\n|.)*?)\)",
+		                            source[:index].strip(),
+		                            RegexFlag.MULTILINE):
+			for attr in raw_attrs.split(','):
+				name, val = attr.strip().split('=')
+				attrs += [[name.strip(), val.strip()]]
+		for name, val in attrs:
+			if name == "http" and val == "True":
+				protocol = 'http'
+			elif name == "prefix":
+				prefix = eval(val)
+			elif name == "host":
+				host_param = eval(val)
 		urllib3.util.connection.HAS_IPV6 = False
+		host_name = self.host
+		if host_param:
+			host_name = host_param
+		host_port = f"{protocol}://{host_name}:{self.port}"
+		self.ssl_key = make_ssl_devcert(f'/tmp/ordb_test_key', cn=host_name)
 		if protocol == 'https':
-			ssl_key = make_ssl_devcert('/tmp/ordb_test_key', cn=self.host)
-			self.s3_cainfo = ssl_key[0]
+			ssl_context = self.ssl_key
+			self.s3_cainfo = self.ssl_key[0]
 		else:
-			ssl_key = None
+			ssl_context = None
 			self.s3_cainfo = None
-		self.s3_server = MotoServerSSL(ssl_context=ssl_key)
+		self.s3_server = MotoServerSSL(ssl_context=ssl_context)
 		self.s3_server.start()
 
-		self.iam_client = boto3.client(
-		    'iam',
-		    endpoint_url=f"{protocol}://{self.host}:{self.port}",
-		    aws_access_key_id="",
-		    aws_secret_access_key="",
-		    region_name=self.region,
-		    verify=self.s3_cainfo)
+		self._orig_create_connection = connection.create_connection
+
+		def s3_test_resolver(host):
+			logging.debug(f"s3_test_resolver: {host}")
+			if host == host_param:
+				return "127.0.0.1"
+			else:
+				addrlist = socket.getaddrinfo(host, 80)
+				for address in addrlist:
+					if address[0] == AddressFamily.AF_INET and address[
+					    1] == SocketKind.SOCK_STREAM:
+						break
+				return address[4][0]
+
+		def patched_create_connection(address, *args, **kwargs):
+			host, port = address
+			hostname = s3_test_resolver(host)
+
+			return self._orig_create_connection((hostname, port), *args,
+			                                    **kwargs)
+
+		connection.create_connection = patched_create_connection
+
+		config = None
+		if self.bucket_name in host_port:
+			config = Config(s3={'addressing_style': 'virtual'})
+		self.iam_client = boto3.client('iam',
+		                               endpoint_url=host_port,
+		                               aws_access_key_id="",
+		                               aws_secret_access_key="",
+		                               region_name=self.region,
+		                               verify=self.s3_cainfo,
+		                               config=config)
 		self.iam_client.create_user(UserName=self.user)
 		policy_document = {
 		    "Version": "2012-10-17",
@@ -76,10 +141,15 @@ class S3BaseTest(BaseTest):
 		host_port = f"{protocol}://{self.host}:{self.port}"
 		self.client = session.client("s3",
 		                             endpoint_url=host_port,
-		                             verify=self.s3_cainfo)
+		                             verify=self.s3_cainfo,
+		                             config=config)
+
+		host_port = f"{protocol}://{host_name}:{self.port}"
+		if not host_param and not prefix:
+			host_port += f"/{self.bucket_name}/"
 		self.loader = OrioledbS3Loader(self.access_key_id,
 		                               self.secret_access_key, self.region,
-		                               host_port, self.s3_cainfo)
+		                               host_port, prefix, self.s3_cainfo)
 		try:
 			self.client.head_bucket(Bucket=self.bucket_name)
 		except:
@@ -104,6 +174,7 @@ class S3BaseTest(BaseTest):
 		self.iam_client.delete_policy(PolicyArn=self.policy_arn)
 		self.iam_client.delete_user(UserName=self.user)
 		self.s3_server.stop()
+		connection.create_connection = self._orig_create_connection
 
 
 class OrioledbS3Loader:
@@ -113,6 +184,7 @@ class OrioledbS3Loader:
 	             aws_secret_access_key,
 	             aws_region,
 	             endpoint_url,
+	             prefix=None,
 	             verify=None):
 		os.environ["AWS_ACCESS_KEY_ID"] = aws_access_key_id
 		os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_access_key
@@ -120,18 +192,23 @@ class OrioledbS3Loader:
 
 		self._aws_region = aws_region
 		self._endpoint_url = endpoint_url
+		self._prefix = prefix
 		self._verify = verify
 
-	def download(self, bucket_name, path, verbose=False, logfile=None):
-		args = [f"{dir_path}/../orioledb_s3_loader.py"]
-		args += ["--bucket-name", bucket_name]
-		args += ["--endpoint", self._endpoint_url]
+	def download(self, path, verbose=False):
+		dir_path = os.path.dirname(os.path.realpath(__file__))
+		old_argv = sys.argv
+		sys.argv = [f"{dir_path}/../orioledb_s3_loader.py"]
+		sys.argv += ["--endpoint", self._endpoint_url]
+		if self._prefix:
+			sys.argv += ["--prefix", self._prefix]
 		if self._verify:
-			args += ["--cert-file", self._verify]
-		args += ["-d", path]
+			sys.argv += ["--cert-file", self._verify]
+		sys.argv += ["-d", path]
 		if verbose:
-			args += ["--verbose"]
-		testgres.utils.execute_utility(args, logfile)
+			sys.argv += ["--verbose"]
+		runpy.run_path(sys.argv[0], None, "__main__")
+		sys.argv = old_argv
 
 
 class MotoServerSSL:

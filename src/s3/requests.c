@@ -252,16 +252,23 @@ s3_get_object(char *objectname, StringInfo str)
 	int			sc;
 	unsigned char hash[32];
 	char	   *contenthash;
-	char	   *objectpath;
+	char	   *objectpath = objectname;
 	long		http_code = 0;
 
 	(void) SHA256(NULL, 0, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
 
-	if (s3_prefix && strlen(s3_prefix) != 0)
-		objectpath = psprintf("%s/%s", s3_prefix, objectname);
-	else
-		objectpath = objectname;
+	if (s3_prefix)
+	{
+		int			prefix_len = strlen(s3_prefix);
+
+		if (prefix_len != 0)
+		{
+			if (s3_prefix[prefix_len - 1] == '/')
+				prefix_len--;
+			objectpath = psprintf("%.*s/%s", prefix_len, s3_prefix, objectname);
+		}
+	}
 
 	url = psprintf("%s://%s/%s",
 				   s3_use_https ? "https" : "http", s3_host, objectpath);
@@ -449,7 +456,7 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	char	   *datetimestring;
 	char	   *signature;
 	char	   *contenthash;
-	char	   *objectpath;
+	char	   *objectpath = objectname;
 	struct curl_slist *slist;
 	char	   *tmp;
 	int			sc;
@@ -460,10 +467,17 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	(void) SHA256((unsigned char *) data, dataSize, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
 
-	if (s3_prefix && strlen(s3_prefix) != 0)
-		objectpath = psprintf("%s/%s", s3_prefix, objectname);
-	else
-		objectpath = objectname;
+	if (s3_prefix)
+	{
+		int			prefix_len = strlen(s3_prefix);
+
+		if (prefix_len != 0)
+		{
+			if (s3_prefix[prefix_len - 1] == '/')
+				prefix_len--;
+			objectpath = psprintf("%.*s/%s", prefix_len, s3_prefix, objectname);
+		}
+	}
 
 	url = psprintf("%s://%s/%s",
 				   s3_use_https ? "https" : "http", s3_host, objectpath);
