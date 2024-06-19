@@ -9,7 +9,7 @@ from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException
 
-from .s3_base_test import S3BaseTest
+from .s3_base_test import S3BaseTest, s3_test_attrs
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -324,7 +324,7 @@ class S3Test(S3BaseTest):
 			pass
 
 		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
-			self.loader.download(self.bucket_name, new_node.data_dir)
+			self.loader.download(new_node.data_dir)
 			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 
@@ -334,18 +334,20 @@ class S3Test(S3BaseTest):
 			new_node.stop()
 			new_node.cleanup()
 
+	@s3_test_attrs(
+	    http=True,
+	    prefix=f'{S3BaseTest.bucket_name}/{S3BaseTest.optional_prefix}')
 	def test_s3_http_and_prefix(self):
-		"""
-		Check http orioledb connection
-		Docstring to enable http mode: [http]
-		"""
+		prefix = f'{self.bucket_name}/{self.optional_prefix}'
 		node = self.node
+		self.client.put_object(Bucket=self.bucket_name,
+		                       Key=self.optional_prefix)
 
 		node.append_conf(
 		    'postgresql.conf', f"""
 			orioledb.s3_mode = true
 			orioledb.s3_host = '{self.host}:{self.port}'
-			orioledb.s3_prefix = '{self.bucket_name}'
+			orioledb.s3_prefix = '{prefix}'
 			orioledb.s3_region = '{self.region}'
 			orioledb.s3_accesskey = '{self.access_key_id}'
 			orioledb.s3_secretkey = '{self.secret_access_key}'
@@ -373,15 +375,186 @@ class S3Test(S3BaseTest):
 
 		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
 
+		wal_prefix = os.path.join(prefix, 'wal/')
 		while self.client.list_objects(Bucket=self.bucket_name,
-		                               Prefix='wal/') == []:
+		                               Prefix=wal_prefix) == []:
 			pass
 		os.kill(archiver_pid, signal.SIGUSR2)
 		while node.status() == NodeStatus.Running:
 			pass
 
 		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
-			self.loader.download(self.bucket_name, new_node.data_dir)
+			self.loader.download(new_node.data_dir)
+			new_node.port = self.getBasePort() + 1
+			new_node.append_conf(port=new_node.port)
+
+			new_node.start()
+			self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+			                 new_node.execute("SELECT * FROM o_test_1"))
+			new_node.stop()
+			new_node.cleanup()
+		node.stop()
+
+	@s3_test_attrs(host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}',
+	               prefix=S3BaseTest.optional_prefix)
+	def test_s3_prefix_no_bucket(self):
+		node = self.node
+		self.client.put_object(Bucket=self.bucket_name,
+		                       Key=self.optional_prefix)
+
+		node.append_conf(
+		    'postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.bucket_name}.{self.host}:{self.port}'
+			orioledb.s3_prefix = {self.optional_prefix}
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_use_https = true
+
+			archive_mode = on
+			archive_library = 'orioledb'
+		""")
+		node.start()
+		archiver_pid = node.execute("""
+			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
+		""")[0][0]
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT;")
+		self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+		                 node.execute("SELECT * FROM o_test_1"))
+		node.stop(['--no-wait'])
+
+		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
+
+		wal_prefix = os.path.join(self.optional_prefix, 'wal/')
+		while self.client.list_objects(Bucket=self.bucket_name,
+		                               Prefix=wal_prefix) == []:
+			pass
+		os.kill(archiver_pid, signal.SIGUSR2)
+		while node.status() == NodeStatus.Running:
+			pass
+
+		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+			self.loader.download(new_node.data_dir)
+			new_node.port = self.getBasePort() + 1
+			new_node.append_conf(port=new_node.port)
+
+			new_node.start()
+			self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+			                 new_node.execute("SELECT * FROM o_test_1"))
+			new_node.stop()
+			new_node.cleanup()
+		node.stop()
+
+	@s3_test_attrs(http=True,
+	               host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}')
+	def test_s3_http_virtual_host(self):
+		node = self.node
+
+		node.append_conf(
+		    'postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.bucket_name}.{self.host}:{self.port}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_use_https = false
+
+			archive_mode = on
+			archive_library = 'orioledb'
+		""")
+		node.start()
+		archiver_pid = node.execute("""
+			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
+		""")[0][0]
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT;")
+		self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+		                 node.execute("SELECT * FROM o_test_1"))
+		node.stop(['--no-wait'])
+
+		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
+
+		wal_prefix = os.path.join(self.optional_prefix, 'wal/')
+		while self.client.list_objects(Bucket=self.bucket_name,
+		                               Prefix=wal_prefix) == []:
+			pass
+		os.kill(archiver_pid, signal.SIGUSR2)
+		while node.status() == NodeStatus.Running:
+			pass
+
+		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+			self.loader.download(new_node.data_dir)
+			new_node.port = self.getBasePort() + 1
+			new_node.append_conf(port=new_node.port)
+
+			new_node.start()
+			self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+			                 new_node.execute("SELECT * FROM o_test_1"))
+			new_node.stop()
+			new_node.cleanup()
+		node.stop()
+
+	@s3_test_attrs(host=f'{S3BaseTest.bucket_name}.{S3BaseTest.host}')
+	def test_s3_https_virtual_host(self):
+		node = self.node
+
+		node.append_conf(
+		    'postgresql.conf', f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.bucket_name}.{self.host}:{self.port}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+			orioledb.s3_use_https = true
+
+			archive_mode = on
+			archive_library = 'orioledb'
+		""")
+		node.start()
+		archiver_pid = node.execute("""
+			SELECT pid FROM pg_stat_activity WHERE backend_type = 'archiver';
+		""")[0][0]
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test_1 (
+				val_1 int
+			) USING orioledb;
+			INSERT INTO o_test_1 SELECT * FROM generate_series(1, 5);
+		""")
+		node.safe_psql("CHECKPOINT;")
+		self.assertEqual([(1, ), (2, ), (3, ), (4, ), (5, )],
+		                 node.execute("SELECT * FROM o_test_1"))
+		node.stop(['--no-wait'])
+
+		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
+
+		wal_prefix = os.path.join(self.optional_prefix, 'wal/')
+		while self.client.list_objects(Bucket=self.bucket_name,
+		                               Prefix=wal_prefix) == []:
+			pass
+		os.kill(archiver_pid, signal.SIGUSR2)
+		while node.status() == NodeStatus.Running:
+			pass
+
+		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+			self.loader.download(new_node.data_dir)
 			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 

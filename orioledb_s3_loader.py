@@ -7,6 +7,8 @@ import re
 import struct
 import testgres
 
+from botocore.config import Config
+from botocore.exceptions import ParamValidationError
 from concurrent.futures import ThreadPoolExecutor
 from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import ClientError
@@ -30,16 +32,17 @@ class OrioledbS3ObjectLoader:
 		parser.add_argument('--endpoint',
 		                    dest='endpoint',
 		                    required=True,
-		                    help="AWS url")
+		                    help="AWS url (must contain bucket name if no prefix set)")
 		parser.add_argument('-d',
 		                    '--data-dir',
 		                    dest='data_dir',
 		                    required=True,
 		                    help="Destination data directory")
-		parser.add_argument('--bucket-name',
-		                    dest='bucket_name',
-		                    required=True,
-		                    help="Bucket name")
+		parser.add_argument('--prefix',
+		                    dest='prefix',
+		                    required=False,
+							default="",
+		                    help="Prefix to prepend to S3 object name (may contain bucket name)")
 		parser.add_argument('--cert-file',
 		                    dest='cert_file',
 		                    help="Path to crt file")
@@ -63,32 +66,67 @@ class OrioledbS3ObjectLoader:
 
 		parsed_url = urlparse(args.endpoint)
 		bucket = parsed_url.netloc.split('.')[0]
-		if bucket == args.bucket_name:
-			args.endpoint = f"{parsed_url.scheme}://{'.'.join(parsed_url.netloc.split('.')[1:])}"
-		self.s3 = boto3.client("s3", endpoint_url=args.endpoint, verify=verify)
+		raw_endpoint = f"{parsed_url.scheme}://{'.'.join(parsed_url.netloc.split('.')[1:])}"
+
+		splitted_prefix = args.prefix.strip('/').split('/')
+		splitted_path = parsed_url.path.strip('/').split('/')
+		prefix = os.path.join(*splitted_path, *splitted_prefix)
+		splitted_prefix = prefix.split('/')
+
+		bucket_in_endpoint = True
+		bucket_in_prefix = False
+		try:
+			config = Config(s3={'addressing_style': 'virtual'})
+			s3_client = boto3.client("s3", endpoint_url=raw_endpoint, verify=verify,
+									config=config)
+			s3_client.head_bucket(Bucket=bucket)
+			bucket_name=bucket
+		except ValueError:
+			bucket_in_endpoint = False
+			bucket_in_prefix = True
+		if bucket_in_prefix:
+			config = None
+			bucket = splitted_prefix[0]
+			prefix = '/'.join(splitted_prefix[1:])
+			s3_client = boto3.client("s3", endpoint_url=f"{parsed_url.scheme}://{parsed_url.netloc}", verify=verify)
+			try:
+				s3_client.head_bucket(Bucket=bucket)
+			except ParamValidationError:
+				bucket_in_prefix = False
+			except ClientError:
+				bucket_in_prefix = False
+			bucket_name=bucket
+
+		if not bucket_in_endpoint and not bucket_in_prefix:
+			raise Exception("No valid bucket name in endpoint or prefix")
+
 		self._error_occurred = Event()
 		self.data_dir = args.data_dir
-		self.bucket_name = args.bucket_name
+		self.bucket_name = bucket_name
+		self.prefix = prefix
 		self.verbose = args.verbose
+		self.s3 = s3_client
 
 	def run(self):
 		wal_dir = os.path.join(self.data_dir, 'pg_wal')
-		chkp_num = loader.last_checkpoint_number(self.bucket_name)
-		loader.download_files_in_directory(self.bucket_name, 'data/', chkp_num,
-		                                   self.data_dir)
-		loader.download_files_in_directory(self.bucket_name,
-		                                   'orioledb_data/',
-		                                   chkp_num,
-		                                   f"{self.data_dir}/orioledb_data",
-		                                   transform=self.transform_orioledb,
-		                                   filter=self.filter_orioledb)
+		chkp_num = self.last_checkpoint_number(self.bucket_name)
+		self.download_files_in_directory(self.bucket_name, 'data/', chkp_num,
+		                                 self.data_dir,
+		                                 transform=self.transform_pg)
+		self.download_files_in_directory(self.bucket_name,
+		                                 'orioledb_data/',
+		                                 chkp_num,
+		                                 f"{self.data_dir}/orioledb_data",
+		                                 transform=self.transform_orioledb,
+		                                 filter=self.filter_orioledb)
 
 		control = get_control_data(self.data_dir)
 		orioledb_control = get_orioledb_control_data(self.data_dir)
 		self.download_undo(orioledb_control)
 		wal_file = control["Latest checkpoint's REDO WAL file"]
-		loader.download_file(self.bucket_name, f"wal/{wal_file}",
-		                     f"{wal_dir}/{wal_file}")
+		local_path = os.path.join(self.data_dir, f"pg_wal/{wal_file}")
+		wal_file = os.path.join(self.prefix, f"wal/{wal_file}")
+		self.download_file(self.bucket_name, wal_file, local_path)
 
 	def download_undo(self, orioledb_control):
 		UNDO_FILE_SIZE = 0x4000000
@@ -100,14 +138,16 @@ class OrioledbS3ObjectLoader:
 		    (orioledb_control['undoEndLocation'] - 1) // UNDO_FILE_SIZE):
 			fileName = "orioledb_data/%02X%08X" % (fileNum >> 32,
 			                                       fileNum & 0xFFFFFFFF)
+			fileName = os.path.join(self.prefix, fileName)
 			loader.download_file(self.bucket_name, fileName, fileName)
 
 	def last_checkpoint_number(self, bucket_name):
 		paginator = self.s3.get_paginator('list_objects_v2')
 
 		numbers = []
+		prefix = os.path.join(self.prefix, 'data/')
 		for page in paginator.paginate(Bucket=bucket_name,
-		                               Prefix='data/',
+		                               Prefix=prefix,
 		                               Delimiter='/'):
 			if 'CommonPrefixes' in page:
 				for prefix in page['CommonPrefixes']:
@@ -124,7 +164,7 @@ class OrioledbS3ObjectLoader:
 		found = False
 		chkp_list_index = len(numbers) - 1
 
-		last_chkp_data_dir = os.path.join('data',
+		last_chkp_data_dir = os.path.join(self.prefix, 'data',
 		                                  str(numbers[chkp_list_index]))
 
 		while not found and chkp_list_index >= 0:
@@ -141,7 +181,7 @@ class OrioledbS3ObjectLoader:
 					chkp_list_index -= 1
 					if chkp_list_index >= 0:
 						last_chkp_data_dir = os.path.join(
-						    'data', str(numbers[chkp_list_index]))
+						    self.prefix, 'data', str(numbers[chkp_list_index]))
 				else:
 					raise
 
@@ -154,7 +194,8 @@ class OrioledbS3ObjectLoader:
 		objects = []
 		paginator = self.s3.get_paginator('list_objects_v2')
 
-		for page in paginator.paginate(Bucket=bucket_name, Prefix=directory):
+		prefix = os.path.join(self.prefix, directory)
+		for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
 			if 'Contents' in page:
 				page_objs = [x["Key"] for x in page['Contents']]
 				objects.extend(page_objs)
@@ -240,21 +281,35 @@ class OrioledbS3ObjectLoader:
 			self._error_occurred.set()
 
 	def transform_orioledb(self, val: str) -> str:
+		offset = 0
+		prefix = self.prefix.strip('/')
+		if prefix != "":
+			offset = len(prefix.split('/'))
 		parts = val.split('/')
-		file_parts = parts[3].split('.')
-		result = f"{parts[2]}/{file_parts[0]}-{parts[1]}"
+		file_parts = parts[offset + 3].split('.')
+		result = f"{parts[offset + 2]}/{file_parts[0]}-{parts[offset + 1]}"
 		if file_parts[-1] == 'map':
 			result += '.map'
 		return result
 
 	def filter_orioledb(self, val: str) -> bool:
+		offset = 0
+		prefix = self.prefix.strip('/')
+		if prefix != "":
+			offset = len(prefix.split('/'))
 		parts = val.split('/')
-		file_parts = parts[3].split('.')
+		file_parts = parts[offset + 3].split('.')
 		is_map = file_parts[-1] == 'map'
 		return is_map
 
-	def transform_pg(val: str) -> str:
-		return '/'.join(val.split('/')[2:])
+	def transform_pg(self, val: str) -> str:
+		offset = 0
+		prefix = self.prefix.strip('/')
+		if prefix != "":
+			offset = len(prefix.split('/'))
+		parts = val.split('/')
+		result = '/'.join(parts[offset + 2:])
+		return result
 
 	def download_files_in_directory(self,
 	                                bucket_name,
@@ -262,7 +317,7 @@ class OrioledbS3ObjectLoader:
 	                                chkp_num,
 	                                local_directory,
 	                                transform: Callable[[str],
-	                                                    str] = transform_pg,
+	                                                    str],
 	                                filter: Callable[[str],
 	                                                    bool] = None):
 		last_chkp_dir = os.path.join(directory, str(chkp_num))

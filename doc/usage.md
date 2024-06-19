@@ -184,6 +184,8 @@ To use S3 functionality, the following parameters should be set before creating 
 * `archive_mode = on` -- set it to use S3 mode
 * `orioledb.s3_region` -- specify S3 region, where the S3 bucket is created.
 * `orioledb.s3_host` -- access endpoint address for S3 bucket (without `https://` prefix). E.g. mybucket.s3-accelerate.amazonaws.com
+* `orioledb.s3_prefix` -- Prefix to prepend to S3 object name (may contain bucket name if it is not in endpoint)
+* `orioledb.s3_use_https` -- Use https for S3 connections (or http otherwise). The default is `on`. (Make sure that it matches server, especially for localhost connections)
 * `orioledb.s3_accesskey` -- specify AWS access key to authenticate the bucket.
 * `orioledb.s3_secretkey` -- specify AWS secret key to authenticate the bucket.
 * `orioledb.s3_num_workers` -- specify the number of AWS workers syncing data to S3 bucket. More workers could make sync faster. 20 - is a recommended value that is enough in most cases.
@@ -227,11 +229,11 @@ Run the script with the same parameters as from your S3 Postgres cluster config:
 * `AWS_ACCESS_KEY_ID` - same as `orioledb.s3_accesskey`
 * `AWS_SECRET_ACCESS_KEY` - same as `orioledb.s3_secretkey`
 * `AWS_DEFAULT_REGION` - same as `orioledb.s3_region`
-* `--endpoint` - same as `orioledb.s3_host` (full URL with `https://` or `http://` prefix) E.g `--endpoint=https://mybucket.s3-accelerate.amazonaws.com` or `--endpoint=https://mybucket.s3.amazonaws.com`
-* `--bucket-name` - S3 bucket name from `orioledb.s3_host` E.g `--bucket-name=mybucket`
+* `--endpoint` - same as `orioledb.s3_host` (full URL with `https://` or `http://` prefix) E.g `--endpoint=https://mybucket.s3-accelerate.amazonaws.com` or `--endpoint=https://mybucket.s3.amazonaws.com` or for local instance `--endpoint=http://localhost:PORT`
+* `--prefix` - optional prefix to prepend to object paths (May contain bucket name if it is not in endpoint)
 * `--data-dir` - destination directory on the local machine you want to write data to. E.g. `--data-dir=mydata/`
 * `--verbose` - optionally print extended info.
 
 `
-AWS_ACCESS_KEY_ID=<your access key> AWS_SECRET_ACCESS_KEY='<your secret key>' AWS_DEFAULT_REGION=<your region> python orioledb_s3_loader.py --endpoint=https://<your-bucket-endpoint> --bucket-name=<your-bucket-name> --data-dir='orioledb_data' --verbose
+AWS_ACCESS_KEY_ID=<your access key> AWS_SECRET_ACCESS_KEY='<your secret key>' AWS_DEFAULT_REGION=<your region> python orioledb_s3_loader.py --endpoint=https://<your-bucket-endpoint> --data-dir='orioledb_data' --verbose
 `
