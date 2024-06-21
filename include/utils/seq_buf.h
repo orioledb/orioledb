@@ -69,22 +69,22 @@ typedef enum
 	SeqBufReplaceError
 } SeqBufReplaceResult;
 
-extern bool init_seq_buf(SeqBufDescPrivate *private, SeqBufDescShared *shared,
+extern bool init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 						 SeqBufTag *tag, bool write, bool init_shared, int skip_len, EvictedSeqBufData *evicted);
 
-extern bool seq_buf_write_u32(SeqBufDescPrivate *private, uint32 offset);
-extern bool seq_buf_read_u32(SeqBufDescPrivate *private, uint32 *ptr);
-extern bool seq_buf_write_file_extent(SeqBufDescPrivate *private, FileExtent extent);
-extern bool seq_buf_read_file_extent(SeqBufDescPrivate *private, FileExtent *extent);
+extern bool seq_buf_write_u32(SeqBufDescPrivate *seqBufPrivate, uint32 offset);
+extern bool seq_buf_read_u32(SeqBufDescPrivate *seqBufPrivate, uint32 *ptr);
+extern bool seq_buf_write_file_extent(SeqBufDescPrivate *seqBufPrivate, FileExtent extent);
+extern bool seq_buf_read_file_extent(SeqBufDescPrivate *seqBufPrivate, FileExtent *extent);
 
-extern uint64 seq_buf_finalize(SeqBufDescPrivate *private);
+extern uint64 seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate);
 extern char *get_seq_buf_filename(SeqBufTag *tag);
-extern uint64 seq_buf_get_offset(SeqBufDescPrivate *private);
-extern SeqBufReplaceResult seq_buf_try_replace(SeqBufDescPrivate *private,
+extern uint64 seq_buf_get_offset(SeqBufDescPrivate *seqBufPrivate);
+extern SeqBufReplaceResult seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate,
 											   SeqBufTag *tag, pg_atomic_uint64 *size,
 											   Size data_size);
 extern bool seq_buf_file_exist(SeqBufTag *tag);
 extern bool seq_buf_remove_file(SeqBufTag *tag);
-extern void seq_buf_close_file(SeqBufDescPrivate *private);
+extern void seq_buf_close_file(SeqBufDescPrivate *seqBufPrivate);
 
 #endif							/* __SEQ_BUF_H__ */
