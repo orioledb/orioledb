@@ -848,12 +848,15 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 	{
 		OTuple		internalTuple;
-		BTreeNonLeafTuphdr *tuphdr;
+		BTreeNonLeafTuphdr *tuphdr = NULL;
 		bool		tup_loaded = true;
 
 		tup_loaded = partial_load_chunk(&context->partial, context->parentImg, loc.chunkOffset);
-		BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, internalTuple, context->parentImg, &loc);
-		Assert(tuphdr != NULL);
+		if (tup_loaded)
+		{
+			BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, internalTuple, context->parentImg, &loc);
+			Assert(tuphdr != NULL);
+		}
 
 		/* Check it's consistent with our hikey */
 		if (tup_loaded && DOWNLINK_IS_IN_MEMORY(tuphdr->downlink) &&
