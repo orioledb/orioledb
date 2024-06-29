@@ -1046,7 +1046,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 	if (!has_toasted)
 		full_size = expected_tuple_len(slot, descr);
 
-	/* we do not need use TOAST, get minimal tuple from slot and exit */
+	/* we do not need use TOAST */
 	if (full_size <= O_BTREE_MAX_TUPLE_SIZE && !has_toasted)
 	{
 		return;
@@ -1106,6 +1106,9 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 			if (!slot->tts_isnull[toast_attn] && !oslot->to_toast[toast_attn])
 			{
 				att = TupleDescAttr(tupdesc, toast_attn);
+
+				Assert(att->attstorage != 'p');
+
 				if (att->attstorage == 'm' &&
 					VARATT_IS_COMPRESSED(slot->tts_values[toast_attn]))
 					continue;
@@ -1143,14 +1146,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 								   TOAST_PGLZ_COMPRESSION);
 		MemoryContextSwitchTo(oldMctx);
 
-		if (DatumGetPointer(tmp) == NULL)
-		{
-			/* value can not be compressed */
-			oslot->to_toast[max_attn] = true;
-			to_toastn++;
-			continue;
-		}
-		else
+		if (DatumGetPointer(tmp) != NULL)
 		{
 			/* we should free it later */
 			if (oslot->vfree[max_attn])
@@ -1158,14 +1154,14 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 			slot->tts_values[max_attn] = tmp;
 			oslot->vfree[max_attn] = true;
 		}
+		else
+		{
+			/* value can not be compressed */
 
-		/* if tuple with compressed value can be stored without TOAST */
-		if (can_be_stored_in_index(slot, descr))
-			break;
-
-		/* else it must be toasted */
-		oslot->to_toast[max_attn] = true;
-		to_toastn++;
+			/* FIXME: att->attstorage == 'm' */
+			oslot->to_toast[max_attn] = true;
+			to_toastn++;
+		}
 	}
 }
 
