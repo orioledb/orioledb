@@ -24,7 +24,7 @@ typedef struct OTableSlot
 	TupleTableSlot base;
 
 	char	   *data;			/* data for materialized slots */
-	bool	   *to_toast;
+	char	   *to_toast;
 	bool	   *vfree;
 	Datum	   *detoasted;
 	OTuple		tuple;
@@ -37,6 +37,10 @@ typedef struct OTableSlot
 	OTupleReaderState state;
 	BTreeLocationHint hint;
 } OTableSlot;
+
+#define ORIOLEDB_TO_TOAST_OFF ('\0')
+#define ORIOLEDB_TO_TOAST_ON ('y')
+#define ORIOLEDB_TO_TOAST_COMPRESSION_TRIED ('c')
 
 extern PGDLLIMPORT const TupleTableSlotOps TTSOpsOrioleDB;
 

@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "tableam/toast.h"
+#include "tuple/slot.h"
 #include "tuple/toast.h"
 #include "tuple/format.h"
 
@@ -415,7 +416,7 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
  */
 static Size
 o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr,
-						  Datum *values, bool *isnull, bool *to_toast,
+						  Datum *values, bool *isnull, char *to_toast,
 						  int natts)
 {
 	Size		data_length = 0;
@@ -429,7 +430,8 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr,
 
 		if (!(i == 0 && iptr))
 		{
-			if (to_toast != NULL && to_toast[i - off])
+			if (to_toast != NULL &&
+				to_toast[i - off] == ORIOLEDB_TO_TOAST_ON)
 			{
 				data_length += sizeof(OToastValue);
 				continue;
@@ -479,7 +481,7 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr,
 Size
 o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 				 ItemPointer iptr, uint32 version,
-				 Datum *values, bool *isnull, bool *to_toast)
+				 Datum *values, bool *isnull, char *to_toast)
 {
 	bool		hasnull = false;
 	bool		fixedFormat = (version == 0);
@@ -531,7 +533,7 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 void
 o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			 OTuple *tuple, Size tuple_size, ItemPointer iptr, uint32 version,
-			 Datum *values, bool *isnull, bool *to_toast)
+			 Datum *values, bool *isnull, char *to_toast)
 {
 	OTupleHeader tup = (OTupleHeader) tuple->data;
 	bits8	   *bitP;
@@ -605,7 +607,8 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 
 		if (!(i == 0 && iptr))
 		{
-			cur_to_toast = (to_toast != NULL && to_toast[i - attOff]);
+			cur_to_toast = (to_toast != NULL &&
+							to_toast[i - attOff] == ORIOLEDB_TO_TOAST_ON);
 			value = values[i - attOff];
 			null = isnull[i - attOff];
 		}

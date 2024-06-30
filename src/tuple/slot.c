@@ -92,7 +92,7 @@ tts_orioledb_clear(TupleTableSlot *slot)
 				pfree(DatumGetPointer(slot->tts_values[i]));
 		}
 		memset(oslot->vfree, 0, natts * sizeof(bool));
-		memset(oslot->to_toast, 0, natts * sizeof(bool));
+		memset(oslot->to_toast, ORIOLEDB_TO_TOAST_OFF, natts * sizeof(bool));
 	}
 
 	oslot->data = NULL;
@@ -161,8 +161,8 @@ alloc_to_toast_vfree_detoasted(TupleTableSlot *slot)
 	oslot->to_toast = MemoryContextAllocZero(slot->tts_mcxt,
 											 MAXALIGN(sizeof(bool) * totalNatts * 2) +
 											 sizeof(Datum) * totalNatts);
-	oslot->vfree = oslot->to_toast + sizeof(bool) * totalNatts;
-	oslot->detoasted = (Datum *) (oslot->to_toast + MAXALIGN(sizeof(bool) * totalNatts * 2));
+	oslot->vfree = (bool *) (oslot->to_toast + totalNatts);
+	oslot->detoasted = (Datum *) ((Pointer) oslot->to_toast + MAXALIGN(sizeof(char) * totalNatts + sizeof(bool) * totalNatts));
 }
 
 /*
@@ -537,7 +537,7 @@ tts_orioledb_materialize(TupleTableSlot *slot)
 	if (oslot->to_toast)
 	{
 		memset(oslot->vfree, 0, desc->natts * sizeof(bool));
-		memset(oslot->to_toast, 0, desc->natts * sizeof(bool));
+		memset(oslot->to_toast, 0, desc->natts * sizeof(char));
 	}
 }
 
@@ -1058,11 +1058,11 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 	full_size = 0;
 	for (i = 0; i < descr->ntoastable; i++)
-		oslot->to_toast[descr->toastable[i] - ctid_off] = true;
+		oslot->to_toast[descr->toastable[i] - ctid_off] = ORIOLEDB_TO_TOAST_ON;
 
 	full_size = expected_tuple_len(slot, descr);
 
-	memset(oslot->to_toast, 0, sizeof(bool) * natts);
+	memset(oslot->to_toast, ORIOLEDB_TO_TOAST_OFF, sizeof(bool) * natts);
 
 	/* if we can not compress tuple, we do not try do it */
 	if (full_size > O_BTREE_MAX_TUPLE_SIZE)
@@ -1085,7 +1085,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 		if (VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[toast_attn]))
 		{
-			oslot->to_toast[toast_attn] = true;
+			oslot->to_toast[toast_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
 		}
 	}
@@ -1103,7 +1103,8 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		for (i = 0; i < descr->ntoastable; i++)
 		{
 			toast_attn = descr->toastable[i] - ctid_off;
-			if (!slot->tts_isnull[toast_attn] && !oslot->to_toast[toast_attn])
+			if (!slot->tts_isnull[toast_attn] &&
+				oslot->to_toast[toast_attn] == ORIOLEDB_TO_TOAST_OFF)
 			{
 				att = TupleDescAttr(tupdesc, toast_attn);
 
@@ -1136,7 +1137,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		if (VARATT_IS_COMPRESSED(slot->tts_values[max_attn])
 			|| att->attstorage == TYPSTORAGE_EXTERNAL)
 		{
-			oslot->to_toast[max_attn] = true;
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
 			continue;
 		}
@@ -1154,12 +1155,14 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 			slot->tts_values[max_attn] = tmp;
 			oslot->vfree[max_attn] = true;
 		}
+		else if (att->attstorage == TYPSTORAGE_MAIN)
+		{
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_COMPRESSION_TRIED;
+			to_toastn++;
+		}
 		else
 		{
-			/* value can not be compressed */
-
-			/* FIXME: att->attstorage == TYPSTORAGE_MAIN */
-			oslot->to_toast[max_attn] = true;
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
 		}
 	}
