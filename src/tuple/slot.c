@@ -1107,9 +1107,9 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 			{
 				att = TupleDescAttr(tupdesc, toast_attn);
 
-				Assert(att->attstorage != 'p');
+				Assert(att->attstorage != TYPSTORAGE_PLAIN);
 
-				if (att->attstorage == 'm' &&
+				if (att->attstorage == TYPSTORAGE_MAIN &&
 					VARATT_IS_COMPRESSED(slot->tts_values[toast_attn]))
 					continue;
 
@@ -1134,7 +1134,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		 * toasted
 		 */
 		if (VARATT_IS_COMPRESSED(slot->tts_values[max_attn])
-			|| att->attstorage == 'e')
+			|| att->attstorage == TYPSTORAGE_EXTERNAL)
 		{
 			oslot->to_toast[max_attn] = true;
 			to_toastn++;
@@ -1158,7 +1158,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		{
 			/* value can not be compressed */
 
-			/* FIXME: att->attstorage == 'm' */
+			/* FIXME: att->attstorage == TYPSTORAGE_MAIN */
 			oslot->to_toast[max_attn] = true;
 			to_toastn++;
 		}
