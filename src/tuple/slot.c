@@ -928,6 +928,9 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 	}
 }
 
+/*
+ * Appends index key stored in the tuple slot to the given string.
+ */
 void
 appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 {
@@ -973,6 +976,10 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 	appendStringInfo(str, ")");
 }
 
+/*
+ * Returns a string representation of the index key that is stored in the
+ * tuple slot.
+ */
 char *
 tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id)
 {
@@ -984,6 +991,10 @@ tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id)
 	return buf.data;
 }
 
+/*
+ * Returns the expected length of the tuple that will be stored in the primary
+ * key index.
+ */
 static inline int
 expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 {
@@ -1002,6 +1013,10 @@ expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 	return tup_size;
 }
 
+/*
+ * Returns true if the tuple stored in the slot fits the maximum size to be
+ * stored in the index.
+ */
 static inline bool
 can_be_stored_in_index(TupleTableSlot *slot, OTableDescr *descr)
 {
@@ -1014,6 +1029,10 @@ can_be_stored_in_index(TupleTableSlot *slot, OTableDescr *descr)
 	return false;
 }
 
+/*
+ * Apply TOAST including compression and out-of-line storage to the tuple
+ * stored in the slot if necessary.
+ */
 void
 tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 {
@@ -1131,8 +1150,8 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		att = TupleDescAttr(tupdesc, max_attn);
 
 		/*
-		 * if value already compressed or can not be compressed - it must be
-		 * toasted
+		 * If the value is already compressed or can not be compressed - it
+		 * must be toasted
 		 */
 		if (VARATT_IS_COMPRESSED(slot->tts_values[max_attn])
 			|| att->attstorage == TYPSTORAGE_EXTERNAL)
@@ -1149,20 +1168,26 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 		if (DatumGetPointer(tmp) != NULL)
 		{
-			/* we should free it later */
+			/* Suceessfully compressed, replace the value */
+
+			/* free the old value */
 			if (oslot->vfree[max_attn])
 				pfree(DatumGetPointer(slot->tts_values[max_attn]));
+			/* store the new value and mark to free it later */
 			slot->tts_values[max_attn] = tmp;
 			oslot->vfree[max_attn] = true;
 		}
-		else if (att->attstorage == TYPSTORAGE_MAIN)
+		else if (att->attstorage != TYPSTORAGE_MAIN)
 		{
-			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_COMPRESSION_TRIED;
+			/* Compression failed, try to TOAST it */
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
 		}
 		else
 		{
-			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_ON;
+			/* Compression failed, but we can not TOAST it */
+			Assert(att->attstorage == TYPSTORAGE_MAIN);
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_COMPRESSION_TRIED;
 			to_toastn++;
 		}
 	}
