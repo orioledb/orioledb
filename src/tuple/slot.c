@@ -166,39 +166,63 @@ alloc_to_toast_vfree_detoasted(TupleTableSlot *slot)
 }
 
 /*
- * Attribute values are readily available in tts_values and tts_isnull array
- * in a OTableSlot. So there should be no need to call either of the
- * following two functions.
+ * This function is designed to populate the attributes of a tuple table slot
+ * from an OrioleDB tuple.  It selectively retrieves attributes based on
+ * the provided number of attributes (__natts) and updates the slot's values
+ * and null flags accordingly.
  */
 static void
 tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 {
+	/*
+	 * Cast the generic TupleTableSlot to an OTableSlot for OrioleDB specific
+	 * operations.
+	 */
 	OTableSlot *oslot = (OTableSlot *) slot;
+
+	/* Declaration of variables used throughout the function. */
 	int			natts,
 				attnum,
 				ctid_off,
 				res_ctidoff;
-	OTableDescr *descr = oslot->descr;
-	Datum	   *values = slot->tts_values;
-	bool	   *isnull = slot->tts_isnull;
-	bool		hastoast = false;
+	OTableDescr *descr = oslot->descr;	/* Descriptor for the table. */
+	Datum	   *values = slot->tts_values;	/* Array to store attribute
+											 * values. */
+	bool	   *isnull = slot->tts_isnull;	/* Array to store null flags for
+											 * attributes. */
+	bool		hastoast = false;	/* Flag to indicate presence of TOASTed
+									 * attributes. */
 	OIndexDescr *idx;
 	bool		index_order;
 	int			cur_tbl_attnum = 0;
 
+	/*
+	 * Early return if the requested number of attributes is already valid or
+	 * the tuple is null.
+	 */
 	if (__natts <= slot->tts_nvalid || O_TUPLE_IS_NULL(oslot->tuple))
 		return;
 
+	/* Ensure the descriptor is not NULL. */
 	Assert(descr);
 	idx = descr->indices[oslot->ixnum];
 
+	/* Determine if the attributes should be fetched in index order. */
 	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
 	if (oslot->ixnum == PrimaryIndexNumber)
 		index_order = index_order &&
 			slot->tts_tupleDescriptor->natts == idx->nFields;
 
+	/*
+	 * Ensure that if there are valid attributes, the slot is for the primary
+	 * index.
+	 */
 	Assert(slot->tts_nvalid == 0 || oslot->ixnum == PrimaryIndexNumber);
 
+	/*
+	 * Determine the offset of the attributes due to the possible presence of
+	 * ctid column.
+	 */
 	if (GET_PRIMARY(descr)->primaryIsCtid && oslot->ixnum == PrimaryIndexNumber)
 		ctid_off = 1;
 	else
@@ -206,23 +230,44 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 	res_ctidoff = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
+	/*
+	 * Determine the number of attributes to process based on the index type
+	 * and the order of attributes.
+	 */
 	if (oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
 	{
 		if (index_order)
+		{
+			/*
+			 * The attributes are stored in the index order.  So fetch all the
+			 * attributes at once.
+			 */
 			natts = descr->tupdesc->natts;
+		}
 		else
+		{
 			natts = Min(__natts, descr->tupdesc->natts);
+		}
 	}
 	else
 	{
+		/*
+		 * For secondary indexes, the attributes are also stored in the index
+		 * order.  So fetch all the attributes at once.
+		 */
 		natts = oslot->state.desc->natts;
 	}
 
+	/* Iterate over the attributes to populate values and null flags. */
 	for (attnum = slot->tts_nvalid; attnum < natts; attnum++)
 	{
 		Form_pg_attribute thisatt;
 		int			res_attnum;
 
+		/*
+		 * Determine the result attribute number based on the index type and
+		 * the order of attributes.
+		 */
 		if (oslot->ixnum == PrimaryIndexNumber)
 		{
 			if (index_order)
@@ -251,17 +296,27 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			res_attnum = idx->fields[attnum].tableAttnum - 1;
 		}
 
+		/* Ensure the result attribute number is valid. */
 		Assert(res_attnum >= -2);
 		if (res_attnum >= 0)
 		{
+			/*
+			 * Read the next field value and update the slot's value and null
+			 * arrays.
+			 */
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
 
+			/* Determine the attribute metadata based on the index and order. */
 			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
 				thisatt = TupleDescAttr(slot->tts_tupleDescriptor, attnum);
 			else
 				thisatt = TupleDescAttr(idx->leafTupdesc, attnum);
 
+			/*
+			 * Check for TOASTed attributes and adjust the number of
+			 * attributes if necessary.
+			 */
 			if (!isnull[res_attnum] && !thisatt->attbyval && thisatt->attlen < 0)
 			{
 				Pointer		p = DatumGetPointer(values[res_attnum]);
@@ -277,6 +332,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else if (res_attnum == -1)
 		{
+			/* Special handling for ctid attribute. */
 			Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
 			bool		iptr_null;
 
@@ -289,23 +345,28 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else if (res_attnum == -2)
 		{
+			/* Handle dropped attributes by reading and ignoring the value. */
 			bool		dropped_null;
 
 			(void) o_tuple_read_next_field(&oslot->state, &dropped_null);
 		}
 	}
 
+	/* Process TOASTed attributes if any were found. */
 	if (hastoast)
 	{
 		OTuple		pkey;
 
 		Assert(oslot->ixnum == PrimaryIndexNumber);
 
+		/* Allocate memory for TOASTed attributes if not already done. */
 		if (!oslot->to_toast)
 			alloc_to_toast_vfree_detoasted(slot);
 
+		/* Generate a primary key for the TOASTed attributes. */
 		pkey = tts_orioledb_make_key(slot, descr);
 
+		/* Iterate over attributes to process TOASTed values. */
 		for (attnum = 0; attnum < natts; attnum++)
 		{
 			Form_pg_attribute thisatt;
@@ -317,6 +378,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 				if (IS_TOAST_POINTER(p))
 				{
+					/* Replace TOASTed value with a detoasted version. */
 					MemoryContext mcxt = MemoryContextSwitchTo(slot->tts_mcxt);
 					OToastValue toastValue;
 
@@ -330,11 +392,14 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 				}
 			}
 		}
+		/* Free the primary key memory. */
 		pfree(pkey.data);
 	}
 
+	/* Ensure the number of processed attributes matches the expected count. */
 	Assert(attnum == natts);
 
+	/* Update the slot's valid attribute count. */
 	slot->tts_nvalid = natts;
 }
 
