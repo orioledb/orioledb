@@ -33,7 +33,7 @@
 #include "utils/relcache.h"
 
 #define ORIOLEDB_VERSION "OrioleDB public beta 5"
-#define ORIOLEDB_BINARY_VERSION 4
+#define ORIOLEDB_BINARY_VERSION 5
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
@@ -289,8 +289,9 @@ typedef int OCompress;
  */
 typedef struct OCompressHeader
 {
-	uint16		page_size;
 	uint32		chkpNum;
+	uint16		page_size;
+	uint16		reserved;		/* for possible future use */
 } OCompressHeader;
 typedef struct ORelOptions
 {

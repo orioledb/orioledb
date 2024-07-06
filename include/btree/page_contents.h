@@ -94,6 +94,13 @@ struct BTreePageItemLocator
 typedef struct
 {
 	OrioleDBPageHeader o_header;
+	uint32		checkpointNum;
+
+	/* Link to the page-level undo item and corresponding CSN */
+	UndoLocation undoLocation;
+	CommitSeqNo csn;
+
+	uint64		rightLink;
 	uint32		flags:6,
 
 	/*
@@ -108,12 +115,6 @@ typedef struct
 	 */
 				field2:15;
 
-	/* Link to the page-level undo item and corresponding CSN */
-	UndoLocation undoLocation;
-	CommitSeqNo csn;
-
-	uint64		rightLink;
-	uint32		checkpointNum;
 	LocationIndex maxKeyLen;
 	OffsetNumber prevInsertOffset;
 	OffsetNumber chunksCount;
