@@ -5,27 +5,30 @@ set -Eeo pipefail
 # run from project root: ./ci/local_docker_matrix.sh
 # and check the logs in ./log_docker_build/*.*.log
 
-# Full matrix of test builds 2x2x12 = 48 builds
+# Full matrix of test builds 2x2x12x2 = 96 builds
 pg_major_list=( 16 15)
 compiler_list=( clang gcc )
 base_list=(
-   # alpine versions
+
+   # dev versions : 2
+   alpine:edge
+   ubuntu:devel
+
+   # alpine versions : 7
+   alpine:3.20
    alpine:3.19
    alpine:3.18
    alpine:3.17
    alpine:3.16
    alpine:3.15
    alpine:3.14
-   alpine:3.13
+#  alpine:3.13  python test env setup not working;
 
-   # ubuntu versions
-   ubuntu:23.10
+   # ubuntu versions : 3
+   ubuntu:24.04
    ubuntu:22.04
    ubuntu:20.04
 
-   # developer versions
-   alpine:edge
-   ubuntu:devel
   )
 
 
@@ -54,36 +57,39 @@ fi
 for pg_major in "${pg_major_list[@]}" ; do
   for compiler in "${compiler_list[@]}" ; do
     for base in "${base_list[@]}" ; do
+      for regression in "yes" "no" ; do
 
-      base_os="${base%%:*}"
-      base_tag="${base##*:}"
-      base_os_upper="${base_os^^}"
+        base_os="${base%%:*}"
+        base_tag="${base##*:}"
+        base_os_upper="${base_os^^}"
 
-      # Determine the Dockerfile based on base OS
-      if [ "$base_os" = "alpine" ]; then
-        dockerfile="Dockerfile"
-      elif [ "$base_os" = "ubuntu" ]; then
-        dockerfile="Dockerfile.ubuntu"
-      fi
+        # Determine the Dockerfile based on base OS
+        if [ "$base_os" = "alpine" ]; then
+          dockerfile="Dockerfile"
+        elif [ "$base_os" = "ubuntu" ]; then
+          dockerfile="Dockerfile.ubuntu"
+        fi
 
-      docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}"
-      echo "------------ $docker_tag ------------------"
+        docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}-regression-${regression}"
+        echo "------------ $docker_tag ------------------"
 
-      rm -f ${logpath}/"${docker_tag}".*.log
+        rm -f ${logpath}/"${docker_tag}".*.log
 
-      time docker build --pull --network=host --progress=plain \
-          -f $dockerfile \
-          --build-arg "${base_os_upper}_VERSION=$base_tag" \
-          --build-arg BUILD_CC_COMPILER="$compiler" \
-          --build-arg PG_MAJOR="$pg_major" \
-          -t orioletest:"${docker_tag}" . 2>&1 | tee ${logpath}/"${docker_tag}".build.log
+        time docker build --pull --network=host --progress=plain \
+            -f $dockerfile \
+            --build-arg "${base_os_upper}_VERSION=$base_tag" \
+            --build-arg BUILD_CC_COMPILER="$compiler" \
+            --build-arg PG_MAJOR="$pg_major" \
+            --build-arg RUN_REGRESSION_TESTS="$regression" \
+            -t orioletest:"${docker_tag}" . 2>&1 | tee ${logpath}/"${docker_tag}".build.log
 
-      # Run docker test : oriole + postgres official test scripts
-      "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
-          -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
-          -c "test/orioledb-config.sh" \
-          "orioletest:${docker_tag}" 2>&1 | tee ${logpath}/"${docker_tag}".test.log
+        # Run docker test : oriole + postgres official test scripts
+        "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
+            -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
+            -c "test/orioledb-config.sh" \
+            "orioletest:${docker_tag}" 2>&1 | tee ${logpath}/"${docker_tag}".test.log
 
+      done
     done
   done
 done
@@ -92,3 +98,7 @@ docker images orioletest:* | sort
 
 # You can check the build logs with:
 #    grep -i  -C 1 warning: ./log_docker_build/*/*.build.log
+
+# remove test images:
+#    docker images | grep ^libr       |  awk '{print $3}' | xargs docker rmi
+#    docker images | grep ^orioletest |  awk '{print $3}' | xargs docker rmi
