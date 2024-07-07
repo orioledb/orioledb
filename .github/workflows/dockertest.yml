@@ -13,18 +13,32 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        postgres: [16, 15]
-        compiler: [clang]
-        distr:  [alpine, ubuntu]
         include:
-          - distr-version: 3.19
+          - postgres: 16
+            compiler: clang
             distr: alpine
-          - distr-version: focal
+            distr-version: 3.19
+          - postgres: 15
+            compiler: clang
+            distr: alpine
+            distr-version: 3.19
+          - postgres: 16
+            compiler: clang
             distr: ubuntu
+            distr-version: focal
+          - postgres: 15
+            compiler: clang
+            distr: ubuntu
+            distr-version: focal
+          # allowed to fail on edge !
+          - postgres: 16
+            compiler: clang
+            distr: alpine
+            distr-version: edge
 
     name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.alpine == 'edge' }}
+    continue-on-error: ${{ matrix.distr-version == 'edge' }}
 
     steps:
 
@@ -32,13 +46,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: docker build orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
           platforms: linux/amd64
-          push: false
           pull: true
+          load: true
+          push: false
           tags: orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
           build-args: |
             ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
@@ -46,3 +61,21 @@ jobs:
             PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
             DOCKER_PG_LLVM_DEPS=llvm-dev clang
+            RUN_REGRESSION_TESTS=yes
+
+      # docker imgage testing with https://github.com/docker-library/official-images.git
+      # to check if the image is compatible with the official-images test suite
+      # the special orioledb test config is in the ./test/tests/orioledb-config.sh
+      - name: Run Docker-official-postgres tests + extra orioledb tests
+        run: |
+          OFFIMG_LOCAL_CLONE=./log_docker_build/official-images
+          OFFIMG_REPO_URL=https://github.com/docker-library/official-images.git
+          mkdir -p "$OFFIMG_LOCAL_CLONE"
+          git clone --depth=1 --branch=master "$OFFIMG_REPO_URL" "$OFFIMG_LOCAL_CLONE"
+          "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
+              -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
+              -c "test/orioledb-config.sh" \
+              "orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}"
+
+      # if you want to push the tested image
+      # check this example:  https://docs.docker.com/build/ci/github-actions/test-before-push/
