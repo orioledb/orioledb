@@ -237,7 +237,10 @@ check: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
 endif
 
-COMMIT_HASH = $(shell git rev-parse HEAD)
+COMMIT_HASH := $(shell git rev-parse HEAD 2>/dev/null)
+ifeq ($(strip $(COMMIT_HASH)),)
+	COMMIT_HASH := 0000000000000000000000000000000000000000
+endif
 override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declarations
 
 ifdef VALGRIND
