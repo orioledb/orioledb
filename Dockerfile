@@ -1,18 +1,22 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.19 3.18 3.17 3.16 3.15 3.14 3.13 ]
-ARG ALPINE_VERSION=3.19
+# set ALPINE_VERSION= [ edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13 ]
+ARG ALPINE_VERSION=3.20
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION
 # Set PG_MAJOR = [16 15]
 ARG PG_MAJOR=16
-ENV PG_MAJOR ${PG_MAJOR}
+ENV PG_MAJOR=${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
 ARG BUILD_CC_COMPILER=clang
-ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
+ENV BUILD_CC_COMPILER=${BUILD_CC_COMPILER}
+
+# To run regression tests during the build process set to "yes"
+ARG RUN_REGRESSION_TESTS=no
+ENV RUN_REGRESSION_TESTS=${RUN_REGRESSION_TESTS}
 
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
@@ -20,7 +24,7 @@ ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
 # Note: PostgreSQL does not support LLVM 16. Therefore, for Alpine >=3.18, please use "llvm15-dev clang15".
 # Reference: https://github.com/docker-library/postgres/pull/1077
 ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
-ENV DOCKER_PG_LLVM_DEPS ${DOCKER_PG_LLVM_DEPS}
+ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
 
 # 70 is the standard uid/gid for "postgres" in Alpine
 # https://git.alpinelinux.org/aports/tree/main/postgresql/postgresql.pre-install?h=3.12-stable
@@ -34,7 +38,7 @@ RUN set -eux; \
 
 # make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
 # alpine doesn't require explicit locale-file generation
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 RUN mkdir -p /usr/src/postgresql/contrib/orioledb
 
@@ -53,7 +57,7 @@ RUN set -eux; \
 # https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
 # https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18 | 3.19 | 3.20* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
+		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
 		*) : ;; \
 	esac ; \
 	\
@@ -136,8 +140,8 @@ RUN set -eux; \
 	mv src/include/pg_config_manual.h.new src/include/pg_config_manual.h; \
 	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
 # explicitly update autoconf config.guess and config.sub so they support more arches/libcs
-	wget -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
-	wget -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget --tries=10 --timeout=60 -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget --tries=10 --timeout=60 -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
 # configure options taken from:
 # https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
 	( CC=${BUILD_CC_COMPILER} ./configure \
@@ -179,6 +183,27 @@ RUN set -eux; \
 	make install; \
 	make -C contrib install; \
 	make -C contrib/orioledb install; \
+	# Run regression tests if RUN_REGRESSION_TESTS is set to "yes"
+	if [[ "${RUN_REGRESSION_TESTS}" == "yes" ]]; then \
+		# Install python dependencies for running tests
+		set -eux; \
+		apk add --no-cache --virtual .check-deps py3-pip py3-virtualenv ; \
+		virtualenv /tmp/env ; \
+		source /tmp/env/bin/activate ; \
+		pip install --no-cache-dir --upgrade pip ; \
+		pip install --no-cache-dir psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL ; \
+		chown -R postgres:postgres /usr/src/postgresql ; \
+		# Run the regression tests
+		su postgres -c 'make -C contrib/orioledb regresscheck   -j$(nproc) LANG=C PGUSER=postgres'; \
+		su postgres -c 'make -C contrib/orioledb isolationcheck -j$(nproc) LANG=C PGUSER=postgres'; \
+		#su postgres -c 'make -C contrib/orioledb testgrescheck  -j$(nproc) LANG=C PGUSER=postgres'; \
+		\
+		# Clean up test dependencies
+		apk del --no-network .check-deps ; \
+		rm -rf /root/.cache/pip ; \
+		rm -rf /root/.local/share/virtualenv ; \
+		rm -rf /tmp/env ; \
+	fi ; \
 	\
 	runDeps="$( \
 		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
@@ -211,7 +236,7 @@ RUN set -eux; \
 
 RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
 
-ENV PGDATA /var/lib/postgresql/data
+ENV PGDATA=/var/lib/postgresql/data
 # this 777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
 RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PGDATA"
 VOLUME /var/lib/postgresql/data
