@@ -35,6 +35,10 @@ jobs:
             compiler: clang
             distr: alpine
             distr-version: edge
+          - postgres: 16
+            compiler: gcc
+            distr: alpine
+            distr-version: edge
 
     name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
     runs-on: ubuntu-latest
