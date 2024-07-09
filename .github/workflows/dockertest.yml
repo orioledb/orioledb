@@ -30,7 +30,8 @@ jobs:
             compiler: clang
             distr: ubuntu
             distr-version: focal
-          # allowed to fail on edge !
+
+          # allowed to fail on alpine:edge or ubuntu:devel!
           - postgres: 16
             compiler: clang
             distr: alpine
@@ -39,10 +40,14 @@ jobs:
             compiler: gcc
             distr: alpine
             distr-version: edge
+          - postgres: 16
+            compiler: clang
+            distr: ubuntu
+            distr-version: devel
 
     name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.distr-version == 'edge' }}
+    continue-on-error: ${{ matrix.distr-version == 'edge' || matrix.distr-version == 'devel' }}
 
     steps:
 

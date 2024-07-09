@@ -10,9 +10,9 @@ pg_major_list=( 16 15)
 compiler_list=( clang gcc )
 base_list=(
 
-   # dev versions : 2
-   alpine:edge
+   # development versions : 2
    ubuntu:devel
+   alpine:edge
 
    # alpine versions : 7
    alpine:3.20
@@ -76,7 +76,7 @@ for pg_major in "${pg_major_list[@]}" ; do
         rm -f ${logpath}/"${docker_tag}".*.log
 
         time docker build --pull --network=host --progress=plain \
-            -f $dockerfile \
+            -f "$dockerfile" \
             --build-arg "${base_os_upper}_VERSION=$base_tag" \
             --build-arg BUILD_CC_COMPILER="$compiler" \
             --build-arg PG_MAJOR="$pg_major" \
