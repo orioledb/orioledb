@@ -223,7 +223,7 @@ RUN set -eux; \
 		virtualenv /tmp/env ; \
 		. /tmp/env/bin/activate ; \
 		pip install --no-cache-dir --upgrade pip ; \
-		pip install --no-cache-dir psycopg2 six testgres==1.10.1 moto[s3] flask flask_cors boto3 pyOpenSSL ; \
+		pip install --no-cache-dir psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL ; \
 		chown -R postgres:postgres /usr/src/postgresql ; \
 		\
 		# Temporarily removing "logical_test" as it is not working.
