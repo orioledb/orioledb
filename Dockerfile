@@ -195,11 +195,12 @@ RUN set -eux; \
 	if [[ "${RUN_REGRESSION_TESTS}" == "yes" ]]; then \
 		# Install python dependencies for running tests
 		set -eux; \
-		apk add --no-cache --virtual .check-deps py3-pip py3-virtualenv util-linux; \
+		apk add --no-cache --virtual .check-deps py3-pip py3-virtualenv; \
 		virtualenv /tmp/env ; \
 		source /tmp/env/bin/activate ; \
 		pip install --no-cache-dir --upgrade pip ; \
 		pip install --no-cache-dir psycopg2 six testgres==1.8.9 moto[s3] flask flask_cors boto3 pyOpenSSL ; \
+		pip freeze ; \
 		chown -R postgres:postgres /usr/src/postgresql ; \
 		\
 		# Temporarily removing "logical_test" as it is not working.
@@ -210,7 +211,7 @@ RUN set -eux; \
 		su postgres -c 'source /tmp/env/bin/activate && make -C contrib/orioledb regresscheck   -j$(nproc) LANG=C PGUSER=postgres'; \
 		su postgres -c 'source /tmp/env/bin/activate && make -C contrib/orioledb isolationcheck -j$(nproc) LANG=C PGUSER=postgres'; \
 		su postgres -c 'source /tmp/env/bin/activate && make -C contrib/orioledb testgrescheck_part_1  -j$(nproc) LANG=C PGUSER=postgres' ; \
-		taskset -a -c 0-4 su postgres -c 'source /tmp/env/bin/activate && make -C contrib/orioledb testgrescheck_part_2  -j4 LANG=C PGUSER=postgres' ; \
+		su postgres -c 'source /tmp/env/bin/activate && make -C contrib/orioledb testgrescheck_part_2  -j4 LANG=C PGUSER=postgres' ; \
 		\
 		# Clean up test dependencies
 		apk del --no-network .check-deps ; \

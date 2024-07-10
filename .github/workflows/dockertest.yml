@@ -14,6 +14,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # stable versions for the docker publications !
           - postgres: 16
             compiler: clang
             distr: alpine
@@ -31,7 +32,7 @@ jobs:
             distr: ubuntu
             distr-version: focal
 
-          # allowed to fail on alpine:edge or ubuntu:devel!
+          # latest dev versions ( allowed to fail )
           - postgres: 16
             compiler: clang
             distr: alpine
@@ -44,6 +45,16 @@ jobs:
             compiler: clang
             distr: ubuntu
             distr-version: devel
+
+          # oldest supported version
+          - postgres: 16
+            compiler: clang
+            distr: alpine
+            distr-version: 3.14
+          - postgres: 16
+            compiler: clang
+            distr: ubuntu
+            distr-version: 20.04
 
     name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
     runs-on: ubuntu-latest
