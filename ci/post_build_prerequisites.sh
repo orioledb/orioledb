@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -eu
+
+export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
+
+# psycopg2 depends on existing postgres installation
+if [ $GITHUB_JOB = "run-benchmark" ]; then
+	pip_packages="psycopg2-binary six testgres python-telegram-bot matplotlib"
+elif [ $GITHUB_JOB = "pgindent" ]; then
+	pip_packages="psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL yapf"
+else
+	pip_packages="psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL"
+fi
+
+# install required packages
+sudo env "PATH=$PATH" pip3 install --upgrade $pip_packages
+
+if [ $GITHUB_JOB != "run-benchmark" ] && [ $GITHUB_JOB != "pgindent" ]; then
+    wget https://codeload.github.com/eulerto/wal2json/tar.gz/refs/tags/wal2json_2_6
+    tar -zxf wal2json_2_6
+    rm wal2json_2_6
+    cd wal2json-wal2json_2_6
+    make
+    make install
+fi

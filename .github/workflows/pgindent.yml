@@ -36,5 +36,7 @@ jobs:
         run: bash ./orioledb/ci/prerequisites.sh
       - name: Build
         run: bash ./orioledb/ci/build.sh
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
       - name: PGIndent
         run: bash ./orioledb/ci/pgindent.sh
