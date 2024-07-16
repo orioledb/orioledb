@@ -12,13 +12,13 @@ if [ "$COMPILER" = "clang" ]; then
 		make USE_PGXS=1 USE_ASSERT_CHECKING=1 || status=$?
 
 elif [ "$COMPILER" = "gcc" ]; then
-	cppcheck --template "{file} ({line}): {severity} ({id}): {message}" \
+	cppcheck \
 		--enable=warning,portability,performance \
 		--suppress=redundantAssignment \
 		--suppress=uselessAssignmentPtrArg \
 		--suppress=incorrectStringBooleanError \
 		--suppress=nullPointerRedundantCheck \
-		--std=c89 src/*.c src/*/*.c include/*.h include/*/*.h 2> cppcheck.log
+		--std=c89 --inline-suppr --verbose src/*.c src/*/*.c include/*.h include/*/*.h 2> cppcheck.log
 
 	if [ -s cppcheck.log ]; then
 		cat cppcheck.log

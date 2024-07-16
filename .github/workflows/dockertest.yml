@@ -15,7 +15,7 @@ jobs:
       matrix:
         postgres: [16, 15]
         compiler: [clang]
-        distr:  [alpine, ubuntu]
+        distr: [alpine, ubuntu]
         include:
           - distr-version: 3.19
             distr: alpine
@@ -27,7 +27,6 @@ jobs:
     continue-on-error: ${{ matrix.alpine == 'edge' }}
 
     steps:
-
       - name: Checkout source
         uses: actions/checkout@v4
 

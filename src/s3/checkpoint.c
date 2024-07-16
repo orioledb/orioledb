@@ -293,7 +293,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 	char		pathbuf[MAXPGPATH * 2];
 	struct stat statbuf;
 	int64		size = 0;
-	const char *lastDir;		/* Split last dir from parent path. */
+	const char *lastDir = NULL; /* Split last dir from parent path. */
 	bool		isDbDir = false;	/* Does this directory contain relations? */
 
 	/*
@@ -310,6 +310,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		strspn(lastDir + 1, "0123456789") == strlen(lastDir + 1))
 	{
 		/* Part of path that contains the parent directory. */
+		/* cppcheck-suppress uninitvar */
 		int			parentPathLen = lastDir - path;
 
 		/*
@@ -487,10 +488,13 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 
 			rllen = readlink(pathbuf, linkpath, sizeof(linkpath));
 			if (rllen < 0)
+			{
 				ereport(ERROR,
 						(errcode_for_file_access(),
 						 errmsg("could not read symbolic link \"%s\": %m",
 								pathbuf)));
+				return 0;		/* keep cppcheck quiet */
+			}
 			if (rllen >= sizeof(linkpath))
 				ereport(ERROR,
 						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),

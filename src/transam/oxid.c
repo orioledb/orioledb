@@ -205,7 +205,7 @@ static TransactionId
 acquire_logical_xid(void)
 {
 	int			i = MyProc->pgprocno,
-				mynum;
+				mynum = 0;
 	int			nloops = 0;
 	TransactionId result;
 	uint32		divider = max_procs * 32;

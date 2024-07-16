@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -67,7 +67,7 @@ jobs:
         pg_version: [13, 14, 15]
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Get the required tag name
         shell: bash
@@ -168,4 +168,3 @@ jobs:
       - name: fault-tolerance-test testgres
         run: |
           curl -X POST https://orioledb.antithesis.com/api/v1/launch_experiment/${{ env.ENDPOINT }}${{ matrix.pg_version }}-latest -u '${{ secrets.ANTITHESIS_API_USER }}'
-

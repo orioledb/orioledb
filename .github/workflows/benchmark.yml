@@ -61,7 +61,7 @@ jobs:
       COMPILER: ${{ github.event.inputs.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: orioledb
       - name: Get the required tag name
@@ -69,7 +69,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ github.event.inputs.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
