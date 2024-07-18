@@ -80,9 +80,9 @@ o_toast_init_tupdescs(OIndexDescr *toast, TupleDesc ix_primary)
 	/* attribute number */
 	o_tables_tupdesc_init_builtin(toast->leafTupdesc, pidx_natts + ATTN_POS, "attnum", INT2OID);
 	o_tables_tupdesc_init_builtin(toast->nonLeafTupdesc, pidx_natts + ATTN_POS, "attnum", INT2OID);
-	/* offset */
-	o_tables_tupdesc_init_builtin(toast->leafTupdesc, pidx_natts + OFFSET_POS, "offset", INT4OID);
-	o_tables_tupdesc_init_builtin(toast->nonLeafTupdesc, pidx_natts + OFFSET_POS, "offset", INT4OID);
+	/* chunk number */
+	o_tables_tupdesc_init_builtin(toast->leafTupdesc, pidx_natts + CHUNKN_POS, "chunknum", INT4OID);
+	o_tables_tupdesc_init_builtin(toast->nonLeafTupdesc, pidx_natts + CHUNKN_POS, "chunknum", INT4OID);
 	/* data only in leaf tuples */
 	o_tables_tupdesc_init_builtin(toast->leafTupdesc, pidx_natts + DATA_POS, "data", BYTEAOID);
 }
@@ -99,8 +99,8 @@ o_toast_cmp(BTreeDescr *desc,
 	OTuple		pk2;
 	int16		attnum1,
 				attnum2;
-	int32		offset1,
-				offset2;
+	int32		chunknum1,
+				chunknum2;
 
 	if (k1 == BTreeKeyBound)
 		pk1 = ((OToastKey *) p1)->pk_tuple;
@@ -141,7 +141,7 @@ o_toast_cmp(BTreeDescr *desc,
 	if (k1 == BTreeKeyBound)
 	{
 		attnum1 = ((OToastKey *) p1)->attnum;
-		offset1 = ((OToastKey *) p1)->offset;
+		chunknum1 = ((OToastKey *) p1)->chunknum;
 	}
 	else
 	{
@@ -149,14 +149,14 @@ o_toast_cmp(BTreeDescr *desc,
 
 		attnum1 = DatumGetInt16(o_fastgetattr(pk1, pkAttnum + ATTN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
-		offset1 = DatumGetInt32(o_fastgetattr(pk1, pkAttnum + OFFSET_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
+		chunknum1 = DatumGetInt32(o_fastgetattr(pk1, pkAttnum + CHUNKN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
 	}
 
 	if (k2 == BTreeKeyBound)
 	{
 		attnum2 = ((OToastKey *) p2)->attnum;
-		offset2 = ((OToastKey *) p2)->offset;
+		chunknum2 = ((OToastKey *) p2)->chunknum;
 	}
 	else
 	{
@@ -164,14 +164,14 @@ o_toast_cmp(BTreeDescr *desc,
 
 		attnum2 = DatumGetInt16(o_fastgetattr(pk2, pkAttnum + ATTN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
-		offset2 = DatumGetInt32(o_fastgetattr(pk2, pkAttnum + OFFSET_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
+		chunknum2 = DatumGetInt32(o_fastgetattr(pk2, pkAttnum + CHUNKN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
 	}
 
 	if (attnum1 != attnum2)
 		return (attnum1 < attnum2) ? -1 : 1;
-	if (offset1 != offset2)
-		return (offset1 < offset2) ? -1 : 1;
+	if (chunknum1 != chunknum2)
+		return (chunknum1 < chunknum2) ? -1 : 1;
 	return 0;
 }
 
@@ -267,11 +267,11 @@ tableGetMaxChunkSize(void *key, void *arg)
 }
 
 static void
-tableUpdateKey(void *key, uint32 offset, void *arg)
+tableUpdateKey(void *key, uint32 chunknum, void *arg)
 {
 	OToastKey  *tkey = (OToastKey *) key;
 
-	tkey->offset = offset;
+	tkey->chunknum = chunknum;
 }
 
 static void *
@@ -282,18 +282,18 @@ tableGetNextKey(void *key, void *arg)
 
 	nextKey = *tkey;
 	nextKey.attnum += 1;
-	nextKey.offset = 0;
+	nextKey.chunknum = 0;
 
 	return (Pointer) &nextKey;
 }
 
 static OTuple
-tableCreateTuple(void *key, Pointer data, uint32 offset, int length, void *arg)
+tableCreateTuple(void *key, Pointer data, uint32 offset, uint32 chunknum, int length, void *arg)
 {
 	OToastKey  *tkey = (OToastKey *) key;
 	OTuple		result;
 
-	tkey->offset = offset;
+	tkey->chunknum = chunknum;
 
 	result = o_create_toast_tuple(*tkey,
 								  data + offset,
@@ -304,12 +304,12 @@ tableCreateTuple(void *key, Pointer data, uint32 offset, int length, void *arg)
 }
 
 static OTuple
-tableCreateKey(void *key, uint32 offset, void *arg)
+tableCreateKey(void *key, uint32 chunknum, void *arg)
 {
 	OToastKey  *tkey = (OToastKey *) key;
 	OTuple		result;
 
-	tkey->offset = offset;
+	tkey->chunknum = chunknum;
 
 	result = o_create_toast_key(*tkey, (OTableToastArg *) arg);
 
@@ -333,14 +333,14 @@ tableGetTupleData(OTuple tuple, void *arg)
 }
 
 static uint32
-tableGetTupleOffset(OTuple tuple, void *arg)
+tableGetTupleChunknum(OTuple tuple, void *arg)
 {
 	OIndexDescr *toast = ((OTableToastArg *) arg)->toast;
 	bool		isnull;
 	Datum		result;
 
 	result = o_fastgetattr(tuple,
-						   toast->leafTupdesc->natts + OFFSET_POS - DATA_POS,
+						   toast->leafTupdesc->natts + CHUNKN_POS - DATA_POS,
 						   toast->leafTupdesc,
 						   &toast->leafSpec,
 						   &isnull);
@@ -384,7 +384,7 @@ ToastAPI	tableToastAPI = {
 	.createTuple = tableCreateTuple,
 	.createKey = tableCreateKey,
 	.getTupleData = tableGetTupleData,
-	.getTupleOffset = tableGetTupleOffset,
+	.getTupleChunknum = tableGetTupleChunknum,
 	.getTupleDataSize = tableGetTupleDataSize,
 	.deleteLogFullTuple = false,
 	.versionCallback = tableVersionCallback
@@ -398,6 +398,7 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 	BTreeDescr *desc = api->getBTreeDesc(arg);
 	uint32		max_length = api->getMaxChunkSize(key, arg);
 	uint32		offset = 0;
+	uint32		chunknum = 0;
 	bool		inserted;
 	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
@@ -419,7 +420,7 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 			length = max_length;
 		}
 
-		tup = api->createTuple(key, data, offset, length, arg);
+		tup = api->createTuple(key, data, offset, chunknum, length, arg);
 
 		inserted = o_btree_modify(desc, BTreeOperationInsert,
 								  tup, BTreeKeyLeafTuple,
@@ -440,6 +441,7 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 		pfree(tup.data);
 
 		offset += length;
+		chunknum++;
 		data_size -= length;
 	}
 
@@ -462,6 +464,7 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 {
 	uint32		max_length = api->getMaxChunkSize(key, arg);
 	uint32		offset = 0;
+	uint32		chunknum = 0;
 
 	Assert(data_size > 0);
 
@@ -479,10 +482,11 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 			length = max_length;
 		}
 
-		tup = api->createTuple(key, data, offset, length, arg);
+		tup = api->createTuple(key, data, offset, chunknum, length, arg);
 		tuplesort_putotuple(sortstate, tup);
 
 		offset += length;
+		chunknum++;
 		data_size -= length;
 	}
 }
@@ -526,6 +530,7 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 	int			max_length = api->getMaxChunkSize(key, arg);
 	uint32		offset = 0,
 				length;
+	uint32		chunknum = 0;
 	bool		success = true;
 	BTreeModifyCallbackInfo callbackInfo = {
 		.waitCallback = NULL,
@@ -551,7 +556,7 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 			length = max_length;
 		}
 
-		tup = api->createTuple(key, data, offset, length, arg);
+		tup = api->createTuple(key, data, offset, chunknum, length, arg);
 
 		result = o_btree_modify(desc, BTreeOperationInsert,
 								tup, BTreeKeyLeafTuple,
@@ -562,8 +567,7 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 		if (result != OBTreeModifyResultInserted && result != OBTreeModifyResultUpdated)
 		{
 			pfree(tup.data);
-			success = false;
-			break;
+			return false;
 		}
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
@@ -577,13 +581,14 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 		}
 
 		offset += length;
+		chunknum++;
 		data_size -= length;
 	}
 
 	/*
 	 * There might be tailing tuples.  We need to delete them.
 	 */
-	api->updateKey(key, offset + 1, arg);
+	api->updateKey(key, chunknum, arg);
 	(void) generic_toast_delete_optional_wal(api, key, oxid, csn, arg, wal);
 
 	return success;
@@ -622,7 +627,7 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 		BTreeLocationHint hint;
 		OTuple		walKey;
 		OTuple		tuple;
-		uint32		offset;
+		uint32		chunknum;
 		OTuple		nullTup;
 
 		tuple = o_btree_iterator_fetch(it, NULL, nextKey, BTreeKeyBound, false, &hint);
@@ -631,8 +636,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 		if (O_TUPLE_IS_NULL(tuple))
 			break;
 
-		offset = api->getTupleOffset(tuple, arg);
-		api->updateKey(key, offset, arg);
+		chunknum = api->getTupleChunknum(tuple, arg);
+		api->updateKey(key, chunknum, arg);
 
 		O_TUPLE_SET_NULL(nullTup);
 		if (o_btree_modify(desc, BTreeOperationDelete,
@@ -864,7 +869,7 @@ o_toast_insert(OIndexDescr *primary, OIndexDescr *toast, OTuple pk, uint16 attn,
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
-	tkey.offset = 0;
+	tkey.chunknum = 0;
 
 	Assert(toast->desc.type == oIndexToast);
 
@@ -885,7 +890,7 @@ o_toast_sort_add(OIndexDescr *primary, OIndexDescr *toast,
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
-	tkey.offset = 0;
+	tkey.chunknum = 0;
 
 	Assert(toast->desc.type == oIndexToast);
 
@@ -905,7 +910,7 @@ o_toast_delete(OIndexDescr *primary, OIndexDescr *toast,
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
-	tkey.offset = 0;
+	tkey.chunknum = 0;
 
 	Assert(toast->desc.type == oIndexToast);
 
@@ -926,7 +931,7 @@ o_toast_get(OIndexDescr *primary, OIndexDescr *toast,
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
-	tkey.offset = 0;
+	tkey.chunknum = 0;
 
 	Assert(toast->desc.type == oIndexToast);
 
@@ -961,7 +966,7 @@ o_create_toast_tuple(OToastKey tkey, Pointer data_ptr, Size data_length,
 	memcpy(VARDATA(data), data_ptr, data_length);
 	SET_VARSIZE(data, VARHDRSZ + data_length);
 	key[natts] = tkey.attnum;
-	key[natts + 1] = tkey.offset;
+	key[natts + 1] = tkey.chunknum;
 	key[natts + 2] = PointerGetDatum(data);
 
 	result = o_form_tuple(arg->toast->leafTupdesc,
@@ -994,7 +999,7 @@ o_create_toast_key(OToastKey tkey,
 							   &arg->pk->nonLeafSpec,
 							   &isnull[i]);
 	}
-	key[natts] = tkey.offset;
+	key[natts] = tkey.chunknum;
 	key[natts + 1] = tkey.attnum;
 
 	return o_form_tuple(arg->toast->nonLeafTupdesc,
@@ -1183,7 +1188,7 @@ toast_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 {
 	int			attnum,
 				i,
-				offset_pos,
+				chunkn_pos,
 				attn_pos,
 				datasz_pos;
 	int			pk_natts = tupDesc->natts - (is_tuple ? TOAST_LEAF_FIELDS_NUM
@@ -1207,12 +1212,12 @@ toast_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 	}
 	appendStringInfo(buf, "), ");
 
-	offset_pos = pk_natts + OFFSET_POS - 1;
+	chunkn_pos = pk_natts + CHUNKN_POS - 1;
 	attn_pos = pk_natts + ATTN_POS - 1;
 	values[attn_pos] = o_fastgetattr(tup, pk_natts + ATTN_POS, tupDesc, spec,
 									 &nulls[attn_pos]);
-	values[offset_pos] = o_fastgetattr(tup, pk_natts + OFFSET_POS, tupDesc, spec,
-									   &nulls[offset_pos]);
+	values[chunkn_pos] = o_fastgetattr(tup, pk_natts + CHUNKN_POS, tupDesc, spec,
+									   &nulls[chunkn_pos]);
 	if (is_tuple)
 	{
 		Datum		data;
@@ -1222,16 +1227,16 @@ toast_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 							 &nulls[datasz_pos]);
 		if (!nulls[datasz_pos])
 			values[datasz_pos] = UInt32GetDatum(VARSIZE_ANY_EXHDR(data));
-		appendStringInfo(buf, "attnum %hu, offset %u, data_length %u",
+		appendStringInfo(buf, "attnum %hu, chunknum %u, data_length %u",
 						 DatumGetUInt16(values[attn_pos]),
-						 DatumGetUInt32(values[offset_pos]),
+						 DatumGetUInt32(values[chunkn_pos]),
 						 DatumGetUInt32(values[datasz_pos]));
 	}
 	else
 	{
-		appendStringInfo(buf, "attnum %hu, offset %u",
+		appendStringInfo(buf, "attnum %hu, chunknum %u",
 						 DatumGetUInt16(values[attn_pos]),
-						 DatumGetUInt32(values[offset_pos]));
+						 DatumGetUInt32(values[chunkn_pos]));
 	}
 	appendStringInfo(buf, ") ");
 }

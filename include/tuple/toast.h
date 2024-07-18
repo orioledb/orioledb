@@ -24,7 +24,7 @@
 
 /* position after primary ix tuple */
 #define ATTN_POS (1)
-#define OFFSET_POS (2)
+#define CHUNKN_POS (2)
 #define DATA_POS (3)
 
 #define TOAST_LEAF_FIELDS_NUM (3)
@@ -41,8 +41,8 @@ typedef struct OToastKey
 {
 	/* primary index tuple */
 	OTuple		pk_tuple;
-	/* current offset */
-	uint32		offset;
+	/* current chunk number */
+	uint32		chunknum;
 	/* attribute number of toasted value in table */
 	uint16		attnum;
 } OToastKey;
@@ -70,13 +70,13 @@ typedef struct
 	BTreeDescr *(*getBTreeDesc) (void *arg);
 	uint32		(*getKeySize) (void *arg);
 	uint32		(*getMaxChunkSize) (void *key, void *arg);
-	void		(*updateKey) (void *key, uint32 offset, void *arg);
+	void		(*updateKey) (void *key, uint32 chunknum, void *arg);
 	void	   *(*getNextKey) (void *key, void *arg);
-	OTuple		(*createTuple) (void *key, Pointer data, uint32 offset,
+	OTuple		(*createTuple) (void *key, Pointer data, uint32 offset, uint32 chunknum,
 								int length, void *arg);
-	OTuple		(*createKey) (void *key, uint32 offset, void *arg);
+	OTuple		(*createKey) (void *key, uint32 chunknum, void *arg);
 	Pointer		(*getTupleData) (OTuple tuple, void *arg);
-	uint32		(*getTupleOffset) (OTuple tuple, void *arg);
+	uint32		(*getTupleChunknum) (OTuple tuple, void *arg);
 	uint32		(*getTupleDataSize) (OTuple tuple, void *arg);
 	bool		deleteLogFullTuple;
 	TupleFetchCallback versionCallback;

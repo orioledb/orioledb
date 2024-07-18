@@ -888,9 +888,9 @@ o_table_chunk_cmp(BTreeDescr *desc,
 	else if (key1->oids.relnode > key2->oids.relnode)
 		return 1;
 
-	if (key1->offset < key2->offset)
+	if (key1->chunknum < key2->chunknum)
 		return -1;
-	else if (key1->offset > key2->offset)
+	else if (key1->chunknum > key2->chunknum)
 		return 1;
 
 	return 0;
@@ -910,7 +910,7 @@ o_table_chunk_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 	OTableChunkKey *key = (OTableChunkKey *) tup.data;
 
 	appendStringInfo(buf, "((%u, %u, %u), %u, %u)", key->oids.datoid,
-					 key->oids.relnode, key->oids.reloid, key->offset,
+					 key->oids.relnode, key->oids.reloid, key->chunknum,
 					 key->version);
 }
 
@@ -923,7 +923,7 @@ o_table_chunk_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 					 chunk->key.oids.datoid,
 					 chunk->key.oids.relnode,
 					 chunk->key.oids.reloid,
-					 chunk->key.offset,
+					 chunk->key.chunknum,
 					 chunk->key.version,
 					 chunk->dataLength);
 }
@@ -937,7 +937,7 @@ o_table_chunk_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state
 	jsonb_push_int8_key(state, "datoid", key->oids.datoid);
 	jsonb_push_int8_key(state, "reloid", key->oids.reloid);
 	jsonb_push_int8_key(state, "relnode", key->oids.relnode);
-	jsonb_push_int8_key(state, "offset", key->offset);
+	jsonb_push_int8_key(state, "chunknum", key->chunknum);
 	jsonb_push_int8_key(state, "version", key->version);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
 }
@@ -992,8 +992,8 @@ o_index_chunk_cmp(BTreeDescr *desc,
 	if (key1->oids.relnode != key2->oids.relnode)
 		return (key1->oids.relnode < key2->oids.relnode) ? -1 : 1;
 
-	if (key1->offset != key2->offset)
-		return (key1->offset < key2->offset) ? -1 : 1;
+	if (key1->chunknum != key2->chunknum)
+		return (key1->chunknum < key2->chunknum) ? -1 : 1;
 
 	return 0;
 }
@@ -1011,7 +1011,7 @@ o_index_chunk_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 {
 	OIndexChunkKey *key = (OIndexChunkKey *) tup.data;
 
-	appendStringInfo(buf, "(%d, (%u, %u, %u), %u)", (int) key->type, key->oids.datoid, key->oids.relnode, key->oids.reloid, key->offset);
+	appendStringInfo(buf, "(%d, (%u, %u, %u), %u)", (int) key->type, key->oids.datoid, key->oids.relnode, key->oids.reloid, key->chunknum);
 }
 
 static void
@@ -1024,7 +1024,7 @@ o_index_chunk_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 					 chunk->key.oids.datoid,
 					 chunk->key.oids.relnode,
 					 chunk->key.oids.reloid,
-					 chunk->key.offset,
+					 chunk->key.chunknum,
 					 chunk->dataLength);
 }
 
@@ -1038,7 +1038,7 @@ o_index_chunk_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state
 	jsonb_push_int8_key(state, "datoid", key->oids.datoid);
 	jsonb_push_int8_key(state, "reloid", key->oids.reloid);
 	jsonb_push_int8_key(state, "relnode", key->oids.relnode);
-	jsonb_push_int8_key(state, "offset", key->offset);
+	jsonb_push_int8_key(state, "chunknum", key->chunknum);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
 }
 

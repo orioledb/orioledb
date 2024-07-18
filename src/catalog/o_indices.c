@@ -61,11 +61,11 @@ oIndicesGetMaxChunkSize(void *key, void *arg)
 }
 
 static void
-oIndicesUpdateKey(void *key, uint32 offset, void *arg)
+oIndicesUpdateKey(void *key, uint32 chunknum, void *arg)
 {
 	OIndexChunkKey *ckey = (OIndexChunkKey *) key;
 
-	ckey->offset = offset;
+	ckey->chunknum = chunknum;
 }
 
 static void *
@@ -76,20 +76,20 @@ oIndicesGetNextKey(void *key, void *arg)
 
 	nextKey = *ckey;
 	nextKey.oids.relnode++;
-	nextKey.offset = 0;
+	nextKey.chunknum = 0;
 
 	return &nextKey;
 }
 
 static OTuple
-oIndicesCreateTuple(void *key, Pointer data, uint32 offset,
+oIndicesCreateTuple(void *key, Pointer data, uint32 offset, uint32 chunknum,
 					int length, void *arg)
 {
 	OIndexChunkKey *ckey = (OIndexChunkKey *) key;
 	OIndexChunk *chunk;
 	OTuple		result;
 
-	ckey->offset = offset;
+	ckey->chunknum = chunknum;
 
 	chunk = (OIndexChunk *) palloc(offsetof(OIndexChunk, data) + length);
 	chunk->key = *ckey;
@@ -102,7 +102,7 @@ oIndicesCreateTuple(void *key, Pointer data, uint32 offset,
 }
 
 static OTuple
-oIndicesCreateKey(void *key, uint32 offset, void *arg)
+oIndicesCreateKey(void *key, uint32 chunknum, void *arg)
 {
 	OIndexChunkKey *ckey = (OIndexChunkKey *) key;
 	OIndexChunkKey *ckeyCopy;
@@ -126,11 +126,11 @@ oIndicesGetTupleData(OTuple tuple, void *arg)
 }
 
 static uint32
-oIndicesGetTupleOffset(OTuple tuple, void *arg)
+oIndicesGetTupleChunknum(OTuple tuple, void *arg)
 {
 	OIndexChunk *chunk = (OIndexChunk *) tuple.data;
 
-	return chunk->key.offset;
+	return chunk->key.chunknum;
 }
 
 static uint32
@@ -149,7 +149,7 @@ ToastAPI	oIndicesToastAPI = {
 	.createTuple = oIndicesCreateTuple,
 	.createKey = oIndicesCreateKey,
 	.getTupleData = oIndicesGetTupleData,
-	.getTupleOffset = oIndicesGetTupleOffset,
+	.getTupleChunknum = oIndicesGetTupleChunknum,
 	.getTupleDataSize = oIndicesGetTupleDataSize,
 	.deleteLogFullTuple = true,
 	.versionCallback = NULL
@@ -446,7 +446,7 @@ make_toast_o_index(OTable *table)
 					   INT2_BTREE_OPS_OID);
 	j++;
 	make_builtin_field(&result->leafFields[j], &result->nonLeafFields[j],
-					   INT4OID, "offset", FirstLowInvalidHeapAttributeNumber,
+					   INT4OID, "chunknum", FirstLowInvalidHeapAttributeNumber,
 					   INT4_BTREE_OPS_OID);
 	j++;
 	Assert(j <= result->nNonLeafFields);
@@ -859,7 +859,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	oIndex->createOxid = oxid;
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
-	key.offset = 0;
+	key.chunknum = 0;
 	data = serialize_o_index(oIndex, &len);
 	free_o_index(oIndex);
 
@@ -882,7 +882,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	oIndex = make_o_index(table, ixNum);
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
-	key.offset = 0;
+	key.chunknum = 0;
 	free_o_index(oIndex);
 
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
@@ -902,7 +902,7 @@ o_indices_get(ORelOids oids, OIndexType type)
 
 	key.type = type;
 	key.oids = oids;
-	key.offset = 0;
+	key.chunknum = 0;
 
 	result = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key,
 								   &dataLength, COMMITSEQNO_NON_DELETED,
@@ -931,7 +931,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	data = serialize_o_index(oIndex, &len);
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
-	key.offset = 0;
+	key.chunknum = 0;
 	free_o_index(oIndex);
 
 	systrees_modify_start();
@@ -956,7 +956,7 @@ o_indices_find_table_oids(ORelOids indexOids, OIndexType type, CommitSeqNo csn,
 
 	key.oids = indexOids;
 	key.type = type;
-	key.offset = 0;
+	key.chunknum = 0;
 
 	data = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key, &dataSize,
 								 csn, get_sys_tree(SYS_TREES_O_INDICES));
@@ -982,7 +982,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 
 	chunkKey.type = type;
 	chunkKey.oids = oids;
-	chunkKey.offset = 0;
+	chunkKey.chunknum = 0;
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
 								 COMMITSEQNO_NON_DELETED, ForwardScanDirection);
@@ -1001,7 +1001,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		Assert(chunk->dataLength >= sizeof(tableOids));
 		memcpy(&tableOids, chunk->data, sizeof(tableOids));
 		memcpy(&temp_table, chunk->data + sizeof(tableOids), sizeof(bool));
-		Assert(chunk->key.offset == 0);
+		Assert(chunk->key.chunknum == 0);
 		Assert(ORelOidsIsValid(oids));
 		Assert(!ORelOidsIsEqual(old_oids, oids));
 		old_oids = oids;
@@ -1014,7 +1014,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		oids.relnode += 1;		/* go to the next oid */
 		chunkKey.oids = oids;
 		chunkKey.type = type;
-		chunkKey.offset = 0;
+		chunkKey.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
 									 COMMITSEQNO_NON_DELETED, ForwardScanDirection);

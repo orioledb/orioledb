@@ -98,7 +98,7 @@ typedef struct
 /* Key of chunks of entry stored in TOAST sys cache tree */
 typedef struct OSysCacheToastChunkKeyCommon
 {
-	uint32		offset;
+	uint32		chunknum;
 } OSysCacheToastChunkKeyCommon;
 
 /* Key of chunks of entry stored in TOAST sys cache tree */

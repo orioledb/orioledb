@@ -85,14 +85,14 @@ static void o_sys_cache_keys_to_str(StringInfo buf, OSysCache *sys_cache,
 
 static BTreeDescr *oSysCacheToastGetBTreeDesc(void *arg);
 static uint32 oSysCacheToastGetMaxChunkSize(void *key, void *arg);
-static void oSysCacheToastUpdateKey(void *key, uint32 offset, void *arg);
+static void oSysCacheToastUpdateKey(void *key, uint32 chunknum, void *arg);
 static void *oSysCacheToastGetNextKey(void *key, void *arg);
 static OTuple oSysCacheToastCreateTuple(void *key, Pointer data,
-										uint32 offset, int length,
+										uint32 offset, uint32 chunknum, int length,
 										void *arg);
-static OTuple oSysCacheToastCreateKey(void *key, uint32 offset, void *arg);
+static OTuple oSysCacheToastCreateKey(void *key, uint32 chunknum, void *arg);
 static Pointer oSysCacheToastGetTupleData(OTuple tuple, void *arg);
-static uint32 oSysCacheToastGetTupleOffset(OTuple tuple, void *arg);
+static uint32 oSysCacheToastGetTupleChunknum(OTuple tuple, void *arg);
 static uint32 oSysCacheToastGetTupleDataSize(OTuple tuple, void *arg);
 
 static HeapTuple o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid);
@@ -106,7 +106,7 @@ ToastAPI	oSysCacheToastAPI = {
 	.createTuple = oSysCacheToastCreateTuple,
 	.createKey = oSysCacheToastCreateKey,
 	.getTupleData = oSysCacheToastGetTupleData,
-	.getTupleOffset = oSysCacheToastGetTupleOffset,
+	.getTupleChunknum = oSysCacheToastGetTupleChunknum,
 	.getTupleDataSize = oSysCacheToastGetTupleDataSize,
 	.deleteLogFullTuple = false,
 	.versionCallback = NULL
@@ -534,7 +534,7 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 	Size		dataLength;
 	Pointer		result = NULL;
 	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
-	OSysCacheToastKeyBound toast_key = {.common = {.offset = 0},
+	OSysCacheToastKeyBound toast_key = {.common = {.chunknum = 0},
 	.key = key,.lsn_cmp = false};
 
 	data = generic_toast_get_any_with_callback(&oSysCacheToastAPI,
@@ -709,7 +709,7 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 		OAutonomousTxState state;
 
 		toast_key.key = entry_key;
-		toast_key.common.offset = 0;
+		toast_key.common.chunknum = 0;
 		toast_key.lsn_cmp = true;
 
 		data = sys_cache->funcs->toast_serialize_entry(entry, &len);
@@ -827,7 +827,7 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 		OAutonomousTxState state;
 
 		toast_key.key = sys_cache_key;
-		toast_key.common.offset = 0;
+		toast_key.common.chunknum = 0;
 		toast_key.lsn_cmp = true;
 
 		data = sys_cache->funcs->toast_serialize_entry(updated_entry, &len);
@@ -978,7 +978,7 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 				OAutonomousTxState state;
 
 				toast_key.key = sys_cache_key;
-				toast_key.common.offset = 0;
+				toast_key.common.chunknum = 0;
 				toast_key.lsn_cmp = true;
 
 				start_autonomous_transaction(&state);
@@ -1049,11 +1049,11 @@ oSysCacheToastGetMaxChunkSize(void *key, void *arg)
 }
 
 static void
-oSysCacheToastUpdateKey(void *key, uint32 offset, void *arg)
+oSysCacheToastUpdateKey(void *key, uint32 chunknum, void *arg)
 {
 	OSysCacheToastKeyBound *ckey = (OSysCacheToastKeyBound *) key;
 
-	ckey->common.offset = offset;
+	ckey->common.chunknum = chunknum;
 }
 
 static inline int
@@ -1096,7 +1096,7 @@ oSysCacheToastGetNextKey(void *key, void *arg)
 
 	key_len = offsetof(OSysCacheKey, keys) + sizeof(Datum) * nkeys;
 
-	nextKeyBound.common.offset = 0;
+	nextKeyBound.common.chunknum = 0;
 	memcpy(nextKeyBound.key, ckey->key, key_len);
 	nextKeyBound.key->keys[nkeys - 1]++;
 
@@ -1104,7 +1104,7 @@ oSysCacheToastGetNextKey(void *key, void *arg)
 }
 
 static OTuple
-oSysCacheToastCreateTuple(void *key, Pointer data, uint32 offset,
+oSysCacheToastCreateTuple(void *key, Pointer data, uint32 offset, uint32 chunknum,
 						  int length, void *arg)
 {
 	OSysCacheToastKeyBound *bound = (OSysCacheToastKeyBound *) key;
@@ -1117,7 +1117,7 @@ oSysCacheToastCreateTuple(void *key, Pointer data, uint32 offset,
 	OSysCacheToastChunkKey *chunk_key;
 	OSysCacheToastChunkCommon *common;
 
-	bound->common.offset = offset;
+	bound->common.chunknum = chunknum;
 
 	chunk_key_len = o_btree_len(desc, tup, OKeyLength);
 	key_len = chunk_key_len - offsetof(OSysCacheToastChunkKey, sys_cache_key);
@@ -1140,7 +1140,7 @@ oSysCacheToastCreateTuple(void *key, Pointer data, uint32 offset,
 }
 
 static OTuple
-oSysCacheToastCreateKey(void *key, uint32 offset, void *arg)
+oSysCacheToastCreateKey(void *key, uint32 chunknum, void *arg)
 {
 	OSysCacheToastChunkKey *ckey = (OSysCacheToastChunkKey *) key;
 	OSysCacheToastChunkKey *ckey_copy;
@@ -1169,14 +1169,14 @@ oSysCacheToastGetTupleData(OTuple tuple, void *arg)
 }
 
 static uint32
-oSysCacheToastGetTupleOffset(OTuple tuple, void *arg)
+oSysCacheToastGetTupleChunknum(OTuple tuple, void *arg)
 {
 	Pointer		chunk = tuple.data;
 	OSysCacheToastChunkKey *chunk_key;
 
 	chunk_key = (OSysCacheToastChunkKey *) chunk;
 
-	return chunk_key->common.offset;
+	return chunk_key->common.chunknum;
 }
 
 static uint32
@@ -2076,8 +2076,8 @@ int
 o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 					  void *p2, BTreeKeyType k2)
 {
-	uint32		offset1,
-				offset2;
+	uint32		chunknum1,
+				chunknum2;
 	OSysCacheKey *key1 = NULL;
 	OSysCacheKey *key2 = NULL;
 	OSysCacheKey4 _key = {0};
@@ -2099,7 +2099,7 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 		Assert(k2 != BTreeKeyBound);
 		key1 = (OSysCacheKey *) &_key;
 		key1->common = kb1->key->common;
-		offset1 = kb1->common.offset;
+		chunknum1 = kb1->common.chunknum;
 		memcpy(key1->keys, kb1->key->keys, sizeof(Datum) * nkeys);
 		if (kb1->lsn_cmp)
 			k1 = BTreeKeyNonLeafKey;	/* make o_sys_cache_cmp to compare by
@@ -2113,7 +2113,7 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 			((OSysCacheToastChunkKey *) ((OTuple *) p1)->data);
 
 		key1 = &chunk_key->sys_cache_key;
-		offset1 = chunk_key->common.offset;
+		chunknum1 = chunk_key->common.chunknum;
 	}
 
 	if (!sys_cache_key_cmp_arg1)
@@ -2129,7 +2129,7 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 		Assert(k1 != BTreeKeyBound);
 		key2 = (OSysCacheKey *) &_key;
 		key2->common = kb2->key->common;
-		offset2 = kb2->common.offset;
+		chunknum2 = kb2->common.chunknum;
 		memcpy(key2->keys, kb2->key->keys, sizeof(Datum) * nkeys);
 		if (kb2->lsn_cmp)
 			k2 = BTreeKeyNonLeafKey;	/* make o_sys_cache_cmp to compare by
@@ -2143,7 +2143,7 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 			((OSysCacheToastChunkKey *) ((OTuple *) p2)->data);
 
 		key2 = &chunk_key->sys_cache_key;
-		offset2 = chunk_key->common.offset;
+		chunknum2 = chunk_key->common.chunknum;
 	}
 
 	if (!sys_cache_key_cmp_arg2)
@@ -2159,8 +2159,8 @@ o_sys_cache_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 	if (sys_cache_key_cmp_result != 0)
 		return sys_cache_key_cmp_result;
 
-	if (offset1 != offset2)
-		return offset1 < offset2 ? -1 : 1;
+	if (chunknum1 != chunknum2)
+		return chunknum1 < chunknum2 ? -1 : 1;
 
 	return 0;
 }
@@ -2179,7 +2179,7 @@ o_sys_cache_toast_key_print(BTreeDescr *desc, StringInfo buf,
 	key_tup.data = (Pointer) &key->sys_cache_key;
 	o_sys_cache_key_print(desc, buf, key_tup, arg);
 	appendStringInfo(buf, ", %u)",
-					 key->common.offset);
+					 key->common.chunknum);
 }
 
 JsonbValue *
@@ -2190,7 +2190,7 @@ o_sys_cache_toast_key_to_jsonb(BTreeDescr *desc, OTuple tup,
 
 	(void) pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
 	o_sys_cache_key_push_to_jsonb_state(desc, &key->sys_cache_key, state);
-	jsonb_push_int8_key(state, "offset", key->common.offset);
+	jsonb_push_int8_key(state, "chunknum", key->common.chunknum);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
 }
 

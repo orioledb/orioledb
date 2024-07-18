@@ -346,7 +346,7 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 								   INT2_BTREE_OPS_OID);
 	o_finish_sort_support_function(field.comparator, sortKey);
 
-	/* OFFSET_POS */
+	/* CHUNKN_POS */
 	sortKey = &base->sortKeys[key_fields + 1];
 	sortKey->ssup_cxt = CurrentMemoryContext;
 	sortKey->ssup_collation = DEFAULT_COLLATION_OID;
