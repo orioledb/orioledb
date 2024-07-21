@@ -292,8 +292,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			}
 
-			ReorderBufferCommit(ctx->reorder, logicalXid, buf->origptr, buf->endptr,
-								0, InvalidRepOriginId, buf->origptr + (ptr - startPtr));
+			ReorderBufferCommit(ctx->reorder, logicalXid,
+								buf->origptr, buf->endptr,
+								0, XLogRecGetOrigin(buf->record),
+								buf->origptr + (ptr - startPtr));
 			UpdateDecodingStats(ctx);
 
 			oxid = InvalidOXid;
@@ -319,8 +321,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 										 snap);
 			snap->active_count++;
 
-			ReorderBufferCommit(ctx->reorder, logicalXid, buf->origptr, buf->endptr,
-								0, InvalidRepOriginId, buf->origptr + (ptr - startPtr));
+			ReorderBufferCommit(ctx->reorder, logicalXid,
+								buf->origptr, buf->endptr,
+								0, XLogRecGetOrigin(buf->record),
+								buf->origptr + (ptr - startPtr));
 			UpdateDecodingStats(ctx);
 		}
 		else if (rec_type == WAL_REC_RELATION)
