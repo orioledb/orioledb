@@ -4,8 +4,10 @@
 import json
 import os
 import sys
+import testgres
 import unittest
 
+from tempfile import mkdtemp
 from testgres.utils import get_pg_config
 
 from .base_test import BaseTest
@@ -46,7 +48,7 @@ class LogicalTest(BaseTest):
 		node.start()  # start PostgreSQL
 		node.safe_psql(
 		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE data(id serial primary key, data text);\n")
+		    "CREATE TABLE data(id serial primary key, data text) USING orioledb;\n")
 
 		node.safe_psql(
 		    'postgres',
@@ -78,7 +80,7 @@ class LogicalTest(BaseTest):
 			CREATE TABLE data(
 				id serial primary key,
 				data text
-			);
+			) USING orioledb;
 		""")
 
 		node.safe_psql(
@@ -133,3 +135,71 @@ class LogicalTest(BaseTest):
 		            }
 		        }]
 		    })
+
+	def test_logical_subscription(self):
+		with self.node as publisher:
+			publisher.start()
+
+			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
+			subscriber = testgres.get_new_node('subscriber',
+												port=self.getBasePort() + 1,
+												base_dir=baseDir)
+			subscriber.init(["--no-locale", "--encoding=UTF8"])
+			subscriber.append_conf(shared_preload_libraries = 'orioledb')
+			subscriber.append_conf(wal_level = 'logical')
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test1 (
+						id serial primary key,
+						data text
+					) USING orioledb;
+					CREATE TABLE o_test2 (
+						id serial primary key,
+						data text
+					) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables = ['o_test1'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute("INSERT INTO o_test1 (data) VALUES('1');")
+						con2.execute("INSERT INTO o_test1 (data) VALUES('2');")
+						con1.execute("INSERT INTO o_test1 (data) VALUES('3');")
+						con2.execute("INSERT INTO o_test1 (data) VALUES('4');")
+
+						con1.execute("INSERT INTO o_test2 (data) VALUES('1');")
+						con2.execute("INSERT INTO o_test2 (data) VALUES('2');")
+						con1.execute("INSERT INTO o_test2 (data) VALUES('3');")
+						con2.execute("INSERT INTO o_test2 (data) VALUES('4');")
+
+						con1.commit()
+						con2.commit()
+
+						con1.execute("UPDATE o_test1 SET data = 'YES' WHERE id = 1;")
+						con2.execute("UPDATE o_test2 SET data = 'YES' WHERE id = 1;")
+
+						con1.execute("UPDATE o_test1 SET data = 'NO' WHERE id = 4;")
+						con2.execute("UPDATE o_test2 SET data = 'NO' WHERE id = 4;")
+
+						con1.execute("DELETE FROM o_test1 WHERE id = 1;")
+						con2.execute("DELETE FROM o_test2 WHERE id = 2;")
+						con1.execute("DELETE FROM o_test1 WHERE id = 3;")
+						con2.execute("DELETE FROM o_test2 WHERE id = 4;")
+
+						con1.commit()
+						con2.commit()
+
+					self.assertListEqual(publisher.execute('SELECT * FROM o_test1 ORDER BY id'), [(2, '2'), (4, 'NO')])
+					self.assertListEqual(publisher.execute('SELECT * FROM o_test2 ORDER BY id'), [(1, 'YES'), (3, '3')])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
+					self.assertListEqual(subscriber.execute('SELECT * FROM o_test1 ORDER BY id'), [(2, '2'), (4, 'NO')])
+					self.assertListEqual(subscriber.execute('SELECT * FROM o_test2 ORDER BY id'), [])
