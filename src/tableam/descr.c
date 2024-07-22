@@ -1072,7 +1072,8 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
 	{
 		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
 
-		if (!att->attisdropped && att->attlen <= 0 && att->attstorage != 'p' &&
+		if (!att->attisdropped && att->attlen <= 0 &&
+			att->attstorage != TYPSTORAGE_PLAIN &&
 			!is_pk_attnum(tableDescr, i + 1))
 			toastable = lappend_int(toastable, i);
 	}

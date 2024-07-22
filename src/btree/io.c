@@ -1115,7 +1115,6 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	{
 		char		buf[ORIOLEDB_BLCKSZ];
 		bool		compressed = len != (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ);
-		Pointer		read_buf = compressed ? buf : img;
 
 		extent->off = offset;
 		extent->len = len;
@@ -1126,17 +1125,45 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			offset &= S3_OFFSET_MASK;
 		}
 
-		byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
-		read_size = len * ORIOLEDB_COMP_BLCKSZ;
+		if (compressed)
+		{
+			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
+			read_size = len * ORIOLEDB_COMP_BLCKSZ;
 
-		err = btree_smgr_read(desc, read_buf, chkpNum, read_size, byte_offset) != read_size;
+			err = btree_smgr_read(desc, buf, chkpNum, read_size, byte_offset) != read_size;
 
-		if (!err && compressed)
+			if (!err)
+			{
+				OCompressHeader header;
+
+				memcpy(&header, buf, sizeof(OCompressHeader));
+				o_decompress_page(buf + sizeof(OCompressHeader), header.page_size, img);
+			}
+		}
+		else
 		{
 			OCompressHeader header;
 
-			memcpy(&header, buf, sizeof(OCompressHeader));
-			o_decompress_page(buf + sizeof(OCompressHeader), header.page_size, img);
+			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
+			read_size = sizeof(OCompressHeader);
+
+			/* details about writed image parts are in write_page_to_disk */
+			err = btree_smgr_read(desc, (Pointer) &header, chkpNum, read_size, byte_offset) != read_size;
+			byte_offset += read_size;
+
+			if (!err)
+			{
+				size_t		skipped = offsetof(BTreePageHeader, undoLocation);
+				BTreePageHeader *page_header;
+
+				memset(img, 0, skipped);
+				img += skipped;
+				read_size = ORIOLEDB_BLCKSZ - skipped;
+				err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
+
+				page_header = (BTreePageHeader *) &img;
+				page_header->checkpointNum = header.chkpNum;
+			}
 		}
 	}
 
@@ -1210,14 +1237,24 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 		if (page_size != ORIOLEDB_BLCKSZ)
 		{
 			write_size = extent->len * ORIOLEDB_COMP_BLCKSZ - sizeof(OCompressHeader);
+			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 		}
 		else
 		{
-			write_size = ORIOLEDB_BLCKSZ - sizeof(OCompressHeader);
-		}
+			size_t		skipped = offsetof(BTreePageHeader, undoLocation);
 
-		/* write data */
-		err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
+			Assert(sizeof(OCompressHeader) < O_PAGE_HEADER_SIZE);
+
+			/*
+			 * Skipping checkpointNum because it is present in OCompressHeader
+			 * using sizeof checkpointNum because offsetof(BTreePageHeader,
+			 * flags) is forbidden
+			 */
+			page += skipped;
+			write_size = ORIOLEDB_BLCKSZ - skipped;
+			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
+
+		}
 	}
 
 	return !err;

@@ -72,7 +72,7 @@ typedef struct
 typedef struct
 {
 	ORelOids	oids;
-	uint32		offset;
+	uint32		chunknum;
 	uint32		version;
 } OTableChunkKey;
 
@@ -87,7 +87,7 @@ typedef struct
 {
 	OIndexType	type;
 	ORelOids	oids;
-	uint32		offset;
+	uint32		chunknum;
 } OIndexChunkKey;
 
 typedef struct

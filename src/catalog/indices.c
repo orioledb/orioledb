@@ -1415,7 +1415,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 	/* Infrastructure for parallel build corresponds to _bt_spools_heapscan */
 	oIdxSpool  *btspool = NULL;
-	oIdxBuildState buildstate;
+	oIdxBuildState buildstate = {0};
 	SortCoordinate coordinate = NULL;
 	uint64		ctid;
 	double		heap_tuples;
@@ -1699,7 +1699,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	double	   *index_tuples;
 	uint64		ctid;
 	CheckpointFileHeader *fileHeaders;
-	oIdxBuildState buildstate;
+	oIdxBuildState buildstate = {0};
 	oIdxSpool  *btspool = NULL;
 	SortCoordinate *coordinate = NULL;
 	S3TaskLocation maxLocation = 0,

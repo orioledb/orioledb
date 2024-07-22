@@ -126,11 +126,11 @@ oTablesGetMaxChunkSize(void *key, void *arg)
 }
 
 static void
-oTablesUpdateKey(void *key, uint32 offset, void *arg)
+oTablesUpdateKey(void *key, uint32 chunknum, void *arg)
 {
 	OTableChunkKey *ckey = (OTableChunkKey *) key;
 
-	ckey->offset = offset;
+	ckey->chunknum = chunknum;
 }
 
 static void *
@@ -141,20 +141,20 @@ oTablesGetNextKey(void *key, void *arg)
 
 	nextKey = *ckey;
 	nextKey.oids.relnode++;
-	nextKey.offset = 0;
+	nextKey.chunknum = 0;
 
 	return (Pointer) &nextKey;
 }
 
 static OTuple
-oTablesCreateTuple(void *key, Pointer data, uint32 offset,
+oTablesCreateTuple(void *key, Pointer data, uint32 offset, uint32 chunknum,
 				   int length, void *arg)
 {
 	OTableChunkKey *ckey = (OTableChunkKey *) key;
 	OTableChunk *chunk;
 	OTuple		result;
 
-	ckey->offset = offset;
+	ckey->chunknum = chunknum;
 
 	chunk = (OTableChunk *) palloc(offsetof(OTableChunk, data) + length);
 	chunk->key = *ckey;
@@ -168,7 +168,7 @@ oTablesCreateTuple(void *key, Pointer data, uint32 offset,
 }
 
 static OTuple
-oTablesCreateKey(void *key, uint32 offset, void *arg)
+oTablesCreateKey(void *key, uint32 chunknum, void *arg)
 {
 	OTableChunkKey *ckey = (OTableChunkKey *) key;
 	OTableChunkKey *ckey_copy;
@@ -192,11 +192,11 @@ oTablesGetTupleData(OTuple tuple, void *arg)
 }
 
 static uint32
-oTablesGetTupleOffset(OTuple tuple, void *arg)
+oTablesGetTupleChunknum(OTuple tuple, void *arg)
 {
 	OTableChunk *chunk = (OTableChunk *) tuple.data;
 
-	return chunk->key.offset;
+	return chunk->key.chunknum;
 }
 
 static uint32
@@ -240,7 +240,7 @@ ToastAPI	oTablesToastAPI = {
 	.createTuple = oTablesCreateTuple,
 	.createKey = oTablesCreateKey,
 	.getTupleData = oTablesGetTupleData,
-	.getTupleOffset = oTablesGetTupleOffset,
+	.getTupleChunknum = oTablesGetTupleChunknum,
 	.getTupleDataSize = oTablesGetTupleDataSize,
 	.deleteLogFullTuple = false,
 	.versionCallback = oTablesVersionCallback
@@ -259,7 +259,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 	BTreeDescr *desc = get_sys_tree(SYS_TREES_O_TABLES);
 
 	chunk_key.oids = oids;
-	chunk_key.offset = 0;
+	chunk_key.chunknum = 0;
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunk_key, BTreeKeyBound,
 								 csn, ForwardScanDirection);
@@ -283,7 +283,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 
 		oids.relnode += 1;		/* go to the next oid */
 		chunk_key.oids = oids;
-		chunk_key.offset = 0;
+		chunk_key.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunk_key, BTreeKeyBound,
 									 csn, ForwardScanDirection);
@@ -963,7 +963,7 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	key.oids = oids;
-	key.offset = 0;
+	key.chunknum = 0;
 
 	systrees_modify_start();
 	table = o_tables_get(oids);
@@ -1026,7 +1026,7 @@ o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 	data = serialize_o_table(table, &len);
 
 	key.oids = table->oids;
-	key.offset = 0;
+	key.chunknum = 0;
 	key.version = version;
 
 	systrees_modify_start();
@@ -1060,7 +1060,7 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 	OTable	   *oTable;
 
 	key.oids = oids;
-	key.offset = 0;
+	key.chunknum = 0;
 	if (version)
 		key.version = *version;
 	else
@@ -1140,7 +1140,7 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	data = serialize_o_table(table, &len);
 
 	key.oids = table->oids;
-	key.offset = 0;
+	key.chunknum = 0;
 	key.version = table->version + 1;
 
 	systrees_modify_start();
@@ -1466,7 +1466,7 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 		OAutonomousTxState state;
 
 		key.oids = o_table->oids;
-		key.offset = 0;
+		key.chunknum = 0;
 
 		start_autonomous_transaction(&state);
 

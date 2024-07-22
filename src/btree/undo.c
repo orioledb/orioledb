@@ -1552,7 +1552,7 @@ get_prev_leaf_header_and_tuple_from_undo(BTreeLeafTuphdr *tuphdr,
 										 OTuple *tuple,
 										 LocationIndex sizeAvailable)
 {
-	BTreeModifyUndoStackItem item;
+	BTreeModifyUndoStackItem item = {0};
 	LocationIndex tupleSize;
 	UndoLocation undoLocation = tuphdr->undoLocation;
 

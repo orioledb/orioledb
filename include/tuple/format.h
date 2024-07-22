@@ -188,11 +188,11 @@ extern Pointer o_toast_nocachegetattr_ptr(OTuple tuple, int attnum,
 extern Pointer o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec);
 extern Size o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 							 ItemPointer iptr, uint32 version,
-							 Datum *values, bool *isnull, bool *to_toast);
+							 Datum *values, bool *isnull, char *to_toast);
 extern void o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						 OTuple *tuple, Size tuple_size,
 						 ItemPointer iptr, uint32 version,
-						 Datum *values, bool *isnull, bool *to_toast);
+						 Datum *values, bool *isnull, char *to_toast);
 extern OTuple o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						   uint32 version, Datum *values, bool *isnull);
 extern uint32 o_tuple_get_version(OTuple tuple);

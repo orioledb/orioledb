@@ -1,22 +1,23 @@
-name: pgindent
+name: static
 
 on:
   push:
   pull_request:
 
 jobs:
-  pgindent:
+  static:
     runs-on:
-      - ubuntu-20.04
+     - ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        pg_version: [16]
+        pg_version: [15, 16]
+        compiler: [clang, gcc]
     env:
       LLVM_VER: 12
       CPU: ${{ matrix.cpu }}
-      CHECK_TYPE: pgindent
-      COMPILER: gcc
+      CHECK_TYPE: static
+      COMPILER: ${{ matrix.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v4
@@ -36,7 +37,5 @@ jobs:
         run: bash ./orioledb/ci/prerequisites.sh
       - name: Build
         run: bash ./orioledb/ci/build.sh
-      - name: Install post build prerequisites
-        run: bash ./orioledb/ci/post_build_prerequisites.sh
-      - name: PGIndent
-        run: bash ./orioledb/ci/pgindent.sh
+      - name: Static analysis
+        run: bash ./orioledb/ci/static.sh

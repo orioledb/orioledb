@@ -31,12 +31,12 @@ jobs:
                               openssl-devel systemd-devel llvm-toolset-7-clang \
                               llvm5.0-devel gcc gcc-c++ libzstd-devel lz4-devel
       - name: Checkout PGRPMs into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: orioledb/pgrpms
           ref: orioledb
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: orioledb
       - name: Get the required tag name
@@ -44,7 +44,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ github.event.inputs.version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}

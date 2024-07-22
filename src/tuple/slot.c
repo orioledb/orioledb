@@ -92,7 +92,7 @@ tts_orioledb_clear(TupleTableSlot *slot)
 				pfree(DatumGetPointer(slot->tts_values[i]));
 		}
 		memset(oslot->vfree, 0, natts * sizeof(bool));
-		memset(oslot->to_toast, 0, natts * sizeof(bool));
+		memset(oslot->to_toast, ORIOLEDB_TO_TOAST_OFF, natts * sizeof(bool));
 	}
 
 	oslot->data = NULL;
@@ -161,44 +161,68 @@ alloc_to_toast_vfree_detoasted(TupleTableSlot *slot)
 	oslot->to_toast = MemoryContextAllocZero(slot->tts_mcxt,
 											 MAXALIGN(sizeof(bool) * totalNatts * 2) +
 											 sizeof(Datum) * totalNatts);
-	oslot->vfree = oslot->to_toast + sizeof(bool) * totalNatts;
-	oslot->detoasted = (Datum *) (oslot->to_toast + MAXALIGN(sizeof(bool) * totalNatts * 2));
+	oslot->vfree = (bool *) (oslot->to_toast + totalNatts);
+	oslot->detoasted = (Datum *) ((Pointer) oslot->to_toast + MAXALIGN(sizeof(char) * totalNatts + sizeof(bool) * totalNatts));
 }
 
 /*
- * Attribute values are readily available in tts_values and tts_isnull array
- * in a OTableSlot. So there should be no need to call either of the
- * following two functions.
+ * This function is designed to populate the attributes of a tuple table slot
+ * from an OrioleDB tuple.  It selectively retrieves attributes based on
+ * the provided number of attributes (__natts) and updates the slot's values
+ * and null flags accordingly.
  */
 static void
 tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 {
+	/*
+	 * Cast the generic TupleTableSlot to an OTableSlot for OrioleDB specific
+	 * operations.
+	 */
 	OTableSlot *oslot = (OTableSlot *) slot;
+
+	/* Declaration of variables used throughout the function. */
 	int			natts,
 				attnum,
 				ctid_off,
 				res_ctidoff;
-	OTableDescr *descr = oslot->descr;
-	Datum	   *values = slot->tts_values;
-	bool	   *isnull = slot->tts_isnull;
-	bool		hastoast = false;
+	OTableDescr *descr = oslot->descr;	/* Descriptor for the table. */
+	Datum	   *values = slot->tts_values;	/* Array to store attribute
+											 * values. */
+	bool	   *isnull = slot->tts_isnull;	/* Array to store null flags for
+											 * attributes. */
+	bool		hastoast = false;	/* Flag to indicate presence of TOASTed
+									 * attributes. */
 	OIndexDescr *idx;
 	bool		index_order;
 	int			cur_tbl_attnum = 0;
 
+	/*
+	 * Early return if the requested number of attributes is already valid or
+	 * the tuple is null.
+	 */
 	if (__natts <= slot->tts_nvalid || O_TUPLE_IS_NULL(oslot->tuple))
 		return;
 
+	/* Ensure the descriptor is not NULL. */
 	Assert(descr);
 	idx = descr->indices[oslot->ixnum];
 
+	/* Determine if the attributes should be fetched in index order. */
 	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
 	if (oslot->ixnum == PrimaryIndexNumber)
 		index_order = index_order &&
 			slot->tts_tupleDescriptor->natts == idx->nFields;
 
+	/*
+	 * Ensure that if there are valid attributes, the slot is for the primary
+	 * index.
+	 */
 	Assert(slot->tts_nvalid == 0 || oslot->ixnum == PrimaryIndexNumber);
 
+	/*
+	 * Determine the offset of the attributes due to the possible presence of
+	 * ctid column.
+	 */
 	if (GET_PRIMARY(descr)->primaryIsCtid && oslot->ixnum == PrimaryIndexNumber)
 		ctid_off = 1;
 	else
@@ -206,23 +230,44 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 	res_ctidoff = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
+	/*
+	 * Determine the number of attributes to process based on the index type
+	 * and the order of attributes.
+	 */
 	if (oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
 	{
 		if (index_order)
+		{
+			/*
+			 * The attributes are stored in the index order.  So fetch all the
+			 * attributes at once.
+			 */
 			natts = descr->tupdesc->natts;
+		}
 		else
+		{
 			natts = Min(__natts, descr->tupdesc->natts);
+		}
 	}
 	else
 	{
+		/*
+		 * For secondary indexes, the attributes are also stored in the index
+		 * order.  So fetch all the attributes at once.
+		 */
 		natts = oslot->state.desc->natts;
 	}
 
+	/* Iterate over the attributes to populate values and null flags. */
 	for (attnum = slot->tts_nvalid; attnum < natts; attnum++)
 	{
 		Form_pg_attribute thisatt;
 		int			res_attnum;
 
+		/*
+		 * Determine the result attribute number based on the index type and
+		 * the order of attributes.
+		 */
 		if (oslot->ixnum == PrimaryIndexNumber)
 		{
 			if (index_order)
@@ -251,17 +296,27 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			res_attnum = idx->fields[attnum].tableAttnum - 1;
 		}
 
+		/* Ensure the result attribute number is valid. */
 		Assert(res_attnum >= -2);
 		if (res_attnum >= 0)
 		{
+			/*
+			 * Read the next field value and update the slot's value and null
+			 * arrays.
+			 */
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
 
+			/* Determine the attribute metadata based on the index and order. */
 			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
 				thisatt = TupleDescAttr(slot->tts_tupleDescriptor, attnum);
 			else
 				thisatt = TupleDescAttr(idx->leafTupdesc, attnum);
 
+			/*
+			 * Check for TOASTed attributes and adjust the number of
+			 * attributes if necessary.
+			 */
 			if (!isnull[res_attnum] && !thisatt->attbyval && thisatt->attlen < 0)
 			{
 				Pointer		p = DatumGetPointer(values[res_attnum]);
@@ -277,6 +332,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else if (res_attnum == -1)
 		{
+			/* Special handling for ctid attribute. */
 			Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
 			bool		iptr_null;
 
@@ -289,23 +345,28 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else if (res_attnum == -2)
 		{
+			/* Handle dropped attributes by reading and ignoring the value. */
 			bool		dropped_null;
 
 			(void) o_tuple_read_next_field(&oslot->state, &dropped_null);
 		}
 	}
 
+	/* Process TOASTed attributes if any were found. */
 	if (hastoast)
 	{
 		OTuple		pkey;
 
 		Assert(oslot->ixnum == PrimaryIndexNumber);
 
+		/* Allocate memory for TOASTed attributes if not already done. */
 		if (!oslot->to_toast)
 			alloc_to_toast_vfree_detoasted(slot);
 
+		/* Generate a primary key for the TOASTed attributes. */
 		pkey = tts_orioledb_make_key(slot, descr);
 
+		/* Iterate over attributes to process TOASTed values. */
 		for (attnum = 0; attnum < natts; attnum++)
 		{
 			Form_pg_attribute thisatt;
@@ -317,6 +378,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 				if (IS_TOAST_POINTER(p))
 				{
+					/* Replace TOASTed value with a detoasted version. */
 					MemoryContext mcxt = MemoryContextSwitchTo(slot->tts_mcxt);
 					OToastValue toastValue;
 
@@ -330,11 +392,14 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 				}
 			}
 		}
+		/* Free the primary key memory. */
 		pfree(pkey.data);
 	}
 
+	/* Ensure the number of processed attributes matches the expected count. */
 	Assert(attnum == natts);
 
+	/* Update the slot's valid attribute count. */
 	slot->tts_nvalid = natts;
 }
 
@@ -537,7 +602,7 @@ tts_orioledb_materialize(TupleTableSlot *slot)
 	if (oslot->to_toast)
 	{
 		memset(oslot->vfree, 0, desc->natts * sizeof(bool));
-		memset(oslot->to_toast, 0, desc->natts * sizeof(bool));
+		memset(oslot->to_toast, 0, desc->natts * sizeof(char));
 	}
 }
 
@@ -928,6 +993,9 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 	}
 }
 
+/*
+ * Appends index key stored in the tuple slot to the given string.
+ */
 void
 appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 {
@@ -973,6 +1041,10 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 	appendStringInfo(str, ")");
 }
 
+/*
+ * Returns a string representation of the index key that is stored in the
+ * tuple slot.
+ */
 char *
 tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id)
 {
@@ -984,6 +1056,10 @@ tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id)
 	return buf.data;
 }
 
+/*
+ * Returns the expected length of the tuple that will be stored in the primary
+ * key index.
+ */
 static inline int
 expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 {
@@ -1002,6 +1078,10 @@ expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 	return tup_size;
 }
 
+/*
+ * Returns true if the tuple stored in the slot fits the maximum size to be
+ * stored in the index.
+ */
 static inline bool
 can_be_stored_in_index(TupleTableSlot *slot, OTableDescr *descr)
 {
@@ -1014,6 +1094,10 @@ can_be_stored_in_index(TupleTableSlot *slot, OTableDescr *descr)
 	return false;
 }
 
+/*
+ * Apply TOAST including compression and out-of-line storage to the tuple
+ * stored in the slot if necessary.
+ */
 void
 tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 {
@@ -1046,7 +1130,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 	if (!has_toasted)
 		full_size = expected_tuple_len(slot, descr);
 
-	/* we do not need use TOAST, get minimal tuple from slot and exit */
+	/* we do not need use TOAST */
 	if (full_size <= O_BTREE_MAX_TUPLE_SIZE && !has_toasted)
 	{
 		return;
@@ -1058,11 +1142,11 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 	full_size = 0;
 	for (i = 0; i < descr->ntoastable; i++)
-		oslot->to_toast[descr->toastable[i] - ctid_off] = true;
+		oslot->to_toast[descr->toastable[i] - ctid_off] = ORIOLEDB_TO_TOAST_ON;
 
 	full_size = expected_tuple_len(slot, descr);
 
-	memset(oslot->to_toast, 0, sizeof(bool) * natts);
+	memset(oslot->to_toast, ORIOLEDB_TO_TOAST_OFF, sizeof(bool) * natts);
 
 	/* if we can not compress tuple, we do not try do it */
 	if (full_size > O_BTREE_MAX_TUPLE_SIZE)
@@ -1085,7 +1169,7 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 		if (VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[toast_attn]))
 		{
-			oslot->to_toast[toast_attn] = true;
+			oslot->to_toast[toast_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
 		}
 	}
@@ -1103,10 +1187,14 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		for (i = 0; i < descr->ntoastable; i++)
 		{
 			toast_attn = descr->toastable[i] - ctid_off;
-			if (!slot->tts_isnull[toast_attn] && !oslot->to_toast[toast_attn])
+			if (!slot->tts_isnull[toast_attn] &&
+				oslot->to_toast[toast_attn] == ORIOLEDB_TO_TOAST_OFF)
 			{
 				att = TupleDescAttr(tupdesc, toast_attn);
-				if (att->attstorage == 'm' &&
+
+				Assert(att->attstorage != TYPSTORAGE_PLAIN);
+
+				if (att->attstorage == TYPSTORAGE_MAIN &&
 					VARATT_IS_COMPRESSED(slot->tts_values[toast_attn]))
 					continue;
 
@@ -1127,13 +1215,13 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		att = TupleDescAttr(tupdesc, max_attn);
 
 		/*
-		 * if value already compressed or can not be compressed - it must be
-		 * toasted
+		 * If the value is already compressed or can not be compressed - it
+		 * must be toasted
 		 */
 		if (VARATT_IS_COMPRESSED(slot->tts_values[max_attn])
-			|| att->attstorage == 'e')
+			|| att->attstorage == TYPSTORAGE_EXTERNAL)
 		{
-			oslot->to_toast[max_attn] = true;
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
 			continue;
 		}
@@ -1143,29 +1231,30 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 								   TOAST_PGLZ_COMPRESSION);
 		MemoryContextSwitchTo(oldMctx);
 
-		if (DatumGetPointer(tmp) == NULL)
+		if (DatumGetPointer(tmp) != NULL)
 		{
-			/* value can not be compressed */
-			oslot->to_toast[max_attn] = true;
-			to_toastn++;
-			continue;
-		}
-		else
-		{
-			/* we should free it later */
+			/* Suceessfully compressed, replace the value */
+
+			/* free the old value */
 			if (oslot->vfree[max_attn])
 				pfree(DatumGetPointer(slot->tts_values[max_attn]));
+			/* store the new value and mark to free it later */
 			slot->tts_values[max_attn] = tmp;
 			oslot->vfree[max_attn] = true;
 		}
-
-		/* if tuple with compressed value can be stored without TOAST */
-		if (can_be_stored_in_index(slot, descr))
-			break;
-
-		/* else it must be toasted */
-		oslot->to_toast[max_attn] = true;
-		to_toastn++;
+		else if (att->attstorage != TYPSTORAGE_MAIN)
+		{
+			/* Compression failed, try to TOAST it */
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_ON;
+			to_toastn++;
+		}
+		else
+		{
+			/* Compression failed, but we can not TOAST it */
+			Assert(att->attstorage == TYPSTORAGE_MAIN);
+			oslot->to_toast[max_attn] = ORIOLEDB_TO_TOAST_COMPRESSION_TRIED;
+			to_toastn++;
+		}
 	}
 }
 

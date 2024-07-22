@@ -2028,7 +2028,7 @@ o_indices_get_oids(Pointer tuple, ORelOids *tableOids)
 
 	memcpy(&chunk, tuple, offsetof(OIndexChunk, data));
 
-	if (chunk.key.offset != 0)
+	if (chunk.key.chunknum != 0)
 		return NULL;
 
 	Assert(chunk.dataLength >= sizeof(*tableOids));

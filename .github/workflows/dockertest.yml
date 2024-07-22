@@ -61,7 +61,6 @@ jobs:
     continue-on-error: ${{ matrix.distr-version == 'edge' || matrix.distr-version == 'devel' }}
 
     steps:
-
       - name: Checkout source
         uses: actions/checkout@v4
 

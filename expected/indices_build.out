@@ -22762,67 +22762,67 @@ SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
-                                          orioledb_tbl_structure                                           
------------------------------------------------------------------------------------------------------------
- Index o_indices8_pkey contents                                                                           +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                      +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                               +
-     Item 0: offset = 272, tuple = ('1', 'e2af2ac479', '551e8b15be547418fbf5')                            +
-     Item 1: offset = 336, tuple = ('2', 'a9a8d7170b', TOASTed)                                           +
-     Item 2: offset = 392, tuple = ('3', 'a9a8d7170b', TOASTed)                                           +
-     Item 3: offset = 448, tuple = ('4', '6714eedbf4', TOASTed)                                           +
-     Item 4: offset = 504, tuple = ('5', 'e2af2ac479', TOASTed)                                           +
-                                                                                                          +
- Index o_indices8_idx1 contents                                                                           +
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                                      +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '2')                  +
-     Item 0: offset = 264, tuple = ('6714eedbf4', '4')                                                    +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('a9a8d7170b', '3')                 +
-     Item 1: offset = 312, tuple = ('a9a8d7170b', '2')                                                    +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e2af2ac479', '1')                 +
-     Item 2: offset = 360, tuple = ('a9a8d7170b', '3')                                                    +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('e2af2ac479', '5')                 +
-     Item 3: offset = 408, tuple = ('e2af2ac479', '1')                                                    +
-   Chunk 4: offset = 4, location = 448, hikey location = 176                                              +
-     Item 4: offset = 456, tuple = ('e2af2ac479', '5')                                                    +
-                                                                                                          +
- Index toast contents                                                                                     +
- Page 0: level = 1, maxKeyLen = 16                                                                        +
- state = free, datoid equal, relnode equal, ix_type = toast, dirty                                        +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 512, hikey location = 64                                               +
-     Item 0: offset = 520, downlink = 1                                                                   +
-     Item 1: offset = 528, downlink = 2, key = (PK: ('4'), attnum 3, offset 0)                            +
-                                                                                                          +
- Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = toast, dirty                                        +
-     Leftmost, Rightlink is invalid                                                                       +
-     Hikey: offset = 120, key = (PK: ('4'), attnum 3, offset 0)                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 3, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('3'), attnum 3, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('2'), attnum 3, offset 2657, data_length 1347)                  +
-   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('3'), attnum 3, offset 2657) +
-     Item 2: offset = 4376, tuple = (PK: ('3'), attnum 3, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('4'), attnum 3, offset 0)    +
-     Item 3: offset = 7088, tuple = (PK: ('3'), attnum 3, offset 2657, data_length 347)                   +
-                                                                                                          +
- Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = toast, dirty                                        +
-     Rightmost                                                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('4'), attnum 3, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('4'), attnum 3, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('5'), attnum 3, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('4'), attnum 3, offset 2657, data_length 347)                   +
-   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('5'), attnum 3, offset 2657) +
-     Item 2: offset = 3376, tuple = (PK: ('5'), attnum 3, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 6080, hikey location = 120                                             +
-     Item 3: offset = 6088, tuple = (PK: ('5'), attnum 3, offset 2657, data_length 347)                   +
-                                                                                                          +
+                                          orioledb_tbl_structure                                          
+----------------------------------------------------------------------------------------------------------
+ Index o_indices8_pkey contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                              +
+     Item 0: offset = 272, tuple = ('1', 'e2af2ac479', '551e8b15be547418fbf5')                           +
+     Item 1: offset = 336, tuple = ('2', 'a9a8d7170b', TOASTed)                                          +
+     Item 2: offset = 392, tuple = ('3', 'a9a8d7170b', TOASTed)                                          +
+     Item 3: offset = 448, tuple = ('4', '6714eedbf4', TOASTed)                                          +
+     Item 4: offset = 504, tuple = ('5', 'e2af2ac479', TOASTed)                                          +
+                                                                                                         +
+ Index o_indices8_idx1 contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '2')                 +
+     Item 0: offset = 264, tuple = ('6714eedbf4', '4')                                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('a9a8d7170b', '3')                +
+     Item 1: offset = 312, tuple = ('a9a8d7170b', '2')                                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e2af2ac479', '1')                +
+     Item 2: offset = 360, tuple = ('a9a8d7170b', '3')                                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('e2af2ac479', '5')                +
+     Item 3: offset = 408, tuple = ('e2af2ac479', '1')                                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                                             +
+     Item 4: offset = 456, tuple = ('e2af2ac479', '5')                                                   +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 1, maxKeyLen = 16                                                                       +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                              +
+     Item 0: offset = 520, downlink = 1                                                                  +
+     Item 1: offset = 528, downlink = 2, key = (PK: ('4'), attnum 3, chunknum 0)                         +
+                                                                                                         +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightlink is invalid                                                                      +
+     Hikey: offset = 120, key = (PK: ('4'), attnum 3, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 3, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('3'), attnum 3, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('2'), attnum 3, chunknum 1, data_length 1347)                  +
+   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('3'), attnum 3, chunknum 1) +
+     Item 2: offset = 4376, tuple = (PK: ('3'), attnum 3, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('4'), attnum 3, chunknum 0) +
+     Item 3: offset = 7088, tuple = (PK: ('3'), attnum 3, chunknum 1, data_length 347)                   +
+                                                                                                         +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('4'), attnum 3, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('4'), attnum 3, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('5'), attnum 3, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('4'), attnum 3, chunknum 1, data_length 347)                   +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('5'), attnum 3, chunknum 1) +
+     Item 2: offset = 3376, tuple = (PK: ('5'), attnum 3, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                            +
+     Item 3: offset = 6088, tuple = (PK: ('5'), attnum 3, chunknum 1, data_length 347)                   +
+                                                                                                         +
  
 (1 row)
 
@@ -22937,71 +22937,71 @@ SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
-                                            orioledb_tbl_structure                                             
----------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                  +
- Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                          +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                                          +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,1)')                                +
-     Item 0: offset = 264, tuple = ('(0,0)', '1', 'e2af2ac479', '551e8b15be547418fbf5')                       +
-   Chunk 1: offset = 1, location = 336, hikey location = 88, hikey = ('(0,2)')                                +
-     Item 1: offset = 344, tuple = ('(0,1)', '2', 'a9a8d7170b', TOASTed)                                      +
-   Chunk 2: offset = 2, location = 408, hikey location = 96, hikey = ('(0,3)')                                +
-     Item 2: offset = 416, tuple = ('(0,2)', '3', 'a9a8d7170b', TOASTed)                                      +
-   Chunk 3: offset = 3, location = 480, hikey location = 104, hikey = ('(0,4)')                               +
-     Item 3: offset = 488, tuple = ('(0,3)', '4', '6714eedbf4', TOASTed)                                      +
-   Chunk 4: offset = 4, location = 552, hikey location = 112                                                  +
-     Item 4: offset = 560, tuple = ('(0,4)', '5', 'e2af2ac479', TOASTed)                                      +
-                                                                                                              +
- Index o_indices8_idx1 contents                                                                               +
- Page 0: level = 0, maxKeyLen = 26, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                                          +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '(0,1)')                  +
-     Item 0: offset = 264, tuple = ('6714eedbf4', '(0,3)')                                                    +
-   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('a9a8d7170b', '(0,2)')                 +
-     Item 1: offset = 320, tuple = ('a9a8d7170b', '(0,1)')                                                    +
-   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e2af2ac479', '(0,0)')                 +
-     Item 2: offset = 376, tuple = ('a9a8d7170b', '(0,2)')                                                    +
-   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('e2af2ac479', '(0,4)')                 +
-     Item 3: offset = 432, tuple = ('e2af2ac479', '(0,0)')                                                    +
-   Chunk 4: offset = 4, location = 480, hikey location = 208                                                  +
-     Item 4: offset = 488, tuple = ('e2af2ac479', '(0,4)')                                                    +
-                                                                                                              +
- Index toast contents                                                                                         +
- Page 0: level = 1, maxKeyLen = 16                                                                            +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                            +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('(0,3)'), attnum 4, offset 0)      +
-     Item 0: offset = 520, downlink = 1                                                                       +
-   Chunk 1: offset = 1, location = 528, hikey location = 80                                                   +
-     Item 1: offset = 536, downlink = 2, key = (PK: ('(0,3)'), attnum 4, offset 0)                            +
-                                                                                                              +
- Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                            +
-     Leftmost, Rightlink is invalid                                                                           +
-     Hikey: offset = 120, key = (PK: ('(0,3)'), attnum 4, offset 0)                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,1)'), attnum 4, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('(0,1)'), attnum 4, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,2)'), attnum 4, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('(0,1)'), attnum 4, offset 2657, data_length 1347)                  +
-   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('(0,2)'), attnum 4, offset 2657) +
-     Item 2: offset = 4376, tuple = (PK: ('(0,2)'), attnum 4, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('(0,3)'), attnum 4, offset 0)    +
-     Item 3: offset = 7088, tuple = (PK: ('(0,2)'), attnum 4, offset 2657, data_length 347)                   +
-                                                                                                              +
- Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                            +
-     Rightmost                                                                                                +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,3)'), attnum 4, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('(0,3)'), attnum 4, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,4)'), attnum 4, offset 2657)  +
-     Item 1: offset = 2976, tuple = (PK: ('(0,3)'), attnum 4, offset 2657, data_length 347)                   +
-     Item 2: offset = 3368, tuple = (PK: ('(0,4)'), attnum 4, offset 0, data_length 2657)                     +
-   Chunk 2: offset = 3, location = 6072, hikey location = 104                                                 +
-     Item 3: offset = 6080, tuple = (PK: ('(0,4)'), attnum 4, offset 2657, data_length 347)                   +
-                                                                                                              +
+                                            orioledb_tbl_structure                                            
+--------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,1)')                               +
+     Item 0: offset = 264, tuple = ('(0,0)', '1', 'e2af2ac479', '551e8b15be547418fbf5')                      +
+   Chunk 1: offset = 1, location = 336, hikey location = 88, hikey = ('(0,2)')                               +
+     Item 1: offset = 344, tuple = ('(0,1)', '2', 'a9a8d7170b', TOASTed)                                     +
+   Chunk 2: offset = 2, location = 408, hikey location = 96, hikey = ('(0,3)')                               +
+     Item 2: offset = 416, tuple = ('(0,2)', '3', 'a9a8d7170b', TOASTed)                                     +
+   Chunk 3: offset = 3, location = 480, hikey location = 104, hikey = ('(0,4)')                              +
+     Item 3: offset = 488, tuple = ('(0,3)', '4', '6714eedbf4', TOASTed)                                     +
+   Chunk 4: offset = 4, location = 552, hikey location = 112                                                 +
+     Item 4: offset = 560, tuple = ('(0,4)', '5', 'e2af2ac479', TOASTed)                                     +
+                                                                                                             +
+ Index o_indices8_idx1 contents                                                                              +
+ Page 0: level = 0, maxKeyLen = 26, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '(0,1)')                 +
+     Item 0: offset = 264, tuple = ('6714eedbf4', '(0,3)')                                                   +
+   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('a9a8d7170b', '(0,2)')                +
+     Item 1: offset = 320, tuple = ('a9a8d7170b', '(0,1)')                                                   +
+   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e2af2ac479', '(0,0)')                +
+     Item 2: offset = 376, tuple = ('a9a8d7170b', '(0,2)')                                                   +
+   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('e2af2ac479', '(0,4)')                +
+     Item 3: offset = 432, tuple = ('e2af2ac479', '(0,0)')                                                   +
+   Chunk 4: offset = 4, location = 480, hikey location = 208                                                 +
+     Item 4: offset = 488, tuple = ('e2af2ac479', '(0,4)')                                                   +
+                                                                                                             +
+ Index toast contents                                                                                        +
+ Page 0: level = 1, maxKeyLen = 16                                                                           +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                           +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('(0,3)'), attnum 4, chunknum 0)   +
+     Item 0: offset = 520, downlink = 1                                                                      +
+   Chunk 1: offset = 1, location = 528, hikey location = 80                                                  +
+     Item 1: offset = 536, downlink = 2, key = (PK: ('(0,3)'), attnum 4, chunknum 0)                         +
+                                                                                                             +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                           +
+     Leftmost, Rightlink is invalid                                                                          +
+     Hikey: offset = 120, key = (PK: ('(0,3)'), attnum 4, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,1)'), attnum 4, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('(0,1)'), attnum 4, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,2)'), attnum 4, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('(0,1)'), attnum 4, chunknum 1, data_length 1347)                  +
+   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('(0,2)'), attnum 4, chunknum 1) +
+     Item 2: offset = 4376, tuple = (PK: ('(0,2)'), attnum 4, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('(0,3)'), attnum 4, chunknum 0) +
+     Item 3: offset = 7088, tuple = (PK: ('(0,2)'), attnum 4, chunknum 1, data_length 347)                   +
+                                                                                                             +
+ Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                           +
+     Rightmost                                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,3)'), attnum 4, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('(0,3)'), attnum 4, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,4)'), attnum 4, chunknum 1)  +
+     Item 1: offset = 2976, tuple = (PK: ('(0,3)'), attnum 4, chunknum 1, data_length 347)                   +
+     Item 2: offset = 3368, tuple = (PK: ('(0,4)'), attnum 4, chunknum 0, data_length 2657)                  +
+   Chunk 2: offset = 3, location = 6072, hikey location = 104                                                +
+     Item 3: offset = 6080, tuple = (PK: ('(0,4)'), attnum 4, chunknum 1, data_length 347)                   +
+                                                                                                             +
  
 (1 row)
 
@@ -23055,71 +23055,71 @@ SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
-                                          orioledb_tbl_structure                                           
------------------------------------------------------------------------------------------------------------
- Index o_indices8_pkey contents                                                                           +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                                      +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')                                +
-     Item 0: offset = 264, tuple = ('1', 'e2af2ac479', '551e8b15be547418fbf5')                            +
-   Chunk 1: offset = 1, location = 328, hikey location = 88, hikey = ('3')                                +
-     Item 1: offset = 336, tuple = ('2', 'a9a8d7170b', TOASTed)                                           +
-   Chunk 2: offset = 2, location = 392, hikey location = 96, hikey = ('4')                                +
-     Item 2: offset = 400, tuple = ('3', 'a9a8d7170b', TOASTed)                                           +
-   Chunk 3: offset = 3, location = 456, hikey location = 104, hikey = ('5')                               +
-     Item 3: offset = 464, tuple = ('4', '6714eedbf4', TOASTed)                                           +
-   Chunk 4: offset = 4, location = 520, hikey location = 112                                              +
-     Item 4: offset = 528, tuple = ('5', 'e2af2ac479', TOASTed)                                           +
-                                                                                                          +
- Index o_indices8_idx1 contents                                                                           +
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                                      +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '2')                  +
-     Item 0: offset = 264, tuple = ('6714eedbf4', '4')                                                    +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('a9a8d7170b', '3')                 +
-     Item 1: offset = 312, tuple = ('a9a8d7170b', '2')                                                    +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e2af2ac479', '1')                 +
-     Item 2: offset = 360, tuple = ('a9a8d7170b', '3')                                                    +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('e2af2ac479', '5')                 +
-     Item 3: offset = 408, tuple = ('e2af2ac479', '1')                                                    +
-   Chunk 4: offset = 4, location = 448, hikey location = 176                                              +
-     Item 4: offset = 456, tuple = ('e2af2ac479', '5')                                                    +
-                                                                                                          +
- Index toast contents                                                                                     +
- Page 0: level = 1, maxKeyLen = 16                                                                        +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('4'), attnum 3, offset 0)      +
-     Item 0: offset = 520, downlink = 1                                                                   +
-   Chunk 1: offset = 1, location = 528, hikey location = 80                                               +
-     Item 1: offset = 536, downlink = 2, key = (PK: ('4'), attnum 3, offset 0)                            +
-                                                                                                          +
- Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
-     Leftmost, Rightlink is invalid                                                                       +
-     Hikey: offset = 120, key = (PK: ('4'), attnum 3, offset 0)                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 3, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('3'), attnum 3, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('2'), attnum 3, offset 2657, data_length 1347)                  +
-   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('3'), attnum 3, offset 2657) +
-     Item 2: offset = 4376, tuple = (PK: ('3'), attnum 3, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('4'), attnum 3, offset 0)    +
-     Item 3: offset = 7088, tuple = (PK: ('3'), attnum 3, offset 2657, data_length 347)                   +
-                                                                                                          +
- Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
-     Rightmost                                                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('4'), attnum 3, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('4'), attnum 3, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('5'), attnum 3, offset 2657)  +
-     Item 1: offset = 2976, tuple = (PK: ('4'), attnum 3, offset 2657, data_length 347)                   +
-     Item 2: offset = 3368, tuple = (PK: ('5'), attnum 3, offset 0, data_length 2657)                     +
-   Chunk 2: offset = 3, location = 6072, hikey location = 104                                             +
-     Item 3: offset = 6080, tuple = (PK: ('5'), attnum 3, offset 2657, data_length 347)                   +
-                                                                                                          +
+                                          orioledb_tbl_structure                                          
+----------------------------------------------------------------------------------------------------------
+ Index o_indices8_pkey contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')                               +
+     Item 0: offset = 264, tuple = ('1', 'e2af2ac479', '551e8b15be547418fbf5')                           +
+   Chunk 1: offset = 1, location = 328, hikey location = 88, hikey = ('3')                               +
+     Item 1: offset = 336, tuple = ('2', 'a9a8d7170b', TOASTed)                                          +
+   Chunk 2: offset = 2, location = 392, hikey location = 96, hikey = ('4')                               +
+     Item 2: offset = 400, tuple = ('3', 'a9a8d7170b', TOASTed)                                          +
+   Chunk 3: offset = 3, location = 456, hikey location = 104, hikey = ('5')                              +
+     Item 3: offset = 464, tuple = ('4', '6714eedbf4', TOASTed)                                          +
+   Chunk 4: offset = 4, location = 520, hikey location = 112                                             +
+     Item 4: offset = 528, tuple = ('5', 'e2af2ac479', TOASTed)                                          +
+                                                                                                         +
+ Index o_indices8_idx1 contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '2')                 +
+     Item 0: offset = 264, tuple = ('6714eedbf4', '4')                                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('a9a8d7170b', '3')                +
+     Item 1: offset = 312, tuple = ('a9a8d7170b', '2')                                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e2af2ac479', '1')                +
+     Item 2: offset = 360, tuple = ('a9a8d7170b', '3')                                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('e2af2ac479', '5')                +
+     Item 3: offset = 408, tuple = ('e2af2ac479', '1')                                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                                             +
+     Item 4: offset = 456, tuple = ('e2af2ac479', '5')                                                   +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 1, maxKeyLen = 16                                                                       +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('4'), attnum 3, chunknum 0)   +
+     Item 0: offset = 520, downlink = 1                                                                  +
+   Chunk 1: offset = 1, location = 528, hikey location = 80                                              +
+     Item 1: offset = 536, downlink = 2, key = (PK: ('4'), attnum 3, chunknum 0)                         +
+                                                                                                         +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Leftmost, Rightlink is invalid                                                                      +
+     Hikey: offset = 120, key = (PK: ('4'), attnum 3, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 3, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('3'), attnum 3, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('2'), attnum 3, chunknum 1, data_length 1347)                  +
+   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('3'), attnum 3, chunknum 1) +
+     Item 2: offset = 4376, tuple = (PK: ('3'), attnum 3, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('4'), attnum 3, chunknum 0) +
+     Item 3: offset = 7088, tuple = (PK: ('3'), attnum 3, chunknum 1, data_length 347)                   +
+                                                                                                         +
+ Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('4'), attnum 3, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('4'), attnum 3, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('5'), attnum 3, chunknum 1)  +
+     Item 1: offset = 2976, tuple = (PK: ('4'), attnum 3, chunknum 1, data_length 347)                   +
+     Item 2: offset = 3368, tuple = (PK: ('5'), attnum 3, chunknum 0, data_length 2657)                  +
+   Chunk 2: offset = 3, location = 6072, hikey location = 104                                            +
+     Item 3: offset = 6080, tuple = (PK: ('5'), attnum 3, chunknum 1, data_length 347)                   +
+                                                                                                         +
  
 (1 row)
 
@@ -23177,67 +23177,67 @@ SELECT val FROM o_indices8_ctid WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_indices8_ctid'::regclass, 'nue');
-                                            orioledb_tbl_structure                                             
----------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                  +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                          +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                          +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                   +
-     Item 0: offset = 272, tuple = ('(0,1)', '1', 'e2af2ac479', '551e8b15be547418fbf5')                       +
-     Item 1: offset = 344, tuple = ('(0,2)', '2', 'a9a8d7170b', TOASTed)                                      +
-     Item 2: offset = 408, tuple = ('(0,3)', '3', 'a9a8d7170b', TOASTed)                                      +
-     Item 3: offset = 472, tuple = ('(0,4)', '4', '6714eedbf4', TOASTed)                                      +
-     Item 4: offset = 536, tuple = ('(0,5)', '5', 'e2af2ac479', TOASTed)                                      +
-                                                                                                              +
- Index o_indices8_ctid_idx1 contents                                                                          +
- Page 0: level = 0, maxKeyLen = 26, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                                          +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '(0,2)')                  +
-     Item 0: offset = 264, tuple = ('6714eedbf4', '(0,4)')                                                    +
-   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('a9a8d7170b', '(0,3)')                 +
-     Item 1: offset = 320, tuple = ('a9a8d7170b', '(0,2)')                                                    +
-   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e2af2ac479', '(0,1)')                 +
-     Item 2: offset = 376, tuple = ('a9a8d7170b', '(0,3)')                                                    +
-   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('e2af2ac479', '(0,5)')                 +
-     Item 3: offset = 432, tuple = ('e2af2ac479', '(0,1)')                                                    +
-   Chunk 4: offset = 4, location = 480, hikey location = 208                                                  +
-     Item 4: offset = 488, tuple = ('e2af2ac479', '(0,5)')                                                    +
-                                                                                                              +
- Index toast contents                                                                                         +
- Page 0: level = 1, maxKeyLen = 16                                                                            +
- state = free, datoid equal, relnode equal, ix_type = toast, dirty                                            +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 512, hikey location = 64                                                   +
-     Item 0: offset = 520, downlink = 1                                                                       +
-     Item 1: offset = 528, downlink = 2, key = (PK: ('(0,4)'), attnum 4, offset 0)                            +
-                                                                                                              +
- Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = toast, dirty                                            +
-     Leftmost, Rightlink is invalid                                                                           +
-     Hikey: offset = 120, key = (PK: ('(0,4)'), attnum 4, offset 0)                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,2)'), attnum 4, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('(0,2)'), attnum 4, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,3)'), attnum 4, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('(0,2)'), attnum 4, offset 2657, data_length 1347)                  +
-   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('(0,3)'), attnum 4, offset 2657) +
-     Item 2: offset = 4376, tuple = (PK: ('(0,3)'), attnum 4, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('(0,4)'), attnum 4, offset 0)    +
-     Item 3: offset = 7088, tuple = (PK: ('(0,3)'), attnum 4, offset 2657, data_length 347)                   +
-                                                                                                              +
- Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = toast, dirty                                            +
-     Rightmost                                                                                                +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,4)'), attnum 4, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('(0,4)'), attnum 4, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,5)'), attnum 4, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('(0,4)'), attnum 4, offset 2657, data_length 347)                   +
-   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('(0,5)'), attnum 4, offset 2657) +
-     Item 2: offset = 3376, tuple = (PK: ('(0,5)'), attnum 4, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 6080, hikey location = 120                                                 +
-     Item 3: offset = 6088, tuple = (PK: ('(0,5)'), attnum 4, offset 2657, data_length 347)                   +
-                                                                                                              +
+                                            orioledb_tbl_structure                                            
+--------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                  +
+     Item 0: offset = 272, tuple = ('(0,1)', '1', 'e2af2ac479', '551e8b15be547418fbf5')                      +
+     Item 1: offset = 344, tuple = ('(0,2)', '2', 'a9a8d7170b', TOASTed)                                     +
+     Item 2: offset = 408, tuple = ('(0,3)', '3', 'a9a8d7170b', TOASTed)                                     +
+     Item 3: offset = 472, tuple = ('(0,4)', '4', '6714eedbf4', TOASTed)                                     +
+     Item 4: offset = 536, tuple = ('(0,5)', '5', 'e2af2ac479', TOASTed)                                     +
+                                                                                                             +
+ Index o_indices8_ctid_idx1 contents                                                                         +
+ Page 0: level = 0, maxKeyLen = 26, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '(0,2)')                 +
+     Item 0: offset = 264, tuple = ('6714eedbf4', '(0,4)')                                                   +
+   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('a9a8d7170b', '(0,3)')                +
+     Item 1: offset = 320, tuple = ('a9a8d7170b', '(0,2)')                                                   +
+   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e2af2ac479', '(0,1)')                +
+     Item 2: offset = 376, tuple = ('a9a8d7170b', '(0,3)')                                                   +
+   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('e2af2ac479', '(0,5)')                +
+     Item 3: offset = 432, tuple = ('e2af2ac479', '(0,1)')                                                   +
+   Chunk 4: offset = 4, location = 480, hikey location = 208                                                 +
+     Item 4: offset = 488, tuple = ('e2af2ac479', '(0,5)')                                                   +
+                                                                                                             +
+ Index toast contents                                                                                        +
+ Page 0: level = 1, maxKeyLen = 16                                                                           +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                           +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                                  +
+     Item 0: offset = 520, downlink = 1                                                                      +
+     Item 1: offset = 528, downlink = 2, key = (PK: ('(0,4)'), attnum 4, chunknum 0)                         +
+                                                                                                             +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                           +
+     Leftmost, Rightlink is invalid                                                                          +
+     Hikey: offset = 120, key = (PK: ('(0,4)'), attnum 4, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,2)'), attnum 4, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('(0,2)'), attnum 4, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,3)'), attnum 4, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('(0,2)'), attnum 4, chunknum 1, data_length 1347)                  +
+   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('(0,3)'), attnum 4, chunknum 1) +
+     Item 2: offset = 4376, tuple = (PK: ('(0,3)'), attnum 4, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('(0,4)'), attnum 4, chunknum 0) +
+     Item 3: offset = 7088, tuple = (PK: ('(0,3)'), attnum 4, chunknum 1, data_length 347)                   +
+                                                                                                             +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                           +
+     Rightmost                                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,4)'), attnum 4, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('(0,4)'), attnum 4, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,5)'), attnum 4, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('(0,4)'), attnum 4, chunknum 1, data_length 347)                   +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('(0,5)'), attnum 4, chunknum 1) +
+     Item 2: offset = 3376, tuple = (PK: ('(0,5)'), attnum 4, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                                +
+     Item 3: offset = 6088, tuple = (PK: ('(0,5)'), attnum 4, chunknum 1, data_length 347)                   +
+                                                                                                             +
  
 (1 row)
 
@@ -23274,71 +23274,71 @@ SELECT val FROM o_indices8_ctid WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_indices8_ctid'::regclass, 'nue');
-                                          orioledb_tbl_structure                                           
------------------------------------------------------------------------------------------------------------
- Index o_indices8_ctid_pkey contents                                                                      +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                                      +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')                                +
-     Item 0: offset = 264, tuple = ('1', 'e2af2ac479', '551e8b15be547418fbf5')                            +
-   Chunk 1: offset = 1, location = 328, hikey location = 88, hikey = ('3')                                +
-     Item 1: offset = 336, tuple = ('2', 'a9a8d7170b', TOASTed)                                           +
-   Chunk 2: offset = 2, location = 392, hikey location = 96, hikey = ('4')                                +
-     Item 2: offset = 400, tuple = ('3', 'a9a8d7170b', TOASTed)                                           +
-   Chunk 3: offset = 3, location = 456, hikey location = 104, hikey = ('5')                               +
-     Item 3: offset = 464, tuple = ('4', '6714eedbf4', TOASTed)                                           +
-   Chunk 4: offset = 4, location = 520, hikey location = 112                                              +
-     Item 4: offset = 528, tuple = ('5', 'e2af2ac479', TOASTed)                                           +
-                                                                                                          +
- Index o_indices8_ctid_idx1 contents                                                                      +
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                                      +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '2')                  +
-     Item 0: offset = 264, tuple = ('6714eedbf4', '4')                                                    +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('a9a8d7170b', '3')                 +
-     Item 1: offset = 312, tuple = ('a9a8d7170b', '2')                                                    +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e2af2ac479', '1')                 +
-     Item 2: offset = 360, tuple = ('a9a8d7170b', '3')                                                    +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('e2af2ac479', '5')                 +
-     Item 3: offset = 408, tuple = ('e2af2ac479', '1')                                                    +
-   Chunk 4: offset = 4, location = 448, hikey location = 176                                              +
-     Item 4: offset = 456, tuple = ('e2af2ac479', '5')                                                    +
-                                                                                                          +
- Index toast contents                                                                                     +
- Page 0: level = 1, maxKeyLen = 16                                                                        +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
-     Leftmost, Rightmost                                                                                  +
-   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('4'), attnum 3, offset 0)      +
-     Item 0: offset = 520, downlink = 1                                                                   +
-   Chunk 1: offset = 1, location = 528, hikey location = 80                                               +
-     Item 1: offset = 536, downlink = 2, key = (PK: ('4'), attnum 3, offset 0)                            +
-                                                                                                          +
- Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
-     Leftmost, Rightlink is invalid                                                                       +
-     Hikey: offset = 120, key = (PK: ('4'), attnum 3, offset 0)                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 3, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('3'), attnum 3, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('2'), attnum 3, offset 2657, data_length 1347)                  +
-   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('3'), attnum 3, offset 2657) +
-     Item 2: offset = 4376, tuple = (PK: ('3'), attnum 3, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('4'), attnum 3, offset 0)    +
-     Item 3: offset = 7088, tuple = (PK: ('3'), attnum 3, offset 2657, data_length 347)                   +
-                                                                                                          +
- Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                     +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                        +
-     Rightmost                                                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('4'), attnum 3, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('4'), attnum 3, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('5'), attnum 3, offset 2657)  +
-     Item 1: offset = 2976, tuple = (PK: ('4'), attnum 3, offset 2657, data_length 347)                   +
-     Item 2: offset = 3368, tuple = (PK: ('5'), attnum 3, offset 0, data_length 2657)                     +
-   Chunk 2: offset = 3, location = 6072, hikey location = 104                                             +
-     Item 3: offset = 6080, tuple = (PK: ('5'), attnum 3, offset 2657, data_length 347)                   +
-                                                                                                          +
+                                          orioledb_tbl_structure                                          
+----------------------------------------------------------------------------------------------------------
+ Index o_indices8_ctid_pkey contents                                                                     +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')                               +
+     Item 0: offset = 264, tuple = ('1', 'e2af2ac479', '551e8b15be547418fbf5')                           +
+   Chunk 1: offset = 1, location = 328, hikey location = 88, hikey = ('3')                               +
+     Item 1: offset = 336, tuple = ('2', 'a9a8d7170b', TOASTed)                                          +
+   Chunk 2: offset = 2, location = 392, hikey location = 96, hikey = ('4')                               +
+     Item 2: offset = 400, tuple = ('3', 'a9a8d7170b', TOASTed)                                          +
+   Chunk 3: offset = 3, location = 456, hikey location = 104, hikey = ('5')                              +
+     Item 3: offset = 464, tuple = ('4', '6714eedbf4', TOASTed)                                          +
+   Chunk 4: offset = 4, location = 520, hikey location = 112                                             +
+     Item 4: offset = 528, tuple = ('5', 'e2af2ac479', TOASTed)                                          +
+                                                                                                         +
+ Index o_indices8_ctid_idx1 contents                                                                     +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '2')                 +
+     Item 0: offset = 264, tuple = ('6714eedbf4', '4')                                                   +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('a9a8d7170b', '3')                +
+     Item 1: offset = 312, tuple = ('a9a8d7170b', '2')                                                   +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('e2af2ac479', '1')                +
+     Item 2: offset = 360, tuple = ('a9a8d7170b', '3')                                                   +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('e2af2ac479', '5')                +
+     Item 3: offset = 408, tuple = ('e2af2ac479', '1')                                                   +
+   Chunk 4: offset = 4, location = 448, hikey location = 176                                             +
+     Item 4: offset = 456, tuple = ('e2af2ac479', '5')                                                   +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 1, maxKeyLen = 16                                                                       +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('4'), attnum 3, chunknum 0)   +
+     Item 0: offset = 520, downlink = 1                                                                  +
+   Chunk 1: offset = 1, location = 528, hikey location = 80                                              +
+     Item 1: offset = 536, downlink = 2, key = (PK: ('4'), attnum 3, chunknum 0)                         +
+                                                                                                         +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Leftmost, Rightlink is invalid                                                                      +
+     Hikey: offset = 120, key = (PK: ('4'), attnum 3, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 3, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('3'), attnum 3, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('2'), attnum 3, chunknum 1, data_length 1347)                  +
+   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('3'), attnum 3, chunknum 1) +
+     Item 2: offset = 4376, tuple = (PK: ('3'), attnum 3, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('4'), attnum 3, chunknum 0) +
+     Item 3: offset = 7088, tuple = (PK: ('3'), attnum 3, chunknum 1, data_length 347)                   +
+                                                                                                         +
+ Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                       +
+     Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('4'), attnum 3, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('4'), attnum 3, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('5'), attnum 3, chunknum 1)  +
+     Item 1: offset = 2976, tuple = (PK: ('4'), attnum 3, chunknum 1, data_length 347)                   +
+     Item 2: offset = 3368, tuple = (PK: ('5'), attnum 3, chunknum 0, data_length 2657)                  +
+   Chunk 2: offset = 3, location = 6072, hikey location = 104                                            +
+     Item 3: offset = 6080, tuple = (PK: ('5'), attnum 3, chunknum 1, data_length 347)                   +
+                                                                                                         +
  
 (1 row)
 
@@ -23419,71 +23419,71 @@ SELECT val FROM o_indices8_ctid WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_indices8_ctid'::regclass, 'nue');
-                                            orioledb_tbl_structure                                             
----------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                  +
- Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                          +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                                          +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,1)')                                +
-     Item 0: offset = 264, tuple = ('(0,0)', '1', 'e2af2ac479', '551e8b15be547418fbf5')                       +
-   Chunk 1: offset = 1, location = 336, hikey location = 88, hikey = ('(0,2)')                                +
-     Item 1: offset = 344, tuple = ('(0,1)', '2', 'a9a8d7170b', TOASTed)                                      +
-   Chunk 2: offset = 2, location = 408, hikey location = 96, hikey = ('(0,3)')                                +
-     Item 2: offset = 416, tuple = ('(0,2)', '3', 'a9a8d7170b', TOASTed)                                      +
-   Chunk 3: offset = 3, location = 480, hikey location = 104, hikey = ('(0,4)')                               +
-     Item 3: offset = 488, tuple = ('(0,3)', '4', '6714eedbf4', TOASTed)                                      +
-   Chunk 4: offset = 4, location = 552, hikey location = 112                                                  +
-     Item 4: offset = 560, tuple = ('(0,4)', '5', 'e2af2ac479', TOASTed)                                      +
-                                                                                                              +
- Index o_indices8_ctid_idx1 contents                                                                          +
- Page 0: level = 0, maxKeyLen = 26, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                                          +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '(0,1)')                  +
-     Item 0: offset = 264, tuple = ('6714eedbf4', '(0,3)')                                                    +
-   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('a9a8d7170b', '(0,2)')                 +
-     Item 1: offset = 320, tuple = ('a9a8d7170b', '(0,1)')                                                    +
-   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e2af2ac479', '(0,0)')                 +
-     Item 2: offset = 376, tuple = ('a9a8d7170b', '(0,2)')                                                    +
-   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('e2af2ac479', '(0,4)')                 +
-     Item 3: offset = 432, tuple = ('e2af2ac479', '(0,0)')                                                    +
-   Chunk 4: offset = 4, location = 480, hikey location = 208                                                  +
-     Item 4: offset = 488, tuple = ('e2af2ac479', '(0,4)')                                                    +
-                                                                                                              +
- Index toast contents                                                                                         +
- Page 0: level = 1, maxKeyLen = 16                                                                            +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                            +
-     Leftmost, Rightmost                                                                                      +
-   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('(0,3)'), attnum 4, offset 0)      +
-     Item 0: offset = 520, downlink = 1                                                                       +
-   Chunk 1: offset = 1, location = 528, hikey location = 80                                                   +
-     Item 1: offset = 536, downlink = 2, key = (PK: ('(0,3)'), attnum 4, offset 0)                            +
-                                                                                                              +
- Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                            +
-     Leftmost, Rightlink is invalid                                                                           +
-     Hikey: offset = 120, key = (PK: ('(0,3)'), attnum 4, offset 0)                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,1)'), attnum 4, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('(0,1)'), attnum 4, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,2)'), attnum 4, offset 0)     +
-     Item 1: offset = 2976, tuple = (PK: ('(0,1)'), attnum 4, offset 2657, data_length 1347)                  +
-   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('(0,2)'), attnum 4, offset 2657) +
-     Item 2: offset = 4376, tuple = (PK: ('(0,2)'), attnum 4, offset 0, data_length 2657)                     +
-   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('(0,3)'), attnum 4, offset 0)    +
-     Item 3: offset = 7088, tuple = (PK: ('(0,2)'), attnum 4, offset 2657, data_length 347)                   +
-                                                                                                              +
- Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                         +
- state = free, datoid equal, relnode equal, ix_type = toast, clean                                            +
-     Rightmost                                                                                                +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,3)'), attnum 4, offset 2657)   +
-     Item 0: offset = 264, tuple = (PK: ('(0,3)'), attnum 4, offset 0, data_length 2657)                      +
-   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,4)'), attnum 4, offset 2657)  +
-     Item 1: offset = 2976, tuple = (PK: ('(0,3)'), attnum 4, offset 2657, data_length 347)                   +
-     Item 2: offset = 3368, tuple = (PK: ('(0,4)'), attnum 4, offset 0, data_length 2657)                     +
-   Chunk 2: offset = 3, location = 6072, hikey location = 104                                                 +
-     Item 3: offset = 6080, tuple = (PK: ('(0,4)'), attnum 4, offset 2657, data_length 347)                   +
-                                                                                                              +
+                                            orioledb_tbl_structure                                            
+--------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,1)')                               +
+     Item 0: offset = 264, tuple = ('(0,0)', '1', 'e2af2ac479', '551e8b15be547418fbf5')                      +
+   Chunk 1: offset = 1, location = 336, hikey location = 88, hikey = ('(0,2)')                               +
+     Item 1: offset = 344, tuple = ('(0,1)', '2', 'a9a8d7170b', TOASTed)                                     +
+   Chunk 2: offset = 2, location = 408, hikey location = 96, hikey = ('(0,3)')                               +
+     Item 2: offset = 416, tuple = ('(0,2)', '3', 'a9a8d7170b', TOASTed)                                     +
+   Chunk 3: offset = 3, location = 480, hikey location = 104, hikey = ('(0,4)')                              +
+     Item 3: offset = 488, tuple = ('(0,3)', '4', '6714eedbf4', TOASTed)                                     +
+   Chunk 4: offset = 4, location = 552, hikey location = 112                                                 +
+     Item 4: offset = 560, tuple = ('(0,4)', '5', 'e2af2ac479', TOASTed)                                     +
+                                                                                                             +
+ Index o_indices8_ctid_idx1 contents                                                                         +
+ Page 0: level = 0, maxKeyLen = 26, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('a9a8d7170b', '(0,1)')                 +
+     Item 0: offset = 264, tuple = ('6714eedbf4', '(0,3)')                                                   +
+   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('a9a8d7170b', '(0,2)')                +
+     Item 1: offset = 320, tuple = ('a9a8d7170b', '(0,1)')                                                   +
+   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e2af2ac479', '(0,0)')                +
+     Item 2: offset = 376, tuple = ('a9a8d7170b', '(0,2)')                                                   +
+   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('e2af2ac479', '(0,4)')                +
+     Item 3: offset = 432, tuple = ('e2af2ac479', '(0,0)')                                                   +
+   Chunk 4: offset = 4, location = 480, hikey location = 208                                                 +
+     Item 4: offset = 488, tuple = ('e2af2ac479', '(0,4)')                                                   +
+                                                                                                             +
+ Index toast contents                                                                                        +
+ Page 0: level = 1, maxKeyLen = 16                                                                           +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                           +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 512, hikey location = 64, hikey = (PK: ('(0,3)'), attnum 4, chunknum 0)   +
+     Item 0: offset = 520, downlink = 1                                                                      +
+   Chunk 1: offset = 1, location = 528, hikey location = 80                                                  +
+     Item 1: offset = 536, downlink = 2, key = (PK: ('(0,3)'), attnum 4, chunknum 0)                         +
+                                                                                                             +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                           +
+     Leftmost, Rightlink is invalid                                                                          +
+     Hikey: offset = 120, key = (PK: ('(0,3)'), attnum 4, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,1)'), attnum 4, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('(0,1)'), attnum 4, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,2)'), attnum 4, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('(0,1)'), attnum 4, chunknum 1, data_length 1347)                  +
+   Chunk 2: offset = 2, location = 4368, hikey location = 104, hikey = (PK: ('(0,2)'), attnum 4, chunknum 1) +
+     Item 2: offset = 4376, tuple = (PK: ('(0,2)'), attnum 4, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 7080, hikey location = 120, hikey = (PK: ('(0,3)'), attnum 4, chunknum 0) +
+     Item 3: offset = 7088, tuple = (PK: ('(0,2)'), attnum 4, chunknum 1, data_length 347)                   +
+                                                                                                             +
+ Page 2: level = 0, maxKeyLen = 12, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = toast, clean                                           +
+     Rightmost                                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('(0,3)'), attnum 4, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('(0,3)'), attnum 4, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('(0,4)'), attnum 4, chunknum 1)  +
+     Item 1: offset = 2976, tuple = (PK: ('(0,3)'), attnum 4, chunknum 1, data_length 347)                   +
+     Item 2: offset = 3368, tuple = (PK: ('(0,4)'), attnum 4, chunknum 0, data_length 2657)                  +
+   Chunk 2: offset = 3, location = 6072, hikey location = 104                                                +
+     Item 3: offset = 6080, tuple = (PK: ('(0,4)'), attnum 4, chunknum 1, data_length 347)                   +
+                                                                                                             +
  
 (1 row)
 
