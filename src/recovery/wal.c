@@ -32,7 +32,8 @@ static OIndexType local_type = oIndexInvalid;
 
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
-static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
+static void add_xid_wal_record(OXid oxid, TransactionId logicalXid,
+							   TransactionId logicalNextXid);
 static void add_xid_wal_record_if_needed(void);
 static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
@@ -98,7 +99,7 @@ add_local_modify(uint8 record_type, OTuple record, OffsetNumber length)
 }
 
 void
-wal_commit(OXid oxid, TransactionId logicalXid)
+wal_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid)
 {
 	XLogRecPtr	wait_pos;
 
@@ -118,7 +119,7 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
-		add_xid_wal_record(oxid, logicalXid);
+		add_xid_wal_record(oxid, logicalXid, logicalNextXid);
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(true);
 	local_wal_has_material_changes = false;
@@ -129,7 +130,8 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 }
 
 void
-wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid)
+wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid,
+				 TransactionId xid)
 {
 	Assert(!is_recovery_process());
 
@@ -137,7 +139,7 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid)
 	Assert(local_wal_buffer_offset + sizeof(WALRecJointCommit) <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (local_wal_buffer_offset == 0)
-		add_xid_wal_record(oxid, logicalXid);
+		add_xid_wal_record(oxid, logicalXid, logicalNextXid);
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
 	(void) flush_local_wal(true);
 	local_wal_has_material_changes = false;
@@ -157,7 +159,7 @@ wal_after_commit()
 }
 
 void
-wal_rollback(OXid oxid, TransactionId logicalXid)
+wal_rollback(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid)
 {
 	XLogRecPtr	wait_pos;
 
@@ -175,7 +177,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid)
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) <= LOCAL_WAL_BUFFER_SIZE);
 	if (local_wal_buffer_offset == 0)
-		add_xid_wal_record(oxid, logicalXid);
+		add_xid_wal_record(oxid, logicalXid, logicalNextXid);
 	add_finish_wal_record(WAL_REC_ROLLBACK, pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false);
 	local_wal_has_material_changes = false;
@@ -224,7 +226,8 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin)
  * Returns size of a new record.
  */
 static void
-add_xid_wal_record(OXid oxid, TransactionId logicalXid)
+add_xid_wal_record(OXid oxid, TransactionId logicalXid,
+				   TransactionId logicalNextXid)
 {
 	WALRecXid  *rec;
 
@@ -236,6 +239,7 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
+	memcpy(rec->logicalNextXid, &logicalNextXid, sizeof(TransactionId));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }
@@ -247,9 +251,10 @@ add_xid_wal_record_if_needed(void)
 	{
 		OXid		oxid = get_current_oxid_if_any();
 		TransactionId logicalXid = get_current_logical_xid();
+		TransactionId logicalNextXid = get_current_logical_xid();
 
 		Assert(oxid != InvalidOXid);
-		add_xid_wal_record(oxid, logicalXid);
+		add_xid_wal_record(oxid, logicalXid, logicalNextXid);
 	}
 }
 
