@@ -40,7 +40,12 @@
 	 ((committing) ? COMMITSEQNO_SPECIAL_COMMITTING_BIT : 0))
 
 static OXid curOxid = InvalidOXid;
+
+/*
+ * A 32-bit transaction id to be used during logical decoding.
+ */
 static TransactionId logicalXid = InvalidTransactionId;
+static TransactionId logicalNextXid = InvalidTransactionId;
 static List *prevLogicalXids = NIL;
 static pg_atomic_uint64 *xidBuffer;
 
@@ -945,6 +950,7 @@ get_current_oxid(void)
 													 false));
 		curOxid = newOxid;
 		logicalXid = acquire_logical_xid();
+		logicalNextXid = XidFromFullTransactionId(ShmemVariableCache->nextXid);
 	}
 
 	return curOxid;
@@ -962,6 +968,13 @@ set_current_logical_xid(TransactionId xid)
 {
 	Assert(!TransactionIdIsValid(logicalXid));
 	logicalXid = xid;
+}
+
+void
+set_current_logical_next_xid(TransactionId xid)
+{
+	Assert(!TransactionIdIsValid(logicalNextXid));
+	logicalNextXid = xid;
 }
 
 void
@@ -986,6 +999,7 @@ reset_current_oxid(void)
 {
 	curOxid = InvalidOXid;
 	logicalXid = InvalidTransactionId;
+	logicalNextXid = InvalidTransactionId;
 }
 
 OXid
@@ -1001,6 +1015,12 @@ TransactionId
 get_current_logical_xid(void)
 {
 	return logicalXid;
+}
+
+TransactionId
+get_current_logical_next_xid(void)
+{
+	return logicalNextXid;
 }
 
 void
@@ -1084,6 +1104,7 @@ current_oxid_commit(CommitSeqNo csn)
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
+	logicalNextXid = InvalidTransactionId;
 }
 
 void
@@ -1103,6 +1124,7 @@ current_oxid_abort(void)
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
+	logicalNextXid = InvalidTransactionId;
 }
 
 /*

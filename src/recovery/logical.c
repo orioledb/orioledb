@@ -223,6 +223,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	ORelOids	cur_oids = {0, 0, 0};
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId;
+	TransactionId logicalNextXid = InvalidTransactionId;
 	uint8		rec_type;
 	OffsetNumber length;
 	OIndexType	ix_type = oIndexInvalid;
@@ -256,18 +257,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&logicalXid, ptr, sizeof(TransactionId));
 			ptr += sizeof(TransactionId);
 
-
+			memcpy(&logicalNextXid, ptr, sizeof(TransactionId));
+			ptr += sizeof(TransactionId);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
 			OXid		xmin;
 			dlist_iter	cur_txn_i;
 			ReorderBufferTXN *txn;
-#if PG_VERSION_NUM >= 160000
-			Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
-#else
-			Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder, InvalidTransactionId);
-#endif
 
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
@@ -275,11 +272,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
 			if (txn->toptxn)
 				txn = txn->toptxn;
-
-			ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
-										 buf->origptr + (ptr - startPtr),
-										 snap);
-			snap->active_count++;
 
 			dlist_foreach(cur_txn_i, &txn->subtxns)
 			{
@@ -300,32 +292,27 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
+			logicalNextXid = InvalidTransactionId;
 		}
 		else if (rec_type == WAL_REC_JOINT_COMMIT)
 		{
 			TransactionId xid;
 			OXid		xmin;
-#if PG_VERSION_NUM >= 160000
-			Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
-#else
-			Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder, InvalidTransactionId);
-#endif
 
 			memcpy(&xid, ptr, sizeof(xid));
 			ptr += sizeof(xid);
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
 
-			ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
-										 buf->origptr + (ptr - startPtr),
-										 snap);
-			snap->active_count++;
-
 			ReorderBufferCommit(ctx->reorder, logicalXid,
 								buf->origptr, buf->endptr,
 								0, XLogRecGetOrigin(buf->record),
 								buf->origptr + (ptr - startPtr));
 			UpdateDecodingStats(ctx);
+
+			oxid = InvalidOXid;
+			logicalXid = InvalidTransactionId;
+			logicalNextXid = InvalidTransactionId;
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
@@ -457,6 +444,37 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			memcpy(&length, ptr, sizeof(OffsetNumber));
 			ptr += sizeof(OffsetNumber);
+
+			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
+			{
+				ptr += length;
+				continue;
+			}
+
+			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_CONSISTENT &&
+				TransactionIdPrecedes(logicalNextXid, SnapBuildNextPhaseAt(ctx->snapshot_builder)))
+			{
+				ptr += length;
+				continue;
+			}
+
+			/*
+			 * If the reorderbuffer doesn't yet have a snapshot, add one now, it will
+			 * be needed to decode the change we're currently processing.
+			 */
+			if (!ReorderBufferXidHasBaseSnapshot(ctx->reorder, logicalXid))
+			{
+#if PG_VERSION_NUM >= 160000
+				Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
+#else
+				Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder, InvalidTransactionId);
+#endif
+
+				ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
+											 buf->origptr + (ptr - startPtr),
+											 snap);
+				snap->active_count++;
+			}
 
 
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
