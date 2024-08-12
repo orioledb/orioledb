@@ -18,6 +18,7 @@
 #include "btree/modify.h"
 #include "catalog/indices.h"
 #include "catalog/o_tables.h"
+#include "indexam/handler.h"
 #include "tableam/operations.h"
 #include "tableam/tree.h"
 #include "tuple/slot.h"
@@ -32,6 +33,7 @@
 #include "optimizer/optimizer.h"
 #include "parser/parsetree.h"
 #include "tableam/index_scan.h"
+#include "utils/fmgroids.h"
 #include "utils/index_selfuncs.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
@@ -87,11 +89,8 @@ static Size orioledb_amestimateparallelscan(void);
 static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
 
-Datum orioledb_indexam_handler(PG_FUNCTION_ARGS);
-
-PG_FUNCTION_INFO_V1(orioledb_indexam_handler);
-
-Datum orioledb_indexam_handler(PG_FUNCTION_ARGS)
+static IndexAmRoutine *
+orioledb_get_indexam_handler(void)
 {
 	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 	orioledb_check_shmem();
@@ -144,13 +143,37 @@ Datum orioledb_indexam_handler(PG_FUNCTION_ARGS)
 	amroutine->aminitparallelscan = orioledb_aminitparallelscan;
 	amroutine->amparallelrescan = orioledb_amparallelrescan;
 
-	PG_RETURN_POINTER(amroutine);
+	return amroutine;
 }
+
+IndexAmRoutine *
+orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
+{
+	static Oid orioledb_tam_oid = InvalidOid;
+
+	if (tamoid == HEAP_TABLE_AM_OID)
+		return NULL;
+
+	if (!OidIsValid(orioledb_tam_oid))
+		orioledb_tam_oid = GetSysCacheOid1(AMNAME, Anum_pg_am_oid,
+										   CStringGetDatum("orioledb"));
+
+	if (tamoid == orioledb_tam_oid && amhandler == F_BTHANDLER)
+		return orioledb_get_indexam_handler();
+
+	return NULL;
+}
+
+
+/* Check if name is used */
+
 
 IndexBuildResult *
 orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
 	IndexBuildResult	   *result;
+
+	(void) btbuild(heap, index, indexInfo);
 
 	result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
 
@@ -169,6 +192,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 void
 orioledb_ambuildempty(Relation index)
 {
+	btbuildempty(index);
 }
 
 static OBTreeModifyCallbackAction

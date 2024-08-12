@@ -22,6 +22,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "indexam/handler.h"
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -898,6 +899,7 @@ _PG_init(void)
 	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
 	prev_base_init_startup_hook = base_init_startup_hook;
 	base_init_startup_hook = o_base_init_startup_hook;
+	IndexAMRoutineHook = orioledb_indexam_routine_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }
