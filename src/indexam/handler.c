@@ -188,6 +188,8 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	(void) btbuild(heap, index, indexInfo);
 
+	(void) btbuild(heap, index, indexInfo);
+
 	result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
 
 	result->heap_tuples = 0.0;
@@ -376,149 +378,6 @@ detoast_passed_values(OIndexDescr *index_descr, Datum *values, bool *isnull, boo
 			values[i] = tmp;
 			vfree[i] = true;
 		}
-	}
-}
-
-static OBTreeModifyCallbackAction
-o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
-				  OXid oxid, OTupleXactInfo xactInfo,
-				  BTreeLeafTupleDeletedStatus deleted,
-				  UndoLocation location, RowLockMode *lock_mode,
-				  BTreeLocationHint *hint, void *arg)
-{
-	OTableSlot *oslot = (OTableSlot *) arg;
-
-	if (descr->type == oIndexPrimary &&
-		XACT_INFO_OXID_IS_CURRENT(xactInfo))
-	{
-		OIndexDescr *id = (OIndexDescr *) descr->arg;
-
-		o_tuple_set_version(&id->leafSpec, newtup,
-							o_tuple_get_version(tup) + 1);
-		oslot->tuple = *newtup;
-	}
-	return OBTreeCallbackActionUpdate;
-}
-
-static void
-o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
-{
-	bool		is_ctid = id->primaryIsCtid;
-	bool		is_primary = id->desc.type == oIndexPrimary;
-
-	if (is_primary && is_ctid)
-	{
-		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-						errmsg("ctid index key duplicate.")));
-	}
-	else
-	{
-		StringInfo	str = makeStringInfo();
-		int			i;
-
-		appendStringInfo(str, "(");
-		for (i = 0; i < id->nKeyFields; i++)
-		{
-			if (i != 0)
-				appendStringInfo(str, ", ");
-			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
-		}
-		appendStringInfo(str, ")=");
-
-		slot_getallattrs(slot);
-
-		appendStringInfo(str, "(");
-		for (i = 0; i < id->nUniqueFields; i++)
-		{
-			Datum		value = slot->tts_values[i];
-			bool		isnull = slot->tts_isnull[i];
-
-			if (i != 0)
-				appendStringInfo(str, ", ");
-			if (isnull)
-				appendStringInfo(str, "null");
-			else
-			{
-				Oid			typoutput;
-				bool		typisvarlena;
-				char	   *res;
-
-				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
-								&typoutput, &typisvarlena);
-				res = OidOutputFunctionCall(typoutput, value);
-				appendStringInfo(str, "'%s'", res);
-			}
-		}
-		appendStringInfo(str, ")");
-
-		ereport(ERROR,
-				(errcode(ERRCODE_UNIQUE_VIOLATION),
-				 errmsg("duplicate key value violates unique "
-						"constraint \"%s\"", id->name.data),
-				 errdetail("Key %s already exists.", str->data),
-				 errtableconstraint(rel, id->desc.type == oIndexPrimary ?
-									"pk" : "sk")));
-	}
-}
-
-
-static void
-append_rowid_values(OIndexDescr *id,
-					TupleDesc	pk_tupdesc, OTupleFixedFormatSpec *pk_spec,
-					Datum pkDatum, Datum *values, bool *isnull,
-					CommitSeqNo *csn, uint32 *version)
-{
-	bytea	   *rowid;
-	Pointer		p;
-
-	if (!id->primaryIsCtid)
-	{
-		OTuple		tuple;
-		ORowIdAddendumNonCtid *add;
-
-		rowid = DatumGetByteaP(pkDatum);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumNonCtid *) p;
-		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tuple.data = p;
-		tuple.formatFlags = add->flags;
-		*csn = add->csn;
-		*version = o_tuple_get_version(tuple);
-
-		if (id->nPrimaryFields < id->nFields)
-		{
-			int			i;
-			int			pk_from;
-
-			pk_from = id->nFields - id->nPrimaryFields;
-
-			/* Amount of index fields checked in o_define_index_validate */
-			for (i = 0; i < id->nPrimaryFields; i++)
-			{
-				AttrNumber attnum = id->primaryFieldsAttnums[i] - 1;
-				if (attnum >= pk_from)
-				{
-					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
-				}
-			}
-		}
-	}
-	else
-	{
-		ORowIdAddendumCtid *add;
-		AttrNumber attnum = id->nFields - 1;
-
-		rowid = DatumGetByteaP(pkDatum);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumCtid *) p;
-		*csn = add->csn;
-		*version = add->version;
-		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-
-		values[attnum] = PointerGetDatum(p);
-		isnull[attnum] = false;
 	}
 }
 
