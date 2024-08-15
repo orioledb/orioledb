@@ -343,6 +343,9 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	CommitSeqNo csn;
 	OXid		oxid;
 
+	if (OidIsValid(relation->rd_rel->relrewrite))
+		return slot;
+
 	descr = relation_get_descr(relation);
 	fill_current_oxid_csn(&oxid, &csn);
 	return o_tbl_insert(descr, relation, slot, oxid, csn);

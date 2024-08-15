@@ -207,6 +207,14 @@ SELECT * FROM o_test_add_column;
 -- Test that default fields not recalculated
 SELECT * FROM o_test_add_column;
 
+-- Test primary key usage after rewrite
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column ORDER BY id;
+SELECT * FROM o_test_add_column ORDER BY id;
+COMMIT;
+\q
+
 CREATE TABLE o_test_multiple_analyzes (
     aid integer NOT NULL PRIMARY KEY
 ) USING orioledb;

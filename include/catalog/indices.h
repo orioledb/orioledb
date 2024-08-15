@@ -121,9 +121,11 @@ typedef struct oIdxShared
 extern oIdxShared *recovery_oidxshared;
 extern Sharedsort *recovery_sharedsort;
 
-extern void o_define_index_validate(Relation heap, Relation index, IndexInfo *indexInfo);
+extern void o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo,
+									OTable *o_table);
 extern void o_define_index(Relation heap, Relation index, Oid indoid,
-						   OIndexNumber old_ix_num, IndexBuildResult *result);
+						   OIndexNumber old_ix_num, IndexBuildResult *result,
+						   bool recreate);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
@@ -134,7 +136,8 @@ extern void rebuild_indices_insert_placeholders(OTableDescr *descr);
 extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 							OTable *o_table, OTableDescr *descr,
 							bool in_dedicated_recovery_worker,
-							IndexBuildResult *result);
+							IndexBuildResult *result,
+							bool update_stats);
 extern void assign_new_oids(OTable *oTable, Relation rel);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
 extern void build_secondary_index(OTable *o_table, OTableDescr *descr,

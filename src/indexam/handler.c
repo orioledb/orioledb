@@ -180,10 +180,12 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
 
-	if (!index->rd_index->indisprimary)
+	if (!index->rd_index->indisprimary && !OidIsValid(o_saved_relrewrite))
 	{
-		o_define_index_validate(heap, index, indexInfo);
-		o_define_index(heap, index, InvalidOid, InvalidIndexNumber, result);
+		ORelOids	tbl_oids;
+		ORelOidsSetFromRel(tbl_oids, heap);
+		o_define_index_validate(tbl_oids, index, indexInfo, NULL);
+		o_define_index(heap, index, InvalidOid, InvalidIndexNumber, result, true);
 	}
 
 	return result;
@@ -363,6 +365,9 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	TupleTableSlot *slot;
 	uint32		version;
 	OTuple		tuple;
+
+	if (OidIsValid(rel->rd_rel->relrewrite))
+		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
