@@ -412,6 +412,9 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	if (OidIsValid(rel->rd_rel->relrewrite))
 		return true;
 
+	if (OidIsValid(rel->rd_rel->relrewrite))
+		return true;
+
 	if (rel->rd_index->indisprimary)
 		return true;
 

@@ -134,7 +134,8 @@ extern void rebuild_indices_insert_placeholders(OTableDescr *descr);
 extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 							OTable *o_table, OTableDescr *descr,
 							bool in_dedicated_recovery_worker,
-							IndexBuildResult *result);
+							IndexBuildResult *result,
+							bool update_stats);
 extern void assign_new_oids(OTable *oTable, Relation rel);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
 extern void build_secondary_index(OTable *o_table, OTableDescr *descr,

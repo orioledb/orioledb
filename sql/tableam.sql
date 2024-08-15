@@ -25,18 +25,16 @@ CREATE TABLE o_tableam1
 ) USING orioledb;
 
 -- not supported
-CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 USING orioledb_btree (key);
-CREATE INDEX o_tableam1_ix_options ON o_tableam1 USING orioledb_btree (value) WITH (compression = on);
-ALTER TABLE o_tableam1 ADD EXCLUDE USING orioledb_btree (value WITH =);
--- TODO: Don't forget to make this also not supported
--- ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
+CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
+CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
+ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
 -- supported
 ALTER TABLE o_tableam1 OWNER TO current_user;
-CREATE UNIQUE INDEX o_tableam1_ix1 ON o_tableam1 USING orioledb_btree (key);
-CREATE INDEX o_tableam1_ix2 on o_tableam1 USING orioledb_btree (value);
+CREATE UNIQUE INDEX o_tableam1_ix1 ON o_tableam1 (key);
+CREATE INDEX o_tableam1_ix2 on o_tableam1 (value);
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
@@ -54,10 +52,6 @@ EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
 SELECT * FROM o_tableam1 WHERE value = '5text';
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
 SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
-EXPLAIN (COSTS off) SELECT key FROM o_tableam1 WHERE key = 5;
-SELECT * FROM o_tableam1 WHERE key = 5;
-EXPLAIN (COSTS off) SELECT value FROM o_tableam1 WHERE value = '5text';
-SELECT value FROM o_tableam1 WHERE value = '5text';
 RESET enable_seqscan;
 
 TRUNCATE o_tableam1;
@@ -77,12 +71,9 @@ DROP TABLE o_tableam1;
 -- partial index test
 CREATE TABLE o_test_partial
 (
-	key int8 NOT NULL,
+	key int8 NOT NULL PRIMARY KEY,
 	value text
 ) USING orioledb;
-
-CREATE UNIQUE INDEX o_test_partial_pkey ON o_test_partial USING orioledb_btree (key);
-ALTER TABLE o_test_partial ADD PRIMARY KEY USING INDEX o_test_partial_pkey;
 
 CREATE FUNCTION plpgsql_func_test(in bigint) RETURNS int AS $$
 BEGIN
@@ -131,15 +122,14 @@ SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 EXPLAIN (COSTS off) SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 SET enable_seqscan = OFF;
-
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE value BETWEEN '6' AND '9';
 SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
-SELECT value FROM o_test_partial
-	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
 RESET enable_seqscan;
+SELECT value FROM o_test_partial
+	WHERE (value || 'WOW') BETWEEN '6' AND '9';
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
 DELETE FROM o_test_partial WHERE key = 1;
@@ -160,7 +150,7 @@ DROP TABLE o_test_partial;
 -- expression index test
 CREATE TABLE o_test_expression
 (
-	key int8 NOT NULL,
+	key int8 NOT NULL PRIMARY KEY,
 	value text
 ) USING orioledb;
 
@@ -267,11 +257,9 @@ DROP TABLE o_test_expression;
 -- create table with primary key
 CREATE TABLE o_tableam3
 (
-  id integer NOT NULL
+  id integer NOT NULL,
+  PRIMARY KEY (id)
 ) USING orioledb;
-
-CREATE UNIQUE INDEX o_tableam3_pkey ON o_tableam3 USING orioledb_btree (id);
-ALTER TABLE o_tableam3 ADD PRIMARY KEY USING INDEX o_tableam3_pkey;
 
 SELECT orioledb_tbl_indices('o_tableam3'::regclass);
 INSERT INTO o_tableam3 (SELECT id FROM generate_series(1, 10) as id);
@@ -351,7 +339,8 @@ CREATE TABLE o_tableam_delete1
 (
 	id int8 NOT NULL,
 	val text,
-	val2 text
+	val2 text,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 CREATE INDEX o_tableam_delete1_ix ON o_tableam_delete1 (val);
@@ -377,7 +366,8 @@ CREATE TABLE o_tableam_update1
 (
 	id int8 NOT NULL,
 	val text,
-	val2 text
+	val2 text,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
 CREATE INDEX o_tableam_update1_ix ON o_tableam_update1 (val);
@@ -485,12 +475,10 @@ SELECT orioledb_parallel_debug_start();
 CREATE TABLE o_tableam7
 (
 	id int8 not null,
-	value int8 not null
+	value int8 not null,
+	PRIMARY KEY(id)
 );
 RESET default_table_access_method;
-
-CREATE UNIQUE INDEX o_tableam7_pkey ON o_tableam7 USING orioledb_btree (id);
-ALTER TABLE o_tableam7 ADD PRIMARY KEY USING INDEX o_tableam7_pkey;
 
 INSERT INTO o_tableam7 SELECT i, 100 - i FROM generate_series(1, 100, 1) AS i;
 UPDATE o_tableam7 SET id = id - 5 WHERE value < 99;
@@ -520,10 +508,9 @@ DROP TABLE o_tableam7;
 CREATE TABLE o_tableam8
 (
 	id int4 not null,
-	t text not null
+	t text not null,
+	PRIMARY KEY(id)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_tableam8_pkey ON o_tableam8 USING orioledb_btree (id);
-ALTER TABLE o_tableam8 ADD PRIMARY KEY USING INDEX o_tableam8_pkey;
 
 -- Test page split
 INSERT INTO o_tableam8 SELECT id, repeat('x', id) FROM generate_series(1, 1000, 10) AS id;
@@ -546,10 +533,9 @@ DROP TABLE o_tableam8;
 CREATE TABLE o_tableam_join1
 (
 	id integer NOT NULL,
-	val text
+	val text,
+	PRIMARY KEY (id)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_tableam_join1_pkey ON o_tableam_join1 USING orioledb_btree (id);
-ALTER TABLE o_tableam_join1 ADD PRIMARY KEY USING INDEX o_tableam_join1_pkey;
 
 INSERT INTO o_tableam_join1 (id, val) SELECT i, i||'!' FROM generate_series(1,30,2) AS i;
 
@@ -602,10 +588,9 @@ CREATE TABLE o_tableam_cte_primary_idx
 (
   id integer NOT NULL,
   val integer,
-  val2 integer
+  val2 integer,
+  PRIMARY KEY (id)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_tableam_cte_primary_idx_pkey ON o_tableam_cte_primary_idx USING orioledb_btree (id);
-ALTER TABLE o_tableam_cte_primary_idx ADD PRIMARY KEY USING INDEX o_tableam_cte_primary_idx_pkey;
 
 INSERT INTO o_tableam_cte_base (SELECT id, id + 1, id + 4 FROM generate_series(1, 10) as id);
 
@@ -750,10 +735,9 @@ SELECT * FROM o_tableam_multicolumn_same_idx;
 CREATE TABLE o_tableam_ioc
 (
 	id integer NOT NULL,
-	val integer
+	val integer,
+	PRIMARY KEY(id)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_tableam_ioc_pkey ON o_tableam_ioc USING orioledb_btree (id);
-ALTER TABLE o_tableam_ioc ADD PRIMARY KEY USING INDEX o_tableam_ioc_pkey;
 
 INSERT INTO o_tableam_ioc (SELECT id, id + 1 FROM generate_series(1, 10) as id);
 SELECT * FROM o_tableam_ioc;
@@ -782,10 +766,9 @@ CREATE TABLE o_tableam_explain_2
   id integer NOT NULL,
   val integer,
   val2 integer,
-  val3 integer
+  val3 integer,
+  PRIMARY KEY(id)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_tableam_explain_2_pkey ON o_tableam_explain_2 USING orioledb_btree (id);
-ALTER TABLE o_tableam_explain_2 ADD PRIMARY KEY USING INDEX o_tableam_explain_2_pkey;
 
 INSERT INTO o_tableam_explain_1 (SELECT id, id + 1, id + 4 FROM generate_series(1, 10) as id);
 INSERT INTO o_tableam_explain_2 (SELECT id + 5, id + 1, id + 2, id + 3 FROM generate_series(1, 10) as id);
@@ -819,11 +802,9 @@ SELECT * FROM o_tableam_explain_2;
 
 -- Check snapshot deregistering
 CREATE TABLE o_tableam_snapshot_check (
-	t text,
+	t text PRIMARY KEY,
 	cnt int)
 USING orioledb;
-CREATE UNIQUE INDEX o_tableam_snapshot_check_pkey ON o_tableam_snapshot_check USING orioledb_btree (t);
-ALTER TABLE o_tableam_snapshot_check ADD PRIMARY KEY USING INDEX o_tableam_snapshot_check_pkey;
 WITH inserted AS (
 	INSERT INTO o_tableam_snapshot_check (
 		SELECT t, COUNT(*)
@@ -845,11 +826,9 @@ DROP TABLE heap_table;
 
 CREATE TABLE o_test_add_column
 (
-  id serial,
+  id serial primary key,
   i int4
 ) USING orioledb;
-CREATE UNIQUE INDEX o_test_add_column_pkey ON o_test_add_column USING orioledb_btree (id);
-ALTER TABLE o_test_add_column ADD PRIMARY KEY USING INDEX o_test_add_column_pkey;
 
 CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
 $$
@@ -920,10 +899,9 @@ DROP TABLE o_test_1;
 SELECT orioledb_parallel_debug_stop();
 CREATE TABLE o_test_split_rightmost (
   val_1 int NOT NULL,
-  val_2 text NOT NULL
+  val_2 text NOT NULL,
+  PRIMARY KEY(val_1, val_2)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_test_split_rightmost_pkey ON o_test_split_rightmost USING orioledb_btree (val_1, val_2);
-ALTER TABLE o_test_split_rightmost ADD PRIMARY KEY USING INDEX o_test_split_rightmost_pkey;
 
 INSERT INTO o_test_split_rightmost
   SELECT a, repeat('x', a) FROM generate_series(978, 985) as a;

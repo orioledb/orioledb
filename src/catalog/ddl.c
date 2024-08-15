@@ -1450,6 +1450,9 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 		saved_undo_location[i] = prevSavedLocation[i];
 }
 
+Oid o_saved_relrewrite = InvalidOid;
+static ORelOids saved_oids;
+
 static void
 set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 {
@@ -2610,10 +2613,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			if (rel != NULL)
 			{
 				Assert(rel->rd_rel->relkind == RELKIND_INDEX);
-				/*
-				* dropflags == PERFORM_DELETION_OF_RELATION ignored, to not
-				* drop indices when whole table dropped
-				*/
+				ORelOids	tbl_oids;
 				Relation	tbl = relation_open(rel->rd_index->indrelid,
 												AccessShareLock);
 				bool		closed = false;
@@ -2627,12 +2627,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					Assert(descr != NULL);
 					if (rel->rd_index->indisprimary) {
+						ORelOidsSetFromRel(tbl_oids, tbl);
 						// NOTE: This will work when ADD PRIMARY KEY will have indexam option to use
-						o_define_index_validate(tbl, rel, NULL);
+						o_define_index_validate(tbl_oids, rel, NULL, NULL);
 						relation_close(rel, AccessShareLock);
 						closed = true;
 						o_define_index(tbl, rel, conform->conindid,
-									   InvalidIndexNumber, NULL);
+									   InvalidIndexNumber, NULL, true);
 					} else {
 						ix_num = o_find_ix_num_by_name(descr,
 													rel->rd_rel->relname.data);
@@ -2640,11 +2641,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						{
 							if (descr->indices[ix_num]->primaryIsCtid)
 								ix_num--;
-							o_define_index_validate(tbl, rel, NULL);
+							ORelOidsSetFromRel(tbl_oids, tbl);
+							o_define_index_validate(tbl_oids, rel, NULL, NULL);
 							relation_close(rel, AccessShareLock);
 							closed = true;
 							o_define_index(tbl, rel, conform->conindid,
-										   ix_num, NULL);
+										   ix_num, NULL, true);
 						}
 					}
 				}
