@@ -169,12 +169,14 @@ $$ LANGUAGE sql;
 CREATE TABLE o_test_add_column
 (
 	id serial primary key,
-	i int4
+	i int4,
+	v int4 default nextval('o_test_add_column_id_seq'::regclass)
 ) USING orioledb;
 \d o_test_add_column
 SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
 
+INSERT INTO o_test_add_column VALUES (0, 15, NULL);
 INSERT INTO o_test_add_column (i)
 	SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
 

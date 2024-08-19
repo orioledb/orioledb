@@ -374,7 +374,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					{
 						old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
 						o_fill_tmp_table_descr(old_o_descr, old_o_table);
-						rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true, NULL, true);
+						rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true, NULL);
 					}
 					else
 					{

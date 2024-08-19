@@ -14,14 +14,17 @@
 
 #include "orioledb.h"
 
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/indices.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "tableam/operations.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "tuple/slot.h"
 #include "utils/compress.h"
 #include "recovery/wal.h"
 
@@ -1882,11 +1885,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_table_free(o_table);
 				}
 			}
-			else if (rel->rd_rel->relkind == RELKIND_RELATION &&
-					 OidIsValid(rel->rd_rel->relrewrite) &&
-					 (subId == 0) && is_orioledb_rel(rel))
-			{
-			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
 				Relation	tbl = relation_open(rel->rd_index->indrelid,
@@ -1947,7 +1945,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				relation_close(tbl, AccessShareLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_RELATION &&
-				  OidIsValid(o_saved_relrewrite) && (subId == 0) &&
+				  OidIsValid(o_saved_relrewrite) && !OidIsValid(rel->rd_rel->relrewrite) &&
+				  (subId == 0) &&
 				  is_orioledb_rel(rel) &&
 				  saved_oids.relnode != rel->rd_locator.relNumber)
 			{
@@ -2081,6 +2080,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						indexOid = lfirst_oid(index);
 						Relation ind = relation_open(indexOid, AccessShareLock);
 
+						if (ind->rd_index->indisprimary)
 						{
 							o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 							relation_close(ind, AccessShareLock);
@@ -2103,8 +2103,110 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				old_descr = o_fetch_table_descr(old_o_table->oids);
 
 				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-				rebuild_indices(old_o_table, old_descr,
-								new_o_table, &tmp_descr, false, NULL, true);
+
+				void	   *sscan;
+				TupleTableSlot *primarySlot;
+
+				primarySlot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
+
+				sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, COMMITSEQNO_INPROGRESS, NULL);
+
+				OTuple		tup;
+				CommitSeqNo tupleCsn;
+				BTreeLocationHint hint;
+
+				while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, primarySlot->tts_mcxt, &tupleCsn, &hint)))
+				{
+					tts_orioledb_store_tuple(primarySlot, tup, old_descr,
+											COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+											true, &hint);
+					slot_getallattrs(primarySlot);
+					tts_orioledb_detoast(primarySlot);
+					tts_orioledb_toast(primarySlot, old_descr);
+
+					for (int i = 0; i < primarySlot->tts_tupleDescriptor->natts; i++)
+					{
+						Form_pg_attribute attr = &primarySlot->tts_tupleDescriptor->attrs[i];
+
+						if (attr->atthasdef && !attr->atthasmissing &&
+							i > old_o_table->primary_init_nfields &&
+							primarySlot->tts_isnull[i])
+						{
+							MemoryContext oldcxt;
+							MemoryContext tbl_cxt = OGetTableContext(o_table);
+							Node	   *defaultexpr = build_column_default(rel, i + 1);
+							Datum		default_val;
+							Expr	   *expr2;
+							ParseNamespaceItem *nsitem;
+							ParseState *pstate;
+							EState	   *estate = NULL;
+							ExprContext *econtext;
+							ExprState  *exprState;
+
+							pstate = make_parsestate(NULL);
+							pstate->p_sourcetext = NULL;
+							nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
+																NULL, false, true);
+							addNSItemToQuery(pstate, nsitem, true, true, true);
+
+							expr2 = expression_planner((Expr *) defaultexpr);
+
+							oldcxt = MemoryContextSwitchTo(tbl_cxt);
+							estate = CreateExecutorState();
+							exprState = ExecPrepareExpr(expr2, estate);
+							econtext = GetPerTupleExprContext(estate);
+
+							default_val = ExecEvalExpr(exprState, econtext,
+													&primarySlot->tts_isnull[i]);
+
+							FreeExecutorState(estate);
+							free_parsestate(pstate);
+
+							primarySlot->tts_values[i] = datumCopy(default_val, attr->attbyval, attr->attlen);
+							MemoryContextSwitchTo(oldcxt);
+
+							attr->atthasmissing = false;
+						}
+
+
+					}
+					OTableDescr *descr;
+					CommitSeqNo csn;
+					OXid		oxid;
+
+					descr = &tmp_descr;
+
+					fill_current_oxid_csn(&oxid, &csn);
+					o_tbl_insert(descr, rel, primarySlot, oxid, csn);
+
+					ExecClearTuple(primarySlot);
+				}
+
+				ExecDropSingleTupleTableSlot(primarySlot);
+				free_btree_seq_scan(sscan);
+
+				{
+					ListCell   *index;
+					Oid			indexOid;
+
+					foreach(index, RelationGetIndexList(rel))
+					{
+						bool closed = false;
+						indexOid = lfirst_oid(index);
+						Relation ind = relation_open(indexOid, AccessShareLock);
+
+						if (!ind->rd_index->indisprimary)
+						{
+							o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+							relation_close(ind, AccessShareLock);
+							o_define_index(rel, ind, ind->rd_rel->oid,
+										   InvalidIndexNumber, NULL, false);
+							closed = true;
+						}
+						if (!closed)
+							relation_close(ind, AccessShareLock);
+					}
+				}
 
 				o_table_free(old_o_table);
 				o_table_free(new_o_table);
