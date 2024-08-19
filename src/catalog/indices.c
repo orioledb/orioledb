@@ -602,7 +602,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		if (table_index->type == oIndexPrimary)
 		{
 			Assert(old_o_table);
-			rebuild_indices(old_o_table, old_descr, o_table, descr, false, result, true);
+			rebuild_indices(old_o_table, old_descr, o_table, descr, false, result);
 		}
 		else
 		{
@@ -1622,7 +1622,7 @@ void
 rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				OTable *o_table, OTableDescr *descr,
 				bool in_dedicated_recovery_worker,
-				IndexBuildResult *result, bool update_stats)
+				IndexBuildResult *result)
 {
 	Tuplesortstate **sortstates;
 	int			i;
@@ -1768,7 +1768,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	pfree(fileHeaders);
 
-	if (!is_recovery_in_progress() && update_stats)
+	if (!is_recovery_in_progress())
 	{
 		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
 		index_update_stats(tableRelation, true, heap_tuples);
@@ -1827,7 +1827,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
-	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL, true);
+	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
 
 }
 

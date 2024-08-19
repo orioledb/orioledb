@@ -2349,10 +2349,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
-										new_o_table, &tmp_descr, false, NULL, true);
+										new_o_table, &tmp_descr, false, NULL);
 #else
 					rebuild_indices(old_o_table, old_descr,
-									new_o_table, &tmp_descr, false, NULL, true);
+									new_o_table, &tmp_descr, false, NULL);
 #endif
 				}
 				else
@@ -2416,10 +2416,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
-										new_o_table, &tmp_descr, false, NULL, true);
+										new_o_table, &tmp_descr, false, NULL);
 #else
 					rebuild_indices(old_o_table, old_descr,
-									new_o_table, &tmp_descr, false, NULL, true);
+									new_o_table, &tmp_descr, false, NULL);
 #endif
 				}
 				else
