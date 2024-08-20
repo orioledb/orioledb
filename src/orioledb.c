@@ -138,6 +138,7 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
+static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
 
@@ -200,6 +201,7 @@ static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											Oid relationObjectId,
 											bool inhparent,
 											RelOptInfo *rel);
+static bool orioledb_skip_tree_height_hook(Relation indexRelation);
 
 PG_FUNCTION_INFO_V1(orioledb_page_stats);
 PG_FUNCTION_INFO_V1(orioledb_version);
@@ -895,6 +897,8 @@ _PG_init(void)
 	reset_xmin_hook = orioledb_reset_xmin_hook;
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
+	prev_skip_tree_height_hook = skip_tree_height_hook;
+	skip_tree_height_hook = orioledb_skip_tree_height_hook;
 	xact_redo_hook = o_xact_redo_hook;
 	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
 	prev_base_init_startup_hook = base_init_startup_hook;
@@ -1643,6 +1647,21 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 	}
 
 	table_close(relation, NoLock);
+}
+
+static bool
+orioledb_skip_tree_height_hook(Relation indexRelation)
+{
+	bool		result = false;
+	Relation	tbl;
+
+	tbl = table_open(indexRelation->rd_index->indrelid, NoLock);
+
+	if (is_orioledb_rel(tbl))
+		result = true;
+
+	table_close(tbl, NoLock);
+	return result;
 }
 
 Datum

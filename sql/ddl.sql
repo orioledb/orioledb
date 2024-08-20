@@ -166,11 +166,12 @@ $$
 	SELECT substr(sha256(($1::text || ' ' || $2::text)::bytea)::text,2,16)::bit(52)::bigint::float8 / pow(2.0, 52.0);
 $$ LANGUAGE sql;
 
+CREATE SEQUENCE o_test_add_column_id_seq2;
 CREATE TABLE o_test_add_column
 (
 	id serial primary key,
 	i int4,
-	v int4 default nextval('o_test_add_column_id_seq'::regclass)
+	v int4 default nextval('o_test_add_column_id_seq2'::regclass)
 ) USING orioledb;
 \d o_test_add_column
 SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
@@ -215,7 +216,6 @@ SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column ORDER BY id;
 SELECT * FROM o_test_add_column ORDER BY id;
 COMMIT;
-\q
 
 CREATE TABLE o_test_multiple_analyzes (
     aid integer NOT NULL PRIMARY KEY
@@ -377,21 +377,23 @@ INSERT INTO o_test_float_default VALUES (2, null, 2.0);
 SELECT * FROM o_test_float_default;
 
 CREATE TABLE o_test_duplicate_key_fields (
+	val_2 int,
 	val_1 int
 ) USING orioledb;
 
 CREATE INDEX o_test_duplicate_key_fields_ix1
-	ON o_test_duplicate_key_fields (val_1, val_1) INCLUDE (val_1);
+	ON o_test_duplicate_key_fields (val_1, val_2, val_1) INCLUDE (val_1);
 
-INSERT INTO o_test_duplicate_key_fields SELECT generate_series(1, 5);
+INSERT INTO o_test_duplicate_key_fields SELECT v, v * 10 FROM generate_series(1, 5) v;
 
 SELECT orioledb_tbl_indices('o_test_duplicate_key_fields'::regclass);
 SELECT orioledb_tbl_structure('o_test_duplicate_key_fields'::regclass, 'nue');
 
 SET enable_seqscan = off;
-SELECT * FROM o_test_duplicate_key_fields ORDER BY val_1;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_duplicate_key_fields ORDER BY val_1;
+EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
+SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
 RESET enable_seqscan;
+\q
 
 CREATE TABLE o_test_pkey_fields_same_as_index (
 	val_1 int,

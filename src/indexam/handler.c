@@ -1219,6 +1219,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 			int			nfields = index_descr->nFields;
 			int			i;
 
+			// TODO: Cache these tupdescs
 			tupdesc = CreateTemplateTupleDesc(nfields);
 			for (i = 0; i < nfields; i++)
 			{
@@ -1229,10 +1230,36 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 			{
 				nfields--;
 			}
-			scan->xs_itupdesc = CreateTemplateTupleDesc(nfields);
-			for (i = 0; i < nfields; i++)
+
+			OTable *o_table;
+			OTableIndex *o_tbl_idx;
+
+			o_table = o_tables_get(index_descr->tableOids);
+			if (o_table->has_primary)
+				o_tbl_idx = &o_table->indices[ix_num];
+			else
+				o_tbl_idx = &o_table->indices[ix_num - 1];
+
+			scan->xs_itupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
+			for (i = 0; i < o_tbl_idx->nfields; i++)
 			{
-				TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+				if (i < index_descr->leafTupdesc->natts - 1)
+					TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+				else
+				{
+					int j;
+					int found = -1;
+					for (j = 0; j < index_descr->leafTupdesc->natts - 1; j++)
+					{
+						if (o_tbl_idx->fields[i].attnum == o_tbl_idx->fields[j].attnum)
+						{
+							found = j;
+							break;
+						}
+					}
+					Assert(found >= 0);
+					TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, found + 1);
+				}
 			}
 
 			slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsOrioleDB);
