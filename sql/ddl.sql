@@ -393,7 +393,6 @@ SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
 SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
 RESET enable_seqscan;
-\q
 
 CREATE TABLE o_test_pkey_fields_same_as_index (
 	val_1 int,
