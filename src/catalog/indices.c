@@ -535,8 +535,13 @@ o_define_index(Relation heap, Relation index, Oid indoid,
 			OXid		oxid;
 
 			fill_current_oxid_csn(&oxid, &csn);
+
 			o_tables_drop_by_oids(old_o_table->oids, oxid, csn);
+			o_invalidate_oids(old_o_table->oids);
+
 			o_tables_add(o_table, oxid, csn);
+			add_undo_create_relnode(o_table->oids, &table_index->oids, 1);
+
 		}
 	}
 	else
