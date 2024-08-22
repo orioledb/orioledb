@@ -1450,9 +1450,6 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 		saved_undo_location[i] = prevSavedLocation[i];
 }
 
-Oid o_saved_relrewrite = InvalidOid;
-static ORelOids saved_oids;
-
 static void
 set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 {
@@ -2633,7 +2630,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						relation_close(rel, AccessShareLock);
 						closed = true;
 						o_define_index(tbl, rel, conform->conindid,
-									   InvalidIndexNumber, NULL, true);
+									   InvalidIndexNumber, NULL);
 					} else {
 						ix_num = o_find_ix_num_by_name(descr,
 													rel->rd_rel->relname.data);
@@ -2646,7 +2643,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							relation_close(rel, AccessShareLock);
 							closed = true;
 							o_define_index(tbl, rel, conform->conindid,
-										   ix_num, NULL, true);
+										   ix_num, NULL);
 						}
 					}
 				}
