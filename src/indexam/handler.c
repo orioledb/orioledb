@@ -185,7 +185,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		ORelOids	tbl_oids;
 		ORelOidsSetFromRel(tbl_oids, heap);
 		o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-		o_define_index(heap, index, InvalidOid, InvalidIndexNumber, result, true);
+		o_define_index(heap, index, InvalidOid, InvalidIndexNumber, result);
 	}
 
 	return result;

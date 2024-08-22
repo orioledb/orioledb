@@ -383,8 +383,7 @@ index_build_params(OTableIndex *index)
  */
 void
 o_define_index(Relation heap, Relation index, Oid indoid,
-			   OIndexNumber old_ix_num, IndexBuildResult *result,
-			   bool recreate)
+			   OIndexNumber old_ix_num, IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
@@ -454,13 +453,10 @@ o_define_index(Relation heap, Relation index, Oid indoid,
 	/* Rebuild, assign new oids */
 	if (ix_type == oIndexPrimary)
 	{
-		if (recreate)
-		{
-			new_o_table = o_tables_get(oids);
-			o_table = new_o_table;
-			assign_new_oids(new_o_table, heap);
-			oids = new_o_table->oids;
-		}
+		new_o_table = o_tables_get(oids);
+		o_table = new_o_table;
+		assign_new_oids(new_o_table, heap);
+		oids = new_o_table->oids;
 		o_table->has_primary = true;
 		o_table->primary_init_nfields = o_table->nfields;
 		ix_num = 0;		/* place first */
@@ -527,22 +523,7 @@ o_define_index(Relation heap, Relation index, Oid indoid,
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 
-		if (recreate)
-			recreate_o_table(old_o_table, o_table);
-		else
-		{
-			CommitSeqNo csn;
-			OXid		oxid;
-
-			fill_current_oxid_csn(&oxid, &csn);
-
-			o_tables_drop_by_oids(old_o_table->oids, oxid, csn);
-			o_invalidate_oids(old_o_table->oids);
-
-			o_tables_add(o_table, oxid, csn);
-			add_undo_create_relnode(o_table->oids, &table_index->oids, 1);
-
-		}
+		recreate_o_table(old_o_table, o_table);
 	}
 	else
 	{
