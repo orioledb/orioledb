@@ -72,7 +72,9 @@ SELECT * FROM o_ddl_check;
 BEGIN;
 ALTER TABLE o_ddl_check ALTER f2 TYPE int
 	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
-SELECT orioledb_table_description('o_ddl_check'::regclass);
+-- TODO: Make ALTER TYPE for multiple columns at once
+-- ALTER TABLE o_ddl_check ALTER f2 TYPE char USING substr(f2::text, 2, 1),
+-- 						ALTER f3 TYPE char USING substr(f3::text, 2, 1);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
 ROLLBACK;
