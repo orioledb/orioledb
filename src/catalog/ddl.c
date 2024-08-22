@@ -1213,6 +1213,7 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	Node	   *expr = NULL;
 	bool		rewrite = false;
 	ListCell   *lc;
+	bool		append_transform = false;
 
 	foreach(lc, alter_type_exprs)
 	{
@@ -1230,12 +1231,15 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	{
 		expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
 								old_field->collation, 0);
+		append_transform = true;
 	}
 	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
 								 field->typmod, COERCION_EXPLICIT,
 								 COERCE_IMPLICIT_CAST, -1);
 	if (expr != NULL)
 	{
+		if (append_transform)
+			alter_type_exprs = lappend(alter_type_exprs, list_make2(makeInteger(subId), expr));
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
 
@@ -2107,9 +2111,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 
 				void	   *sscan;
-				TupleTableSlot *primarySlot;
+				TupleTableSlot *old_slot;
+				TupleTableSlot *new_slot;
 
-				primarySlot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
+				old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
+				new_slot = MakeSingleTupleTableSlot(tmp_descr.tupdesc, &TTSOpsOrioleDB);
 
 				sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, COMMITSEQNO_INPROGRESS, NULL);
 
@@ -2117,27 +2123,46 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				CommitSeqNo tupleCsn;
 				BTreeLocationHint hint;
 
-				while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, primarySlot->tts_mcxt, &tupleCsn, &hint)))
+				while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
 				{
-					tts_orioledb_store_tuple(primarySlot, tup, old_descr,
-											COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
-											true, &hint);
-					slot_getallattrs(primarySlot);
-					tts_orioledb_detoast(primarySlot);
-					tts_orioledb_toast(primarySlot, old_descr);
+					tts_orioledb_store_tuple(old_slot, tup, old_descr,
+											 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+											 true, &hint);
+					slot_getallattrs(old_slot);
+					tts_orioledb_detoast(old_slot);
 
-					for (int i = 0; i < primarySlot->tts_tupleDescriptor->natts; i++)
+					for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 					{
-						Form_pg_attribute attr = &primarySlot->tts_tupleDescriptor->attrs[i];
+						Node	   *expr = NULL;
+						Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
 
-						if (attr->atthasdef && !attr->atthasmissing &&
+						ListCell   *lc;
+
+						foreach(lc, alter_type_exprs)
+						{
+							AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+
+							if (attnum == i + 1)
+							{
+								expr = (Node *) lsecond((List *) lfirst(lc));
+								break;
+							}
+						}
+
+						if (!expr && attr->atthasdef && !attr->atthasmissing &&
 							i > old_o_table->primary_init_nfields &&
-							primarySlot->tts_isnull[i])
+							old_slot->tts_isnull[i])
+						{
+							Node	   *defaultexpr = build_column_default(rel, i + 1);
+							expr = defaultexpr;
+						}
+
+						attr = &new_slot->tts_tupleDescriptor->attrs[i];
+						if (expr)
 						{
 							MemoryContext oldcxt;
 							MemoryContext tbl_cxt = OGetTableContext(o_table);
-							Node	   *defaultexpr = build_column_default(rel, i + 1);
-							Datum		default_val;
+							Datum		new_val;
 							Expr	   *expr2;
 							ParseNamespaceItem *nsitem;
 							ParseState *pstate;
@@ -2151,27 +2176,30 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 																NULL, false, true);
 							addNSItemToQuery(pstate, nsitem, true, true, true);
 
-							expr2 = expression_planner((Expr *) defaultexpr);
+							expr2 = expression_planner((Expr *) expr);
 
 							oldcxt = MemoryContextSwitchTo(tbl_cxt);
 							estate = CreateExecutorState();
 							exprState = ExecPrepareExpr(expr2, estate);
 							econtext = GetPerTupleExprContext(estate);
 
-							default_val = ExecEvalExpr(exprState, econtext,
-													&primarySlot->tts_isnull[i]);
+							econtext->ecxt_scantuple = old_slot;
+							new_val = ExecEvalExpr(exprState, econtext,
+												   &new_slot->tts_isnull[i]);
 
 							FreeExecutorState(estate);
 							free_parsestate(pstate);
 
-							primarySlot->tts_values[i] = datumCopy(default_val, attr->attbyval, attr->attlen);
+							new_slot->tts_values[i] = datumCopy(new_val, attr->attbyval, attr->attlen);
 							MemoryContextSwitchTo(oldcxt);
-
-							attr->atthasmissing = false;
 						}
-
-
+						else
+						{
+							new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
+							new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
+						}
 					}
+					new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
 					OTableDescr *descr;
 					CommitSeqNo csn;
 					OXid		oxid;
@@ -2179,12 +2207,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					descr = relation_get_descr(rel);
 
 					fill_current_oxid_csn(&oxid, &csn);
-					o_tbl_insert(descr, rel, primarySlot, oxid, csn);
+					o_tbl_insert(descr, rel, new_slot, oxid, csn);
 
-					ExecClearTuple(primarySlot);
+					ExecClearTuple(old_slot);
+					ExecClearTuple(new_slot);
 				}
 
-				ExecDropSingleTupleTableSlot(primarySlot);
+				ExecDropSingleTupleTableSlot(old_slot);
+				ExecDropSingleTupleTableSlot(new_slot);
 				free_btree_seq_scan(sscan);
 
 				{
