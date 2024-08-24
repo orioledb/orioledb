@@ -72,9 +72,7 @@ SELECT * FROM o_ddl_check;
 BEGIN;
 ALTER TABLE o_ddl_check ALTER f2 TYPE int
 	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
--- TODO: Make ALTER TYPE for multiple columns at once
--- ALTER TABLE o_ddl_check ALTER f2 TYPE char USING substr(f2::text, 2, 1),
--- 						ALTER f3 TYPE char USING substr(f3::text, 2, 1);
+SELECT orioledb_table_description('o_ddl_check'::regclass);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
 ROLLBACK;
@@ -319,8 +317,10 @@ EXPLAIN (COSTS OFF)
 		ORDER BY val_3;
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 
+SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 ALTER TABLE o_test_alter_type_ix_included_rollback
 	ALTER val_2 TYPE text COLLATE "C";
+SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback

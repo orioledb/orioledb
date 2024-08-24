@@ -294,7 +294,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 						ix;
 
 			if (o_table->has_primary)
-				elog(ERROR, "table already has primary index");
+				ereport(ERROR, errmsg("table already has primary index"), errbacktrace());
 
 			for (ix = 0; ix < o_table->nindices; ix++)
 				nattrs_max = Max(nattrs_max, o_table->indices[ix].nfields);
@@ -381,7 +381,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	int16		indnkeyatts;
 	OCompress	compress = InvalidOCompress;
 	OBTOptions *options;
-	bool		unique_as_pkey = old_ix_num != InvalidIndexNumber;
 
 	if (OidIsValid(indoid))
 		index = index_open(indoid, AccessShareLock);
@@ -405,7 +404,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		}
 	}
 
-	if (index->rd_index->indisprimary || unique_as_pkey)
+	if (index->rd_index->indisprimary)
 		ix_type = oIndexPrimary;
 	else if (index->rd_index->indisunique)
 		ix_type = oIndexUnique;
