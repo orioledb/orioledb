@@ -72,15 +72,30 @@ SELECT * FROM o_ddl_check;
 BEGIN;
 ALTER TABLE o_ddl_check ALTER f2 TYPE int
 	USING ('x' || lpad(f2, 8, '0'))::bit(32)::int;
--- TODO: Make ALTER TYPE for multiple columns at once
--- ALTER TABLE o_ddl_check ALTER f2 TYPE char USING substr(f2::text, 2, 1),
--- 						ALTER f3 TYPE char USING substr(f3::text, 2, 1);
+SELECT orioledb_table_description('o_ddl_check'::regclass);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
 ROLLBACK;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
+
+-- TODO: Add test that does ALTER TYPE for multiple columns at once
+-- TODO: Add test that does multiple column ALTER TYPE that are part of one index (to test how drop_index_list overwrite works)
+UPDATE o_ddl_check SET f3 = 53; -- TODO: Comment this line and fix segfault
+TABLE o_ddl_check;
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+CREATE INDEX o_ddl_check_ix1 ON o_ddl_check(f2, f3);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C" USING substr(f2::text, 1, 1),
+						ALTER f3 TYPE char USING substr(f3::text, 1, 1);
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+TABLE o_ddl_check;
+
+ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C",
+						ALTER f3 TYPE char;
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+TABLE o_ddl_check;
 
 CREATE TABLE o_test_alter_change_byval (
     val_1 int
@@ -293,8 +308,10 @@ EXPLAIN (COSTS OFF)
 		ORDER BY val_3;
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 
+SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 ALTER TABLE o_test_alter_type_ix_included_rollback
 	ALTER val_2 TYPE text COLLATE "C";
+SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback

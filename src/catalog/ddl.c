@@ -107,6 +107,7 @@ List	   *drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 Oid o_saved_relrewrite = InvalidOid;
 static ORelOids saved_oids;
+static bool in_rewrite = false;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -715,6 +716,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	/* copied from standard_ProcessUtility */
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
+
+	in_rewrite = false;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -1520,6 +1523,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_POST_CREATE && classId == RelationRelationId)
 	{
+		bool		closed = false;
+
 		rel = relation_open(objectId, AccessShareLock);
 
 		if (rel != NULL)
@@ -1716,7 +1721,56 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				if (tbl)
 					table_close(tbl, AccessShareLock);
 			}
-			relation_close(rel, AccessShareLock);
+			else if (rel->rd_rel->relkind == RELKIND_INDEX)
+			{
+				CommandCounterIncrement();
+				Relation	tbl = relation_open(rel->rd_index->indrelid,
+												AccessShareLock);
+
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+					is_orioledb_rel(tbl))
+				{
+					OTable	   *o_table;
+					ORelOids	table_oids;
+
+					ORelOidsSetFromRel(table_oids, tbl);
+					o_table = o_tables_get(table_oids);
+					if (o_table == NULL)
+					{
+						elog(NOTICE, "orioledb table %s not found",
+							 RelationGetRelationName(tbl));
+					}
+					else
+					{
+						int ix_num = InvalidIndexNumber;
+						int			i;
+
+						for (i = 0; i < o_table->nindices; i++)
+						{
+							if (strcmp(o_table->indices[i].name.data, rel->rd_rel->relname.data) == 0)
+							{
+								ix_num = i;
+								break;
+							}
+						}
+
+						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
+
+						if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
+							o_define_index_validate(table_oids, rel, NULL, NULL);
+						relation_close(rel, AccessShareLock);
+						closed = true;
+						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
+							o_define_index(tbl, rel, rel->rd_rel->oid, ix_num, NULL);
+					}
+				}
+				relation_close(tbl, AccessShareLock);
+
+				// ReleaseSysCache(contup);
+			}
+			if (!closed)
+				relation_close(rel, AccessShareLock);
 		}
 	}
 	else if (access == OAT_POST_CREATE && classId == AttrDefaultRelationId)
@@ -1745,7 +1799,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				OTableField old_field;
 				OTableField *field;
 				bool		changed;
-				bool		rewrite = false;
 
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
@@ -1753,6 +1806,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				attr = &rel->rd_att->attrs[subId - 1];
 				orioledb_attr_to_field(field, attr);
 
+				// TODO: Probably use CheckIndexCompatible here
 				changed = old_field.typid != field->typid ||
 					old_field.collation != field->collation;
 
@@ -1760,10 +1814,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					if (ATColumnChangeRequiresRewrite(&old_field, field,
 													  subId))
-						rewrite = true;
+						in_rewrite = true;
 				}
 
-				if (!rewrite)
+				if (!in_rewrite)
 				{
 					o_table_fill_constr(o_table, rel, subId - 1,
 										&old_field, field);
@@ -1815,7 +1869,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OTableField old_field;
 					OTableField *field;
 					Form_pg_attribute attr;
-					bool		rewrite = false;
 					CommitSeqNo csn;
 					OXid		oxid;
 					int			ix_num;
@@ -1827,6 +1880,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					attr = &rel->rd_att->attrs[subId - 1];
 					orioledb_attr_to_field(field, attr);
 
+					// TODO: Probably use CheckIndexCompatible here
 					changed = old_field.typid != field->typid ||
 						old_field.collation != field->collation;
 
@@ -1834,10 +1888,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						if (ATColumnChangeRequiresRewrite(&old_field, field,
 														  subId))
-							rewrite = true;
+							in_rewrite = true;
 					}
 
-					if (!rewrite)
+					if (!in_rewrite)
 					{
 						orioledb_save_collation(field->collation);
 						fill_current_oxid_csn(&oxid, &csn);
@@ -2324,69 +2378,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			o_invalidate_comparator_cache(o_opclass->opfamily,
 										  o_opclass->inputtype,
 										  o_opclass->inputtype);
-	}
-	else if (access == OAT_POST_CREATE && classId == ConstraintRelationId)
-	{
-		HeapTuple	contup;
-		Form_pg_constraint conform;
-
-		CommandCounterIncrement();
-		contup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(objectId));
-		if (!HeapTupleIsValid(contup))
-			elog(ERROR, "cache lookup failed for constraint %u", objectId);
-		conform = (Form_pg_constraint) GETSTRUCT(contup);
-
-		if (conform->contype == CONSTRAINT_PRIMARY && OidIsValid(conform->conindid))
-		{
-			rel = relation_open(conform->conindid, AccessShareLock);
-
-			if (rel != NULL)
-			{
-				Assert(rel->rd_rel->relkind == RELKIND_INDEX);
-				ORelOids	tbl_oids;
-				Relation	tbl = relation_open(rel->rd_index->indrelid,
-												AccessShareLock);
-				bool		closed = false;
-
-				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
-					tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
-					is_orioledb_rel(tbl))
-				{
-					OIndexNumber ix_num;
-					OTableDescr *descr = relation_get_descr(tbl);
-
-					Assert(descr != NULL);
-					if (rel->rd_index->indisprimary) {
-						ORelOidsSetFromRel(tbl_oids, tbl);
-						// NOTE: This will work when ADD PRIMARY KEY will have indexam option to use
-						o_define_index_validate(tbl_oids, rel, NULL, NULL);
-						relation_close(rel, AccessShareLock);
-						closed = true;
-						o_define_index(tbl, rel, conform->conindid,
-									   InvalidIndexNumber, NULL);
-					} else {
-						ix_num = o_find_ix_num_by_name(descr,
-													rel->rd_rel->relname.data);
-						if (ix_num != InvalidIndexNumber)
-						{
-							if (descr->indices[ix_num]->primaryIsCtid)
-								ix_num--;
-							ORelOidsSetFromRel(tbl_oids, tbl);
-							o_define_index_validate(tbl_oids, rel, NULL, NULL);
-							relation_close(rel, AccessShareLock);
-							closed = true;
-							o_define_index(tbl, rel, conform->conindid,
-										   ix_num, NULL);
-						}
-					}
-				}
-				relation_close(tbl, AccessShareLock);
-				if (!closed)
-					relation_close(rel, AccessShareLock);
-			}
-		}
-
-		ReleaseSysCache(contup);
 	}
 
 	if (old_objectaccess_hook)
