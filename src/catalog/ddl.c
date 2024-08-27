@@ -718,6 +718,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		pstmt = copyObject(pstmt);
 
 	in_rewrite = false;
+	o_saved_relrewrite = InvalidOid;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -1326,6 +1327,232 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 }
 
 static void
+set_toast_oids_and_compress(Relation rel, Relation toast_rel)
+{
+	ORelOids	oids,
+				toastOids,
+				*treeOids;
+	int			numTreeOids;
+	OTable	   *o_table;
+	ORelOptions *options = (ORelOptions *) rel->rd_options;
+	OCompress	compress = default_compress,
+				primary_compress = default_primary_compress,
+				toast_compress = default_toast_compress;
+	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
+	OXid		oxid = InvalidOXid;
+
+	Assert(RelIsInMyDatabase(rel));
+	ORelOidsSetFromRel(oids, rel);
+	ORelOidsSetFromRel(toastOids, toast_rel);
+
+	o_table = o_tables_get(oids);
+	o_table->toast_oids = toastOids;
+
+	if (options)
+	{
+		if (options->compress_offset > 0)
+		{
+			char	   *str;
+
+			str = (char *) (((Pointer) options) +
+							options->compress_offset);
+			if (str)
+				compress = o_parse_compress(str);
+		}
+		if (options->primary_compress_offset > 0)
+		{
+			char	   *str;
+
+			str = (char *) (((Pointer) options) +
+							options->primary_compress_offset);
+			if (str)
+				primary_compress = o_parse_compress(str);
+		}
+		if (options->toast_compress_offset > 0)
+		{
+			char	   *str;
+
+			str = (char *) (((Pointer) options) +
+							options->toast_compress_offset);
+			if (str)
+				toast_compress = o_parse_compress(str);
+		}
+	}
+
+	if (rel->rd_rel->relpersistence !=
+		RELPERSISTENCE_PERMANENT &&
+		(OCompressIsValid(compress) ||
+			OCompressIsValid(primary_compress) ||
+			OCompressIsValid(toast_compress)))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("temp and unlogged orioledb tables does not "
+						"support compression options")));
+	}
+
+	if (OCompressIsValid(compress))
+	{
+		if (!OCompressIsValid(primary_compress))
+			primary_compress = compress;
+		if (!OCompressIsValid(toast_compress))
+			toast_compress = compress;
+	}
+	o_table->default_compress = compress;
+	o_table->toast_compress = toast_compress;
+	o_table->primary_compress = primary_compress;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	o_tables_rel_meta_lock(rel);
+	o_tables_update(o_table, oxid, csn);
+	o_tables_after_update(o_table, oxid, csn);
+
+	treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+	add_undo_create_relnode(oids, treeOids, numTreeOids);
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+	pfree(treeOids);
+	o_table_free(o_table);
+}
+
+static void
+create_o_table_for_rel(Relation rel)
+{
+	ORelOids	oids;
+	TupleDesc	tupdesc;
+	OTable	   *o_table;
+	CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
+	OXid		oxid = InvalidOXid;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	Assert(RelIsInMyDatabase(rel));
+	ORelOidsSetFromRel(oids, rel);
+	tupdesc = RelationGetDescr(rel);
+
+	o_tables_rel_meta_lock(rel);
+	o_table = o_table_tableam_create(oids, tupdesc,
+									rel->rd_rel->relpersistence);
+	o_opclass_cache_add_table(o_table);
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
+
+	o_tables_add(o_table, oxid, csn);
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+	o_table_free(o_table);
+}
+
+static void
+rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
+{
+	OTableDescr *old_descr = NULL;
+	void	   *sscan;
+	TupleTableSlot *old_slot;
+	TupleTableSlot *new_slot;
+	OTuple		tup;
+	CommitSeqNo tupleCsn;
+	BTreeLocationHint hint;
+	OTableDescr *descr;
+	CommitSeqNo csn;
+	OXid		oxid;
+
+	old_descr = o_fetch_table_descr(old_o_table->oids);
+	descr = relation_get_descr(rel);
+	old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
+	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, COMMITSEQNO_INPROGRESS, NULL);
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
+	{
+		tts_orioledb_store_tuple(old_slot, tup, old_descr,
+								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+								 true, &hint);
+		slot_getallattrs(old_slot);
+		tts_orioledb_detoast(old_slot);
+
+		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
+		{
+			Node *expr = NULL;
+			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+
+			ListCell *lc;
+
+			foreach (lc, alter_type_exprs)
+			{
+				AttrNumber attnum = intVal(linitial((List *)lfirst(lc)));
+
+				if (attnum == i + 1)
+				{
+					expr = (Node *)lsecond((List *)lfirst(lc));
+					break;
+				}
+			}
+
+			if (!expr && attr->atthasdef && !attr->atthasmissing &&
+				i > old_o_table->primary_init_nfields &&
+				old_slot->tts_isnull[i])
+			{
+				Node *defaultexpr = build_column_default(rel, i + 1);
+				expr = defaultexpr;
+			}
+
+			attr = &new_slot->tts_tupleDescriptor->attrs[i];
+			if (expr)
+			{
+				new_slot->tts_values[i] = o_eval_default(new_o_table, rel, expr, old_slot,
+														 attr->attbyval, attr->attlen,
+														 &new_slot->tts_isnull[i]);
+			}
+			else
+			{
+				new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
+				new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
+			}
+		}
+		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
+
+		o_tbl_insert(descr, rel, new_slot, oxid, csn);
+
+		ExecClearTuple(old_slot);
+		ExecClearTuple(new_slot);
+	}
+
+	ExecDropSingleTupleTableSlot(old_slot);
+	ExecDropSingleTupleTableSlot(new_slot);
+	free_btree_seq_scan(sscan);
+}
+
+static void
+redefine_indices(Relation rel, OTable *new_o_table, bool primary)
+{
+	ListCell   *index;
+	Oid			indexOid;
+
+	foreach(index, RelationGetIndexList(rel))
+	{
+		bool closed = false;
+		indexOid = lfirst_oid(index);
+		Relation ind = relation_open(indexOid, AccessShareLock);
+
+		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
+		{
+			o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+			relation_close(ind, AccessShareLock);
+			o_define_index(rel, ind, ind->rd_rel->oid,
+							InvalidIndexNumber, NULL);
+			closed = true;
+		}
+		if (!closed)
+			relation_close(ind, AccessShareLock);
+	}
+}
+
+static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
 {
@@ -1587,30 +1814,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				if (!OidIsValid(rel->rd_rel->relrewrite))
 				{
-					ORelOids	oids;
-					TupleDesc	tupdesc;
-					OTable	   *o_table;
-					CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
-					OXid		oxid = InvalidOXid;
-					XLogRecPtr	cur_lsn;
-					Oid			datoid;
-
-					fill_current_oxid_csn(&oxid, &csn);
-
-					Assert(RelIsInMyDatabase(rel));
-					ORelOidsSetFromRel(oids, rel);
-					tupdesc = RelationGetDescr(rel);
-
-					o_tables_rel_meta_lock(rel);
-					o_table = o_table_tableam_create(oids, tupdesc,
-													rel->rd_rel->relpersistence);
-					o_opclass_cache_add_table(o_table);
-
-					o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-					o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
-
-					o_tables_add(o_table, oxid, csn);
-					o_tables_rel_meta_unlock(rel, InvalidOid);
+					create_o_table_for_rel(rel);
 				}
 				else {
 					Relation	old_rel = relation_open(rel->rd_rel->relrewrite, AccessShareLock);
@@ -1632,91 +1836,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					ORelOids	oids,
-								toastOids,
-							   *treeOids;
-					OTable	   *o_table;
-					int			numTreeOids;
-					CommitSeqNo csn;
-					OXid		oxid;
-					ORelOptions *options;
-					OCompress	compress = default_compress,
-								primary_compress = default_primary_compress,
-								toast_compress = default_toast_compress;
-
-					options = (ORelOptions *) tbl->rd_options;
-
-					Assert(RelIsInMyDatabase(tbl));
-					ORelOidsSetFromRel(oids, tbl);
-					ORelOidsSetFromRel(toastOids, rel);
-
-					o_table = o_tables_get(oids);
-					o_table->toast_oids = toastOids;
-
-					if (options)
-					{
-						if (options->compress_offset > 0)
-						{
-							char	   *str;
-
-							str = (char *) (((Pointer) options) +
-											options->compress_offset);
-							if (str)
-								compress = o_parse_compress(str);
-						}
-						if (options->primary_compress_offset > 0)
-						{
-							char	   *str;
-
-							str = (char *) (((Pointer) options) +
-											options->primary_compress_offset);
-							if (str)
-								primary_compress = o_parse_compress(str);
-						}
-						if (options->toast_compress_offset > 0)
-						{
-							char	   *str;
-
-							str = (char *) (((Pointer) options) +
-											options->toast_compress_offset);
-							if (str)
-								toast_compress = o_parse_compress(str);
-						}
-					}
-
-					if (rel->rd_rel->relpersistence !=
-						RELPERSISTENCE_PERMANENT &&
-						(OCompressIsValid(compress) ||
-						 OCompressIsValid(primary_compress) ||
-						 OCompressIsValid(toast_compress)))
-					{
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("temp and unlogged orioledb tables does not "
-										"support compression options")));
-					}
-
-					if (OCompressIsValid(compress))
-					{
-						if (!OCompressIsValid(primary_compress))
-							primary_compress = compress;
-						if (!OCompressIsValid(toast_compress))
-							toast_compress = compress;
-					}
-					o_table->default_compress = compress;
-					o_table->toast_compress = toast_compress;
-					o_table->primary_compress = primary_compress;
-
-					fill_current_oxid_csn(&oxid, &csn);
-
-					o_tables_rel_meta_lock(tbl);
-					o_tables_update(o_table, oxid, csn);
-					o_tables_after_update(o_table, oxid, csn);
-
-					treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-					add_undo_create_relnode(oids, treeOids, numTreeOids);
-					o_tables_rel_meta_unlock(tbl, InvalidOid);
-					pfree(treeOids);
+					set_toast_oids_and_compress(tbl, rel);
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);
@@ -2001,302 +2121,53 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 				relation_close(tbl, AccessShareLock);
 			}
-			else if (rel->rd_rel->relkind == RELKIND_RELATION &&
-				  OidIsValid(o_saved_relrewrite) && !OidIsValid(rel->rd_rel->relrewrite) &&
-				  (subId == 0) &&
-				  is_orioledb_rel(rel) &&
-				  saved_oids.relnode != rel->rd_locator.relNumber)
+			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
+					 OidIsValid(o_saved_relrewrite) &&
+					 OidIsValid(rel->rd_rel->relrewrite) &&
+					 (subId == 0))
 			{
-				OTable	   *old_o_table,
-						   *new_o_table;
+				Relation	tbl = NULL;
 
-				old_o_table = o_tables_get(saved_oids);
-				Assert(old_o_table != NULL);
-
-				ORelOids	oids;
-				TupleDesc	tupdesc;
-				OTable	   *o_table;
-				CommitSeqNo csn = COMMITSEQNO_INPROGRESS;
-				OXid		oxid = InvalidOXid;
-				XLogRecPtr	cur_lsn;
-				Oid			datoid;
-
-				fill_current_oxid_csn(&oxid, &csn);
-
-				Assert(RelIsInMyDatabase(rel));
-				ORelOidsSetFromRel(oids, rel);
-				tupdesc = RelationGetDescr(rel);
-
-				o_tables_rel_meta_lock(rel);
-				o_table = o_table_tableam_create(oids, tupdesc,
-												rel->rd_rel->relpersistence);
-				o_opclass_cache_add_table(o_table);
-
-				o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-				o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
-
-				o_tables_add(o_table, oxid, csn);
-				o_tables_rel_meta_unlock(rel, InvalidOid);
-
-				ORelOids	toastOids,
-							*treeOids;
-				int			numTreeOids;
-				ORelOptions *options;
-				OCompress	compress = default_compress,
-							primary_compress = default_primary_compress,
-							toast_compress = default_toast_compress;
-				Relation	toast_rel = relation_open(rel->rd_rel->reltoastrelid, AccessShareLock);
-
-				options = (ORelOptions *) rel->rd_options;
-
-				Assert(RelIsInMyDatabase(rel));
-				ORelOidsSetFromRel(oids, rel);
-				ORelOidsSetFromRel(toastOids, toast_rel);
-
-				o_table = o_tables_get(oids);
-				o_table->toast_oids = toastOids;
-
-				if (options)
+				tbl = table_open(o_saved_relrewrite, AccessShareLock);
+				if (is_orioledb_rel(tbl))
 				{
-					if (options->compress_offset > 0)
-					{
-						char	   *str;
+					ORelOids	new_oids;
+					OTable	   *old_o_table,
+							*new_o_table;
 
-						str = (char *) (((Pointer) options) +
-										options->compress_offset);
-						if (str)
-							compress = o_parse_compress(str);
-					}
-					if (options->primary_compress_offset > 0)
-					{
-						char	   *str;
+					ereport(WARNING, errmsg("NEW tbl_oid: %u", objectId), errbacktrace());
 
-						str = (char *) (((Pointer) options) +
-										options->primary_compress_offset);
-						if (str)
-							primary_compress = o_parse_compress(str);
-					}
-					if (options->toast_compress_offset > 0)
-					{
-						char	   *str;
+					CommandCounterIncrement();
 
-						str = (char *) (((Pointer) options) +
-										options->toast_compress_offset);
-						if (str)
-							toast_compress = o_parse_compress(str);
-					}
+					old_o_table = o_tables_get(saved_oids);
+					Assert(old_o_table != NULL);
+
+					create_o_table_for_rel(tbl);
+
+					set_toast_oids_and_compress(tbl, rel);
+
+					ORelOidsSetFromRel(new_oids, tbl);
+					new_o_table = o_tables_get(new_oids);
+					Assert(new_o_table != NULL);
+
+					relation_close(tbl, AccessShareLock);
+					CommandCounterIncrement();
+					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
+
+					redefine_indices(tbl, new_o_table, true);
+
+					o_table_free(new_o_table);
+					new_o_table = o_tables_get(new_oids);
+					Assert(new_o_table != NULL);
+
+					rewrite_table(tbl, old_o_table, new_o_table);
+					redefine_indices(tbl, new_o_table, false);
+
+					o_table_free(old_o_table);
+					o_table_free(new_o_table);
+					o_saved_relrewrite = InvalidOid;
 				}
-
-				if (rel->rd_rel->relpersistence !=
-					RELPERSISTENCE_PERMANENT &&
-					(OCompressIsValid(compress) ||
-						OCompressIsValid(primary_compress) ||
-						OCompressIsValid(toast_compress)))
-				{
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("temp and unlogged orioledb tables does not "
-									"support compression options")));
-				}
-
-				if (OCompressIsValid(compress))
-				{
-					if (!OCompressIsValid(primary_compress))
-						primary_compress = compress;
-					if (!OCompressIsValid(toast_compress))
-						toast_compress = compress;
-				}
-				o_table->default_compress = compress;
-				o_table->toast_compress = toast_compress;
-				o_table->primary_compress = primary_compress;
-
-				fill_current_oxid_csn(&oxid, &csn);
-
-				o_tables_rel_meta_lock(rel);
-				o_tables_update(o_table, oxid, csn);
-				o_tables_after_update(o_table, oxid, csn);
-
-				treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-				add_undo_create_relnode(oids, treeOids, numTreeOids);
-				o_tables_rel_meta_unlock(rel, InvalidOid);
-				pfree(treeOids);
-				relation_close(toast_rel, AccessShareLock);
-
-				ORelOids	new_oids;
-				ORelOidsSetFromRel(new_oids, rel);
-				new_o_table = o_tables_get(new_oids);
-				Assert(new_o_table != NULL);
-
-				relation_close(rel, AccessShareLock);
-				CommandCounterIncrement();
-				rel = relation_open(objectId, AccessShareLock);
-				{
-					ListCell   *index;
-					Oid			indexOid;
-
-					foreach(index, RelationGetIndexList(rel))
-					{
-						bool closed = false;
-						indexOid = lfirst_oid(index);
-						Relation ind = relation_open(indexOid, AccessShareLock);
-
-						if (ind->rd_index->indisprimary)
-						{
-							o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
-							relation_close(ind, AccessShareLock);
-							o_define_index(rel, ind, ind->rd_rel->oid,
-										   InvalidIndexNumber, NULL);
-							closed = true;
-						}
-						if (!closed)
-							relation_close(ind, AccessShareLock);
-					}
-				}
-
-				o_table_free(new_o_table);
-				new_o_table = o_tables_get(new_oids);
-				Assert(new_o_table != NULL);
-
-				OTableDescr tmp_descr;
-				OTableDescr *old_descr = NULL;
-
-				old_descr = o_fetch_table_descr(old_o_table->oids);
-
-				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-
-				void	   *sscan;
-				TupleTableSlot *old_slot;
-				TupleTableSlot *new_slot;
-
-				old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
-				new_slot = MakeSingleTupleTableSlot(tmp_descr.tupdesc, &TTSOpsOrioleDB);
-
-				sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, COMMITSEQNO_INPROGRESS, NULL);
-
-				OTuple		tup;
-				CommitSeqNo tupleCsn;
-				BTreeLocationHint hint;
-
-				while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
-				{
-					tts_orioledb_store_tuple(old_slot, tup, old_descr,
-											 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
-											 true, &hint);
-					slot_getallattrs(old_slot);
-					tts_orioledb_detoast(old_slot);
-
-					for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
-					{
-						Node	   *expr = NULL;
-						Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
-
-						ListCell   *lc;
-
-						foreach(lc, alter_type_exprs)
-						{
-							AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-
-							if (attnum == i + 1)
-							{
-								expr = (Node *) lsecond((List *) lfirst(lc));
-								break;
-							}
-						}
-
-						if (!expr && attr->atthasdef && !attr->atthasmissing &&
-							i > old_o_table->primary_init_nfields &&
-							old_slot->tts_isnull[i])
-						{
-							Node	   *defaultexpr = build_column_default(rel, i + 1);
-							expr = defaultexpr;
-						}
-
-						attr = &new_slot->tts_tupleDescriptor->attrs[i];
-						if (expr)
-						{
-							MemoryContext oldcxt;
-							MemoryContext tbl_cxt = OGetTableContext(o_table);
-							Datum		new_val;
-							Expr	   *expr2;
-							ParseNamespaceItem *nsitem;
-							ParseState *pstate;
-							EState	   *estate = NULL;
-							ExprContext *econtext;
-							ExprState  *exprState;
-
-							pstate = make_parsestate(NULL);
-							pstate->p_sourcetext = NULL;
-							nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
-																NULL, false, true);
-							addNSItemToQuery(pstate, nsitem, true, true, true);
-
-							expr2 = expression_planner((Expr *) expr);
-
-							oldcxt = MemoryContextSwitchTo(tbl_cxt);
-							estate = CreateExecutorState();
-							exprState = ExecPrepareExpr(expr2, estate);
-							econtext = GetPerTupleExprContext(estate);
-
-							econtext->ecxt_scantuple = old_slot;
-							new_val = ExecEvalExpr(exprState, econtext,
-												   &new_slot->tts_isnull[i]);
-
-							FreeExecutorState(estate);
-							free_parsestate(pstate);
-
-							new_slot->tts_values[i] = datumCopy(new_val, attr->attbyval, attr->attlen);
-							MemoryContextSwitchTo(oldcxt);
-						}
-						else
-						{
-							new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
-							new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
-						}
-					}
-					new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
-					OTableDescr *descr;
-					CommitSeqNo csn;
-					OXid		oxid;
-
-					descr = relation_get_descr(rel);
-
-					fill_current_oxid_csn(&oxid, &csn);
-					o_tbl_insert(descr, rel, new_slot, oxid, csn);
-
-					ExecClearTuple(old_slot);
-					ExecClearTuple(new_slot);
-				}
-
-				ExecDropSingleTupleTableSlot(old_slot);
-				ExecDropSingleTupleTableSlot(new_slot);
-				free_btree_seq_scan(sscan);
-
-				{
-					ListCell   *index;
-					Oid			indexOid;
-
-					foreach(index, RelationGetIndexList(rel))
-					{
-						bool closed = false;
-						indexOid = lfirst_oid(index);
-						Relation ind = relation_open(indexOid, AccessShareLock);
-
-						if (!ind->rd_index->indisprimary)
-						{
-							o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
-							relation_close(ind, AccessShareLock);
-							o_define_index(rel, ind, ind->rd_rel->oid,
-										   InvalidIndexNumber, NULL);
-							closed = true;
-						}
-						if (!closed)
-							relation_close(ind, AccessShareLock);
-					}
-				}
-
-				o_table_free(old_o_table);
-				o_table_free(new_o_table);
-				o_saved_relrewrite = InvalidOid;
+				table_close(tbl, AccessShareLock);
 			}
 			relation_close(rel, AccessShareLock);
 		}

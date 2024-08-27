@@ -312,7 +312,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 						ix;
 
 			if (o_table->has_primary)
-				ereport(ERROR, errmsg("table already has primary index"), errbacktrace());
+				elog(ERROR, "table already has primary index");
 
 			for (ix = 0; ix < o_table->nindices; ix++)
 				nattrs_max = Max(nattrs_max, o_table->indices[ix].nfields);

@@ -228,7 +228,9 @@ o_tables_rel_unlock(ORelOids *oids, int lockmode)
 extern void o_table_fill_oids(OTable *oTable, Relation rel,
 							  const RelFileNode *newrnode);
 extern void o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table);
-
+extern Datum o_eval_default(OTable *o_table, Relation rel,
+							Node *expr, TupleTableSlot *scantuple,
+							bool byval, int16 typlen, bool *isNull);
 extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 								OTableField *old_field, OTableField *field);

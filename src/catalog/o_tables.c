@@ -531,6 +531,46 @@ o_table_resize_constr(OTable *o_table)
 	MemoryContextSwitchTo(oldcxt);
 }
 
+Datum
+o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantuple,
+			   bool byval, int16 typlen, bool *isNull)
+{
+	MemoryContext oldcxt;
+	MemoryContext tbl_cxt = OGetTableContext(o_table);
+	Datum		new_val;
+	Expr	   *expr2;
+	ParseNamespaceItem *nsitem;
+	ParseState *pstate;
+	EState	   *estate = NULL;
+	ExprContext *econtext;
+	ExprState  *exprState;
+	Datum		result;
+
+	pstate = make_parsestate(NULL);
+	pstate->p_sourcetext = NULL;
+	nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
+										NULL, false, true);
+	addNSItemToQuery(pstate, nsitem, true, true, true);
+
+	expr2 = expression_planner((Expr *) expr);
+
+	oldcxt = MemoryContextSwitchTo(tbl_cxt);
+	estate = CreateExecutorState();
+	exprState = ExecPrepareExpr(expr2, estate);
+	econtext = GetPerTupleExprContext(estate);
+
+	if (scantuple)
+		econtext->ecxt_scantuple = scantuple;
+	new_val = ExecEvalExpr(exprState, econtext, isNull);
+
+	FreeExecutorState(estate);
+	free_parsestate(pstate);
+
+	result = datumCopy(new_val, byval, typlen);
+	MemoryContextSwitchTo(oldcxt);
+	return result;
+}
+
 void
 o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 					OTableField *old_field, OTableField *field)
@@ -548,40 +588,13 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 
 	if (!old_field->hasmissing && field->hasmissing)
 	{
-		Datum		missingval;
-		Expr	   *expr2;
-		ParseNamespaceItem *nsitem;
-		ParseState *pstate;
-		EState	   *estate = NULL;
-		ExprContext *econtext;
-		ExprState  *exprState;
 		bool		missingIsNull = true;
 
-		pstate = make_parsestate(NULL);
-		pstate->p_sourcetext = NULL;
-		nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
-											   NULL, false, true);
-		addNSItemToQuery(pstate, nsitem, true, true, true);
-
-		expr2 = expression_planner((Expr *) defaultexpr);
-
-		oldcxt = MemoryContextSwitchTo(tbl_cxt);
-		estate = CreateExecutorState();
-		exprState = ExecPrepareExpr(expr2, estate);
-		econtext = GetPerTupleExprContext(estate);
-
-		missingval = ExecEvalExpr(exprState, econtext,
-								  &missingIsNull);
-
-		FreeExecutorState(estate);
-		free_parsestate(pstate);
-
-		attrmiss_temp.am_value = datumCopy(missingval, field->byval,
-										   field->typlen);
-		MemoryContextSwitchTo(oldcxt);
+		attrmiss_temp.am_value = o_eval_default(o_table, rel, defaultexpr, NULL,
+												field->byval, field->typlen,
+												&missingIsNull);
 		attrmiss_temp.am_present = true;
 		attrmiss = &attrmiss_temp;
-		defaultexpr = (Node *) expr2;
 	}
 
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
