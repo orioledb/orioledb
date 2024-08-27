@@ -373,6 +373,7 @@ typedef struct OIndexDescr OIndexDescr;
 extern void orioledb_setup_ddl_hooks(void);
 extern UndoLocation saved_undo_location[(int) UndoLogsCount];
 extern List *drop_index_list;
+extern List *reindex_list;
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;

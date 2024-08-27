@@ -1570,6 +1570,11 @@ orioledb_error_cleanup_hook(void)
 		list_free_deep(drop_index_list);
 		drop_index_list = NIL;
 	}
+	if (reindex_list)
+	{
+		list_free_deep(reindex_list);
+		reindex_list = NIL;
+	}
 	if (orioledb_s3_mode)
 		s3_headers_error_cleanup();
 }

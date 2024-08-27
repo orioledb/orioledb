@@ -382,7 +382,7 @@ index_build_params(OTableIndex *index)
  * complete.  Also checkpoint numer in tree headers is valid.
  */
 void
-o_define_index(Relation heap, Relation index, Oid indoid,
+o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			   OIndexNumber old_ix_num, IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
@@ -444,55 +444,97 @@ o_define_index(Relation heap, Relation index, Oid indoid,
 
 	if (!reuse)
 	{
-		ORelOids	primary_oids;
-
-		primary_oids = ix_type == oIndexPrimary ||
-			!old_o_table->has_primary ?
-			old_o_table->oids :
-			old_o_table->indices[PrimaryIndexNumber].oids;
-		is_build = tbl_data_exists(&primary_oids);
-
-		/* Rebuild, assign new oids */
-		if (ix_type == oIndexPrimary)
+		if (reindex)
 		{
-			new_o_table = o_tables_get(oids);
-			o_table = new_o_table;
-			assign_new_oids(new_o_table, heap);
-			oids = new_o_table->oids;
-			o_table->has_primary = true;
-			o_table->primary_init_nfields = o_table->nfields;
-			ix_num = 0;		/* place first */
+			int			i;
+
+			ix_num = InvalidIndexNumber;
+			for (i = 0; i < o_table->nindices; i++)
+			{
+				if (o_table->indices[i].oids.reloid == index->rd_rel->oid)
+					ix_num = i;
+			}
+			reindex = ix_num != InvalidIndexNumber &&
+				ix_num < o_table->nindices;
+		}
+
+		if (reindex)
+		{
+			o_index_drop(heap, ix_num);
+
+			if (ix_type == oIndexPrimary)
+			{
+				o_table_free(old_o_table);
+				ORelOidsSetFromRel(oids, heap);
+				old_o_table = o_tables_get(oids);
+				if (old_o_table == NULL)
+				{
+					elog(FATAL, "orioledb table does not exists "
+						 "for oids = %u, %u, %u",
+						 oids.datoid, oids.reloid, oids.relnode);
+				}
+				o_table = old_o_table;
+				reindex = false;
+			}
+		}
+
+		if (!reindex)
+		{
+			ORelOids	primary_oids;
+
+			primary_oids = ix_type == oIndexPrimary ||
+				!old_o_table->has_primary ?
+				old_o_table->oids :
+				old_o_table->indices[PrimaryIndexNumber].oids;
+			is_build = tbl_data_exists(&primary_oids);
+
+			/* Rebuild, assign new oids */
+			if (ix_type == oIndexPrimary)
+			{
+				new_o_table = o_tables_get(oids);
+				o_table = new_o_table;
+				assign_new_oids(new_o_table, heap);
+				oids = new_o_table->oids;
+				o_table->has_primary = true;
+				o_table->primary_init_nfields = o_table->nfields;
+				ix_num = 0;		/* place first */
+			}
+			else
+			{
+				ix_num = o_table->nindices;
+			}
+			o_table->indices = (OTableIndex *)
+				repalloc(o_table->indices, sizeof(OTableIndex) *
+						 (o_table->nindices + 1));
+
+			/* move indices if needed */
+			if (ix_type == oIndexPrimary && o_table->nindices > 0)
+			{
+				memmove(&o_table->indices[1], &o_table->indices[0],
+						o_table->nindices * (sizeof(OTableIndex)));
+			}
+			o_table->nindices++;
+
+			table_index = &o_table->indices[ix_num];
+
+			memset(table_index, 0, sizeof(OTableIndex));
+
+			table_index->type = ix_type;
+			table_index->nfields = indnatts;
+			table_index->nkeyfields = indnkeyatts;
+
+			if (OCompressIsValid(compress))
+				table_index->compress = compress;
+			else if (ix_type == oIndexPrimary)
+				table_index->compress = o_table->primary_compress;
+			else
+				table_index->compress = o_table->default_compress;
 		}
 		else
 		{
-			ix_num = o_table->nindices;
+			is_build = true;
+			table_index = &o_table->indices[ix_num];
 		}
-		o_table->indices = (OTableIndex *)
-			repalloc(o_table->indices, sizeof(OTableIndex) *
-						(o_table->nindices + 1));
-
-		/* move indices if needed */
-		if (ix_type == oIndexPrimary && o_table->nindices > 0)
-		{
-			memmove(&o_table->indices[1], &o_table->indices[0],
-					o_table->nindices * (sizeof(OTableIndex)));
-		}
-		o_table->nindices++;
-
-		table_index = &o_table->indices[ix_num];
-
-		memset(table_index, 0, sizeof(OTableIndex));
-
-		table_index->type = ix_type;
-		table_index->nfields = indnatts;
-		table_index->nkeyfields = indnkeyatts;
-
-		if (OCompressIsValid(compress))
-			table_index->compress = compress;
-		else if (ix_type == oIndexPrimary)
-			table_index->compress = o_table->primary_compress;
-		else
-			table_index->compress = o_table->default_compress;
 	}
 	else
 	{
@@ -550,6 +592,12 @@ o_define_index(Relation heap, Relation index, Oid indoid,
 		else
 			o_insert_shared_root_placeholder(table_index->oids.datoid,
 											 table_index->oids.relnode);
+	}
+
+	if (reindex)
+	{
+		o_invalidate_oids(table_index->oids);
+		o_add_invalidate_undo_item(table_index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 
 	if (!reuse && is_build)

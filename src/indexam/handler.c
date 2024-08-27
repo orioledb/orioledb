@@ -171,7 +171,16 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 IndexBuildResult *
 orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
+	bool					reindex = false;
 	IndexBuildResult	   *result;
+	String				   *relname;
+
+	relname = makeString(index->rd_rel->relname.data);
+	if (list_member(reindex_list, relname))
+	{
+		reindex = true;
+		reindex_list = list_delete(reindex_list, relname);
+	}
 
 	(void) btbuild(heap, index, indexInfo);
 
@@ -185,7 +194,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		ORelOids	tbl_oids;
 		ORelOidsSetFromRel(tbl_oids, heap);
 		o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-		o_define_index(heap, index, InvalidOid, InvalidIndexNumber, result);
+		o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, result);
 	}
 
 	return result;

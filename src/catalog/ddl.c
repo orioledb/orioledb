@@ -108,6 +108,7 @@ static List *alter_type_exprs = NIL;
 Oid o_saved_relrewrite = InvalidOid;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
+List	   *reindex_list = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -494,7 +495,7 @@ reindex_concurrently_not_supported(Relation tbl)
 }
 
 static void
-check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
+check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
 {
 	Oid			objectOid;
 	Relation	relationRelation;
@@ -686,7 +687,21 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind)
 
 		tbl = relation_open(relid, AccessShareLock);
 		if (is_orioledb_rel(tbl))
-			reindex_concurrently_not_supported(tbl);
+		{
+			ListCell   *index;
+
+			foreach(index, RelationGetIndexList(tbl))
+			{
+				Oid indexOid = lfirst_oid(index);
+				Relation ind = relation_open(indexOid, AccessShareLock);
+				String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+				reindex_list = list_append_unique(reindex_list, ix_name);
+				relation_close(ind, AccessShareLock);
+			}
+
+			if (concurrently)
+				reindex_concurrently_not_supported(tbl);
+		}
 		relation_close(tbl, AccessShareLock);
 
 		MemoryContextSwitchTo(old);
@@ -719,6 +734,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 	in_rewrite = false;
 	o_saved_relrewrite = InvalidOid;
+	/*
+	 * reindex_list is expected to be allocated in PortalContext so it
+	 * isn't freed by us and pointer may be invalid there
+	 */
+	reindex_list = NIL;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -735,7 +755,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		 * isn't freed by us and pointer may be invalid there
 		 */
 		alter_type_exprs = NIL;
-
 
 		/*
 		 * Figure out lock mode, and acquire lock.  This also does basic
@@ -902,50 +921,68 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				concurrently = defGetBoolean(opt);
 		}
 
-		if (concurrently)
+		switch (stmt->kind)
 		{
-			switch (stmt->kind)
-			{
-				case REINDEX_OBJECT_INDEX:
-					{
-						Oid			indOid = RangeVarGetRelid(stmt->relation,
-															  AccessShareLock,
-															  false);
-						Relation	iRel,
-									tbl;
+			case REINDEX_OBJECT_INDEX:
+				{
+					Oid			indOid = RangeVarGetRelid(stmt->relation,
+															AccessShareLock,
+															false);
+					Relation	iRel,
+								tbl;
 
-						iRel = index_open(indOid, AccessShareLock);
-						tbl = relation_open(iRel->rd_index->indrelid,
-											AccessShareLock);
-						if (is_orioledb_rel(tbl))
-							reindex_concurrently_not_supported(tbl);
-						relation_close(tbl, AccessShareLock);
-						relation_close(iRel, AccessShareLock);
-					}
-					break;
-				case REINDEX_OBJECT_TABLE:
+					iRel = index_open(indOid, AccessShareLock);
+					tbl = relation_open(iRel->rd_index->indrelid,
+										AccessShareLock);
+					if (is_orioledb_rel(tbl))
 					{
-						Oid			tblOid = RangeVarGetRelid(stmt->relation,
-															  AccessShareLock,
-															  false);
-						Relation	tbl;
+						String	   *ix_name;
 
-						tbl = relation_open(tblOid, AccessShareLock);
-						if (is_orioledb_rel(tbl))
+						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
+						reindex_list = list_append_unique(reindex_list, ix_name);
+						if (concurrently)
 							reindex_concurrently_not_supported(tbl);
-						relation_close(tbl, AccessShareLock);
 					}
-					break;
-				case REINDEX_OBJECT_SCHEMA:
-				case REINDEX_OBJECT_SYSTEM:
-				case REINDEX_OBJECT_DATABASE:
-					check_multiple_tables(stmt->name, stmt->kind);
-					break;
-				default:
-					elog(ERROR, "unrecognized object type: %d",
-						 (int) stmt->kind);
-					break;
-			}
+					relation_close(tbl, AccessShareLock);
+					relation_close(iRel, AccessShareLock);
+				}
+				break;
+			case REINDEX_OBJECT_TABLE:
+				{
+					Oid			tblOid = RangeVarGetRelid(stmt->relation,
+															AccessShareLock,
+															false);
+					Relation	tbl;
+
+					tbl = relation_open(tblOid, AccessShareLock);
+					if (is_orioledb_rel(tbl))
+					{
+						ListCell   *index;
+
+						foreach(index, RelationGetIndexList(tbl))
+						{
+							Oid indexOid = lfirst_oid(index);
+							Relation ind = relation_open(indexOid, AccessShareLock);
+							String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+							reindex_list = list_append_unique(reindex_list, ix_name);
+							relation_close(ind, AccessShareLock);
+						}
+						if (concurrently)
+							reindex_concurrently_not_supported(tbl);
+					}
+					relation_close(tbl, AccessShareLock);
+				}
+				break;
+			case REINDEX_OBJECT_SCHEMA:
+			case REINDEX_OBJECT_SYSTEM:
+			case REINDEX_OBJECT_DATABASE:
+				if (concurrently)
+					check_multiple_tables(stmt->name, stmt->kind, concurrently);
+				break;
+			default:
+				elog(ERROR, "unrecognized object type: %d",
+						(int) stmt->kind);
+				break;
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))
@@ -1543,8 +1580,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 		{
 			o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 			relation_close(ind, AccessShareLock);
-			o_define_index(rel, ind, ind->rd_rel->oid,
-							InvalidIndexNumber, NULL);
+			o_define_index(rel, ind, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
 			closed = true;
 		}
 		if (!closed)
@@ -1882,7 +1918,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						relation_close(rel, AccessShareLock);
 						closed = true;
 						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-							o_define_index(tbl, rel, rel->rd_rel->oid, ix_num, NULL);
+							o_define_index(tbl, rel, rel->rd_rel->oid, false, ix_num, NULL);
 					}
 				}
 				relation_close(tbl, AccessShareLock);
@@ -2134,8 +2170,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					ORelOids	new_oids;
 					OTable	   *old_o_table,
 							*new_o_table;
-
-					ereport(WARNING, errmsg("NEW tbl_oid: %u", objectId), errbacktrace());
 
 					CommandCounterIncrement();
 
