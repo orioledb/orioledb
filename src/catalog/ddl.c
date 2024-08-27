@@ -78,6 +78,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
+#include "pgstat.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
@@ -109,6 +110,7 @@ Oid o_saved_relrewrite = InvalidOid;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
+Query	   *savedDataQuery = NULL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -734,6 +736,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 	in_rewrite = false;
 	o_saved_relrewrite = InvalidOid;
+	savedDataQuery = NULL;
 	/*
 	 * reindex_list is expected to be allocated in PortalContext so it
 	 * isn't freed by us and pointer may be invalid there
@@ -1003,6 +1006,22 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		Oid			collOid = get_collation_oid(astmt->collname, false);
 
 		o_find_collation_dependencies(collOid);
+	}
+	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
+	{
+		RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
+		if (!stmt->skipData)
+		{
+			Oid			matviewOid;
+			Relation	matviewRel;
+
+			matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
+												  RangeVarCallbackOwnsTable, NULL);
+			matviewRel = table_open(matviewOid, AccessShareLock);
+			savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
+			table_close(matviewRel, AccessShareLock);
+		}
+		stmt->skipData = true;
 	}
 
 	if (call_next)
@@ -1480,6 +1499,134 @@ create_o_table_for_rel(Relation rel)
 	o_tables_add(o_table, oxid, csn);
 	o_tables_rel_meta_unlock(rel, InvalidOid);
 	o_table_free(o_table);
+}
+
+typedef struct
+{
+	DestReceiver 	pub;			/* publicly-known function pointers */
+	Relation		rel;
+	OTableDescr	   *descr;
+	CommitSeqNo		csn;
+	OXid			oxid;
+} DR_transientrel;
+
+/*
+ * transientrel_startup --- executor startup
+ */
+static void
+transientrel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
+{
+	DR_transientrel *myState = (DR_transientrel *) self;
+
+	fill_current_oxid_csn(&myState->oxid, &myState->csn);
+}
+
+/*
+ * transientrel_receive --- receive one tuple
+ */
+static bool
+transientrel_receive(TupleTableSlot *slot, DestReceiver *self)
+{
+	DR_transientrel *myState = (DR_transientrel *) self;
+
+	o_tbl_insert(myState->descr, myState->rel, slot, myState->oxid, myState->csn);
+
+	/* We know this is a newly created relation, so there are no indexes */
+
+	return true;
+}
+
+/*
+ * transientrel_shutdown --- executor end
+ */
+static void
+transientrel_shutdown(DestReceiver *self)
+{
+}
+
+/*
+ * transientrel_destroy --- release DestReceiver object
+ */
+static void
+transientrel_destroy(DestReceiver *self)
+{
+	pfree(self);
+}
+
+static DestReceiver *
+CreateOrioledbDestReceiver(Relation rel)
+{
+	DR_transientrel *self = (DR_transientrel *) palloc0(sizeof(DR_transientrel));
+
+	self->pub.receiveSlot = transientrel_receive;
+	self->pub.rStartup = transientrel_startup;
+	self->pub.rShutdown = transientrel_shutdown;
+	self->pub.rDestroy = transientrel_destroy;
+	self->pub.mydest = DestTransientRel;
+	self->rel = rel;
+	self->descr = relation_get_descr(rel);
+	Assert(self->descr != NULL);
+
+	return (DestReceiver *) self;
+}
+
+static void
+rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
+{
+	DestReceiver *dest = CreateOrioledbDestReceiver(rel);
+	List	   *rewritten;
+	PlannedStmt *plan;
+	QueryDesc  *queryDesc;
+	Query	   *copied_query;
+	Query	   *query;
+
+	/* Lock and rewrite, using a copy to preserve the original query. */
+	copied_query = copyObject(savedDataQuery);
+	AcquireRewriteLocks(copied_query, true, false);
+	rewritten = QueryRewrite(copied_query);
+
+	/* SELECT should never rewrite to more or less than one SELECT query */
+	if (list_length(rewritten) != 1)
+		elog(ERROR, "unexpected rewrite result for REFRESH MATERIALIZED VIEW");
+	query = (Query *) linitial(rewritten);
+
+	/* Check for user-requested abort. */
+	CHECK_FOR_INTERRUPTS();
+
+	/* Plan the query which will generate data for the refresh. */
+	plan = pg_plan_query(query, "ORIOLEDB rewrite_matview", CURSOR_OPT_PARALLEL_OK, NULL);
+
+	/*
+	 * Use a snapshot with an updated command ID to ensure this query sees
+	 * results of any previously executed queries.  (This could only matter if
+	 * the planner executed an allegedly-stable function that changed the
+	 * database contents, but let's do it anyway to be safe.)
+	 */
+	PushCopiedSnapshot(GetActiveSnapshot());
+	UpdateActiveSnapshotCommandId();
+
+	/* Create a QueryDesc, redirecting output to our tuple receiver */
+	queryDesc = CreateQueryDesc(plan, "ORIOLEDB rewrite_matview",
+								GetActiveSnapshot(), InvalidSnapshot,
+								dest, NULL, NULL, 0);
+
+	/* call ExecutorStart to prepare the plan for execution */
+	ExecutorStart(queryDesc, 0);
+
+	/* run the plan */
+	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
+
+	pgstat_count_heap_insert(rel, queryDesc->estate->es_processed);
+
+	/* and clean up */
+	ExecutorFinish(queryDesc);
+	ExecutorEnd(queryDesc);
+
+	FreeQueryDesc(queryDesc);
+
+	PopActiveSnapshot();
+
+	SetMatViewPopulatedState(rel, true);
 }
 
 static void
@@ -2169,7 +2316,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					ORelOids	new_oids;
 					OTable	   *old_o_table,
-							*new_o_table;
+							   *new_o_table;
 
 					CommandCounterIncrement();
 
@@ -2194,7 +2341,20 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					new_o_table = o_tables_get(new_oids);
 					Assert(new_o_table != NULL);
 
-					rewrite_table(tbl, old_o_table, new_o_table);
+					switch (tbl->rd_rel->relkind)
+					{
+						case RELKIND_RELATION:
+							rewrite_table(tbl, old_o_table, new_o_table);
+							break;
+						case RELKIND_MATVIEW:
+							if (savedDataQuery != NULL)
+								rewrite_matview(tbl, old_o_table, new_o_table);
+							break;
+						default:
+							Assert(false);
+							break;
+					}
+
 					redefine_indices(tbl, new_o_table, false);
 
 					o_table_free(old_o_table);

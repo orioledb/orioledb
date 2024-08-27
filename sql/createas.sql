@@ -156,6 +156,11 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY quantity2;
 SELECT * FROM o_test_matview ORDER BY quantity2;
 
+REFRESH MATERIALIZED VIEW o_test_matview WITH NO DATA;
+SELECT * FROM o_test_matview;
+REFRESH MATERIALIZED VIEW o_test_matview;
+SELECT * FROM o_test_matview;
+
 CREATE MATERIALIZED VIEW o_test_matview_no_data
 	(order_id, item_id, quantity, price) USING orioledb
 	AS (VALUES (100, 1, 4, nextval('o_matview_seq'::regclass)),
