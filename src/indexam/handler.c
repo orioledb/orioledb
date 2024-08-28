@@ -1177,7 +1177,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	 * scan.  We can't do this in btrescan because we don't know the scan
 	 * direction at that time.
 	 */
-	if (so->numArrayKeys && !BTScanPosIsValid(so->currPos))
+	if (so->numArrayKeys && !o_scan->curKeyRangeIsLoaded)
 	{
 		/* punt if we have any unsatisfiable array keys */
 		if (so->numArrayKeys < 0)
@@ -1185,16 +1185,14 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 
 		_bt_start_array_keys(scan, dir);
 	}
-	if (!BTScanPosIsValid(so->currPos))
+	if (!o_scan->curKeyRangeIsLoaded)
 	{
 		_bt_preprocess_keys(scan);
+		o_scan->curKeyRange.empty = true;
 	}
 
 	descr = relation_get_descr(scan->heapRelation);
 	scan_primary = o_scan->ixNum == PrimaryIndexNumber || !scan->xs_want_itup;
-
-	if (!o_scan->curKeyRangeIsLoaded)
-		o_scan->curKeyRange.empty = true;
 
 	tuple = o_index_scan_getnext(descr, o_scan, &tupleCsn, scan_primary,
 								 tupleCxt, &hint);

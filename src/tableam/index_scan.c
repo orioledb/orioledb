@@ -341,48 +341,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	return tup;
 }
 
-
-/* fetches next tuple for oIterateDirectModify */
-TupleTableSlot *
-o_exec_fetch(OScanState *ostate, ScanState *ss)
-{
-	OTableDescr *descr = relation_get_descr(ss->ss_currentRelation);
-	TupleTableSlot *slot;
-	OTuple		tuple;
-	bool		scan_primary = ostate->ixNum == PrimaryIndexNumber ||
-		!ostate->onlyCurIx;
-	MemoryContext tupleCxt = ss->ss_ScanTupleSlot->tts_mcxt;
-
-	do
-	{
-		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
-		CommitSeqNo tupleCsn;
-
-		if (!ostate->curKeyRangeIsLoaded)
-			ostate->curKeyRange.empty = true;
-
-		tuple = o_index_scan_getnext(descr, ostate, &tupleCsn,
-									 scan_primary, tupleCxt, &hint);
-
-		if (O_TUPLE_IS_NULL(tuple))
-		{
-			slot = ExecClearTuple(ss->ss_ScanTupleSlot);
-		}
-		else
-		{
-			tts_orioledb_store_tuple(ss->ss_ScanTupleSlot, tuple,
-									 descr, tupleCsn,
-									 scan_primary ? PrimaryIndexNumber : ostate->ixNum,
-									 true, &hint);
-			slot = ss->ss_ScanTupleSlot;
-		}
-	} while (!TupIsNull(slot) &&
-			 !o_exec_qual(ss->ps.ps_ExprContext,
-						  ss->ps.qual, slot));
-
-	return slot;
-}
-
 /* checks quals for a tuple slot */
 bool
 o_exec_qual(ExprContext *econtext, ExprState *qual, TupleTableSlot *slot)

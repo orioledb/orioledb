@@ -50,7 +50,6 @@ extern OTuple o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 								   CommitSeqNo *tupleCsn,
 								   bool scan_primary, MemoryContext tupleCxt,
 								   BTreeLocationHint *hint);
-extern TupleTableSlot *o_exec_fetch(OScanState *ostate, ScanState *ss);
 extern bool o_exec_qual(ExprContext *econtext, ExprState *qual,
 						TupleTableSlot *slot);
 extern TupleTableSlot *o_exec_project(ProjectionInfo *projInfo,
