@@ -1165,7 +1165,6 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	MemoryContext tupleCxt = CurrentMemoryContext;
 	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 	CommitSeqNo tupleCsn;
-	OIndexNumber ix_num;
 
 	o_scan->scanDir = dir;
 	o_scan->csn = scan->xs_snapshot->snapshotcsn;
@@ -1209,21 +1208,95 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	{
 		TupleTableSlot *slot;
 
-		ix_num = scan_primary ? PrimaryIndexNumber : o_scan->ixNum;
-
 		// TODO: Rewrite
-		if (scan_primary)
+		if (o_scan->ixNum == PrimaryIndexNumber && scan->xs_want_itup)
+		{
+			OIndexDescr *primary = descr->indices[o_scan->ixNum];
+			OTableIndex *o_tbl_idx;
+			OTable *o_table;
+			int i;
+
+			o_table = o_tables_get(primary->tableOids);
+			o_tbl_idx = &o_table->indices[o_scan->ixNum];
+			// TODO: Cache these tupdescs
+			scan->xs_hitupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
+			for (i = 0; i < o_tbl_idx->nfields; i++)
+			{
+				OTableIndexField *idx_field = &o_tbl_idx->fields[i];
+				TupleDescCopyEntry(scan->xs_hitupdesc, i + 1,
+								   primary->leafTupdesc, idx_field->attnum + 1);
+			}
+			o_table_free(o_table);
+
+			slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
+			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
+									 true, &hint);
+			slot_getallattrs(slot);
+
+			TupleDesc	pk_tupdesc = scan->xs_hitupdesc;
+			OTupleFixedFormatSpec pk_spec;
+			int			result_size,
+						tuple_size;
+			bytea	   *rowid;
+			ORowIdAddendumNonCtid addNonCtid;
+			Datum		*rowid_values = slot->tts_values;
+			bool		*rowid_isnull = slot->tts_isnull;
+			Pointer		ptr;
+
+			// TODO: Cache these tupdescs and specs
+			int			len = 0;
+
+			for (i = 0; i < pk_tupdesc->natts; i++)
+			{
+				Form_pg_attribute attr = TupleDescAttr(pk_tupdesc, i);
+
+				if (attr->attlen <= 0)
+					break;
+
+				len = att_align_nominal(len, attr->attalign);
+				len += attr->attlen;
+			}
+			pk_spec.natts = i;
+			pk_spec.len = len;
+
+			addNonCtid.hint = hint;
+			addNonCtid.csn = tupleCsn;
+			addNonCtid.flags = tuple.formatFlags;
+
+			tuple_size = o_new_tuple_size(pk_tupdesc,
+										  &pk_spec,
+										  NULL, 0,
+										  rowid_values,
+										  rowid_isnull, NULL);
+			result_size = MAXALIGN(VARHDRSZ) +
+				MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+			result_size += tuple_size;
+			rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+			SET_VARSIZE(rowid, result_size);
+			ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+			memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
+			tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+			o_tuple_fill(pk_tupdesc, &pk_spec, &tuple, tuple_size, NULL,
+						 0, rowid_values, rowid_isnull, NULL);
+
+			scan->xs_rowid.isnull = false;
+			scan->xs_rowid.value = PointerGetDatum(rowid);
+
+			scan->xs_hitup = ExecCopySlotHeapTuple(slot);
+		}
+		else if (scan_primary)
 		{
 			scan->xs_hitupdesc = descr->tupdesc;
 			slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
-			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, ix_num,
+			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber,
 									true, &hint);
 			scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
 			scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 		}
 		else
 		{
-			OIndexDescr *index_descr = descr->indices[ix_num];
+			OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
 			TupleDesc	tupdesc;
 			int			nfields = index_descr->nFields;
 			int			i;
@@ -1249,7 +1322,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 				OTable *o_table;
 
 				o_table = o_tables_get(index_descr->tableOids);
-				o_tbl_idx = &o_table->indices[ix_num - 1];
+				o_tbl_idx = &o_table->indices[o_scan->ixNum - 1];
 				scan->xs_itupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
 				nfields--;
 				for (i = 0; i < o_tbl_idx->nfields; i++)
@@ -1276,7 +1349,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 			}
 
 			slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsOrioleDB);
-			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, ix_num,
+			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
 									 true, &hint);
 			slot_getallattrs(slot);
 
