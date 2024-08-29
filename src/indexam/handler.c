@@ -1207,205 +1207,67 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 		TupleTableSlot *slot;
 
 		// TODO: Rewrite
-		if (o_scan->ixNum == PrimaryIndexNumber && scan->xs_want_itup)
+		if (scan->xs_want_itup)
 		{
-			OIndexDescr *primary = descr->indices[o_scan->ixNum];
-			OTableIndex *o_tbl_idx;
-			OTable *o_table;
-			int i;
-
-			o_table = o_tables_get(primary->tableOids);
-			o_tbl_idx = &o_table->indices[o_scan->ixNum];
-			// TODO: Cache these tupdescs
-			scan->xs_hitupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
-			for (i = 0; i < o_tbl_idx->nfields; i++)
+			if (o_scan->ixNum == PrimaryIndexNumber)
 			{
-				OTableIndexField *idx_field = &o_tbl_idx->fields[i];
-				TupleDescCopyEntry(scan->xs_hitupdesc, i + 1,
-								   primary->leafTupdesc, idx_field->attnum + 1);
-			}
-			o_table_free(o_table);
-
-			slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
-			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
-									 true, &hint);
-			slot_getallattrs(slot);
-
-			TupleDesc	pk_tupdesc = scan->xs_hitupdesc;
-			OTupleFixedFormatSpec pk_spec;
-			int			result_size,
-						tuple_size;
-			bytea	   *rowid;
-			ORowIdAddendumNonCtid addNonCtid;
-			Datum		*rowid_values = slot->tts_values;
-			bool		*rowid_isnull = slot->tts_isnull;
-			Pointer		ptr;
-
-			// TODO: Cache these tupdescs and specs
-			int			len = 0;
-
-			for (i = 0; i < pk_tupdesc->natts; i++)
-			{
-				Form_pg_attribute attr = TupleDescAttr(pk_tupdesc, i);
-
-				if (attr->attlen <= 0)
-					break;
-
-				len = att_align_nominal(len, attr->attalign);
-				len += attr->attlen;
-			}
-			pk_spec.natts = i;
-			pk_spec.len = len;
-
-			addNonCtid.hint = hint;
-			addNonCtid.csn = tupleCsn;
-			addNonCtid.flags = tuple.formatFlags;
-
-			tuple_size = o_new_tuple_size(pk_tupdesc,
-										  &pk_spec,
-										  NULL, 0,
-										  rowid_values,
-										  rowid_isnull, NULL);
-			result_size = MAXALIGN(VARHDRSZ) +
-				MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-			result_size += tuple_size;
-			rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
-			SET_VARSIZE(rowid, result_size);
-			ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-			memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
-			tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-			o_tuple_fill(pk_tupdesc, &pk_spec, &tuple, tuple_size, NULL,
-						 0, rowid_values, rowid_isnull, NULL);
-
-			scan->xs_rowid.isnull = false;
-			scan->xs_rowid.value = PointerGetDatum(rowid);
-
-			scan->xs_hitup = ExecCopySlotHeapTuple(slot);
-		}
-		else if (scan_primary)
-		{
-			scan->xs_hitupdesc = descr->tupdesc;
-			slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
-			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber,
-									true, &hint);
-			scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
-			scan->xs_hitup = ExecCopySlotHeapTuple(slot);
-		}
-		else
-		{
-			OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
-			TupleDesc	tupdesc;
-			int			nfields = index_descr->nFields;
-			int			i;
-
-			// TODO: Cache these tupdescs
-			tupdesc = CreateTemplateTupleDesc(nfields);
-			for (i = 0; i < nfields; i++)
-			{
-				TupleDescCopyEntry(tupdesc, i + 1, index_descr->leafTupdesc, i + 1);
-			}
-
-			if (!index_descr->primaryIsCtid)
-			{
-				scan->xs_itupdesc = CreateTemplateTupleDesc(nfields);
-				for (i = 0; i < nfields; i++)
-				{
-					TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
-				}
-			}
-			else
-			{
+				OIndexDescr *primary = descr->indices[o_scan->ixNum];
 				OTableIndex *o_tbl_idx;
 				OTable *o_table;
+				int i;
 
-				o_table = o_tables_get(index_descr->tableOids);
-				o_tbl_idx = &o_table->indices[o_scan->ixNum - 1];
+				o_table = o_tables_get(primary->tableOids);
+				o_tbl_idx = &o_table->indices[o_scan->ixNum];
+				// TODO: Cache these tupdescs
 				scan->xs_itupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
-				nfields--;
 				for (i = 0; i < o_tbl_idx->nfields; i++)
 				{
-					if (i < nfields)
-						TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
-					else
-					{
-						int j;
-						int found = -1;
-						for (j = 0; j < nfields; j++)
-						{
-							if (o_tbl_idx->fields[i].attnum == o_tbl_idx->fields[j].attnum)
-							{
-								found = j;
-								break;
-							}
-						}
-						Assert(found >= 0);
-						TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, found + 1);
-					}
+					OTableIndexField *idx_field = &o_tbl_idx->fields[i];
+					TupleDescCopyEntry(scan->xs_itupdesc, i + 1,
+									primary->leafTupdesc, idx_field->attnum + 1);
 				}
 				o_table_free(o_table);
-			}
 
-			slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsOrioleDB);
-			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
-									 true, &hint);
-			slot_getallattrs(slot);
+				slot = MakeSingleTupleTableSlot(scan->xs_itupdesc, &TTSOpsOrioleDB);
+				tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
+										true, &hint);
+				slot_getallattrs(slot);
 
-			TupleDesc	pk_tupdesc;
-			OTupleFixedFormatSpec *pk_spec;
-			int			result_size,
-						tuple_size;
-			bytea	   *rowid;
-			OTableSlot *oslot = (OTableSlot *) slot;
-			Pointer		ptr;
-
-			pk_tupdesc = GET_PRIMARY(descr)->nonLeafTupdesc;
-			pk_spec = &GET_PRIMARY(descr)->nonLeafSpec;
-
-			if (index_descr->primaryIsCtid)
-			{
-				ORowIdAddendumCtid addCtid;
-
-				addCtid.hint = hint;
-				addCtid.csn = tupleCsn;
-				addCtid.version = oslot->version;
-
-				/* Ctid primary key: give hint + tid as rowid */
-				result_size = MAXALIGN(VARHDRSZ) +
-					MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-					sizeof(ItemPointerData);
-				rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
-				SET_VARSIZE(rowid, result_size);
-				ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-				memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
-				ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
-				memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
-			}
-			else
-			{
+				TupleDesc	pk_tupdesc = scan->xs_itupdesc;
+				OTupleFixedFormatSpec pk_spec;
+				int			result_size,
+							tuple_size;
+				bytea	   *rowid;
 				ORowIdAddendumNonCtid addNonCtid;
-				Datum		rowid_values[2 * INDEX_MAX_KEYS];
-				bool		rowid_isnull[2 * INDEX_MAX_KEYS];
+				Datum		*rowid_values = slot->tts_values;
+				bool		*rowid_isnull = slot->tts_isnull;
+				Pointer		ptr;
+
+				// TODO: Cache these tupdescs and specs
+				int			len = 0;
+
+				for (i = 0; i < pk_tupdesc->natts; i++)
+				{
+					Form_pg_attribute attr = TupleDescAttr(pk_tupdesc, i);
+
+					if (attr->attlen <= 0)
+						break;
+
+					len = att_align_nominal(len, attr->attalign);
+					len += attr->attlen;
+				}
+				pk_spec.natts = i;
+				pk_spec.len = len;
 
 				addNonCtid.hint = hint;
 				addNonCtid.csn = tupleCsn;
 				addNonCtid.flags = tuple.formatFlags;
 
-				int			i;
-
-				/* Amount of index fields checked in o_define_index_validate */
-				for (i = 0; i < index_descr->nPrimaryFields; i++)
-				{
-					AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
-					rowid_values[i] = slot->tts_values[attnum];
-					rowid_isnull[i] = slot->tts_isnull[attnum];
-				}
-
 				tuple_size = o_new_tuple_size(pk_tupdesc,
-											  pk_spec,
-											  NULL, 0,
-											  rowid_values,
-											  rowid_isnull, NULL);
+											&pk_spec,
+											NULL, 0,
+											rowid_values,
+											rowid_isnull, NULL);
 				result_size = MAXALIGN(VARHDRSZ) +
 					MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 				result_size += tuple_size;
@@ -1415,20 +1277,162 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 				memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
 				tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 
-				o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL,
+				o_tuple_fill(pk_tupdesc, &pk_spec, &tuple, tuple_size, NULL,
 							 0, rowid_values, rowid_isnull, NULL);
+
+				scan->xs_rowid.isnull = false;
+				scan->xs_rowid.value = PointerGetDatum(rowid);
+
+				scan->xs_itup = index_form_tuple(scan->xs_itupdesc,
+												 slot->tts_values,
+												 slot->tts_isnull);
 			}
+			else
+			{
+				OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
+				TupleDesc	tupdesc;
+				int			nfields = index_descr->nFields;
+				int			i;
 
-			scan->xs_rowid.isnull = false;
-			scan->xs_rowid.value = PointerGetDatum(rowid);
+				// TODO: Cache these tupdescs
+				tupdesc = CreateTemplateTupleDesc(nfields);
+				for (i = 0; i < nfields; i++)
+				{
+					TupleDescCopyEntry(tupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+				}
 
-			scan->xs_itup = index_form_tuple(scan->xs_itupdesc,
-											 slot->tts_values,
-											 slot->tts_isnull);
+				if (!index_descr->primaryIsCtid)
+				{
+					scan->xs_itupdesc = CreateTemplateTupleDesc(nfields);
+					for (i = 0; i < nfields; i++)
+					{
+						TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+					}
+				}
+				else
+				{
+					OTableIndex *o_tbl_idx;
+					OTable *o_table;
 
-			ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
+					o_table = o_tables_get(index_descr->tableOids);
+					o_tbl_idx = &o_table->indices[o_scan->ixNum - 1];
+					scan->xs_itupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
+					nfields--;
+					for (i = 0; i < o_tbl_idx->nfields; i++)
+					{
+						if (i < nfields)
+							TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+						else
+						{
+							int j;
+							int found = -1;
+							for (j = 0; j < nfields; j++)
+							{
+								if (o_tbl_idx->fields[i].attnum == o_tbl_idx->fields[j].attnum)
+								{
+									found = j;
+									break;
+								}
+							}
+							Assert(found >= 0);
+							TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, found + 1);
+						}
+					}
+					o_table_free(o_table);
+				}
+
+				slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsOrioleDB);
+				tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
+										true, &hint);
+				slot_getallattrs(slot);
+
+				TupleDesc	pk_tupdesc;
+				OTupleFixedFormatSpec *pk_spec;
+				int			result_size,
+							tuple_size;
+				bytea	   *rowid;
+				OTableSlot *oslot = (OTableSlot *) slot;
+				Pointer		ptr;
+
+				pk_tupdesc = GET_PRIMARY(descr)->nonLeafTupdesc;
+				pk_spec = &GET_PRIMARY(descr)->nonLeafSpec;
+
+				if (index_descr->primaryIsCtid)
+				{
+					ORowIdAddendumCtid addCtid;
+
+					addCtid.hint = hint;
+					addCtid.csn = tupleCsn;
+					addCtid.version = oslot->version;
+
+					/* Ctid primary key: give hint + tid as rowid */
+					result_size = MAXALIGN(VARHDRSZ) +
+						MAXALIGN(sizeof(ORowIdAddendumCtid)) +
+						sizeof(ItemPointerData);
+					rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+					SET_VARSIZE(rowid, result_size);
+					ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+					memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
+					ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
+					memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
+				}
+				else
+				{
+					ORowIdAddendumNonCtid addNonCtid;
+					Datum		rowid_values[2 * INDEX_MAX_KEYS];
+					bool		rowid_isnull[2 * INDEX_MAX_KEYS];
+
+					addNonCtid.hint = hint;
+					addNonCtid.csn = tupleCsn;
+					addNonCtid.flags = tuple.formatFlags;
+
+					int			i;
+
+					/* Amount of index fields checked in o_define_index_validate */
+					for (i = 0; i < index_descr->nPrimaryFields; i++)
+					{
+						AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+						rowid_values[i] = slot->tts_values[attnum];
+						rowid_isnull[i] = slot->tts_isnull[attnum];
+					}
+
+					tuple_size = o_new_tuple_size(pk_tupdesc,
+												pk_spec,
+												NULL, 0,
+												rowid_values,
+												rowid_isnull, NULL);
+					result_size = MAXALIGN(VARHDRSZ) +
+						MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+					result_size += tuple_size;
+					rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+					SET_VARSIZE(rowid, result_size);
+					ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+					memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
+					tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+					o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL,
+								0, rowid_values, rowid_isnull, NULL);
+				}
+
+				scan->xs_rowid.isnull = false;
+				scan->xs_rowid.value = PointerGetDatum(rowid);
+
+				scan->xs_itup = index_form_tuple(scan->xs_itupdesc,
+												 slot->tts_values,
+												 slot->tts_isnull);
+
+				ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
+			}
 		}
-
+		else
+		{
+			scan->xs_hitupdesc = descr->tupdesc;
+			slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
+			tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber,
+									true, &hint);
+			scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
+			scan->xs_hitup = ExecCopySlotHeapTuple(slot);
+		}
 		res = true;
 	}
 	return res;
