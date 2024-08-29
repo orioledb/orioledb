@@ -130,6 +130,8 @@ static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
 static void o_find_collation_dependencies(Oid colloid);
+static void redefine_indices(Relation rel, OTable *new_o_table, bool primary);
+static void redefine_pkey_for_rel(Relation rel);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -1037,6 +1039,66 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									context, params, env,
 									dest, qc);
 	}
+
+
+	if (IsA(pstmt->utilityStmt, TruncateStmt))
+	{
+		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
+		List	   *relids = NIL;
+		ListCell   *cell;
+
+		/*
+		* Open, exclusive-lock, and check all the explicitly-specified relations
+		*/
+		foreach(cell, tstmt->relations)
+		{
+			RangeVar   *rv = lfirst(cell);
+			Relation	rel;
+			bool		recurse = rv->inh;
+			Oid			myrelid;
+			LOCKMODE	lockmode = AccessShareLock;
+
+			myrelid = RangeVarGetRelid(rv, lockmode, false);
+
+			/* don't throw error for "TRUNCATE foo, foo" */
+			if (list_member_oid(relids, myrelid))
+				continue;
+
+			/* open the relation, we already hold a lock on it */
+			rel = table_open(myrelid, NoLock);
+			if (is_orioledb_rel(rel))
+			{
+				redefine_pkey_for_rel(rel);
+			}
+
+			relids = lappend_oid(relids, myrelid);
+
+			if (recurse)
+			{
+				ListCell   *child;
+				List	   *children;
+
+				children = find_all_inheritors(myrelid, lockmode, NULL);
+
+				foreach(child, children)
+				{
+					Oid			childrelid = lfirst_oid(child);
+
+					if (list_member_oid(relids, childrelid))
+						continue;
+
+					/* find_all_inheritors already got lock */
+					rel = table_open(childrelid, NoLock);
+					if (is_orioledb_rel(rel))
+					{
+						redefine_pkey_for_rel(rel);
+					}
+					table_close(rel, lockmode);
+				}
+			}
+			table_close(rel, NoLock);
+		}
+	}
 }
 
 static void
@@ -1727,12 +1789,27 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 		{
 			o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 			relation_close(ind, AccessShareLock);
-			o_define_index(rel, ind, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
+			o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
 			closed = true;
 		}
 		if (!closed)
 			relation_close(ind, AccessShareLock);
 	}
+}
+
+static void
+redefine_pkey_for_rel(Relation rel)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	Assert(o_table != NULL);
+
+	redefine_indices(rel, o_table, true);
+
+	o_table_free(o_table);
 }
 
 static void
@@ -2026,9 +2103,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
+				Relation	tbl;
+
 				CommandCounterIncrement();
-				Relation	tbl = relation_open(rel->rd_index->indrelid,
-												AccessShareLock);
+				tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
 
 				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
 					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -2065,12 +2143,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						relation_close(rel, AccessShareLock);
 						closed = true;
 						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-							o_define_index(tbl, rel, rel->rd_rel->oid, false, ix_num, NULL);
+							o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
 					}
 				}
 				relation_close(tbl, AccessShareLock);
-
-				// ReleaseSysCache(contup);
 			}
 			if (!closed)
 				relation_close(rel, AccessShareLock);

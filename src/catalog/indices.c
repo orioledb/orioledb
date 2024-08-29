@@ -392,7 +392,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	OTableIndex *table_index;
 	OTableDescr *old_descr = NULL,
 			   *descr = NULL;
-	bool		reuse = old_ix_num != InvalidIndexNumber;
+	bool		reuse_relnode = old_ix_num != InvalidIndexNumber;
 	bool		is_build = false;
 	ORelOids	oids;
 	OIndexType	ix_type;
@@ -442,7 +442,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	}
 	o_table = old_o_table;
 
-	if (!reuse)
+	if (!reuse_relnode)
 	{
 		if (reindex)
 		{
@@ -542,13 +542,13 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		table_index = &o_table->indices[ix_num];
 	}
 
-	if (!reuse)
+	if (!reuse_relnode)
 		memcpy(&table_index->name, &index->rd_rel->relname,
 			   sizeof(NameData));
 	table_index->oids.relnode = index->rd_rel->relfilenode;
 
 	/* fill index fields */
-	if (!reuse)
+	if (!reuse_relnode)
 	{
 		table_index->nulls_not_distinct = index->rd_index->indnullsnotdistinct;
 		o_table_fill_index(o_table, ix_num, index);
@@ -557,14 +557,14 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
 
-	if (!reuse && is_build)
+	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);
 	else
 		o_tables_table_meta_lock(o_table);
 
 	o_opclass_cache_add_table(o_table);
 	custom_types_add_all(o_table, table_index);
-	if (!reuse && table_index->type == oIndexPrimary)
+	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
@@ -578,14 +578,14 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 		fill_current_oxid_csn(&oxid, &csn);
 		o_tables_update(o_table, oxid, csn);
-		if (!reuse)
+		if (!reuse_relnode)
 			add_undo_create_relnode(o_table->oids, &table_index->oids, 1);
 		recreate_table_descr_by_oids(oids);
 	}
 
 	descr = o_fetch_table_descr(o_table->oids);
 
-	if (!reuse && is_build)
+	if (!reuse_relnode && is_build)
 	{
 		if (table_index->type == oIndexPrimary)
 			rebuild_indices_insert_placeholders(descr);
@@ -600,7 +600,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_add_invalidate_undo_item(table_index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 
-	if (!reuse && is_build)
+	if (!reuse_relnode && is_build)
 	{
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		if (STOPEVENTS_ENABLED())

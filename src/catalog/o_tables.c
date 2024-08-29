@@ -881,7 +881,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 				new_keys_num = 0,
 				i = 0,
 				j = 0;
-	bool		reuse = false;
+	bool		reuse_relnode = false;
 
 	old_keys = o_table_make_index_keys(old_table, &old_keys_num);
 	new_keys = o_table_make_index_keys(new_table, &new_keys_num);
@@ -913,7 +913,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 					 old_keys[i].oids.reloid != new_keys[j].oids.reloid &&
 					 old_keys[i].oids.relnode == new_keys[j].oids.relnode)
 			{
-				reuse = true;
+				reuse_relnode = true;
 			}
 		}
 
@@ -922,7 +922,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			bool		result;
 
 			Assert(old_table);
-			if (!reuse)
+			if (!reuse_relnode)
 			{
 				elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
 					 old_keys[i].type,
@@ -946,7 +946,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			bool		result PG_USED_FOR_ASSERTS_ONLY;
 
 			Assert(new_table);
-			if (!reuse)
+			if (!reuse_relnode)
 			{
 				elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
 					 new_keys[j].type,
@@ -961,7 +961,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 									   oxid, csn);
 				Assert(result);
 			}
-			reuse = false;
+			reuse_relnode = false;
 			j++;
 		}
 	}

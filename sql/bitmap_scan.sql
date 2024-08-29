@@ -4,12 +4,9 @@ CREATE EXTENSION orioledb;
 
 CREATE TABLE bitmap_test
 (
-	id serial,
+	id serial primary key,
 	i int4
 ) USING orioledb;
-
-CREATE UNIQUE INDEX bitmap_test_pkey ON bitmap_test USING orioledb_btree (id);
-ALTER TABLE bitmap_test ADD PRIMARY KEY USING INDEX bitmap_test_pkey;
 
 CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
 $$
@@ -26,7 +23,7 @@ INSERT INTO bitmap_test (i)
 	SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,5000) v;
 ANALYZE bitmap_test;
 
-CREATE INDEX bitmap_test_ix1 ON bitmap_test USING orioledb_btree (i);
+CREATE INDEX bitmap_test_ix1 ON bitmap_test (i);
 
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 100;
 SELECT count(*) FROM bitmap_test WHERE i < 100;
@@ -65,8 +62,8 @@ SET enable_seqscan = ON;
 ALTER TABLE bitmap_test ADD COLUMN j int4;
 ALTER TABLE bitmap_test ADD COLUMN h int4;
 UPDATE bitmap_test SET j = pseudo_random(2, id) * 20000, h = pseudo_random(10, id) * 20000;
-CREATE INDEX bitmap_test_ix2 ON bitmap_test USING orioledb_btree (j);
-CREATE INDEX bitmap_test_ix3 ON bitmap_test USING orioledb_btree (h);
+CREATE INDEX bitmap_test_ix2 ON bitmap_test (j);
+CREATE INDEX bitmap_test_ix3 ON bitmap_test (h);
 ANALYZE bitmap_test;
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM bitmap_test
@@ -667,12 +664,9 @@ SET enable_seqscan = ON;
 -- Test int8 indices
 CREATE TABLE bitmap_test_int8
 (
-	id bigserial,
+	id bigserial primary key,
 	i int
 ) USING orioledb;
-
-CREATE UNIQUE INDEX bitmap_test_int8_pkey ON bitmap_test_int8 USING orioledb_btree (id);
-ALTER TABLE bitmap_test_int8 ADD PRIMARY KEY USING INDEX bitmap_test_int8_pkey;
 
 ALTER SEQUENCE bitmap_test_int8_id_seq RESTART WITH 100000;
 
@@ -680,7 +674,7 @@ INSERT INTO bitmap_test_int8 (i)
 	SELECT pseudo_random(3, v) * 20000 FROM generate_series(1,5000) v;
 ANALYZE bitmap_test_int8;
 
-CREATE INDEX bitmap_test_int8_ix1 ON bitmap_test_int8 USING orioledb_btree (i);
+CREATE INDEX bitmap_test_int8_ix1 ON bitmap_test_int8 (i);
 
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_int8 WHERE i < 100;
 SELECT count(*) FROM bitmap_test_int8 WHERE i < 100;
@@ -698,13 +692,10 @@ SET enable_seqscan = ON;
 CREATE TABLE bitmap_second_field_pk
 (
 	key int8 NOT NULL,
-	value int8 NOT NULL
+	value int8 NOT NULL,
+	PRIMARY KEY(value)
 ) USING orioledb;
-
-CREATE UNIQUE INDEX bitmap_second_field_pk_pkey ON bitmap_second_field_pk USING orioledb_btree (value);
-ALTER TABLE bitmap_second_field_pk ADD PRIMARY KEY USING INDEX bitmap_second_field_pk_pkey;
-
-CREATE INDEX bitmap_second_field_pk_ix1 ON bitmap_second_field_pk USING orioledb_btree (key);
+CREATE INDEX bitmap_second_field_pk_ix1 ON bitmap_second_field_pk (key);
 SELECT orioledb_tbl_indices('bitmap_second_field_pk'::regclass);
 INSERT INTO bitmap_second_field_pk (key, value)
 	SELECT pseudo_random(4, v) * 20000, v FROM generate_series(1,500) v;
@@ -715,12 +706,8 @@ SELECT COUNT(*) FROM bitmap_second_field_pk WHERE key < 1000;
 -- Test not building bitmap for pkey
 CREATE TABLE pkey_bitmap_test
 (
-	i int4
+	i int4 PRIMARY KEY
 ) USING orioledb;
-
-CREATE UNIQUE INDEX pkey_bitmap_test_pkey ON pkey_bitmap_test USING orioledb_btree (i);
-ALTER TABLE pkey_bitmap_test ADD PRIMARY KEY USING INDEX pkey_bitmap_test_pkey;
-
 INSERT INTO pkey_bitmap_test (i)
 	SELECT pseudo_random(5, v) * 20000 FROM generate_series(1,5000) v
 		ON CONFLICT DO NOTHING;
@@ -737,8 +724,8 @@ INSERT INTO bitmap_test_ctid (i, j)
 	SELECT pseudo_random(6, v) * 20000, pseudo_random(11, v) * 20000 FROM generate_series(1,5000) v;
 ANALYZE bitmap_test_ctid;
 
-CREATE INDEX bitmap_test_ctid_ix1 ON bitmap_test_ctid USING orioledb_btree (i);
-CREATE INDEX bitmap_test_ctid_ix2 ON bitmap_test_ctid USING orioledb_btree (j);
+CREATE INDEX bitmap_test_ctid_ix1 ON bitmap_test_ctid (i);
+CREATE INDEX bitmap_test_ctid_ix2 ON bitmap_test_ctid (j);
 
 CREATE OR REPLACE FUNCTION bitmap_test_ctid_high(tid) RETURNS int4
     AS $$ SELECT ($1::text::point)[0]::int4
@@ -1256,11 +1243,9 @@ CREATE TABLE bitmap_test_multi
 (
 	id bigserial,
 	id2 bigserial,
-	i int
+	i int,
+	PRIMARY KEY (id, id2)
 ) USING orioledb;
-
-CREATE UNIQUE INDEX bitmap_test_multi_pkey ON bitmap_test_multi USING orioledb_btree (id, id2);
-ALTER TABLE bitmap_test_multi ADD PRIMARY KEY USING INDEX bitmap_test_multi_pkey;
 
 ALTER SEQUENCE bitmap_test_multi_id_seq RESTART WITH 100000;
 ALTER SEQUENCE bitmap_test_multi_id2_seq RESTART WITH 100000;
@@ -1269,7 +1254,7 @@ INSERT INTO bitmap_test_multi (i)
 	SELECT pseudo_random(7, v) * 20000 FROM generate_series(1,5000) v;
 ANALYZE bitmap_test_multi;
 
-CREATE INDEX bitmap_test_multi_ix1 ON bitmap_test_multi USING orioledb_btree (i);
+CREATE INDEX bitmap_test_multi_ix1 ON bitmap_test_multi (i);
 
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
 SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
@@ -1289,11 +1274,9 @@ CREATE TABLE bitmap_test_multi_inval
 (
 	id bigserial,
 	id2 real NOT NULL DEFAULT nextval('bitmap_test_multi_inval_id2_seq')::real,
-	i int
+	i int,
+	PRIMARY KEY (id, id2)
 ) USING orioledb;
-
-CREATE UNIQUE INDEX bitmap_test_multi_inval_pkey ON bitmap_test_multi_inval USING orioledb_btree (id, id2);
-ALTER TABLE bitmap_test_multi_inval ADD PRIMARY KEY USING INDEX bitmap_test_multi_inval_pkey;
 
 ALTER SEQUENCE bitmap_test_multi_inval_id_seq RESTART WITH 100000;
 
@@ -1301,7 +1284,7 @@ INSERT INTO bitmap_test_multi_inval (i)
 	SELECT pseudo_random(8, v) * 20000 FROM generate_series(1,5000) v;
 ANALYZE bitmap_test_multi_inval;
 
-CREATE INDEX bitmap_test_multi_inval_ix1 ON bitmap_test_multi_inval USING orioledb_btree (i);
+CREATE INDEX bitmap_test_multi_inval_ix1 ON bitmap_test_multi_inval (i);
 
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
 SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
@@ -1320,17 +1303,15 @@ CREATE TABLE bitmap_test_complex
 	id integer NOT NULL,
 	id2 integer DEFAULT 5,
 	id3 integer DEFAULT 2,
-	val text
+	val text,
+	PRIMARY KEY(id)
 ) USING orioledb;
 
-CREATE UNIQUE INDEX bitmap_test_complex_pkey ON bitmap_test_complex USING orioledb_btree (id);
-ALTER TABLE bitmap_test_complex ADD PRIMARY KEY USING INDEX bitmap_test_complex_pkey;
-
-CREATE INDEX bitmap_test_complex_ix1 ON bitmap_test_complex USING orioledb_btree (val);
-CREATE INDEX bitmap_test_complex_ix2 ON bitmap_test_complex USING orioledb_btree (id2, id);
-CREATE INDEX bitmap_test_complex_ix3 ON bitmap_test_complex USING orioledb_btree (id, id2, val);
-CREATE INDEX bitmap_test_complex_ix4 ON bitmap_test_complex USING orioledb_btree (id, val, id2);
-CREATE INDEX bitmap_test_complex_ix5 ON bitmap_test_complex USING orioledb_btree (val, id, id2);
+CREATE INDEX bitmap_test_complex_ix1 ON bitmap_test_complex(val);
+CREATE INDEX bitmap_test_complex_ix2 ON bitmap_test_complex(id2, id);
+CREATE INDEX bitmap_test_complex_ix3 ON bitmap_test_complex(id, id2, val);
+CREATE INDEX bitmap_test_complex_ix4 ON bitmap_test_complex(id, val, id2);
+CREATE INDEX bitmap_test_complex_ix5 ON bitmap_test_complex(val, id, id2);
 
 INSERT INTO bitmap_test_complex (id, val) SELECT i, i||'!' FROM generate_series(1,30,2) AS i;
 UPDATE bitmap_test_complex SET id2 = id WHERE id < 10;
