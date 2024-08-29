@@ -1150,6 +1150,8 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 	OScanState	*o_scan = (OScanState *) scan;
 
 	MemoryContextReset(o_scan->cxt);
+	o_scan->iterator = NULL;
+	o_scan->curKeyRangeIsLoaded = false;
 	btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 }
 
