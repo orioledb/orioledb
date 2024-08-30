@@ -9,13 +9,11 @@ CREATE TABLE o_indices0
 (
 	key bigint NOT NULL,
 	val int,
-	val2 int
+	val2 int,
+	PRIMARY KEY (key)
 ) USING orioledb;
 
-CREATE UNIQUE INDEX o_indices0_pkey ON o_indices0 USING orioledb_btree (key);
-ALTER TABLE o_indices0 ADD PRIMARY KEY USING INDEX o_indices0_pkey;
-
-CREATE INDEX o_indices0_idx1 ON o_indices0 USING orioledb_btree (val);
+CREATE INDEX o_indices0_idx1 ON o_indices0 (val);
 
 SELECT orioledb_tbl_indices('o_indices0'::regclass);
 
@@ -27,7 +25,7 @@ SET enable_bitmapscan = off;
 EXPLAIN (COSTS off) SELECT val FROM o_indices0 WHERE val > 0 ORDER BY val;
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices0 WHERE val2 > 0;
 
-CREATE INDEX o_indices0_idx2 ON o_indices0 USING orioledb_btree (val2);
+CREATE INDEX o_indices0_idx2 ON o_indices0 (val2);
 SELECT orioledb_tbl_indices('o_indices0'::regclass);
 
 SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
@@ -60,12 +58,12 @@ CREATE TABLE o_indices1
 	val2 int8
 ) USING orioledb;
 
-CREATE INDEX o_indices1_idx1 on o_indices1 USING orioledb_btree (val);
+CREATE INDEX o_indices1_idx1 on o_indices1 (val);
 
 INSERT INTO o_indices1 (SELECT id, id, id FROM generate_series(1, 10) as id);
 
-CREATE INDEX o_indices1_idx2 on o_indices1 USING orioledb_btree (val2);
-CREATE INDEX o_indices1_idx3 on o_indices1 USING orioledb_btree (key);
+CREATE INDEX o_indices1_idx2 on o_indices1 (val2);
+CREATE INDEX o_indices1_idx3 on o_indices1 (key);
 
 EXPLAIN (COSTS off) SELECT * FROM o_indices1;
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices1 WHERE val2 > 5 ORDER BY val2;
@@ -91,13 +89,11 @@ CREATE TABLE o_indices2
 (
 	key bigint NOT NULL,
 	val bigint,
-	val2 bigint
+	val2 bigint,
+	PRIMARY KEY (key)
 ) USING orioledb;
 
-CREATE UNIQUE INDEX o_indices2_pkey ON o_indices2 USING orioledb_btree (key);
-ALTER TABLE o_indices2 ADD PRIMARY KEY USING INDEX o_indices2_pkey;
-
-CREATE INDEX o_indices2_idx1 on o_indices2 USING orioledb_btree (val);
+CREATE INDEX o_indices2_idx1 on o_indices2 (val);
 
 SELECT orioledb_tbl_indices('o_indices2'::regclass);
 
@@ -106,7 +102,7 @@ SELECT val FROM o_indices2 WHERE val > 0 ORDER BY val;
 
 -- index has data on disk after select, so table has
 -- no values in primary index, but index should build
-CREATE INDEX o_indices2_idx2 ON o_indices2 USING orioledb_btree (val2);
+CREATE INDEX o_indices2_idx2 ON o_indices2 (val2);
 
 SELECT orioledb_tbl_indices('o_indices2'::regclass);
 
@@ -127,18 +123,16 @@ CREATE TABLE o_indices3
 (
 	key text NOT NULL,
 	val int8,
-	val2 int8
+	val2 int8,
+	PRIMARY KEY (key)
 ) USING orioledb;
 
-CREATE UNIQUE INDEX o_indices3_pkey ON o_indices3 USING orioledb_btree (key);
-ALTER TABLE o_indices3 ADD PRIMARY KEY USING INDEX o_indices3_pkey;
-
-CREATE INDEX o_indices3_idx1 ON o_indices3 USING orioledb_btree (val);
+CREATE INDEX o_indices3_idx1 ON o_indices3 (val);
 
 INSERT INTO o_indices3 (SELECT id || 'key' || repeat('x', 500), id, id FROM generate_series(201, 700, 1) id);
 INSERT INTO o_indices3 (SELECT id || 'key' || repeat('x', 500), id, id FROM generate_series(701, 1200, 1) id);
 INSERT INTO o_indices3 (SELECT id || 'key' || repeat('x', 500), id, id FROM generate_series(1201, 1700, 1) id);
-CREATE INDEX o_indices3_idx2 ON o_indices3 USING orioledb_btree (val2);
+CREATE INDEX o_indices3_idx2 ON o_indices3 (val2);
 
 SELECT orioledb_tbl_indices('o_indices3'::regclass);
 
@@ -169,17 +163,15 @@ CREATE TABLE o_indices4
 (
 	key int8 NOT NULL,
 	val int,
-	val2 int
+	val2 int,
+	PRIMARY KEY (key)
 ) USING orioledb;
 
-CREATE UNIQUE INDEX o_indices4_pkey ON o_indices4 USING orioledb_btree (key);
-ALTER TABLE o_indices4 ADD PRIMARY KEY USING INDEX o_indices4_pkey;
-
-CREATE INDEX o_indices4_idx1 ON o_indices4 USING orioledb_btree (val DESC);
+CREATE INDEX o_indices4_idx1 ON o_indices4 (val DESC);
 
 INSERT INTO o_indices4 SELECT 1000 + i, 3000 + i, 3000 + i FROM generate_series(500, 1, -1) AS i;
 
-CREATE INDEX o_indices4_idx2 ON o_indices4 USING orioledb_btree (val2 DESC);
+CREATE INDEX o_indices4_idx2 ON o_indices4 (val2 DESC);
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices4 WHERE val > 0 ORDER BY val ASC;
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices4 WHERE val2 > 0 ORDER BY val2 ASC;
@@ -202,19 +194,17 @@ CREATE TABLE o_indices5
 	val int,
 	val2 int,
 	val3 int,
-	val4 int
+	val4 int,
+	PRIMARY KEY (key)
 ) USING orioledb;
 
-CREATE UNIQUE INDEX o_indices5_pkey ON o_indices5 USING orioledb_btree (key);
-ALTER TABLE o_indices5 ADD PRIMARY KEY USING INDEX o_indices5_pkey;
-
-CREATE INDEX o_indices5_idx1 ON o_indices5 USING orioledb_btree (val ASC, val2 DESC);
+CREATE INDEX o_indices5_idx1 ON o_indices5 (val ASC, val2 DESC);
 
 INSERT INTO o_indices5 SELECT 1000 + i, 3000 + i, 4000 + i,
 										 3000 + i, 4000 + i
 						FROM generate_series(500, 1, -1) AS i;
 
-CREATE INDEX o_indices5_idx2 ON o_indices5 USING orioledb_btree (val3 ASC, val4 DESC);
+CREATE INDEX o_indices5_idx2 ON o_indices5 (val3 ASC, val4 DESC);
 
 EXPLAIN (COSTS off) SELECT val2, val FROM o_indices5 WHERE val BETWEEN 3300 AND 3320 AND val2 > 0 ORDER BY val2 DESC;
 EXPLAIN (COSTS off) SELECT val4, val3 FROM o_indices5 WHERE val3 BETWEEN 3300 AND 3320 AND val4 > 0 ORDER BY val4 DESC;
@@ -232,16 +222,14 @@ CREATE TABLE o_indices6
 (
 	key int8 NOT NULL,
 	val int,
-	val2 int
+	val2 int,
+	PRIMARY KEY (key)
 ) USING orioledb;
-
-CREATE UNIQUE INDEX o_indices6_pkey ON o_indices6 USING orioledb_btree (key);
-ALTER TABLE o_indices6 ADD PRIMARY KEY USING INDEX o_indices6_pkey;
 
 INSERT INTO o_indices6 SELECT 1000 + i, 3000 + i % 100, 4000 + i FROM generate_series(1, 500) AS i;
 
-CREATE UNIQUE INDEX o_indices6_idx1 ON o_indices6 USING orioledb_btree (val); -- fail
-CREATE UNIQUE INDEX o_indices6_idx2 ON o_indices6 USING orioledb_btree (val2); -- success
+CREATE UNIQUE INDEX o_indices6_idx1 ON o_indices6 (val); -- fail
+CREATE UNIQUE INDEX o_indices6_idx2 ON o_indices6 (val2); -- success
 
 INSERT INTO o_indices6 VALUES (1501, 3000, 4001); -- fail
 
@@ -265,8 +253,8 @@ CREATE TABLE o_indices6_ctid
 
 INSERT INTO o_indices6_ctid SELECT 1000 + i, 3000 + i % 100, 4000 + i FROM generate_series(1, 500) AS i;
 
-CREATE UNIQUE INDEX o_indices6_ctid_idx1 ON o_indices6_ctid USING orioledb_btree (val); -- fail
-CREATE UNIQUE INDEX o_indices6_ctid_idx2 ON o_indices6_ctid USING orioledb_btree (val2); -- success
+CREATE UNIQUE INDEX o_indices6_ctid_idx1 ON o_indices6_ctid (val); -- fail
+CREATE UNIQUE INDEX o_indices6_ctid_idx2 ON o_indices6_ctid (val2); -- success
 
 SELECT orioledb_tbl_indices('o_indices6_ctid'::regclass);
 
@@ -282,11 +270,9 @@ CREATE TABLE o_indices7
 (
 	key int NOT NULL,
 	val int,
-	val2 int
+	val2 int,
+	PRIMARY KEY (key)
 ) USING orioledb;
-
-CREATE UNIQUE INDEX o_indices7_pkey ON o_indices7 USING orioledb_btree (key);
-ALTER TABLE o_indices7 ADD PRIMARY KEY USING INDEX o_indices7_pkey;
 
 INSERT INTO o_indices7 SELECT 1000 + i, 3000 + i, 4000 + i
 FROM generate_series(1, 500) AS i;
@@ -294,7 +280,7 @@ FROM generate_series(1, 500) AS i;
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
 
 BEGIN;
-CREATE INDEX o_indices7_idx1 ON o_indices7 USING orioledb_btree (val);
+CREATE INDEX o_indices7_idx1 ON o_indices7 (val);
 ROLLBACK;
 
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
@@ -303,7 +289,7 @@ EXPLAIN (COSTS off) SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDE
 SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDER BY val;
 
 BEGIN;
-CREATE INDEX o_indices7_idx1 ON o_indices7 USING orioledb_btree (val);
+CREATE INDEX o_indices7_idx1 ON o_indices7 (val);
 COMMIT;
 
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
@@ -330,16 +316,16 @@ EXPLAIN (COSTS off) SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDE
 SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDER BY val;
 
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
-CREATE INDEX o_indices7_idx1 ON o_indices7 USING orioledb_btree (val2);
-CREATE INDEX o_indices7_idx2 ON o_indices7 USING orioledb_btree (val2);
-CREATE INDEX o_indices7_idx3 ON o_indices7 USING orioledb_btree (val2);
-CREATE INDEX o_indices7_idx4 ON o_indices7 USING orioledb_btree (val2);
+CREATE INDEX o_indices7_idx1 ON o_indices7 (val2);
+CREATE INDEX o_indices7_idx2 ON o_indices7 (val2);
+CREATE INDEX o_indices7_idx3 ON o_indices7 (val2);
+CREATE INDEX o_indices7_idx4 ON o_indices7 (val2);
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
 DROP INDEX o_indices7_idx2;
 DROP INDEX o_indices7_idx3;
 DROP INDEX o_indices7_idx4;
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
-CREATE INDEX o_indices7_idx5 ON o_indices7 USING orioledb_btree (val);
+CREATE INDEX o_indices7_idx5 ON o_indices7 (val);
 SELECT orioledb_tbl_indices('o_indices7'::regclass);
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0
@@ -367,8 +353,9 @@ EXPLAIN (COSTS off) SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
 
-CREATE UNIQUE INDEX o_indices7_pkey ON o_indices7 USING orioledb_btree (key);
-ALTER TABLE o_indices7 ADD PRIMARY KEY USING INDEX o_indices7_pkey;
+ALTER TABLE o_indices7
+  ADD CONSTRAINT o_indices7_pkey
+    PRIMARY KEY (key);
 
 EXPLAIN (COSTS off) SELECT * FROM o_indices7 WHERE val = 3400 AND val > 0
 	ORDER BY val;
@@ -396,10 +383,9 @@ CREATE TABLE o_indices8
 (
 	key integer NOT NULL,
 	val text COLLATE "C" NOT NULL,
-	val2 text COLLATE "C" NOT NULL
+	val2 text COLLATE "C" NOT NULL,
+	PRIMARY KEY (key)
 ) USING orioledb;
-CREATE UNIQUE INDEX o_indices8_pkey ON o_indices8 USING orioledb_btree (key);
-ALTER TABLE o_indices8 ADD PRIMARY KEY USING INDEX o_indices8_pkey;
 INSERT INTO o_indices8
 	VALUES (1, generate_string(5, 10), generate_string(1, 20));
 INSERT INTO o_indices8
@@ -407,8 +393,8 @@ INSERT INTO o_indices8
 INSERT INTO o_indices8
 	SELECT i, generate_string(i, 10), generate_string(i, 3000)
 	FROM generate_series(3, 5) i;
-CREATE INDEX o_indices8_idx1 ON o_indices8 USING orioledb_btree (val);
-CREATE INDEX o_indices8_idx2 ON o_indices8 USING orioledb_btree (val2);
+CREATE INDEX o_indices8_idx1 ON o_indices8 (val);
+CREATE INDEX o_indices8_idx2 ON o_indices8 (val2);
 SELECT * FROM o_indices8;
 SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
@@ -427,8 +413,9 @@ SELECT * FROM o_indices8;
 SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 
-CREATE UNIQUE INDEX o_indices8_pkey ON o_indices8 USING orioledb_btree (key);
-ALTER TABLE o_indices8 ADD PRIMARY KEY USING INDEX o_indices8_pkey;
+ALTER TABLE o_indices8
+  ADD CONSTRAINT o_indices8_pkey
+    PRIMARY KEY (key);
 EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT key, val FROM o_indices8;
@@ -453,15 +440,16 @@ INSERT INTO o_indices8_ctid
 INSERT INTO o_indices8_ctid
 	SELECT i, generate_string(i, 10), generate_string(i, 3000)
 	FROM generate_series(3, 5) i;
-CREATE INDEX o_indices8_ctid_idx1 ON o_indices8_ctid USING orioledb_btree (val);
-CREATE INDEX o_indices8_ctid_idx2 ON o_indices8_ctid USING orioledb_btree (val2);
+CREATE INDEX o_indices8_ctid_idx1 ON o_indices8_ctid (val);
+CREATE INDEX o_indices8_ctid_idx2 ON o_indices8_ctid (val2);
 SELECT * FROM o_indices8_ctid;
 SELECT val FROM o_indices8_ctid WHERE val > 'a' ORDER BY val;
 
 SELECT orioledb_tbl_structure('o_indices8_ctid'::regclass, 'nue');
 
-CREATE UNIQUE INDEX o_indices8_ctid_pkey ON o_indices8_ctid USING orioledb_btree (key);
-ALTER TABLE o_indices8_ctid ADD PRIMARY KEY USING INDEX o_indices8_ctid_pkey;
+ALTER TABLE o_indices8_ctid
+  ADD CONSTRAINT o_indices8_ctid_pkey
+    PRIMARY KEY (key);
 SELECT key, val FROM o_indices8_ctid;
 SELECT * FROM o_indices8_ctid;
 SELECT val FROM o_indices8_ctid WHERE val > 'a' ORDER BY val;
@@ -479,17 +467,15 @@ SELECT orioledb_tbl_structure('o_indices8_ctid'::regclass, 'nue');
 -- Check external sorting
 CREATE TABLE o_indices9
 (
-	key integer,
+	key integer PRIMARY KEY,
 	val text COLLATE "C" NOT NULL
 ) USING orioledb;
-CREATE UNIQUE INDEX o_indices9_pkey ON o_indices9 USING orioledb_btree (key);
-ALTER TABLE o_indices9 ADD PRIMARY KEY USING INDEX o_indices9_pkey;
 
 INSERT INTO o_indices9
 SELECT i, generate_string(i, 1000)
 FROM generate_series(1, 200) i;
 SET work_mem = '64kB';
-CREATE INDEX o_indices9_val_idx ON o_indices9 USING orioledb_btree (val);
+CREATE INDEX o_indices9_val_idx ON o_indices9(val);
 WITH x(val) AS (SELECT val FROM o_indices9 ORDER BY val)
 SELECT sum(length(val)) FROM x;
 
@@ -503,7 +489,7 @@ CREATE TABLE o_indices10
 INSERT INTO o_indices10
 	SELECT 1000 + i, 3000 + i,
 			3000 + i FROM generate_series(1, 500) AS i;
-CREATE UNIQUE INDEX o_indices10_idx1 ON o_indices10 USING orioledb_btree (val2);
+CREATE UNIQUE INDEX o_indices10_idx1 ON o_indices10 (val2);
 SELECT orioledb_tbl_indices('o_indices10'::regclass);
 DROP INDEX o_indices10_idx1;
 SELECT orioledb_tbl_indices('o_indices10'::regclass);
@@ -575,24 +561,23 @@ INSERT INTO o_test_pkey_mixed_build
 		   generate_series(0, 2) v;
 SELECT orioledb_tbl_structure('o_test_pkey_mixed_build'::regclass, 'nue');
 
-CREATE UNIQUE INDEX o_test_pkey_mixed_build_pkey ON o_test_pkey_mixed_build USING orioledb_btree (pk1, pk2, pk3, pk4);
-ALTER TABLE o_test_pkey_mixed_build ADD PRIMARY KEY USING INDEX o_test_pkey_mixed_build_pkey;
+ALTER TABLE o_test_pkey_mixed_build ADD PRIMARY KEY (pk1, pk2, pk3, pk4);
 
 CREATE INDEX o_test_pkey_mixed_build_ix1
-	ON o_test_pkey_mixed_build USING orioledb_btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2);
+	ON o_test_pkey_mixed_build (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2);
 \d+ o_test_pkey_mixed_build
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
 
 CREATE UNIQUE INDEX o_test_pkey_mixed_build_uniq1
-	ON o_test_pkey_mixed_build USING orioledb_btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2);
+	ON o_test_pkey_mixed_build (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2);
 \d+ o_test_pkey_mixed_build
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
 
 CREATE INDEX o_test_pkey_mixed_build_ix3
-	ON o_test_pkey_mixed_build USING orioledb_btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3);
+	ON o_test_pkey_mixed_build (f3, f2, pk4, f1, pk4) INCLUDE (pk3);
 \d+ o_test_pkey_mixed_build
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -600,7 +585,7 @@ CREATE INDEX o_test_pkey_mixed_build_ix3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
 
 CREATE INDEX o_test_pkey_mixed_build_ix4
-	ON o_test_pkey_mixed_build USING orioledb_btree (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2);
+	ON o_test_pkey_mixed_build (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2);
 \d+ o_test_pkey_mixed_build
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -637,8 +622,7 @@ INSERT INTO o_test_pkey_include_box_build
 		   6 * 10 ^ v FROM generate_series(0, 2) v;
 SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
 
-CREATE UNIQUE INDEX o_test_pkey_include_box_build_pkey ON o_test_pkey_include_box_build USING orioledb_btree (pk1) INCLUDE (pk2);
-ALTER TABLE o_test_pkey_include_box_build ADD PRIMARY KEY USING INDEX o_test_pkey_include_box_build_pkey;
+ALTER TABLE o_test_pkey_include_box_build ADD PRIMARY KEY (pk1) INCLUDE (pk2);
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
@@ -657,7 +641,7 @@ INSERT INTO o_test_include_box_build
 SELECT orioledb_tbl_structure('o_test_include_box_build'::regclass, 'nue');
 
 CREATE UNIQUE INDEX o_test_include_box_build_ix1
-	ON o_test_include_box_build USING orioledb_btree (val_1) INCLUDE (val_4);
+	ON o_test_include_box_build (val_1) INCLUDE (val_4);
 \d+ o_test_include_box_build
 SELECT orioledb_tbl_indices('o_test_include_box_build'::regclass);
 
@@ -683,12 +667,11 @@ INSERT INTO o_test_include_box_with_pkey_build
 SELECT orioledb_tbl_structure('o_test_include_box_with_pkey_build'::regclass,
 							  'nue');
 
-CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_pkey ON o_test_include_box_with_pkey_build USING orioledb_btree (val_1);
-ALTER TABLE o_test_include_box_with_pkey_build ADD PRIMARY KEY USING INDEX o_test_include_box_with_pkey_build_pkey;
+ALTER TABLE o_test_include_box_with_pkey_build ADD PRIMARY KEY (val_1);
 CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix1
-	ON o_test_include_box_with_pkey USING orioledb_btree (val_2) INCLUDE (val_4);
+	ON o_test_include_box_with_pkey (val_2) INCLUDE (val_4);
 CREATE UNIQUE INDEX o_test_include_box_with_pkey_build_ix2
-	ON o_test_include_box_with_pkey_build USING orioledb_btree (val_3);
+	ON o_test_include_box_with_pkey_build (val_3);
 \d+ o_test_include_box_with_pkey_build
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
 
@@ -723,13 +706,13 @@ INSERT INTO o_rebuild_unique_with_new_pkey_fields
 
 CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_ix1
 	ON o_rebuild_unique_with_new_pkey_fields
-		USING orioledb_btree (project_id, id, ts, filler);
+		USING btree (project_id, id, ts, filler);
 CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_ix2
 	ON o_rebuild_unique_with_new_pkey_fields
-		USING orioledb_btree (project_id, filler);
+		USING btree (project_id, filler);
 SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
-CREATE UNIQUE INDEX o_rebuild_unique_with_new_pkey_fields_pkey ON o_rebuild_unique_with_new_pkey_fields USING orioledb_btree (project_id, id, ts);
-ALTER TABLE o_rebuild_unique_with_new_pkey_fields ADD PRIMARY KEY USING INDEX o_rebuild_unique_with_new_pkey_fields_pkey;
+ALTER TABLE o_rebuild_unique_with_new_pkey_fields
+	ADD PRIMARY KEY (project_id, id, ts);
 SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
 
 BEGIN;
@@ -743,7 +726,7 @@ CREATE TABLE o_test_max_parallel_maintenance_workers_idx_build (
 INSERT INTO o_test_max_parallel_maintenance_workers_idx_build VALUES (1);
 
 CREATE INDEX o_test_max_parallel_maintenance_workers_idx_build_ix1
-	ON o_test_max_parallel_maintenance_workers_idx_build USING orioledb_btree (val_2);
+	ON o_test_max_parallel_maintenance_workers_idx_build (val_2);
 COMMIT;
 
 SELECT orioledb_parallel_debug_stop();

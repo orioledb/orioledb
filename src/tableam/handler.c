@@ -730,6 +730,36 @@ orioledb_relation_set_new_filenode(Relation rel,
 }
 
 static void
+drop_indices_for_rel(Relation rel, bool primary)
+{
+	ListCell   *index;
+	Oid			indexOid;
+
+	foreach(index, RelationGetIndexList(rel))
+	{
+		bool closed = false;
+		indexOid = lfirst_oid(index);
+		Relation ind = relation_open(indexOid, AccessShareLock);
+
+		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
+		{
+			OIndexNumber ix_num;
+			OTableDescr *descr = relation_get_descr(rel);
+
+			Assert(descr != NULL);
+			ix_num = o_find_ix_num_by_name(descr, ind->rd_rel->relname.data);
+			if (GET_PRIMARY(descr)->primaryIsCtid)
+				ix_num--;
+			relation_close(ind, AccessShareLock);
+			o_index_drop(rel, ix_num);
+			closed = true;
+		}
+		if (!closed)
+			relation_close(ind, AccessShareLock);
+	}
+}
+
+static void
 orioledb_relation_nontransactional_truncate(Relation rel)
 {
 	ORelOids	oids;
@@ -739,6 +769,10 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 		return;
 
 	o_truncate_table(oids);
+
+	drop_indices_for_rel(rel, false);
+	// drop primary after all indices to not rebuild them
+	drop_indices_for_rel(rel, true);
 
 	if (RelationIsPermanent(rel))
 		add_truncate_wal_record(oids);

@@ -1075,6 +1075,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (recurse)
 			{
+				Relation	rel;
 				ListCell   *child;
 				List	   *children;
 
