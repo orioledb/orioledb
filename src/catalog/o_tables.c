@@ -631,6 +631,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 	field->notnull = attr->attnotnull;
 	field->hasmissing = attr->atthasmissing;
 	field->hasdef = attr->atthasdef;
+	field->generated = attr->attgenerated;
 }
 
 OTable *
@@ -1601,6 +1602,7 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 
 	att->attnotnull = field->notnull;
 	att->atthasdef = field->hasdef;
+	att->attgenerated = field->generated;
 	att->atthasmissing = field->hasmissing;
 	att->attidentity = '\0';
 	att->attisdropped = field->droped;

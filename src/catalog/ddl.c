@@ -1748,6 +1748,12 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defaultexpr;
 			}
 
+			if (!expr && attr->attgenerated && old_slot->tts_isnull[i])
+			{
+				Node *defaultexpr = build_column_default(rel, i + 1);
+				expr = defaultexpr;
+			}
+
 			attr = &new_slot->tts_tupleDescriptor->attrs[i];
 			if (expr)
 			{

@@ -41,6 +41,7 @@ typedef struct
 	char		compression;
 	bool		hasmissing;
 	bool		hasdef;
+	char		generated;
 } OTableField;
 
 /*
