@@ -317,10 +317,8 @@ EXPLAIN (COSTS OFF)
 		ORDER BY val_3;
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 
-SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 ALTER TABLE o_test_alter_type_ix_included_rollback
 	ALTER val_2 TYPE text COLLATE "C";
-SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
