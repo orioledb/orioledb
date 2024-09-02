@@ -1565,16 +1565,7 @@ orioledb_error_cleanup_hook(void)
 	unset_skip_ucm();
 	btree_io_error_cleanup();
 	o_reset_syscache_hooks();
-	if (drop_index_list)
-	{
-		list_free_deep(drop_index_list);
-		drop_index_list = NIL;
-	}
-	if (reindex_list)
-	{
-		list_free_deep(reindex_list);
-		reindex_list = NIL;
-	}
+	o_rewrite_cleanup();
 	if (orioledb_s3_mode)
 		s3_headers_error_cleanup();
 }

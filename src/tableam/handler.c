@@ -1262,6 +1262,9 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	OTableDescr *descr;
 	bool		result;
 
+	if (OidIsValid(o_saved_relrewrite))
+		return false;
+
 	do
 	{
 		OTuple		tuple = {0};

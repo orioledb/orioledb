@@ -573,58 +573,58 @@ SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-                            orioledb_tbl_structure                            
-------------------------------------------------------------------------------
- Index o_test_add_column_pkey contents                                       +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                         +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
-     Leftmost, Rightmost                                                     +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: offset = 280, tuple = ('0', '15', null, null, '5', '9798')      +
-     Item 1: offset = 328, tuple = ('1', '159', '1', null, '5', '17916')     +
-     Item 2: offset = 384, tuple = ('2', '19305', '2', null, '5', '19971')   +
-     Item 3: offset = 440, tuple = ('3', '7790', '3', null, '5', '1747')     +
-     Item 4: offset = 496, tuple = ('4', '16764', '4', null, '5', '17054')   +
-     Item 5: offset = 552, tuple = ('5', '8182', '5', null, '5', '13731')    +
-     Item 6: offset = 608, tuple = ('6', '3414', '6', null, '5', '19646')    +
-     Item 7: offset = 664, tuple = ('7', '16703', '7', null, '5', '13585')   +
-     Item 8: offset = 720, tuple = ('8', '18766', '8', null, '5', '17991')   +
-     Item 9: offset = 776, tuple = ('9', '18518', '9', null, '5', '1481')    +
-     Item 10: offset = 832, tuple = ('10', '18915', '10', null, '5', '10774')+
-                                                                             +
- Index toast: not loaded                                                     +
+                           orioledb_tbl_structure                            
+-----------------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                        +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty        +
+     Leftmost, Rightmost                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                 +
+     Item 0: offset = 280, tuple = ('0', '15', null, null, '5', '17928')    +
+     Item 1: offset = 328, tuple = ('1', '159', '1', null, '5', '332')      +
+     Item 2: offset = 384, tuple = ('2', '19305', '2', null, '5', '9675')   +
+     Item 3: offset = 440, tuple = ('3', '7790', '3', null, '5', '17247')   +
+     Item 4: offset = 496, tuple = ('4', '16764', '4', null, '5', '5534')   +
+     Item 5: offset = 552, tuple = ('5', '8182', '5', null, '5', '515')     +
+     Item 6: offset = 608, tuple = ('6', '3414', '6', null, '5', '9615')    +
+     Item 7: offset = 664, tuple = ('7', '16703', '7', null, '5', '12229')  +
+     Item 8: offset = 720, tuple = ('8', '18766', '8', null, '5', '16597')  +
+     Item 9: offset = 776, tuple = ('9', '18518', '9', null, '5', '9993')   +
+     Item 10: offset = 832, tuple = ('10', '18915', '10', null, '5', '5149')+
+                                                                            +
+ Index toast: not loaded                                                    +
  
 (1 row)
 
 INSERT INTO o_test_add_column (i)
 	SELECT pseudo_random(3, v) * 20000 FROM generate_series(1,5) v;
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-                            orioledb_tbl_structure                            
-------------------------------------------------------------------------------
- Index o_test_add_column_pkey contents                                       +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                         +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
-     Leftmost, Rightmost                                                     +
-   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('6')   +
-     Item 0: offset = 272, tuple = ('0', '15', null, null, '5', '9798')      +
-     Item 1: offset = 320, tuple = ('1', '159', '1', null, '5', '17916')     +
-     Item 2: offset = 376, tuple = ('2', '19305', '2', null, '5', '19971')   +
-     Item 3: offset = 432, tuple = ('3', '7790', '3', null, '5', '1747')     +
-     Item 4: offset = 488, tuple = ('4', '16764', '4', null, '5', '17054')   +
-     Item 5: offset = 544, tuple = ('5', '8182', '5', null, '5', '13731')    +
-   Chunk 1: offset = 6, location = 600, hikey location = 72                  +
-     Item 6: offset = 624, tuple = ('6', '3414', '6', null, '5', '19646')    +
-     Item 7: offset = 680, tuple = ('7', '16703', '7', null, '5', '13585')   +
-     Item 8: offset = 736, tuple = ('8', '18766', '8', null, '5', '17991')   +
-     Item 9: offset = 792, tuple = ('9', '18518', '9', null, '5', '1481')    +
-     Item 10: offset = 848, tuple = ('10', '18915', '10', null, '5', '10774')+
-     Item 11: offset = 904, tuple = ('11', '3206', '11', null, '5', '8386')  +
-     Item 12: offset = 960, tuple = ('12', '15492', '12', null, '5', '18273')+
-     Item 13: offset = 1016, tuple = ('13', '16020', '13', null, '5', '2066')+
-     Item 14: offset = 1072, tuple = ('14', '9948', '14', null, '5', '10254')+
-     Item 15: offset = 1128, tuple = ('15', '4451', '15', null, '5', '1809') +
-                                                                             +
- Index toast: not loaded                                                     +
+                            orioledb_tbl_structure                             
+-------------------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                          +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty          +
+     Leftmost, Rightmost                                                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('6')    +
+     Item 0: offset = 272, tuple = ('0', '15', null, null, '5', '17928')      +
+     Item 1: offset = 320, tuple = ('1', '159', '1', null, '5', '332')        +
+     Item 2: offset = 376, tuple = ('2', '19305', '2', null, '5', '9675')     +
+     Item 3: offset = 432, tuple = ('3', '7790', '3', null, '5', '17247')     +
+     Item 4: offset = 488, tuple = ('4', '16764', '4', null, '5', '5534')     +
+     Item 5: offset = 544, tuple = ('5', '8182', '5', null, '5', '515')       +
+   Chunk 1: offset = 6, location = 600, hikey location = 72                   +
+     Item 6: offset = 624, tuple = ('6', '3414', '6', null, '5', '9615')      +
+     Item 7: offset = 680, tuple = ('7', '16703', '7', null, '5', '12229')    +
+     Item 8: offset = 736, tuple = ('8', '18766', '8', null, '5', '16597')    +
+     Item 9: offset = 792, tuple = ('9', '18518', '9', null, '5', '9993')     +
+     Item 10: offset = 848, tuple = ('10', '18915', '10', null, '5', '5149')  +
+     Item 11: offset = 904, tuple = ('11', '3206', '11', null, '5', '9798')   +
+     Item 12: offset = 960, tuple = ('12', '15492', '12', null, '5', '17916') +
+     Item 13: offset = 1016, tuple = ('13', '16020', '13', null, '5', '19971')+
+     Item 14: offset = 1072, tuple = ('14', '9948', '14', null, '5', '1747')  +
+     Item 15: offset = 1128, tuple = ('15', '4451', '15', null, '5', '17054') +
+                                                                              +
+ Index toast: not loaded                                                      +
  
 (1 row)
 
@@ -637,44 +637,44 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column;
 SELECT * FROM o_test_add_column;
  id |   i   | v  | y | z |   j   
 ----+-------+----+---+---+-------
-  0 |    15 |    |   | 5 |  9798
-  1 |   159 |  1 |   | 5 | 17916
-  2 | 19305 |  2 |   | 5 | 19971
-  3 |  7790 |  3 |   | 5 |  1747
-  4 | 16764 |  4 |   | 5 | 17054
-  5 |  8182 |  5 |   | 5 | 13731
-  6 |  3414 |  6 |   | 5 | 19646
-  7 | 16703 |  7 |   | 5 | 13585
-  8 | 18766 |  8 |   | 5 | 17991
-  9 | 18518 |  9 |   | 5 |  1481
- 10 | 18915 | 10 |   | 5 | 10774
- 11 |  3206 | 11 |   | 5 |  8386
- 12 | 15492 | 12 |   | 5 | 18273
- 13 | 16020 | 13 |   | 5 |  2066
- 14 |  9948 | 14 |   | 5 | 10254
- 15 |  4451 | 15 |   | 5 |  1809
+  0 |    15 |    |   | 5 | 17928
+  1 |   159 |  1 |   | 5 |   332
+  2 | 19305 |  2 |   | 5 |  9675
+  3 |  7790 |  3 |   | 5 | 17247
+  4 | 16764 |  4 |   | 5 |  5534
+  5 |  8182 |  5 |   | 5 |   515
+  6 |  3414 |  6 |   | 5 |  9615
+  7 | 16703 |  7 |   | 5 | 12229
+  8 | 18766 |  8 |   | 5 | 16597
+  9 | 18518 |  9 |   | 5 |  9993
+ 10 | 18915 | 10 |   | 5 |  5149
+ 11 |  3206 | 11 |   | 5 |  9798
+ 12 | 15492 | 12 |   | 5 | 17916
+ 13 | 16020 | 13 |   | 5 | 19971
+ 14 |  9948 | 14 |   | 5 |  1747
+ 15 |  4451 | 15 |   | 5 | 17054
 (16 rows)
 
 -- Test that default fields not recalculated
 SELECT * FROM o_test_add_column;
  id |   i   | v  | y | z |   j   
 ----+-------+----+---+---+-------
-  0 |    15 |    |   | 5 |  9798
-  1 |   159 |  1 |   | 5 | 17916
-  2 | 19305 |  2 |   | 5 | 19971
-  3 |  7790 |  3 |   | 5 |  1747
-  4 | 16764 |  4 |   | 5 | 17054
-  5 |  8182 |  5 |   | 5 | 13731
-  6 |  3414 |  6 |   | 5 | 19646
-  7 | 16703 |  7 |   | 5 | 13585
-  8 | 18766 |  8 |   | 5 | 17991
-  9 | 18518 |  9 |   | 5 |  1481
- 10 | 18915 | 10 |   | 5 | 10774
- 11 |  3206 | 11 |   | 5 |  8386
- 12 | 15492 | 12 |   | 5 | 18273
- 13 | 16020 | 13 |   | 5 |  2066
- 14 |  9948 | 14 |   | 5 | 10254
- 15 |  4451 | 15 |   | 5 |  1809
+  0 |    15 |    |   | 5 | 17928
+  1 |   159 |  1 |   | 5 |   332
+  2 | 19305 |  2 |   | 5 |  9675
+  3 |  7790 |  3 |   | 5 | 17247
+  4 | 16764 |  4 |   | 5 |  5534
+  5 |  8182 |  5 |   | 5 |   515
+  6 |  3414 |  6 |   | 5 |  9615
+  7 | 16703 |  7 |   | 5 | 12229
+  8 | 18766 |  8 |   | 5 | 16597
+  9 | 18518 |  9 |   | 5 |  9993
+ 10 | 18915 | 10 |   | 5 |  5149
+ 11 |  3206 | 11 |   | 5 |  9798
+ 12 | 15492 | 12 |   | 5 | 17916
+ 13 | 16020 | 13 |   | 5 | 19971
+ 14 |  9948 | 14 |   | 5 |  1747
+ 15 |  4451 | 15 |   | 5 | 17054
 (16 rows)
 
 -- Test primary key usage after rewrite
@@ -689,22 +689,22 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column ORDER BY id;
 SELECT * FROM o_test_add_column ORDER BY id;
  id |   i   | v  | y | z |   j   
 ----+-------+----+---+---+-------
-  0 |    15 |    |   | 5 |  9798
-  1 |   159 |  1 |   | 5 | 17916
-  2 | 19305 |  2 |   | 5 | 19971
-  3 |  7790 |  3 |   | 5 |  1747
-  4 | 16764 |  4 |   | 5 | 17054
-  5 |  8182 |  5 |   | 5 | 13731
-  6 |  3414 |  6 |   | 5 | 19646
-  7 | 16703 |  7 |   | 5 | 13585
-  8 | 18766 |  8 |   | 5 | 17991
-  9 | 18518 |  9 |   | 5 |  1481
- 10 | 18915 | 10 |   | 5 | 10774
- 11 |  3206 | 11 |   | 5 |  8386
- 12 | 15492 | 12 |   | 5 | 18273
- 13 | 16020 | 13 |   | 5 |  2066
- 14 |  9948 | 14 |   | 5 | 10254
- 15 |  4451 | 15 |   | 5 |  1809
+  0 |    15 |    |   | 5 | 17928
+  1 |   159 |  1 |   | 5 |   332
+  2 | 19305 |  2 |   | 5 |  9675
+  3 |  7790 |  3 |   | 5 | 17247
+  4 | 16764 |  4 |   | 5 |  5534
+  5 |  8182 |  5 |   | 5 |   515
+  6 |  3414 |  6 |   | 5 |  9615
+  7 | 16703 |  7 |   | 5 | 12229
+  8 | 18766 |  8 |   | 5 | 16597
+  9 | 18518 |  9 |   | 5 |  9993
+ 10 | 18915 | 10 |   | 5 |  5149
+ 11 |  3206 | 11 |   | 5 |  9798
+ 12 | 15492 | 12 |   | 5 | 17916
+ 13 | 16020 | 13 |   | 5 | 19971
+ 14 |  9948 | 14 |   | 5 |  1747
+ 15 |  4451 | 15 |   | 5 | 17054
 (16 rows)
 
 COMMIT;

@@ -2614,3 +2614,19 @@ o_parse_compress(const char *value)
 
 	return result;
 }
+
+void
+o_rewrite_cleanup(void)
+{
+	if (drop_index_list)
+	{
+		list_free_deep(drop_index_list);
+		drop_index_list = NIL;
+	}
+	if (reindex_list)
+	{
+		list_free_deep(reindex_list);
+		reindex_list = NIL;
+	}
+	o_saved_relrewrite = InvalidOid;
+}
