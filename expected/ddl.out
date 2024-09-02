@@ -412,49 +412,20 @@ CREATE FUNCTION pseudo_random(seed bigint, i bigint) RETURNS float8 AS
 $$
 	SELECT substr(sha256(($1::text || ' ' || $2::text)::bytea)::text,2,16)::bit(52)::bigint::float8 / pow(2.0, 52.0);
 $$ LANGUAGE sql;
+CREATE SEQUENCE o_test_add_column_id_seq2;
 CREATE TABLE o_test_add_column
 (
 	id serial primary key,
-	i int4
+	i int4,
+	v int4 default nextval('o_test_add_column_id_seq2'::regclass)
 ) USING orioledb;
 \d o_test_add_column
                               Table "ddl.o_test_add_column"
- Column |  Type   | Collation | Nullable |                    Default                    
---------+---------+-----------+----------+-----------------------------------------------
+ Column |  Type   | Collation | Nullable |                    Default                     
+--------+---------+-----------+----------+------------------------------------------------
  id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
  i      | integer |           |          | 
-Indexes:
-    "o_test_add_column_pkey" PRIMARY KEY, btree (id)
-
-SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_test_add_column_pkey                  +
-     Index type: primary, unique               +
-     Leaf tuple size: 2, non-leaf tuple size: 1+
-     Non-leaf tuple fields: id                 +
- 
-(1 row)
-
-SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-          orioledb_tbl_structure          
-------------------------------------------
- Index o_test_add_column_pkey: not loaded+
- Index toast: not loaded                 +
- 
-(1 row)
-
-INSERT INTO o_test_add_column (i)
-	SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
--- test new null column
-ALTER TABLE o_test_add_column ADD COLUMN y int4;
-\d o_test_add_column
-                              Table "ddl.o_test_add_column"
- Column |  Type   | Collation | Nullable |                    Default                    
---------+---------+-----------+----------+-----------------------------------------------
- id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
- i      | integer |           |          | 
- y      | integer |           |          | 
+ v      | integer |           |          | nextval('o_test_add_column_id_seq2'::regclass)
 Indexes:
     "o_test_add_column_pkey" PRIMARY KEY, btree (id)
 
@@ -469,38 +440,26 @@ SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-                       orioledb_tbl_structure                        
----------------------------------------------------------------------
- Index o_test_add_column_pkey contents                              +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty+
-     Leftmost, Rightmost                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('1', '159', null)               +
-     Item 1: offset = 304, tuple = ('2', '19305', null)             +
-     Item 2: offset = 328, tuple = ('3', '7790', null)              +
-     Item 3: offset = 352, tuple = ('4', '16764', null)             +
-     Item 4: offset = 376, tuple = ('5', '8182', null)              +
-     Item 5: offset = 400, tuple = ('6', '3414', null)              +
-     Item 6: offset = 424, tuple = ('7', '16703', null)             +
-     Item 7: offset = 448, tuple = ('8', '18766', null)             +
-     Item 8: offset = 472, tuple = ('9', '18518', null)             +
-     Item 9: offset = 496, tuple = ('10', '18915', null)            +
-                                                                    +
- Index toast: not loaded                                            +
+          orioledb_tbl_structure          
+------------------------------------------
+ Index o_test_add_column_pkey: not loaded+
+ Index toast: not loaded                 +
  
 (1 row)
 
--- test new column with volatile default
-ALTER TABLE o_test_add_column ADD COLUMN z int4 default 5;
+INSERT INTO o_test_add_column VALUES (0, 15, NULL);
+INSERT INTO o_test_add_column (i)
+	SELECT pseudo_random(1, v) * 20000 FROM generate_series(1,10) v;
+-- test new null column
+ALTER TABLE o_test_add_column ADD COLUMN y int4;
 \d o_test_add_column
                               Table "ddl.o_test_add_column"
- Column |  Type   | Collation | Nullable |                    Default                    
---------+---------+-----------+----------+-----------------------------------------------
+ Column |  Type   | Collation | Nullable |                    Default                     
+--------+---------+-----------+----------+------------------------------------------------
  id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
  i      | integer |           |          | 
+ v      | integer |           |          | nextval('o_test_add_column_id_seq2'::regclass)
  y      | integer |           |          | 
- z      | integer |           |          | 5
 Indexes:
     "o_test_add_column_pkey" PRIMARY KEY, btree (id)
 
@@ -522,34 +481,33 @@ SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('1', '159', null, null)         +
-     Item 1: offset = 304, tuple = ('2', '19305', null, null)       +
-     Item 2: offset = 328, tuple = ('3', '7790', null, null)        +
-     Item 3: offset = 352, tuple = ('4', '16764', null, null)       +
-     Item 4: offset = 376, tuple = ('5', '8182', null, null)        +
-     Item 5: offset = 400, tuple = ('6', '3414', null, null)        +
-     Item 6: offset = 424, tuple = ('7', '16703', null, null)       +
-     Item 7: offset = 448, tuple = ('8', '18766', null, null)       +
-     Item 8: offset = 472, tuple = ('9', '18518', null, null)       +
-     Item 9: offset = 496, tuple = ('10', '18915', null, null)      +
+     Item 0: offset = 280, tuple = ('0', '15', null, null)          +
+     Item 1: offset = 320, tuple = ('1', '159', '1', null)          +
+     Item 2: offset = 352, tuple = ('2', '19305', '2', null)        +
+     Item 3: offset = 384, tuple = ('3', '7790', '3', null)         +
+     Item 4: offset = 416, tuple = ('4', '16764', '4', null)        +
+     Item 5: offset = 448, tuple = ('5', '8182', '5', null)         +
+     Item 6: offset = 480, tuple = ('6', '3414', '6', null)         +
+     Item 7: offset = 512, tuple = ('7', '16703', '7', null)        +
+     Item 8: offset = 544, tuple = ('8', '18766', '8', null)        +
+     Item 9: offset = 576, tuple = ('9', '18518', '9', null)        +
+     Item 10: offset = 608, tuple = ('10', '18915', '10', null)     +
                                                                     +
  Index toast: not loaded                                            +
  
 (1 row)
 
-CREATE SEQUENCE o_test_j_seq;
--- test new column with non-volatile default
-ALTER TABLE o_test_add_column
-	ADD COLUMN j int4 not null default pseudo_random(2, nextval('o_test_j_seq')) * 20000;
+-- test new column with volatile default
+ALTER TABLE o_test_add_column ADD COLUMN z int4 default 5;
 \d o_test_add_column
-                                                   Table "ddl.o_test_add_column"
- Column |  Type   | Collation | Nullable |                                         Default                                         
---------+---------+-----------+----------+-----------------------------------------------------------------------------------------
+                              Table "ddl.o_test_add_column"
+ Column |  Type   | Collation | Nullable |                    Default                     
+--------+---------+-----------+----------+------------------------------------------------
  id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
  i      | integer |           |          | 
+ v      | integer |           |          | nextval('o_test_add_column_id_seq2'::regclass)
  y      | integer |           |          | 
  z      | integer |           |          | 5
- j      | integer |           | not null | (pseudo_random(2::bigint, nextval('o_test_j_seq'::regclass)) * 20000::double precision)
 Indexes:
     "o_test_add_column_pkey" PRIMARY KEY, btree (id)
 
@@ -564,73 +522,109 @@ SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-                           orioledb_tbl_structure                            
------------------------------------------------------------------------------
- Index o_test_add_column_pkey contents                                      +
- Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                        +
- state = free, datoid equal, relnode equal, ix_type = primary, clean        +
-     Leftmost, Rightmost                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('2')  +
-     Item 0: offset = 264, tuple = ('1', '159', null, '5', '17928')         +
-   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('3') +
-     Item 1: offset = 320, tuple = ('2', '19305', null, '5', '332')         +
-   Chunk 2: offset = 2, location = 368, hikey location = 112, hikey = ('4') +
-     Item 2: offset = 376, tuple = ('3', '7790', null, '5', '9675')         +
-   Chunk 3: offset = 3, location = 424, hikey location = 120, hikey = ('5') +
-     Item 3: offset = 432, tuple = ('4', '16764', null, '5', '17247')       +
-   Chunk 4: offset = 4, location = 480, hikey location = 128, hikey = ('6') +
-     Item 4: offset = 488, tuple = ('5', '8182', null, '5', '5534')         +
-   Chunk 5: offset = 5, location = 536, hikey location = 136, hikey = ('7') +
-     Item 5: offset = 544, tuple = ('6', '3414', null, '5', '515')          +
-   Chunk 6: offset = 6, location = 592, hikey location = 144, hikey = ('8') +
-     Item 6: offset = 600, tuple = ('7', '16703', null, '5', '9615')        +
-   Chunk 7: offset = 7, location = 648, hikey location = 152, hikey = ('9') +
-     Item 7: offset = 656, tuple = ('8', '18766', null, '5', '12229')       +
-   Chunk 8: offset = 8, location = 704, hikey location = 160, hikey = ('10')+
-     Item 8: offset = 712, tuple = ('9', '18518', null, '5', '16597')       +
-   Chunk 9: offset = 9, location = 760, hikey location = 168                +
-     Item 9: offset = 768, tuple = ('10', '18915', null, '5', '9993')       +
-                                                                            +
- Index toast: not loaded                                                    +
+                        orioledb_tbl_structure                        
+----------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                 +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty +
+     Leftmost, Rightmost                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64          +
+     Item 0: offset = 280, tuple = ('0', '15', null, null, null)     +
+     Item 1: offset = 320, tuple = ('1', '159', '1', null, null)     +
+     Item 2: offset = 352, tuple = ('2', '19305', '2', null, null)   +
+     Item 3: offset = 384, tuple = ('3', '7790', '3', null, null)    +
+     Item 4: offset = 416, tuple = ('4', '16764', '4', null, null)   +
+     Item 5: offset = 448, tuple = ('5', '8182', '5', null, null)    +
+     Item 6: offset = 480, tuple = ('6', '3414', '6', null, null)    +
+     Item 7: offset = 512, tuple = ('7', '16703', '7', null, null)   +
+     Item 8: offset = 544, tuple = ('8', '18766', '8', null, null)   +
+     Item 9: offset = 576, tuple = ('9', '18518', '9', null, null)   +
+     Item 10: offset = 608, tuple = ('10', '18915', '10', null, null)+
+                                                                     +
+ Index toast: not loaded                                             +
+ 
+(1 row)
+
+CREATE SEQUENCE o_test_j_seq;
+-- test new column with non-volatile default
+ALTER TABLE o_test_add_column
+	ADD COLUMN j int4 not null default pseudo_random(2, nextval('o_test_j_seq')) * 20000;
+\d o_test_add_column
+                                                   Table "ddl.o_test_add_column"
+ Column |  Type   | Collation | Nullable |                                         Default                                         
+--------+---------+-----------+----------+-----------------------------------------------------------------------------------------
+ id     | integer |           | not null | nextval('o_test_add_column_id_seq'::regclass)
+ i      | integer |           |          | 
+ v      | integer |           |          | nextval('o_test_add_column_id_seq2'::regclass)
+ y      | integer |           |          | 
+ z      | integer |           |          | 5
+ j      | integer |           | not null | (pseudo_random(2::bigint, nextval('o_test_j_seq'::regclass)) * 20000::double precision)
+Indexes:
+    "o_test_add_column_pkey" PRIMARY KEY, btree (id)
+
+SELECT orioledb_tbl_indices('o_test_add_column'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_add_column_pkey                  +
+     Index type: primary, unique               +
+     Leaf tuple size: 6, non-leaf tuple size: 1+
+     Non-leaf tuple fields: id                 +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
+                            orioledb_tbl_structure                            
+------------------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: offset = 280, tuple = ('0', '15', null, null, '5', '9798')      +
+     Item 1: offset = 328, tuple = ('1', '159', '1', null, '5', '17916')     +
+     Item 2: offset = 384, tuple = ('2', '19305', '2', null, '5', '19971')   +
+     Item 3: offset = 440, tuple = ('3', '7790', '3', null, '5', '1747')     +
+     Item 4: offset = 496, tuple = ('4', '16764', '4', null, '5', '17054')   +
+     Item 5: offset = 552, tuple = ('5', '8182', '5', null, '5', '13731')    +
+     Item 6: offset = 608, tuple = ('6', '3414', '6', null, '5', '19646')    +
+     Item 7: offset = 664, tuple = ('7', '16703', '7', null, '5', '13585')   +
+     Item 8: offset = 720, tuple = ('8', '18766', '8', null, '5', '17991')   +
+     Item 9: offset = 776, tuple = ('9', '18518', '9', null, '5', '1481')    +
+     Item 10: offset = 832, tuple = ('10', '18915', '10', null, '5', '10774')+
+                                                                             +
+ Index toast: not loaded                                                     +
  
 (1 row)
 
 INSERT INTO o_test_add_column (i)
 	SELECT pseudo_random(3, v) * 20000 FROM generate_series(1,5) v;
 SELECT orioledb_tbl_structure('o_test_add_column'::regclass, 'ne');
-                           orioledb_tbl_structure                            
------------------------------------------------------------------------------
- Index o_test_add_column_pkey contents                                      +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                        +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty        +
-     Leftmost, Rightmost                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('2')  +
-     Item 0: offset = 264, tuple = ('1', '159', null, '5', '17928')         +
-   Chunk 1: offset = 1, location = 312, hikey location = 104, hikey = ('3') +
-     Item 1: offset = 320, tuple = ('2', '19305', null, '5', '332')         +
-   Chunk 2: offset = 2, location = 368, hikey location = 112, hikey = ('4') +
-     Item 2: offset = 376, tuple = ('3', '7790', null, '5', '9675')         +
-   Chunk 3: offset = 3, location = 424, hikey location = 120, hikey = ('5') +
-     Item 3: offset = 432, tuple = ('4', '16764', null, '5', '17247')       +
-   Chunk 4: offset = 4, location = 480, hikey location = 128, hikey = ('6') +
-     Item 4: offset = 488, tuple = ('5', '8182', null, '5', '5534')         +
-   Chunk 5: offset = 5, location = 536, hikey location = 136, hikey = ('7') +
-     Item 5: offset = 544, tuple = ('6', '3414', null, '5', '515')          +
-   Chunk 6: offset = 6, location = 592, hikey location = 144, hikey = ('8') +
-     Item 6: offset = 600, tuple = ('7', '16703', null, '5', '9615')        +
-   Chunk 7: offset = 7, location = 648, hikey location = 152, hikey = ('9') +
-     Item 7: offset = 656, tuple = ('8', '18766', null, '5', '12229')       +
-   Chunk 8: offset = 8, location = 704, hikey location = 160, hikey = ('10')+
-     Item 8: offset = 712, tuple = ('9', '18518', null, '5', '16597')       +
-   Chunk 9: offset = 9, location = 760, hikey location = 168                +
-     Item 9: offset = 776, tuple = ('10', '18915', null, '5', '9993')       +
-     Item 10: offset = 824, tuple = ('11', '3206', null, '5', '5149')       +
-     Item 11: offset = 872, tuple = ('12', '15492', null, '5', '9798')      +
-     Item 12: offset = 920, tuple = ('13', '16020', null, '5', '17916')     +
-     Item 13: offset = 968, tuple = ('14', '9948', null, '5', '19971')      +
-     Item 14: offset = 1016, tuple = ('15', '4451', null, '5', '1747')      +
-                                                                            +
- Index toast: not loaded                                                    +
+                            orioledb_tbl_structure                            
+------------------------------------------------------------------------------
+ Index o_test_add_column_pkey contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('6')   +
+     Item 0: offset = 272, tuple = ('0', '15', null, null, '5', '9798')      +
+     Item 1: offset = 320, tuple = ('1', '159', '1', null, '5', '17916')     +
+     Item 2: offset = 376, tuple = ('2', '19305', '2', null, '5', '19971')   +
+     Item 3: offset = 432, tuple = ('3', '7790', '3', null, '5', '1747')     +
+     Item 4: offset = 488, tuple = ('4', '16764', '4', null, '5', '17054')   +
+     Item 5: offset = 544, tuple = ('5', '8182', '5', null, '5', '13731')    +
+   Chunk 1: offset = 6, location = 600, hikey location = 72                  +
+     Item 6: offset = 624, tuple = ('6', '3414', '6', null, '5', '19646')    +
+     Item 7: offset = 680, tuple = ('7', '16703', '7', null, '5', '13585')   +
+     Item 8: offset = 736, tuple = ('8', '18766', '8', null, '5', '17991')   +
+     Item 9: offset = 792, tuple = ('9', '18518', '9', null, '5', '1481')    +
+     Item 10: offset = 848, tuple = ('10', '18915', '10', null, '5', '10774')+
+     Item 11: offset = 904, tuple = ('11', '3206', '11', null, '5', '8386')  +
+     Item 12: offset = 960, tuple = ('12', '15492', '12', null, '5', '18273')+
+     Item 13: offset = 1016, tuple = ('13', '16020', '13', null, '5', '2066')+
+     Item 14: offset = 1072, tuple = ('14', '9948', '14', null, '5', '10254')+
+     Item 15: offset = 1128, tuple = ('15', '4451', '15', null, '5', '1809') +
+                                                                             +
+ Index toast: not loaded                                                     +
  
 (1 row)
 
@@ -641,46 +635,79 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column;
 (1 row)
 
 SELECT * FROM o_test_add_column;
- id |   i   | y | z |   j   
-----+-------+---+---+-------
-  1 |   159 |   | 5 | 17928
-  2 | 19305 |   | 5 |   332
-  3 |  7790 |   | 5 |  9675
-  4 | 16764 |   | 5 | 17247
-  5 |  8182 |   | 5 |  5534
-  6 |  3414 |   | 5 |   515
-  7 | 16703 |   | 5 |  9615
-  8 | 18766 |   | 5 | 12229
-  9 | 18518 |   | 5 | 16597
- 10 | 18915 |   | 5 |  9993
- 11 |  3206 |   | 5 |  5149
- 12 | 15492 |   | 5 |  9798
- 13 | 16020 |   | 5 | 17916
- 14 |  9948 |   | 5 | 19971
- 15 |  4451 |   | 5 |  1747
-(15 rows)
+ id |   i   | v  | y | z |   j   
+----+-------+----+---+---+-------
+  0 |    15 |    |   | 5 |  9798
+  1 |   159 |  1 |   | 5 | 17916
+  2 | 19305 |  2 |   | 5 | 19971
+  3 |  7790 |  3 |   | 5 |  1747
+  4 | 16764 |  4 |   | 5 | 17054
+  5 |  8182 |  5 |   | 5 | 13731
+  6 |  3414 |  6 |   | 5 | 19646
+  7 | 16703 |  7 |   | 5 | 13585
+  8 | 18766 |  8 |   | 5 | 17991
+  9 | 18518 |  9 |   | 5 |  1481
+ 10 | 18915 | 10 |   | 5 | 10774
+ 11 |  3206 | 11 |   | 5 |  8386
+ 12 | 15492 | 12 |   | 5 | 18273
+ 13 | 16020 | 13 |   | 5 |  2066
+ 14 |  9948 | 14 |   | 5 | 10254
+ 15 |  4451 | 15 |   | 5 |  1809
+(16 rows)
 
 -- Test that default fields not recalculated
 SELECT * FROM o_test_add_column;
- id |   i   | y | z |   j   
-----+-------+---+---+-------
-  1 |   159 |   | 5 | 17928
-  2 | 19305 |   | 5 |   332
-  3 |  7790 |   | 5 |  9675
-  4 | 16764 |   | 5 | 17247
-  5 |  8182 |   | 5 |  5534
-  6 |  3414 |   | 5 |   515
-  7 | 16703 |   | 5 |  9615
-  8 | 18766 |   | 5 | 12229
-  9 | 18518 |   | 5 | 16597
- 10 | 18915 |   | 5 |  9993
- 11 |  3206 |   | 5 |  5149
- 12 | 15492 |   | 5 |  9798
- 13 | 16020 |   | 5 | 17916
- 14 |  9948 |   | 5 | 19971
- 15 |  4451 |   | 5 |  1747
-(15 rows)
+ id |   i   | v  | y | z |   j   
+----+-------+----+---+---+-------
+  0 |    15 |    |   | 5 |  9798
+  1 |   159 |  1 |   | 5 | 17916
+  2 | 19305 |  2 |   | 5 | 19971
+  3 |  7790 |  3 |   | 5 |  1747
+  4 | 16764 |  4 |   | 5 | 17054
+  5 |  8182 |  5 |   | 5 | 13731
+  6 |  3414 |  6 |   | 5 | 19646
+  7 | 16703 |  7 |   | 5 | 13585
+  8 | 18766 |  8 |   | 5 | 17991
+  9 | 18518 |  9 |   | 5 |  1481
+ 10 | 18915 | 10 |   | 5 | 10774
+ 11 |  3206 | 11 |   | 5 |  8386
+ 12 | 15492 | 12 |   | 5 | 18273
+ 13 | 16020 | 13 |   | 5 |  2066
+ 14 |  9948 | 14 |   | 5 | 10254
+ 15 |  4451 | 15 |   | 5 |  1809
+(16 rows)
 
+-- Test primary key usage after rewrite
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column ORDER BY id;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Index Scan using o_test_add_column_pkey on o_test_add_column
+(1 row)
+
+SELECT * FROM o_test_add_column ORDER BY id;
+ id |   i   | v  | y | z |   j   
+----+-------+----+---+---+-------
+  0 |    15 |    |   | 5 |  9798
+  1 |   159 |  1 |   | 5 | 17916
+  2 | 19305 |  2 |   | 5 | 19971
+  3 |  7790 |  3 |   | 5 |  1747
+  4 | 16764 |  4 |   | 5 | 17054
+  5 |  8182 |  5 |   | 5 | 13731
+  6 |  3414 |  6 |   | 5 | 19646
+  7 | 16703 |  7 |   | 5 | 13585
+  8 | 18766 |  8 |   | 5 | 17991
+  9 | 18518 |  9 |   | 5 |  1481
+ 10 | 18915 | 10 |   | 5 | 10774
+ 11 |  3206 | 11 |   | 5 |  8386
+ 12 | 15492 | 12 |   | 5 | 18273
+ 13 | 16020 | 13 |   | 5 |  2066
+ 14 |  9948 | 14 |   | 5 | 10254
+ 15 |  4451 | 15 |   | 5 |  1809
+(16 rows)
+
+COMMIT;
 CREATE TABLE o_test_multiple_analyzes (
     aid integer NOT NULL PRIMARY KEY
 ) USING orioledb;
@@ -702,17 +729,16 @@ select count(1) from o_test_multiple_analyzes;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('explain (analyze, buffers)
 	select * from o_test_multiple_analyzes ORDER BY aid DESC LIMIT 10;') as t;
-                                                 regexp_replace                                                 
-----------------------------------------------------------------------------------------------------------------
+                                                                     regexp_replace                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------
  Limit  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   ->  Custom Scan (o_scan) on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-         Backward index only scan of: o_test_multiple_analyzes_pkey
-         Primary pages: read=x
+   ->  Index Only Scan Backward using o_test_multiple_analyzes_pkey on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Heap Fetches: x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(7 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('explain (analyze, buffers)
@@ -721,11 +747,9 @@ FROM query_to_text('explain (analyze, buffers)
 ----------------------------------------------------------------------------------------------------
  Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    ->  Seq Scan on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(6 rows)
+(4 rows)
 
 ROLLBACK;
 CREATE FOREIGN DATA WRAPPER dummy;
@@ -955,23 +979,24 @@ SELECT * FROM o_test_float_default;
 (1 row)
 
 CREATE TABLE o_test_duplicate_key_fields (
+	val_2 int,
 	val_1 int
 ) USING orioledb;
 CREATE INDEX o_test_duplicate_key_fields_ix1
-	ON o_test_duplicate_key_fields (val_1, val_1) INCLUDE (val_1);
-INSERT INTO o_test_duplicate_key_fields SELECT generate_series(1, 5);
+	ON o_test_duplicate_key_fields (val_1, val_2, val_1) INCLUDE (val_1);
+INSERT INTO o_test_duplicate_key_fields SELECT v, v * 10 FROM generate_series(1, 5) v;
 SELECT orioledb_tbl_indices('o_test_duplicate_key_fields'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 2, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
- Index o_test_duplicate_key_fields_ix1         +
-     Index type: secondary                     +
-     Leaf tuple size: 3, non-leaf tuple size: 3+
-     Non-leaf tuple fields: val_1, val_1, ctid +
-     Leaf tuple fields: val_1, val_1, ctid     +
+                 orioledb_tbl_indices                 
+------------------------------------------------------
+ Index ctid_primary                                  +
+     Index type: primary, unique, ctid               +
+     Leaf tuple size: 3, non-leaf tuple size: 1      +
+     Non-leaf tuple fields: ctid                     +
+ Index o_test_duplicate_key_fields_ix1               +
+     Index type: secondary                           +
+     Leaf tuple size: 4, non-leaf tuple size: 4      +
+     Non-leaf tuple fields: val_1, val_2, val_1, ctid+
+     Leaf tuple fields: val_1, val_2, val_1, ctid    +
  
 (1 row)
 
@@ -983,44 +1008,43 @@ SELECT orioledb_tbl_structure('o_test_duplicate_key_fields'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('(0,1)', '1')                   +
-     Item 1: offset = 304, tuple = ('(0,2)', '2')                   +
-     Item 2: offset = 336, tuple = ('(0,3)', '3')                   +
-     Item 3: offset = 368, tuple = ('(0,4)', '4')                   +
-     Item 4: offset = 400, tuple = ('(0,5)', '5')                   +
+     Item 0: offset = 272, tuple = ('(0,1)', '1', '10')             +
+     Item 1: offset = 304, tuple = ('(0,2)', '2', '20')             +
+     Item 2: offset = 336, tuple = ('(0,3)', '3', '30')             +
+     Item 3: offset = 368, tuple = ('(0,4)', '4', '40')             +
+     Item 4: offset = 400, tuple = ('(0,5)', '5', '50')             +
                                                                     +
  Index o_test_duplicate_key_fields_ix1 contents                     +
- Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '1', '(0,1)')              +
-     Item 1: offset = 304, tuple = ('2', '2', '(0,2)')              +
-     Item 2: offset = 336, tuple = ('3', '3', '(0,3)')              +
-     Item 3: offset = 368, tuple = ('4', '4', '(0,4)')              +
-     Item 4: offset = 400, tuple = ('5', '5', '(0,5)')              +
+     Item 0: offset = 272, tuple = ('10', '1', '10', '(0,1)')       +
+     Item 1: offset = 312, tuple = ('20', '2', '20', '(0,2)')       +
+     Item 2: offset = 352, tuple = ('30', '3', '30', '(0,3)')       +
+     Item 3: offset = 392, tuple = ('40', '4', '40', '(0,4)')       +
+     Item 4: offset = 432, tuple = ('50', '5', '50', '(0,5)')       +
                                                                     +
  Index toast: not loaded                                            +
  
 (1 row)
 
 SET enable_seqscan = off;
-SELECT * FROM o_test_duplicate_key_fields ORDER BY val_1;
+EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Index Only Scan using o_test_duplicate_key_fields_ix1 on o_test_duplicate_key_fields
+(1 row)
+
+SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
  val_1 
 -------
-     1
-     2
-     3
-     4
-     5
+    10
+    20
+    30
+    40
+    50
 (5 rows)
-
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_duplicate_key_fields ORDER BY val_1;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Custom Scan (o_scan) on o_test_duplicate_key_fields
-   Forward index only scan of: o_test_duplicate_key_fields_ix1
-(2 rows)
 
 RESET enable_seqscan;
 CREATE TABLE o_test_pkey_fields_same_as_index (
@@ -1049,11 +1073,10 @@ INSERT INTO o_test_pkey_fields_same_as_index
 	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v FROM generate_series(0, 2) v;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_fields_same_as_index
-   Forward index scan of: o_test_pkey_fields_same_as_index_val_1_val_3_key
-(2 rows)
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Index Scan using o_test_pkey_fields_same_as_index_val_1_val_3_key on o_test_pkey_fields_same_as_index
+(1 row)
 
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;;
  val_1 | val_2 | val_3 
@@ -1081,11 +1104,10 @@ SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_fields_same_as_index
-   Forward index scan of: o_test_pkey_fields_same_as_index_pkey
-(2 rows)
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Scan using o_test_pkey_fields_same_as_index_pkey on o_test_pkey_fields_same_as_index
+(1 row)
 
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
  val_1 | val_2 | val_3 
@@ -1114,11 +1136,10 @@ SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_pkey_fields_same_as_index
-   Forward index scan of: o_test_pkey_fields_same_as_index_val_1_val_3_key
-(2 rows)
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Index Scan using o_test_pkey_fields_same_as_index_val_1_val_3_key on o_test_pkey_fields_same_as_index
+(1 row)
 
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
  val_1 | val_2 | val_3 
@@ -1209,7 +1230,7 @@ CREATE TABLE o_test_add_pkey_empty_index (
 	a int,
 	b int,
 	c int,
-	d int
+	d int8
 ) USING orioledb;
 CREATE INDEX ON o_test_add_pkey_empty_index (a, b);
 \d o_test_add_pkey_empty_index
@@ -1219,7 +1240,7 @@ CREATE INDEX ON o_test_add_pkey_empty_index (a, b);
  a      | integer |           |          | 
  b      | integer |           |          | 
  c      | integer |           |          | 
- d      | integer |           |          | 
+ d      | bigint  |           |          | 
 Indexes:
     "o_test_add_pkey_empty_index_a_b_idx" btree (a, b)
 
@@ -1246,7 +1267,7 @@ ALTER TABLE o_test_add_pkey_empty_index ADD PRIMARY KEY (d);
  a      | integer |           |          | 
  b      | integer |           |          | 
  c      | integer |           |          | 
- d      | integer |           | not null | 
+ d      | bigint  |           | not null | 
 Indexes:
     "o_test_add_pkey_empty_index_pkey" PRIMARY KEY, btree (d)
     "o_test_add_pkey_empty_index_a_b_idx" btree (a, b)
@@ -1269,11 +1290,10 @@ SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
 INSERT INTO o_test_add_pkey_empty_index
 	SELECT v, v*10, v*100, v*1000 FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF) SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_add_pkey_empty_index
-   Forward index only scan of: o_test_add_pkey_empty_index_a_b_idx
-(2 rows)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_add_pkey_empty_index_a_b_idx on o_test_add_pkey_empty_index
+(1 row)
 
 SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
  a | b  |  d   
@@ -1294,10 +1314,10 @@ SELECT orioledb_tbl_structure('o_test_add_pkey_empty_index'::regclass, 'nue');
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 272, tuple = ('1', '10', '100', '1000')       +
-     Item 1: offset = 304, tuple = ('2', '20', '200', '2000')       +
-     Item 2: offset = 336, tuple = ('3', '30', '300', '3000')       +
-     Item 3: offset = 368, tuple = ('4', '40', '400', '4000')       +
-     Item 4: offset = 400, tuple = ('5', '50', '500', '5000')       +
+     Item 1: offset = 312, tuple = ('2', '20', '200', '2000')       +
+     Item 2: offset = 352, tuple = ('3', '30', '300', '3000')       +
+     Item 3: offset = 392, tuple = ('4', '40', '400', '4000')       +
+     Item 4: offset = 432, tuple = ('5', '50', '500', '5000')       +
                                                                     +
  Index o_test_add_pkey_empty_index_a_b_idx contents                 +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
@@ -1321,7 +1341,7 @@ SELECT orioledb_tbl_structure('o_test_add_pkey_empty_index'::regclass, 'nue');
  a      | integer |           |          | 
  b      | integer |           |          | 
  c      | integer |           |          | 
- d      | integer |           | not null | 
+ d      | bigint  |           | not null | 
 Indexes:
     "o_test_add_pkey_empty_index_pkey" PRIMARY KEY, btree (d)
     "o_test_add_pkey_empty_index_a_b_idx" btree (a, b)
@@ -1411,8 +1431,9 @@ drop cascades to table o_test_add_pkey_empty_index
 drop cascades to table o_test_empty
 drop cascades to table o_test_plpgsql_default
 DROP SCHEMA ddl CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
+drop cascades to sequence o_test_add_column_id_seq2
 drop cascades to sequence o_test_j_seq
 drop cascades to function query_to_text(text)
 drop cascades to function o_test_plpgsql_default_func(integer)
