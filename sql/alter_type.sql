@@ -80,20 +80,29 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 SELECT * FROM o_ddl_check;
 
--- TODO: Add test that does ALTER TYPE for multiple columns at once
--- TODO: Add test that does multiple column ALTER TYPE that are part of one index (to test how drop_index_list overwrite works)
-UPDATE o_ddl_check SET f3 = 53; -- TODO: Comment this line and fix segfault
-TABLE o_ddl_check;
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+-- Check rewrite with NULL fields
 CREATE INDEX o_ddl_check_ix1 ON o_ddl_check(f2, f3);
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C" USING substr(f2::text, 1, 1),
-						ALTER f3 TYPE char USING substr(f3::text, 1, 1);
-SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
-TABLE o_ddl_check;
+						ALTER f3 TYPE char USING substr(f3::text, 4, 1);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
+SELECT * FROM o_ddl_check ORDER BY f2, f3;
+COMMIT;
 
-ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C",
-						ALTER f3 TYPE char;
+-- Check rewrite of index with multiple columns
+SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
+ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || f2::text,
+						ALTER f3 TYPE int USING substr(f1::text, 4, 1)::int;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
+SELECT * FROM o_ddl_check ORDER BY f2, f3;
+COMMIT;
+
+ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || f2::text,
+						ALTER f3 TYPE int;
 SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
 TABLE o_ddl_check;
 
@@ -308,10 +317,8 @@ EXPLAIN (COSTS OFF)
 		ORDER BY val_3;
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 
-SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 ALTER TABLE o_test_alter_type_ix_included_rollback
 	ALTER val_2 TYPE text COLLATE "C";
-SELECT orioledb_tbl_indices('o_test_alter_type_ix_included_rollback'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback

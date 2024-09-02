@@ -544,7 +544,7 @@ o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantu
 	EState	   *estate = NULL;
 	ExprContext *econtext;
 	ExprState  *exprState;
-	Datum		result;
+	Datum		result = 0;
 
 	pstate = make_parsestate(NULL);
 	pstate->p_sourcetext = NULL;
@@ -566,7 +566,8 @@ o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantu
 	FreeExecutorState(estate);
 	free_parsestate(pstate);
 
-	result = datumCopy(new_val, byval, typlen);
+	if (!*isNull)
+		result = datumCopy(new_val, byval, typlen);
 	MemoryContextSwitchTo(oldcxt);
 	return result;
 }
