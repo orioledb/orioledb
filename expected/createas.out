@@ -332,11 +332,10 @@ SELECT orioledb_tbl_indices('o_test_matview'::regclass);
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY item_id DESC;
-                 QUERY PLAN                  
----------------------------------------------
- Custom Scan (o_scan) on o_test_matview
-   Forward index scan of: o_test_matview_ix1
-(2 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using o_test_matview_ix1 on o_test_matview
+(1 row)
 
 SELECT * FROM o_test_matview ORDER BY item_id DESC;
  order_id | item_id | quantity | price 
@@ -347,11 +346,10 @@ SELECT * FROM o_test_matview ORDER BY item_id DESC;
 
 REINDEX INDEX o_test_matview_ix1;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY item_id DESC;
-                 QUERY PLAN                  
----------------------------------------------
- Custom Scan (o_scan) on o_test_matview
-   Forward index scan of: o_test_matview_ix1
-(2 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using o_test_matview_ix1 on o_test_matview
+(1 row)
 
 SELECT * FROM o_test_matview ORDER BY item_id DESC;
  order_id | item_id | quantity | price 
@@ -433,17 +431,28 @@ View definition:
    FROM (VALUES (100,1,'a'::text,nextval('o_matview_seq'::regclass)), (100,3,'b'::text,nextval('o_matview_seq'::regclass))) "*VALUES*";
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY quantity2;
-                 QUERY PLAN                  
----------------------------------------------
- Custom Scan (o_scan) on o_test_matview
-   Forward index scan of: o_test_matview_ix2
-(2 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using o_test_matview_ix2 on o_test_matview
+(1 row)
 
 SELECT * FROM o_test_matview ORDER BY quantity2;
  order_id | item_id | quantity2 | price 
 ----------+---------+-----------+-------
       100 |       1 | a         |     5
       100 |       3 | b         |     6
+(2 rows)
+
+REFRESH MATERIALIZED VIEW o_test_matview WITH NO DATA;
+SELECT * FROM o_test_matview;
+ERROR:  materialized view "o_test_matview" has not been populated
+HINT:  Use the REFRESH MATERIALIZED VIEW command.
+REFRESH MATERIALIZED VIEW o_test_matview;
+SELECT * FROM o_test_matview;
+ order_id | item_id | quantity2 | price 
+----------+---------+-----------+-------
+      100 |       1 | a         |     7
+      100 |       3 | b         |     8
 (2 rows)
 
 CREATE MATERIALIZED VIEW o_test_matview_no_data
@@ -465,8 +474,8 @@ REFRESH MATERIALIZED VIEW o_test_matview_no_data;
 SELECT * FROM o_test_matview_no_data;
  order_id | item_id | quantity | price 
 ----------+---------+----------+-------
-      100 |       1 |        4 |     7
-      100 |       3 |        1 |     8
+      100 |       1 |        4 |     9
+      100 |       3 |        1 |    10
 (2 rows)
 
 DROP MATERIALIZED VIEW o_test_matview_no_data;
