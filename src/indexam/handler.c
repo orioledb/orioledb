@@ -402,6 +402,21 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
+	// TODO: Run this only when fields amount differs
+	// Remove duplicates like we do in orioledb tables
+	int skipped = 0;
+	for (int copy_from = 0; copy_from < rel->rd_att->natts; copy_from++)
+	{
+		Form_pg_attribute orig_attr = &rel->rd_att->attrs[copy_from];
+		Form_pg_attribute idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
+		if (strncmp(orig_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+		{
+			if (skipped > 0)
+				values[copy_from - skipped] = values[copy_from];
+		}
+		else
+			skipped++;
+	}
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
@@ -1292,27 +1307,63 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 			else
 			{
 				OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
-				TupleDesc	tupdesc;
-				int			nfields = index_descr->nFields;
 				int			i;
 
 				// TODO: Cache these tupdescs
-				tupdesc = CreateTemplateTupleDesc(nfields);
-				for (i = 0; i < nfields; i++)
-				{
-					TupleDescCopyEntry(tupdesc, i + 1, index_descr->leafTupdesc, i + 1);
-				}
-
 				if (!index_descr->primaryIsCtid)
 				{
-					scan->xs_itupdesc = CreateTemplateTupleDesc(nfields);
-					for (i = 0; i < nfields; i++)
+					int			pk_nfields = index_descr->nPrimaryFields;
+					for (i = 0; i < index_descr->nPrimaryFields; i++)
 					{
-						TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+						bool found = false;
+						AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+						Form_pg_attribute pk_attr = &index_descr->leafTupdesc->attrs[attnum];
+						for (int j = 0; j < scan->indexRelation->rd_att->natts; j++)
+						{
+							Form_pg_attribute idx_attr = &scan->indexRelation->rd_att->attrs[j];
+							if (strncmp(pk_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+							{
+								found = true;
+								break;
+							}
+						}
+						if (found)
+							pk_nfields--;
+					}
+
+					int nfields = scan->indexRelation->rd_att->natts + pk_nfields;
+					scan->xs_itupdesc = CreateTemplateTupleDesc(nfields);
+					for (i = 0; i < scan->indexRelation->rd_att->natts; i++)
+					{
+						TupleDescCopyEntry(scan->xs_itupdesc, i + 1, scan->indexRelation->rd_att, i + 1);
+					}
+
+					int pk_nfield = scan->indexRelation->rd_att->natts;
+					for (i = 0; i < index_descr->nPrimaryFields; i++)
+					{
+						bool found = false;
+						AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+						Form_pg_attribute pk_attr = &index_descr->leafTupdesc->attrs[attnum];
+						for (int j = 0; j < scan->indexRelation->rd_att->natts; j++)
+						{
+							Form_pg_attribute idx_attr = &scan->indexRelation->rd_att->attrs[j];
+							if (strncmp(pk_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+							{
+								found = true;
+								break;
+							}
+						}
+
+						if (!found)
+						{
+							TupleDescCopyEntry(scan->xs_itupdesc, pk_nfield + 1, index_descr->leafTupdesc, attnum + 1);
+							pk_nfield++;
+						}
 					}
 				}
 				else
 				{
+					int			nfields = index_descr->nFields;
 					OTableIndex *o_tbl_idx;
 					OTable *o_table;
 
@@ -1343,10 +1394,34 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 					o_table_free(o_table);
 				}
 
-				slot = MakeSingleTupleTableSlot(tupdesc, &TTSOpsOrioleDB);
+				slot = MakeSingleTupleTableSlot(scan->xs_itupdesc, &TTSOpsOrioleDB);
 				tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum,
-										true, &hint);
+										 true, &hint);
 				slot_getallattrs(slot);
+
+				// moving values from duplicate field places that will be filled during index_form_tuple
+				if (scan->xs_itupdesc->natts > index_descr->leafTupdesc->natts)
+				{
+					int skipped = scan->xs_itupdesc->natts - index_descr->leafTupdesc->natts;
+					for (int copy_to = scan->xs_itupdesc->natts - 1; copy_to >= 0; copy_to--)
+					{
+						Form_pg_attribute idx_attr = &scan->xs_itupdesc->attrs[copy_to];
+						Form_pg_attribute slot_attr = &index_descr->leafTupdesc->attrs[copy_to - skipped];
+						if (strncmp(slot_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+						{
+							if (skipped == 0)
+								break;
+							slot->tts_values[copy_to] = slot->tts_values[copy_to - skipped];
+							slot->tts_isnull[copy_to] = slot->tts_isnull[copy_to - skipped];
+						}
+						else
+						{
+							slot->tts_values[copy_to] = 0;
+							slot->tts_isnull[copy_to] = true;
+							skipped--;
+						}
+					}
+				}
 
 				TupleDesc	pk_tupdesc;
 				OTupleFixedFormatSpec *pk_spec;

@@ -1542,10 +1542,10 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY f1;
 SELECT * FROM o_test_pkey_mixed ORDER BY f1;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY f2;
 SELECT * FROM o_test_pkey_mixed ORDER BY f2;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY f3;
-SELECT * FROM o_test_pkey_mixed ORDER BY f3;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY i1;
-SELECT * FROM o_test_pkey_mixed ORDER BY i1;
+EXPLAIN (COSTS OFF) SELECT f3, f2, pk4, f1, pk4, pk3, pk1, pk2 FROM o_test_pkey_mixed ORDER BY f3;
+SELECT f3, f2, pk4, f1, pk4, pk3, pk1, pk2 FROM o_test_pkey_mixed ORDER BY f3;
+EXPLAIN (COSTS OFF) SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
+SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
 RESET enable_seqscan;
 
 CREATE TABLE o_test_pkey_include_box
