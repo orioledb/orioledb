@@ -422,14 +422,12 @@ ALTER TABLE o_test_partition_index
 	ATTACH PARTITION o_test_partition_index_child2 FOR VALUES FROM (6) TO (11);
 INSERT INTO o_test_partition_index SELECT v, v FROM generate_series(1, 10) v;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index ORDER BY val_1;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
  Append
-   ->  Custom Scan (o_scan) on o_test_partition_index_child1 o_test_partition_index_1
-         Forward index scan of: o_test_partition_index_child1_pkey
-   ->  Custom Scan (o_scan) on o_test_partition_index_child2 o_test_partition_index_2
-         Forward index scan of: o_test_partition_index_child2_pkey
-(5 rows)
+   ->  Index Scan using o_test_partition_index_child1_pkey on o_test_partition_index_child1 o_test_partition_index_1
+   ->  Index Scan using o_test_partition_index_child2_pkey on o_test_partition_index_child2 o_test_partition_index_2
+(3 rows)
 
 SELECT * FROM o_test_partition_index ORDER BY val_1;
  val_1 | val_2 
@@ -471,12 +469,11 @@ SELECT * FROM o_test_partition_index
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_partition_index
 		WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_partition_index_child2 o_test_partition_index
-   Forward index scan of: o_test_partition_index_child2_pkey
-   Conds: ((val_1 >= 7) AND (val_1 <= 9))
-(3 rows)
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Index Scan using o_test_partition_index_child2_pkey on o_test_partition_index_child2 o_test_partition_index
+   Index Cond: ((val_1 >= 7) AND (val_1 <= 9))
+(2 rows)
 
 SELECT * FROM o_test_partition_index WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
  val_1 | val_2 
@@ -487,11 +484,10 @@ SELECT * FROM o_test_partition_index WHERE val_1 BETWEEN 7 AND 9 ORDER BY val_1;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Custom Scan (o_scan) on o_test_partition_index_child1
-   Forward index scan of: o_test_partition_index_child1_pkey
-(2 rows)
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Index Scan using o_test_partition_index_child1_pkey on o_test_partition_index_child1
+(1 row)
 
 SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
  val_1 | val_2 
@@ -504,11 +500,10 @@ SELECT * FROM o_test_partition_index_child1 ORDER BY val_1;
 (5 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Custom Scan (o_scan) on o_test_partition_index_child2
-   Forward index scan of: o_test_partition_index_child2_pkey
-(2 rows)
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Index Scan using o_test_partition_index_child2_pkey on o_test_partition_index_child2
+(1 row)
 
 SELECT * FROM o_test_partition_index_child2 ORDER BY val_1;
  val_1 | val_2 
@@ -542,14 +537,13 @@ SELECT * FROM o_test_partition_pkey_update_child;
 
 EXPLAIN (COSTS OFF)
 	UPDATE o_test_partition_pkey_update SET val_1 = 3 WHERE val_1 = 1;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
  Update on o_test_partition_pkey_update
    Update on o_test_partition_pkey_update_child o_test_partition_pkey_update_1
-   ->  Custom Scan (o_scan) on o_test_partition_pkey_update_child o_test_partition_pkey_update_1
-         Forward index scan of: o_test_partition_pkey_update_child_pkey
-         Conds: (val_1 = 1)
-(5 rows)
+   ->  Index Scan using o_test_partition_pkey_update_child_pkey on o_test_partition_pkey_update_child o_test_partition_pkey_update_1
+         Index Cond: (val_1 = 1)
+(4 rows)
 
 UPDATE o_test_partition_pkey_update SET val_1 = 3 WHERE val_1 = 1;
 SELECT * FROM o_test_partition_pkey_update;

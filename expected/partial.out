@@ -160,7 +160,6 @@ CREATE INDEX o_test_sql_func_ix_s_p ON
 	o_test_sql_func(val) WHERE (my_eq_s_p(val, val + 10));
 ERROR:  function "my_cmp_plpgsql" cannot be used here
 HINT:  only C and SQL functions are supported in orioledb index predicate
-CONTEXT:  SQL function "my_eq_s_p" during body validation
 CREATE INDEX o_test_sql_func_ix_s_s ON
 	o_test_sql_func(val) WHERE (my_eq_s_s(val, val * 11));
 CREATE INDEX o_test_sql_func_ix_s_s_s_s ON
@@ -168,15 +167,10 @@ CREATE INDEX o_test_sql_func_ix_s_s_s_s ON
 ERROR:  function "extract" cannot be used here
 HINT:  only immutable functions are supported in orioledb index predicate
 CONTEXT:  SQL function "my_cmp_sql_sql" during body validation
-SQL function "my_cmp_sql_sql_sql" during body validation
-SQL function "my_eq_s_s_s_s" during body validation
 CREATE INDEX o_test_sql_func_ix_s_s_s_p ON
 	o_test_sql_func(val) WHERE (my_eq_s_s_s_p(val, val * 11));
 ERROR:  function "my_cmp_plpgsql" cannot be used here
 HINT:  only C and SQL functions are supported in orioledb index predicate
-CONTEXT:  SQL function "my_cmp_sql_plpgsql" during body validation
-SQL function "my_cmp_sql_sql_plpgsql" during body validation
-SQL function "my_eq_s_s_s_p" during body validation
 CREATE INDEX o_test_sql_func_ix_s_sb ON
 	o_test_sql_func(val) WHERE (my_eq_s_sb(val, val * 11));
 CREATE INDEX o_test_sql_func_ix_s_i ON
@@ -192,7 +186,6 @@ CREATE INDEX o_test_sql_func_ix_sb_p ON
 	o_test_sql_func(val) WHERE (my_eq_sb_p(val, val + 10));
 ERROR:  function "my_cmp_plpgsql" cannot be used here
 HINT:  only C and SQL functions are supported in orioledb index predicate
-CONTEXT:  SQL function "my_eq_sb_p" during body validation
 CREATE INDEX o_test_sql_func_ix_sb_s ON
 	o_test_sql_func(val) WHERE (my_eq_sb_s(val, val * 11));
 CREATE INDEX o_test_sql_func_ix_sb_sb ON
@@ -217,8 +210,7 @@ CREATE INDEX o_test_sql_func_ix_c ON
 CREATE SEQUENCE o_test_sql_func_seq;
 CREATE INDEX o_test_sql_func_ix_nv ON
 	o_test_sql_func(val) WHERE (nextval('o_test_sql_func_seq') % 2 = 0);
-ERROR:  function "nextval" cannot be used here
-HINT:  only immutable functions are supported in orioledb index predicate
+ERROR:  functions in index predicate must be marked IMMUTABLE
 CREATE INDEX o_test_sql_func_ix_ss ON
 	o_test_sql_func(((SELECT * FROM generate_series(1, 10) LIMIT 1) = val));
 ERROR:  cannot use subquery in index expression

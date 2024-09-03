@@ -325,11 +325,10 @@ CREATE INDEX int_val_ix_s_i ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_s_i
-(2 rows)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Index Only Scan using int_val_ix_s_i on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -365,11 +364,10 @@ CREATE INDEX int_val_ix_s_s_s_s_i ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                     QUERY PLAN                     
-----------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_s_s_s_s_i
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Index Only Scan using int_val_ix_s_s_s_s_i on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -409,11 +407,10 @@ CREATE INDEX int_val_ix_simple_expression ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                         QUERY PLAN                         
-------------------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_simple_expression
-(2 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Index Only Scan using int_val_ix_simple_expression on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -453,11 +450,10 @@ CREATE INDEX int_val_ix_values ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                   QUERY PLAN                    
--------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_values
-(2 rows)
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Index Only Scan using int_val_ix_values on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -497,11 +493,10 @@ CREATE INDEX int_val_ix_generate_series ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_generate_series
-(2 rows)
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Only Scan using int_val_ix_generate_series on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -542,11 +537,10 @@ CREATE INDEX int_val_ix_subselect ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                     QUERY PLAN                     
-----------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_subselect
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Index Only Scan using int_val_ix_subselect on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -589,11 +583,10 @@ CREATE INDEX int_val_ix_cte ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_cte
-(2 rows)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Index Only Scan using int_val_ix_cte on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -636,11 +629,10 @@ CREATE INDEX int_val_ix_rows_func ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                     QUERY PLAN                     
-----------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_rows_func
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Index Only Scan using int_val_ix_rows_func on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -681,11 +673,10 @@ CREATE INDEX int_val_ix_join ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_join
-(2 rows)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Index Only Scan using int_val_ix_join on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -732,11 +723,10 @@ CREATE INDEX int_val_ix_complex ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_complex
-(2 rows)
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Index Only Scan using int_val_ix_complex on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -778,11 +768,10 @@ CREATE INDEX int_val_ix_sqlbody ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                    QUERY PLAN                    
---------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_sqlbody
-(2 rows)
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Index Only Scan using int_val_ix_sqlbody on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -823,11 +812,10 @@ CREATE INDEX int_val_ix_init_plan ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                     QUERY PLAN                     
-----------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_init_plan
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Index Only Scan using int_val_ix_init_plan on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -868,11 +856,10 @@ CREATE INDEX int_val_ix_cast ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_cast
-(2 rows)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Index Only Scan using int_val_ix_cast on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -916,11 +903,10 @@ CREATE INDEX int_val_ix_windowagg ON
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^);
-                     QUERY PLAN                     
-----------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index only scan of: int_val_ix_windowagg
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Index Only Scan using int_val_ix_windowagg on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^);
@@ -956,12 +942,11 @@ CREATE INDEX int_val_ix_build_ix ON
 	o_test_custom_opclass(int_val my_op_class_build_ix);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 						ORDER BY int_val USING OPERATOR(<^) LIMIT 10;
-                       QUERY PLAN                        
----------------------------------------------------------
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
  Limit
-   ->  Custom Scan (o_scan) on o_test_custom_opclass
-         Forward index only scan of: int_val_ix_build_ix
-(3 rows)
+   ->  Index Only Scan using int_val_ix_build_ix on o_test_custom_opclass
+(2 rows)
 
 SELECT * FROM o_test_custom_opclass
 	ORDER BY int_val USING OPERATOR(<^) LIMIT 10;
@@ -1063,11 +1048,10 @@ LINE 2:  USING OPERATOR(#<#);
 HINT:  Ordering operators must be "<" or ">" members of btree operator families.
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(<);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix
-(2 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using rec_val_ix on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(<);
@@ -1087,11 +1071,10 @@ SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 	ORDER BY rec_val;
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix
-(2 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using rec_val_ix on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val;
  int_val |   rec_val   
@@ -1116,11 +1099,10 @@ CREATE OPERATOR CLASS my_op_class_rec
 CREATE INDEX rec_val_ix2 ON o_test_custom_opclass(rec_val);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(#<#);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix2
-(2 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using rec_val_ix2 on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(#<#);
@@ -1140,11 +1122,10 @@ SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(<);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix
-(2 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using rec_val_ix on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(<);
@@ -1164,11 +1145,10 @@ SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 	ORDER BY rec_val;
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix2
-(2 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using rec_val_ix2 on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val;
  int_val |   rec_val   
@@ -1201,11 +1181,10 @@ LINE 2:  USING OPERATOR(#<#);
 HINT:  Ordering operators must be "<" or ">" members of btree operator families.
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(<);
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix
-(2 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using rec_val_ix on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(<);
@@ -1225,11 +1204,10 @@ SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 	ORDER BY rec_val;
-                  QUERY PLAN                   
------------------------------------------------
- Custom Scan (o_scan) on o_test_custom_opclass
-   Forward index scan of: rec_val_ix
-(2 rows)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using rec_val_ix on o_test_custom_opclass
+(1 row)
 
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val;
  int_val |   rec_val   

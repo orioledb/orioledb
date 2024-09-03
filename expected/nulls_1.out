@@ -19,13 +19,12 @@ INSERT INTO o_test_null_clauses VALUES (11, NULL), (12, NULL);
 SET enable_bitmapscan = off;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses ORDER BY val NULLS FIRST;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Sort
    Sort Key: val NULLS FIRST
-   ->  Custom Scan (o_scan) on o_test_null_clauses
-         Forward index only scan of: o_test_null_clauses_val_idx
-(4 rows)
+   ->  Index Only Scan using o_test_null_clauses_val_idx on o_test_null_clauses
+(3 rows)
 
 SELECT * FROM o_test_null_clauses ORDER BY val NULLS FIRST;
  id | val 
@@ -47,12 +46,11 @@ SELECT * FROM o_test_null_clauses ORDER BY val NULLS FIRST;
 -- Test primary index scan with null clause
 EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
 	WHERE val IS NULL ORDER BY val;
-                        QUERY PLAN                         
------------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_clauses
-   Forward index only scan of: o_test_null_clauses_val_idx
-   Conds: (val IS NULL)
-(3 rows)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Index Only Scan using o_test_null_clauses_val_idx on o_test_null_clauses
+   Index Cond: (val IS NULL)
+(2 rows)
 
 SELECT * FROM o_test_null_clauses WHERE val IS NULL ORDER BY val;
  id | val 
@@ -64,12 +62,11 @@ SELECT * FROM o_test_null_clauses WHERE val IS NULL ORDER BY val;
 -- Test primary index scan with not null clause
 EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
 	WHERE val IS NOT NULL ORDER BY val;
-                        QUERY PLAN                         
------------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_clauses
-   Forward index only scan of: o_test_null_clauses_val_idx
-   Conds: (val IS NOT NULL)
-(3 rows)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Index Only Scan using o_test_null_clauses_val_idx on o_test_null_clauses
+   Index Cond: (val IS NOT NULL)
+(2 rows)
 
 SELECT * FROM o_test_null_clauses WHERE val IS NOT NULL ORDER BY val;
  id | val 
@@ -89,12 +86,11 @@ SELECT * FROM o_test_null_clauses WHERE val IS NOT NULL ORDER BY val;
 -- Test primary index scan with not null and another clause
 EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
 	WHERE val IS NOT NULL AND val > 5 ORDER BY val;
-                        QUERY PLAN                         
------------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_clauses
-   Forward index only scan of: o_test_null_clauses_val_idx
-   Conds: ((val IS NOT NULL) AND (val > 5))
-(3 rows)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Index Only Scan using o_test_null_clauses_val_idx on o_test_null_clauses
+   Index Cond: ((val IS NOT NULL) AND (val > 5))
+(2 rows)
 
 SELECT * FROM o_test_null_clauses
 	WHERE val IS NOT NULL AND val > 5 ORDER BY val;
@@ -112,14 +108,13 @@ SELECT * FROM o_test_null_clauses
 -- Test primary index scan with not null and another clause and nullsfirst
 EXPLAIN (COSTS off) SELECT * FROM o_test_null_clauses
 	WHERE val IS NOT NULL AND val > 5 ORDER BY val NULLS FIRST;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Sort
    Sort Key: val NULLS FIRST
-   ->  Custom Scan (o_scan) on o_test_null_clauses
-         Forward index only scan of: o_test_null_clauses_val_idx
-         Conds: ((val IS NOT NULL) AND (val > 5))
-(5 rows)
+   ->  Index Only Scan using o_test_null_clauses_val_idx on o_test_null_clauses
+         Index Cond: ((val IS NOT NULL) AND (val > 5))
+(4 rows)
 
 SELECT * FROM o_test_null_clauses
 	WHERE val IS NOT NULL AND val > 5 ORDER BY val NULLS FIRST;
@@ -139,12 +134,11 @@ RESET enable_bitmapscan;
 -- Test primary index scan with null array clause
 EXPLAIN (COSTS off) select id from o_test_null_clauses
 	WHERE id = ANY(NULL::int4[]);
-                       QUERY PLAN                       
---------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_clauses
-   Forward index only scan of: o_test_null_clauses_pkey
-   Conds: (id = ANY (NULL::integer[]))
-(3 rows)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Index Only Scan using o_test_null_clauses_pkey on o_test_null_clauses
+   Index Cond: (id = ANY (NULL::integer[]))
+(2 rows)
 
 select id from o_test_null_clauses WHERE id = ANY(NULL::int4[]);
  id 
@@ -153,15 +147,14 @@ select id from o_test_null_clauses WHERE id = ANY(NULL::int4[]);
 
 -- Test nested primary index scan with not null clause
 EXPLAIN (COSTS off) select max(id) from o_test_null_clauses;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
  Result
    InitPlan 1 (returns $0)
      ->  Limit
-           ->  Custom Scan (o_scan) on o_test_null_clauses
-                 Backward index only scan of: o_test_null_clauses_pkey
-                 Conds: (id IS NOT NULL)
-(6 rows)
+           ->  Index Only Scan Backward using o_test_null_clauses_pkey on o_test_null_clauses
+                 Index Cond: (id IS NOT NULL)
+(5 rows)
 
 select max(id) from o_test_null_clauses;
  max 
@@ -180,11 +173,10 @@ SET LOCAL enable_seqscan = off;
 SET LOCAL enable_bitmapscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_null_comparison ORDER BY a;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_comparison
-   Forward index only scan of: o_test_null_comparison_ix1
-(2 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Only Scan using o_test_null_comparison_ix1 on o_test_null_comparison
+(1 row)
 
 SELECT * FROM o_test_null_comparison ORDER BY a;
  a 
@@ -195,12 +187,11 @@ SELECT * FROM o_test_null_comparison ORDER BY a;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_null_comparison WHERE a > 1 ORDER BY a;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_comparison
-   Forward index only scan of: o_test_null_comparison_ix1
-   Conds: (a > 1)
-(3 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Only Scan using o_test_null_comparison_ix1 on o_test_null_comparison
+   Index Cond: (a > 1)
+(2 rows)
 
 SELECT * FROM o_test_null_comparison WHERE a > 1 ORDER BY a;
  a 
@@ -209,12 +200,11 @@ SELECT * FROM o_test_null_comparison WHERE a > 1 ORDER BY a;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_null_comparison WHERE a < 1 ORDER BY a;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_comparison
-   Forward index only scan of: o_test_null_comparison_ix1
-   Conds: (a < 1)
-(3 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Only Scan using o_test_null_comparison_ix1 on o_test_null_comparison
+   Index Cond: (a < 1)
+(2 rows)
 
 SELECT * FROM o_test_null_comparison WHERE a < 1 ORDER BY a;
  a 
@@ -223,12 +213,11 @@ SELECT * FROM o_test_null_comparison WHERE a < 1 ORDER BY a;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_null_comparison WHERE a IS NULL ORDER BY a;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_comparison
-   Forward index only scan of: o_test_null_comparison_ix1
-   Conds: (a IS NULL)
-(3 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Only Scan using o_test_null_comparison_ix1 on o_test_null_comparison
+   Index Cond: (a IS NULL)
+(2 rows)
 
 SELECT * FROM o_test_null_comparison WHERE a IS NULL ORDER BY a;
  a 
@@ -238,12 +227,11 @@ SELECT * FROM o_test_null_comparison WHERE a IS NULL ORDER BY a;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_null_comparison WHERE a IS NOT NULL ORDER BY a;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_null_comparison
-   Forward index only scan of: o_test_null_comparison_ix1
-   Conds: (a IS NOT NULL)
-(3 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Only Scan using o_test_null_comparison_ix1 on o_test_null_comparison
+   Index Cond: (a IS NOT NULL)
+(2 rows)
 
 SELECT * FROM o_test_null_comparison WHERE a IS NOT NULL ORDER BY a;
  a 
