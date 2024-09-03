@@ -1767,8 +1767,16 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			}
 			else
 			{
-				new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
-				new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
+				if (!old_slot->tts_isnull[i])
+				{
+					new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
+					new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
+				}
+				else
+				{
+					new_slot->tts_values[i] = 0;
+					new_slot->tts_isnull[i] = true;
+				}
 			}
 		}
 		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
