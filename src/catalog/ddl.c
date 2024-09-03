@@ -1705,6 +1705,10 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	OTableDescr *descr;
 	CommitSeqNo csn;
 	OXid		oxid;
+	int			primary_init_nfields = old_o_table->primary_init_nfields;
+
+	if (!old_o_table->has_primary)
+		primary_init_nfields--;
 
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	descr = relation_get_descr(rel);
@@ -1741,7 +1745,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			}
 
 			if (!expr && attr->atthasdef && !attr->atthasmissing &&
-				i > old_o_table->primary_init_nfields &&
+				i >= primary_init_nfields &&
 				old_slot->tts_isnull[i])
 			{
 				Node *defaultexpr = build_column_default(rel, i + 1);
