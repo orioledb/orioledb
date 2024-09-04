@@ -83,7 +83,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 		return false;
 	}
 
-	needsUndo = O_PAGE_IS(left, LEAF) && desc->undoType != UndoReserveNone;
+	needsUndo = O_PAGE_IS(left, LEAF) && desc->undoType != UndoLogNone;
 	if (needsUndo && OXidIsValid(desc->createOxid) &&
 		!XACT_INFO_IS_FINISHED(desc->createOxid))
 		needsUndo = false;
@@ -214,7 +214,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				left_blkno;
 	uint32		parent_change_count;
 	bool		success = false;
-	bool		needsUndo = desc->undoType != UndoReserveNone;
+	bool		needsUndo = desc->undoType != UndoLogNone;
 
 	/*
 	 * Reserve the required undo size.  We are holding the page lock, so we

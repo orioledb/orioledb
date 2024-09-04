@@ -256,19 +256,25 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->pid = InvalidPid;
 		pg_atomic_init_u64(&checkpoint_state->mmapDataLength, 0);
 		pg_atomic_init_u32(&checkpoint_state->autonomousLevel, ORIOLEDB_MAX_DEPTH);
-		pg_atomic_init_u64(&undo_meta->lastUsedLocation, 0);
-		pg_atomic_init_u64(&undo_meta->advanceReservedLocation, 0);
-		pg_atomic_init_u64(&undo_meta->writeInProgressLocation, 0);
-		pg_atomic_init_u64(&undo_meta->writtenLocation, 0);
-		pg_atomic_init_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, 0);
-		pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
-		pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
-		pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
-		pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
-		pg_atomic_init_u64(&undo_meta->checkpointRetainStartLocation, 0);
-		pg_atomic_init_u64(&undo_meta->checkpointRetainEndLocation, 0);
-		pg_atomic_init_u64(&undo_meta->cleanedCheckpointStartLocation, 0);
-		pg_atomic_init_u64(&undo_meta->cleanedCheckpointEndLocation, 0);
+
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+
+			pg_atomic_init_u64(&undo_meta->lastUsedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->advanceReservedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->writeInProgressLocation, 0);
+			pg_atomic_init_u64(&undo_meta->writtenLocation, 0);
+			pg_atomic_init_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->checkpointRetainStartLocation, 0);
+			pg_atomic_init_u64(&undo_meta->checkpointRetainEndLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedCheckpointStartLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedCheckpointEndLocation, 0);
+		}
 
 		pg_atomic_init_u64(&xid_meta->nextXid, FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->runXmin, FirstNormalTransactionId);
@@ -350,19 +356,25 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->controlSysTreesStartPtr = control.sysTreesStartPtr;
 		pg_atomic_write_u64(&checkpoint_state->mmapDataLength, control.mmapDataLength);
 
-		pg_atomic_write_u64(&undo_meta->lastUsedLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->advanceReservedLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->writeInProgressLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->writtenLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->minProcRetainLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->minProcTransactionRetainLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->minProcReservedLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->cleanedLocation, control.lastUndoLocation);
-		pg_atomic_write_u64(&undo_meta->checkpointRetainStartLocation, control.checkpointRetainStartLocation);
-		pg_atomic_write_u64(&undo_meta->checkpointRetainEndLocation, control.checkpointRetainEndLocation);
-		pg_atomic_write_u64(&undo_meta->cleanedCheckpointStartLocation, control.checkpointRetainStartLocation);
-		pg_atomic_write_u64(&undo_meta->cleanedCheckpointEndLocation, control.checkpointRetainEndLocation);
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+			CheckpointUndoInfo *undo_info = &control.undoInfo[i];
+
+			pg_atomic_write_u64(&undo_meta->lastUsedLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->advanceReservedLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->writeInProgressLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->writtenLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->minProcRetainLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->minProcTransactionRetainLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->minProcReservedLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->cleanedLocation, undo_info->lastUndoLocation);
+			pg_atomic_write_u64(&undo_meta->checkpointRetainStartLocation, undo_info->checkpointRetainStartLocation);
+			pg_atomic_write_u64(&undo_meta->checkpointRetainEndLocation, undo_info->checkpointRetainEndLocation);
+			pg_atomic_write_u64(&undo_meta->cleanedCheckpointStartLocation, undo_info->checkpointRetainStartLocation);
+			pg_atomic_write_u64(&undo_meta->cleanedCheckpointEndLocation, undo_info->checkpointRetainEndLocation);
+		}
 
 		pg_atomic_init_u64(&xid_meta->nextXid, control.lastXid);
 		pg_atomic_init_u64(&xid_meta->runXmin, control.lastXid);
@@ -721,6 +733,7 @@ write_to_xids_queue(XidFileRec *rec)
 	while (location >= pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) + XID_RECS_QUEUE_SIZE)
 		try_flush_xids_queue();
 
+	target->undoType = rec->undoType;
 	target->undoLocation = rec->undoLocation;
 
 	pg_write_barrier();
@@ -811,7 +824,8 @@ finish_write_xids(uint32 chkpnum)
 {
 	XidFileRec	xidRec;
 	int			i,
-				j;
+				j,
+				k;
 
 	memset(&xidRec, 0, sizeof(xidRec));
 
@@ -820,23 +834,28 @@ finish_write_xids(uint32 chkpnum)
 		LWLockAcquire(&oProcData[i].undoStackLocationsFlushLock, LW_EXCLUSIVE);
 		for (j = 0; j < PROC_XID_ARRAY_SIZE; j++)
 		{
-			while (true)
+			for (k = 0; k < (int) UndoLogsCount; k++)
 			{
-				xidRec.oxid = oProcData[i].vxids[j].oxid;
-				if (OXidIsValid(xidRec.oxid))
+				while (true)
 				{
-					pg_read_barrier();
+					xidRec.oxid = oProcData[i].vxids[j].oxid;
+					xidRec.undoType = (UndoLogType) k;
+					if (OXidIsValid(xidRec.oxid))
+					{
+						pg_read_barrier();
 
-					read_shared_undo_locations(&xidRec.undoLocation, &oProcData[i].undoStackLocations[j]);
+						read_shared_undo_locations(&xidRec.undoLocation,
+												   &oProcData[i].undoStackLocations[j][k]);
 
-					pg_read_barrier();
+						pg_read_barrier();
 
-					if (xidRec.oxid != oProcData[i].vxids[j].oxid)
-						continue;
+						if (xidRec.oxid != oProcData[i].vxids[j].oxid)
+							continue;
 
-					write_to_xids_queue(&xidRec);
+						write_to_xids_queue(&xidRec);
+					}
+					break;
 				}
-				break;
 			}
 		}
 		oProcData[i].flushUndoLocations = false;
@@ -1073,8 +1092,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 				prev_chkp_num = checkpoint_state->lastCheckpointNumber;
 	MemoryContext prev_context;
 	ODBProcData *my_proc_info = GET_CUR_PROCDATA();
-	UndoLocation checkpoint_start_loc,
-				checkpoint_end_loc;
+	UndoLocation checkpoint_start_loc[(int) UndoLogsCount],
+				checkpoint_end_loc[(int) UndoLogsCount];
 	OXid		checkpoint_xmin,
 				checkpoint_xmax;
 	int			i;
@@ -1123,10 +1142,16 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 
-	checkpoint_start_loc = pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation);
 	checkpoint_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
-	pg_atomic_write_u64(&my_proc_info->snapshotRetainUndoLocation, checkpoint_start_loc);
 	pg_atomic_write_u64(&my_proc_info->xmin, checkpoint_xmin);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+
+		checkpoint_start_loc[i] = pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation);
+		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation,
+							checkpoint_start_loc[i]);
+	}
 
 	pg_write_barrier();
 
@@ -1189,28 +1214,38 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	close_xids_file();
 	LWLockRelease(&checkpoint_state->oXidQueueLock);
 
-	checkpoint_end_loc = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+
+		checkpoint_end_loc[i] = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+	}
 	checkpoint_xmax = pg_atomic_read_u64(&xid_meta->nextXid);
 
 	if (use_mmap)
 		msync(mmap_data, device_length, MS_SYNC);
 
-	fsync_undo_range(checkpoint_start_loc,
-					 checkpoint_end_loc,
-					 WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);
-
-	if (orioledb_s3_mode && checkpoint_end_loc > checkpoint_start_loc)
+	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		uint64		undoFileNum;
+		fsync_undo_range((UndoLogType) i,
+						 checkpoint_start_loc[i],
+						 checkpoint_end_loc[i],
+						 WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);
 
-		for (undoFileNum = checkpoint_start_loc / UNDO_FILE_SIZE;
-			 undoFileNum <= (checkpoint_end_loc - 1) / UNDO_FILE_SIZE;
-			 undoFileNum++)
+		if (orioledb_s3_mode && checkpoint_end_loc[i] > checkpoint_start_loc[i])
 		{
-			S3TaskLocation location;
+			uint64		undoFileNum;
 
-			location = s3_schedule_undo_file_write(undoFileNum);
-			maxLocation = Max(maxLocation, location);
+			for (undoFileNum = checkpoint_start_loc[i] / UNDO_FILE_SIZE;
+				 undoFileNum <= (checkpoint_end_loc[i] - 1) / UNDO_FILE_SIZE;
+				 undoFileNum++)
+			{
+				S3TaskLocation location;
+
+				location = s3_schedule_undo_file_write((UndoLogType) i,
+													   undoFileNum);
+				maxLocation = Max(maxLocation, location);
+			}
 		}
 	}
 
@@ -1218,10 +1253,17 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 					   checkpoint_xmax,
 					   WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);
 
-	SpinLockAcquire(&undo_meta->minUndoLocationsMutex);
-	pg_atomic_write_u64(&undo_meta->checkpointRetainStartLocation, checkpoint_start_loc);
-	pg_atomic_write_u64(&undo_meta->checkpointRetainEndLocation, checkpoint_end_loc);
-	SpinLockRelease(&undo_meta->minUndoLocationsMutex);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+
+		SpinLockAcquire(&undo_meta->minUndoLocationsMutex);
+		pg_atomic_write_u64(&undo_meta->checkpointRetainStartLocation,
+							checkpoint_start_loc[i]);
+		pg_atomic_write_u64(&undo_meta->checkpointRetainEndLocation,
+							checkpoint_end_loc[i]);
+		SpinLockRelease(&undo_meta->minUndoLocationsMutex);
+	}
 
 	SpinLockAcquire(&xid_meta->xminMutex);
 	pg_atomic_write_u64(&xid_meta->checkpointRetainXmin, checkpoint_xmin);
@@ -1230,18 +1272,25 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	pg_atomic_write_u64(&my_proc_info->snapshotRetainUndoLocation, InvalidUndoLocation);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
 
 	control.lastCheckpointNumber = checkpoint_state->lastCheckpointNumber;
 	control.lastCSN = pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo);
 	control.lastXid = pg_atomic_read_u64(&xid_meta->nextXid);
-	control.lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 	control.sysTreesStartPtr = checkpoint_state->sysTreesStartPtr;
 	control.replayStartPtr = checkpoint_state->replayStartPtr;
 	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
 	control.mmapDataLength = pg_atomic_read_u64(&checkpoint_state->mmapDataLength);
-	control.checkpointRetainStartLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation);
-	control.checkpointRetainEndLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainEndLocation);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+		CheckpointUndoInfo *undo_info = &control.undoInfo[i];
+
+		undo_info->lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+		undo_info->checkpointRetainStartLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation);
+		undo_info->checkpointRetainEndLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainEndLocation);
+	}
 	control.checkpointRetainXmin = pg_atomic_read_u64(&xid_meta->checkpointRetainXmin);
 	control.checkpointRetainXmax = pg_atomic_read_u64(&xid_meta->checkpointRetainXmax);
 	control.binaryVersion = ORIOLEDB_BINARY_VERSION;
@@ -2945,10 +2994,10 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
 							  blkno, loc, rightBlkno, true))
 	{
-		release_undo_size(UndoReserveTxn);
-		free_retained_undo_location();
+		release_undo_size(descr->undoType);
+		free_retained_undo_location(descr->undoType);
 
-		reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+		reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 		return true;
 	}
 	else
@@ -2968,7 +3017,8 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 {
 	OInMemoryBlkno old_blkno;
 
-	reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+	if (descr->undoType != UndoLogNone)
+		reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
 	while (true)
 	{
@@ -2985,7 +3035,7 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 		if (o_btree_split_is_incomplete(*blkno, &relocked))
 		{
 			o_btree_split_fix_and_unlock(descr, *blkno);
-			reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+			reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 		}
 		else if (!(level > 0 && *blkno == state->stack[level].hikeyBlkno) &&
 				 is_page_too_sparse(descr, O_GET_IN_MEMORY_PAGE(*blkno)))
@@ -3004,8 +3054,11 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 			break;
 	}
 
-	release_undo_size(UndoReserveTxn);
-	free_retained_undo_location();
+	if (descr->undoType != UndoLogNone)
+	{
+		release_undo_size(descr->undoType);
+		free_retained_undo_location(descr->undoType);
+	}
 }
 
 static void
@@ -5330,7 +5383,8 @@ foreach_extent_append(BTreeDescr *desc, FileExtent extent, void *arg)
 }
 
 void
-systrees_lock_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
+systrees_lock_callback(UndoLogType undoType, UndoLocation location,
+					   UndoStackItem *baseItem, OXid oxid,
 					   bool abort, bool changeCountsValid)
 {
 	SysTreesLockUndoStackItem *lockItem = (SysTreesLockUndoStackItem *) baseItem;
@@ -5355,7 +5409,7 @@ add_systrees_lock_undo(bool lock)
 	SysTreesLockUndoStackItem *item;
 	LocationIndex size = sizeof(SysTreesLockUndoStackItem);
 
-	item = (SysTreesLockUndoStackItem *) get_undo_record_unreserved(UndoReserveTxn,
+	item = (SysTreesLockUndoStackItem *) get_undo_record_unreserved(UndoLogSystem,
 																	&location,
 																	MAXALIGN(size));
 	item->lock = lock;
@@ -5363,8 +5417,8 @@ add_systrees_lock_undo(bool lock)
 	item->header.indexType = oIndexPrimary;
 	item->header.itemSize = size;
 
-	add_new_undo_stack_item(location);
-	release_undo_size(UndoReserveTxn);
+	add_new_undo_stack_item(UndoLogSystem, location);
+	release_undo_size(UndoLogSystem);
 }
 
 /*

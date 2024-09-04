@@ -56,7 +56,8 @@ typedef struct
 	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
 } RelnodeUndoStackItem;
 
-static void clean_chain_has_locks_flag(UndoLocation location,
+static void clean_chain_has_locks_flag(UndoLogType undoType,
+									   UndoLocation location,
 									   BTreeLeafTuphdr *pageTuphdr,
 									   OInMemoryBlkno blkno);
 
@@ -73,7 +74,7 @@ page_add_item_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 
 	Assert(O_PAGE_IS(p, LEAF));
 
-	Assert(desc->undoType != UndoReserveNone);
+	Assert(desc->undoType != UndoLogNone);
 	if (splitKey)
 		ptr = get_undo_record(desc->undoType, &undoLocation,
 							  O_SPLIT_UNDO_IMAGE_SIZE(splitKeyLen));
@@ -129,7 +130,8 @@ page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	{
 		nonLockTuphdr = *tuphdr;
 		nonLockTuphdrPtr = &nonLockTuphdr;
-		nonLockUndoLocation = find_non_lock_only_undo_record(nonLockTuphdrPtr);
+		nonLockUndoLocation = find_non_lock_only_undo_record(desc->undoType,
+															 nonLockTuphdrPtr);
 	}
 
 retry:
@@ -146,9 +148,9 @@ retry:
 		 */
 		Assert(!UndoLocationIsValid(nonLockUndoLocation));
 		Assert(UndoLocationIsValid(tuphdr->undoLocation));
-		Assert(UNDO_REC_EXISTS(tuphdr->undoLocation));
+		Assert(UNDO_REC_EXISTS(desc->undoType, tuphdr->undoLocation));
 
-		get_prev_leaf_header_from_undo(tuphdr, true);
+		get_prev_leaf_header_from_undo(desc->undoType, tuphdr, true);
 		BTREE_PAGE_READ_TUPLE(prev_tuple, p, locator);
 		PAGE_SUB_N_VACATED(p,
 						   BTreeLeafTuphdrSize +
@@ -180,7 +182,8 @@ retry:
 		prev_tuplen = o_btree_len(desc, tuple, OTupleLength);
 
 		tuplen = BTREE_PAGE_GET_ITEM_SIZE(p, locator) - BTreeLeafTuphdrSize;
-		get_prev_leaf_header_and_tuple_from_undo(&prev_header,
+		get_prev_leaf_header_and_tuple_from_undo(desc->undoType,
+												 &prev_header,
 												 &tuple,
 												 tuplen);
 		tuplen = o_btree_len(desc, tuple, OTupleLength);
@@ -210,7 +213,9 @@ retry:
 			tuphdr->deleted = prev_header.deleted;
 			nonLockTuphdrPtr->undoLocation = prev_header.undoLocation;
 			nonLockTuphdrPtr->xactInfo = prev_header.xactInfo;
-			update_leaf_header_in_undo(nonLockTuphdrPtr, nonLockUndoLocation);
+			update_leaf_header_in_undo(desc->undoType,
+									   nonLockTuphdrPtr,
+									   nonLockUndoLocation);
 		}
 
 		BTREE_PAGE_SET_ITEM_FLAGS(p, locator, tuple.formatFlags);
@@ -220,7 +225,8 @@ retry:
 			 !XACT_INFO_IS_FINISHED(prev_header.xactInfo)) && wholeChain)
 		{
 			/* Find the next item in the chain */
-			nonLockUndoLocation = find_non_lock_only_undo_record(nonLockTuphdrPtr);
+			nonLockUndoLocation = find_non_lock_only_undo_record(desc->undoType,
+																 nonLockTuphdrPtr);
 			if (XACT_INFO_IS_FINISHED(nonLockTuphdrPtr->xactInfo))
 				return true;
 			item = BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
@@ -347,7 +353,7 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 		Assert(!key_palloc);
 	}
 
-	add_new_undo_stack_item(*undoLocation);
+	add_new_undo_stack_item(desc->undoType, *undoLocation);
 
 	*undoLocation += offsetof(BTreeModifyUndoStackItem, tuphdr);
 	return &item->tuphdr;
@@ -374,8 +380,9 @@ get_tree_descr(ORelOids oids, OIndexType type)
  * Callback for aborting B-tree record modification.
  */
 void
-modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
-					 OXid oxid, bool abort, bool changeCountsValid)
+modify_undo_callback(UndoLogType undoType, UndoLocation location,
+					 UndoStackItem *baseItem, OXid oxid, bool abort,
+					 bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
 	BTreeDescr *desc = get_tree_descr(item->oids, item->header.indexType);
@@ -454,7 +461,8 @@ modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
 	}
 
 	nonLockTupHdr = *tupHdr;
-	nonLockUndoLocation = find_non_lock_only_undo_record(&nonLockTupHdr);
+	nonLockUndoLocation = find_non_lock_only_undo_record(desc->undoType,
+														 &nonLockTupHdr);
 
 	if (!XACT_INFO_OXID_EQ(nonLockTupHdr.xactInfo, oxid))
 	{
@@ -492,7 +500,8 @@ modify_undo_callback(UndoLocation location, UndoStackItem *baseItem,
  * Callback for aborting B-tree tuple lock.
  */
 void
-lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
+lock_undo_callback(UndoLogType undoType, UndoLocation location,
+				   UndoStackItem *baseItem, OXid oxid,
 				   bool abort, bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
@@ -569,8 +578,9 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 		UndoLocation undoLocation = tuphdr.undoLocation;
 		BTreeLeafTuphdr prev_tuphdr = tuphdr;
 
-		Assert(UndoLocationIsValid(undoLocation) && UNDO_REC_EXISTS(undoLocation));
-		get_prev_leaf_header_from_undo(&prev_tuphdr, false);
+		Assert(UndoLocationIsValid(undoLocation));
+		Assert(UNDO_REC_EXISTS(desc->undoType, undoLocation));
+		get_prev_leaf_header_from_undo(desc->undoType, &prev_tuphdr, false);
 
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo) && XACT_INFO_GET_OXID(tuphdr.xactInfo) == oxid)
 		{
@@ -582,7 +592,8 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 		{
 			if (!tuphdr.chainHasLocks &&
 				XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
-				clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
+				clean_chain_has_locks_flag(desc->undoType,
+										   lastLockOnlyUndoLocation,
 										   page_tuphdr, blkno);
 
 			if (!UndoLocationIsValid(tuphdrUndoLocation))
@@ -599,7 +610,8 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 				tuphdr.xactInfo = prev_tuphdr.xactInfo;
 				tuphdr.undoLocation = prev_tuphdr.undoLocation;
 				tuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
-				update_leaf_header_in_undo(&tuphdr, tuphdrUndoLocation);
+				update_leaf_header_in_undo(desc->undoType, &tuphdr,
+										   tuphdrUndoLocation);
 			}
 		}
 
@@ -607,7 +619,7 @@ lock_undo_callback(UndoLocation location, UndoStackItem *baseItem, OXid oxid,
 		 * We should be able to find at CSN-record or invalid undo location
 		 * before running out of undo records.
 		 */
-		Assert(UNDO_REC_EXISTS(undoLocation));
+		Assert(UNDO_REC_EXISTS(desc->undoType, undoLocation));
 
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
 			lastLockOnlyUndoLocation = tuphdrUndoLocation;
@@ -628,7 +640,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 	uint64		offset;
 	uint64		length;
 
-	LWLockAcquire(&undo_meta->pendingTruncatesLock, LW_EXCLUSIVE);
+	LWLockAcquire(&pending_truncates_meta->pendingTruncatesLock, LW_EXCLUSIVE);
 
 	pendingTruncatesFile = PathNameOpenFile(PENDING_TRUNCATES_FILENAME,
 											O_RDWR | O_CREAT | PG_BINARY);
@@ -637,7 +649,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 						errmsg("could not open pending truncates file %s",
 							   PENDING_TRUNCATES_FILENAME)));
 
-	offset = undo_meta->pendingTruncatesLocation;
+	offset = pending_truncates_meta->pendingTruncatesLocation;
 	length = sizeof(relOids);
 
 	if (FileWrite(pendingTruncatesFile, (Pointer) &relOids, length, offset,
@@ -665,11 +677,11 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset += length;
-	undo_meta->pendingTruncatesLocation = offset;
+	pending_truncates_meta->pendingTruncatesLocation = offset;
 
 	FileClose(pendingTruncatesFile);
 
-	LWLockRelease(&undo_meta->pendingTruncatesLock);
+	LWLockRelease(&pending_truncates_meta->pendingTruncatesLock);
 }
 
 void
@@ -684,16 +696,16 @@ check_pending_truncates(void)
 	int			relNodesAllocated = 0;
 	File		pendingTruncatesFile;
 
-	if (have_backup_in_progress() || undo_meta->pendingTruncatesLocation == 0)
+	if (have_backup_in_progress() || pending_truncates_meta->pendingTruncatesLocation == 0)
 		return;
 
-	if (!LWLockConditionalAcquire(&undo_meta->pendingTruncatesLock,
+	if (!LWLockConditionalAcquire(&pending_truncates_meta->pendingTruncatesLock,
 								  LW_EXCLUSIVE))
 		return;
 
-	if (have_backup_in_progress() || undo_meta->pendingTruncatesLocation == 0)
+	if (have_backup_in_progress() || pending_truncates_meta->pendingTruncatesLocation == 0)
 	{
-		LWLockRelease(&undo_meta->pendingTruncatesLock);
+		LWLockRelease(&pending_truncates_meta->pendingTruncatesLock);
 		return;
 	}
 
@@ -705,7 +717,7 @@ check_pending_truncates(void)
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset = 0;
-	maxOffset = undo_meta->pendingTruncatesLocation;
+	maxOffset = pending_truncates_meta->pendingTruncatesLocation;
 	while (offset < maxOffset)
 	{
 		int			i;
@@ -748,9 +760,9 @@ check_pending_truncates(void)
 			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode);
 	}
 
-	undo_meta->pendingTruncatesLocation = 0;
+	pending_truncates_meta->pendingTruncatesLocation = 0;
 
-	LWLockRelease(&undo_meta->pendingTruncatesLock);
+	LWLockRelease(&pending_truncates_meta->pendingTruncatesLock);
 
 	if (relNodes)
 		pfree(relNodes);
@@ -760,7 +772,8 @@ check_pending_truncates(void)
  * Change relnode of btree.
  */
 void
-btree_relnode_undo_callback(UndoLocation location, UndoStackItem *baseItem,
+btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
+							UndoStackItem *baseItem,
 							OXid oxid, bool abort, bool changeCountsValid)
 {
 	RelnodeUndoStackItem *relnode_item = (RelnodeUndoStackItem *) baseItem;
@@ -864,7 +877,7 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 	RelnodeUndoStackItem *item;
 
 	size = offsetof(RelnodeUndoStackItem, oids) + sizeof(ORelOids) * (oldNumTreeOids + newNumTreeOids);
-	item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoReserveTxn, &location, MAXALIGN(size));
+	item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
 	item->header.base.type = RelnodeUndoItemType;
 	item->header.base.itemSize = size;
@@ -908,9 +921,9 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 	(void) get_current_oxid();
 
 	oxid_needs_wal_flush = true;
-	add_new_undo_stack_item(location);
+	add_new_undo_stack_item(UndoLogSystem, location);
 
-	release_undo_size(UndoReserveTxn);
+	release_undo_size(UndoLogSystem);
 }
 
 void
@@ -946,11 +959,13 @@ add_undo_create_relnode(ORelOids oids, ORelOids *treeOids, int numTreeOids)
 }
 
 static void
-read_hikey_from_undo(UndoLocation location, Page dest, LocationIndex *loc)
+read_hikey_from_undo(UndoLogType undoType, UndoLocation location,
+					 Page dest, LocationIndex *loc)
 {
-	undo_read(location, sizeof(BTreePageHeader), dest);
+	undo_read(undoType, location, sizeof(BTreePageHeader), dest);
 	*loc = sizeof(BTreePageHeader);
-	undo_read(location + *loc,
+	undo_read(undoType,
+			  location + *loc,
 			  ((BTreePageHeader *) dest)->hikeysEnd - *loc,
 			  dest + *loc);
 	*loc = ((BTreePageHeader *) dest)->hikeysEnd;
@@ -973,7 +988,8 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				right_loc;
 	LocationIndex loc = 0;
 
-	undo_read(undoLocation, sizeof(UndoPageImageHeader), (Pointer) &header);
+	undo_read(desc->undoType, undoLocation,
+			  sizeof(UndoPageImageHeader), (Pointer) &header);
 	left_loc = undoLocation + MAXALIGN(sizeof(UndoPageImageHeader));
 
 	if (is_left != NULL)
@@ -990,7 +1006,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 			*is_left = true;
 		if (is_right != NULL)
 			*is_right = true;
-		undo_read(left_loc, ORIOLEDB_BLCKSZ, dest);
+		undo_read(desc->undoType, left_loc, ORIOLEDB_BLCKSZ, dest);
 		if (page_lokey && header.type == UndoPageImageSplit)
 		{
 			bool		set_page_lokey = false;
@@ -1010,7 +1026,8 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 
 			if (set_page_lokey)
 			{
-				undo_read(left_loc + ORIOLEDB_BLCKSZ,
+				undo_read(desc->undoType,
+						  left_loc + ORIOLEDB_BLCKSZ,
 						  header.splitKeyLen,
 						  page_lokey->fixedData);
 				page_lokey->tuple.formatFlags = header.splitKeyFlags;
@@ -1032,17 +1049,17 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		case BTreeKeyNone:
 			if (is_left != NULL)
 				*is_left = true;
-			undo_read(left_loc, ORIOLEDB_BLCKSZ, dest);
+			undo_read(desc->undoType, left_loc, ORIOLEDB_BLCKSZ, dest);
 			break;
 		case BTreeKeyRightmost:
 			if (is_right != NULL)
 				*is_right = true;
 			if (lokey != NULL)
 			{
-				read_hikey_from_undo(left_loc, dest, &loc);
+				read_hikey_from_undo(desc->undoType, left_loc, dest, &loc);
 				copy_fixed_hikey(desc, lokey, dest);
 			}
-			undo_read(right_loc, ORIOLEDB_BLCKSZ, dest);
+			undo_read(desc->undoType, right_loc, ORIOLEDB_BLCKSZ, dest);
 			break;
 		case BTreeKeyLeafTuple:
 		case BTreeKeyNonLeafKey:
@@ -1050,7 +1067,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		case BTreeKeyPageHiKey:
 			Assert(key != NULL);
 
-			read_hikey_from_undo(left_loc, dest, &loc);
+			read_hikey_from_undo(desc->undoType, left_loc, dest, &loc);
 
 			cmp_expected = kind == BTreeKeyPageHiKey ? 1 : 0;
 			kind = kind == BTreeKeyPageHiKey ? BTreeKeyNonLeafKey : kind;
@@ -1064,13 +1081,13 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 					*is_right = true;
 				if (lokey != NULL)
 					copy_fixed_hikey(desc, lokey, dest);
-				undo_read(right_loc, ORIOLEDB_BLCKSZ, dest);
+				undo_read(desc->undoType, right_loc, ORIOLEDB_BLCKSZ, dest);
 			}
 			else
 			{
 				if (is_left != NULL)
 					*is_left = true;
-				undo_read(left_loc + loc, ORIOLEDB_BLCKSZ - loc, dest + loc);
+				undo_read(desc->undoType, left_loc + loc, ORIOLEDB_BLCKSZ - loc, dest + loc);
 			}
 			break;
 		default:
@@ -1091,7 +1108,7 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 
 	Assert(O_PAGE_IS(left, LEAF) && O_PAGE_IS(right, LEAF));
 
-	Assert(desc->undoType != UndoReserveNone);
+	Assert(desc->undoType != UndoLogNone);
 	undo_rec = get_undo_record(desc->undoType, &undoLocation, O_MERGE_UNDO_IMAGE_SIZE);
 
 	header = (UndoPageImageHeader *) undo_rec;
@@ -1108,16 +1125,16 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
  * Clean `chainHasLocks` flag on given and previous undo locations.
  */
 static void
-clean_chain_has_locks_flag(UndoLocation location, BTreeLeafTuphdr *pageTuphdr,
-						   OInMemoryBlkno blkno)
+clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
+						   BTreeLeafTuphdr *pageTuphdr, OInMemoryBlkno blkno)
 {
 	BTreeLeafTuphdr tuphdr;
 	UndoLocation retainedUndoLocation;
 
 	if (!is_recovery_process())
-		retainedUndoLocation = get_snapshot_retained_undo_location();
+		retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 	else
-		retainedUndoLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation);
+		retainedUndoLocation = pg_atomic_read_u64(&get_undo_meta_by_type(undoType)->checkpointRetainStartLocation);
 
 	/*
 	 * Invalid location means that we should update starting from the
@@ -1139,15 +1156,15 @@ clean_chain_has_locks_flag(UndoLocation location, BTreeLeafTuphdr *pageTuphdr,
 	 */
 	while (UndoLocationIsValid(location) && location >= retainedUndoLocation)
 	{
-		Assert(UNDO_REC_EXISTS(location));
+		Assert(UNDO_REC_EXISTS(undoType, location));
 
-		undo_read(location, sizeof(tuphdr), (Pointer) &tuphdr);
+		undo_read(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr);
 
 		if (!tuphdr.chainHasLocks)
 			break;
 
 		tuphdr.chainHasLocks = false;
-		undo_write(location, sizeof(tuphdr), (Pointer) &tuphdr);
+		undo_write(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr);
 
 		location = tuphdr.undoLocation;
 	}
@@ -1170,6 +1187,7 @@ clean_chain_has_locks_flag(UndoLocation location, BTreeLeafTuphdr *pageTuphdr,
 bool
 row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				   BTreeLeafTuphdr *conflictTuphdr,
+				   UndoLogType undoType,
 				   UndoLocation *conflictUndoLocation,
 				   RowLockMode mode, OXid my_oxid, CommitSeqNo my_csn,
 				   OInMemoryBlkno blkno, UndoLocation savepointUndoLocation,
@@ -1185,7 +1203,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				finalTuphdr;
 	UndoLocation curUndoLocation,
 				finalUndoLocation;
-	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location();
+	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 	bool		foundFinal;
 	bool		result = false;
 
@@ -1264,10 +1282,10 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 
 			if (delete_record && undoLocation >= retainedUndoLocation)
 			{
-				Assert(UNDO_REC_EXISTS(undoLocation));
+				Assert(UNDO_REC_EXISTS(undoType, undoLocation));
 
 				prev_tuphdr = curTuphdr;
-				get_prev_leaf_header_from_undo(&prev_tuphdr, false);
+				get_prev_leaf_header_from_undo(undoType, &prev_tuphdr, false);
 				if (!UndoLocationIsValid(curUndoLocation))
 				{
 					page_block_reads(blkno);
@@ -1284,7 +1302,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					if (XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) &&
 						!curTuphdr.chainHasLocks)
 					{
-						clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
+						clean_chain_has_locks_flag(undoType,
+												   lastLockOnlyUndoLocation,
 												   pageTuphdr,
 												   blkno);
 						lastLockOnlyUndoLocation = InvalidUndoLocation;
@@ -1293,7 +1312,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 					curTuphdr.xactInfo = prev_tuphdr.xactInfo;
 					curTuphdr.undoLocation = prev_tuphdr.undoLocation;
 					curTuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
-					update_leaf_header_in_undo(&curTuphdr,
+					update_leaf_header_in_undo(undoType,
+											   &curTuphdr,
 											   curUndoLocation);
 
 				}
@@ -1327,7 +1347,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			 */
 			if (curTuphdr.chainHasLocks)
 			{
-				clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
+				clean_chain_has_locks_flag(undoType,
+										   lastLockOnlyUndoLocation,
 										   pageTuphdr,
 										   blkno);
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
@@ -1347,7 +1368,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			 * We should be able to find a CSN-record or invalid undo location
 			 * before running out of undo records.
 			 */
-			Assert(UNDO_REC_EXISTS(undoLocation));
+			Assert(UNDO_REC_EXISTS(undoType, undoLocation));
 
 			/*
 			 * Update previous location of lock-only record.
@@ -1356,7 +1377,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				lastLockOnlyUndoLocation = undoLocation;
 
 			prevChainHasLocks = curTuphdr.chainHasLocks;
-			get_prev_leaf_header_from_undo(&curTuphdr, false);
+			get_prev_leaf_header_from_undo(undoType, &curTuphdr, false);
 		}
 
 		curUndoLocation = undoLocation;
@@ -1383,7 +1404,8 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			 * We have reached the end of "in-progress" undo chain.  Fix tail
 			 * "chainHasLocks" flag if needed.
 			 */
-			clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
+			clean_chain_has_locks_flag(undoType,
+									   lastLockOnlyUndoLocation,
 									   pageTuphdr,
 									   blkno);
 			lastLockOnlyUndoLocation = InvalidUndoLocation;
@@ -1411,6 +1433,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 void
 remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 						   BTreeLeafTuphdr *conflictTuphdrPtr,
+						   UndoLogType undoType,
 						   UndoLocation *conflictTupHdrUndoLocation,
 						   RowLockMode mode,
 						   OXid my_oxid, OInMemoryBlkno blkno,
@@ -1423,7 +1446,7 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 	UndoLocation undoLocation = tuphdr.undoLocation,
 				prevUndoLoc = InvalidUndoLocation,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
-	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location();
+	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 	int			prevFormatFlags = 0;
 
 	while ((!xactIsFinished || chainHasLocks) &&
@@ -1434,15 +1457,15 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 		 * We should be able to find at CSN-record or invalid undo location
 		 * before running out of undo records.
 		 */
-		Assert(UNDO_REC_EXISTS(undoLocation));
+		Assert(UNDO_REC_EXISTS(undoType, undoLocation));
 
-		get_prev_leaf_header_from_undo(&tuphdr, false);
+		get_prev_leaf_header_from_undo(undoType, &tuphdr, false);
 
 		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && XACT_INFO_GET_OXID(xactInfo) == my_oxid)
 		{
 			bool		delete_record = false;
 
-			Assert(UndoLocationIsValid(undoLocation) && UNDO_REC_EXISTS(undoLocation));
+			Assert(UndoLocationIsValid(undoLocation) && UNDO_REC_EXISTS(undoType, undoLocation));
 
 			if (XACT_INFO_GET_LOCK_MODE(xactInfo) <= mode &&
 				(!UndoLocationIsValid(savepointUndoLocation) ||
@@ -1471,12 +1494,13 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 					 */
 					if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && !chainHasLocks)
 					{
-						clean_chain_has_locks_flag(lastLockOnlyUndoLocation,
+						clean_chain_has_locks_flag(undoType,
+												   lastLockOnlyUndoLocation,
 												   pageTuphdr,
 												   blkno);
 					}
 					tuphdr.formatFlags = prevFormatFlags;
-					update_leaf_header_in_undo(&tuphdr, prevUndoLoc);
+					update_leaf_header_in_undo(undoType, &tuphdr, prevUndoLoc);
 				}
 			}
 		}
@@ -1501,7 +1525,7 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
  * NULL if such record is not found.
  */
 UndoLocation
-find_non_lock_only_undo_record(BTreeLeafTuphdr *tuphdr)
+find_non_lock_only_undo_record(UndoLogType undoType, BTreeLeafTuphdr *tuphdr)
 {
 	OTupleXactInfo xactInfo = tuphdr->xactInfo;
 	UndoLocation undoLocation = InvalidUndoLocation;
@@ -1516,9 +1540,9 @@ find_non_lock_only_undo_record(BTreeLeafTuphdr *tuphdr)
 		 * running out of undo records.
 		 */
 		undoLocation = tuphdr->undoLocation;
-		if (!UndoLocationIsValid(undoLocation) || !UNDO_REC_EXISTS(undoLocation))
+		if (!UndoLocationIsValid(undoLocation) || !UNDO_REC_EXISTS(undoType, undoLocation))
 			return InvalidUndoLocation;
-		get_prev_leaf_header_from_undo(tuphdr, false);
+		get_prev_leaf_header_from_undo(undoType, tuphdr, false);
 		xactInfo = tuphdr->xactInfo;
 	}
 
@@ -1526,14 +1550,16 @@ find_non_lock_only_undo_record(BTreeLeafTuphdr *tuphdr)
 }
 
 void
-get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr, bool inPage)
+get_prev_leaf_header_from_undo(UndoLogType undoType,
+							   BTreeLeafTuphdr *tuphdr, bool inPage)
 {
 	BTreeLeafTuphdr prevTuphdr;
 
 	Assert(UndoLocationIsValid(tuphdr->undoLocation));
-	Assert(UNDO_REC_EXISTS(tuphdr->undoLocation));
+	Assert(UNDO_REC_EXISTS(undoType, tuphdr->undoLocation));
 
-	undo_read(tuphdr->undoLocation, sizeof(prevTuphdr), (Pointer) &prevTuphdr);
+	undo_read(undoType, tuphdr->undoLocation,
+			  sizeof(prevTuphdr), (Pointer) &prevTuphdr);
 
 	if (!XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo) || !inPage)
 	{
@@ -1548,7 +1574,8 @@ get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr, bool inPage)
 }
 
 void
-get_prev_leaf_header_and_tuple_from_undo(BTreeLeafTuphdr *tuphdr,
+get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
+										 BTreeLeafTuphdr *tuphdr,
 										 OTuple *tuple,
 										 LocationIndex sizeAvailable)
 {
@@ -1556,9 +1583,11 @@ get_prev_leaf_header_and_tuple_from_undo(BTreeLeafTuphdr *tuphdr,
 	LocationIndex tupleSize;
 	UndoLocation undoLocation = tuphdr->undoLocation;
 
-	Assert(UndoLocationIsValid(undoLocation) && UNDO_REC_EXISTS(undoLocation));
+	Assert(UndoLocationIsValid(undoLocation));
+	Assert(UNDO_REC_EXISTS(undoType, undoLocation));
 
-	undo_read(tuphdr->undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr),
+	undo_read(undoType,
+			  tuphdr->undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr),
 			  sizeof(BTreeModifyUndoStackItem),
 			  (Pointer) &item);
 	Assert(item.header.type == ModifyUndoItemType);
@@ -1570,16 +1599,22 @@ get_prev_leaf_header_and_tuple_from_undo(BTreeLeafTuphdr *tuphdr,
 	if (sizeAvailable == 0)
 		tuple->data = palloc(tupleSize);
 	Assert(sizeAvailable == 0 || sizeAvailable >= tupleSize);
-	undo_read(undoLocation + BTreeLeafTuphdrSize,
+	undo_read(undoType,
+			  undoLocation + BTreeLeafTuphdrSize,
 			  tupleSize,
 			  tuple->data);
 	tuphdr->formatFlags = 0;
 }
 
 void
-update_leaf_header_in_undo(BTreeLeafTuphdr *tuphdr, UndoLocation location)
+update_leaf_header_in_undo(UndoLogType undoType,
+						   BTreeLeafTuphdr *tuphdr,
+						   UndoLocation location)
 {
-	Assert(UndoLocationIsValid(location) && UNDO_REC_EXISTS(location));
+	Assert(UndoLocationIsValid(location) && UNDO_REC_EXISTS(undoType, location));
 
-	undo_write(location, sizeof(*tuphdr), (Pointer) tuphdr);
+	undo_write(undoType,
+			   location,
+			   sizeof(*tuphdr),
+			   (Pointer) tuphdr);
 }

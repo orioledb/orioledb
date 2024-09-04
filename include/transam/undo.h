@@ -58,23 +58,14 @@ typedef struct
 	int			undoWriteTrancheId;
 	LWLock		undoWriteLock;
 	int			undoStackLocationsFlushLockTrancheId;
+} UndoMeta;
 
+typedef struct
+{
 	int			pendingTruncatesTrancheId;
 	LWLock		pendingTruncatesLock;
 	uint64		pendingTruncatesLocation;
-} UndoMeta;
-
-typedef enum
-{
-	/* Invalid value. */
-	UndoReserveNone = -1,
-
-	/*
-	 * Undo reserved while a transaction in progress. Undo records may be
-	 * added to a undo stack.
-	 */
-	UndoReserveTxn = 0
-} UndoReserveType;
+} PendingTruncatesMeta;
 
 typedef struct UndoStackItem UndoStackItem;
 
@@ -114,7 +105,7 @@ typedef struct
 typedef struct
 {
 	bool		needs_wal_flush;
-	bool		has_retained_undo_location;
+	bool		has_retained_undo_location[(int) UndoLogsCount];
 	bool		local_wal_has_material_changes;
 	OXid		oxid;
 	TransactionId logicalXid;
@@ -150,78 +141,86 @@ typedef enum
 } UndoStackKind;
 
 extern bool oxid_needs_wal_flush;
-extern UndoLocation curRetainUndoLocation;
+extern UndoLocation curRetainUndoLocations[(int) UndoLogsCount];
+extern PendingTruncatesMeta *pending_truncates_meta;
 
-#define ORIOLEDB_UNDO_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08X")
+#define ORIOLEDB_UNDO_DATA_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xdata")
+#define ORIOLEDB_UNDO_SYSTEM_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xsystem")
 #define UNDO_FILE_SIZE (0x4000000)
 
-#define UNDO_REC_EXISTS(location) ((location) >= pg_atomic_read_u64(&undo_meta->minProcRetainLocation) || \
-								   ((location) >= pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation) && \
-									(location) < pg_atomic_read_u64(&undo_meta->checkpointRetainEndLocation)))
-#define UNDO_REC_XACT_RETAIN(location) ((location) >= pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation))
-#define GET_CUR_UNDO_STACK_LOCATIONS() (AssertMacro(MyProc->pgprocno >= 0 && MyProc->pgprocno < max_procs), \
-										&oProcData[MyProc->pgprocno].undoStackLocations[oProcData[MyProc->pgprocno].autonomousNestingLevel])
-
-extern Pointer o_undo_buffers;
-extern UndoMeta *undo_meta;
+#define UNDO_REC_EXISTS(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcRetainLocation) || \
+											 ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainStartLocation) && \
+											  (location) < pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainEndLocation)))
+#define UNDO_REC_XACT_RETAIN(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcTransactionRetainLocation))
+#define GET_CUR_UNDO_STACK_LOCATIONS(undoType) (AssertMacro(MyProc->pgprocno >= 0 && MyProc->pgprocno < max_procs), \
+										AssertMacro((int) (undoType) >= 0 && (int) (undoType) < (int) UndoLogsCount), \
+										&oProcData[MyProc->pgprocno].undoStackLocations[oProcData[MyProc->pgprocno].autonomousNestingLevel][(int) (undoType)])
 
 extern Size undo_shmem_needs(void);
 extern void undo_shmem_init(Pointer buf, bool found);
+extern UndoMeta *get_undo_meta_by_type(UndoLogType undoType);
 
-/*
- * UndoReserveType used here only for assertions and can be removed,
- * but it may help us to simplify error detection
- */
-extern void update_min_undo_locations(bool have_lock, bool do_cleanup);
-extern void write_undo(UndoLocation targetUndoLocation,
+extern void update_min_undo_locations(UndoLogType undoType,
+									  bool have_lock, bool do_cleanup);
+extern void write_undo(UndoLogType undoType,
+					   UndoLocation targetUndoLocation,
 					   UndoLocation minProcReservedLocation,
 					   bool attempt);
-extern bool reserve_undo_size_extended(UndoReserveType type, Size size,
+extern bool reserve_undo_size_extended(UndoLogType type, Size size,
 									   bool waitForUndoLocation,
 									   bool reportError);
-extern void fsync_undo_range(UndoLocation fromLoc, UndoLocation toLoc, uint32 wait_event_info);
-extern Pointer get_undo_record(UndoReserveType type, UndoLocation *undoLocation,
+extern void fsync_undo_range(UndoLogType undoType,
+							 UndoLocation fromLoc, UndoLocation toLoc,
+							 uint32 wait_event_info);
+extern Pointer get_undo_record(UndoLogType undoType, UndoLocation *undoLocation,
 							   Size size);
-extern Pointer get_undo_record_unreserved(UndoReserveType type,
+extern Pointer get_undo_record_unreserved(UndoLogType type,
 										  UndoLocation *undoLocation,
 										  Size size);
-extern Size get_reserved_undo_size(UndoReserveType type);
-extern void release_undo_size(UndoReserveType type);
-extern void add_new_undo_stack_item(UndoLocation location);
-extern UndoLocation get_subxact_undo_location(void);
+extern Size get_reserved_undo_size(UndoLogType undoType);
+extern void release_undo_size(UndoLogType undoType);
+extern void add_new_undo_stack_item(UndoLogType undoType,
+									UndoLocation location);
+extern UndoLocation get_subxact_undo_location(UndoLogType undoType);
 extern void read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *from);
 extern void write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from);
-extern UndoStackLocations get_cur_undo_locations(void);
-extern void set_cur_undo_locations(UndoStackLocations);
+extern UndoStackLocations get_cur_undo_locations(UndoLogType undoType);
+extern void set_cur_undo_locations(UndoLogType undoType,
+								   UndoStackLocations locations);
 extern void reset_cur_undo_locations(void);
 extern void undo_xact_callback(XactEvent event, void *arg);
 extern void undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 								  SubTransactionId parentSubid, void *arg);
-extern bool have_current_undo(void);
+extern bool have_current_undo(UndoLogType undoType);
 extern void report_undo_overflow(void);
-extern void apply_undo_branches(OXid oxid);
-extern void apply_undo_stack(OXid oxid, UndoStackLocations *toLocation,
+extern void apply_undo_branches(UndoLogType undoType, OXid oxid);
+extern void apply_undo_stack(UndoLogType undoType, OXid oxid,
+							 UndoStackLocations *toLocation,
 							 bool changeCountsValid);
-extern void on_commit_undo_stack(OXid oxid, bool changeCountsValid);
-extern void free_retained_undo_location(void);
+extern void on_commit_undo_stack(UndoLogType undoType, OXid oxid,
+								 bool changeCountsValid);
+extern void free_retained_undo_location(UndoLogType undoType);
 extern void start_autonomous_transaction(OAutonomousTxState *state);
 extern void abort_autonomous_transaction(OAutonomousTxState *state);
 extern void finish_autonomous_transaction(OAutonomousTxState *state);
-extern void undo_read(UndoLocation location, Size size, Pointer buf);
-extern void undo_write(UndoLocation location, Size size, Pointer buf);
+extern void undo_read(UndoLogType undoType, UndoLocation location,
+					  Size size, Pointer buf);
+extern void undo_write(UndoLogType undoType, UndoLocation location,
+					   Size size, Pointer buf);
 extern void undo_snapshot_register_hook(Snapshot snapshot);
 extern void undo_snapshot_deregister_hook(Snapshot snapshot);
 extern void orioledb_snapshot_hook(Snapshot snapshot);
 extern void add_subxact_undo_item(SubTransactionId parentSubid);
-extern void rollback_to_savepoint(UndoStackKind kind,
+extern void rollback_to_savepoint(UndoLogType undoType,
+								  UndoStackKind kind,
 								  SubTransactionId parentSubid,
 								  bool changeCountsValid);
 extern bool have_retained_undo_location(void);
-extern UndoLocation get_snapshot_retained_undo_location(void);
+extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
 extern void orioledb_reset_xmin_hook(void);
 
 static inline void
-reserve_undo_size(UndoReserveType type, Size size)
+reserve_undo_size(UndoLogType type, Size size)
 {
 	(void) reserve_undo_size_extended(type, size, true, true);
 }

@@ -138,7 +138,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.action = action;
 	context.key = key;
 	context.keyType = keyType;
-	context.savepointUndoLocation = get_subxact_undo_location();
+	context.savepointUndoLocation = get_subxact_undo_location(desc->undoType);
 	context.pageReserveKind = pageReserveKind;
 	context.callbackInfo = callbackInfo;
 
@@ -148,7 +148,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	Assert((deleted == BTreeLeafTupleNonDeleted) || (action == BTreeOperationDelete));
 
 	context.pagesAreReserved = (action != BTreeOperationDelete);
-	context.undoIsReserved = (desc->undoType != UndoReserveNone);
+	context.undoIsReserved = (desc->undoType != UndoLogNone);
 
 	/* Undo should be reserved for transactional operations */
 	Assert(OXidIsValid(opOxid) == context.undoIsReserved);
@@ -426,6 +426,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 	if (row_lock_conflicts(tuphdr,
 						   &context->conflictTupHdr,
+						   desc->undoType,
 						   &context->conflictUndoLocation,
 						   context->lockMode, context->opOxid, context->opCsn,
 						   blkno, context->savepointUndoLocation,
@@ -595,6 +596,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 		  context->lockStatus == BTreeModifySameOrStrongerLock))
 	{
 		remove_redundant_row_locks(tuphdr, &context->conflictTupHdr,
+								   desc->undoType,
 								   &context->conflictUndoLocation,
 								   context->lockMode,
 								   context->opOxid, blkno,
@@ -956,7 +958,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		keyType = tupleType;
 	}
 
-	if (desc->undoType != UndoReserveNone)
+	if (desc->undoType != UndoLogNone)
 		(void) reserve_undo_size(desc->undoType, O_MODIFY_UNDO_RESSERVE_SIZE);
 
 	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
@@ -1001,7 +1003,7 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 			return false;
 
 		tuphdr = *pageTuphdr;
-		(void) find_non_lock_only_undo_record(&tuphdr);
+		(void) find_non_lock_only_undo_record(desc->undoType, &tuphdr);
 		if (XACT_INFO_OXID_EQ(tuphdr.xactInfo, opOxid) || XACT_INFO_IS_FINISHED(tuphdr.xactInfo))
 		{
 			if (tuphdr.deleted != BTreeLeafTupleNonDeleted)
@@ -1086,7 +1088,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 
 	Assert(key != NULL && keyType == BTreeKeyBound);
 
-	if (desc->undoType != UndoReserveNone)
+	if (desc->undoType != UndoLogNone)
 		(void) reserve_undo_size(desc->undoType, O_MODIFY_UNDO_RESSERVE_SIZE);
 
 	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))

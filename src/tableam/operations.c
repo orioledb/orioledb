@@ -272,7 +272,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 	larg->selfModified = COMMITSEQNO_IS_INPROGRESS(larg->csn) &&
 		(larg->oxid == get_current_oxid_if_any()) &&
 		UndoLocationIsValid(larg->tupUndoLocation) &&
-		(larg->tupUndoLocation >= saved_undo_location);
+		(larg->tupUndoLocation >= saved_undo_location[UndoLogRegular]);
 
 	return res;
 }
@@ -292,7 +292,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 	OXid		oxid;
 
 	fill_current_oxid_csn(&oxid, &csn);
-	undoStackLocations = get_cur_undo_locations();
+	undoStackLocations = get_cur_undo_locations(UndoLogRegular);
 
 	ioc_arg.desc = descr;
 	ioc_arg.oxid = oxid;
@@ -393,7 +393,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				if (COMMITSEQNO_IS_INPROGRESS(ioc_arg.csn) &&
 					(ioc_arg.oxid == get_current_oxid_if_any()) &&
 					UndoLocationIsValid(ioc_arg.tupUndoLocation) &&
-					(ioc_arg.tupUndoLocation >= saved_undo_location))
+					(ioc_arg.tupUndoLocation >= saved_undo_location[UndoLogRegular]))
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_CARDINALITY_VIOLATION),
@@ -408,8 +408,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 		}
 
 		/* Failed to insert.  Rollback the changes we managed to make. */
-		release_undo_size(UndoReserveTxn);
-		apply_undo_stack(oxid, &undoStackLocations, true);
+		release_undo_size(UndoLogRegular);
+		apply_undo_stack(UndoLogRegular, oxid, &undoStackLocations, true);
 		oxid_notify_all();
 
 		/* Conflish with running oxid case */
@@ -484,8 +484,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 						  (Pointer) &key2, BTreeKeyUniqueLowerBound) != 0)
 			{
 				/* secondary key on primary tuple has been updated */
-				release_undo_size(UndoReserveTxn);
-				apply_undo_stack(oxid, &undoStackLocations, true);
+				release_undo_size(UndoLogRegular);
+				apply_undo_stack(UndoLogRegular, oxid, &undoStackLocations, true);
 				oxid_notify_all();
 				csn = save_csn;
 				continue;
@@ -546,7 +546,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	mres.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
 		(arg->oxid == get_current_oxid_if_any()) &&
 		UndoLocationIsValid(arg->tup_undo_location) &&
-		(arg->tup_undo_location >= saved_undo_location);
+		(arg->tup_undo_location >= saved_undo_location[UndoLogRegular]);
 	if (!mres.self_modified)
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)
@@ -632,7 +632,7 @@ o_tbl_delete(OTableDescr *descr, OBTreeKeyBound *primary_key,
 	result.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
 		(arg->oxid == get_current_oxid_if_any()) &&
 		UndoLocationIsValid(arg->tup_undo_location) &&
-		(arg->tup_undo_location >= saved_undo_location);
+		(arg->tup_undo_location >= saved_undo_location[UndoLogRegular]);
 	if (!result.self_modified)
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)

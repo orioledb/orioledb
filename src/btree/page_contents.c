@@ -59,7 +59,7 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
 		rec_undo_location = header->undoLocation;
 
 		/* Page-level undo item should be retained */
-		Assert(UNDO_REC_EXISTS(undo_loc));
+		Assert(UNDO_REC_EXISTS(desc->undoType, undo_loc));
 
 		/* Continue traversing undo chain if needed */
 		if (COMMITSEQNO_IS_NORMAL(page_csn) && page_csn >= csn)
@@ -74,7 +74,7 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
 	}
 
 	/* Page-level undo item should be retained */
-	Assert(UNDO_REC_EXISTS(undo_loc));
+	Assert(UNDO_REC_EXISTS(desc->undoType, undo_loc));
 
 	return O_UNDO_GET_IMAGE_LOCATION(undo_loc, is_left);
 }

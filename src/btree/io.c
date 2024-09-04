@@ -2543,7 +2543,8 @@ retry:
 }
 
 static bool
-write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 loadId,
+write_tree_pages_recursive(UndoLogType undoType,
+						   OInMemoryBlkno blkno, uint32 loadId,
 						   int maxLevel, bool evict)
 {
 	Page		p;
@@ -2584,7 +2585,8 @@ write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 loadId,
 	unlock_page(blkno);
 
 	for (i = 0; i < childPagesCount; i++)
-		(void) write_tree_pages_recursive(childPageNumbers[i],
+		(void) write_tree_pages_recursive(undoType,
+										  childPageNumbers[i],
 										  childPageChangeCounts[i],
 										  maxLevel,
 										  evict);
@@ -2593,11 +2595,11 @@ write_tree_pages_recursive(OInMemoryBlkno blkno, uint32 loadId,
 	{
 		while (true)
 		{
-			reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+			reserve_undo_size(undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 			if (walk_page(blkno, evict) != OWalkPageMerged)
 				break;
 		}
-		release_undo_size(UndoReserveTxn);
+		release_undo_size(undoType);
 	}
 
 	return true;
@@ -2607,7 +2609,8 @@ static void
 write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 {
 	o_btree_load_shmem(desc);
-	if (!write_tree_pages_recursive(desc->rootInfo.rootPageBlkno,
+	if (!write_tree_pages_recursive(desc->undoType,
+									desc->rootInfo.rootPageBlkno,
 									desc->rootInfo.rootPageChangeCount,
 									maxLevel, evict))
 	{
@@ -2615,7 +2618,8 @@ write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 		desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 		desc->rootInfo.rootPageChangeCount = 0;
 		o_btree_load_shmem(desc);
-		(void) write_tree_pages_recursive(desc->rootInfo.rootPageBlkno,
+		(void) write_tree_pages_recursive(desc->undoType,
+										  desc->rootInfo.rootPageBlkno,
 										  desc->rootInfo.rootPageChangeCount,
 										  maxLevel, evict);
 	}

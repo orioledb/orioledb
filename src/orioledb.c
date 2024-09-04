@@ -85,12 +85,12 @@ static Size catalog_buffers_count;
 static Size main_buffers_offset;
 
 Pointer		o_shared_buffers = NULL;
-Pointer		o_undo_buffers = NULL;
 OrioleDBPageDesc *page_descs = NULL;
 
 /* Custom GUC variables */
 int			main_buffers_guc;
 static int	undo_buffers_guc;
+static int	undo_system_buffers_guc;
 static int	xid_buffers_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
@@ -98,6 +98,8 @@ Size		orioledb_buffers_count;
 Size		page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
+Size		undo_system_circular_buffer_size;
+uint32		undo_system_buffers_count;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
 bool		remove_old_checkpoint_files = true;
@@ -315,6 +317,19 @@ _PG_init(void)
 							"Size of orioledb engine undo log buffers.",
 							NULL,
 							&undo_buffers_guc,
+							Max(128, 4 * max_procs),
+							4 * max_procs,
+							INT_MAX,
+							PGC_POSTMASTER,
+							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.undo_system_buffers",
+							"Size of undo log buffers for orioledb system trees.",
+							NULL,
+							&undo_system_buffers_guc,
 							Max(128, 4 * max_procs),
 							4 * max_procs,
 							INT_MAX,
@@ -764,6 +779,11 @@ _PG_init(void)
 	undo_buffers_count = (uint32) undo_circular_buffer_size;
 	undo_circular_buffer_size *= ORIOLEDB_BLCKSZ;
 
+	undo_system_circular_buffer_size = ((Size) undo_system_buffers_guc * BLCKSZ) / 2;
+	undo_system_circular_buffer_size /= ORIOLEDB_BLCKSZ;
+	undo_system_buffers_count = (uint32) undo_system_circular_buffer_size;
+	undo_system_circular_buffer_size *= ORIOLEDB_BLCKSZ;
+
 	xid_circular_buffer_size = ((Size) xid_buffers_guc * BLCKSZ) / 2;
 	xid_circular_buffer_size /= ORIOLEDB_BLCKSZ;
 	xid_buffers_count = (uint32) xid_circular_buffer_size;
@@ -932,24 +952,31 @@ o_proc_shmem_init(Pointer ptr, bool found)
 
 		for (i = 0; i < max_procs; i++)
 		{
-			int			j;
+			int			j,
+						k;
 
-			pg_atomic_init_u64(&oProcData[i].reservedUndoLocation, InvalidUndoLocation);
-			pg_atomic_init_u64(&oProcData[i].snapshotRetainUndoLocation, InvalidUndoLocation);
-			pg_atomic_init_u64(&oProcData[i].transactionUndoRetainLocation, InvalidUndoLocation);
+			for (j = 0; j < (int) UndoLogsCount; j++)
+			{
+				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].reservedUndoLocation, InvalidUndoLocation);
+				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].snapshotRetainUndoLocation, InvalidUndoLocation);
+				pg_atomic_init_u64(&oProcData[i].undoRetainLocations[j].transactionUndoRetainLocation, InvalidUndoLocation);
+			}
 			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, OWalInvalidCommitPos);
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
 			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,
-							 undo_meta->undoStackLocationsFlushLockTrancheId);
+							 get_undo_meta_by_type(UndoLogRegular)->undoStackLocationsFlushLockTrancheId);
 			oProcData[i].flushUndoLocations = false;
 			for (j = 0; j < PROC_XID_ARRAY_SIZE; j++)
 			{
-				pg_atomic_init_u64(&oProcData[i].undoStackLocations[j].location, InvalidUndoLocation);
-				pg_atomic_init_u64(&oProcData[i].undoStackLocations[j].branchLocation, InvalidUndoLocation);
-				pg_atomic_init_u64(&oProcData[i].undoStackLocations[j].subxactLocation, InvalidUndoLocation);
-				pg_atomic_init_u64(&oProcData[i].undoStackLocations[j].onCommitLocation, InvalidUndoLocation);
+				for (k = 0; k < (int) UndoLogsCount; k++)
+				{
+					pg_atomic_init_u64(&oProcData[i].undoStackLocations[j][k].location, InvalidUndoLocation);
+					pg_atomic_init_u64(&oProcData[i].undoStackLocations[j][k].branchLocation, InvalidUndoLocation);
+					pg_atomic_init_u64(&oProcData[i].undoStackLocations[j][k].subxactLocation, InvalidUndoLocation);
+					pg_atomic_init_u64(&oProcData[i].undoStackLocations[j][k].onCommitLocation, InvalidUndoLocation);
+				}
 				oProcData[i].vxids[j].oxid = InvalidOXid;
 			}
 		}
@@ -1521,10 +1548,13 @@ jsonb_push_string_key(JsonbParseState **state, const char *key,
 static void
 orioledb_error_cleanup_hook(void)
 {
+	int			i;
+
 	GET_CUR_PROCDATA()->waitingForOxid = false;
 	release_all_page_locks();
 	ppool_release_all_pages();
-	release_undo_size(UndoReserveTxn);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		release_undo_size((UndoLogType) i);
 	btree_mark_incomplete_splits();
 	unset_skip_ucm();
 	btree_io_error_cleanup();

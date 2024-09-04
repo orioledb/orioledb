@@ -21,16 +21,21 @@
 
 typedef struct
 {
+	UndoLocation lastUndoLocation;
+	UndoLocation checkpointRetainStartLocation;
+	UndoLocation checkpointRetainEndLocation;
+} CheckpointUndoInfo;
+
+typedef struct
+{
 	uint32		lastCheckpointNumber;
 	CommitSeqNo lastCSN;
 	OXid		lastXid;
-	UndoLocation lastUndoLocation;
 	XLogRecPtr	toastConsistentPtr;
 	XLogRecPtr	replayStartPtr;
 	XLogRecPtr	sysTreesStartPtr;
 	uint64		mmapDataLength;
-	UndoLocation checkpointRetainStartLocation;
-	UndoLocation checkpointRetainEndLocation;
+	CheckpointUndoInfo undoInfo[(int) UndoLogsCount];
 	OXid		checkpointRetainXmin;
 	OXid		checkpointRetainXmax;
 	uint32		binaryVersion;
@@ -151,6 +156,7 @@ typedef enum
 typedef struct
 {
 	OXid		oxid;
+	UndoLogType undoType;
 	UndoStackLocations undoLocation;
 } XidFileRec;
 
@@ -259,7 +265,8 @@ extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem,
 extern void checkpointable_tree_free(BTreeDescr *desc);
 extern void systrees_modify_start(void);
 extern void systrees_modify_end(bool any_wal);
-extern void systrees_lock_callback(UndoLocation location,
+extern void systrees_lock_callback(UndoLogType undoType,
+								   UndoLocation location,
 								   UndoStackItem *baseItem, OXid oxid,
 								   bool abort, bool changeCountsValid);
 extern void before_writing_xids_file(int chkpnum);

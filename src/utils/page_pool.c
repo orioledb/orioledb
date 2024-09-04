@@ -244,7 +244,8 @@ ppool_run_clock(OPagePool *pool, bool evict,
 				volatile sig_atomic_t *shutdown_requested)
 {
 	uint64		blkno;
-	Size		undoSize = get_reserved_undo_size(UndoReserveTxn);
+	Size		undoRegularSize = get_reserved_undo_size(UndoLogRegular);
+	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
 	bool		haveRetainLoc = have_retained_undo_location();
 
 	blkno = pg_prng_uint64_range(&pool->prngSeed,
@@ -258,7 +259,8 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Assert(!have_locked_pages());
 
 	/* We might need to merge pages */
-	reserve_undo_size(UndoReserveTxn, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+	reserve_undo_size(UndoLogRegular, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+	reserve_undo_size(UndoLogSystem, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
 	Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
 	/* Our attempts to evict pages shouldn't themselves affect UCM */
@@ -291,14 +293,20 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	 */
 	if (haveRetainLoc)
 	{
-		if (undoSize > 0)
-			reserve_undo_size(UndoReserveTxn, undoSize);
+		if (undoRegularSize > 0)
+			reserve_undo_size(UndoLogRegular, undoRegularSize);
+		if (undoSystemSize > 0)
+			reserve_undo_size(UndoLogSystem, undoSystemSize);
 	}
 	else
 	{
-		release_undo_size(UndoReserveTxn);
-		free_retained_undo_location();
-		if (undoSize > 0)
-			reserve_undo_size(UndoReserveTxn, undoSize);
+		release_undo_size(UndoLogRegular);
+		release_undo_size(UndoLogSystem);
+		free_retained_undo_location(UndoLogRegular);
+		free_retained_undo_location(UndoLogSystem);
+		if (undoRegularSize > 0)
+			reserve_undo_size(UndoLogRegular, undoRegularSize);
+		if (undoSystemSize > 0)
+			reserve_undo_size(UndoLogSystem, undoSystemSize);
 	}
 }

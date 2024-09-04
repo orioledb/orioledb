@@ -82,6 +82,7 @@ extern UndoLocation make_merge_undo_image(BTreeDescr *desc, Pointer left,
 										  Pointer right, CommitSeqNo imageCsn);
 extern bool row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 							   BTreeLeafTuphdr *conflictTupHdr,
+							   UndoLogType undoType,
 							   UndoLocation *conflictUndoLocation,
 							   RowLockMode mode,
 							   OXid my_oxid, CommitSeqNo my_csn,
@@ -91,29 +92,38 @@ extern bool row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 							   BTreeModifyLockStatus *lock_status);
 extern void remove_redundant_row_locks(BTreeLeafTuphdr *tuphdr_ptr,
 									   BTreeLeafTuphdr *conflictTuphdrPtr,
+									   UndoLogType undoType,
 									   UndoLocation *conflictTupHdrUndoLocation,
 									   RowLockMode mode, OXid my_oxid,
 									   OInMemoryBlkno blkno,
 									   UndoLocation savepointUndoLocation);
-extern UndoLocation find_non_lock_only_undo_record(BTreeLeafTuphdr *tuphdr);
-extern void modify_undo_callback(UndoLocation location,
+extern UndoLocation find_non_lock_only_undo_record(UndoLogType undoType,
+												   BTreeLeafTuphdr *tuphdr);
+extern void modify_undo_callback(UndoLogType undoType,
+								 UndoLocation location,
 								 UndoStackItem *baseItem,
 								 OXid oxid,
 								 bool abort,
 								 bool changeCountsValid);
-extern void lock_undo_callback(UndoLocation location, UndoStackItem *baseItem,
+extern void lock_undo_callback(UndoLogType undoType, UndoLocation location,
+							   UndoStackItem *baseItem,
 							   OXid oxid, bool abort,
 							   bool changeCountsValid);
-extern void btree_relnode_undo_callback(UndoLocation location,
+extern void btree_relnode_undo_callback(UndoLogType undoType,
+										UndoLocation location,
 										UndoStackItem *baseItem, OXid oxid,
 										bool abort,
 										bool changeCountsValid);
-extern void get_prev_leaf_header_from_undo(BTreeLeafTuphdr *tuphdr,
+extern void get_prev_leaf_header_from_undo(UndoLogType undoType,
+										   BTreeLeafTuphdr *tuphdr,
 										   bool inPage);
-extern void get_prev_leaf_header_and_tuple_from_undo(BTreeLeafTuphdr *tuphdr,
+extern void get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
+													 BTreeLeafTuphdr *tuphdr,
 													 OTuple *tuple,
 													 LocationIndex sizeAvailable);
-extern void update_leaf_header_in_undo(BTreeLeafTuphdr *tuphdr, UndoLocation location);
+extern void update_leaf_header_in_undo(UndoLogType undoType,
+									   BTreeLeafTuphdr *tuphdr,
+									   UndoLocation location);
 extern void add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
 									  int oldNumTreeOids,
 									  ORelOids newOids, ORelOids *newTreeOids,

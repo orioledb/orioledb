@@ -117,6 +117,7 @@ bgwriter_main(Datum main_arg)
 			OPagePoolType poolType;
 			UndoLocation lastUsedLocation;
 			UndoLocation writeInProgressLocation;
+			int			j;
 
 			if (shutdown_requested)
 				break;
@@ -168,16 +169,22 @@ bgwriter_main(Datum main_arg)
 				}
 			}
 
-			writeInProgressLocation = pg_atomic_read_u64(&undo_meta->writeInProgressLocation);
-			lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
-			if (writeInProgressLocation + undo_circular_buffer_size <
-				lastUsedLocation + undo_circular_buffer_size / 20)
+			for (j = 0; j < (int) UndoLogsCount; j++)
 			{
-				UndoLocation minProcReservedLocation = pg_atomic_read_u64(&undo_meta->minProcReservedLocation);
-				UndoLocation targetLocation = lastUsedLocation - (19 * undo_circular_buffer_size) / 20;
+				UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) j);
 
-				if (targetLocation < minProcReservedLocation)
-					write_undo(targetLocation, minProcReservedLocation, true);
+				writeInProgressLocation = pg_atomic_read_u64(&undo_meta->writeInProgressLocation);
+				lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+				if (writeInProgressLocation + undo_circular_buffer_size <
+					lastUsedLocation + undo_circular_buffer_size / 20)
+				{
+					UndoLocation minProcReservedLocation = pg_atomic_read_u64(&undo_meta->minProcReservedLocation);
+					UndoLocation targetLocation = lastUsedLocation - (19 * undo_circular_buffer_size) / 20;
+
+					if (targetLocation < minProcReservedLocation)
+						write_undo((UndoLogType) j, targetLocation,
+								   minProcReservedLocation, true);
+				}
 			}
 
 			check_pending_truncates();

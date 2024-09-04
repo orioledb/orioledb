@@ -10,6 +10,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "c.h"
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -28,6 +29,7 @@
 #include "storage/latch.h"
 #include "storage/proc.h"
 #include "storage/sinvaladt.h"
+#include "transam/undo.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -275,12 +277,30 @@ s3process_task(uint64 taskLocation)
 		uint64		fileNum = task->typeSpecific.writeUndoFile.fileNum;
 		char	   *filename;
 
-		filename = psprintf(ORIOLEDB_UNDO_FILENAME_TEMPLATE,
-							(uint32) (fileNum >> 32),
-							(uint32) fileNum);
-		objectname = psprintf("orioledb_undo/%02X%08X",
-							  (uint32) (fileNum >> 32),
-							  (uint32) fileNum);
+		if (task->typeSpecific.writeUndoFile.undoType == UndoLogRegular)
+		{
+			filename = psprintf(ORIOLEDB_UNDO_DATA_FILENAME_TEMPLATE,
+								(uint32) (fileNum >> 32),
+								(uint32) fileNum);
+			objectname = psprintf("orioledb_undo/%02X%08Xdata",
+								  (uint32) (fileNum >> 32),
+								  (uint32) fileNum);
+		}
+		else if (task->typeSpecific.writeUndoFile.undoType == UndoLogSystem)
+		{
+			filename = psprintf(ORIOLEDB_UNDO_SYSTEM_FILENAME_TEMPLATE,
+								(uint32) (fileNum >> 32),
+								(uint32) fileNum);
+			objectname = psprintf("orioledb_undo/%02X%08Xsystem",
+								  (uint32) (fileNum >> 32),
+								  (uint32) fileNum);
+		}
+		else
+		{
+			Assert(false);
+			filename = NULL;
+			objectname = NULL;
+		}
 
 		s3_put_file(objectname, filename);
 
@@ -289,7 +309,6 @@ s3process_task(uint64 taskLocation)
 	}
 
 	pfree(task);
-
 	s3_queue_erase_task(taskLocation);
 }
 
@@ -459,13 +478,14 @@ s3_schedule_wal_file_write(char *filename)
  * Schedule a synchronization of given UNDO file to S3.
  */
 S3TaskLocation
-s3_schedule_undo_file_write(uint64 fileNum)
+s3_schedule_undo_file_write(UndoLogType undoType, uint64 fileNum)
 {
 	S3Task	   *task;
 	S3TaskLocation location;
 
 	task = (S3Task *) palloc0(sizeof(S3Task));
 	task->type = S3TaskTypeWriteUndoFile;
+	task->typeSpecific.writeUndoFile.undoType = undoType;
 	task->typeSpecific.writeUndoFile.fileNum = fileNum;
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
