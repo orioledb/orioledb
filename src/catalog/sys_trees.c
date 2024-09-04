@@ -47,7 +47,7 @@ typedef struct
 	PrintFunc	keyPrint;
 	PrintFunc	tupPrint;
 	OPagePoolType poolType;
-	UndoReserveType undoReserveType;
+	UndoLogType undoLogType;
 	BTreeStorageType storageType;
 	bool		(*needs_undo) (BTreeDescr *desc, BTreeOperationType action,
 							   OTuple oldTuple, OTupleXactInfo oldXactInfo, bool oldDeleted,
@@ -136,7 +136,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = idx_descr_tup_print,
 		.keyToJsonb = idx_descr_key_to_jsonb,
 		.poolType = OPagePoolMain,
-		.undoReserveType = UndoReserveNone,
+		.undoLogType = UndoLogNone,
 		.storageType = BTreeStorageInMemory,
 		.needs_undo = NULL
 	},
@@ -149,7 +149,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_table_chunk_tup_print,
 		.keyToJsonb = o_table_chunk_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = o_table_chunk_needs_undo
 	},
@@ -162,7 +162,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_index_chunk_tup_print,
 		.keyToJsonb = o_index_chunk_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = o_index_chunk_needs_undo
 	},
@@ -174,7 +174,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_opclass_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -188,7 +188,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_enum_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -200,7 +200,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_enumoid_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -212,7 +212,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_range_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -225,7 +225,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_sys_cache_toast_tup_print,
 		.keyToJsonb = o_sys_cache_toast_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -237,7 +237,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = free_tree_print,
 		.keyToJsonb = free_tree_key_to_jsonb,
 		.poolType = OPagePoolFreeTree,
-		.undoReserveType = UndoReserveNone,
+		.undoLogType = UndoLogNone,
 		.storageType = BTreeStorageTemporary,
 		.needs_undo = NULL
 	},
@@ -249,7 +249,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = free_tree_print,
 		.keyToJsonb = free_tree_key_to_jsonb,
 		.poolType = OPagePoolFreeTree,
-		.undoReserveType = UndoReserveNone,
+		.undoLogType = UndoLogNone,
 		.storageType = BTreeStorageTemporary,
 		.needs_undo = NULL
 	},
@@ -262,7 +262,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_sys_cache_toast_tup_print,
 		.keyToJsonb = o_sys_cache_toast_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -274,7 +274,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_type_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -287,7 +287,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_sys_cache_toast_tup_print,
 		.keyToJsonb = o_sys_cache_toast_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -299,7 +299,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_operator_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -311,7 +311,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_amop_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -323,7 +323,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_amproc_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -336,7 +336,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_sys_cache_toast_tup_print,
 		.keyToJsonb = o_sys_cache_toast_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -348,7 +348,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_database_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -360,7 +360,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_amop_strat_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -372,7 +372,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_evicted_data_print,
 		.keyToJsonb = idx_descr_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveNone,
+		.undoLogType = UndoLogNone,
 		.storageType = BTreeStorageTemporary,
 		.needs_undo = NULL
 	},
@@ -384,7 +384,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_chkp_num_print,
 		.keyToJsonb = idx_descr_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveNone,
+		.undoLogType = UndoLogNone,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
@@ -396,7 +396,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_multirange_cache_tup_print,
 		.keyToJsonb = o_sys_cache_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoReserveType = UndoReserveTxn,
+		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	}
@@ -622,7 +622,7 @@ orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 bool
 sys_tree_supports_transactions(int tree_num)
 {
-	return sysTreesMeta[tree_num - 1].undoReserveType != UndoReserveNone;
+	return sysTreesMeta[tree_num - 1].undoLogType != UndoLogNone;
 }
 
 BTreeStorageType
@@ -738,7 +738,7 @@ sys_tree_init(int i, bool init_shmem)
 
 	descr->compress = InvalidOCompress;
 	descr->ppool = pool;
-	descr->undoType = meta->undoReserveType;
+	descr->undoType = meta->undoLogType;
 	descr->storageType = meta->storageType;
 	descr->createOxid = InvalidOXid;
 

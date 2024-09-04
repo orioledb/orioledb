@@ -268,7 +268,8 @@ extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid o
 extern void o_finish_sort_support_function(OComparator *comparator, SortSupport ssup);
 
 extern void o_add_invalidate_undo_item(ORelOids oids, uint32 flags);
-extern void o_invalidate_undo_item_callback(UndoLocation location,
+extern void o_invalidate_undo_item_callback(UndoLogType undoType,
+											UndoLocation location,
 											UndoStackItem *baseItem,
 											OXid oxid, bool abort,
 											bool changeCountsValid);

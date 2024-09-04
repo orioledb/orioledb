@@ -95,6 +95,24 @@ typedef enum
 
 #define PROC_XID_ARRAY_SIZE	32
 
+typedef enum
+{
+	/* Invalid value. */
+	UndoLogNone = -1,
+
+	/*
+	 * Undo log for modification of user data.
+	 */
+	UndoLogRegular = 0,
+
+	/*
+	 * Undo log for modification of system trees.
+	 */
+	UndoLogSystem = 1,
+
+	UndoLogsCount = 2
+} UndoLogType;
+
 typedef struct
 {
 	OXid		oxid;
@@ -114,13 +132,18 @@ typedef struct
 	pg_atomic_uint64 reservedUndoLocation;
 	pg_atomic_uint64 transactionUndoRetainLocation;
 	pg_atomic_uint64 snapshotRetainUndoLocation;
+} UndoRetainSharedLocations;
+
+typedef struct
+{
+	UndoRetainSharedLocations undoRetainLocations[(int) UndoLogsCount];
 	pg_atomic_uint64 commitInProgressXlogLocation;
 	int			autonomousNestingLevel;
 	LWLock		undoStackLocationsFlushLock;
 	bool		flushUndoLocations;
 	bool		waitingForOxid;
 	pg_atomic_uint64 xmin;
-	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE];
+	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;
 
@@ -225,6 +248,8 @@ extern Size orioledb_buffers_size;
 extern Size orioledb_buffers_count;
 extern Size undo_circular_buffer_size;
 extern uint32 undo_buffers_count;
+extern Size undo_system_circular_buffer_size;
+extern uint32 undo_system_buffers_count;
 extern Size xid_circular_buffer_size;
 extern uint32 xid_buffers_count;
 extern Pointer o_shared_buffers;
@@ -346,7 +371,7 @@ typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
 extern void orioledb_setup_ddl_hooks(void);
-extern UndoLocation saved_undo_location;
+extern UndoLocation saved_undo_location[(int) UndoLogsCount];
 extern List *drop_index_list;
 
 /* scan.c */

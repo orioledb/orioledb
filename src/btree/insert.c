@@ -628,7 +628,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			OInMemoryBlkno root_split_left_blkno = OInvalidInMemoryBlkno;
 			CommitSeqNo csn;
 			UndoLocation undoLocation;
-			bool		needsUndo = O_PAGE_IS(p, LEAF) && desc->undoType != UndoReserveNone;
+			bool		needsUndo = O_PAGE_IS(p, LEAF) && desc->undoType != UndoLogNone;
 
 			if (needsUndo && OXidIsValid(desc->createOxid) &&
 				desc->createOxid == get_current_oxid_if_any())

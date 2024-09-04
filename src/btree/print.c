@@ -48,7 +48,7 @@ typedef struct
 	 */
 	HTAB	   *pageHash;
 	/* sorted list of unique undo locations in ascending order */
-	List	   *undosList;
+	List	   *undosList[(int) UndoLogsCount];
 } BTreePrintData;
 
 typedef BackendId BackendIdHashKey;
@@ -73,14 +73,16 @@ static void print_page_contents_recursive(BTreeDescr *desc,
 										  Pointer printArg,
 										  BTreePrintData *printData,
 										  int depthLeft, StringInfo outbuf);
-static void btree_calculate_min_values(OInMemoryBlkno blkno,
+static void btree_calculate_min_values(UndoLogType undoType,
+									   OInMemoryBlkno blkno,
 									   BTreePrintData *printData);
 static bool btree_print_csn(CommitSeqNo csn, StringInfo outbuf,
 							BTreePrintData *printData, bool addComma);
 static void btree_print_backend_id(OXid oxid, StringInfo outbuf,
 								   BTreePrintData *printData);
 static uint64 lundo_location(List *list, UndoLocation location);
-static bool btree_print_undo_location(UndoLocation undoLocation,
+static bool btree_print_undo_location(UndoLogType undoType,
+									  UndoLocation undoLocation,
 									  StringInfo outbuf,
 									  BTreePrintData *printData,
 									  bool addComma);
@@ -95,6 +97,7 @@ static void btree_print_rightlink(OInMemoryBlkno rightlink, StringInfo outbuf,
 static void pdata_set_min_csn(BTreePrintData *printData,
 							  CommitSeqNo csn);
 static List *ladd_unique_undo(List *list,
+							  UndoLogType undoType,
 							  UndoLocation location);
 
 
@@ -109,9 +112,10 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 {
 	HASHCTL		ctl;
 	BTreePrintData printData = {0};
+	int			i;
 
 	if (options->undoLogLocationPrintType != BTreeNotPrint)
-		update_min_undo_locations(false, true);
+		update_min_undo_locations(desc->undoType, false, true);
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno) &&
 		   OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno));
 
@@ -141,14 +145,18 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 		printData.minUndoLoc = InvalidUndoLocation;
 		printData.backendIdInTraversal = 0;
 		printData.NLRPageNumber = 0;
-		printData.undosList = NIL;
-		btree_calculate_min_values(desc->rootInfo.rootPageBlkno, &printData);
+		for (i = 0; i < (int) UndoLogsCount; i++)
+			printData.undosList[i] = NIL;
+		btree_calculate_min_values(desc->undoType,
+								   desc->rootInfo.rootPageBlkno,
+								   &printData);
 	}
 	printData.NLRPageNumber = 0;
 	print_page_contents_recursive(desc, desc->rootInfo.rootPageBlkno, keyPrintFunc, tuplePrintFunc,
 								  printArg, &printData, depth, outbuf);
 
-	list_free_deep(printData.undosList);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		list_free_deep(printData.undosList[i]);
 	hash_destroy(printData.pageHash);
 	hash_destroy(printData.backendIdHash);
 }
@@ -184,7 +192,8 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (UndoLocationIsValid(header->undoLocation))
 	{
-		btree_print_undo_location(header->undoLocation, outbuf, printData, true);
+		btree_print_undo_location(desc->undoType, header->undoLocation,
+								  outbuf, printData, true);
 	}
 
 	if (O_PAGE_IS(p, LEAF))
@@ -380,7 +389,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 						else if (tuphdr.deleted == BTreeLeafTuplePKChanged)
 							appendStringInfo(outbuf, "PK changed");
 					}
-					needsComma |= btree_print_undo_location((UndoLocation) tuphdr.undoLocation, outbuf, printData, needsComma);
+					needsComma |= btree_print_undo_location(desc->undoType, (UndoLocation) tuphdr.undoLocation, outbuf, printData, needsComma);
 
 					if (!inUndo)
 					{
@@ -415,16 +424,17 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 					if ((!XACT_INFO_IS_FINISHED(tuphdr.xactInfo) || tuphdr.chainHasLocks) &&
 						UndoLocationIsValid(tuphdr.undoLocation))
 					{
-						Assert(UNDO_REC_EXISTS(tuphdr.undoLocation));
+						Assert(UNDO_REC_EXISTS(desc->undoType, tuphdr.undoLocation));
 						if (inUndo && !O_TUPLE_IS_NULL(tuple))
 							pfree(tuple.data);
 						if (!tuphdr.deleted && !XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
 						{
-							get_prev_leaf_header_and_tuple_from_undo(&tuphdr, &tuple, 0);
+							get_prev_leaf_header_and_tuple_from_undo(desc->undoType,
+																	 &tuphdr, &tuple, 0);
 						}
 						else
 						{
-							get_prev_leaf_header_from_undo(&tuphdr, false);
+							get_prev_leaf_header_from_undo(desc->undoType, &tuphdr, false);
 							O_TUPLE_SET_NULL(tuple);
 						}
 						inUndo = true;
@@ -496,7 +506,8 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
  * relative CSNs and Undo locations.
  */
 static void
-btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
+btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
+						   BTreePrintData *printData)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
@@ -517,8 +528,9 @@ btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
 
 	printData->minCheckpointNum = Min(printData->minCheckpointNum,
 									  header->checkpointNum);
-	printData->undosList = ladd_unique_undo(printData->undosList,
-											header->undoLocation);
+	printData->undosList[(int) undoType] = ladd_unique_undo(printData->undosList[(int) undoType],
+															undoType,
+															header->undoLocation);
 
 	/* Iterate over the child nodes */
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
@@ -531,8 +543,9 @@ btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
 
 			while (true)
 			{
-				printData->undosList = ladd_unique_undo(printData->undosList,
-														tuphdr.undoLocation);
+				printData->undosList[(int) undoType] = ladd_unique_undo(printData->undosList[(int) undoType],
+																		undoType,
+																		tuphdr.undoLocation);
 
 				if (XACT_INFO_IS_FINISHED(tuphdr.xactInfo))
 				{
@@ -561,7 +574,7 @@ btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
 				}
 				if ((!XACT_INFO_IS_FINISHED(tuphdr.xactInfo) || tuphdr.chainHasLocks) &&
 					UndoLocationIsValid(tuphdr.undoLocation))
-					get_prev_leaf_header_from_undo(&tuphdr, false);
+					get_prev_leaf_header_from_undo(undoType, &tuphdr, false);
 				else
 					break;
 			}
@@ -574,7 +587,8 @@ btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
 			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
 			{
 				/* recursively traverse to every child */
-				btree_calculate_min_values(DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink),
+				btree_calculate_min_values(undoType,
+										   DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink),
 										   printData);
 			}
 		}
@@ -583,7 +597,7 @@ btree_calculate_min_values(OInMemoryBlkno blkno, BTreePrintData *printData)
 	/* If node has valid rightlink also traverse to it */
 	blkno = RIGHTLINK_GET_BLKNO(BTREE_PAGE_GET_RIGHTLINK(p));
 	if (OInMemoryBlknoIsValid(blkno))
-		btree_calculate_min_values(blkno, printData);
+		btree_calculate_min_values(undoType, blkno, printData);
 }
 
 /*
@@ -654,8 +668,9 @@ lundo_location(List *list, UndoLocation location)
 }
 
 static bool
-btree_print_undo_location(UndoLocation undoLocation, StringInfo outbuf,
-						  BTreePrintData *printData, bool addComma)
+btree_print_undo_location(UndoLogType undoType, UndoLocation undoLocation,
+						  StringInfo outbuf, BTreePrintData *printData,
+						  bool addComma)
 {
 	UndoLocation printedUndoLoc = undoLocation;
 	BTreePrintOption printType = printData->options->undoLogLocationPrintType;
@@ -664,8 +679,8 @@ btree_print_undo_location(UndoLocation undoLocation, StringInfo outbuf,
 	{
 		/* print undo location only if it is valid */
 		if (UndoLocationIsValid(undoLocation) &&
-			(((UNDO_REC_EXISTS(undoLocation) && printType == BTreePrintAbsolute)) ||
-			 ((UNDO_REC_XACT_RETAIN(undoLocation) && printType == BTreePrintRelative))))
+			(((UNDO_REC_EXISTS(undoType, undoLocation) && printType == BTreePrintAbsolute)) ||
+			 ((UNDO_REC_XACT_RETAIN(undoType, undoLocation) && printType == BTreePrintRelative))))
 		{
 			/*
 			 * if ascending number option set, then it gets number of undo
@@ -674,9 +689,9 @@ btree_print_undo_location(UndoLocation undoLocation, StringInfo outbuf,
 			if (printData->options->undoLogLocationPrintType ==
 				BTreePrintRelative)
 			{
-				printedUndoLoc = lundo_location(printData->undosList, undoLocation);
+				printedUndoLoc = lundo_location(printData->undosList[(int) undoType], undoLocation);
 				Assert(!printedUndoLoc ||
-					   printedUndoLoc != list_length(printData->undosList));
+					   printedUndoLoc != list_length(printData->undosList[(int) undoType]));
 			}
 			if (addComma)
 				appendStringInfo(outbuf, ", ");
@@ -791,7 +806,7 @@ pdata_set_min_csn(BTreePrintData *printData, CommitSeqNo csn)
 
 /* adds unique undo location in ascending order */
 static List *
-ladd_unique_undo(List *list, UndoLocation location)
+ladd_unique_undo(List *list, UndoLogType undoType, UndoLocation location)
 {
 	ListCell   *lc;
 	UndoLocation lLoc,
@@ -799,7 +814,8 @@ ladd_unique_undo(List *list, UndoLocation location)
 	int			insertAt = -1,
 				i;
 
-	if (!UndoLocationIsValid(location) || !UNDO_REC_XACT_RETAIN(location))
+	if (!UndoLocationIsValid(location) ||
+		!UNDO_REC_XACT_RETAIN(undoType, location))
 		return list;
 
 	copyLoc = palloc(sizeof(UndoLocation));

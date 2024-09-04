@@ -192,7 +192,7 @@ load_first_historical_page(BTreeSeqScan *scan)
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->snapshotCsn)
 	{
-		if (!UNDO_REC_EXISTS(header->undoLocation))
+		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_SNAPSHOT_TOO_OLD),
@@ -247,7 +247,7 @@ load_next_historical_page(BTreeSeqScan *scan)
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->snapshotCsn)
 	{
-		if (!UNDO_REC_EXISTS(header->undoLocation))
+		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_SNAPSHOT_TOO_OLD),

@@ -21,6 +21,7 @@
 #include "catalog/o_sys_cache.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
+#include "transam/undo.h"
 #include "utils/compress.h"
 #include "recovery/wal.h"
 
@@ -93,7 +94,10 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 
-UndoLocation saved_undo_location = InvalidUndoLocation;
+UndoLocation saved_undo_location[(int) UndoLogsCount] =
+{
+	InvalidUndoLocation
+};
 static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
@@ -938,21 +942,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		TransactionStmt *tstmt = (TransactionStmt *) pstmt->utilityStmt;
 
-		if (tstmt->kind == TRANS_STMT_PREPARE)
+		if (tstmt->kind == TRANS_STMT_PREPARE && have_retained_undo_location())
 		{
-			ODBProcData *proc_data = GET_CUR_PROCDATA();
-			UndoLocation transactionUndoRetainLocation;
-
-			transactionUndoRetainLocation =
-				pg_atomic_read_u64(&proc_data->transactionUndoRetainLocation);
-
-			if (UndoLocationIsValid(transactionUndoRetainLocation))
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("cannot use PREPARE TRANSACTION in transaction that uses orioledb table")),
-						errdetail("OrioleDB does not support prepared transactions yet."));
-			}
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot use PREPARE TRANSACTION in transaction that uses orioledb table")),
+					errdetail("OrioleDB does not support prepared transactions yet."));
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, AlterCollationStmt))
@@ -1283,9 +1278,14 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 						  uint64 count,
 						  bool execute_once)
 {
-	UndoLocation prevSavedLocation = saved_undo_location;
+	UndoLocation prevSavedLocation[(int) UndoLogsCount];
+	int			i;
 
-	saved_undo_location = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		prevSavedLocation[i] = saved_undo_location[i];
+		saved_undo_location[i] = pg_atomic_read_u64(&get_undo_meta_by_type((UndoLogType) i)->lastUsedLocation);
+	}
 
 #ifdef USE_ASSERT_CHECKING
 	{
@@ -1296,7 +1296,10 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 		depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth,
 												   (Datum) 0));
 		if (top_level && depth == 0)
-			Assert(!UndoLocationIsValid(prevSavedLocation));
+		{
+			for (i = 0; i < (int) UndoLogsCount; i++)
+				Assert(!UndoLocationIsValid(prevSavedLocation[i]));
+		}
 	}
 #endif
 
@@ -1305,7 +1308,8 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 	else
 		standard_ExecutorRun(queryDesc, direction, count, execute_once);
 
-	saved_undo_location = prevSavedLocation;
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		saved_undo_location[i] = prevSavedLocation[i];
 }
 
 static void

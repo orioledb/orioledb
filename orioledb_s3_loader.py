@@ -132,22 +132,24 @@ class OrioledbS3ObjectLoader:
 
 		control = get_control_data(self.data_dir)
 		orioledb_control = get_orioledb_control_data(self.data_dir)
-		self.download_undo(orioledb_control)
+		self.download_undo(orioledb_control['undoRegularStartLocation'],
+		                   orioledb_control['undoRegularEndLocation'],
+		                   "orioledb_data/%02X%08Xdata")
+		self.download_undo(orioledb_control['undoSystemStartLocation'],
+		                   orioledb_control['undoSystemEndLocation'],
+		                   "orioledb_data/%02X%08Xsystem")
 		wal_file = control["Latest checkpoint's REDO WAL file"]
 		local_path = os.path.join(self.data_dir, f"pg_wal/{wal_file}")
 		wal_file = os.path.join(self.prefix, f"wal/{wal_file}")
 		self.download_file(self.bucket_name, wal_file, local_path)
 
-	def download_undo(self, orioledb_control):
+	def download_undo(self, startLocation, endLocation, template):
 		UNDO_FILE_SIZE = 0x4000000
-		if orioledb_control['undoStartLocation'] > orioledb_control[
-		    'undoEndLocation']:
+		if startLocation >= endLocation:
 			return
-		for fileNum in range(
-		    orioledb_control['undoStartLocation'] // UNDO_FILE_SIZE,
-		    (orioledb_control['undoEndLocation'] - 1) // UNDO_FILE_SIZE):
-			fileName = "orioledb_data/%02X%08X" % (fileNum >> 32,
-			                                       fileNum & 0xFFFFFFFF)
+		for fileNum in range(startLocation // UNDO_FILE_SIZE,
+		                     (endLocation - 1) // UNDO_FILE_SIZE):
+			fileName = template % (fileNum >> 32, fileNum & 0xFFFFFFFF)
 			fileName = os.path.join(self.prefix, fileName)
 			loader.download_file(self.bucket_name, fileName, fileName)
 
@@ -380,13 +382,18 @@ def get_orioledb_control_data(data_dir: str):
 	"""
 
 	f = open(f"{data_dir}/orioledb_data/control", 'rb')
-	data = f.read(80)
-	(undoStartLocation, undoEndLocation) = struct.unpack('QQ', data[64:])
+	data = f.read(8 * 13)
+	(undoRegularStartLocation,
+	 undoRegularEndLocation) = struct.unpack('QQ', data[8 * 8:8 * 10])
+	(undoSystemStartLocation,
+	 undoSystemEndLocation) = struct.unpack('QQ', data[8 * 11:8 * 13])
 	f.close()
 
 	dict = {
-	    'undoStartLocation': undoStartLocation,
-	    'undoEndLocation': undoEndLocation
+	    'undoRegularStartLocation': undoRegularStartLocation,
+	    'undoRegularEndLocation': undoRegularEndLocation,
+	    'undoSystemStartLocation': undoSystemStartLocation,
+	    'undoSystemEndLocation': undoSystemEndLocation
 	}
 
 	return dict

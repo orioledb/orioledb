@@ -127,7 +127,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	OTuple		result;
 
 	if (COMMITSEQNO_IS_NORMAL(readCsn))
-		combinedResult = !have_current_undo();
+		combinedResult = !have_current_undo(desc->undoType);
 
 	init_page_find_context(&context, desc,
 						   combinedResult ? COMMITSEQNO_INPROGRESS : readCsn, BTREE_PAGE_FIND_FETCH);
@@ -243,7 +243,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 	BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, p, loc);
 	tupHdr = *tupHdrPtr;
-	(void) find_non_lock_only_undo_record(&tupHdr);
+	(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
 
 	Assert(COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_INPROGRESS(csn));
 
@@ -298,7 +298,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				 * system tree.
 				 */
 				if (XACT_INFO_GET_OXID(xactInfo) == get_current_oxid_if_any() &&
-					(UndoLocationGetValue(tupHdr.undoLocation) <= saved_undo_location ||
+					(UndoLocationGetValue(tupHdr.undoLocation) <= saved_undo_location[desc->undoType] ||
 					 IS_SYS_TREE_OIDS(desc->oids)) &&
 					csn != COMMITSEQNO_MAX_NORMAL)
 					break;
@@ -327,17 +327,18 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (tupHdr.deleted != BTreeLeafTupleNonDeleted ||
 			XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
 		{
-			get_prev_leaf_header_from_undo(&tupHdr, true);
+			get_prev_leaf_header_from_undo(desc->undoType, &tupHdr, true);
 		}
 		else
 		{
 			if (curTupleAllocated)
 				pfree(curTuple.data);
-			get_prev_leaf_header_and_tuple_from_undo(&tupHdr, &curTuple, 0);
+			get_prev_leaf_header_and_tuple_from_undo(desc->undoType, &tupHdr,
+													 &curTuple, 0);
 			curTupleAllocated = true;
 		}
 
-		Assert(UNDO_REC_EXISTS(undoLocation));
+		Assert(UNDO_REC_EXISTS(desc->undoType, undoLocation));
 	}
 
 	if (COMMITSEQNO_IS_NON_DELETED(csn))
@@ -370,7 +371,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		result = curTuple;
 	}
 
-	Assert(!UndoLocationIsValid(undoLocation) || UNDO_REC_EXISTS(undoLocation));
+	Assert(!UndoLocationIsValid(undoLocation) || UNDO_REC_EXISTS(desc->undoType, undoLocation));
 	MemoryContextSwitchTo(prevMctx);
 	return result;
 }
@@ -383,7 +384,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
-	it->combinedResult = !have_current_undo() && COMMITSEQNO_IS_NORMAL(csn);
+	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(csn);
 	it->csn = csn;
 	it->scanDir = scanDir;
 	it->tupleCxt = CurrentMemoryContext;
@@ -1149,7 +1150,7 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 		undoIt->rightmost = (undoIt->rightmost && right) || O_PAGE_IS(undoIt->image, RIGHTMOST);
 		undoIt->leftmost = (undoIt->leftmost && left) || O_PAGE_IS(undoIt->image, LEFTMOST);
 		undoIt->imageUndoLoc = O_UNDO_GET_IMAGE_LOCATION(undoLocation, left);
-		Assert(UNDO_REC_EXISTS(undoLocation));
+		Assert(UNDO_REC_EXISTS(undoIt->it->context.desc->undoType, undoLocation));
 
 		header = (BTreePageHeader *) undoIt->image;
 		rec_csn = header->csn;

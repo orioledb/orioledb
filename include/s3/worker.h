@@ -13,6 +13,7 @@
 #ifndef __S3_WORKER_H__
 #define __S3_WORKER_H__
 
+#include "orioledb.h"
 #include "s3/queue.h"
 
 typedef enum
@@ -42,6 +43,7 @@ typedef struct
 		}			writeFile;
 		struct
 		{
+			UndoLogType undoType;
 			uint64		fileNum;
 		}			writeUndoFile;
 		struct
@@ -81,7 +83,8 @@ extern S3TaskLocation s3_schedule_file_part_read(uint32 chkpNum, Oid datoid,
 												 Oid relnode, int32 segNum,
 												 int32 partNum);
 extern S3TaskLocation s3_schedule_wal_file_write(char *filename);
-extern S3TaskLocation s3_schedule_undo_file_write(uint64 fileNum);
+extern S3TaskLocation s3_schedule_undo_file_write(UndoLogType undoType,
+												  uint64 fileNum);
 extern S3TaskLocation s3_schedule_downlink_load(struct BTreeDescr *desc,
 												uint64 downlink);
 extern S3TaskLocation s3_schedule_root_file_write(char *filename, bool delete);

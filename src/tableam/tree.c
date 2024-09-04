@@ -115,7 +115,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, ORelOids oids,
 		desc->storageType = BTreeStorageUnlogged;
 	else
 		desc->storageType = BTreeStoragePersistence;
-	desc->undoType = UndoReserveTxn;
+	desc->undoType = UndoLogRegular;
 	desc->createOxid = createOxid;
 }
 

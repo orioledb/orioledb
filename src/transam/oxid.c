@@ -969,6 +969,7 @@ parallel_worker_set_oxid(void)
 {
 	XidVXidMapElement *vxidElem;
 	ODBProcData *leaderProcData;
+	int			i;
 
 	Assert(MyProc->lockGroupLeader);
 
@@ -976,7 +977,8 @@ parallel_worker_set_oxid(void)
 	vxidElem = &leaderProcData->vxids[leaderProcData->autonomousNestingLevel];
 
 	curOxid = vxidElem->oxid;
-	saved_undo_location = InvalidUndoLocation;
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		saved_undo_location[i] = InvalidUndoLocation;
 }
 
 void

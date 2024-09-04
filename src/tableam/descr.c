@@ -1605,7 +1605,8 @@ orioledb_get_index_descrs(PG_FUNCTION_ARGS)
 }
 
 void
-o_invalidate_undo_item_callback(UndoLocation location, UndoStackItem *baseItem,
+o_invalidate_undo_item_callback(UndoLogType undoType, UndoLocation location,
+								UndoStackItem *baseItem,
 								OXid oxid, bool abort, bool changeCountsValid)
 {
 	InvalidateUndoStackItem *invalidateItem = (InvalidateUndoStackItem *) baseItem;
@@ -1627,7 +1628,7 @@ o_add_invalidate_undo_item(ORelOids oids, uint32 flags)
 	LocationIndex size;
 
 	size = sizeof(InvalidateUndoStackItem);
-	item = (InvalidateUndoStackItem *) get_undo_record_unreserved(UndoReserveTxn,
+	item = (InvalidateUndoStackItem *) get_undo_record_unreserved(UndoLogSystem,
 																  &location,
 																  MAXALIGN(size));
 	item->oids = oids;
@@ -1636,6 +1637,6 @@ o_add_invalidate_undo_item(ORelOids oids, uint32 flags)
 	item->header.base.indexType = oIndexPrimary;
 	item->header.base.itemSize = size;
 
-	add_new_undo_stack_item(location);
-	release_undo_size(UndoReserveTxn);
+	add_new_undo_stack_item(UndoLogSystem, location);
+	release_undo_size(UndoLogSystem);
 }

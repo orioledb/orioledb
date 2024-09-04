@@ -132,6 +132,7 @@ typedef enum
 typedef struct
 {
 	OXid		oxid;
+	UndoLogType undoType;
 	UndoStackLocations undoLocation;
 } XidFileRec;
 
@@ -241,7 +242,8 @@ extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem,
 extern void checkpointable_tree_free(BTreeDescr *desc);
 extern void systrees_modify_start(void);
 extern void systrees_modify_end(bool any_wal);
-extern void systrees_lock_callback(UndoLocation location,
+extern void systrees_lock_callback(UndoLogType undoType,
+								   UndoLocation location,
 								   UndoStackItem *baseItem, OXid oxid,
 								   bool abort, bool changeCountsValid);
 extern void before_writing_xids_file(int chkpnum);
