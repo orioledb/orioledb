@@ -740,11 +740,11 @@ o_update_secondary_index(OIndexDescr *id,
 						 OXid oxid,
 						 CommitSeqNo csn)
 {
-	OTableModifyResult res;
-	OBTreeKeyBound old_key,
-				new_key;
-	OTuple		nullTup;
-	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
+	OTableModifyResult		res;
+	OBTreeKeyBound			old_key,
+							new_key;
+	OTuple					nullTup;
+	BTreeModifyCallbackInfo	callbackInfo = nullCallbackInfo;
 
 	slot_getallattrs(oldSlot);
 	res.success = true;
@@ -752,6 +752,9 @@ o_update_secondary_index(OIndexDescr *id,
 
 	fill_key_bound(oldSlot, id, &old_key);
 	fill_key_bound(newSlot, id, &new_key);
+
+	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
+		return res;
 
 	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
