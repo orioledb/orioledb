@@ -1075,7 +1075,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (recurse)
 			{
-				Relation	rel;
+				Relation	child_rel;
 				ListCell   *child;
 				List	   *children;
 
@@ -1089,12 +1089,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						continue;
 
 					/* find_all_inheritors already got lock */
-					rel = table_open(childrelid, NoLock);
-					if (is_orioledb_rel(rel))
+					child_rel = table_open(childrelid, NoLock);
+					if (is_orioledb_rel(child_rel))
 					{
-						redefine_pkey_for_rel(rel);
+						redefine_pkey_for_rel(child_rel);
 					}
-					table_close(rel, lockmode);
+					table_close(child_rel, lockmode);
 				}
 			}
 			table_close(rel, NoLock);
@@ -1796,13 +1796,12 @@ static void
 redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 {
 	ListCell   *index;
-	Oid			indexOid;
 
 	foreach(index, RelationGetIndexList(rel))
 	{
-		bool closed = false;
-		indexOid = lfirst_oid(index);
-		Relation ind = relation_open(indexOid, AccessShareLock);
+		bool		closed = false;
+		Oid			indexOid = lfirst_oid(index);
+		Relation	ind = relation_open(indexOid, AccessShareLock);
 
 		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
 		{
