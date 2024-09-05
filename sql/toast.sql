@@ -150,6 +150,16 @@ INSERT INTO o_test1 SELECT id, repeat('x', 2664) FROM generate_series(3, 1000) i
 SELECT t, count(*) FROM o_test1 GROUP BY t;
 
 DROP TABLE o_test1;
+
+-- generate pseudo-random string function in deterministic way
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+	AS $$
+		SELECT substr(string_agg(
+						substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+				''), 1, length)
+		FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+
 CREATE TABLE o_test1 (
        id integer NOT NULL,
        t text NOT NULL,
@@ -157,7 +167,7 @@ CREATE TABLE o_test1 (
 ) USING orioledb;
 CREATE INDEX o_test1_reg ON o_test1(t);
 INSERT INTO o_test1 VALUES (1, repeat('x', 2600));
-INSERT INTO o_test1 VALUES (2, repeat('x', 3000));
+INSERT INTO o_test1 VALUES (2, generate_string(1, 3000));
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
 DROP TABLE o_test1;
@@ -232,15 +242,6 @@ SELECT * FROM o_test1 WHERE t = 500 || repeat('y', 6000);
 -----
 --- Test TOAST
 -----
-
--- generate pseudo-random string function in deterministic way
-CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
-	AS $$
-		SELECT substr(string_agg(
-						substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
-				''), 1, length)
-		FROM generate_series(1, (length + 20) / 21) i; $$
-LANGUAGE SQL;
 
 -- TOAST tree should be freed after DROP TABLE.
 CREATE TABLE o_toast_free (
