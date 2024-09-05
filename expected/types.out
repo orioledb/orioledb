@@ -528,12 +528,11 @@ CREATE INDEX o_test_record_type_alter_idx1 ON o_test_record_type_alter (val4);
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc' ORDER BY val4;
-                       QUERY PLAN                       
---------------------------------------------------------
- Custom Scan (o_scan) on o_test_record_type_alter
-   Forward index scan of: o_test_record_type_alter_idx1
-   Conds: (val4 = 'abc'::text)
-(3 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Index Scan using o_test_record_type_alter_idx1 on o_test_record_type_alter
+   Index Cond: (val4 = 'abc'::text)
+(2 rows)
 
 SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc' ORDER BY val4;
    key   | val | val3 | val4 

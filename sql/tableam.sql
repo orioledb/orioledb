@@ -103,8 +103,7 @@ CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
 	WHERE plpgsql_func_test(-key) * 2 = 0;
 CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
 	WHERE plpgsql_func_test(-key) * 2 = 0;
-CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
-	WHERE COALESCE(NULL, NULL, (plpgsql_func_test(-key) > 0)) != NULL;
+-- predicate evalutes to null
 CREATE INDEX o_test_partial_ix7 ON o_test_partial (key)
 	WHERE GREATEST(NULL, NULL, (ABS(plpgsql_func_test(-key)) > 0)) != NULL;
 CREATE INDEX o_test_partial_ix8 ON o_test_partial (value)
