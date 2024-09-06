@@ -6,14 +6,16 @@ import os
 import re
 import subprocess
 
+
 def is_objdump(execname):
 	try:
 		output = subprocess.run([execname, '-v'],
-								stdout = subprocess.PIPE,
-								stderr = subprocess.PIPE).stdout.decode('utf-8')
+		                        stdout=subprocess.PIPE,
+		                        stderr=subprocess.PIPE).stdout.decode('utf-8')
 	except:
 		return False
 	return output.startswith('GNU objdump')
+
 
 def find_objdump():
 	execname = os.getenv('OBJDUMP')
@@ -25,9 +27,11 @@ def find_objdump():
 		return 'gobjdump'
 	raise Exception('objdump not found')
 
-output = subprocess.run([find_objdump(), '-W'] + glob.glob('src/*/*.o') + glob.glob('src/*.o'),
-						stdout = subprocess.PIPE,
-						stderr = subprocess.PIPE).stdout.decode('utf-8')
+
+output = subprocess.run([find_objdump(), '-W'] + glob.glob('src/*/*.o') +
+                        glob.glob('src/*.o'),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE).stdout.decode('utf-8')
 
 typenames = []
 i = 3
