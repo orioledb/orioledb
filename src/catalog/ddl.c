@@ -1926,7 +1926,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				!OidIsValid(rel->rd_rel->relrewrite))
 			{
 				ORelOids	oids;
-
 				ORelOidsSetFromRel(oids, rel);
 				Assert(relation_get_descr(rel) != NULL);
 				drop_table(oids);
