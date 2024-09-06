@@ -1197,6 +1197,8 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 								   O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
 	}
+	o_add_invalidate_undo_item(o_table->oids,
+								O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);
 	if (ORelOidsIsValid(o_table->toast_oids))
 	{

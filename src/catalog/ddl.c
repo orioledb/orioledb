@@ -1758,6 +1758,40 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defaultexpr;
 			}
 
+			if (!expr && DomainHasConstraints(attr->atttypid) &&
+				old_slot->tts_isnull[i])
+			{
+				Oid			baseTypeId;
+				int32		baseTypeMod;
+				Oid			baseTypeColl;
+				Node	   *defval;
+
+				defval = build_column_default(rel, i + 1);
+
+				if (!defval)
+				{
+					baseTypeMod = attr->atttypmod;
+					baseTypeId = getBaseTypeAndTypmod(attr->atttypid, &baseTypeMod);
+					baseTypeColl = get_typcollation(baseTypeId);
+					defval = (Node *) makeNullConst(baseTypeId, baseTypeMod, baseTypeColl);
+				}
+				else
+				{
+					baseTypeId = exprType(defval);
+				}
+				defval = (Node *) coerce_to_target_type(NULL,
+														defval,
+														baseTypeId,
+														attr->atttypid,
+														attr->atttypmod,
+														COERCION_ASSIGNMENT,
+														COERCE_IMPLICIT_CAST,
+														-1);
+				if (defval == NULL) /* should not happen */
+					elog(ERROR, "failed to coerce base type to domain");
+				expr = defval;
+			}
+
 			attr = &new_slot->tts_tupleDescriptor->attrs[i];
 			if (expr)
 			{
