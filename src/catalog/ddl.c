@@ -1634,6 +1634,26 @@ CreateOrioledbDestReceiver(Relation rel)
 }
 
 static void
+drop_table(ORelOids	oids)
+{
+	CommitSeqNo csn;
+	OXid		oxid;
+	OTable	   *table;
+	ORelOids   *treeOids;
+	int			numTreeOids;
+
+	fill_current_oxid_csn(&oxid, &csn);
+
+	o_tables_table_meta_lock(NULL);
+	table = o_tables_drop_by_oids(oids, oxid, csn);
+	o_tables_table_meta_unlock(NULL, InvalidOid);
+	treeOids = o_table_make_index_oids(table, &numTreeOids);
+	add_undo_drop_relnode(oids, treeOids, numTreeOids);
+	pfree(treeOids);
+	o_table_free(table);
+}
+
+static void
 rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 {
 	DestReceiver *dest = CreateOrioledbDestReceiver(rel);
@@ -1824,6 +1844,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
 	free_btree_seq_scan(sscan);
+
+	drop_table(old_o_table->oids);
 }
 
 static void
@@ -1896,25 +1918,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				(subId == 0) && is_orioledb_rel(rel) &&
 				!OidIsValid(rel->rd_rel->relrewrite))
 			{
-				CommitSeqNo csn;
-				OXid		oxid;
-				OTable	   *table;
-				ORelOids   *treeOids;
-				int			numTreeOids;
 				ORelOids	oids;
-
 				ORelOidsSetFromRel(oids, rel);
-
-				fill_current_oxid_csn(&oxid, &csn);
 				Assert(relation_get_descr(rel) != NULL);
-
-				o_tables_table_meta_lock(NULL);
-				table = o_tables_drop_by_oids(oids, oxid, csn);
-				o_tables_table_meta_unlock(NULL, InvalidOid);
-				treeOids = o_table_make_index_oids(table, &numTreeOids);
-				add_undo_drop_relnode(oids, treeOids, numTreeOids);
-				pfree(treeOids);
-				o_table_free(table);
+				drop_table(oids);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -2477,6 +2484,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						case RELKIND_MATVIEW:
 							if (savedDataQuery != NULL)
 								rewrite_matview(tbl, old_o_table, new_o_table);
+							drop_table(old_o_table->oids);
 							break;
 						default:
 							Assert(false);
