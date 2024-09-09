@@ -32,6 +32,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "checkpoint/control.h"
 #include "recovery/internal.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -57,8 +58,6 @@
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-
-#define CONTROL_FILENAME ORIOLEDB_DATA_DIR"/control"
 
 /*
  * Single action in B-tree checkpoint loop.
@@ -162,7 +161,6 @@ static void writeback_put_extent(CheckpointWriteBack *writeback, FileExtent *ext
 static void perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback);
 static void free_writeback(CheckpointWriteBack *writeback);
 
-static void write_checkpoint_control(CheckpointControl *control);
 static uint64 append_file_contents(File target, char *source_filename, uint64 offset);
 static uint64 finalize_chkp_map(File chkp_file, uint64 len,
 								char *input_filename, uint64 input_offset,
@@ -246,10 +244,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 
 	if (!found)
 	{
-		int			controlFile;
 		int			i;
 		CheckpointControl control;
-		pg_crc32c	crc;
 
 		memset(checkpoint_state, 0, sizeof(*checkpoint_state));
 		checkpoint_state->curKeyType = CurKeyFinished;
@@ -310,39 +306,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		for (i = 0; i < XID_RECS_QUEUE_SIZE; i++)
 			checkpoint_state->xidRecQueue[i].oxid = InvalidOXid;
 
-		controlFile = BasicOpenFile(CONTROL_FILENAME, O_RDONLY | PG_BINARY);
-		if (controlFile < 0)
-			return;
-
-		if (read(controlFile, (Pointer) &control, sizeof(control)) != sizeof(control))
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not read data from control file %s", CONTROL_FILENAME)));
-
-		close(controlFile);
-
-		INIT_CRC32C(crc);
-		COMP_CRC32C(crc, &control, offsetof(CheckpointControl, crc));
-		FIN_CRC32C(crc);
-
-		if (crc != control.crc)
-			elog(ERROR, "Wrong CRC in control file");
-
-		if (control.binaryVersion != ORIOLEDB_BINARY_VERSION)
-			ereport(FATAL,
-					(errmsg("database files are incompatible with server"),
-					 errdetail("OrioleDB was initialized with binary version %d,"
-							   " but the extension was compiled with binary version %d.",
-							   control.binaryVersion, ORIOLEDB_BINARY_VERSION),
-					 errhint("It looks like you need to initdb.")));
-
-		if (control.s3Mode != orioledb_s3_mode)
-			ereport(FATAL,
-					(errmsg("database files are incompatible with server"),
-					 errdetail("OrioleDB was initialized with S3 mode %s,"
-							   " but the extension was configure with S3 mode %s.",
-							   control.s3Mode ? "on" : "off",
-							   orioledb_s3_mode ? "on" : "off")));
+		get_checkpoint_control_data(&control);
 
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;
@@ -1537,36 +1501,11 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 
 	location = s3_schedule_file_write(chkpNum, XLOG_CONTROL_FILE, false);
 	maxLocation = Max(maxLocation, location);
-	location = s3_schedule_file_write(chkpNum, ORIOLEDB_DATA_DIR "/control", false);
+	location = s3_schedule_file_write(chkpNum, CONTROL_FILENAME, false);
 	maxLocation = Max(maxLocation, location);
 	s3_queue_wait_for_location(maxLocation);
 }
 
-/*
- * Write checkpoint control file to the disk (and sync).
- */
-static void
-write_checkpoint_control(CheckpointControl *control)
-{
-	File		controlFile;
-
-	INIT_CRC32C(control->crc);
-	COMP_CRC32C(control->crc, control, offsetof(CheckpointControl, crc));
-	FIN_CRC32C(control->crc);
-
-	controlFile = PathNameOpenFile(CONTROL_FILENAME, O_RDWR | O_CREAT | PG_BINARY);
-	if (controlFile < 0)
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not open checkpoint control file %s", CONTROL_FILENAME)));
-
-	if (OFileWrite(controlFile, (Pointer) control, sizeof(*control), 0,
-				   WAIT_EVENT_SLRU_WRITE) != sizeof(*control) ||
-		FileSync(controlFile, WAIT_EVENT_SLRU_SYNC) != 0)
-		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write checkpoint control to file %s", CONTROL_FILENAME)));
-
-	FileClose(controlFile);
-}
 
 static uint64
 append_file_contents(File target, char *source_filename, uint64 offset)
