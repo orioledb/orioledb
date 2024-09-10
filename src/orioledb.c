@@ -1603,7 +1603,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					IndexOptInfo *info = lfirst_node(IndexOptInfo, lc);
 					bool		hasbitmap;
 					OIndexNumber ix_num;
-					OIndexDescr *index_descr;
+					OIndexDescr *index_descr = NULL;
 					OInMemoryBlkno rootPageBlkno;
 					Page		root_page;
 
@@ -1633,6 +1633,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 							break;
 					}
 					Assert(ix_num < descr->nIndices);
+					Assert(index_descr);
 					o_btree_load_shmem(&index_descr->desc);
 					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
 					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);
