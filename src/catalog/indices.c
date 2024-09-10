@@ -154,8 +154,7 @@ is_in_indexes_rebuild(void)
 void
 assign_new_oids(OTable *oTable, Relation rel)
 {
-	Oid			heap_relid,
-				toast_relid;
+	Oid			toast_relid;
 	ReindexParams params;
 
 	CheckTableForSerializableConflictIn(rel);
@@ -171,58 +170,43 @@ assign_new_oids(OTable *oTable, Relation rel)
 		table_close(toastrel, NoLock);
 	}
 
-	heap_relid = RelationGetRelid(rel);
-
 	PG_TRY();
 	{
+		List	   *indexIds;
+		char		persistence;
+		ListCell   *indexId;
+		int			i;
+
 		in_indexes_rebuild = true;
 		params.options = 0;
 		params.tablespaceOid = InvalidOid;
+
+		/* not using simple reindex_relation here anymore, */
+		/* because we hold a lock on relation already */
+		indexIds = RelationGetIndexList(rel);
+
+		persistence = rel->rd_rel->relpersistence;
+
+		/* Reindex all the indexes. */
+		i = 1;
+		foreach(indexId, indexIds)
 		{
-			Relation	rel;
-			Oid			toast_relid;
-			List	   *indexIds;
-			char		persistence;
-			ListCell   *indexId;
-			int			i;
+			Oid			indexOid = lfirst_oid(indexId);
+			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
 
-			rel = table_open(heap_relid, ShareLock);
+			RelationSetNewRelfilenode(iRel, persistence);
+			index_close(iRel, AccessExclusiveLock);
+			i++;
+		}
 
-			if (rel)
-			{
-				toast_relid = rel->rd_rel->reltoastrelid;
-
-				indexIds = RelationGetIndexList(rel);
-
-				persistence = rel->rd_rel->relpersistence;
-
-				/* Reindex all the indexes. */
-				i = 1;
-				foreach(indexId, indexIds)
-				{
-					Oid			indexOid = lfirst_oid(indexId);
-					Relation	iRel = index_open(indexOid, AccessExclusiveLock);
-
-					RelationSetNewRelfilenode(iRel, persistence);
-					index_close(iRel, AccessExclusiveLock);
-					i++;
-				}
-
-				/*
-				* Close rel, but continue to hold the lock.
-				*/
-				table_close(rel, NoLock);
-
-				/*
-				* If the relation has a secondary toast rel, reindex that too while we
-				* still hold the lock on the main table.
-				*/
-				if (OidIsValid(toast_relid))
-				{
-					params.options &= ~(REINDEXOPT_MISSING_OK);
-					reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
-				}
-			}
+		/*
+		 * If the relation has a secondary toast rel, reindex that too while
+		 * we still hold the lock on the main table.
+		 */
+		if (OidIsValid(toast_relid))
+		{
+			params.options &= ~(REINDEXOPT_MISSING_OK);
+			reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
 		}
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}
@@ -284,13 +268,14 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	if (index->rd_index->indisexclusion)
 		elog(ERROR, "exclusion indices are not supported.");
 
-	if (o_table == NULL) {
+	if (o_table == NULL)
+	{
 		o_table = o_tables_get(oids);
 		if (o_table == NULL)
 		{
 			elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
-					(unsigned) oids.datoid, (unsigned) oids.reloid,
-					(unsigned) oids.relnode);
+				 (unsigned) oids.datoid, (unsigned) oids.reloid,
+				 (unsigned) oids.relnode);
 		}
 	}
 
@@ -1799,7 +1784,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				Relation	indexRelation;
 
 				indexRelation = index_open(table_index->oids.reloid,
-										AccessExclusiveLock);
+										   AccessExclusiveLock);
 
 				index_update_stats(indexRelation, false, index_tuples[i]);
 				index_close(indexRelation, AccessExclusiveLock);

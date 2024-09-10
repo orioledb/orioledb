@@ -738,11 +738,11 @@ o_update_secondary_index(OIndexDescr *id,
 						 OXid oxid,
 						 CommitSeqNo csn)
 {
-	OTableModifyResult		res;
-	OBTreeKeyBound			old_key,
-							new_key;
-	OTuple					nullTup;
-	BTreeModifyCallbackInfo	callbackInfo = nullCallbackInfo;
+	OTableModifyResult res;
+	OBTreeKeyBound old_key,
+				new_key;
+	OTuple		nullTup;
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 	slot_getallattrs(oldSlot);
 	res.success = true;
@@ -759,10 +759,10 @@ o_update_secondary_index(OIndexDescr *id,
 
 	if (old_valid)
 		res.success = o_btree_modify(&id->desc, BTreeOperationDelete,
-									nullTup, BTreeKeyNone,
-									(Pointer) &old_key, BTreeKeyBound,
-									oxid, csn, RowLockUpdate,
-									NULL, &callbackInfo) == OBTreeModifyResultDeleted;
+									 nullTup, BTreeKeyNone,
+									 (Pointer) &old_key, BTreeKeyBound,
+									 oxid, csn, RowLockUpdate,
+									 NULL, &callbackInfo) == OBTreeModifyResultDeleted;
 	else
 		res.success = true;
 
@@ -969,10 +969,10 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 	fill_key_bound(slot, id, &bound);
 	o_btree_load_shmem(&id->desc);
 	res = o_btree_modify(&id->desc, BTreeOperationDelete,
-							nullTup, BTreeKeyNone,
-							(Pointer) &bound, BTreeKeyBound,
-							oxid, csn, RowLockUpdate,
-							NULL, &callbackInfo);
+						 nullTup, BTreeKeyNone,
+						 (Pointer) &bound, BTreeKeyBound,
+						 oxid, csn, RowLockUpdate,
+						 NULL, &callbackInfo);
 
 	result.success = (res == OBTreeModifyResultDeleted);
 	if (!result.success)
@@ -1090,9 +1090,9 @@ o_tbl_index_insert(OTableDescr *descr,
 								NULL, callbackInfo) == OBTreeModifyResultInserted;
 	else
 		result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
-										(Pointer) &knew, BTreeKeyBound,
-										oxid, csn, RowLockUpdate,
-										NULL, callbackInfo) == OBTreeModifyResultInserted;
+									   (Pointer) &knew, BTreeKeyBound,
+									   oxid, csn, RowLockUpdate,
+									   NULL, callbackInfo) == OBTreeModifyResultInserted;
 
 	((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 

@@ -63,7 +63,7 @@ typedef struct OIndexPath
 	OPath		o_path;
 	ScanDirection scandir;
 	OIndexNumber ix_num;
-} OIndexPath;
+}			OIndexPath;
 
 typedef struct OBitmapHeapPath
 {
@@ -77,7 +77,7 @@ typedef struct OIndexPlanState
 	/* Used only in o_explain_custom_scan */
 	List	   *stripped_indexquals;
 	bool		onlyCurIx;
-} OIndexPlanState;
+}			OIndexPlanState;
 
 typedef struct OCustomScanState
 {
@@ -333,6 +333,7 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					if (!IsA(path, Path))
 					{
 						Path	   *custom_path = transform_path(path, descr);
+
 						rel->pathlist = list_delete_nth_cell(rel->pathlist, i);
 
 						rel->pathlist = list_insert_nth(rel->pathlist, i,

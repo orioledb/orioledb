@@ -549,7 +549,7 @@ o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantu
 	pstate = make_parsestate(NULL);
 	pstate->p_sourcetext = NULL;
 	nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
-										NULL, false, true);
+										   NULL, false, true);
 	addNSItemToQuery(pstate, nsitem, true, true, true);
 
 	expr2 = expression_planner((Expr *) expr);
@@ -1198,7 +1198,7 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
 	}
 	o_add_invalidate_undo_item(o_table->oids,
-								O_INVALIDATE_OIDS_ON_ABORT);
+							   O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);
 	if (ORelOidsIsValid(o_table->toast_oids))
 	{

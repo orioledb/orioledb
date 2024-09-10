@@ -127,7 +127,7 @@ orioledb_index_fetch_begin(Relation rel)
 static void
 orioledb_index_fetch_reset(IndexFetchTableData *scan)
 {
-	// OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
+	/* OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan; */
 }
 
 static void
@@ -170,11 +170,11 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						&csn, &version);
 
 	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
-										 (Pointer) &pkey,
-										 BTreeKeyBound,
-										 csn, &tupleCsn,
-										 slot->tts_mcxt,
-										 &hint);
+									  (Pointer) &pkey,
+									  BTreeKeyBound,
+									  csn, &tupleCsn,
+									  slot->tts_mcxt,
+									  &hint);
 
 	if (O_TUPLE_IS_NULL(tuple))
 		return false;
@@ -737,9 +737,11 @@ drop_indices_for_rel(Relation rel, bool primary)
 
 	foreach(index, RelationGetIndexList(rel))
 	{
-		bool closed = false;
+		Relation	ind;
+		bool		closed = false;
+
 		indexOid = lfirst_oid(index);
-		Relation ind = relation_open(indexOid, AccessShareLock);
+		ind = relation_open(indexOid, AccessShareLock);
 
 		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
 		{
@@ -771,7 +773,7 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 	o_truncate_table(oids);
 
 	drop_indices_for_rel(rel, false);
-	// drop primary after all indices to not rebuild them
+	/* drop primary after all indices to not rebuild them */
 	drop_indices_for_rel(rel, true);
 
 	if (RelationIsPermanent(rel))
