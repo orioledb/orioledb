@@ -25,6 +25,7 @@
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "s3/control.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
 #include "s3/requests.h"
@@ -828,7 +829,12 @@ _PG_init(void)
 		register_bgwriter();
 
 	if (orioledb_s3_mode)
-		s3_list_objects();
+	{
+		uint32		chkpNum;
+
+		chkpNum = s3_check_control();
+		s3_put_lock_file(chkpNum);
+	}
 
 	/* Register S3 workers */
 	for (i = 0; orioledb_s3_mode && (i < s3_num_workers); i++)

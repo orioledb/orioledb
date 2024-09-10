@@ -13,6 +13,8 @@
 #ifndef __CHECKPOINT_CONTROL_H__
 #define __CHECKPOINT_CONTROL_H__
 
+#include "postgres.h"
+
 #include "orioledb.h"
 
 typedef struct
