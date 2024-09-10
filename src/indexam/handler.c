@@ -24,6 +24,7 @@
 #include "tuple/slot.h"
 #include "utils/compress.h"
 #include "utils/planner.h"
+#include "utils/stopevent.h"
 
 #include "access/amapi.h"
 #include "access/relation.h"
@@ -1526,6 +1527,7 @@ orioledb_amendscan(IndexScanDesc scan)
 {
 	OScanState	*o_scan = (OScanState *) scan;
 
+	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
 	MemoryContextDelete(o_scan->cxt);
 }
