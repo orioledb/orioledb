@@ -740,11 +740,11 @@ o_update_secondary_index(OIndexDescr *id,
 						 OXid oxid,
 						 CommitSeqNo csn)
 {
-	OTableModifyResult		res;
-	OBTreeKeyBound			old_key,
-							new_key;
-	OTuple					nullTup;
-	BTreeModifyCallbackInfo	callbackInfo = nullCallbackInfo;
+	OTableModifyResult res;
+	OBTreeKeyBound old_key,
+				new_key;
+	OTuple		nullTup;
+	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 	slot_getallattrs(oldSlot);
 	res.success = true;

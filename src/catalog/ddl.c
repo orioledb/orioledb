@@ -740,6 +740,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	in_rewrite = false;
 	o_saved_relrewrite = InvalidOid;
 	savedDataQuery = NULL;
+
 	/*
 	 * reindex_list is expected to be allocated in PortalContext so it isn't
 	 * freed by us and pointer may be invalid there
@@ -1014,6 +1015,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
 	{
 		RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
+
 		if (!stmt->skipData)
 		{
 			Oid			matviewOid;
@@ -1926,6 +1928,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				!OidIsValid(rel->rd_rel->relrewrite))
 			{
 				ORelOids	oids;
+
 				ORelOidsSetFromRel(oids, rel);
 				Assert(relation_get_descr(rel) != NULL);
 				drop_table(oids);

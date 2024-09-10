@@ -433,6 +433,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
+
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
 			break;
@@ -526,6 +527,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
+
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
 			break;
@@ -777,6 +779,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
+
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
 			break;
@@ -807,7 +810,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 					StringInfo	str = makeStringInfo();
 
 					if (result.failedIxNum == PrimaryIndexNumber)
-						break;		/* it is ok */
+						break;	/* it is ok */
 
 					appendStringInfo(str, "(");
 					for (i = 0; i < index_descr->nUniqueFields; i++)
@@ -831,12 +834,12 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 					appendStringInfo(str, ")");
 					ereport(ERROR,
 							(errcode(ERRCODE_INTERNAL_ERROR),
-							errmsg("unable to remove tuple from secondary index in \"%s\"",
+							 errmsg("unable to remove tuple from secondary index in \"%s\"",
 									RelationGetRelationName(rel)),
-							errdetail("Unable to remove %s from index \"%s\"",
-									  str->data,
-									  index_descr->name.data),
-							errtableconstraint(rel, "sk")));
+							 errdetail("Unable to remove %s from index \"%s\"",
+									   str->data,
+									   index_descr->name.data),
+							 errtableconstraint(rel, "sk")));
 					break;
 				}
 			case BTreeOperationInsert:
@@ -1319,6 +1322,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		OIndexDescr *index;
+
 		index = descr->indices[ix_num];
 		if (index->oids.reloid == rel->rd_rel->oid)
 		OIndexDescr *index;
