@@ -13,7 +13,7 @@
 #ifndef __S3_REQUESTS_H__
 #define __S3_REQUESTS_H__
 
-extern bool s3_put_file(char *objectname, char *filename);
+extern bool s3_put_file(char *objectname, char *filename, bool ifNoneMatch);
 extern void s3_get_file(char *objectname, char *filename);
 extern void s3_put_empty_dir(char *objectname);
 extern bool s3_put_file_part(char *objectname, char *filename, int partnum);

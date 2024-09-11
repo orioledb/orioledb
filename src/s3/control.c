@@ -24,6 +24,7 @@
 #include "s3/requests.h"
 
 #include "storage/fd.h"
+#include "utils/builtins.h"
 #include "utils/wait_event.h"
 
 #define S3_LOCK_FILENAME    ORIOLEDB_DATA_DIR"/s3_lock"
@@ -81,14 +82,12 @@ s3_put_lock_file(uint32 chkpNum)
 	lock_file = BasicOpenFile(S3_LOCK_FILENAME, O_RDONLY | PG_BINARY);
 	if (lock_file >= 0)
 	{
-		pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_READ);
 		if (read(lock_file, &lock_identifier,
 				 sizeof(lock_identifier)) != sizeof(lock_identifier))
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not read data from lock file \"%s\"",
 							S3_LOCK_FILENAME)));
-		pgstat_report_wait_end();
 
 		close(lock_file);
 
@@ -122,28 +121,35 @@ s3_put_lock_file(uint32 chkpNum)
 					(errcode_for_file_access(),
 					 errmsg("could not create file \"%s\": %m", S3_LOCK_FILENAME)));
 
-		pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_WRITE);
 		if (write(lock_file, &lock_identifier,
 				  sizeof(lock_identifier)) != sizeof(lock_identifier))
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not write file \"%s\": %m",
 							S3_LOCK_FILENAME)));
-		pgstat_report_wait_end();
 
-		pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_SYNC);
 		if (pg_fsync(lock_file) != 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not fsync file \"%s\": %m",
 							S3_LOCK_FILENAME)));
-		pgstat_report_wait_end();
 
 		close(lock_file);
 	}
 
-
 	objectname = psprintf("data/%u/%s", chkpNum, S3_LOCK_FILENAME);
+	if (!s3_put_file(objectname, S3_LOCK_FILENAME, true))
+	{
+		StringInfoData buf;
+		uint64		s3_lock_identifier;
+
+		initStringInfo(&buf);
+		s3_get_object(objectname, &buf);
+
+		s3_lock_identifier = uint64in_subr(buf.data, NULL, "lock_identifier", NULL);
+
+		pfree(buf.data);
+	}
 
 	pfree(objectname);
 }

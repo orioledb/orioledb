@@ -110,7 +110,7 @@ s3process_task(uint64 taskLocation)
 
 		elog(DEBUG1, "S3 put %s %s", objectname, filename);
 
-		result = s3_put_file(objectname, filename);
+		result = s3_put_file(objectname, filename, false);
 
 		pfree(objectname);
 
@@ -253,7 +253,7 @@ s3process_task(uint64 taskLocation)
 
 		elog(DEBUG1, "S3 map put %s %s", objectname, filename);
 
-		s3_put_file(objectname, filename);
+		s3_put_file(objectname, filename, false);
 
 		pfree(filename);
 		pfree(objectname);
@@ -265,7 +265,7 @@ s3process_task(uint64 taskLocation)
 		filename = psprintf(XLOGDIR "/%s", task->typeSpecific.walFilename);
 		objectname = psprintf("wal/%s", task->typeSpecific.walFilename);
 
-		s3_put_file(objectname, filename);
+		s3_put_file(objectname, filename, false);
 
 		pfree(filename);
 		pfree(objectname);
@@ -282,7 +282,7 @@ s3process_task(uint64 taskLocation)
 							  (uint32) (fileNum >> 32),
 							  (uint32) fileNum);
 
-		s3_put_file(objectname, filename);
+		s3_put_file(objectname, filename, false);
 
 		pfree(filename);
 		pfree(objectname);
