@@ -549,6 +549,41 @@ SELECT query_to_text_filtered($$ SELECT data from pg_logical_slot_get_changes('r
 SELECT * FROM pg_drop_replication_slot('regression_slot');
 DROP TABLE o_logical;
 
+CREATE TABLE IF NOT EXISTS o_test_toast_update_delete (
+	id integer PRIMARY KEY,
+	v1 text,
+	v2 text,
+	v3 text
+) USING orioledb;
+CREATE INDEX o_test_toast_update_delete_idx1 ON o_test_toast_update_delete(v1);
+
+INSERT INTO o_test_toast_update_delete VALUES (10, generate_string(1, 2500), generate_string(2, 2500), generate_string(3, 2500));
+SELECT orioledb_tbl_structure('o_test_toast_update_delete'::regclass, 'ne');
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete ORDER BY v1;
+SELECT * FROM o_test_toast_update_delete ORDER BY v1;
+COMMIT;
+
+UPDATE o_test_toast_update_delete SET v1 = generate_string(4, 2500), v2 = generate_string(5, 2500), v3 = generate_string(6, 2500) WHERE id = 10;
+SELECT orioledb_tbl_structure('o_test_toast_update_delete'::regclass, 'ne');
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete ORDER BY v1;
+SELECT * FROM o_test_toast_update_delete ORDER BY v1;
+COMMIT;
+
+DELETE FROM o_test_toast_update_delete WHERE id = 10;
+SELECT orioledb_tbl_structure('o_test_toast_update_delete'::regclass, 'ne');
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete ORDER BY v1;
+SELECT * FROM o_test_toast_update_delete ORDER BY v1;
+COMMIT;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast CASCADE;

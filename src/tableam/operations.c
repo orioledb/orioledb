@@ -748,8 +748,8 @@ o_update_secondary_index(OIndexDescr *id,
 	res.success = true;
 	res.oldTuple = oldSlot;
 
-	fill_key_bound(newSlot, id, &new_key);
 	fill_key_bound(oldSlot, id, &old_key);
+	fill_key_bound(newSlot, id, &new_key);
 
 	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
@@ -766,7 +766,11 @@ o_update_secondary_index(OIndexDescr *id,
 	else
 		res.success = true;
 
-	if (res.success && new_valid)
+	if (!res.success)
+	{
+		res.action = BTreeOperationUpdate;
+	}
+	else if (new_valid)
 	{
 		o_btree_check_size_of_tuple(o_tuple_size(new_ix_tup, &id->leafSpec),
 									id->name.data,
@@ -786,10 +790,6 @@ o_update_secondary_index(OIndexDescr *id,
 
 		if (!res.success)
 			res.action = BTreeOperationInsert;
-	}
-	else if (!res.success)
-	{
-		res.action = BTreeOperationUpdate;
 	}
 	if (!res.success)
 		res.failedIxNum = ix_num;

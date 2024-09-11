@@ -151,6 +151,39 @@ tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr)
 	return result;
 }
 
+static OTuple
+make_key_from_secondary_slot(TupleTableSlot *slot, OIndexDescr *idx, OTableDescr *descr)
+{
+	Datum		key[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS] = {false};
+	int			i;
+	OTuple		result;
+
+	for (i = 0; i < idx->nPrimaryFields; i++)
+	{
+		int			pk_attnum = idx->primaryFieldsAttnums[i];
+		int			attindex = pk_attnum - 1;
+
+#ifdef USE_ASSERT_CHECKING
+		/* PK attributes shouldn't be external or compressed */
+		Form_pg_attribute att;
+
+		att = TupleDescAttr(slot->tts_tupleDescriptor, pk_attnum - 1);
+		if (!slot->tts_isnull[attindex] && att->attlen < 0)
+		{
+			Assert(!VARATT_IS_EXTERNAL(slot->tts_values[attindex]));
+			Assert(!VARATT_IS_COMPRESSED(slot->tts_values[attindex]));
+		}
+#endif
+		key[i] = slot->tts_values[attindex];
+		isnull[i] = slot->tts_isnull[attindex];
+	}
+
+	result = o_form_tuple(GET_PRIMARY(descr)->nonLeafTupdesc, &GET_PRIMARY(descr)->nonLeafSpec,
+						  ((OTableSlot *) slot)->version, key, isnull);
+	return result;
+}
+
 static void
 alloc_to_toast_vfree_detoasted(TupleTableSlot *slot)
 {
@@ -322,9 +355,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 				Pointer		p = DatumGetPointer(values[res_attnum]);
 
 				Assert(p);
-				if (IS_TOAST_POINTER(p))
+				if (IS_TOAST_POINTER(p) && !VARATT_IS_EXTERNAL_ORIOLEDB(p))
 				{
-					Assert(oslot->ixnum == PrimaryIndexNumber);
 					hastoast = true;
 					natts = Max(natts, idx->maxTableAttnum - ctid_off);
 				}
@@ -357,14 +389,15 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	{
 		OTuple		pkey;
 
-		Assert(oslot->ixnum == PrimaryIndexNumber);
-
 		/* Allocate memory for TOASTed attributes if not already done. */
 		if (!oslot->to_toast)
 			alloc_to_toast_vfree_detoasted(slot);
 
 		/* Generate a primary key for the TOASTed attributes. */
-		pkey = tts_orioledb_make_key(slot, descr);
+		if (oslot->ixnum == PrimaryIndexNumber)
+			pkey = tts_orioledb_make_key(slot, descr);
+		else
+			pkey = make_key_from_secondary_slot(slot, idx, descr);
 
 		/* Iterate over attributes to process TOASTed values. */
 		for (attnum = 0; attnum < natts; attnum++)
