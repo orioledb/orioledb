@@ -81,7 +81,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_collate_idx_c', plan['Index Name'])
 
 		self.assertEqual(
@@ -97,7 +97,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_collate_idx_c', plan['Index Name'])
 
 		self.assertEqual(
@@ -113,7 +113,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_collate_idx_posix', plan['Index Name'])
 
 		self.assertEqual(
@@ -129,7 +129,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_collate_idx_icu', plan['Index Name'])
 
 		self.assertEqual(
@@ -453,7 +453,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
 		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
 		                  ('A', 'T')],
@@ -473,7 +473,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
 		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
 		                  ('A', 'T')],
@@ -531,7 +531,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
 		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
 		                  ('A', 'T')],
@@ -549,7 +549,7 @@ class CollateTest(BaseTest):
 			""")[0][0][0]["Plan"]
 			if plan["Node Type"] == 'Result':
 				plan = plan['Plans'][0]
-			self.assertEqual('Custom Scan', plan["Node Type"])
+			self.assertEqual('Index Only Scan', plan["Node Type"])
 			self.assertEqual('o_test_ix1', plan['Index Name'])
 			self.assertEqual([('W', 'A'), ('C', 'N'), ('A', 'T'), ('V', 'a'),
 			                  ('X', 'a')],
@@ -568,7 +568,7 @@ class CollateTest(BaseTest):
 		""")[0][0][0]["Plan"]
 		if plan["Node Type"] == 'Result':
 			plan = plan['Plans'][0]
-		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Node Type"])
 		self.assertEqual('o_test_ix1', plan['Index Name'])
 		self.assertEqual([('V', 'a'), ('W', 'A'), ('X', 'â'), ('C', 'N'),
 		                  ('A', 'T')],
@@ -586,7 +586,7 @@ class CollateTest(BaseTest):
 			""")[0][0][0]["Plan"]
 			if plan["Node Type"] == 'Result':
 				plan = plan['Plans'][0]
-			self.assertEqual('Custom Scan', plan["Node Type"])
+			self.assertEqual('Index Only Scan', plan["Node Type"])
 			self.assertEqual('o_test_ix1', plan['Index Name'])
 			self.assertEqual([('W', 'A'), ('C', 'N'), ('A', 'T'), ('V', 'a'),
 			                  ('X', 'a')],
