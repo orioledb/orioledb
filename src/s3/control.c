@@ -13,6 +13,7 @@
 
 #include "postgres.h"
 
+#include <sys/fcntl.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -21,6 +22,9 @@
 #include "checkpoint/control.h"
 #include "s3/control.h"
 #include "s3/requests.h"
+
+#include "storage/fd.h"
+#include "utils/wait_event.h"
 
 #define S3_LOCK_FILENAME    ORIOLEDB_DATA_DIR"/s3_lock"
 
@@ -42,7 +46,7 @@ s3_check_control(void)
 
 	objectname = psprintf("data/%u/%s",
 						  control.lastCheckpointNumber,
-						  CONTROL_FILENAME);
+						  S3_LOCK_FILENAME);
 
 	initStringInfo(&buf);
 	s3_get_object(objectname, &buf);
@@ -70,18 +74,74 @@ s3_check_control(void)
 void
 s3_put_lock_file(uint32 chkpNum)
 {
-	uint64		lock_identifier;
-	struct timeval tv;
+	int			lock_file;
+	uint64		lock_identifier = 0;
 	char	   *objectname;
 
-	/*
-	 * Calculate a lock identifier similar to how PostgreSQL calculates a
-	 * system identifier.
-	 */
-	gettimeofday(&tv, NULL);
-	lock_identifier = ((uint64) tv.tv_sec) << 32;
-	lock_identifier |= ((uint64) tv.tv_usec) << 12;
-	lock_identifier |= getpid() & 0xFFF;
+	lock_file = BasicOpenFile(S3_LOCK_FILENAME, O_RDONLY | PG_BINARY);
+	if (lock_file >= 0)
+	{
+		pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_READ);
+		if (read(lock_file, &lock_identifier,
+				 sizeof(lock_identifier)) != sizeof(lock_identifier))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not read data from lock file \"%s\"",
+							S3_LOCK_FILENAME)));
+		pgstat_report_wait_end();
+
+		close(lock_file);
+
+		if (lock_identifier == 0)
+			ereport(FATAL,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("incorrect value of lock identifier " UINT64_FORMAT,
+							lock_identifier)));
+	}
+	else
+	{
+		struct timeval tv;
+
+		if (errno != ENOENT)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not open file \"%s\": %m", S3_LOCK_FILENAME)));
+
+		/*
+		 * Calculate a lock identifier similar to how PostgreSQL calculates a
+		 * system identifier.
+		 */
+		gettimeofday(&tv, NULL);
+		lock_identifier = ((uint64) tv.tv_sec) << 32;
+		lock_identifier |= ((uint64) tv.tv_usec) << 12;
+		lock_identifier |= getpid() & 0xFFF;
+
+		lock_file = BasicOpenFile(S3_LOCK_FILENAME, O_WRONLY | O_CREAT | PG_BINARY);
+		if (lock_file < 0)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not create file \"%s\": %m", S3_LOCK_FILENAME)));
+
+		pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_WRITE);
+		if (write(lock_file, &lock_identifier,
+				  sizeof(lock_identifier)) != sizeof(lock_identifier))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not write file \"%s\": %m",
+							S3_LOCK_FILENAME)));
+		pgstat_report_wait_end();
+
+		pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_SYNC);
+		if (pg_fsync(lock_file) != 0)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not fsync file \"%s\": %m",
+							S3_LOCK_FILENAME)));
+		pgstat_report_wait_end();
+
+		close(lock_file);
+	}
+
 
 	objectname = psprintf("data/%u/%s", chkpNum, S3_LOCK_FILENAME);
 

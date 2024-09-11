@@ -32,10 +32,13 @@ get_checkpoint_control_data(CheckpointControl *control)
 
 	controlFile = BasicOpenFile(CONTROL_FILENAME, O_RDONLY | PG_BINARY);
 	if (controlFile < 0)
-		return;
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open file \"%s\": %m",
+						CONTROL_FILENAME)));
 
 	if (read(controlFile, (Pointer) control,
-			sizeof(CheckpointControl)) != sizeof(CheckpointControl))
+			 sizeof(CheckpointControl)) != sizeof(CheckpointControl))
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not read data from control file %s", CONTROL_FILENAME)));
