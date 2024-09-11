@@ -691,6 +691,13 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	}
 	pfree(vfree);
 
+	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
+	{
+		if (vfree[i])
+			pfree(DatumGetPointer(valuesOld[i]));
+	}
+	pfree(vfree);
+
 	if (!result.success)
 	{
 		switch (result.action)
@@ -759,6 +766,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	uint32		version;
 	TupleTableSlot *slot;
 	OTuple		tuple;
+	bool	   *vfree;
+	int			i;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -792,6 +801,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 						&GET_PRIMARY(descr)->nonLeafSpec,
 						tupleid, values, isnull,
 						&csn, &version);
+	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
+	detoast_passed_values(index_descr, values, isnull, vfree);
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
 						 version, values, isnull);
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, true, NULL);
@@ -799,6 +810,12 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	fill_current_oxid_csn(&oxid, &csn);
 
 	result = o_tbl_index_delete(index_descr, ix_num, slot, oxid, csn);
+	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
+	{
+		if (vfree[i])
+			pfree(DatumGetPointer(values[i]));
+	}
+	pfree(vfree);
 
 	if (!result.success)
 	{
@@ -806,7 +823,6 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		{
 			case BTreeOperationUpdate:
 				{
-					int			i;
 					StringInfo	str = makeStringInfo();
 
 					if (result.failedIxNum == PrimaryIndexNumber)

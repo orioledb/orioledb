@@ -756,9 +756,6 @@ o_update_secondary_index(OIndexDescr *id,
 	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
 
-	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
-		return res;
-
 	o_btree_load_shmem(&id->desc);
 	O_TUPLE_SET_NULL(nullTup);
 
