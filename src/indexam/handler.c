@@ -528,7 +528,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 						oldTupleid, valuesOld, isnullOld,
 						&csn, &version);
 	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
-	// TODO: Probably there is a better way than detoasting here
+	/* TODO: Probably there is a better way than detoasting here */
 	detoast_passed_values(index_descr, valuesOld, isnullOld, vfree);
 	old_tuple = o_form_tuple(index_descr->nonLeafTupdesc, &index_descr->nonLeafSpec,
 							 version, valuesOld, isnullOld);
@@ -1244,27 +1244,27 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 {
 	OScanState *o_scan = (OScanState *) scan;
 	TupleTableSlot *slot;
-	bytea *rowid;
+	bytea	   *rowid;
 	OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
-	TupleDesc pk_tupdesc;
+	TupleDesc	pk_tupdesc;
 	OTupleFixedFormatSpec *pk_spec;
 	OTupleFixedFormatSpec temp_pk_spec;
-	int result_size,
-		tuple_size;
-	Pointer ptr;
+	int			result_size,
+				tuple_size;
+	Pointer		ptr;
 
 	/* TODO: Cache these tupdescs */
 	if (!index_descr->primaryIsCtid)
 	{
-		int pk_nfields = index_descr->nPrimaryFields;
-		int nfields;
-		int pk_nfield;
-		int i;
+		int			pk_nfields = index_descr->nPrimaryFields;
+		int			nfields;
+		int			pk_nfield;
+		int			i;
 
 		for (i = 0; i < index_descr->nPrimaryFields; i++)
 		{
-			bool found = false;
-			AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+			bool		found = false;
+			AttrNumber	attnum = index_descr->primaryFieldsAttnums[i] - 1;
 			Form_pg_attribute pk_attr = &index_descr->leafTupdesc->attrs[attnum];
 
 			for (int j = 0; j < scan->indexRelation->rd_att->natts; j++)
@@ -1293,8 +1293,8 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 
 		for (i = 0; i < index_descr->nPrimaryFields; i++)
 		{
-			bool found = false;
-			AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+			bool		found = false;
+			AttrNumber	attnum = index_descr->primaryFieldsAttnums[i] - 1;
 			Form_pg_attribute pk_attr = &index_descr->leafTupdesc->attrs[attnum];
 
 			for (int j = 0; j < scan->indexRelation->rd_att->natts; j++)
@@ -1317,10 +1317,10 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 	}
 	else
 	{
-		int nfields = index_descr->nFields;
+		int			nfields = index_descr->nFields;
 		OTableIndex *o_tbl_idx;
-		OTable *o_table;
-		int		i;
+		OTable	   *o_table;
+		int			i;
 
 		o_table = o_tables_get(index_descr->tableOids);
 		o_tbl_idx = &o_table->indices[o_scan->ixNum - 1];
@@ -1332,8 +1332,8 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 				TupleDescCopyEntry(scan->xs_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
 			else
 			{
-				int j;
-				int found = -1;
+				int			j;
+				int			found = -1;
 
 				for (j = 0; j < nfields; j++)
 				{
@@ -1355,12 +1355,12 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 	slot_getallattrs(slot);
 
 	/*
-		* moving values from duplicate field places that will be
-		* filled during index_form_tuple
-		*/
+	 * moving values from duplicate field places that will be filled during
+	 * index_form_tuple
+	 */
 	if (scan->xs_itupdesc->natts > index_descr->leafTupdesc->natts)
 	{
-		int skipped = scan->xs_itupdesc->natts - index_descr->leafTupdesc->natts;
+		int			skipped = scan->xs_itupdesc->natts - index_descr->leafTupdesc->natts;
 
 		for (int copy_to = scan->xs_itupdesc->natts - 1; copy_to >= 0; copy_to--)
 		{
@@ -1387,9 +1387,9 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 	{
 		OIndexDescr *primary = descr->indices[o_scan->ixNum];
 		OTableIndex *o_tbl_idx;
-		OTable *o_table;
-		int i;
-		int len = 0;
+		OTable	   *o_table;
+		int			i;
+		int			len = 0;
 
 		o_table = o_tables_get(primary->tableOids);
 		o_tbl_idx = &o_table->indices[o_scan->ixNum];
@@ -1435,7 +1435,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 
 	if (index_descr->primaryIsCtid)
 	{
-		OTableSlot *oslot = (OTableSlot *)slot;
+		OTableSlot *oslot = (OTableSlot *) slot;
 		ORowIdAddendumCtid addCtid;
 
 		addCtid.hint = *hint;
@@ -1444,11 +1444,11 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 
 		/* Ctid primary key: give hint + tid as rowid */
 		result_size = MAXALIGN(VARHDRSZ) +
-						MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-						sizeof(ItemPointerData);
-		rowid = (bytea *)MemoryContextAllocZero(slot->tts_mcxt, result_size);
+			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
+			sizeof(ItemPointerData);
+		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(rowid, result_size);
-		ptr = (Pointer)rowid + MAXALIGN(VARHDRSZ);
+		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
@@ -1456,23 +1456,22 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 	else
 	{
 		ORowIdAddendumNonCtid addNonCtid;
-		Datum *rowid_values;
-		bool *rowid_isnull;
-		Datum temp_rowid_values[2 * INDEX_MAX_KEYS];
-		bool temp_rowid_isnull[2 * INDEX_MAX_KEYS];
-		int i;
+		Datum	   *rowid_values;
+		bool	   *rowid_isnull;
+		Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
+		bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
+		int			i;
 
 		addNonCtid.hint = *hint;
 		addNonCtid.csn = tupleCsn;
 		addNonCtid.flags = tuple.formatFlags;
 
 		/*
-			* Amount of index fields checked in
-			* o_define_index_validate
-			*/
+		 * Amount of index fields checked in o_define_index_validate
+		 */
 		for (i = 0; i < index_descr->nPrimaryFields; i++)
 		{
-			AttrNumber attnum = index_descr->primaryFieldsAttnums[i] - 1;
+			AttrNumber	attnum = index_descr->primaryFieldsAttnums[i] - 1;
 
 			temp_rowid_values[i] = slot->tts_values[attnum];
 			temp_rowid_isnull[i] = slot->tts_isnull[attnum];
