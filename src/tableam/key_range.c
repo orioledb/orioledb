@@ -220,7 +220,12 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		}
 		else
 		{
-			o_fill_key_bounds(key->sk_argument, key->sk_subtype,
+			Oid type = key->sk_subtype;
+
+			if (!OidIsValid(type))
+				type = field->inputtype;
+
+			o_fill_key_bounds(key->sk_argument, type,
 							  setLow ? &low : NULL,
 							  setHigh ? &high : NULL,
 							  field);
