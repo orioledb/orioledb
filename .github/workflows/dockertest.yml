@@ -2,6 +2,8 @@ name: dockerTEST
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 defaults:
