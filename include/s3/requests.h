@@ -19,5 +19,6 @@ extern void s3_put_empty_dir(char *objectname);
 extern bool s3_put_file_part(char *objectname, char *filename, int partnum);
 extern void s3_get_file_part(char *objectname, char *filename, int partnum);
 extern void s3_get_object(char *objectname, StringInfo str);
+extern void s3_delete_object(char *objectname);
 
 #endif							/* __S3_REQUESTS_H__ */

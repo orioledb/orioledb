@@ -27,15 +27,14 @@
 #include "utils/builtins.h"
 #include "utils/wait_event.h"
 
-#define S3_LOCK_FILENAME    ORIOLEDB_DATA_DIR"/s3_lock"
+#define LOCK_FILENAME		ORIOLEDB_DATA_DIR "/s3_lock"
+#define S3_LOCK_FILENAME	"s3_lock"
 
 /*
  * Read local CheckpointControl file and the file from S3 and check if the
  * S3 bucket compatible with the local instance.
- *
- * Returns last checkpoint number.
  */
-uint32
+void
 s3_check_control(void)
 {
 	CheckpointControl control,
@@ -55,31 +54,29 @@ s3_check_control(void)
 	s3_control = (CheckpointControl *) &buf.data;
 	check_checkpoint_control(s3_control);
 
-	if (control.lastCheckpointNumber != s3_control->lastCheckpointNumber)
+	if (control.sysTreesStartPtr <= s3_control->sysTreesStartPtr)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("OrioleDB files on S3 bucket might be incompatible local files"),
-				 errdetail("OrioleDB checkpoint %d is different from S3 bucket checkpoint %d",
-						   control.lastCheckpointNumber,
-						   s3_control->lastCheckpointNumber)));
+				 errmsg("OrioleDB files on the S3 bucket might be incompatible local files"),
+				 errdetail("OrioleDB XLOG location " UINT64_FORMAT
+						   " is behind from the S3 bucket XLOG location " UINT64_FORMAT,
+						   control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
 
 	pfree(buf.data);
 	pfree(objectname);
-
-	return control.lastCheckpointNumber;
 }
 
 /*
  * Try to put a lock file into S3 bucket using conditional write.
  */
 void
-s3_put_lock_file(uint32 chkpNum)
+s3_put_lock_file(void)
 {
 	int			lock_file;
 	uint64		lock_identifier = 0;
 	char	   *objectname;
 
-	lock_file = BasicOpenFile(S3_LOCK_FILENAME, O_RDONLY | PG_BINARY);
+	lock_file = BasicOpenFile(LOCK_FILENAME, O_RDONLY | PG_BINARY);
 	if (lock_file >= 0)
 	{
 		if (read(lock_file, &lock_identifier,
@@ -87,7 +84,7 @@ s3_put_lock_file(uint32 chkpNum)
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not read data from lock file \"%s\"",
-							S3_LOCK_FILENAME)));
+							LOCK_FILENAME)));
 
 		close(lock_file);
 
@@ -104,7 +101,7 @@ s3_put_lock_file(uint32 chkpNum)
 		if (errno != ENOENT)
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("could not open file \"%s\": %m", S3_LOCK_FILENAME)));
+					 errmsg("could not open file \"%s\": %m", LOCK_FILENAME)));
 
 		/*
 		 * Calculate a lock identifier similar to how PostgreSQL calculates a
@@ -115,29 +112,29 @@ s3_put_lock_file(uint32 chkpNum)
 		lock_identifier |= ((uint64) tv.tv_usec) << 12;
 		lock_identifier |= getpid() & 0xFFF;
 
-		lock_file = BasicOpenFile(S3_LOCK_FILENAME, O_WRONLY | O_CREAT | PG_BINARY);
+		lock_file = BasicOpenFile(LOCK_FILENAME, O_WRONLY | O_CREAT | PG_BINARY);
 		if (lock_file < 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("could not create file \"%s\": %m", S3_LOCK_FILENAME)));
+					 errmsg("could not create file \"%s\": %m", LOCK_FILENAME)));
 
 		if (write(lock_file, &lock_identifier,
 				  sizeof(lock_identifier)) != sizeof(lock_identifier))
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not write file \"%s\": %m",
-							S3_LOCK_FILENAME)));
+							LOCK_FILENAME)));
 
 		if (pg_fsync(lock_file) != 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
 					 errmsg("could not fsync file \"%s\": %m",
-							S3_LOCK_FILENAME)));
+							LOCK_FILENAME)));
 
 		close(lock_file);
 	}
 
-	objectname = psprintf("data/%u/%s", chkpNum, S3_LOCK_FILENAME);
+	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
 	if (!s3_put_file(objectname, S3_LOCK_FILENAME, true))
 	{
 		StringInfoData buf;
@@ -163,6 +160,20 @@ s3_put_lock_file(uint32 chkpNum)
 
 		pfree(buf.data);
 	}
+
+	pfree(objectname);
+}
+
+/*
+ * Delete a lock file from an S3 bucket.
+ */
+void
+s3_delete_lock_file(void)
+{
+	char	   *objectname;
+
+	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
+	s3_delete_object(objectname);
 
 	pfree(objectname);
 }

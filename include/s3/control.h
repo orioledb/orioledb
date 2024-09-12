@@ -13,7 +13,8 @@
 #ifndef __S3_CONTROL_H__
 #define __S3_CONTROL_H__
 
-extern uint32 s3_check_control(void);
-extern void s3_put_lock_file(uint32 chkpNum);
+extern void s3_check_control(void);
+extern void s3_put_lock_file(void);
+extern void s3_delete_lock_file(void);
 
 #endif							/* __S3_CONTROL_H__ */

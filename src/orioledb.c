@@ -830,10 +830,8 @@ _PG_init(void)
 
 	if (orioledb_s3_mode)
 	{
-		uint32		chkpNum;
-
-		chkpNum = s3_check_control();
-		s3_put_lock_file(chkpNum);
+		s3_check_control();
+		s3_put_lock_file();
 	}
 
 	/* Register S3 workers */
@@ -1041,6 +1039,8 @@ orioledb_on_shmem_exit(int code, Datum arg)
 {
 	if (MyProc)
 		pg_atomic_write_u64(&oProcData[MyProc->pgprocno].xmin, InvalidOXid);
+
+	s3_delete_lock_file();
 }
 
 /*
