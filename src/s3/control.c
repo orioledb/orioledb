@@ -25,6 +25,7 @@
 
 #include "storage/fd.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/wait_event.h"
 
 #define LOCK_FILENAME		ORIOLEDB_DATA_DIR "/s3_lock"
@@ -42,7 +43,10 @@ s3_check_control(void)
 	StringInfoData buf;
 	char	   *objectname;
 
-	get_checkpoint_control_data(&control);
+	if (!get_checkpoint_control_data(&control))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FILE),
+				 errmsg("File \"%s\" doesn't exist", CONTROL_FILENAME)));
 
 	objectname = psprintf("data/%u/%s",
 						  control.lastCheckpointNumber,

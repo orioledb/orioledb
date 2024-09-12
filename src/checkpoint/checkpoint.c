@@ -306,7 +306,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		for (i = 0; i < XID_RECS_QUEUE_SIZE; i++)
 			checkpoint_state->xidRecQueue[i].oxid = InvalidOXid;
 
-		get_checkpoint_control_data(&control);
+		if (!get_checkpoint_control_data(&control))
+			return;
 
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;

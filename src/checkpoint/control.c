@@ -24,18 +24,25 @@
 
 /*
  * Read checkpoint control file data from the disk.
+ *
+ * Returns false if the control file doesn't exist.
  */
-void
+bool
 get_checkpoint_control_data(CheckpointControl *control)
 {
 	int			controlFile;
 
 	controlFile = BasicOpenFile(CONTROL_FILENAME, O_RDONLY | PG_BINARY);
 	if (controlFile < 0)
+	{
+		if (errno == ENOENT)
+			return false;
+
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not open file \"%s\": %m",
 						CONTROL_FILENAME)));
+	}
 
 	if (read(controlFile, (Pointer) control,
 			 sizeof(CheckpointControl)) != sizeof(CheckpointControl))
@@ -46,6 +53,8 @@ get_checkpoint_control_data(CheckpointControl *control)
 	close(controlFile);
 
 	check_checkpoint_control(control);
+
+	return true;
 }
 
 /*

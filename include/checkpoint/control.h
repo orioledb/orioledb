@@ -38,7 +38,7 @@ typedef struct
 
 #define CONTROL_FILENAME    ORIOLEDB_DATA_DIR"/control"
 
-extern void get_checkpoint_control_data(CheckpointControl *control);
+extern bool get_checkpoint_control_data(CheckpointControl *control);
 extern void check_checkpoint_control(CheckpointControl *control);
 extern void write_checkpoint_control(CheckpointControl *control);
 

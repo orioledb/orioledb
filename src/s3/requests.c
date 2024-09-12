@@ -542,8 +542,8 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	if (sc != 0 || http_code != 200 || strlen(buf.data) != 0)
 	{
 		/*
-		 * Return false if PUT failed to upload object it already exists in the
-		 * bucket.
+		 * Return false if PUT failed to upload object it already exists in
+		 * the bucket.
 		 */
 		if (ifNoneMatch && (http_code == 412 || http_code == 409))
 			res = false;
