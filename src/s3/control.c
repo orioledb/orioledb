@@ -47,7 +47,7 @@ s3_check_control(void)
 
 	objectname = psprintf("data/%u/%s",
 						  control.lastCheckpointNumber,
-						  S3_LOCK_FILENAME);
+						  CONTROL_FILENAME);
 
 	initStringInfo(&buf);
 	s3_get_object(objectname, &buf);
@@ -143,10 +143,23 @@ s3_put_lock_file(uint32 chkpNum)
 		StringInfoData buf;
 		uint64		s3_lock_identifier;
 
+		/*
+		 * The lock file exists on the S3 bucket. In this case check its lock
+		 * identifier. If it is same as the local identifier then proceed with
+		 * startup.
+		 */
 		initStringInfo(&buf);
 		s3_get_object(objectname, &buf);
 
 		s3_lock_identifier = uint64in_subr(buf.data, NULL, "lock_identifier", NULL);
+
+		if (lock_identifier != s3_lock_identifier)
+			ereport(FATAL,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("A lock file from a different OrioleDB instance already exists on the S3 bucket"),
+					 errdetail("The local lock identifier " UINT64_FORMAT " is "
+							   "different from the S3 bucket identifier " UINT64_FORMAT,
+							   lock_identifier, s3_lock_identifier)));
 
 		pfree(buf.data);
 	}
