@@ -68,7 +68,7 @@ check_checkpoint_control(CheckpointControl *control)
 	pg_crc32c	crc;
 
 	INIT_CRC32C(crc);
-	COMP_CRC32C(crc, &control, offsetof(CheckpointControl, crc));
+	COMP_CRC32C(crc, control, offsetof(CheckpointControl, crc));
 	FIN_CRC32C(crc);
 
 	if (crc != control->crc)
