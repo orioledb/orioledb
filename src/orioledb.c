@@ -1040,7 +1040,8 @@ orioledb_on_shmem_exit(int code, Datum arg)
 	if (MyProc)
 		pg_atomic_write_u64(&oProcData[MyProc->pgprocno].xmin, InvalidOXid);
 
-	s3_delete_lock_file();
+	if (orioledb_s3_mode)
+		s3_delete_lock_file();
 }
 
 /*
