@@ -830,8 +830,8 @@ _PG_init(void)
 
 	if (orioledb_s3_mode)
 	{
-		s3_check_control();
 		s3_put_lock_file();
+		s3_check_control();
 	}
 
 	/* Register S3 workers */

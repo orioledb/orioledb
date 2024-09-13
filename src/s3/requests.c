@@ -172,9 +172,12 @@ write_data_to_buf(void *buffer, size_t size, size_t nmemb, void *userp)
 
 /*
  * Get the binary content of an object from S3 into 'str'.
+ *
+ * Returns true if the object was retrieved and false if the object doesn't
+ * exist.
  */
-void
-s3_get_object(char *objectname, StringInfo str)
+bool
+s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 {
 	CURL	   *curl;
 	char	   *url;
@@ -188,6 +191,7 @@ s3_get_object(char *objectname, StringInfo str)
 	char	   *contenthash;
 	char	   *objectpath = objectname;
 	long		http_code = 0;
+	bool		res = true;
 
 	(void) SHA256(NULL, 0, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
@@ -234,10 +238,13 @@ s3_get_object(char *objectname, StringInfo str)
 
 	if (sc != 0 || http_code != 200)
 	{
-		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
-						errmsg("could not get object from S3"),
-						errdetail("return code = %d, http code = %ld, response = %s",
-								  sc, http_code, str->data)));
+		if (missing_ok && http_code == 404)
+			res = false;
+		else
+			ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+							errmsg("could not get object from S3"),
+							errdetail("return code = %d, http code = %ld, response = %s",
+									  sc, http_code, str->data)));
 	}
 
 	curl_easy_cleanup(curl);
@@ -249,6 +256,8 @@ s3_get_object(char *objectname, StringInfo str)
 	pfree(signature);
 	if (objectpath != objectname)
 		pfree(objectpath);
+
+	return res;
 }
 
 /*
@@ -262,7 +271,7 @@ s3_get(PG_FUNCTION_ARGS)
 
 	initStringInfo(&buf);
 
-	s3_get_object(text_to_cstring(PG_GETARG_TEXT_PP(0)), &buf);
+	s3_get_object(text_to_cstring(PG_GETARG_TEXT_PP(0)), &buf, false);
 
 	PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
@@ -594,7 +603,7 @@ s3_get_file(char *objectname, char *filename)
 	StringInfoData buf;
 
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf);
+	s3_get_object(objectname, &buf, false);
 
 	write_file(filename,
 			   (Pointer) buf.data,
@@ -630,7 +639,7 @@ s3_get_file_part(char *objectname, char *filename, int partnum)
 	StringInfoData buf;
 
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf);
+	s3_get_object(objectname, &buf, false);
 
 	write_file_part(filename,
 					partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,

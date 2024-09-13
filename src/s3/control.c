@@ -44,16 +44,24 @@ s3_check_control(void)
 	char	   *objectname;
 
 	if (!get_checkpoint_control_data(&control))
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_FILE),
-				 errmsg("File \"%s\" doesn't exist", CONTROL_FILENAME)));
+		return;
 
 	objectname = psprintf("data/%u/%s",
 						  control.lastCheckpointNumber,
 						  CONTROL_FILENAME);
-
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf);
+	if (!s3_get_object(objectname, &buf, true))
+	{
+		pfree(buf.data);
+		pfree(objectname);
+		return;
+	}
+
+	if (buf.len != sizeof(CheckpointControl))
+		ereport(FATAL,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("Invalid control file \"%s\" in the S3 bucket",
+						objectname)));
 
 	s3_control = (CheckpointControl *) &buf.data;
 	check_checkpoint_control(s3_control);
@@ -139,7 +147,7 @@ s3_put_lock_file(void)
 	}
 
 	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
-	if (!s3_put_file(objectname, S3_LOCK_FILENAME, true))
+	if (!s3_put_file(objectname, LOCK_FILENAME, true))
 	{
 		StringInfoData buf;
 		uint64		s3_lock_identifier;
@@ -150,8 +158,8 @@ s3_put_lock_file(void)
 		 * startup.
 		 */
 		initStringInfo(&buf);
-		s3_get_object(objectname, &buf);
 
+		s3_get_object(objectname, &buf, false);
 		s3_lock_identifier = uint64in_subr(buf.data, NULL, "lock_identifier", NULL);
 
 		if (lock_identifier != s3_lock_identifier)
