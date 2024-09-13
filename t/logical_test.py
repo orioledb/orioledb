@@ -11,7 +11,6 @@ from testgres.utils import get_pg_config
 from .base_test import BaseTest
 
 
-@staticmethod
 def extension_installed(name: str) -> bool:
 	if sys.platform.startswith("win") or sys.platform.startswith("cygwin"):
 		dlsuffix = 'dll'
