@@ -52,7 +52,7 @@ class S3Test(S3BaseTest):
 		objects = objects.get("Contents", [])
 		objects = sorted(list(x["Key"] for x in objects))
 		self.assertEqual(objects,
-		                 ['5/LICENSE', 'LICENSE', 'wal/314159', 'wal/926535'])
+		                 ['5/LICENSE', 'LICENSE', 'data/s3_lock', 'wal/314159', 'wal/926535'])
 		object = self.client.get_object(Bucket=self.bucket_name,
 		                                Key="5/LICENSE")
 		boto_object_body = object["Body"].readlines()
@@ -87,7 +87,7 @@ class S3Test(S3BaseTest):
 		message = log[0].split('] ')[-1].strip()
 		self.assertEqual(
 		    message,
-		    "FATAL:  could not list objects in S3 bucket, check orioledb s3 configs"
+		    "FATAL:  could not put object to S3"
 		)
 
 	def test_s3_checkpoint(self):

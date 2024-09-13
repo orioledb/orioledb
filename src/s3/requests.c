@@ -13,6 +13,9 @@
 
 #include "postgres.h"
 
+#include <stdbool.h>
+#include <unistd.h>
+
 #include "orioledb.h"
 
 #include "s3/requests.h"
@@ -24,7 +27,6 @@
 #include "curl/curl.h"
 #include "openssl/hmac.h"
 #include "openssl/sha.h"
-#include <stdbool.h>
 
 PG_FUNCTION_INFO_V1(s3_get);
 PG_FUNCTION_INFO_V1(s3_put);
@@ -368,12 +370,12 @@ static Pointer
 read_file_part(const char *filename, uint64 offset,
 			   uint64 maxSize, uint64 *size)
 {
-	File		file;
+	int			file;
 	Pointer		buffer,
 				ptr;
 	uint64		totalSize;
 
-	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	file = BasicOpenFile(filename, O_RDONLY | PG_BINARY);
 	if (file < 0)
 	{
 		ereport(WARNING,
@@ -382,7 +384,7 @@ read_file_part(const char *filename, uint64 offset,
 		return NULL;
 	}
 
-	totalSize = FileSize(file);
+	totalSize = lseek(file, 0, SEEK_END);
 	totalSize = Min(totalSize, offset + maxSize);
 	*size = Max(totalSize, offset) - offset;
 	buffer = (Pointer) MemoryContextAllocHuge(CurrentMemoryContext, *size);
@@ -393,7 +395,9 @@ read_file_part(const char *filename, uint64 offset,
 		int			amount = Min(totalSize - offset, BLCKSZ);
 		int			rc;
 
-		rc = FileRead(file, ptr, amount, offset, WAIT_EVENT_DATA_FILE_READ);
+		pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_READ);
+		rc = pg_pread(file, ptr, amount, offset);
+		pgstat_report_wait_end();
 
 		if (rc < 0)
 		{
@@ -414,7 +418,10 @@ read_file_part(const char *filename, uint64 offset,
 		ptr += amount;
 	}
 
-	FileClose(file);
+	if (close(file) != 0)
+		ereport(PANIC,
+				(errcode_for_file_access(),
+				 errmsg("could not close file \"%s\": %m", filename)));
 
 	return buffer;
 }

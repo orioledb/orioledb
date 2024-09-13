@@ -63,10 +63,10 @@ s3_check_control(void)
 				 errmsg("Invalid control file \"%s\" in the S3 bucket",
 						objectname)));
 
-	s3_control = (CheckpointControl *) &buf.data;
+	s3_control = (CheckpointControl *) buf.data;
 	check_checkpoint_control(s3_control);
 
-	if (control.sysTreesStartPtr <= s3_control->sysTreesStartPtr)
+	if (control.sysTreesStartPtr < s3_control->sysTreesStartPtr)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("OrioleDB files on the S3 bucket might be incompatible local files"),
@@ -185,7 +185,10 @@ s3_delete_lock_file(void)
 	char	   *objectname;
 
 	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
+
+	pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_WRITE_UPDATE);
 	s3_delete_object(objectname);
+	pgstat_report_wait_end();
 
 	pfree(objectname);
 }
