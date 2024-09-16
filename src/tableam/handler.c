@@ -183,6 +183,10 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 							 PrimaryIndexNumber, true, &hint);
 	slot->tts_tableOid = descr->oids.reloid;
 
+	/* FIXME? */
+	if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
+		snapshot->xmin = snapshot->xmax = InvalidTransactionId;
+
 	return true;
 }
 
