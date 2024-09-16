@@ -6,18 +6,18 @@ on:
   workflow_dispatch:
     inputs:
       tags:
-        description: 'Dockerhub tags'
+        description: "Dockerhub tags"
         required: false
-        default: ''
+        default: ""
 
 jobs:
   push_to_registry:
     strategy:
       fail-fast: true
       matrix:
-        postgres: [16, 15]
+        postgres: [16]
         compiler: [clang]
-        distr:  [alpine, ubuntu]
+        distr: [alpine, ubuntu]
         include:
           - distr-version: 3.19
             distr: alpine

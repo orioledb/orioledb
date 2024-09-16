@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       long:
-        description: '3 hours'
+        description: "3 hours"
         required: true
         type: boolean
         default: true
@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        pg_version: [13, 14, 15]
+        pg_version: [16]
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v4
