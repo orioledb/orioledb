@@ -220,7 +220,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		}
 		else
 		{
-			Oid type = key->sk_subtype;
+			Oid			type = key->sk_subtype;
 
 			if (!OidIsValid(type))
 				type = field->inputtype;
