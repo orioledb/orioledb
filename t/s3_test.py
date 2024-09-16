@@ -636,3 +636,51 @@ class S3Test(S3BaseTest):
 			objects = objects.get("Contents", [])
 			objects = sorted(list(x["Key"] for x in objects))
 			self.assertNotIn('data/s3_lock', objects)
+
+	def test_s3_control_consistency(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			objects = self.client.list_objects(Bucket=self.bucket_name)
+			objects = objects.get("Contents", [])
+			objects = sorted(list(x["Key"] for x in objects))
+			self.assertIn('data/s3_lock', objects)
+
+			with self.getReplica() as new_node:
+				# Remove the lock file since pg_basebackup will copy it
+				os.remove(
+				    os.path.join(new_node.data_dir, "orioledb_data",
+				                 "s3_lock"))
+
+				node.stop()
+
+				objects = self.client.list_objects(Bucket=self.bucket_name)
+				objects = objects.get("Contents", [])
+				objects = sorted(list(x["Key"] for x in objects))
+				self.assertNotIn('data/s3_lock', objects)
+
+				new_node.start()
+
+				objects = self.client.list_objects(Bucket=self.bucket_name)
+				objects = objects.get("Contents", [])
+				objects = sorted(list(x["Key"] for x in objects))
+				self.assertIn('data/s3_lock', objects)
+
+				new_node.stop()
+				new_node.cleanup()
