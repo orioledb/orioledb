@@ -175,7 +175,6 @@ assign_new_oids(OTable *oTable, Relation rel)
 		List	   *indexIds;
 		char		persistence;
 		ListCell   *indexId;
-		int			i;
 
 		in_indexes_rebuild = true;
 		params.options = 0;
@@ -188,7 +187,6 @@ assign_new_oids(OTable *oTable, Relation rel)
 		persistence = rel->rd_rel->relpersistence;
 
 		/* Reindex all the indexes. */
-		i = 1;
 		foreach(indexId, indexIds)
 		{
 			Oid			indexOid = lfirst_oid(indexId);
@@ -196,7 +194,6 @@ assign_new_oids(OTable *oTable, Relation rel)
 
 			RelationSetNewRelfilenode(iRel, persistence);
 			index_close(iRel, AccessExclusiveLock);
-			i++;
 		}
 
 		/*
