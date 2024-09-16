@@ -344,7 +344,7 @@ s3_delete_object(char *objectname)
 	sc = curl_easy_perform(curl);
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0 || http_code != 200 || strlen(buf.data) != 0)
+	if (sc != 0 || http_code != 204 || strlen(buf.data) != 0)
 		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
 						errmsg("could not delete object from S3"),
 						errdetail("return code = %d, http code = %ld, response = %s",
