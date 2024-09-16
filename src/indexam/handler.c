@@ -1525,7 +1525,13 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	CommitSeqNo tupleCsn;
 
 	o_scan->scanDir = dir;
-	o_scan->csn = scan->xs_snapshot->snapshotcsn;
+
+	if (scan->xs_snapshot->snapshot_type == SNAPSHOT_DIRTY)
+		o_scan->csn = COMMITSEQNO_INPROGRESS;
+	else if (scan->xs_snapshot->snapshot_type == SNAPSHOT_NON_VACUUMABLE)
+		o_scan->csn = COMMITSEQNO_NON_DELETED;
+	else
+		o_scan->csn = scan->xs_snapshot->snapshotcsn;
 
 	/* btree indexes are never lossy */
 	scan->xs_recheck = false;
