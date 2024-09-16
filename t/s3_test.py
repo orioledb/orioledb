@@ -4,6 +4,13 @@ import time
 import signal
 from tempfile import mkdtemp, mkstemp
 
+# import moto
+from moto.s3.responses import S3Response
+from moto.s3.exceptions import PreconditionFailed
+from moto.core.common_types import TYPE_RESPONSE
+
+from unittest.mock import patch
+
 import testgres
 from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
@@ -16,6 +23,21 @@ log.setLevel(logging.ERROR)
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
+# Patch moto[s3]'s put_object() until it releases support "If-None-Match".
+# Relevant PR was merged https://github.com/getmoto/moto/pull/8109 but wasn't
+# released yet.
+orig_put_object = S3Response.put_object
+def mock_put_object(self) -> TYPE_RESPONSE:
+	key_name = self.parse_key_name()
+	if_none_match = self.headers.get("If-None-Match")
+
+	if (
+		if_none_match == "*"
+		and self.backend.get_object(self.bucket_name, key_name) is not None
+	):
+		raise PreconditionFailed("If-None-Match")
+
+	return orig_put_object(self)
 
 class S3Test(S3BaseTest):
 
@@ -51,8 +73,9 @@ class S3Test(S3BaseTest):
 		objects = self.client.list_objects(Bucket=self.bucket_name)
 		objects = objects.get("Contents", [])
 		objects = sorted(list(x["Key"] for x in objects))
-		self.assertEqual(objects,
-		                 ['5/LICENSE', 'LICENSE', 'data/s3_lock', 'wal/314159', 'wal/926535'])
+		self.assertEqual(objects, [
+			'5/LICENSE', 'LICENSE', 'data/s3_lock', 'wal/314159', 'wal/926535'
+		])
 		object = self.client.get_object(Bucket=self.bucket_name,
 		                                Key="5/LICENSE")
 		boto_object_body = object["Body"].readlines()
@@ -85,10 +108,7 @@ class S3Test(S3BaseTest):
 		with open(node.pg_log_file) as f:
 			log = f.readlines()
 		message = log[0].split('] ')[-1].strip()
-		self.assertEqual(
-		    message,
-		    "FATAL:  could not put object to S3"
-		)
+		self.assertEqual(message, "FATAL:  could not put object to S3")
 
 	def test_s3_checkpoint(self):
 		node = self.node
@@ -564,3 +584,49 @@ class S3Test(S3BaseTest):
 			new_node.stop()
 			new_node.cleanup()
 		node.stop()
+
+	def test_s3_lock_file(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object", new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			objects = self.client.list_objects(Bucket=self.bucket_name)
+			objects = objects.get("Contents", [])
+			objects = sorted(list(x["Key"] for x in objects))
+			self.assertIn('data/s3_lock', objects)
+
+			with self.getReplica() as new_node:
+				# Remove the lock file since pg_basebackup will copy it
+				os.remove(os.path.join(new_node.data_dir, "orioledb_data", "s3_lock"))
+
+				with self.assertRaises(StartNodeException) as e:
+					new_node.start()
+				self.assertEqual(e.exception.message, "Cannot start node")
+				with open(new_node.pg_log_file) as f:
+					log = f.readlines()
+				message = log[0].split('] ')[-1].strip()
+				self.assertEqual(message,
+					"FATAL:  A lock file from a different OrioleDB instance already exists on the S3 bucket")
+
+				new_node.cleanup();
+
+			node.stop()
+
+			objects = self.client.list_objects(Bucket=self.bucket_name)
+			objects = objects.get("Contents", [])
+			objects = sorted(list(x["Key"] for x in objects))
+			self.assertNotIn('data/s3_lock', objects)

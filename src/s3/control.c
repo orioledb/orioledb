@@ -146,6 +146,8 @@ s3_put_lock_file(void)
 		close(lock_file);
 	}
 
+	elog(DEBUG1, "lock_identifier: " UINT64_FORMAT, lock_identifier);
+
 	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
 	if (!s3_put_file(objectname, LOCK_FILENAME, true))
 	{
@@ -160,7 +162,14 @@ s3_put_lock_file(void)
 		initStringInfo(&buf);
 
 		s3_get_object(objectname, &buf, false);
-		s3_lock_identifier = uint64in_subr(buf.data, NULL, "lock_identifier", NULL);
+
+		if (buf.len != sizeof(s3_lock_identifier))
+			ereport(FATAL,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("Invalid lock identifier \"%s\" in the S3 bucket",
+							objectname)));
+
+		memcpy((char *) &s3_lock_identifier, buf.data, sizeof(s3_lock_identifier));
 
 		if (lock_identifier != s3_lock_identifier)
 			ereport(FATAL,
