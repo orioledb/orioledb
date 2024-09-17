@@ -287,6 +287,25 @@ s3process_task(uint64 taskLocation)
 		pfree(filename);
 		pfree(objectname);
 	}
+	else if (task->type == S3TaskTypeWriteRootFile)
+	{
+		char	   *filename = task->typeSpecific.writeRootFile.filename;
+		bool		result;
+
+		if (filename[0] == '.' && filename[1] == '/')
+			filename += 2;
+
+		objectname = psprintf("data/%s", filename);
+
+		elog(DEBUG1, "S3 put %s %s", objectname, filename);
+
+		result = s3_put_file(objectname, filename, false);
+
+		pfree(objectname);
+
+		if (result && task->typeSpecific.writeRootFile.delete)
+			unlink(filename);
+	}
 
 	pfree(task);
 
@@ -532,6 +551,34 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 	}
 
 	return result;
+}
+
+/*
+ * Schedule a synchronization of given file to S3.
+ */
+S3TaskLocation
+s3_schedule_root_file_write(char *filename, bool delete)
+{
+	S3Task	   *task;
+	int			filenameLen,
+				taskLen;
+	S3TaskLocation location;
+
+	filenameLen = strlen(filename);
+	taskLen = INTALIGN(offsetof(S3Task, typeSpecific.writeRootFile.filename) + filenameLen + 1);
+	task = (S3Task *) palloc0(taskLen);
+	task->type = S3TaskTypeWriteRootFile;
+	task->typeSpecific.writeRootFile.delete = delete;
+	memcpy(task->typeSpecific.writeRootFile.filename, filename, filenameLen + 1);
+
+	location = s3_queue_put_task((Pointer) task, taskLen);
+
+	elog(DEBUG1, "S3 schedule root file write: %s %u (%llu)",
+		 filename, delete ? 1 : 0, (unsigned long long) location);
+
+	pfree(task);
+
+	return location;
 }
 
 void

@@ -1504,6 +1504,8 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 	maxLocation = Max(maxLocation, location);
 	location = s3_schedule_file_write(chkpNum, CONTROL_FILENAME, false);
 	maxLocation = Max(maxLocation, location);
+	location = s3_schedule_root_file_write(CONTROL_FILENAME, false);
+	maxLocation = Max(maxLocation, location);
 	s3_queue_wait_for_location(maxLocation);
 }
 

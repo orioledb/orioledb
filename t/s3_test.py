@@ -27,8 +27,6 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 # Relevant PR was merged https://github.com/getmoto/moto/pull/8109 but wasn't
 # released yet.
 orig_put_object = S3Response.put_object
-
-
 def mock_put_object(self) -> TYPE_RESPONSE:
 	key_name = self.parse_key_name()
 	if_none_match = self.headers.get("If-None-Match")
@@ -75,7 +73,7 @@ class S3Test(S3BaseTest):
 		objects = objects.get("Contents", [])
 		objects = sorted(list(x["Key"] for x in objects))
 		self.assertEqual(objects, [
-		    '5/LICENSE', 'LICENSE', 'data/s3_lock', 'wal/314159', 'wal/926535'
+		    '5/LICENSE', 'LICENSE', 'data/orioledb_data/s3_lock', 'wal/314159', 'wal/926535'
 		])
 		object = self.client.get_object(Bucket=self.bucket_name,
 		                                Key="5/LICENSE")
@@ -609,7 +607,7 @@ class S3Test(S3BaseTest):
 			objects = self.client.list_objects(Bucket=self.bucket_name)
 			objects = objects.get("Contents", [])
 			objects = sorted(list(x["Key"] for x in objects))
-			self.assertIn('data/s3_lock', objects)
+			self.assertIn('data/orioledb_data/s3_lock', objects)
 
 			with self.getReplica() as new_node:
 				# Remove the lock file since pg_basebackup will copy it
@@ -635,7 +633,7 @@ class S3Test(S3BaseTest):
 			objects = self.client.list_objects(Bucket=self.bucket_name)
 			objects = objects.get("Contents", [])
 			objects = sorted(list(x["Key"] for x in objects))
-			self.assertNotIn('data/s3_lock', objects)
+			self.assertNotIn('data/orioledb_data/s3_lock', objects)
 
 	def test_s3_control_consistency(self):
 		node = self.node
@@ -660,7 +658,7 @@ class S3Test(S3BaseTest):
 			objects = self.client.list_objects(Bucket=self.bucket_name)
 			objects = objects.get("Contents", [])
 			objects = sorted(list(x["Key"] for x in objects))
-			self.assertIn('data/s3_lock', objects)
+			self.assertIn('data/orioledb_data/s3_lock', objects)
 
 			with self.getReplica() as new_node:
 				# Remove the lock file since pg_basebackup will copy it
@@ -668,19 +666,67 @@ class S3Test(S3BaseTest):
 				    os.path.join(new_node.data_dir, "orioledb_data",
 				                 "s3_lock"))
 
-				node.stop()
+				node.stop(["-m", "immediate"])
 
 				objects = self.client.list_objects(Bucket=self.bucket_name)
 				objects = objects.get("Contents", [])
 				objects = sorted(list(x["Key"] for x in objects))
-				self.assertNotIn('data/s3_lock', objects)
+				self.assertNotIn('data/orioledb_data/s3_lock', objects)
 
 				new_node.start()
 
 				objects = self.client.list_objects(Bucket=self.bucket_name)
 				objects = objects.get("Contents", [])
 				objects = sorted(list(x["Key"] for x in objects))
-				self.assertIn('data/s3_lock', objects)
+				self.assertIn('data/orioledb_data/s3_lock', objects)
 
 				new_node.stop()
+				new_node.cleanup()
+
+	def test_s3_control_inconsistency(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			with self.getReplica() as new_node:
+				# Remove the lock file since pg_basebackup will copy it
+				os.remove(
+				    os.path.join(new_node.data_dir, "orioledb_data",
+				                 "s3_lock"))
+
+				node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+				node.safe_psql("""
+					CREATE TABLE o_test (
+						val_1 int
+					) USING orioledb;
+					INSERT INTO o_test SELECT * FROM generate_series(1, 5);
+				""")
+				node.stop()
+
+				with self.assertRaises(StartNodeException) as e:
+					new_node.start()
+				self.assertEqual(e.exception.message, "Cannot start node")
+				with open(new_node.pg_log_file) as f:
+					log = f.readlines()
+				message = log[0].split('] ')[-1].strip()
+				self.assertEqual(
+				    message,
+				    "FATAL:  OrioleDB files on the S3 bucket might be incompatible with local files"
+				)
+
 				new_node.cleanup()

@@ -29,7 +29,6 @@
 #include "utils/wait_event.h"
 
 #define LOCK_FILENAME		ORIOLEDB_DATA_DIR "/s3_lock"
-#define S3_LOCK_FILENAME	"s3_lock"
 
 /*
  * Read local CheckpointControl file and the file from S3 and check if the
@@ -46,9 +45,8 @@ s3_check_control(void)
 	if (!get_checkpoint_control_data(&control))
 		return;
 
-	objectname = psprintf("data/%u/%s",
-						  control.lastCheckpointNumber,
-						  CONTROL_FILENAME);
+	objectname = psprintf("data/%s", CONTROL_FILENAME);
+
 	initStringInfo(&buf);
 	if (!s3_get_object(objectname, &buf, true))
 	{
@@ -66,10 +64,18 @@ s3_check_control(void)
 	s3_control = (CheckpointControl *) buf.data;
 	check_checkpoint_control(s3_control);
 
+	if (control.lastCheckpointNumber != s3_control->lastCheckpointNumber)
+		ereport(FATAL,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("OrioleDB files on the S3 bucket might be incompatible with local files"),
+				 errdetail("OrioleDB last checkpoint number %u"
+						   " is different from the S3 bucket last checkpoint number %u",
+						   control.lastCheckpointNumber, s3_control->lastCheckpointNumber)));
+
 	if (control.sysTreesStartPtr < s3_control->sysTreesStartPtr)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("OrioleDB files on the S3 bucket might be incompatible local files"),
+				 errmsg("OrioleDB files on the S3 bucket might be incompatible with local files"),
 				 errdetail("OrioleDB XLOG location " UINT64_FORMAT
 						   " is behind from the S3 bucket XLOG location " UINT64_FORMAT,
 						   control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
@@ -148,7 +154,7 @@ s3_put_lock_file(void)
 
 	elog(DEBUG1, "lock_identifier: " UINT64_FORMAT, lock_identifier);
 
-	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
+	objectname = psprintf("data/%s", LOCK_FILENAME);
 	if (!s3_put_file(objectname, LOCK_FILENAME, true))
 	{
 		StringInfoData buf;
@@ -193,7 +199,7 @@ s3_delete_lock_file(void)
 {
 	char	   *objectname;
 
-	objectname = psprintf("data/%s", S3_LOCK_FILENAME);
+	objectname = psprintf("data/%s", LOCK_FILENAME);
 
 	pgstat_report_wait_start(WAIT_EVENT_CONTROL_FILE_WRITE_UPDATE);
 	s3_delete_object(objectname);
