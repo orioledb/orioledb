@@ -439,7 +439,12 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	for (int copy_from = 0; copy_from < rel->rd_att->natts; copy_from++)
 	{
 		Form_pg_attribute orig_attr = &rel->rd_att->attrs[copy_from];
-		Form_pg_attribute idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
+		Form_pg_attribute idx_attr;
+
+		if (copy_from - skipped >= index_descr->leafTupdesc->natts)
+			break;
+
+		idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
 
 		if (strncmp(orig_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
 		{
