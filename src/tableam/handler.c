@@ -414,6 +414,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
+	CommitSeqNo csn = snapshot ? snapshot->snapshotcsn : COMMITSEQNO_INPROGRESS;
 
 	descr = relation_get_descr(relation);
 
@@ -436,7 +437,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL);
 
 	mres = o_tbl_delete(descr, &pkey, oxid,
-						snapshot->snapshotcsn, &hint, &marg);
+						csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
@@ -500,6 +501,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
+	CommitSeqNo csn = snapshot ? snapshot->snapshotcsn : COMMITSEQNO_INPROGRESS;
 
 	descr = relation_get_descr(relation);
 
@@ -534,7 +536,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 											   INDEX_ATTR_BITMAP_KEY);
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation,
-						oxid, snapshot->snapshotcsn, &hint, &marg);
+						oxid, csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
