@@ -58,6 +58,7 @@ class BaseTest(unittest.TestCase):
 				name = name[:-8]
 			elif name.endswith('.py'):
 				name = name[:-3]
+			name = name + '-' + self.id().split('.')[-1].removeprefix('test_')
 			self._myName = name
 		return self._myName
 
