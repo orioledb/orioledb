@@ -3,7 +3,7 @@
  * checkpoint.h
  *		Declarations for S3 checkpointing.
  *
- * Copyright (c) 2024, OrioleDATA Inc.
+ * Copyright (c) 2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/s3/checkpoint.h
