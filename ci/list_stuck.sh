@@ -30,7 +30,7 @@ for process in $(pgrep memcheck); do
         if [[ $psout == *"/postgres"* ]]; then
             echo ::group::{Backtrace VALGRIND $psout}
             echo -e $psout
-            gdb --batch --quiet -ex "target remote | vgdb --pid=$process" -ex "thread apply all bt full" -ex "quit" $(which postgres)
+            gdb --batch --quiet -ex "target remote | vgdb --pid=$process" -ex "thread apply all bt full" -ex "detach" $(which postgres)
             echo ::endgroup::
             if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
                 logfile="/tmp/${BASH_REMATCH[1]}/logs/postgresql.log"
