@@ -16,6 +16,9 @@ from urllib3.util import connection
 import boto3
 from botocore.config import Config
 from moto.server import DomainDispatcherApplication, create_backend_app
+from moto.s3.responses import S3Response
+from moto.s3.exceptions import PreconditionFailed
+from moto.core.common_types import TYPE_RESPONSE
 
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
 import urllib3
@@ -33,6 +36,23 @@ def s3_test_attrs(**_):
 		return fn
 
 	return attr_decorator
+
+
+orig_put_object = S3Response.put_object
+
+
+# Patch moto[s3]'s put_object() until it releases support "If-None-Match".
+# Relevant PR was merged https://github.com/getmoto/moto/pull/8109 but wasn't
+# released yet.
+def mock_put_object(self) -> TYPE_RESPONSE:
+	key_name = self.parse_key_name()
+	if_none_match = self.headers.get("If-None-Match")
+
+	if (if_none_match == "*"
+	    and self.backend.get_object(self.bucket_name, key_name) is not None):
+		raise PreconditionFailed("If-None-Match")
+
+	return orig_put_object(self)
 
 
 class S3BaseTest(BaseTest):

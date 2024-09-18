@@ -1,13 +1,9 @@
 import logging
 import os
 import time
+import shutil
 import signal
 from tempfile import mkdtemp, mkstemp
-
-# import moto
-from moto.s3.responses import S3Response
-from moto.s3.exceptions import PreconditionFailed
-from moto.core.common_types import TYPE_RESPONSE
 
 from unittest.mock import patch
 
@@ -16,26 +12,12 @@ from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException
 
-from .s3_base_test import S3BaseTest, s3_test_attrs
+from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
-
-# Patch moto[s3]'s put_object() until it releases support "If-None-Match".
-# Relevant PR was merged https://github.com/getmoto/moto/pull/8109 but wasn't
-# released yet.
-orig_put_object = S3Response.put_object
-def mock_put_object(self) -> TYPE_RESPONSE:
-	key_name = self.parse_key_name()
-	if_none_match = self.headers.get("If-None-Match")
-
-	if (if_none_match == "*"
-	    and self.backend.get_object(self.bucket_name, key_name) is not None):
-		raise PreconditionFailed("If-None-Match")
-
-	return orig_put_object(self)
 
 
 class S3Test(S3BaseTest):
@@ -73,7 +55,8 @@ class S3Test(S3BaseTest):
 		objects = objects.get("Contents", [])
 		objects = sorted(list(x["Key"] for x in objects))
 		self.assertEqual(objects, [
-		    '5/LICENSE', 'LICENSE', 'data/orioledb_data/s3_lock', 'wal/314159', 'wal/926535'
+		    '5/LICENSE', 'LICENSE', 'data/orioledb_data/s3_lock', 'wal/314159',
+		    'wal/926535'
 		])
 		object = self.client.get_object(Bucket=self.bucket_name,
 		                                Key="5/LICENSE")
@@ -584,6 +567,94 @@ class S3Test(S3BaseTest):
 			new_node.cleanup()
 		node.stop()
 
+	def test_s3_check_control(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			control_filename = os.path.join(node.data_dir, "orioledb_data",
+			                                "control")
+			shutil.copy(control_filename, f"{control_filename}.copy")
+
+			node.stop()
+
+			with open(control_filename, "w+") as f:
+				f.truncate(10)
+
+			# Test that PostgreSQL won't start in case of corrupted control file
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    "FATAL:  could not read data from control file orioledb_data/control",
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of different checkpoint number
+			shutil.copy(f"{control_filename}.copy", control_filename)
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    "FATAL:  OrioleDB files on the S3 bucket might be incompatible with local files",
+				    f.read())
+
+	def test_s3_put_lock_file(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+
+			lock_filename = os.path.join(node.data_dir, "orioledb_data",
+			                             "s3_lock")
+			shutil.copy(lock_filename, f"{lock_filename}.copy")
+
+			node.stop()
+
+			with open(lock_filename, "w+") as f:
+				f.truncate(0)
+
+			# Test that PostgreSQL won't start in case of corrupted lock file
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not read data from lock file "orioledb_data/s3_lock"',
+				    f.read())
+
 	def test_s3_lock_file(self):
 		node = self.node
 		node.append_conf(f"""
@@ -608,6 +679,7 @@ class S3Test(S3BaseTest):
 			objects = objects.get("Contents", [])
 			objects = sorted(list(x["Key"] for x in objects))
 			self.assertIn('data/orioledb_data/s3_lock', objects)
+			self.assertIn('data/orioledb_data/control', objects)
 
 			with self.getReplica() as new_node:
 				# Remove the lock file since pg_basebackup will copy it
@@ -659,6 +731,7 @@ class S3Test(S3BaseTest):
 			objects = objects.get("Contents", [])
 			objects = sorted(list(x["Key"] for x in objects))
 			self.assertIn('data/orioledb_data/s3_lock', objects)
+			self.assertIn('data/orioledb_data/control', objects)
 
 			with self.getReplica() as new_node:
 				# Remove the lock file since pg_basebackup will copy it
@@ -672,6 +745,7 @@ class S3Test(S3BaseTest):
 				objects = objects.get("Contents", [])
 				objects = sorted(list(x["Key"] for x in objects))
 				self.assertNotIn('data/orioledb_data/s3_lock', objects)
+				self.assertIn('data/orioledb_data/control', objects)
 
 				new_node.start()
 
@@ -679,6 +753,7 @@ class S3Test(S3BaseTest):
 				objects = objects.get("Contents", [])
 				objects = sorted(list(x["Key"] for x in objects))
 				self.assertIn('data/orioledb_data/s3_lock', objects)
+				self.assertIn('data/orioledb_data/control', objects)
 
 				new_node.stop()
 				new_node.cleanup()

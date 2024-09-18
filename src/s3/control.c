@@ -55,12 +55,6 @@ s3_check_control(void)
 		return;
 	}
 
-	if (buf.len != sizeof(CheckpointControl))
-		ereport(FATAL,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("Invalid control file \"%s\" in the S3 bucket",
-						objectname)));
-
 	s3_control = (CheckpointControl *) buf.data;
 	check_checkpoint_control(s3_control);
 
