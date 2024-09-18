@@ -626,7 +626,7 @@ class S3Test(S3BaseTest):
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
-					'FATAL:  could not open file "orioledb_data/control": Permission denied',
+				    'FATAL:  could not open file "orioledb_data/control": Permission denied',
 				    f.read())
 
 	def test_s3_put_lock_file(self):
@@ -664,9 +664,8 @@ class S3Test(S3BaseTest):
 			self.assertEqual(e.exception.message, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
-				self.assertIn(
-				    'FATAL:  incorrect value of lock identifier 0',
-				    f.read())
+				self.assertIn('FATAL:  incorrect value of lock identifier 0',
+				              f.read())
 
 			# Test that PostgreSQL won't start in case of corrupted lock file 2
 			with open(lock_filename, "w+") as f:
@@ -691,8 +690,8 @@ class S3Test(S3BaseTest):
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
-					'FATAL:  could not open file "orioledb_data/s3_lock": Permission denied',
-					f.read())
+				    'FATAL:  could not open file "orioledb_data/s3_lock": Permission denied',
+				    f.read())
 
 	def test_s3_lock_file(self):
 		node = self.node
