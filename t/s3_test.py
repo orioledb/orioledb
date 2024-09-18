@@ -3,6 +3,7 @@ import os
 import time
 import shutil
 import signal
+import stat
 from tempfile import mkdtemp, mkstemp
 
 from unittest.mock import patch
@@ -617,6 +618,17 @@ class S3Test(S3BaseTest):
 				    "FATAL:  OrioleDB files on the S3 bucket might be incompatible with local files",
 				    f.read())
 
+			# Test that PostgreSQL won't start in case of lack of permissions
+			os.chmod(control_filename, 0)
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+					'FATAL:  could not open file "orioledb_data/control": Permission denied',
+				    f.read())
+
 	def test_s3_put_lock_file(self):
 		node = self.node
 		node.append_conf(f"""
@@ -642,10 +654,24 @@ class S3Test(S3BaseTest):
 
 			node.stop()
 
+			# Test that PostgreSQL won't start in case of corrupted lock file 1
+			fstat = os.stat(lock_filename)
+			with open(lock_filename, "r+") as f:
+				f.write("\0" * fstat.st_size)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  incorrect value of lock identifier 0',
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of corrupted lock file 2
 			with open(lock_filename, "w+") as f:
 				f.truncate(0)
 
-			# Test that PostgreSQL won't start in case of corrupted lock file
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
 			self.assertEqual(e.exception.message, "Cannot start node")
@@ -654,6 +680,19 @@ class S3Test(S3BaseTest):
 				self.assertIn(
 				    'FATAL:  could not read data from lock file "orioledb_data/s3_lock"',
 				    f.read())
+
+			# Test that PostgreSQL won't start in case of lack of permissions
+			shutil.copy(f"{lock_filename}.copy", lock_filename)
+			os.chmod(lock_filename, 0)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+					'FATAL:  could not open file "orioledb_data/s3_lock": Permission denied',
+					f.read())
 
 	def test_s3_lock_file(self):
 		node = self.node
