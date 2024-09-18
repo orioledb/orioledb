@@ -63,7 +63,7 @@ typedef struct OIndexPath
 	OPath		o_path;
 	ScanDirection scandir;
 	OIndexNumber ix_num;
-} OIndexPath;
+}			OIndexPath;
 
 typedef struct OBitmapHeapPath
 {
@@ -77,7 +77,7 @@ typedef struct OIndexPlanState
 	/* Used only in o_explain_custom_scan */
 	List	   *stripped_indexquals;
 	bool		onlyCurIx;
-} OIndexPlanState;
+}			OIndexPlanState;
 
 typedef struct OCustomScanState
 {
