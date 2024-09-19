@@ -1299,6 +1299,113 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 {
 }
 
+static void
+cache_scan_tupdesc(OScanState *o_scan, OIndexDescr *index_descr)
+{
+	MemoryContext oldcxt;
+	IndexScanDesc scan = &o_scan->scandesc;
+
+	/* TODO: Move this to index descr initialization */
+	oldcxt = MemoryContextSwitchTo(o_scan->cxt);
+
+	if (!index_descr->primaryIsCtid)
+	{
+		int			pk_nfields = index_descr->nPrimaryFields;
+		int			nfields;
+		int			pk_nfield;
+		int			i;
+
+		for (i = 0; i < index_descr->nPrimaryFields; i++)
+		{
+			bool		found = false;
+			AttrNumber	attnum = index_descr->primaryFieldsAttnums[i] - 1;
+			Form_pg_attribute pk_attr = &index_descr->leafTupdesc->attrs[attnum];
+
+			for (int j = 0; j < scan->indexRelation->rd_att->natts; j++)
+			{
+				Form_pg_attribute idx_attr = &scan->indexRelation->rd_att->attrs[j];
+
+				if (strncmp(pk_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (found)
+				pk_nfields--;
+		}
+
+		nfields = scan->indexRelation->rd_att->natts + pk_nfields;
+
+		o_scan->cached_itupdesc = CreateTemplateTupleDesc(nfields);
+		for (i = 0; i < scan->indexRelation->rd_att->natts; i++)
+		{
+			TupleDescCopyEntry(o_scan->cached_itupdesc, i + 1, scan->indexRelation->rd_att, i + 1);
+		}
+
+		pk_nfield = scan->indexRelation->rd_att->natts;
+
+		for (i = 0; i < index_descr->nPrimaryFields; i++)
+		{
+			bool		found = false;
+			AttrNumber	attnum = index_descr->primaryFieldsAttnums[i] - 1;
+			Form_pg_attribute pk_attr = &index_descr->leafTupdesc->attrs[attnum];
+
+			for (int j = 0; j < scan->indexRelation->rd_att->natts; j++)
+			{
+				Form_pg_attribute idx_attr = &scan->indexRelation->rd_att->attrs[j];
+
+				if (strncmp(pk_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+			{
+				TupleDescCopyEntry(o_scan->cached_itupdesc, pk_nfield + 1, index_descr->leafTupdesc, attnum + 1);
+				pk_nfield++;
+			}
+		}
+	}
+	else
+	{
+		int			nfields = index_descr->nFields;
+		OTableIndex *o_tbl_idx;
+		OTable	   *o_table;
+		int			i;
+
+		o_table = o_tables_get(index_descr->tableOids);
+		o_tbl_idx = &o_table->indices[o_scan->ixNum - 1];
+		o_scan->cached_itupdesc = CreateTemplateTupleDesc(o_tbl_idx->nfields);
+		nfields--;
+		for (i = 0; i < o_tbl_idx->nfields; i++)
+		{
+			if (i < nfields)
+				TupleDescCopyEntry(o_scan->cached_itupdesc, i + 1, index_descr->leafTupdesc, i + 1);
+			else
+			{
+				int			j;
+				int			found = -1;
+
+				for (j = 0; j < nfields; j++)
+				{
+					if (o_tbl_idx->fields[i].attnum == o_tbl_idx->fields[j].attnum)
+					{
+						found = j;
+						break;
+					}
+				}
+				Assert(found >= 0);
+				TupleDescCopyEntry(o_scan->cached_itupdesc, i + 1, index_descr->leafTupdesc, found + 1);
+			}
+		}
+		o_table_free(o_table);
+	}
+	MemoryContextSwitchTo(oldcxt);
+}
+
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
@@ -1361,11 +1468,24 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
 	OScanState *o_scan = (OScanState *) scan;
+	OIndexDescr *index_descr;
+	ORelOids	oids;
+	OIndexType	ix_type;
 
 	MemoryContextReset(o_scan->cxt);
 	o_scan->iterator = NULL;
 	o_scan->curKeyRangeIsLoaded = false;
 	btrescan(scan, scankey, nscankeys, orderbys, norderbys);
+	ORelOidsSetFromRel(oids, scan->indexRelation);
+	if (scan->indexRelation->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (scan->indexRelation->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else
+		ix_type = oIndexRegular;
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	Assert(index_descr != NULL);
+	cache_scan_tupdesc(o_scan, index_descr);
 }
 
 static void
