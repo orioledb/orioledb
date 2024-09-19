@@ -3,7 +3,7 @@
  * control.h
  *		Declarations for control file.
  *
- * Copyright (c) 2024, OrioleDATA Inc.
+ * Copyright (c) 2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/checkpoint/control.h

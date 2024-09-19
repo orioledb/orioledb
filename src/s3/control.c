@@ -3,7 +3,7 @@
  * control.c
  *		Functions to work with S3 control and lock files.
  *
- * Copyright (c) 2024, OrioleDATA Inc.
+ * Copyright (c) 2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/control.c
