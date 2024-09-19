@@ -29,20 +29,23 @@ class OrioledbS3ObjectLoader:
 		"""
 		parser = argparse.ArgumentParser(usage=argparse.SUPPRESS,
 		                                 epilog=epilog)
-		parser.add_argument('--endpoint',
-		                    dest='endpoint',
-		                    required=True,
-		                    help="AWS url (must contain bucket name if no prefix set)")
+		parser.add_argument(
+		    '--endpoint',
+		    dest='endpoint',
+		    required=True,
+		    help="AWS url (must contain bucket name if no prefix set)")
 		parser.add_argument('-d',
 		                    '--data-dir',
 		                    dest='data_dir',
 		                    required=True,
 		                    help="Destination data directory")
-		parser.add_argument('--prefix',
-		                    dest='prefix',
-		                    required=False,
-							default="",
-		                    help="Prefix to prepend to S3 object name (may contain bucket name)")
+		parser.add_argument(
+		    '--prefix',
+		    dest='prefix',
+		    required=False,
+		    default="",
+		    help="Prefix to prepend to S3 object name (may contain bucket name)"
+		)
 		parser.add_argument('--cert-file',
 		                    dest='cert_file',
 		                    help="Path to crt file")
@@ -77,10 +80,12 @@ class OrioledbS3ObjectLoader:
 		bucket_in_prefix = False
 		try:
 			config = Config(s3={'addressing_style': 'virtual'})
-			s3_client = boto3.client("s3", endpoint_url=raw_endpoint, verify=verify,
-									config=config)
+			s3_client = boto3.client("s3",
+			                         endpoint_url=raw_endpoint,
+			                         verify=verify,
+			                         config=config)
 			s3_client.head_bucket(Bucket=bucket)
-			bucket_name=bucket
+			bucket_name = bucket
 		except ValueError:
 			bucket_in_endpoint = False
 			bucket_in_prefix = True
@@ -88,14 +93,17 @@ class OrioledbS3ObjectLoader:
 			config = None
 			bucket = splitted_prefix[0]
 			prefix = '/'.join(splitted_prefix[1:])
-			s3_client = boto3.client("s3", endpoint_url=f"{parsed_url.scheme}://{parsed_url.netloc}", verify=verify)
+			s3_client = boto3.client(
+			    "s3",
+			    endpoint_url=f"{parsed_url.scheme}://{parsed_url.netloc}",
+			    verify=verify)
 			try:
 				s3_client.head_bucket(Bucket=bucket)
 			except ParamValidationError:
 				bucket_in_prefix = False
 			except ClientError:
 				bucket_in_prefix = False
-			bucket_name=bucket
+			bucket_name = bucket
 
 		if not bucket_in_endpoint and not bucket_in_prefix:
 			raise Exception("No valid bucket name in endpoint or prefix")
@@ -110,7 +118,9 @@ class OrioledbS3ObjectLoader:
 	def run(self):
 		wal_dir = os.path.join(self.data_dir, 'pg_wal')
 		chkp_num = self.last_checkpoint_number(self.bucket_name)
-		self.download_files_in_directory(self.bucket_name, 'data/', chkp_num,
+		self.download_files_in_directory(self.bucket_name,
+		                                 'data/',
+		                                 chkp_num,
 		                                 self.data_dir,
 		                                 transform=self.transform_pg)
 		self.download_files_in_directory(self.bucket_name,
@@ -316,10 +326,8 @@ class OrioledbS3ObjectLoader:
 	                                directory,
 	                                chkp_num,
 	                                local_directory,
-	                                transform: Callable[[str],
-	                                                    str],
-	                                filter: Callable[[str],
-	                                                    bool] = None):
+	                                transform: Callable[[str], str],
+	                                filter: Callable[[str], bool] = None):
 		last_chkp_dir = os.path.join(directory, str(chkp_num))
 		objects = self.list_objects(bucket_name, last_chkp_dir)
 		max_threads = os.cpu_count()

@@ -3,7 +3,7 @@
  * queue.c
  *		Implementation for queue of tasks for S3 workers.
  *
- * Copyright (c) 2024, OrioleDATA Inc.
+ * Copyright (c) 2024, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/queue.c
