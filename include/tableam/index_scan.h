@@ -36,6 +36,7 @@ typedef struct OScanState
 	/* used only by direct modify functions */
 	CmdType		cmd;
 	CommitSeqNo csn;
+	TupleDescData *cached_itupdesc;
 } OScanState;
 
 /*
