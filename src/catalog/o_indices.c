@@ -23,6 +23,7 @@
 #include "commands/defrem.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
+#include "tuple/slot.h"
 #include "tuple/toast.h"
 
 #include "access/genam.h"
@@ -682,6 +683,9 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	namestrcpy(&descr->name, oIndex->name.data);
 	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafFields,
 													 oIndex->nLeafFields);
+	descr->old_leaf_slot = MakeSingleTupleTableSlot(descr->leafTupdesc, &TTSOpsOrioleDB);
+	descr->new_leaf_slot = MakeSingleTupleTableSlot(descr->leafTupdesc, &TTSOpsOrioleDB);
+
 	if (oIndex->indexType == oIndexPrimary)
 	{
 		bool		free_oTable = false;

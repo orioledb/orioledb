@@ -495,6 +495,10 @@ o_tree_init_free_extents(BTreeDescr *desc)
 static void
 index_descr_free(OIndexDescr *tree)
 {
+	if (tree->old_leaf_slot)
+		ExecDropSingleTupleTableSlot(tree->old_leaf_slot);
+	if (tree->new_leaf_slot)
+		ExecDropSingleTupleTableSlot(tree->new_leaf_slot);
 	if (tree->leafTupdesc)
 		FreeTupleDesc(tree->leafTupdesc);
 	if (tree->nonLeafTupdesc)

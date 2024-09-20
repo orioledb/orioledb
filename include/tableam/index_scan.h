@@ -37,7 +37,6 @@ typedef struct OScanState
 	CmdType		cmd;
 	CommitSeqNo csn;
 	TupleDescData *cached_itupdesc;
-	TupleTableSlot *cached_heap_slot;
 	TupleTableSlot *cached_index_slot;
 } OScanState;
 

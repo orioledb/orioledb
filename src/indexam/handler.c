@@ -461,8 +461,8 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 						&csn, &version);
 
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
-	slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
-	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, true, NULL);
+	slot = index_descr->old_leaf_slot;
+	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 	callbackInfo.arg = slot;
 
 	fill_current_oxid_csn(&oxid, &csn);
@@ -532,22 +532,22 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 						&GET_PRIMARY(descr)->nonLeafSpec,
 						oldTupleid, valuesOld, isnullOld,
 						&csn, &version);
-	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
+	vfree = palloc0(sizeof(bool) * index_descr->leafTupdesc->natts);
 	/* TODO: Probably there is a better way than detoasting here */
 	detoast_passed_values(index_descr, valuesOld, isnullOld, vfree);
-	old_tuple = o_form_tuple(index_descr->nonLeafTupdesc, &index_descr->nonLeafSpec,
+	old_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
 							 version, valuesOld, isnullOld);
-	old_slot = MakeSingleTupleTableSlot(index_descr->nonLeafTupdesc, &TTSOpsOrioleDB);
-	tts_orioledb_store_non_leaf_tuple(old_slot, old_tuple, descr, csn, ix_num, true, NULL);
+	old_slot = index_descr->old_leaf_slot;
+	tts_orioledb_store_non_leaf_tuple(old_slot, old_tuple, descr, csn, ix_num, false, NULL);
 
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
 						tupleid, values, isnull,
 						&csn, &version);
-	new_tuple = o_form_tuple(index_descr->nonLeafTupdesc, &index_descr->nonLeafSpec, version, values, isnull);
-	new_slot = MakeSingleTupleTableSlot(index_descr->nonLeafTupdesc, &TTSOpsOrioleDB);
-	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, true, NULL);
+	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	new_slot = index_descr->new_leaf_slot;
+	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_csn(&oxid, &csn);
 
@@ -556,7 +556,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 									  new_slot, new_tuple,
 									  old_slot, oxid, csn);
 
-	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
+	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
 		if (vfree[i])
 			pfree(DatumGetPointer(valuesOld[i]));
@@ -587,7 +587,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -661,7 +661,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
+	slot = index_descr->old_leaf_slot;
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
@@ -671,7 +671,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	detoast_passed_values(index_descr, values, isnull, vfree);
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
 						 version, values, isnull);
-	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, true, NULL);
+	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_csn(&oxid, &csn);
 
@@ -1271,7 +1271,6 @@ cache_scan_tupdesc_and_slot(OScanState *o_scan, OIndexDescr *index_descr, OTable
 	}
 	MemoryContextSwitchTo(oldcxt);
 
-	o_scan->cached_heap_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 	o_scan->cached_index_slot = MakeSingleTupleTableSlot(o_scan->cached_itupdesc, &TTSOpsOrioleDB);
 }
 
@@ -1360,12 +1359,11 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 static void
 fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupleCsn, BTreeLocationHint *hint)
 {
-	OScanState *o_scan = (OScanState *) scan;
 	TupleTableSlot *slot;
 
 	scan->xs_hitupdesc = descr->tupdesc;
-	slot = o_scan->cached_heap_slot;
-	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber, true, hint);
+	slot = descr->oldTuple;
+	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber, false, hint);
 	scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 }
@@ -1385,7 +1383,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 	Pointer		ptr;
 
 	slot = o_scan->cached_index_slot;
-	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, true, hint);
+	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, false, hint);
 	slot_getallattrs(slot);
 
 	/*
