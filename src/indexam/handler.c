@@ -691,7 +691,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	}
 	pfree(vfree);
 
-	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
+	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
 		if (vfree[i])
 			pfree(DatumGetPointer(valuesOld[i]));
@@ -722,7 +722,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, values[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -795,7 +795,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	slot = MakeSingleTupleTableSlot(index_descr->leafTupdesc, &TTSOpsOrioleDB);
+	slot = index_descr->old_leaf_slot;
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
 						&GET_PRIMARY(descr)->nonLeafSpec,
@@ -805,7 +805,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	detoast_passed_values(index_descr, values, isnull, vfree);
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
 						 version, values, isnull);
-	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, true, NULL);
+	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_csn(&oxid, &csn);
 
@@ -1405,7 +1405,6 @@ cache_scan_tupdesc_and_slot(OScanState *o_scan, OIndexDescr *index_descr, OTable
 	}
 	MemoryContextSwitchTo(oldcxt);
 
-	o_scan->cached_heap_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 	o_scan->cached_index_slot = MakeSingleTupleTableSlot(o_scan->cached_itupdesc, &TTSOpsOrioleDB);
 }
 
@@ -1498,7 +1497,6 @@ static void
 fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		   CommitSeqNo tupleCsn, BTreeLocationHint *hint)
 {
-	OScanState *o_scan = (OScanState *) scan;
 	TupleTableSlot *slot;
 
 	scan->xs_hitupdesc = descr->tupdesc;
