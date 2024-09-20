@@ -1166,7 +1166,7 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 }
 
 static void
-cache_scan_tupdesc(OScanState *o_scan, OIndexDescr *index_descr)
+cache_scan_tupdesc_and_slot(OScanState *o_scan, OIndexDescr *index_descr, OTableDescr *descr)
 {
 	MemoryContext oldcxt;
 	IndexScanDesc scan = &o_scan->scandesc;
@@ -1270,6 +1270,9 @@ cache_scan_tupdesc(OScanState *o_scan, OIndexDescr *index_descr)
 		o_table_free(o_table);
 	}
 	MemoryContextSwitchTo(oldcxt);
+
+	o_scan->cached_heap_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+	o_scan->cached_index_slot = MakeSingleTupleTableSlot(o_scan->cached_itupdesc, &TTSOpsOrioleDB);
 }
 
 IndexScanDesc
@@ -1322,7 +1325,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	o_scan->cxt = AllocSetContextCreate(CurrentMemoryContext,
 										"orioledb_cs plan data",
 										ALLOCSET_DEFAULT_SIZES);
-	cache_scan_tupdesc(o_scan, index_descr);
+	cache_scan_tupdesc_and_slot(o_scan, index_descr, descr);
 	return scan;
 }
 
@@ -1332,6 +1335,7 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 {
 	OScanState *o_scan = (OScanState *) scan;
 	OIndexDescr *index_descr;
+	OTableDescr *descr;
 	ORelOids	oids;
 	OIndexType	ix_type;
 
@@ -1348,16 +1352,19 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 		ix_type = oIndexRegular;
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
-	cache_scan_tupdesc(o_scan, index_descr);
+	descr = o_fetch_table_descr(index_descr->tableOids);
+	Assert(descr != NULL);
+	cache_scan_tupdesc_and_slot(o_scan, index_descr, descr);
 }
 
 static void
 fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupleCsn, BTreeLocationHint *hint)
 {
+	OScanState *o_scan = (OScanState *) scan;
 	TupleTableSlot *slot;
 
 	scan->xs_hitupdesc = descr->tupdesc;
-	slot = MakeSingleTupleTableSlot(scan->xs_hitupdesc, &TTSOpsOrioleDB);
+	slot = o_scan->cached_heap_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber, true, hint);
 	scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
@@ -1377,7 +1384,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 				tuple_size;
 	Pointer		ptr;
 
-	slot = MakeSingleTupleTableSlot(o_scan->cached_itupdesc, &TTSOpsOrioleDB);
+	slot = o_scan->cached_index_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, true, hint);
 	slot_getallattrs(slot);
 
