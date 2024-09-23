@@ -50,6 +50,16 @@ class BaseTest(unittest.TestCase):
 			self.replica = replica
 		return self.replica
 
+	def initNode(self, port) -> testgres.PostgresNode:
+		baseDir = mkdtemp(prefix=self.myName + '_tgsn_')
+		node = testgres.get_new_node('test',
+									 port=port,
+									 base_dir=baseDir)
+		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
+		node.append_conf('postgresql.conf',
+		                      "shared_preload_libraries = orioledb\n")
+		return node
+
 	@property
 	def myName(self):
 		if not self._myName:
@@ -62,14 +72,8 @@ class BaseTest(unittest.TestCase):
 		return self._myName
 
 	def setUp(self):
-		baseDir = mkdtemp(prefix=self.myName + '_tgsn_')
 		self.startTime = time.time()
-		self.node = testgres.get_new_node('test',
-		                                  port=self.getBasePort(),
-		                                  base_dir=baseDir)
-		self.node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
-		self.node.append_conf('postgresql.conf',
-		                      "shared_preload_libraries = orioledb\n")
+		self.node = self.initNode(self.getBasePort())
 
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:

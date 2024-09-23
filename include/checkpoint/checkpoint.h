@@ -137,6 +137,7 @@ typedef struct
 
 typedef struct
 {
+	uint64		control_identifier;
 	uint32		changecount;
 	uint32		lastCheckpointNumber;
 	OIndexType	treeType;

@@ -34,48 +34,94 @@
  * Read local CheckpointControl file and the file from S3 and check if the
  * S3 bucket compatible with the local instance.
  */
-void
-s3_check_control(void)
+bool
+s3_check_control(const char **errmsgp)
 {
 	CheckpointControl control,
 			   *s3_control;
+	bool		control_res;
 	StringInfoData buf;
 	char	   *objectname;
+	bool		res = false;
 
-	if (!get_checkpoint_control_data(&control))
-		return;
+	control_res = get_checkpoint_control_data(&control);
 
 	objectname = psprintf("data/%s", CONTROL_FILENAME);
-
 	initStringInfo(&buf);
+
+	/*
+	 * If orioledb_data/control file doesn't exist on the S3 bucket we assume
+	 * that it is empty and it is safe to use it without further checks.
+	 */
 	if (!s3_get_object(objectname, &buf, true))
 	{
-		pfree(buf.data);
-		pfree(objectname);
-		return;
+		res = true;
+		goto cleanup;
+	}
+
+	/*
+	 * If there there is no orioledb_data/control file locally (in case if
+	 * CHECKPOINT didn't happen yet) but it exists on the S3 bucket then the
+	 * local instance isn't consistent with the S3 bucket.
+	 */
+	if (!control_res)
+	{
+		*errmsgp = psprintf("there is no control file \"%s\" locally, but it "
+							"exists on the S3 bucket", CONTROL_FILENAME);
+		goto cleanup;
 	}
 
 	s3_control = (CheckpointControl *) buf.data;
 	check_checkpoint_control(s3_control);
 
-	if (control.lastCheckpointNumber != s3_control->lastCheckpointNumber)
-		ereport(FATAL,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("OrioleDB files on the S3 bucket might be incompatible with local files"),
-				 errdetail("OrioleDB last checkpoint number %u"
-						   " is different from the S3 bucket last checkpoint number %u",
-						   control.lastCheckpointNumber, s3_control->lastCheckpointNumber)));
+	elog(LOG, "control_identifier: " UINT64_FORMAT ", " UINT64_FORMAT,
+		 control.control_identifier, s3_control->control_identifier);
+
+	if (control.control_identifier != s3_control->control_identifier)
+	{
+		*errmsgp = psprintf("OrioleDB control identifier " UINT64_FORMAT
+							" differs from the S3 bucket identifier " UINT64_FORMAT,
+							control.control_identifier,
+							s3_control->control_identifier);
+		goto cleanup;
+	}
+
+	if (control.lastCheckpointNumber < s3_control->lastCheckpointNumber)
+	{
+		*errmsgp = psprintf("OrioleDB last checkpoint number %u "
+							"is behind the S3 bucket last checkpoint number %u",
+							control.lastCheckpointNumber,
+							s3_control->lastCheckpointNumber);
+		goto cleanup;
+	}
+	else if (control.lastCheckpointNumber > s3_control->lastCheckpointNumber)
+		ereport(LOG,
+				(errmsg("OrioleDB last checkpoint number %u is beyond "
+						"the S3 bucket last checkpoint number %u",
+						control.lastCheckpointNumber,
+						s3_control->lastCheckpointNumber)));
 
 	if (control.sysTreesStartPtr < s3_control->sysTreesStartPtr)
-		ereport(FATAL,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("OrioleDB files on the S3 bucket might be incompatible with local files"),
-				 errdetail("OrioleDB XLOG location " UINT64_FORMAT
-						   " is behind from the S3 bucket XLOG location " UINT64_FORMAT,
-						   control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
+	{
+		*errmsgp = psprintf("OrioleDB XLOG location " UINT64_FORMAT
+							" is behind the S3 bucket XLOG location " UINT64_FORMAT,
+							control.sysTreesStartPtr,
+							s3_control->sysTreesStartPtr);
+		goto cleanup;
+	}
+	else if (control.sysTreesStartPtr > s3_control->sysTreesStartPtr)
+		ereport(LOG,
+				(errmsg("OrioleDB XLOG location " UINT64_FORMAT " is beyond "
+						"the S3 bucket XLOG location " UINT64_FORMAT,
+						control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
 
+	res = true;
+
+cleanup:
 	pfree(buf.data);
 	pfree(objectname);
+
+	return res;
 }
 
 /*
@@ -178,6 +224,11 @@ s3_put_lock_file(void)
 					 errdetail("The local lock identifier " UINT64_FORMAT " is "
 							   "different from the S3 bucket identifier " UINT64_FORMAT,
 							   lock_identifier, s3_lock_identifier)));
+		else
+			ereport(LOG,
+					(errmsg("A lock file with the same identifier " UINT64_FORMAT
+							" already exists on the S3 bucket",
+							lock_identifier)));
 
 		pfree(buf.data);
 	}

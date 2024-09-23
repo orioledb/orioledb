@@ -830,8 +830,17 @@ _PG_init(void)
 
 	if (orioledb_s3_mode)
 	{
+		const char *check_error = NULL;
+
 		s3_put_lock_file();
-		s3_check_control();
+		if (!s3_check_control(&check_error))
+		{
+			s3_delete_lock_file();
+
+			ereport(FATAL,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("%s", check_error)));
+		}
 	}
 
 	/* Register S3 workers */

@@ -13,7 +13,7 @@
 #ifndef __S3_CONTROL_H__
 #define __S3_CONTROL_H__
 
-extern void s3_check_control(void);
+extern bool s3_check_control(const char **errmsgp);
 extern void s3_put_lock_file(void);
 extern void s3_delete_lock_file(void);
 

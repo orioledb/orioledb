@@ -594,6 +594,43 @@ class S3Test(S3BaseTest):
 
 			node.stop()
 
+			# Test that PostgreSQL won't start in case of absent control file
+			new_node = self.initNode(self.getBasePort() + 1)
+			new_node.append_conf(f"""
+				orioledb.s3_mode = true
+				orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+				orioledb.s3_region = '{self.region}'
+				orioledb.s3_accesskey = '{self.access_key_id}'
+				orioledb.s3_secretkey = '{self.secret_access_key}'
+				orioledb.s3_cainfo = '{self.s3_cainfo}'
+			""")
+
+			with self.assertRaises(StartNodeException) as e:
+				new_node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(new_node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  there is no control file "orioledb_data/control" locally, but it exists on the S3 bucket',
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of different control identifier
+			new_node.append_conf("orioledb.s3_prefix = 'temp_prefix'")
+			new_node.start()
+			new_node.safe_psql("CHECKPOINT")
+			new_node.stop()
+
+			new_node.append_conf("orioledb.s3_prefix = ''")
+
+			with self.assertRaises(StartNodeException) as e:
+				new_node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(new_node.pg_log_file) as f:
+				self.assertIn(
+				    'differs from the S3 bucket identifier',
+				    f.read())
+
 			with open(control_filename, "w+") as f:
 				f.truncate(10)
 
@@ -615,7 +652,7 @@ class S3Test(S3BaseTest):
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
-				    "FATAL:  OrioleDB files on the S3 bucket might be incompatible with local files",
+				    "FATAL:  OrioleDB last checkpoint number 1 is behind the S3 bucket last checkpoint number 2",
 				    f.read())
 
 			# Test that PostgreSQL won't start in case of lack of permissions
@@ -839,7 +876,7 @@ class S3Test(S3BaseTest):
 				message = log[0].split('] ')[-1].strip()
 				self.assertEqual(
 				    message,
-				    "FATAL:  OrioleDB files on the S3 bucket might be incompatible with local files"
+				    "FATAL:  OrioleDB last checkpoint number 2 is behind the S3 bucket last checkpoint number 3"
 				)
 
 				new_node.cleanup()
