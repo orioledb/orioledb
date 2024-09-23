@@ -627,9 +627,8 @@ class S3Test(S3BaseTest):
 			self.assertEqual(e.exception.message, "Cannot start node")
 
 			with open(new_node.pg_log_file) as f:
-				self.assertIn(
-				    'differs from the S3 bucket identifier',
-				    f.read())
+				self.assertIn('differs from the S3 bucket identifier',
+				              f.read())
 
 			with open(control_filename, "w+") as f:
 				f.truncate(10)

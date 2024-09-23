@@ -52,12 +52,10 @@ class BaseTest(unittest.TestCase):
 
 	def initNode(self, port) -> testgres.PostgresNode:
 		baseDir = mkdtemp(prefix=self.myName + '_tgsn_')
-		node = testgres.get_new_node('test',
-									 port=port,
-									 base_dir=baseDir)
+		node = testgres.get_new_node('test', port=port, base_dir=baseDir)
 		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		node.append_conf('postgresql.conf',
-		                      "shared_preload_libraries = orioledb\n")
+		                 "shared_preload_libraries = orioledb\n")
 		return node
 
 	@property
