@@ -74,9 +74,6 @@ s3_check_control(const char **errmsgp)
 	s3_control = (CheckpointControl *) buf.data;
 	check_checkpoint_control(s3_control);
 
-	elog(LOG, "control_identifier: " UINT64_FORMAT ", " UINT64_FORMAT,
-		 control.control_identifier, s3_control->control_identifier);
-
 	if (control.control_identifier != s3_control->control_identifier)
 	{
 		*errmsgp = psprintf("OrioleDB control identifier " UINT64_FORMAT

@@ -98,18 +98,22 @@ void
 write_checkpoint_control(CheckpointControl *control)
 {
 	File		controlFile;
+	char		buffer[CHECKPOINT_CONTROL_FILE_SIZE];
 
 	INIT_CRC32C(control->crc);
 	COMP_CRC32C(control->crc, control, offsetof(CheckpointControl, crc));
 	FIN_CRC32C(control->crc);
+
+	memset(buffer, 0, CHECKPOINT_CONTROL_FILE_SIZE);
+	memcpy(buffer, control, sizeof(CheckpointControl));
 
 	controlFile = PathNameOpenFile(CONTROL_FILENAME, O_RDWR | O_CREAT | PG_BINARY);
 	if (controlFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not open checkpoint control file %s", CONTROL_FILENAME)));
 
-	if (OFileWrite(controlFile, (Pointer) control, sizeof(*control), 0,
-				   WAIT_EVENT_SLRU_WRITE) != sizeof(*control) ||
+	if (OFileWrite(controlFile, buffer, CHECKPOINT_CONTROL_FILE_SIZE, 0,
+				   WAIT_EVENT_SLRU_WRITE) != CHECKPOINT_CONTROL_FILE_SIZE ||
 		FileSync(controlFile, WAIT_EVENT_SLRU_SYNC) != 0)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not write checkpoint control to file %s", CONTROL_FILENAME)));

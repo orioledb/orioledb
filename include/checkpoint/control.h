@@ -39,6 +39,15 @@ typedef struct
 
 #define CONTROL_FILENAME    ORIOLEDB_DATA_DIR"/control"
 
+/*
+ * Physical size of the orioledb_data/control file.  Note that this is considerably
+ * bigger than the actually used size (ie, sizeof(CheckpointControl)).
+ * The idea is to keep the physical size constant independent of format
+ * changes, so that get_checkpoint_control_data will deliver a suitable wrong-version
+ * message instead of a read error if it's looking at an incompatible file.
+ */
+#define CHECKPOINT_CONTROL_FILE_SIZE	8192
+
 extern bool get_checkpoint_control_data(CheckpointControl *control);
 extern void check_checkpoint_control(CheckpointControl *control);
 extern void write_checkpoint_control(CheckpointControl *control);
