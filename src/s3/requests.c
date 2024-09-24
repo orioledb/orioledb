@@ -561,7 +561,7 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 		 * the bucket.
 		 */
 		if (ifNoneMatch && (http_code == S3_RESPONSE_CONDITION_FAILED ||
-			http_code == S3_RESPONSE_CONDITION_CONFLICT))
+							http_code == S3_RESPONSE_CONDITION_CONFLICT))
 		{
 			/* Do nothing just return http_code */
 		}
