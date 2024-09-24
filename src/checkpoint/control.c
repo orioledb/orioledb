@@ -78,7 +78,7 @@ check_checkpoint_control(CheckpointControl *control)
 		ereport(FATAL,
 				(errmsg("database files are incompatible with server"),
 				 errdetail("OrioleDB was initialized with binary version %d,"
-						   " but the extension was compiled with binary version %d.",
+						   " but the extension is compiled with binary version %d.",
 						   control->binaryVersion, ORIOLEDB_BINARY_VERSION),
 				 errhint("It looks like you need to initdb.")));
 
@@ -86,7 +86,7 @@ check_checkpoint_control(CheckpointControl *control)
 		ereport(FATAL,
 				(errmsg("database files are incompatible with server"),
 				 errdetail("OrioleDB was initialized with S3 mode %s,"
-						   " but the extension was configure with S3 mode %s.",
+						   " but the extension is configured with S3 mode %s.",
 						   control->s3Mode ? "on" : "off",
 						   orioledb_s3_mode ? "on" : "off")));
 }

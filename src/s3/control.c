@@ -93,7 +93,7 @@ s3_check_control(const char **errmsgp)
 	}
 	else if (control.lastCheckpointNumber > s3_control->lastCheckpointNumber)
 		ereport(LOG,
-				(errmsg("OrioleDB last checkpoint number %u is beyond "
+				(errmsg("OrioleDB last checkpoint number %u is ahead of "
 						"the S3 bucket last checkpoint number %u",
 						control.lastCheckpointNumber,
 						s3_control->lastCheckpointNumber)));
@@ -108,7 +108,7 @@ s3_check_control(const char **errmsgp)
 	}
 	else if (control.sysTreesStartPtr > s3_control->sysTreesStartPtr)
 		ereport(LOG,
-				(errmsg("OrioleDB XLOG location " UINT64_FORMAT " is beyond "
+				(errmsg("OrioleDB XLOG location " UINT64_FORMAT " is ahead of "
 						"the S3 bucket XLOG location " UINT64_FORMAT,
 						control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
 
