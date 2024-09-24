@@ -175,10 +175,9 @@ write_data_to_buf(void *buffer, size_t size, size_t nmemb, void *userp)
 /*
  * Get the binary content of an object from S3 into 'str'.
  *
- * Returns true if the object was retrieved and false if the object doesn't
- * exist.
+ * Returns HTTP status code.
  */
-bool
+long
 s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 {
 	CURL	   *curl;
@@ -193,7 +192,6 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	char	   *contenthash;
 	char	   *objectpath = objectname;
 	long		http_code = 0;
-	bool		res = true;
 
 	(void) SHA256(NULL, 0, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
@@ -238,10 +236,12 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	sc = curl_easy_perform(curl);
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0 || http_code != 200)
+	if (sc != 0 || http_code != S3_RESPONSE_OK)
 	{
-		if (missing_ok && http_code == 404)
-			res = false;
+		if (missing_ok && http_code == S3_RESPONSE_NOT_FOUND)
+		{
+			/* Do nothing just return http_code */
+		}
 		else
 			ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
 							errmsg("could not get object from S3"),
@@ -259,7 +259,7 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	if (objectpath != objectname)
 		pfree(objectpath);
 
-	return res;
+	return http_code;
 }
 
 /*
@@ -481,9 +481,9 @@ write_file(const char *filename, Pointer data, uint64 size)
 /*
  * Put object with given binary contents to S3.
  *
- * Returns true on success.
+ * Returns HTTP status code.
  */
-static bool
+static long
 s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 							bool ifNoneMatch)
 {
@@ -500,7 +500,6 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	StringInfoData buf;
 	unsigned char hash[32];
 	long		http_code = 0;
-	bool		res = true;
 
 	(void) SHA256((unsigned char *) data, dataSize, hash);
 	contenthash = hex_string((Pointer) hash, sizeof(hash));
@@ -555,14 +554,17 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	sc = curl_easy_perform(curl);
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0 || http_code != 200 || strlen(buf.data) != 0)
+	if (sc != 0 || http_code != S3_RESPONSE_OK || strlen(buf.data) != 0)
 	{
 		/*
 		 * Return false if PUT failed to upload object it already exists in
 		 * the bucket.
 		 */
-		if (ifNoneMatch && (http_code == 412 || http_code == 409))
-			res = false;
+		if (ifNoneMatch && (http_code == S3_RESPONSE_CONDITION_FAILED ||
+			http_code == S3_RESPONSE_CONDITION_CONFLICT))
+		{
+			/* Do nothing just return http_code */
+		}
 		else
 			ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
 							errmsg("could not put object to S3"),
@@ -583,13 +585,13 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	if (objectpath != objectname)
 		pfree(objectpath);
 
-	return res;
+	return http_code;
 }
 
 /*
  * Put the whole file as S3 object.
  */
-bool
+long
 s3_put_file(char *objectname, char *filename, bool ifNoneMatch)
 {
 	Pointer		data;
@@ -598,7 +600,7 @@ s3_put_file(char *objectname, char *filename, bool ifNoneMatch)
 	data = read_file(filename, &dataSize);
 	if (data)
 		return s3_put_object_with_contents(objectname, data, dataSize, ifNoneMatch);
-	return false;
+	return -1;
 }
 
 /*
@@ -622,7 +624,7 @@ s3_get_file(char *objectname, char *filename)
 /*
  * Put the file part as S3 object.
  */
-bool
+long
 s3_put_file_part(char *objectname, char *filename, int partnum)
 {
 	Pointer		data;
@@ -634,7 +636,7 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 						  &dataSize);
 	if (data)
 		return s3_put_object_with_contents(objectname, data, dataSize, false);
-	return false;
+	return -1;
 }
 
 /*

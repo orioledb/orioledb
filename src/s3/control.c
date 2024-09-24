@@ -23,6 +23,7 @@
 #include "s3/control.h"
 #include "s3/requests.h"
 
+#include "miscadmin.h"
 #include "storage/fd.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
@@ -53,7 +54,7 @@ s3_check_control(const char **errmsgp)
 	 * If orioledb_data/control file doesn't exist on the S3 bucket we assume
 	 * that it is empty and it is safe to use it without further checks.
 	 */
-	if (!s3_get_object(objectname, &buf, true))
+	if (s3_get_object(objectname, &buf, true) == S3_RESPONSE_NOT_FOUND)
 	{
 		res = true;
 		goto cleanup;
@@ -130,6 +131,8 @@ s3_put_lock_file(void)
 	int			lock_file;
 	uint64		lock_identifier = 0;
 	char	   *objectname;
+	long		res;
+	int			retry_put_count = 0;
 
 	lock_file = BasicOpenFile(LOCK_FILENAME, O_RDONLY | PG_BINARY);
 	if (lock_file >= 0)
@@ -192,7 +195,29 @@ s3_put_lock_file(void)
 	elog(DEBUG1, "lock_identifier: " UINT64_FORMAT, lock_identifier);
 
 	objectname = psprintf("data/%s", LOCK_FILENAME);
-	if (!s3_put_file(objectname, LOCK_FILENAME, true))
+
+retry_put:
+	res = s3_put_file(objectname, LOCK_FILENAME, true);
+	if (res == S3_RESPONSE_CONDITION_CONFLICT)
+	{
+		if (retry_put_count < 10)
+		{
+			retry_put_count++;
+
+			ereport(LOG,
+					(errmsg("the lock file \"%s\" was deleted concurrently, "
+							"retrying creating a lock file", objectname)));
+
+			goto retry_put;
+		}
+		else
+			ereport(FATAL,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("failed to create a lock file \"%s\" "
+							"because of a concurrent process",
+							objectname)));
+	}
+	else if (res == S3_RESPONSE_CONDITION_FAILED)
 	{
 		StringInfoData buf;
 		uint64		s3_lock_identifier;
@@ -229,6 +254,10 @@ s3_put_lock_file(void)
 
 		pfree(buf.data);
 	}
+	else if (res != S3_RESPONSE_OK)
+		ereport(FATAL,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("could not put a lock file to S3: %ld", res)));
 
 	pfree(objectname);
 }

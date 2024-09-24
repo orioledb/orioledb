@@ -99,7 +99,7 @@ s3process_task(uint64 taskLocation)
 	if (task->type == S3TaskTypeWriteFile)
 	{
 		char	   *filename = task->typeSpecific.writeFile.filename;
-		bool		result;
+		long		result;
 
 		if (filename[0] == '.' && filename[1] == '/')
 			filename += 2;
@@ -114,7 +114,7 @@ s3process_task(uint64 taskLocation)
 
 		pfree(objectname);
 
-		if (result && task->typeSpecific.writeFile.delete)
+		if ((result == S3_RESPONSE_OK) && task->typeSpecific.writeFile.delete)
 			unlink(filename);
 	}
 	else if (task->type == S3TaskTypeWriteEmptyDir)
@@ -290,7 +290,7 @@ s3process_task(uint64 taskLocation)
 	else if (task->type == S3TaskTypeWriteRootFile)
 	{
 		char	   *filename = task->typeSpecific.writeRootFile.filename;
-		bool		result;
+		long		result;
 
 		if (filename[0] == '.' && filename[1] == '/')
 			filename += 2;
@@ -303,7 +303,7 @@ s3process_task(uint64 taskLocation)
 
 		pfree(objectname);
 
-		if (result && task->typeSpecific.writeRootFile.delete)
+		if ((result == S3_RESPONSE_OK) && task->typeSpecific.writeRootFile.delete)
 			unlink(filename);
 	}
 
