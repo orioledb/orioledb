@@ -61,9 +61,9 @@ s3_check_control(const char **errmsgp, const char **errdetailp)
 	}
 
 	/*
-	 * If there is no orioledb_data/control file locally (in case if CHECKPOINT
-	 * didn't happen yet) but it exists on the S3 bucket then the local
-	 * instance isn't consistent with the S3 bucket.
+	 * If there is no orioledb_data/control file locally (in case if
+	 * CHECKPOINT didn't happen yet) but it exists on the S3 bucket then the
+	 * local instance isn't consistent with the S3 bucket.
 	 */
 	if (!control_res)
 	{

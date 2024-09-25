@@ -14,7 +14,7 @@ from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException
 
 from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object, \
-	mock_put_object_conflict, mock_moto_unkown_error
+ mock_put_object_conflict, mock_moto_unkown_error
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -641,9 +641,7 @@ class S3Test(S3BaseTest):
 			self.assertEqual(e.exception.message, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
-				self.assertIn(
-				    'FATAL:  Wrong CRC in control file',
-				    f.read())
+				self.assertIn('FATAL:  Wrong CRC in control file', f.read())
 
 			# Test that PostgreSQL won't start in case of corrupted control file
 			with open(control_filename, "w+") as f:
@@ -693,7 +691,6 @@ class S3Test(S3BaseTest):
 				    'FATAL:  failed to create a lock file "data/orioledb_data/s3_lock" because of a concurrent process',
 				    f.read())
 
-
 		# Test unkown error handling
 		with patch("moto.s3.responses.S3Response.put_object",
 		           new=mock_moto_unkown_error):
@@ -703,10 +700,7 @@ class S3Test(S3BaseTest):
 			self.assertEqual(e.exception.message, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
-				self.assertIn(
-				    'FATAL:  could not put object to S3',
-				    f.read())
-
+				self.assertIn('FATAL:  could not put object to S3', f.read())
 
 	def test_s3_put_lock_file(self):
 		node = self.node

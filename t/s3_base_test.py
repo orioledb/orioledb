@@ -18,7 +18,7 @@ from botocore.config import Config
 from moto.server import DomainDispatcherApplication, create_backend_app
 from moto.s3.responses import S3Response
 from moto.s3.exceptions import InvalidRequest, PreconditionFailed, \
-	S3ClientError, InvalidRequest
+ S3ClientError, InvalidRequest
 from moto.core.common_types import TYPE_RESPONSE
 
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
@@ -45,16 +45,16 @@ orig_put_object = S3Response.put_object
 # moto[s3] doesn't implement 409 HTTP error code therefore we need to do that
 # by ourselves.
 class ConditionalRequestConflict(S3ClientError):
-    code = 409
+	code = 409
 
-    def __init__(self, failed_condition: str, **kwargs: Any):
-        kwargs.setdefault("template", "condition_error")
-        super().__init__(
-            "ConditionalRequestConflict",
-            "At least one of the pre-conditions you specified did not hold",
-            condition=failed_condition,
-            **kwargs,
-        )
+	def __init__(self, failed_condition: str, **kwargs: Any):
+		kwargs.setdefault("template", "condition_error")
+		super().__init__(
+		    "ConditionalRequestConflict",
+		    "At least one of the pre-conditions you specified did not hold",
+		    condition=failed_condition,
+		    **kwargs,
+		)
 
 
 # Patch moto[s3]'s put_object() until it releases support "If-None-Match".
