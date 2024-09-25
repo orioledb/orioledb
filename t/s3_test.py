@@ -611,7 +611,7 @@ class S3Test(S3BaseTest):
 
 			with open(new_node.pg_log_file) as f:
 				self.assertIn(
-				    'FATAL:  there is no control file "orioledb_data/control" locally, but it exists on the S3 bucket',
+				    'FATAL:  OrioleDB can be incompatible with the S3 bucket because the control file exists on the S3 bucket',
 				    f.read())
 
 			# Test that PostgreSQL won't start in case of different control identifier
@@ -651,7 +651,7 @@ class S3Test(S3BaseTest):
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
-				    "FATAL:  OrioleDB last checkpoint number 1 is behind the S3 bucket last checkpoint number 2",
+				    "FATAL:  OrioleDB misses new changes and checkpoints from the S3 bucket and they are incompatible with each other",
 				    f.read())
 
 			# Test that PostgreSQL won't start in case of lack of permissions
@@ -875,7 +875,7 @@ class S3Test(S3BaseTest):
 				message = log[0].split('] ')[-1].strip()
 				self.assertEqual(
 				    message,
-				    "FATAL:  OrioleDB last checkpoint number 2 is behind the S3 bucket last checkpoint number 3"
+				    "FATAL:  OrioleDB misses new changes and checkpoints from the S3 bucket and they are incompatible with each other"
 				)
 
 				new_node.cleanup()

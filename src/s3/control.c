@@ -36,7 +36,7 @@
  * S3 bucket compatible with the local instance.
  */
 bool
-s3_check_control(const char **errmsgp)
+s3_check_control(const char **errmsgp, const char **errdetailp)
 {
 	CheckpointControl control,
 			   *s3_control;
@@ -61,14 +61,15 @@ s3_check_control(const char **errmsgp)
 	}
 
 	/*
-	 * If there there is no orioledb_data/control file locally (in case if
-	 * CHECKPOINT didn't happen yet) but it exists on the S3 bucket then the
-	 * local instance isn't consistent with the S3 bucket.
+	 * If there is no orioledb_data/control file locally (in case if CHECKPOINT
+	 * didn't happen yet) but it exists on the S3 bucket then the local
+	 * instance isn't consistent with the S3 bucket.
 	 */
 	if (!control_res)
 	{
-		*errmsgp = psprintf("there is no control file \"%s\" locally, but it "
-							"exists on the S3 bucket", CONTROL_FILENAME);
+		*errmsgp = psprintf("OrioleDB can be incompatible with the S3 bucket "
+							"because the control file exists on the S3 bucket");
+		*errdetailp = psprintf("OrioleDB control file \"%s\" is absent", CONTROL_FILENAME);
 		goto cleanup;
 	}
 
@@ -77,41 +78,54 @@ s3_check_control(const char **errmsgp)
 
 	if (control.control_identifier != s3_control->control_identifier)
 	{
-		*errmsgp = psprintf("OrioleDB control identifier " UINT64_FORMAT
-							" differs from the S3 bucket identifier " UINT64_FORMAT,
-							control.control_identifier,
-							s3_control->control_identifier);
+		*errmsgp = psprintf("OrioleDB and the S3 bucket have files from "
+							"different instances and they are incompatible with "
+							"each other");
+		*errdetailp = psprintf("OrioleDB control identifier " UINT64_FORMAT
+							   " differs from the S3 bucket identifier " UINT64_FORMAT,
+							   control.control_identifier,
+							   s3_control->control_identifier);
 		goto cleanup;
 	}
 
 	if (control.lastCheckpointNumber < s3_control->lastCheckpointNumber)
 	{
-		*errmsgp = psprintf("OrioleDB last checkpoint number %u "
-							"is behind the S3 bucket last checkpoint number %u",
-							control.lastCheckpointNumber,
-							s3_control->lastCheckpointNumber);
+		*errmsgp = psprintf("OrioleDB misses new changes and checkpoints from "
+							"the S3 bucket and they are incompatible with "
+							"each other");
+		*errdetailp = psprintf("OrioleDB last checkpoint number %u is behind "
+							   "the S3 bucket last checkpoint number %u",
+							   control.lastCheckpointNumber,
+							   s3_control->lastCheckpointNumber);
 		goto cleanup;
 	}
 	else if (control.lastCheckpointNumber > s3_control->lastCheckpointNumber)
 		ereport(LOG,
-				(errmsg("OrioleDB last checkpoint number %u is ahead of "
-						"the S3 bucket last checkpoint number %u",
-						control.lastCheckpointNumber,
-						s3_control->lastCheckpointNumber)));
+				(errmsg("OrioleDB has more changes and checkpoints than "
+						"the S3 bucket but they are still compatible with each "
+						"other"),
+				 errdetail("OrioleDB last checkpoint number %u is ahead of "
+						   "the S3 bucket last checkpoint number %u",
+						   control.lastCheckpointNumber,
+						   s3_control->lastCheckpointNumber)));
 
 	if (control.sysTreesStartPtr < s3_control->sysTreesStartPtr)
 	{
-		*errmsgp = psprintf("OrioleDB XLOG location " UINT64_FORMAT
-							" is behind the S3 bucket XLOG location " UINT64_FORMAT,
-							control.sysTreesStartPtr,
-							s3_control->sysTreesStartPtr);
+		*errmsgp = psprintf("OrioleDB misses new changes from the S3 bucket "
+							"and they are incompatible with each other");
+		*errdetailp = psprintf("OrioleDB XLOG location " UINT64_FORMAT
+							   " is behind the S3 bucket XLOG location " UINT64_FORMAT,
+							   control.sysTreesStartPtr,
+							   s3_control->sysTreesStartPtr);
 		goto cleanup;
 	}
 	else if (control.sysTreesStartPtr > s3_control->sysTreesStartPtr)
 		ereport(LOG,
-				(errmsg("OrioleDB XLOG location " UINT64_FORMAT " is ahead of "
-						"the S3 bucket XLOG location " UINT64_FORMAT,
-						control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
+				(errmsg("OrioleDB has more changes than the S3 bucket but "
+						"they are still compatible with each other"),
+				 errdetail("OrioleDB XLOG location " UINT64_FORMAT " is ahead of "
+						   "the S3 bucket XLOG location " UINT64_FORMAT,
+						   control.sysTreesStartPtr, s3_control->sysTreesStartPtr)));
 
 	res = true;
 

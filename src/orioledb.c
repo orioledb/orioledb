@@ -830,16 +830,18 @@ _PG_init(void)
 
 	if (orioledb_s3_mode)
 	{
-		const char *check_error = NULL;
+		const char *check_errmsg = NULL;
+		const char *check_errdetail = NULL;
 
 		s3_put_lock_file();
-		if (!s3_check_control(&check_error))
+		if (!s3_check_control(&check_errmsg, &check_errdetail))
 		{
 			s3_delete_lock_file();
 
 			ereport(FATAL,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("%s", check_error)));
+					 errmsg("%s", check_errmsg),
+					 errdetail("%s", check_errdetail)));
 		}
 	}
 
