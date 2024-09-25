@@ -208,11 +208,12 @@ In S3 mode all the tables and materialized views created with `using orioledb` a
 
 For best results, it's recommended to turn on `Transfer acceleration` in **General** AWS S3 bucket settings (endpoint address will be given with `s3-accelerate.amazonaws.com` suffix) and have the bucket and compute instance within the same AWS region. Even better is to use **Directory** AWS bucket within the same AWS region and sub-region as the compute instance.
 
+Only one database instance can connect to the same S3 bucket.  During startup a database instance checks if another instance already is connected to the S3 bucket and if the bucket is compatible.  Otherwise the instance will fail to start.
+
 As mentioned above S3 mode is currently experimental.  The major limitations of this mode are the following.
 
 1. While OrioleDB tables and materialized views are stored incrementally in the S3 bucket, the history is kept forever.  There is currently no mechanism to safely remove the old data.
 2. In the primary/replica setup, each should have a separate S3 bucket.
-3. The user is responsible for ensuring that only one instance is working with the same S3 bucket.  Connecting multiple database instances simultaneously to the same bucket leads to data corruption.
 
 All of the limitations above are temporary and will be removed in further releases.
 
