@@ -48,7 +48,8 @@ get_checkpoint_control_data(CheckpointControl *control)
 			 sizeof(CheckpointControl)) != sizeof(CheckpointControl))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not read data from control file %s", CONTROL_FILENAME)));
+				 errmsg("could not read data from control file \"%s\"",
+						CONTROL_FILENAME)));
 
 	close(controlFile);
 

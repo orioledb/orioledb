@@ -13,7 +13,8 @@ from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException
 
-from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object
+from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object, \
+	mock_put_object_conflict, mock_moto_unkown_error
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -630,17 +631,31 @@ class S3Test(S3BaseTest):
 				self.assertIn('differs from the S3 bucket identifier',
 				              f.read())
 
-			with open(control_filename, "w+") as f:
-				f.truncate(10)
+			# Test that PostgreSQL won't start in caes of wrong CRC of the control file
+			with open(control_filename, "rb+") as f:
+				f.seek(3)
+				f.write(b'\x11')
 
-			# Test that PostgreSQL won't start in case of corrupted control file
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
 			self.assertEqual(e.exception.message, "Cannot start node")
 
 			with open(node.pg_log_file) as f:
 				self.assertIn(
-				    "FATAL:  could not read data from control file orioledb_data/control",
+				    'FATAL:  Wrong CRC in control file',
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of corrupted control file
+			with open(control_filename, "w+") as f:
+				f.truncate(10)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not read data from control file "orioledb_data/control"',
 				    f.read())
 
 			# Test that PostgreSQL won't start in case of different checkpoint number
@@ -664,6 +679,34 @@ class S3Test(S3BaseTest):
 				self.assertIn(
 				    'FATAL:  could not open file "orioledb_data/control": Permission denied',
 				    f.read())
+
+		# Patch put_object() to test "If-None-Match" and 409 error code
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object_conflict):
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  failed to create a lock file "data/orioledb_data/s3_lock" because of a concurrent process',
+				    f.read())
+
+
+		# Test unkown error handling
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_moto_unkown_error):
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not put object to S3',
+				    f.read())
+
 
 	def test_s3_put_lock_file(self):
 		node = self.node
