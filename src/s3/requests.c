@@ -13,6 +13,9 @@
 
 #include "postgres.h"
 
+#include <stdbool.h>
+#include <unistd.h>
+
 #include "orioledb.h"
 
 #include "s3/requests.h"
@@ -169,78 +172,13 @@ write_data_to_buf(void *buffer, size_t size, size_t nmemb, void *userp)
 	return segsize;
 }
 
-void
-s3_list_objects(void)
-{
-	CURL	   *curl;
-	char	   *url;
-	char	   *datestring;
-	char	   *datetimestring;
-	char	   *signature;
-	struct curl_slist *slist;
-	char	   *tmp;
-	int			sc;
-	unsigned char hash[32];
-	char	   *contenthash;
-	char	   *objectpath = s3_prefix ? s3_prefix : "";
-	long		http_code = 0;
-	StringInfo	str = makeStringInfo();
-
-	(void) SHA256(NULL, 0, hash);
-	contenthash = hex_string((Pointer) hash, sizeof(hash));
-
-	url = psprintf("%s://%s/%s",
-				   s3_use_https ? "https" : "http", s3_host, objectpath);
-	datestring = httpdate(NULL);
-	datetimestring = httpdatetime(NULL);
-	signature = s3_signature("GET", datetimestring, datestring, objectpath,
-							 s3_secretkey, contenthash);
-
-	slist = NULL;
-	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
-	pfree(tmp);
-	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
-	pfree(tmp);
-	slist = curl_slist_append(slist,
-							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
-											  s3_accesskey, datestring, s3_region, signature)));
-	pfree(tmp);
-
-	curl = curl_easy_init();
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	if (s3_cainfo)
-		curl_easy_setopt(curl, CURLOPT_CAINFO, s3_cainfo);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_buf);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, str);
-
-	sc = curl_easy_perform(curl);
-	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-	if (sc != 0 || http_code != 200)
-	{
-		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
-						errmsg("could not list objects in S3 bucket, check orioledb s3 configs"),
-						errdetail("return code = %d, http code = %ld, response = %s",
-								  sc, http_code, str->data)));
-	}
-
-	curl_easy_cleanup(curl);
-
-	curl_slist_free_all(slist);
-	pfree(url);
-	pfree(datestring);
-	pfree(datetimestring);
-	pfree(signature);
-	pfree(str->data);
-	pfree(str);
-}
-
 /*
  * Get the binary content of an object from S3 into 'str'.
+ *
+ * Returns HTTP status code.
  */
-static void
-s3_get_object(char *objectname, StringInfo str)
+long
+s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 {
 	CURL	   *curl;
 	char	   *url;
@@ -298,12 +236,17 @@ s3_get_object(char *objectname, StringInfo str)
 	sc = curl_easy_perform(curl);
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0 || http_code != 200)
+	if (sc != 0 || http_code != S3_RESPONSE_OK)
 	{
-		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
-						errmsg("could not get object from S3"),
-						errdetail("return code = %d, http code = %ld, response = %s",
-								  sc, http_code, str->data)));
+		if (missing_ok && http_code == S3_RESPONSE_NOT_FOUND)
+		{
+			/* Do nothing just return http_code */
+		}
+		else
+			ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+							errmsg("could not get object from S3"),
+							errdetail("return code = %d, http code = %ld, response = %s",
+									  sc, http_code, str->data)));
 	}
 
 	curl_easy_cleanup(curl);
@@ -315,6 +258,8 @@ s3_get_object(char *objectname, StringInfo str)
 	pfree(signature);
 	if (objectpath != objectname)
 		pfree(objectpath);
+
+	return http_code;
 }
 
 /*
@@ -328,9 +273,93 @@ s3_get(PG_FUNCTION_ARGS)
 
 	initStringInfo(&buf);
 
-	s3_get_object(text_to_cstring(PG_GETARG_TEXT_PP(0)), &buf);
+	s3_get_object(text_to_cstring(PG_GETARG_TEXT_PP(0)), &buf, false);
 
 	PG_RETURN_TEXT_P(cstring_to_text(buf.data));
+}
+
+/*
+ * Delete an object from an S3 bucket.
+ */
+void
+s3_delete_object(char *objectname)
+{
+	CURL	   *curl;
+	char	   *url;
+	char	   *datestring;
+	char	   *datetimestring;
+	char	   *signature;
+	struct curl_slist *slist;
+	char	   *tmp;
+	int			sc;
+	StringInfoData buf;
+	unsigned char hash[32];
+	char	   *contenthash;
+	char	   *objectpath = objectname;
+	long		http_code = 0;
+
+	(void) SHA256(NULL, 0, hash);
+	contenthash = hex_string((Pointer) hash, sizeof(hash));
+
+	if (s3_prefix)
+	{
+		int			prefix_len = strlen(s3_prefix);
+
+		if (prefix_len != 0)
+		{
+			if (s3_prefix[prefix_len - 1] == '/')
+				prefix_len--;
+			objectpath = psprintf("%.*s/%s", prefix_len, s3_prefix, objectname);
+		}
+	}
+
+	url = psprintf("%s://%s/%s",
+				   s3_use_https ? "https" : "http", s3_host, objectpath);
+	datestring = httpdate(NULL);
+	datetimestring = httpdatetime(NULL);
+	signature = s3_signature("DELETE", datetimestring, datestring, objectpath,
+							 s3_secretkey, contenthash);
+
+	slist = NULL;
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
+	pfree(tmp);
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
+	pfree(tmp);
+	slist = curl_slist_append(slist,
+							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
+											  s3_accesskey, datestring, s3_region, signature)));
+	pfree(tmp);
+
+	initStringInfo(&buf);
+
+	curl = curl_easy_init();
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if (s3_cainfo)
+		curl_easy_setopt(curl, CURLOPT_CAINFO, s3_cainfo);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_buf);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+
+	sc = curl_easy_perform(curl);
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+	if (sc != 0 || http_code != 204 || strlen(buf.data) != 0)
+		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+						errmsg("could not delete object from S3"),
+						errdetail("return code = %d, http code = %ld, response = %s",
+								  sc, http_code, buf.data)));
+
+	curl_easy_cleanup(curl);
+
+	curl_slist_free_all(slist);
+	pfree(url);
+	pfree(datestring);
+	pfree(datetimestring);
+	pfree(signature);
+	pfree(buf.data);
+	if (objectpath != objectname)
+		pfree(objectpath);
 }
 
 /*
@@ -341,12 +370,12 @@ static Pointer
 read_file_part(const char *filename, uint64 offset,
 			   uint64 maxSize, uint64 *size)
 {
-	File		file;
+	int			file;
 	Pointer		buffer,
 				ptr;
 	uint64		totalSize;
 
-	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	file = BasicOpenFile(filename, O_RDONLY | PG_BINARY);
 	if (file < 0)
 	{
 		ereport(WARNING,
@@ -355,7 +384,7 @@ read_file_part(const char *filename, uint64 offset,
 		return NULL;
 	}
 
-	totalSize = FileSize(file);
+	totalSize = lseek(file, 0, SEEK_END);
 	totalSize = Min(totalSize, offset + maxSize);
 	*size = Max(totalSize, offset) - offset;
 	buffer = (Pointer) MemoryContextAllocHuge(CurrentMemoryContext, *size);
@@ -366,7 +395,9 @@ read_file_part(const char *filename, uint64 offset,
 		int			amount = Min(totalSize - offset, BLCKSZ);
 		int			rc;
 
-		rc = FileRead(file, ptr, amount, offset, WAIT_EVENT_DATA_FILE_READ);
+		pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_READ);
+		rc = pg_pread(file, ptr, amount, offset);
+		pgstat_report_wait_end();
 
 		if (rc < 0)
 		{
@@ -387,7 +418,10 @@ read_file_part(const char *filename, uint64 offset,
 		ptr += amount;
 	}
 
-	FileClose(file);
+	if (close(file) != 0)
+		ereport(PANIC,
+				(errcode_for_file_access(),
+				 errmsg("could not close file \"%s\": %m", filename)));
 
 	return buffer;
 }
@@ -446,9 +480,12 @@ write_file(const char *filename, Pointer data, uint64 size)
 
 /*
  * Put object with given binary contents to S3.
+ *
+ * Returns HTTP status code.
  */
-static void
-s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
+static long
+s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
+							bool ifNoneMatch)
 {
 	CURL	   *curl;
 	char	   *url;
@@ -496,8 +533,10 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	slist = curl_slist_append(slist,
 							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
 											  s3_accesskey, datestring, s3_region, signature)));
-	slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
 	pfree(tmp);
+	slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
+	if (ifNoneMatch)
+		slist = curl_slist_append(slist, "If-None-Match: *");
 
 	initStringInfo(&buf);
 
@@ -515,12 +554,22 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	sc = curl_easy_perform(curl);
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-	if (sc != 0 || http_code != 200 || strlen(buf.data) != 0)
+	if (sc != 0 || http_code != S3_RESPONSE_OK || strlen(buf.data) != 0)
 	{
-		ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
-						errmsg("could not put object to S3"),
-						errdetail("return code = %d, http code = %ld, response = %s",
-								  sc, http_code, buf.data)));
+		/*
+		 * Return false if PUT failed to upload object it already exists in
+		 * the bucket.
+		 */
+		if (ifNoneMatch && (http_code == S3_RESPONSE_CONDITION_FAILED ||
+							http_code == S3_RESPONSE_CONDITION_CONFLICT))
+		{
+			/* Do nothing just return http_code */
+		}
+		else
+			ereport(FATAL, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+							errmsg("could not put object to S3"),
+							errdetail("return code = %d, http code = %ld, response = %s",
+									  sc, http_code, buf.data)));
 	}
 
 	curl_easy_cleanup(curl);
@@ -535,21 +584,23 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize)
 	pfree(buf.data);
 	if (objectpath != objectname)
 		pfree(objectpath);
+
+	return http_code;
 }
 
 /*
  * Put the whole file as S3 object.
  */
-bool
-s3_put_file(char *objectname, char *filename)
+long
+s3_put_file(char *objectname, char *filename, bool ifNoneMatch)
 {
 	Pointer		data;
 	uint64		dataSize = 0;
 
 	data = read_file(filename, &dataSize);
 	if (data)
-		s3_put_object_with_contents(objectname, data, dataSize);
-	return data != NULL;
+		return s3_put_object_with_contents(objectname, data, dataSize, ifNoneMatch);
+	return -1;
 }
 
 /*
@@ -561,7 +612,7 @@ s3_get_file(char *objectname, char *filename)
 	StringInfoData buf;
 
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf);
+	s3_get_object(objectname, &buf, false);
 
 	write_file(filename,
 			   (Pointer) buf.data,
@@ -573,7 +624,7 @@ s3_get_file(char *objectname, char *filename)
 /*
  * Put the file part as S3 object.
  */
-bool
+long
 s3_put_file_part(char *objectname, char *filename, int partnum)
 {
 	Pointer		data;
@@ -584,8 +635,8 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 						  ORIOLEDB_S3_PART_SIZE,
 						  &dataSize);
 	if (data)
-		s3_put_object_with_contents(objectname, data, dataSize);
-	return data != NULL;
+		return s3_put_object_with_contents(objectname, data, dataSize, false);
+	return -1;
 }
 
 /*
@@ -597,7 +648,7 @@ s3_get_file_part(char *objectname, char *filename, int partnum)
 	StringInfoData buf;
 
 	initStringInfo(&buf);
-	s3_get_object(objectname, &buf);
+	s3_get_object(objectname, &buf, false);
 
 	write_file_part(filename,
 					partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
@@ -613,7 +664,7 @@ s3_get_file_part(char *objectname, char *filename, int partnum)
 void
 s3_put_empty_dir(char *objectname)
 {
-	s3_put_object_with_contents(objectname, NULL, 0);
+	s3_put_object_with_contents(objectname, NULL, 0, false);
 }
 
 /*
@@ -629,7 +680,7 @@ s3_put(PG_FUNCTION_ARGS)
 	objectname = text_to_cstring(PG_GETARG_TEXT_PP(0));
 	filename = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
-	s3_put_file(objectname, filename);
+	s3_put_file(objectname, filename, false);
 
 	PG_RETURN_NULL();
 }

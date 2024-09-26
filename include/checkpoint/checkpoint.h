@@ -19,25 +19,6 @@
 
 #include "access/xlogdefs.h"
 
-typedef struct
-{
-	uint32		lastCheckpointNumber;
-	CommitSeqNo lastCSN;
-	OXid		lastXid;
-	UndoLocation lastUndoLocation;
-	XLogRecPtr	toastConsistentPtr;
-	XLogRecPtr	replayStartPtr;
-	XLogRecPtr	sysTreesStartPtr;
-	uint64		mmapDataLength;
-	UndoLocation checkpointRetainStartLocation;
-	UndoLocation checkpointRetainEndLocation;
-	OXid		checkpointRetainXmin;
-	OXid		checkpointRetainXmax;
-	uint32		binaryVersion;
-	bool		s3Mode;
-	pg_crc32c	crc;
-} CheckpointControl;
-
 struct CheckpointFileHeader
 {
 	uint64		ctid;
@@ -156,6 +137,7 @@ typedef struct
 
 typedef struct
 {
+	uint64		control_identifier;
 	uint32		changecount;
 	uint32		lastCheckpointNumber;
 	OIndexType	treeType;

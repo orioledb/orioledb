@@ -25,6 +25,7 @@
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "s3/control.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
 #include "s3/requests.h"
@@ -828,7 +829,21 @@ _PG_init(void)
 		register_bgwriter();
 
 	if (orioledb_s3_mode)
-		s3_list_objects();
+	{
+		const char *check_errmsg = NULL;
+		const char *check_errdetail = NULL;
+
+		s3_put_lock_file();
+		if (!s3_check_control(&check_errmsg, &check_errdetail))
+		{
+			s3_delete_lock_file();
+
+			ereport(FATAL,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("%s", check_errmsg),
+					 errdetail("%s", check_errdetail)));
+		}
+	}
 
 	/* Register S3 workers */
 	for (i = 0; orioledb_s3_mode && (i < s3_num_workers); i++)
@@ -1035,6 +1050,9 @@ orioledb_on_shmem_exit(int code, Datum arg)
 {
 	if (MyProc)
 		pg_atomic_write_u64(&oProcData[MyProc->pgprocno].xmin, InvalidOXid);
+
+	if (orioledb_s3_mode)
+		s3_delete_lock_file();
 }
 
 /*

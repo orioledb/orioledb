@@ -10,12 +10,16 @@ from socket import AddressFamily, SocketKind
 import sys
 import time
 from threading import Thread
-from typing import Optional
+from typing import Optional, Any
 from urllib3.util import connection
 
 import boto3
 from botocore.config import Config
 from moto.server import DomainDispatcherApplication, create_backend_app
+from moto.s3.responses import S3Response
+from moto.s3.exceptions import InvalidRequest, PreconditionFailed, \
+ S3ClientError, InvalidRequest
+from moto.core.common_types import TYPE_RESPONSE
 
 from werkzeug.serving import BaseWSGIServer, make_server, make_ssl_devcert
 import urllib3
@@ -33,6 +37,47 @@ def s3_test_attrs(**_):
 		return fn
 
 	return attr_decorator
+
+
+orig_put_object = S3Response.put_object
+
+
+# moto[s3] doesn't implement 409 HTTP error code therefore we need to do that
+# by ourselves.
+class ConditionalRequestConflict(S3ClientError):
+	code = 409
+
+	def __init__(self, failed_condition: str, **kwargs: Any):
+		kwargs.setdefault("template", "condition_error")
+		super().__init__(
+		    "ConditionalRequestConflict",
+		    "At least one of the pre-conditions you specified did not hold",
+		    condition=failed_condition,
+		    **kwargs,
+		)
+
+
+# Patch moto[s3]'s put_object() until it releases support "If-None-Match".
+# Relevant PR was merged https://github.com/getmoto/moto/pull/8109 but wasn't
+# released yet.
+def mock_put_object(self) -> TYPE_RESPONSE:
+	key_name = self.parse_key_name()
+	if_none_match = self.headers.get("If-None-Match")
+
+	if (if_none_match == "*"
+	    and self.backend.get_object(self.bucket_name, key_name) is not None):
+		raise PreconditionFailed("If-None-Match")
+
+	return orig_put_object(self)
+
+
+# Patch moto[s3]'s put_object() to alwasy return 409 code
+def mock_put_object_conflict(self) -> TYPE_RESPONSE:
+	raise ConditionalRequestConflict("If-None-Match")
+
+
+def mock_moto_unkown_error(self) -> TYPE_RESPONSE:
+	raise InvalidRequest("mock_moto_unkown_error")
 
 
 class S3BaseTest(BaseTest):

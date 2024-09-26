@@ -44,6 +44,7 @@ OBJS = src/btree/btree.o \
 	   src/catalog/o_type_cache.o \
 	   src/catalog/sys_trees.o \
 	   src/checkpoint/checkpoint.o \
+	   src/checkpoint/control.o \
 	   src/orioledb.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \
@@ -51,6 +52,7 @@ OBJS = src/btree/btree.o \
 	   src/recovery/worker.o \
 	   src/s3/archive.o \
 	   src/s3/checkpoint.o \
+	   src/s3/control.o \
 	   src/s3/headers.o \
 	   src/s3/queue.o \
 	   src/s3/requests.o \

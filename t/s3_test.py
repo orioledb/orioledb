@@ -1,15 +1,20 @@
 import logging
 import os
 import time
+import shutil
 import signal
+import stat
 from tempfile import mkdtemp, mkstemp
+
+from unittest.mock import patch
 
 import testgres
 from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
 from testgres.exceptions import StartNodeException
 
-from .s3_base_test import S3BaseTest, s3_test_attrs
+from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object, \
+ mock_put_object_conflict, mock_moto_unkown_error
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -51,8 +56,10 @@ class S3Test(S3BaseTest):
 		objects = self.client.list_objects(Bucket=self.bucket_name)
 		objects = objects.get("Contents", [])
 		objects = sorted(list(x["Key"] for x in objects))
-		self.assertEqual(objects,
-		                 ['5/LICENSE', 'LICENSE', 'wal/314159', 'wal/926535'])
+		self.assertEqual(objects, [
+		    '5/LICENSE', 'LICENSE', 'data/orioledb_data/s3_lock', 'wal/314159',
+		    'wal/926535'
+		])
 		object = self.client.get_object(Bucket=self.bucket_name,
 		                                Key="5/LICENSE")
 		boto_object_body = object["Body"].readlines()
@@ -85,10 +92,7 @@ class S3Test(S3BaseTest):
 		with open(node.pg_log_file) as f:
 			log = f.readlines()
 		message = log[0].split('] ')[-1].strip()
-		self.assertEqual(
-		    message,
-		    "FATAL:  could not list objects in S3 bucket, check orioledb s3 configs"
-		)
+		self.assertEqual(message, "FATAL:  could not put object to S3")
 
 	def test_s3_checkpoint(self):
 		node = self.node
@@ -564,3 +568,351 @@ class S3Test(S3BaseTest):
 			new_node.stop()
 			new_node.cleanup()
 		node.stop()
+
+	def test_s3_check_control(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			control_filename = os.path.join(node.data_dir, "orioledb_data",
+			                                "control")
+			shutil.copy(control_filename, f"{control_filename}.copy")
+
+			node.stop()
+
+			# Test that PostgreSQL won't start in case of absent control file
+			new_node = self.initNode(self.getBasePort() + 1)
+			new_node.append_conf(f"""
+				orioledb.s3_mode = true
+				orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+				orioledb.s3_region = '{self.region}'
+				orioledb.s3_accesskey = '{self.access_key_id}'
+				orioledb.s3_secretkey = '{self.secret_access_key}'
+				orioledb.s3_cainfo = '{self.s3_cainfo}'
+			""")
+
+			with self.assertRaises(StartNodeException) as e:
+				new_node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(new_node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  OrioleDB can be incompatible with the S3 bucket because the control file exists on the S3 bucket',
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of different control identifier
+			new_node.append_conf("orioledb.s3_prefix = 'temp_prefix'")
+			new_node.start()
+			new_node.safe_psql("CHECKPOINT")
+			new_node.stop()
+
+			new_node.append_conf("orioledb.s3_prefix = ''")
+
+			with self.assertRaises(StartNodeException) as e:
+				new_node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(new_node.pg_log_file) as f:
+				self.assertIn('differs from the S3 bucket identifier',
+				              f.read())
+
+			# Test that PostgreSQL won't start in caes of wrong CRC of the control file
+			with open(control_filename, "rb+") as f:
+				f.seek(3)
+				f.write(b'\x11')
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn('FATAL:  Wrong CRC in control file', f.read())
+
+			# Test that PostgreSQL won't start in case of corrupted control file
+			with open(control_filename, "w+") as f:
+				f.truncate(10)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not read data from control file "orioledb_data/control"',
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of different checkpoint number
+			shutil.copy(f"{control_filename}.copy", control_filename)
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    "FATAL:  OrioleDB misses new changes and checkpoints from the S3 bucket and they are incompatible with each other",
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of lack of permissions
+			os.chmod(control_filename, 0)
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not open file "orioledb_data/control": Permission denied',
+				    f.read())
+
+		# Patch put_object() to test "If-None-Match" and 409 error code
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object_conflict):
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  failed to create a lock file "data/orioledb_data/s3_lock" because of a concurrent process',
+				    f.read())
+
+		# Test unkown error handling
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_moto_unkown_error):
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn('FATAL:  could not put object to S3', f.read())
+
+	def test_s3_put_lock_file(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+
+			lock_filename = os.path.join(node.data_dir, "orioledb_data",
+			                             "s3_lock")
+			shutil.copy(lock_filename, f"{lock_filename}.copy")
+
+			node.stop()
+
+			# Test that PostgreSQL won't start in case of corrupted lock file 1
+			fstat = os.stat(lock_filename)
+			with open(lock_filename, "r+") as f:
+				f.write("\0" * fstat.st_size)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn('FATAL:  incorrect value of lock identifier 0',
+				              f.read())
+
+			# Test that PostgreSQL won't start in case of corrupted lock file 2
+			with open(lock_filename, "w+") as f:
+				f.truncate(0)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not read data from lock file "orioledb_data/s3_lock"',
+				    f.read())
+
+			# Test that PostgreSQL won't start in case of lack of permissions
+			shutil.copy(f"{lock_filename}.copy", lock_filename)
+			os.chmod(lock_filename, 0)
+
+			with self.assertRaises(StartNodeException) as e:
+				node.start()
+			self.assertEqual(e.exception.message, "Cannot start node")
+
+			with open(node.pg_log_file) as f:
+				self.assertIn(
+				    'FATAL:  could not open file "orioledb_data/s3_lock": Permission denied',
+				    f.read())
+
+	def test_s3_lock_file(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			objects = self.client.list_objects(Bucket=self.bucket_name)
+			objects = objects.get("Contents", [])
+			objects = sorted(list(x["Key"] for x in objects))
+			self.assertIn('data/orioledb_data/s3_lock', objects)
+			self.assertIn('data/orioledb_data/control', objects)
+
+			with self.getReplica() as new_node:
+				# Remove the lock file since pg_basebackup will copy it
+				os.remove(
+				    os.path.join(new_node.data_dir, "orioledb_data",
+				                 "s3_lock"))
+
+				with self.assertRaises(StartNodeException) as e:
+					new_node.start()
+				self.assertEqual(e.exception.message, "Cannot start node")
+				with open(new_node.pg_log_file) as f:
+					log = f.readlines()
+				message = log[0].split('] ')[-1].strip()
+				self.assertEqual(
+				    message,
+				    "FATAL:  A lock file from a different OrioleDB instance already exists on the S3 bucket"
+				)
+
+				new_node.cleanup()
+
+			node.stop()
+
+			objects = self.client.list_objects(Bucket=self.bucket_name)
+			objects = objects.get("Contents", [])
+			objects = sorted(list(x["Key"] for x in objects))
+			self.assertNotIn('data/orioledb_data/s3_lock', objects)
+
+	def test_s3_control_consistency(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			objects = self.client.list_objects(Bucket=self.bucket_name)
+			objects = objects.get("Contents", [])
+			objects = sorted(list(x["Key"] for x in objects))
+			self.assertIn('data/orioledb_data/s3_lock', objects)
+			self.assertIn('data/orioledb_data/control', objects)
+
+			with self.getReplica() as new_node:
+				# Remove the lock file since pg_basebackup will copy it
+				os.remove(
+				    os.path.join(new_node.data_dir, "orioledb_data",
+				                 "s3_lock"))
+
+				node.stop(["-m", "immediate"])
+
+				objects = self.client.list_objects(Bucket=self.bucket_name)
+				objects = objects.get("Contents", [])
+				objects = sorted(list(x["Key"] for x in objects))
+				self.assertNotIn('data/orioledb_data/s3_lock', objects)
+				self.assertIn('data/orioledb_data/control', objects)
+
+				new_node.start()
+
+				objects = self.client.list_objects(Bucket=self.bucket_name)
+				objects = objects.get("Contents", [])
+				objects = sorted(list(x["Key"] for x in objects))
+				self.assertIn('data/orioledb_data/s3_lock', objects)
+				self.assertIn('data/orioledb_data/control', objects)
+
+				new_node.stop()
+				new_node.cleanup()
+
+	def test_s3_control_inconsistency(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+
+		# Patch put_object() to test "If-None-Match"
+		with patch("moto.s3.responses.S3Response.put_object",
+		           new=mock_put_object):
+			node.start()
+			node.safe_psql("CHECKPOINT;")
+
+			with self.getReplica() as new_node:
+				# Remove the lock file since pg_basebackup will copy it
+				os.remove(
+				    os.path.join(new_node.data_dir, "orioledb_data",
+				                 "s3_lock"))
+
+				node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+				node.safe_psql("""
+					CREATE TABLE o_test (
+						val_1 int
+					) USING orioledb;
+					INSERT INTO o_test SELECT * FROM generate_series(1, 5);
+				""")
+				node.stop()
+
+				with self.assertRaises(StartNodeException) as e:
+					new_node.start()
+				self.assertEqual(e.exception.message, "Cannot start node")
+				with open(new_node.pg_log_file) as f:
+					log = f.readlines()
+				message = log[0].split('] ')[-1].strip()
+				self.assertEqual(
+				    message,
+				    "FATAL:  OrioleDB misses new changes and checkpoints from the S3 bucket and they are incompatible with each other"
+				)
+
+				new_node.cleanup()
