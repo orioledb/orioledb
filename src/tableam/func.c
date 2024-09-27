@@ -1138,9 +1138,11 @@ orioledb_tbl_are_indices_equal(PG_FUNCTION_ARGS)
 	if (are_equal)
 	{
 		iter1 = o_btree_iterator_create(&td1->desc, NULL, BTreeKeyNone,
-										COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+										&o_in_progress_snapshot,
+										ForwardScanDirection);
 		iter2 = o_btree_iterator_create(&td2->desc, NULL, BTreeKeyNone,
-										COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+										&o_in_progress_snapshot,
+										ForwardScanDirection);
 		while (are_equal)
 		{
 			OTuple		tuple1,

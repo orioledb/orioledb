@@ -319,7 +319,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 		tmpTup.formatFlags = 0;
 		it = o_btree_iterator_create(off_len_tree, (Pointer) &tmpTup,
 									 BTreeKeyNonLeafKey,
-									 COMMITSEQNO_INPROGRESS,
+									 &o_in_progress_snapshot,
 									 BackwardScanDirection);
 		tmpTup = o_btree_iterator_fetch(it, NULL, NULL, BTreeKeyLeafTuple,
 										false, NULL);
@@ -506,7 +506,7 @@ foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback, void *arg)
 
 	it = o_btree_iterator_create(off_len_tree, (Pointer) &fromTup,
 								 BTreeKeyNonLeafKey,
-								 COMMITSEQNO_INPROGRESS,
+								 &o_in_progress_snapshot,
 								 ForwardScanDirection);
 
 	while (true)

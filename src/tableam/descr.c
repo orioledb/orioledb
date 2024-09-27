@@ -10,7 +10,6 @@
  *
  *-------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -130,7 +129,7 @@ read_evicted_data(Oid datoid, Oid relnode, bool delete)
 
 	result = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_EVICTED_DATA),
 									   &keyTuple, BTreeKeyNonLeafKey,
-									   COMMITSEQNO_INPROGRESS, NULL,
+									   &o_in_progress_snapshot, NULL,
 									   CurrentMemoryContext, NULL);
 	if (O_TUPLE_IS_NULL(result))
 		return NULL;
@@ -187,17 +186,17 @@ orioledb_get_evicted_trees(PG_FUNCTION_ARGS)
 
 	it = o_btree_iterator_create(get_sys_tree(SYS_TREES_EVICTED_DATA),
 								 NULL, BTreeKeyNone,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	while (true)
 	{
 		OTuple		tuple;
-		CommitSeqNo tupCsn;
+		CommitSeqNo tupleCsn;
 		Datum		values[4];
 		bool		nulls[4] = {false};
 		EvictedTreeData *data;
 
-		tuple = o_btree_iterator_fetch(it, &tupCsn, NULL,
+		tuple = o_btree_iterator_fetch(it, &tupleCsn, NULL,
 									   BTreeKeyNone, false, NULL);
 		if (O_TUPLE_IS_NULL(tuple))
 			break;
@@ -876,7 +875,7 @@ o_find_shared_root_info(SharedRootInfoKey *key)
 
 	result_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
 											 &key_tuple, BTreeKeyNonLeafKey,
-											 COMMITSEQNO_INPROGRESS, NULL,
+											 &o_in_progress_snapshot, NULL,
 											 CurrentMemoryContext, NULL);
 
 	return (SharedRootInfo *) result_tuple.data;

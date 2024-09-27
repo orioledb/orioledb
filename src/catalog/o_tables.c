@@ -208,8 +208,8 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 }
 
 static TupleFetchCallbackResult
-oTablesVersionCallback(OTuple tuple, OXid tupOxid, CommitSeqNo csn, void *arg,
-					   TupleFetchCallbackCheckType check_type)
+oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+					   void *arg, TupleFetchCallbackCheckType check_type)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
@@ -217,7 +217,8 @@ oTablesVersionCallback(OTuple tuple, OXid tupOxid, CommitSeqNo csn, void *arg,
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
 
-	if (!(COMMITSEQNO_IS_INPROGRESS(csn) && tupOxid == get_current_oxid_if_any()))
+	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
+		  tupOxid == get_current_oxid_if_any()))
 		return OTupleFetchNext;
 
 	if (boundKey->version == O_TABLE_INVALID_VERSION)
@@ -248,7 +249,7 @@ ToastAPI	oTablesToastAPI = {
 
 void
 o_tables_foreach_oids(OTablesOidsCallback callback,
-					  CommitSeqNo csn,
+					  OSnapshot *oSnapshot,
 					  void *arg)
 {
 	OTableChunkKey chunk_key;
@@ -262,7 +263,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 	chunk_key.chunknum = 0;
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunk_key, BTreeKeyBound,
-								 csn, ForwardScanDirection);
+								 oSnapshot, ForwardScanDirection);
 
 	tuple = o_btree_iterator_fetch(it, NULL, NULL,
 								   BTreeKeyNone, false, NULL);
@@ -286,7 +287,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 		chunk_key.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunk_key, BTreeKeyBound,
-									 csn, ForwardScanDirection);
+									 oSnapshot, ForwardScanDirection);
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
@@ -297,7 +298,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
  */
 void
 o_tables_foreach(OTablesCallback callback,
-				 CommitSeqNo csn,
+				 OSnapshot *oSnapshot,
 				 void *arg)
 {
 	OTablesForeachArg foreach_arg;
@@ -305,7 +306,7 @@ o_tables_foreach(OTablesCallback callback,
 	foreach_arg.callback = callback;
 	foreach_arg.arg = arg;
 
-	o_tables_foreach_oids(o_tables_foreach_callback, csn, &foreach_arg);
+	o_tables_foreach_oids(o_tables_foreach_callback, oSnapshot, &foreach_arg);
 }
 
 static char *
@@ -1010,23 +1011,23 @@ o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id)
 	arg.datoid = database_id;
 
 	o_tables_foreach_oids(o_tables_drop_all_callback,
-						  COMMITSEQNO_NON_DELETED, &arg);
+						  &o_non_deleted_snapshot, &arg);
 }
 
 void
 o_tables_drop_all_temporary()
 {
 	OTablesDropAllArg arg;
-	CommitSeqNo csn;
 	OXid		oxid;
+	OSnapshot	oSnapshot;
 
-	fill_current_oxid_csn(&oxid, &csn);
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	arg.oxid = oxid;
-	arg.csn = csn;
+	arg.csn = oSnapshot.csn;
 
 	o_tables_foreach(o_tables_drop_all_temporary_callback,
-					 COMMITSEQNO_NON_DELETED, &arg);
+					 &o_non_deleted_snapshot, &arg);
 }
 
 bool
@@ -1084,7 +1085,7 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
-											COMMITSEQNO_NON_DELETED,
+											&o_non_deleted_snapshot,
 											get_sys_tree(SYS_TREES_O_TABLES),
 											(Pointer *) &found_key);
 
@@ -1118,7 +1119,7 @@ o_tables_get_by_tree(ORelOids oids, OIndexType type)
 	bool		result;
 
 	/* See if it's index oid first */
-	result = o_indices_find_table_oids(oids, type, COMMITSEQNO_INPROGRESS,
+	result = o_indices_find_table_oids(oids, type, &o_in_progress_snapshot,
 									   &tableOids);
 	if (!result)
 		return NULL;
@@ -1424,7 +1425,7 @@ orioledb_table_oids(PG_FUNCTION_ARGS)
 	MemoryContextSwitchTo(oldcontext);
 
 	o_tables_foreach_oids(o_table_oids_array_callback,
-						  COMMITSEQNO_NON_DELETED, rsinfo);
+						  &o_non_deleted_snapshot, rsinfo);
 
 	tuplestore_donestoring(tupstore);
 
@@ -1820,7 +1821,7 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
 	arg.type_data = (Form_pg_type) GETSTRUCT(tuple);
 
 	o_tables_foreach(o_tables_drop_columns_with_type_callback,
-					 COMMITSEQNO_INPROGRESS, &arg);
+					 &o_in_progress_snapshot, &arg);
 }
 
 void

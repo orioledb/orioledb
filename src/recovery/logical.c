@@ -10,7 +10,6 @@
  *
  *-------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -214,6 +213,8 @@ void
 orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
 	XLogReaderState *record = buf->record;
+	XLogRecPtr	startXLogPtr = record->ReadRecPtr;
+	XLogRecPtr	endXLogPtr = record->EndRecPtr;
 	Pointer		startPtr = (Pointer) XLogRecGetData(record);
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 	Pointer		ptr = startPtr;
@@ -223,7 +224,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	ORelOids	cur_oids = {0, 0, 0};
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId;
-	TransactionId logicalNextXid = InvalidTransactionId;
 	uint8		rec_type;
 	OffsetNumber length;
 	OIndexType	ix_type = oIndexInvalid;
@@ -256,18 +256,25 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			memcpy(&logicalXid, ptr, sizeof(TransactionId));
 			ptr += sizeof(TransactionId);
-
-			memcpy(&logicalNextXid, ptr, sizeof(TransactionId));
-			ptr += sizeof(TransactionId);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
 			OXid		xmin;
 			dlist_iter	cur_txn_i;
 			ReorderBufferTXN *txn;
+			CommitSeqNo csn;
+			CSNSnapshotData csnSnapshot;
 
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
+			memcpy(&csn, ptr, sizeof(csn));
+			ptr += sizeof(csn);
+
+			csnSnapshot.snapshotcsn = csn;
+			csnSnapshot.xmin = xmin;
+			csnSnapshot.xlogptr = endXLogPtr;
+
+			SnapBuildUpdateCSNSnaphot(ctx->snapshot_builder, &csnSnapshot);
 
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
 			if (txn->toptxn)
@@ -280,39 +287,64 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
 
 				ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-										 buf->origptr, buf->endptr);
+										 startXLogPtr, endXLogPtr);
 
 			}
 
-			ReorderBufferCommit(ctx->reorder, logicalXid,
-								buf->origptr, buf->endptr,
-								0, XLogRecGetOrigin(buf->record),
-								buf->origptr + (ptr - startPtr));
+			if (rec_type == WAL_REC_COMMIT &&
+				!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
+			{
+				ReorderBufferCommit(ctx->reorder, logicalXid,
+									startXLogPtr, endXLogPtr,
+									0, XLogRecGetOrigin(buf->record),
+									buf->origptr);
+			}
+			else
+			{
+				ReorderBufferAbort(ctx->reorder, logicalXid,
+								   startXLogPtr, 0);
+			}
 			UpdateDecodingStats(ctx);
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
-			logicalNextXid = InvalidTransactionId;
 		}
 		else if (rec_type == WAL_REC_JOINT_COMMIT)
 		{
 			TransactionId xid;
 			OXid		xmin;
+			CommitSeqNo csn;
+			CSNSnapshotData csnSnapshot;
 
 			memcpy(&xid, ptr, sizeof(xid));
 			ptr += sizeof(xid);
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
+			memcpy(&csn, ptr, sizeof(csn));
+			ptr += sizeof(csn);
 
-			ReorderBufferCommit(ctx->reorder, logicalXid,
-								buf->origptr, buf->endptr,
-								0, XLogRecGetOrigin(buf->record),
-								buf->origptr + (ptr - startPtr));
+			csnSnapshot.snapshotcsn = csn;
+			csnSnapshot.xmin = xmin;
+			csnSnapshot.xlogptr = endXLogPtr;
+
+			SnapBuildUpdateCSNSnaphot(ctx->snapshot_builder, &csnSnapshot);
+
+			if (!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
+			{
+				ReorderBufferCommit(ctx->reorder, logicalXid,
+									startXLogPtr, endXLogPtr,
+									0, XLogRecGetOrigin(buf->record),
+									buf->origptr);
+			}
+			else
+			{
+				ReorderBufferAbort(ctx->reorder, logicalXid,
+								   startXLogPtr, 0);
+			}
 			UpdateDecodingStats(ctx);
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
-			logicalNextXid = InvalidTransactionId;
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
@@ -417,7 +449,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&parentLogicalXid, ptr, sizeof(TransactionId));
 			ptr += sizeof(TransactionId);
 
-			ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr + (ptr - startPtr));
+			ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
 
 			/* Skip */
 		}
@@ -434,10 +466,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			OFixedTuple tuple;
 			ReorderBufferChange *change;
+			XLogRecPtr	changeXLogPtr = startXLogPtr + (ptr - startPtr);
 
 			Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE);
 
-			ReorderBufferProcessXid(ctx->reorder, logicalXid, buf->origptr + (ptr - startPtr));
+			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
 
 			tuple.tuple.formatFlags = *ptr;
 			ptr++;
@@ -446,13 +479,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr += sizeof(OffsetNumber);
 
 			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
-			{
-				ptr += length;
-				continue;
-			}
-
-			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_CONSISTENT &&
-				TransactionIdPrecedes(logicalNextXid, SnapBuildNextPhaseAt(ctx->snapshot_builder)))
 			{
 				ptr += length;
 				continue;
@@ -472,9 +498,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 #endif
 
 				ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
-											 buf->origptr + (ptr - startPtr),
+											 changeXLogPtr,
 											 snap);
 				snap->active_count++;
+				/* XXX: why this matters? */
+				snap->csnSnapshotData.xlogptr = record->ReadRecPtr;
 			}
 
 
@@ -605,7 +633,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					}
 
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
-											 buf->origptr + (ptr - startPtr),
+											 changeXLogPtr,
 											 change, (ix_type == oIndexToast));
 
 				}
@@ -654,7 +682,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
-											 buf->origptr + (ptr - startPtr),
+											 changeXLogPtr,
 											 change, false);
 				}
 				else if (rec_type == WAL_REC_DELETE)
@@ -706,7 +734,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						}
 					}
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
-											 buf->origptr + (ptr - startPtr),
+											 changeXLogPtr,
 											 change, (ix_type == oIndexToast));
 				}
 			}

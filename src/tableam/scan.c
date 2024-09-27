@@ -23,6 +23,7 @@
 #include "tableam/handler.h"
 #include "tableam/index_scan.h"
 #include "tableam/scan.h"
+#include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/stopevent.h"
 
@@ -523,7 +524,7 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 			}
 		}
 
-		bitmap_state->csn = estate->es_snapshot->snapshotcsn;
+		O_LOAD_SNAPSHOT(&bitmap_state->oSnapshot, estate->es_snapshot);
 		bitmap_state->cxt = AllocSetContextCreate(estate->es_query_cxt,
 												  "orioledb_cs plan data",
 												  ALLOCSET_DEFAULT_SIZES);
@@ -559,7 +560,7 @@ o_exec_custom_scan(CustomScanState *node)
 													bitmapqualplanstate,
 													rel,
 													bitmap_state->typeoid,
-													bitmap_state->csn,
+													&bitmap_state->oSnapshot,
 													bitmap_state->cxt);
 		}
 

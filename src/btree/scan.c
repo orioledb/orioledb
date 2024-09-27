@@ -49,6 +49,7 @@
 #include "btree/page_chunks.h"
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/sampling.h"
 #include "utils/stopevent.h"
@@ -78,7 +79,7 @@ struct BTreeSeqScan
 
 	bool		initialized;
 	bool		checkpointNumberSet;
-	CommitSeqNo snapshotCsn;
+	OSnapshot	oSnapshot;
 	OBTreeFindPageContext context;
 	OFixedKey	prevHikey;
 	BTreeLocationHint hint;
@@ -180,7 +181,7 @@ load_first_historical_page(BTreeSeqScan *scan)
 	OFixedKey	hikey;
 
 	scan->haveHistImg = false;
-	if (!COMMITSEQNO_IS_NORMAL(scan->snapshotCsn))
+	if (!COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn))
 		return;
 
 	if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
@@ -190,7 +191,7 @@ load_first_historical_page(BTreeSeqScan *scan)
 	O_TUPLE_SET_NULL(lokey.tuple);
 
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
-		   header->csn >= scan->snapshotCsn)
+		   header->csn >= scan->oSnapshot.csn)
 	{
 		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
 		{
@@ -245,7 +246,7 @@ load_next_historical_page(BTreeSeqScan *scan)
 	copy_fixed_hikey(scan->desc, &prevHikey, scan->histImg);
 
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
-		   header->csn >= scan->snapshotCsn)
+		   header->csn >= scan->oSnapshot.csn)
 	{
 		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
 		{
@@ -509,12 +510,10 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 	mctx = MemoryContextSwitchTo(scan->mctx);
 	if (!O_TUPLE_IS_NULL(keyRangeLow))
 		scan->iter = o_btree_iterator_create(scan->desc, &keyRangeLow, BTreeKeyNonLeafKey,
-											 scan->snapshotCsn,
-											 ForwardScanDirection);
+											 &scan->oSnapshot, ForwardScanDirection);
 	else
 		scan->iter = o_btree_iterator_create(scan->desc, NULL, BTreeKeyNone,
-											 scan->snapshotCsn,
-											 ForwardScanDirection);
+											 &scan->oSnapshot, ForwardScanDirection);
 	MemoryContextSwitchTo(mctx);
 
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
@@ -1085,7 +1084,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 
-	init_page_find_context(&scan->context, desc, scan->snapshotCsn,
+	init_page_find_context(&scan->context, desc, scan->oSnapshot.csn,
 						   BTREE_PAGE_FIND_IMAGE |
 						   BTREE_PAGE_FIND_KEEP_LOKEY |
 						   BTREE_PAGE_FIND_READ_CSN);
@@ -1104,7 +1103,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 }
 
 static BTreeSeqScan *
-make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
+make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 							 BTreeSeqScanCallbacks *cb, void *arg,
 							 BlockSampler sampler, ParallelOScanDesc poscan)
 {
@@ -1113,7 +1112,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 
 	scan->poscan = poscan;
 	scan->desc = desc;
-	scan->snapshotCsn = csn;
+	scan->oSnapshot = *oSnapshot;
 	scan->status = BTreeSeqScanInMemory;
 	scan->allocatedDownlinks = 16;
 	scan->downlinksCount = 0;
@@ -1139,24 +1138,24 @@ make_btree_seq_scan_internal(BTreeDescr *desc, CommitSeqNo csn,
 }
 
 BTreeSeqScan *
-make_btree_seq_scan(BTreeDescr *desc, CommitSeqNo csn, void *poscan)
+make_btree_seq_scan(BTreeDescr *desc, OSnapshot *oSnapshot, void *poscan)
 {
 	o_btree_load_shmem(desc);
-	return make_btree_seq_scan_internal(desc, csn, NULL, NULL, NULL, poscan);
+	return make_btree_seq_scan_internal(desc, oSnapshot, NULL, NULL, NULL, poscan);
 }
 
 BTreeSeqScan *
-make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
+make_btree_seq_scan_cb(BTreeDescr *desc, OSnapshot *oSnapshot,
 					   BTreeSeqScanCallbacks *cb, void *arg)
 {
 	o_btree_load_shmem(desc);
-	return make_btree_seq_scan_internal(desc, csn, cb, arg, NULL, NULL);
+	return make_btree_seq_scan_internal(desc, oSnapshot, cb, arg, NULL, NULL);
 }
 
 BTreeSeqScan *
 make_btree_sampling_scan(BTreeDescr *desc, BlockSampler sampler)
 {
-	return make_btree_seq_scan_internal(desc, COMMITSEQNO_INPROGRESS,
+	return make_btree_seq_scan_internal(desc, &o_in_progress_snapshot,
 										NULL, NULL, sampler, NULL);
 }
 
@@ -1411,7 +1410,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 			tuple = o_find_tuple_version(scan->desc,
 										 scan->histImg,
 										 &scan->histLoc,
-										 scan->snapshotCsn,
+										 &scan->oSnapshot,
 										 tupleCsn,
 										 mctx,
 										 NULL,
@@ -1464,7 +1463,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		tuple = o_find_tuple_version(scan->desc,
 									 scan->leafImg,
 									 &scan->leafLoc,
-									 scan->snapshotCsn,
+									 &scan->oSnapshot,
 									 tupleCsn,
 									 mctx,
 									 NULL,

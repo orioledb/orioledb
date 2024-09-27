@@ -791,7 +791,7 @@ _PG_init(void)
 	xid_circular_buffer_size = ((Size) xid_buffers_guc * BLCKSZ) / 2;
 	xid_circular_buffer_size /= ORIOLEDB_BLCKSZ;
 	xid_buffers_count = (uint32) xid_circular_buffer_size;
-	xid_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(pg_atomic_uint64);
+	xid_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(OXidMapItem);
 
 	page_descs_size = CACHELINEALIGN(mul_size(orioledb_buffers_count, sizeof(OrioleDBPageDesc)));
 

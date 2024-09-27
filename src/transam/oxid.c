@@ -30,14 +30,32 @@
 #define XID_FILE_SIZE (0x1000000)
 
 #define	COMMITSEQNO_SPECIAL_BIT (UINT64CONST(1) << 63)
-#define COMMITSEQNO_SPECIAL_COMMITTING_BIT (1)
+#define COMMITSEQNO_STATUS_IN_PROGRESS (0x0)
+#define COMMITSEQNO_STATUS_CSN_COMMITTING (0x1)
 #define COMMITSEQNO_IS_SPECIAL(csn) ((csn) & COMMITSEQNO_SPECIAL_BIT)
-#define COMMITSEQNO_GET_LEVEL(csn) (((csn) >> 31) & 0xFFFFFFFF)
-#define COMMITSEQNO_GET_PROCNUM(csn) (((csn) >> 15) & 0xFFFF)
-#define COMMITSEQNO_MAKE_SPECIAL(procnum, level, committing) \
+#define COMMITSEQNO_GET_STATUS(csn) \
+	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), (csn) & 0x1)
+#define COMMITSEQNO_GET_LEVEL(csn) \
+	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), ((csn) >> 31) & 0xFFFFFFFF)
+#define COMMITSEQNO_GET_PROCNUM(csn) \
+	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), ((csn) >> 15) & 0xFFFF)
+#define COMMITSEQNO_MAKE_SPECIAL(procnum, level, status) \
 	(COMMITSEQNO_SPECIAL_BIT | ((uint64) procnum << 15) | \
-	 ((uint64) level << 31) | \
-	 ((committing) ? COMMITSEQNO_SPECIAL_COMMITTING_BIT : 0))
+	 ((uint64) level << 31) | (status))
+
+#define	XLOG_PTR_SPECIAL_BIT (0x1)
+#define XLOG_PTR_IN_PROGRESS (0x0)
+#define XLOG_PTR_COMMITTING (0x2)
+#define XLOG_PTR_IS_SPECIAL(ptr) ((ptr) & XLOG_PTR_SPECIAL_BIT)
+#define XLOG_PTR_GET_STATUS(ptr) \
+		(AssertMacro(XLOG_PTR_IS_SPECIAL(ptr)), (ptr) & 0x2)
+#define XLOG_PTR_GET_LEVEL(ptr) \
+		(AssertMacro(XLOG_PTR_IS_SPECIAL(ptr)), ((ptr) >> 31) & 0xFFFFFFFF)
+#define XLOG_PTR_GET_PROCNUM(ptr) \
+		(AssertMacro(XLOG_PTR_IS_SPECIAL(ptr)), ((ptr) >> 15) & 0xFFFF)
+#define XLOG_PTR_MAKE_SPECIAL(procnum, level, status) \
+		(XLOG_PTR_SPECIAL_BIT | ((uint64) procnum << 15) | \
+		 ((uint64) level << 31) | (status))
 
 static OXid curOxid = InvalidOXid;
 
@@ -45,13 +63,15 @@ static OXid curOxid = InvalidOXid;
  * A 32-bit transaction id to be used during logical decoding.
  */
 static TransactionId logicalXid = InvalidTransactionId;
-static TransactionId logicalNextXid = InvalidTransactionId;
 static List *prevLogicalXids = NIL;
-static pg_atomic_uint64 *xidBuffer;
+static OXidMapItem *xidBuffer;
 
 XidMeta    *xid_meta;
 
 pg_atomic_uint32 *logicalXidsShmemMap;
+
+OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0};
+OSnapshot	o_non_deleted_snapshot = {COMMITSEQNO_NON_DELETED, InvalidXLogRecPtr, 0};
 
 static OBuffersDesc buffersDesc = {
 	.singleFileSize = XID_FILE_SIZE,
@@ -71,7 +91,7 @@ oxid_shmem_needs(void)
 
 	size = CACHELINEALIGN(sizeof(XidMeta));
 	size = add_size(size, mul_size(xid_circular_buffer_size,
-								   sizeof(pg_atomic_uint64)));
+								   sizeof(OXidMapItem)));
 	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
 	size = add_size(size, mul_size(max_procs, sizeof(pg_atomic_uint32)));
 
@@ -176,8 +196,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 {
 	xid_meta = (XidMeta *) ptr;
 	ptr += MAXALIGN(sizeof(XidMeta));
-	xidBuffer = (pg_atomic_uint64 *) ptr;
-	ptr += xid_circular_buffer_size * sizeof(pg_atomic_uint64);
+	xidBuffer = (OXidMapItem *) ptr;
+	ptr += xid_circular_buffer_size * sizeof(OXidMapItem);
 	o_buffers_shmem_init(&buffersDesc, ptr, found);
 	ptr += o_buffers_shmem_needs(&buffersDesc);
 	logicalXidsShmemMap = (pg_atomic_uint32 *) ptr;
@@ -189,7 +209,10 @@ oxid_init_shmem(Pointer ptr, bool found)
 		/* xid_meta fields are initialized in checkpoint_shmem_init() */
 		SpinLockInit(&xid_meta->xminMutex);
 		for (i = 0; i < xid_circular_buffer_size; i++)
-			pg_atomic_init_u64(&xidBuffer[i], COMMITSEQNO_FROZEN);
+		{
+			pg_atomic_init_u64(&xidBuffer[i].csn, COMMITSEQNO_FROZEN);
+			pg_atomic_init_u64(&xidBuffer[i].commitPtr, FirstNormalUnloggedLSN);
+		}
 
 		xid_meta->xidMapTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
@@ -312,12 +335,12 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	CommitSeqNo oldCsn;
 	OXid		writeInProgressXmin;
 
-	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size]);
+	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	pg_read_barrier();
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
 	if (oxid >= writeInProgressXmin)
 	{
-		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size],
+		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
 										   &oldCsn, csn))
 		{
 			Assert(oldCsn != COMMITSEQNO_FROZEN);
@@ -343,33 +366,38 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
 	o_buffers_write(&buffersDesc, (Pointer) &csn,
-					oxid * sizeof(CommitSeqNo), sizeof(CommitSeqNo));
+					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, csn),
+					sizeof(CommitSeqNo));
 }
 
 /*
- * Read csn of given xid from xidmap.
+ * Set the csn value for particular oxid.
  */
-static CommitSeqNo
-map_oxid_csn(OXid oxid)
+static void
+set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 {
-	CommitSeqNo csn;
+	XLogRecPtr	oldPtr;
+	OXid		writeInProgressXmin;
 
-	if (is_recovery_process())
-	{
-		bool		found;
-
-		csn = recovery_map_oxid_csn(oxid, &found);
-		if (found)
-			return csn;
-	}
-
-	/* Optimisticly try to read csn from circular buffer */
-	csn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size]);
+	oldPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();
+	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
+	if (oxid >= writeInProgressXmin)
+	{
+		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr,
+										   &oldPtr, ptr))
+		{
+			Assert(oldPtr != FirstNormalUnloggedLSN);
+			return;
+		}
 
-	/* Did we manage to read the correct csn? */
-	if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
-		return csn;
+		/*
+		 * We assume that nobody could change the csn value concurrently.
+		 * Thus, it could be only wiped out from the circular buffer to
+		 * o_buffers.
+		 */
+		Assert(oxid < pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
+	}
 
 	/*
 	 * Wait for the concurrent write operation if needed.
@@ -381,14 +409,80 @@ map_oxid_csn(OXid oxid)
 	}
 
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
-	o_buffers_read(&buffersDesc, (Pointer) &csn,
-				   oxid * sizeof(CommitSeqNo), sizeof(CommitSeqNo));
+	o_buffers_write(&buffersDesc, (Pointer) &ptr,
+					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, commitPtr),
+					sizeof(XLogRecPtr));
+}
+
+void
+set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr)
+{
+	Assert(!XLOG_PTR_IS_SPECIAL(ptr));
+
+	set_oxid_xlog_ptr_internal(oxid, ptr);
+}
+
+
+/*
+ * Read csn of given xid from xidmap.
+ */
+static void
+map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
+{
+	OXidMapItem mapItem;
+
+	if (is_recovery_process() && outCsn)
+	{
+		bool		found;
+
+		*outCsn = recovery_map_oxid_csn(oxid, &found);
+		if (found)
+		{
+			outCsn = NULL;
+			if (!outPtr)
+				return;
+		}
+	}
+
+	/* Optimisticly try to read csn and/or xlog ptr from circular buffer */
+	if (outCsn)
+		*outCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
+	if (outPtr)
+		*outPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
+	pg_read_barrier();
+
+	/* Did we manage to read the correct csn? */
+	if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
+		return;
+
+	/*
+	 * Wait for the concurrent write operation if needed.
+	 */
+	if (oxid >= pg_atomic_read_u64(&xid_meta->writtenXmin))
+	{
+		LWLockAcquire(&xid_meta->xidMapWriteLock, LW_SHARED);
+		LWLockRelease(&xid_meta->xidMapWriteLock);
+	}
+
+	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
+	o_buffers_read(&buffersDesc, (Pointer) &mapItem,
+				   oxid * sizeof(OXidMapItem),
+				   sizeof(OXidMapItem));
 
 	/* Recheck if globalXmin was advanced concurrently */
 	if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
-		return COMMITSEQNO_FROZEN;
+	{
+		if (outCsn)
+			*outCsn = COMMITSEQNO_FROZEN;
+		if (outPtr)
+			*outPtr = FirstNormalUnloggedLSN;
+		return;
+	}
 
-	return csn;
+	if (outCsn)
+		*outCsn = pg_atomic_read_u64(&mapItem.csn);
+	if (outPtr)
+		*outPtr = pg_atomic_read_u64(&mapItem.commitPtr);
 }
 
 /*
@@ -401,8 +495,8 @@ write_xidsmap(OXid targetXmax)
 				xmin,
 				xmax,
 				lastWrittenXmin;
-	int			bufferLength = ORIOLEDB_BLCKSZ / sizeof(CommitSeqNo);
-	CommitSeqNo buffer[ORIOLEDB_BLCKSZ / sizeof(CommitSeqNo)];
+	int			bufferLength = ORIOLEDB_BLCKSZ / sizeof(OXidMapItem);
+	OXidMapItem buffer[ORIOLEDB_BLCKSZ / sizeof(OXidMapItem)];
 
 	/*
 	 * Get the xidmap range to write.
@@ -415,7 +509,7 @@ write_xidsmap(OXid targetXmax)
 	xmax = Min(xmax, pg_atomic_read_u64(&xid_meta->nextXid));
 	for (oxid = xmin; oxid < xmax; oxid++)
 	{
-		if (pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size]) == COMMITSEQNO_FROZEN)
+		if (pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN)
 			break;
 	}
 	xmax = oxid;
@@ -439,20 +533,24 @@ write_xidsmap(OXid targetXmax)
 		{
 			o_buffers_write(&buffersDesc,
 							(Pointer) &buffer[lastWrittenXmin % bufferLength],
-							lastWrittenXmin * sizeof(CommitSeqNo),
-							(oxid - lastWrittenXmin) * sizeof(CommitSeqNo));
+							lastWrittenXmin * sizeof(OXidMapItem),
+							(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
 			lastWrittenXmin = oxid;
 		}
 
-		buffer[oxid % bufferLength] = pg_atomic_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size],
-															 COMMITSEQNO_FROZEN);
+		pg_atomic_write_u64(&buffer[oxid % bufferLength].csn,
+							pg_atomic_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
+												   COMMITSEQNO_FROZEN));
+		pg_atomic_write_u64(&buffer[oxid % bufferLength].commitPtr,
+							pg_atomic_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr,
+												   FirstNormalUnloggedLSN));
 	}
 
 	if (oxid > lastWrittenXmin)
 		o_buffers_write(&buffersDesc,
 						(Pointer) &buffer[lastWrittenXmin % bufferLength],
-						lastWrittenXmin * sizeof(CommitSeqNo),
-						(oxid - lastWrittenXmin) * sizeof(CommitSeqNo));
+						lastWrittenXmin * sizeof(OXidMapItem),
+						(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
 
 	SpinLockAcquire(&xid_meta->xminMutex);
 	Assert(pg_atomic_read_u64(&xid_meta->writtenXmin) < xmax);
@@ -496,7 +594,7 @@ wait_for_oxid(OXid oxid)
 	VirtualTransactionId vxid;
 	bool		result;
 
-	csn = map_oxid_csn(oxid);
+	map_oxid(oxid, &csn, NULL);
 
 	if (!COMMITSEQNO_IS_SPECIAL(csn))
 		return true;
@@ -536,7 +634,7 @@ oxid_notify(OXid oxid)
 	VirtualTransactionId vxid;
 	int			procnum;
 
-	csn = map_oxid_csn(oxid);
+	map_oxid(oxid, &csn, NULL);
 
 	if (!COMMITSEQNO_IS_SPECIAL(csn))
 		return;
@@ -777,8 +875,12 @@ advance_global_xmin(OXid newXid)
 		pg_write_barrier();
 
 		for (oxid = writtenXmin; oxid < globalXmin; oxid++)
-			pg_atomic_write_u64(&xidBuffer[oxid % xid_circular_buffer_size],
+		{
+			pg_atomic_write_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
 								COMMITSEQNO_FROZEN);
+			pg_atomic_write_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr,
+								FirstNormalUnloggedLSN);
+		}
 
 		pg_write_barrier();
 
@@ -883,8 +985,10 @@ advance_oxids(OXid new_xid)
 		xmax = Min(new_xid + 1, pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size);
 		for (; xid < xmax; xid++)
 		{
-			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size],
+			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].csn,
 								COMMITSEQNO_INPROGRESS);
+			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].commitPtr,
+								InvalidXLogRecPtr);
 		}
 		pg_atomic_write_u64(&xid_meta->nextXid, xmax);
 	}
@@ -943,14 +1047,17 @@ get_current_oxid(void)
 		vxidElem->vxid.backendId = MyProc->backendId;
 		vxidElem->vxid.localTransactionId = MyProc->lxid;
 
-		Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size]) == COMMITSEQNO_FROZEN);
-		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size],
+		Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN);
+		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn,
 							COMMITSEQNO_MAKE_SPECIAL(MyProc->pgprocno,
 													 nestingLevel,
-													 false));
+													 COMMITSEQNO_STATUS_IN_PROGRESS));
+		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].commitPtr,
+							XLOG_PTR_MAKE_SPECIAL(MyProc->pgprocno,
+												  nestingLevel,
+												  COMMITSEQNO_STATUS_IN_PROGRESS));
 		curOxid = newOxid;
 		logicalXid = acquire_logical_xid();
-		logicalNextXid = XidFromFullTransactionId(ShmemVariableCache->nextXid);
 	}
 
 	return curOxid;
@@ -968,13 +1075,6 @@ set_current_logical_xid(TransactionId xid)
 {
 	Assert(!TransactionIdIsValid(logicalXid));
 	logicalXid = xid;
-}
-
-void
-set_current_logical_next_xid(TransactionId xid)
-{
-	Assert(!TransactionIdIsValid(logicalNextXid));
-	logicalNextXid = xid;
 }
 
 void
@@ -999,7 +1099,6 @@ reset_current_oxid(void)
 {
 	curOxid = InvalidOXid;
 	logicalXid = InvalidTransactionId;
-	logicalNextXid = InvalidTransactionId;
 }
 
 OXid
@@ -1017,12 +1116,6 @@ get_current_logical_xid(void)
 	return logicalXid;
 }
 
-TransactionId
-get_current_logical_next_xid(void)
-{
-	return logicalNextXid;
-}
-
 void
 current_oxid_precommit(void)
 {
@@ -1031,7 +1124,20 @@ current_oxid_precommit(void)
 
 	set_oxid_csn(curOxid, COMMITSEQNO_MAKE_SPECIAL(MyProc->pgprocno,
 												   GET_CUR_PROCDATA()->autonomousNestingLevel,
-												   true));
+												   COMMITSEQNO_STATUS_CSN_COMMITTING));
+
+	pg_write_barrier();
+}
+
+void
+current_oxid_xlog_precommit(void)
+{
+	if (!OXidIsValid(curOxid))
+		return;
+
+	set_oxid_xlog_ptr_internal(curOxid, XLOG_PTR_MAKE_SPECIAL(MyProc->pgprocno,
+															  GET_CUR_PROCDATA()->autonomousNestingLevel,
+															  XLOG_PTR_COMMITTING));
 
 	pg_write_barrier();
 }
@@ -1051,7 +1157,7 @@ advance_run_xmin(OXid oxid)
 											  &run_xmin, run_xmin + 1))
 		{
 			run_xmin++;
-			csn = map_oxid_csn(run_xmin);
+			map_oxid(run_xmin, &csn, NULL);
 			if (COMMITSEQNO_IS_SPECIAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
 				break;
 		}
@@ -1104,7 +1210,6 @@ current_oxid_commit(CommitSeqNo csn)
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
-	logicalNextXid = InvalidTransactionId;
 }
 
 void
@@ -1124,7 +1229,6 @@ current_oxid_abort(void)
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
-	logicalNextXid = InvalidTransactionId;
 }
 
 /*
@@ -1147,8 +1251,9 @@ oxid_get_csn(OXid oxid)
 		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
 			return COMMITSEQNO_FROZEN;
 
-		csn = map_oxid_csn(oxid);
-		if (COMMITSEQNO_IS_SPECIAL(csn) && (csn & COMMITSEQNO_SPECIAL_COMMITTING_BIT))
+		map_oxid(oxid, &csn, NULL);
+		if (COMMITSEQNO_IS_SPECIAL(csn) &&
+			COMMITSEQNO_GET_STATUS(csn) & COMMITSEQNO_STATUS_CSN_COMMITTING)
 			perform_spin_delay(&status);
 		else
 			break;
@@ -1162,8 +1267,105 @@ oxid_get_csn(OXid oxid)
 	return csn;
 }
 
+/*
+ * Gets commit ptr for given oxid.  Wrapper over map_oxid_xlog_ptr(), which
+ * loops till "committing bit" is not set.
+ */
+XLogRecPtr
+oxid_get_xlog_ptr(OXid oxid)
+{
+	XLogRecPtr	ptr;
+	SpinDelayStatus status;
+
+	if (oxid == BootstrapTransactionId)
+		return COMMITSEQNO_FROZEN;
+
+	init_local_spin_delay(&status);
+
+	while (true)
+	{
+		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
+			return COMMITSEQNO_FROZEN;
+
+		map_oxid(oxid, NULL, &ptr);
+		if (XLOG_PTR_IS_SPECIAL(ptr) &&
+			XLOG_PTR_GET_STATUS(ptr) & XLOG_PTR_COMMITTING)
+			perform_spin_delay(&status);
+		else
+			break;
+	}
+
+	finish_spin_delay(&status);
+
+	if (XLOG_PTR_IS_SPECIAL(ptr))
+		return InvalidXLogRecPtr;
+
+	return ptr;
+}
+
+/*
+ * Gets csn for given oxid.  Wrapper over map_oxid_csn(), which loops
+ * till "committing bit" is not set.
+ */
 void
-fill_current_oxid_csn(OXid *oxid, CommitSeqNo *csn)
+oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
+					CommitSeqNo *outCsn, XLogRecPtr *outPtr)
+{
+	SpinDelayStatus status;
+
+	if (oxid == BootstrapTransactionId || oxid < snapshot->xmin)
+	{
+		if (outCsn)
+			*outCsn = COMMITSEQNO_FROZEN;
+		if (outPtr)
+			*outPtr = FirstNormalUnloggedLSN;
+		return;
+	}
+
+	init_local_spin_delay(&status);
+
+	while (true)
+	{
+		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
+		{
+			if (outCsn)
+				*outCsn = COMMITSEQNO_FROZEN;
+			if (outPtr)
+				*outPtr = FirstNormalUnloggedLSN;
+			return;
+		}
+
+		map_oxid(oxid, outCsn, outPtr);
+
+		if (outCsn &&
+			(!COMMITSEQNO_IS_SPECIAL(*outCsn) ||
+			 !(COMMITSEQNO_GET_STATUS(*outCsn) & COMMITSEQNO_STATUS_CSN_COMMITTING)))
+		{
+			if (COMMITSEQNO_IS_SPECIAL(*outCsn))
+				*outCsn = COMMITSEQNO_INPROGRESS;
+			outCsn = NULL;
+		}
+
+		if (outPtr &&
+			(!XLOG_PTR_IS_SPECIAL(*outPtr) ||
+			 !(XLOG_PTR_GET_STATUS(*outPtr) & XLOG_PTR_COMMITTING)))
+		{
+			if (XLOG_PTR_IS_SPECIAL(*outPtr))
+				*outPtr = InvalidXLogRecPtr;
+			outPtr = NULL;
+		}
+
+		if (!outCsn && !outPtr)
+			break;
+
+		perform_spin_delay(&status);
+	}
+
+	finish_spin_delay(&status);
+}
+
+void
+fill_current_oxid_osnapshot(OXid *oxid, OSnapshot *snapshot)
 {
 	if (XactIsoLevel == XACT_SERIALIZABLE)
 		ereport(ERROR,
@@ -1172,9 +1374,19 @@ fill_current_oxid_csn(OXid *oxid, CommitSeqNo *csn)
 				errdetail("Stay tuned, it will be added in future releases."));
 
 	if (ActiveSnapshotSet())
-		*csn = GetActiveSnapshot()->snapshotcsn;
+	{
+		Snapshot	activeSnapshot = GetActiveSnapshot();
+
+		snapshot->csn = activeSnapshot->csnSnapshotData.snapshotcsn;
+		snapshot->xlogptr = activeSnapshot->csnSnapshotData.xlogptr;
+		snapshot->xmin = activeSnapshot->csnSnapshotData.xmin;
+	}
 	else
-		*csn = COMMITSEQNO_INPROGRESS;
+	{
+		snapshot->csn = COMMITSEQNO_INPROGRESS;
+		snapshot->xlogptr = InvalidXLogRecPtr;
+		snapshot->xmin = InvalidXLogRecPtr;
+	}
 	*oxid = get_current_oxid();
 }
 
@@ -1183,7 +1395,7 @@ oxid_get_procnum(OXid oxid)
 {
 	CommitSeqNo csn;
 
-	csn = map_oxid_csn(oxid);
+	map_oxid(oxid, &csn, NULL);
 
 	if (COMMITSEQNO_IS_SPECIAL(csn))
 		return COMMITSEQNO_GET_PROCNUM(csn);

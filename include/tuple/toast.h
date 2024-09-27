@@ -114,11 +114,11 @@ extern bool generic_toast_delete_optional_wal(ToastAPI *api, void *key,
 
 /* Returns tuple only if its size equals data_size, or NULL otherwise */
 extern Pointer generic_toast_get(ToastAPI *api, void *key, Size data_size,
-								 CommitSeqNo csn, void *arg);
+								 OSnapshot *snapshot, void *arg);
 
 /* Returns tuple and size of data if found, or NULL otherwise */
 extern Pointer generic_toast_get_any(ToastAPI *api, void *key,
-									 Size *data_size, CommitSeqNo csn,
+									 Size *data_size, OSnapshot *snapshot,
 									 void *arg);
 
 /*
@@ -127,15 +127,18 @@ extern Pointer generic_toast_get_any(ToastAPI *api, void *key,
  * - if found_key contains valid pointer it used as version callback arg
  */
 extern Pointer generic_toast_get_any_with_key(ToastAPI *api, void *key,
-											  Size *data_size, CommitSeqNo csn,
+											  Size *data_size, OSnapshot *snapshot,
 											  void *arg, Pointer *found_key);
 
 /*
  * Same as generic_toast_get_any but uses fetch_callback to filter tuples
  */
 extern Pointer generic_toast_get_any_with_callback(ToastAPI *api, Pointer key,
-												   Size *data_size, CommitSeqNo csn, void *arg,
-												   TupleFetchCallback fetch_callback, void *callback_arg);
+												   Size *data_size,
+												   OSnapshot *snapshot,
+												   void *arg,
+												   TupleFetchCallback fetch_callback,
+												   void *callback_arg);
 
 /* Copies TupleDescs to toast definition */
 extern void o_toast_init_tupdescs(OIndexDescr *toast, TupleDesc ix_primary);
@@ -156,7 +159,7 @@ extern bool o_toast_delete(OIndexDescr *primary, OIndexDescr *toast,
 						   OXid oxid, CommitSeqNo csn);
 extern Pointer o_toast_get(OIndexDescr *primary, OIndexDescr *toast,
 						   OTuple pk, uint16 attn, Size data_size,
-						   CommitSeqNo csn);
+						   OSnapshot *snapshot);
 
 extern int	o_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 						void *p2, BTreeKeyType k2);

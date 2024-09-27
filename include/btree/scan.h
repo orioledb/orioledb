@@ -37,9 +37,11 @@ extern BTreeScanShmem *btreeScanShmem;
 
 extern Size btree_scan_shmem_needs(void);
 extern void btree_scan_init_shmem(Pointer ptr, bool found);
-extern BTreeSeqScan *make_btree_seq_scan(BTreeDescr *desc, CommitSeqNo csn,
+extern BTreeSeqScan *make_btree_seq_scan(BTreeDescr *desc,
+										 OSnapshot *oSnapshot,
 										 void *poscan);
-extern BTreeSeqScan *make_btree_seq_scan_cb(BTreeDescr *desc, CommitSeqNo csn,
+extern BTreeSeqScan *make_btree_seq_scan_cb(BTreeDescr *desc,
+											OSnapshot *oSnapshot,
 											BTreeSeqScanCallbacks *cb,
 											void *arg);
 extern BTreeSeqScan *make_btree_sampling_scan(BTreeDescr *desc,

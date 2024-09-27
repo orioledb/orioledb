@@ -932,7 +932,7 @@ o_get_latest_chkp_num(Oid datoid, Oid relnode, uint32 max_chkp_num,
 
 	result_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_CHKP_NUM),
 											 &key_tuple, BTreeKeyNonLeafKey,
-											 COMMITSEQNO_INPROGRESS, NULL,
+											 &o_in_progress_snapshot, NULL,
 											 CurrentMemoryContext, NULL);
 
 	if (O_TUPLE_IS_NULL(result_tuple))
@@ -982,7 +982,7 @@ o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num)
 
 	tuple = o_btree_find_tuple_by_key(desc,
 									  &key_tuple, BTreeKeyNonLeafKey,
-									  COMMITSEQNO_INPROGRESS, NULL,
+									  &o_in_progress_snapshot, NULL,
 									  CurrentMemoryContext, NULL);
 	if (O_TUPLE_IS_NULL(tuple))
 	{
@@ -4578,14 +4578,14 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 	keyTuple.data = (Pointer) &key;
 	resultTuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_EVICTED_DATA),
 											&keyTuple, BTreeKeyNonLeafKey,
-											COMMITSEQNO_INPROGRESS, NULL,
+											&o_in_progress_snapshot, NULL,
 											CurrentMemoryContext, NULL);
 
 	if (O_TUPLE_IS_NULL(resultTuple))
 	{
 		resultTuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
 												&keyTuple, BTreeKeyNonLeafKey,
-												COMMITSEQNO_INPROGRESS, NULL,
+												&o_in_progress_snapshot, NULL,
 												CurrentMemoryContext, NULL);
 		if (O_TUPLE_IS_NULL(resultTuple))
 		{
@@ -5104,7 +5104,7 @@ tbl_data_exists(ORelOids *oids)
 
 	resultTuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
 											&keyTuple, BTreeKeyNonLeafKey,
-											COMMITSEQNO_INPROGRESS, NULL,
+											&o_in_progress_snapshot, NULL,
 											CurrentMemoryContext, NULL);
 	if (!O_TUPLE_IS_NULL(resultTuple))
 	{

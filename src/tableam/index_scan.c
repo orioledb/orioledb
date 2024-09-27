@@ -10,7 +10,6 @@
  *
  *-------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -203,7 +202,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 				 ? &ostate->curKeyRange.low
 				 : &ostate->curKeyRange.high);
 		ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
-												   BTreeKeyBound, ostate->csn,
+												   BTreeKeyBound, &ostate->o_snapshot,
 												   ostate->scanDir);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
 	}
@@ -242,7 +241,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 
 			tup = o_btree_find_tuple_by_key(&indexDescr->desc,
 											&ostate->curKeyRange.low,
-											BTreeKeyBound, ostate->csn,
+											BTreeKeyBound, &ostate->o_snapshot,
 											tupleCsn, tupleCxt, hint);
 			if (!O_TUPLE_IS_NULL(tup))
 				tup_fetched = true;
@@ -324,7 +323,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 			o_btree_load_shmem(&primary->desc);
 			ptup = o_btree_find_tuple_by_key(&primary->desc,
 											 (Pointer) &bound, BTreeKeyBound,
-											 ostate->csn, tupleCsn,
+											 &ostate->o_snapshot, tupleCsn,
 											 tupleCxt, hint);
 			pfree(tup.data);
 			tup = ptup;

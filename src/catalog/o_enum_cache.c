@@ -257,7 +257,7 @@ o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
 	key.keys[0] = ObjectIdGetDatum(enum_oid);
 
 	it = o_btree_iterator_create(td, (Pointer) &bound, BTreeKeyBound,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	do
 	{
@@ -401,7 +401,8 @@ o_load_enum_cache_data_hook(TypeCacheEntry *tcache)
 	key.keys[0] = ObjectIdGetDatum(tcache->type_id);
 
 	it = o_btree_iterator_create(td, (Pointer) &bound, BTreeKeyBound,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot,
+								 ForwardScanDirection);
 
 	do
 	{

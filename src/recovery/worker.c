@@ -491,10 +491,8 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 					OTuple p)
 {
 	OXid		oxid;
-	CommitSeqNo csn;
 
 	oxid = get_current_oxid();
-	csn = COMMITSEQNO_INPROGRESS;
 
 	/*
 	 * Don't apply changes to secondary indices before TOAST is consisntent.
@@ -504,12 +502,12 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 	if (descr && toast_consistent)
 	{
 		/* Modify table */
-		apply_tbl_modify_record(descr, type, p, oxid, csn);
+		apply_tbl_modify_record(descr, type, p, oxid, COMMITSEQNO_INPROGRESS);
 	}
 	else
 	{
 		o_btree_load_shmem(&id->desc);
-		apply_btree_modify_record(&id->desc, type, p, oxid, csn);
+		apply_btree_modify_record(&id->desc, type, p, oxid, COMMITSEQNO_INPROGRESS);
 	}
 }
 
@@ -735,7 +733,8 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 			}
 
 			tts_orioledb_store_tuple(slot, tupCopy.tuple, descr,
-									 tupCopy.csn, PrimaryIndexNumber, true, NULL);
+									 tupCopy.csn, PrimaryIndexNumber,
+									 true, NULL);
 		}
 		else
 		{
@@ -811,7 +810,8 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 			tts_orioledb_store_tuple(new_slot, tuple, descr,
 									 csn, PrimaryIndexNumber, false, NULL);
 			tts_orioledb_store_tuple(old_slot, tupCopy.tuple, descr,
-									 tupCopy.csn, PrimaryIndexNumber, true, NULL);
+									 tupCopy.csn, PrimaryIndexNumber,
+									 true, NULL);
 		}
 		else
 		{

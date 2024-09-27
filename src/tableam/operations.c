@@ -279,10 +279,12 @@ o_tbl_insert_with_arbiter(Relation rel,
 	InsertOnConflictCallbackArg ioc_arg;
 	UndoStackLocations undoStackLocations;
 	OTuple		tup;
+	OSnapshot	oSnapshot;
 	CommitSeqNo csn;
 	OXid		oxid;
 
-	fill_current_oxid_csn(&oxid, &csn);
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	csn = oSnapshot.csn;
 	undoStackLocations = get_cur_undo_locations(UndoLogRegular);
 
 	ioc_arg.desc = descr;

@@ -1299,29 +1299,35 @@ undo_xact_callback(XactEvent event, void *arg)
 	}
 	else
 	{
+		TransactionId xid = GetTopTransactionIdIfAny();
+		XLogRecPtr	flushPos = InvalidXLogRecPtr;
+
+		Assert(!RecoveryInProgress());
 		switch (event)
 		{
 			case XACT_EVENT_PRE_COMMIT:
-				if (!RecoveryInProgress())
-				{
-					TransactionId xid = GetTopTransactionIdIfAny();
-
-					if (TransactionIdIsValid(xid))
-						wal_joint_commit(oxid,
-										 get_current_logical_xid(),
-										 get_current_logical_next_xid(),
-										 xid);
-				}
+				if (TransactionIdIsValid(xid))
+					wal_joint_commit(oxid,
+									 get_current_logical_xid(),
+									 xid);
+				else
+					current_oxid_xlog_precommit();
 				break;
 			case XACT_EVENT_COMMIT:
-				if (!RecoveryInProgress())
+				if (!TransactionIdIsValid(xid))
 				{
-					TransactionId xid = GetTopTransactionIdIfAny();
-
-					if (!TransactionIdIsValid(xid))
-						wal_commit(oxid,
-								   get_current_logical_xid(),
-								   get_current_logical_next_xid());
+					current_oxid_xlog_precommit();
+					flushPos = wal_commit(oxid,
+										  get_current_logical_xid());
+					set_oxid_xlog_ptr(oxid, flushPos);
+					if (!XLogRecPtrIsInvalid(flushPos) &&
+						(synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
+						 oxid_needs_wal_flush))
+						XLogFlush(flushPos);
+				}
+				else
+				{
+					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
 				}
 
 				current_oxid_precommit();
@@ -1339,12 +1345,12 @@ undo_xact_callback(XactEvent event, void *arg)
 			case XACT_EVENT_ABORT:
 				if (!RecoveryInProgress())
 					wal_rollback(oxid,
-								 get_current_logical_xid(),
-								 get_current_logical_next_xid());
+								 get_current_logical_xid());
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
 				reset_cur_undo_locations();
 				current_oxid_abort();
+				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 				oxid_needs_wal_flush = false;
 
 				/*
@@ -1645,7 +1651,6 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
 	state->logicalXid = get_current_logical_xid();
-	state->logicalNextXid = get_current_logical_next_xid();
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
@@ -1668,8 +1673,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 		int			i;
 
 		wal_rollback(oxid,
-					 get_current_logical_xid(),
-					 get_current_logical_next_xid());
+					 get_current_logical_xid());
 		current_oxid_abort();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			apply_undo_stack((UndoLogType) i, oxid, NULL, true);
@@ -1687,7 +1691,6 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
 	set_current_logical_xid(state->logicalXid);
-	set_current_logical_next_xid(state->logicalNextXid);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
@@ -1702,8 +1705,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		int			i;
 
 		wal_commit(oxid,
-				   get_current_logical_xid(),
-				   get_current_logical_next_xid());
+				   get_current_logical_xid());
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
@@ -1726,7 +1728,6 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
 	set_current_logical_xid(state->logicalXid);
-	set_current_logical_next_xid(state->logicalNextXid);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
@@ -1932,7 +1933,9 @@ orioledb_snapshot_hook(Snapshot snapshot)
 	 */
 	pg_read_barrier();
 
-	snapshot->snapshotcsn = pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo);
+	snapshot->csnSnapshotData.snapshotcsn = pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo);
+	snapshot->csnSnapshotData.xlogptr = InvalidXLogRecPtr;
+	snapshot->csnSnapshotData.xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 }
 
 static void

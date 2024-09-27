@@ -511,8 +511,8 @@ o_sys_cache_search(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 }
 
 static TupleFetchCallbackResult
-o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid, CommitSeqNo csn,
-								void *arg,
+o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid,
+								OSnapshot *oSnapshot, void *arg,
 								TupleFetchCallbackCheckType check_type)
 {
 	OSysCacheToastChunkKey *tuple_key = (OSysCacheToastChunkKey *) tuple.data;
@@ -534,13 +534,16 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 	Size		dataLength;
 	Pointer		result = NULL;
 	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
-	OSysCacheToastKeyBound toast_key = {.common = {.chunknum = 0},
-	.key = key,.lsn_cmp = false};
+	OSysCacheToastKeyBound toast_key = {0};
+
+	toast_key.common.chunknum = 0;
+	toast_key.key = key;
+	toast_key.lsn_cmp = false;
 
 	data = generic_toast_get_any_with_callback(&oSysCacheToastAPI,
 											   (Pointer) &toast_key,
 											   &dataLength,
-											   COMMITSEQNO_NON_DELETED,
+											   &o_non_deleted_snapshot,
 											   td,
 											   o_sys_cache_get_by_lsn_callback,
 											   &key->common.lsn);
@@ -562,7 +565,7 @@ o_sys_cache_get_from_tree(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 	OSysCacheBound bound = {.key = key,.nkeys = nkeys};
 
 	it = o_btree_iterator_create(td, (Pointer) &bound, BTreeKeyBound,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	O_TUPLE_SET_NULL(last_tup);
 	do
@@ -935,7 +938,7 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
 
 	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
-								 COMMITSEQNO_NON_DELETED,
+								 &o_non_deleted_snapshot,
 								 ForwardScanDirection);
 
 	do

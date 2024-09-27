@@ -33,7 +33,7 @@ typedef struct OBitmapScan
 {
 	OTableDescr *tbl_desc;
 	ScanState  *ss;
-	CommitSeqNo csn;
+	OSnapshot	oSnapshot;
 	MemoryContext cxt;
 	RBTree	   *saved_bitmap;
 	Oid			typeoid;
@@ -193,7 +193,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	else
 		ea_counters = NULL;
 
-	ostate.csn = bitmap_state->csn;
+	ostate.o_snapshot = bitmap_state->oSnapshot;
 	ostate.onlyCurIx = true;
 	ostate.cxt = bitmap_state->cxt;
 
@@ -353,19 +353,20 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 OBitmapScan *
 o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 				   PlanState *bitmapqualplanstate, Relation rel,
-				   Oid typeoid, CommitSeqNo csn,
+				   Oid typeoid, OSnapshot *oSnapshot,
 				   MemoryContext cxt)
 {
 	OBitmapScan *scan = palloc0(sizeof(OBitmapScan));
 
 	scan->typeoid = typeoid;
-	scan->csn = csn;
+	scan->oSnapshot = *oSnapshot;
 	scan->cxt = cxt;
 	scan->ss = ss;
 	scan->tbl_desc = relation_get_descr(rel);
 	bitmap_state->scan = scan;
 	scan->saved_bitmap = o_exec_bitmapqual(bitmap_state, bitmapqualplanstate);
-	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->tbl_desc)->desc, scan->csn,
+	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->tbl_desc)->desc,
+											&scan->oSnapshot,
 											&bitmap_seq_scan_callbacks, scan);
 	return scan;
 }

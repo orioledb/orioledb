@@ -988,7 +988,7 @@ o_indices_get(ORelOids oids, OIndexType type)
 	key.chunknum = 0;
 
 	result = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key,
-								   &dataLength, COMMITSEQNO_NON_DELETED,
+								   &dataLength, &o_non_deleted_snapshot,
 								   get_sys_tree(SYS_TREES_O_INDICES));
 
 	if (result == NULL)
@@ -1030,8 +1030,8 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 bool
-o_indices_find_table_oids(ORelOids indexOids, OIndexType type, CommitSeqNo csn,
-						  ORelOids *tableOids)
+o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
+						  OSnapshot *oSnapshot, ORelOids *tableOids)
 {
 	OIndexChunkKey key;
 	Pointer		data;
@@ -1042,7 +1042,7 @@ o_indices_find_table_oids(ORelOids indexOids, OIndexType type, CommitSeqNo csn,
 	key.chunknum = 0;
 
 	data = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key, &dataSize,
-								 csn, get_sys_tree(SYS_TREES_O_INDICES));
+								 oSnapshot, get_sys_tree(SYS_TREES_O_INDICES));
 	if (data)
 	{
 		memcpy(tableOids, data, sizeof(ORelOids));
@@ -1068,7 +1068,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	chunkKey.chunknum = 0;
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
-								 COMMITSEQNO_NON_DELETED, ForwardScanDirection);
+								 &o_non_deleted_snapshot, ForwardScanDirection);
 
 	tuple = o_btree_iterator_fetch(it, NULL, NULL,
 								   BTreeKeyNone, false, NULL);
@@ -1100,7 +1100,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		chunkKey.chunknum = 0;
 
 		it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
-									 COMMITSEQNO_NON_DELETED, ForwardScanDirection);
+									 &o_non_deleted_snapshot, ForwardScanDirection);
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
@@ -1351,7 +1351,7 @@ orioledb_index_rows(PG_FUNCTION_ARGS)
 		elog(ERROR, "return type must be a row type");
 
 	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	do
 	{

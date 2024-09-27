@@ -35,7 +35,7 @@ typedef struct OScanState
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;
-	CommitSeqNo csn;
+	OSnapshot	o_snapshot;
 } OScanState;
 
 /*

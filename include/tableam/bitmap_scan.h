@@ -29,7 +29,7 @@ typedef struct OBitmapHeapPlanState
 	/* index quals, in standard expr form */
 	List	   *bitmapqualorig;
 	Oid			typeoid;
-	CommitSeqNo csn;
+	OSnapshot	oSnapshot;
 	MemoryContext cxt;
 	OBitmapScan *scan;
 	OEACallsCounters *eaCounters;
@@ -39,7 +39,7 @@ extern OBitmapScan *o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state,
 									   ScanState *ss,
 									   PlanState *bitmapqualplanstate,
 									   Relation rel, Oid typeoid,
-									   CommitSeqNo csn, MemoryContext cxt);
+									   OSnapshot *oSnapshot, MemoryContext cxt);
 extern TupleTableSlot *o_exec_bitmap_fetch(OBitmapScan *scan,
 										   CustomScanState *node);
 extern void o_free_bitmap_scan(OBitmapScan *scan);

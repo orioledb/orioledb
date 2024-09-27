@@ -579,7 +579,7 @@ orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 	o_btree_load_shmem(get_sys_tree(num));
 
 	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	do
 	{

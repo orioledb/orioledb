@@ -232,7 +232,7 @@ o_amop_cache_search_htup_list(TupleDesc tupdesc, Oid amopopr)
 	key.keys[0] = ObjectIdGetDatum(amopopr);
 
 	it = o_btree_iterator_create(td, (Pointer) &bound, BTreeKeyBound,
-								 COMMITSEQNO_INPROGRESS, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	do
 	{

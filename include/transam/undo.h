@@ -109,7 +109,6 @@ typedef struct
 	bool		local_wal_has_material_changes;
 	OXid		oxid;
 	TransactionId logicalXid;
-	TransactionId logicalNextXid;
 } OAutonomousTxState;
 
 /*

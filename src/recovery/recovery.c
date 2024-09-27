@@ -10,7 +10,6 @@
  *
  *-------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -28,6 +27,7 @@
 #include "recovery/wal.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
+#include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/dsa.h"
 #include "utils/inval.h"
@@ -1228,6 +1228,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 		walk_checkpoint_stacks(csn, InvalidSubTransactionId, flush_undo_pos);
 		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 		set_oxid_csn(oxid, csn);
+		set_oxid_xlog_ptr(oxid, XLOG_PTR_ALIGN(ptr));
 	}
 	else if (!COMMITSEQNO_IS_ABORTED(csn) && !sync)
 	{
@@ -1251,6 +1252,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 			if (sync)
 			{
 				set_oxid_csn(oxid, COMMITSEQNO_ABORTED);
+				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 			}
 			else
 			{
@@ -1743,10 +1745,12 @@ update_proc_retain_undo_location(int worker_id)
 				set_oxid_csn(state->oxid, COMMITSEQNO_COMMITTING);
 				state->csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 				set_oxid_csn(state->oxid, state->csn);
+				set_oxid_xlog_ptr(state->oxid, XLOG_PTR_ALIGN(state->ptr));
 			}
 			else
 			{
 				set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
+				set_oxid_xlog_ptr(state->oxid, InvalidXLogRecPtr);
 			}
 		}
 		dlist_delete(miter.cur);
@@ -2476,8 +2480,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			memcpy(&oxid, ptr, sizeof(oxid));
 			ptr += sizeof(oxid);
 
-			/* don't need logicalXid and logicalNextXid here */
-			ptr += 2 * sizeof(TransactionId);
+			/* don't need logicalXid here */
+			ptr += sizeof(TransactionId);
 
 			advance_oxids(oxid);
 			recovery_switch_to_oxid(oxid, -1);
@@ -2490,6 +2494,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
+
+			/* skip csn field */
+			ptr += sizeof(CommitSeqNo);
 
 			recovery_xmin = Max(recovery_xmin, xmin);
 
@@ -2528,6 +2535,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			ptr += sizeof(xid);
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
+
+			/* skip csn field */
+			ptr += sizeof(CommitSeqNo);
 
 			cur_state->xid = xid;
 			recovery_xmin = Max(recovery_xmin, xmin);
