@@ -10,6 +10,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "c.h"
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -483,6 +484,43 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 		*outCsn = pg_atomic_read_u64(&mapItem.csn);
 	if (outPtr)
 		*outPtr = pg_atomic_read_u64(&mapItem.commitPtr);
+}
+
+/*
+ * Read csn of given xid from xidmap.
+ */
+static XLogRecPtr
+map_oxid_xlog_ptr(OXid oxid)
+{
+	XLogRecPtr	ptr;
+
+	/* Optimisticly try to read csn from circular buffer */
+	ptr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
+	pg_read_barrier();
+
+	/* Did we manage to read the correct csn? */
+	if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
+		return ptr;
+
+	/*
+	 * Wait for the concurrent write operation if needed.
+	 */
+	if (oxid >= pg_atomic_read_u64(&xid_meta->writtenXmin))
+	{
+		LWLockAcquire(&xid_meta->xidMapWriteLock, LW_SHARED);
+		LWLockRelease(&xid_meta->xidMapWriteLock);
+	}
+
+	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
+	o_buffers_read(&buffersDesc, (Pointer) &ptr,
+				   oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, commitPtr),
+				   sizeof(XLogRecPtr));
+
+	/* Recheck if globalXmin was advanced concurrently */
+	if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
+		return COMMITSEQNO_FROZEN;
+
+	return ptr;
 }
 
 /*
