@@ -1299,29 +1299,37 @@ undo_xact_callback(XactEvent event, void *arg)
 	}
 	else
 	{
+		TransactionId xid = GetTopTransactionIdIfAny();
+		XLogRecPtr	flushPos = InvalidXLogRecPtr;
+
+		Assert(!RecoveryInProgress());
 		switch (event)
 		{
 			case XACT_EVENT_PRE_COMMIT:
-				if (!RecoveryInProgress())
-				{
-					TransactionId xid = GetTopTransactionIdIfAny();
-
-					if (TransactionIdIsValid(xid))
-						wal_joint_commit(oxid,
-										 get_current_logical_xid(),
-										 get_current_logical_next_xid(),
-										 xid);
-				}
+				if (TransactionIdIsValid(xid))
+					wal_joint_commit(oxid,
+									 get_current_logical_xid(),
+									 get_current_logical_next_xid(),
+									 xid);
+				else
+					current_oxid_xlog_precommit();
 				break;
 			case XACT_EVENT_COMMIT:
-				if (!RecoveryInProgress())
+				if (!TransactionIdIsValid(xid))
 				{
-					TransactionId xid = GetTopTransactionIdIfAny();
-
-					if (!TransactionIdIsValid(xid))
-						wal_commit(oxid,
-								   get_current_logical_xid(),
-								   get_current_logical_next_xid());
+					current_oxid_xlog_precommit();
+					flushPos = wal_commit(oxid,
+										  get_current_logical_xid(),
+										  get_current_logical_next_xid());
+					set_oxid_xlog_ptr(oxid, flushPos);
+					if (!XLogRecPtrIsInvalid(flushPos) &&
+						(synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
+						 oxid_needs_wal_flush))
+						XLogFlush(flushPos);
+				}
+				else
+				{
+					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
 				}
 
 				current_oxid_precommit();
@@ -1345,6 +1353,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
 				reset_cur_undo_locations();
 				current_oxid_abort();
+				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 				oxid_needs_wal_flush = false;
 
 				/*

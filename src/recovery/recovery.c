@@ -1228,6 +1228,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 		walk_checkpoint_stacks(csn, InvalidSubTransactionId, flush_undo_pos);
 		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 		set_oxid_csn(oxid, csn);
+		set_oxid_xlog_ptr(oxid, ptr);
 	}
 	else if (!COMMITSEQNO_IS_ABORTED(csn) && !sync)
 	{
@@ -1251,6 +1252,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 			if (sync)
 			{
 				set_oxid_csn(oxid, COMMITSEQNO_ABORTED);
+				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 			}
 			else
 			{
@@ -1743,10 +1745,12 @@ update_proc_retain_undo_location(int worker_id)
 				set_oxid_csn(state->oxid, COMMITSEQNO_COMMITTING);
 				state->csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
 				set_oxid_csn(state->oxid, state->csn);
+				set_oxid_xlog_ptr(state->oxid, state->ptr);
 			}
 			else
 			{
 				set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
+				set_oxid_xlog_ptr(state->oxid, InvalidXLogRecPtr);
 			}
 		}
 		dlist_delete(miter.cur);

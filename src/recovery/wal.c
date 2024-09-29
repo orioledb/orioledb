@@ -98,10 +98,10 @@ add_local_modify(uint8 record_type, OTuple record, OffsetNumber length)
 	local_wal_has_material_changes = true;
 }
 
-void
+XLogRecPtr
 wal_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid)
 {
-	XLogRecPtr	wait_pos;
+	XLogRecPtr	walPos;
 
 	Assert(!is_recovery_process());
 
@@ -112,7 +112,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid)
 		local_oids.datoid = InvalidOid;
 		local_oids.reloid = InvalidOid;
 		local_oids.relnode = InvalidOid;
-		return;
+		return InvalidXLogRecPtr;
 	}
 
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
@@ -121,18 +121,18 @@ wal_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid)
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid, logicalXid, logicalNextXid);
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
-	wait_pos = flush_local_wal(true);
+	walPos = flush_local_wal(true);
 	local_wal_has_material_changes = false;
 
-	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
-		oxid_needs_wal_flush)
-		XLogFlush(wait_pos);
+	return walPos;
 }
 
-void
+XLogRecPtr
 wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextXid,
 				 TransactionId xid)
 {
+	XLogRecPtr	walPos;
+
 	Assert(!is_recovery_process());
 
 	flush_local_wal_if_needed(sizeof(WALRecJointCommit));
@@ -141,13 +141,14 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId logicalNextX
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid, logicalXid, logicalNextXid);
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
-	(void) flush_local_wal(true);
+	walPos = flush_local_wal(true);
 	local_wal_has_material_changes = false;
 
 	/*
 	 * Don't need to flush local WAL, because we only commit if builtin
 	 * transaction commits.
 	 */
+	return walPos;
 }
 
 void

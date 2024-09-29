@@ -15,6 +15,12 @@
 
 typedef struct
 {
+	pg_atomic_uint64 csn;
+	pg_atomic_uint64 commitPtr;
+} OXidMapItem;
+
+typedef struct
+{
 	pg_atomic_uint64 nextXid;
 	pg_atomic_uint64 lastXidWhenUpdatedGlobalXmin;
 	pg_atomic_uint64 runXmin;
@@ -45,6 +51,7 @@ extern void advance_oxids(OXid new_xid);
 extern OXid get_current_oxid(void);
 extern void assign_subtransaction_logical_xid(void);
 extern void set_oxid_csn(OXid oxid, CommitSeqNo csn);
+extern void set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr);
 extern void set_current_oxid(OXid oxid);
 extern void set_current_logical_xid(TransactionId xid);
 extern void set_current_logical_next_xid(TransactionId xid);
@@ -54,9 +61,11 @@ extern OXid get_current_oxid_if_any(void);
 extern TransactionId get_current_logical_xid(void);
 extern TransactionId get_current_logical_next_xid(void);
 extern void current_oxid_precommit(void);
+extern void current_oxid_xlog_precommit(void);
 extern void current_oxid_commit(CommitSeqNo csn);
 extern void current_oxid_abort(void);
 extern CommitSeqNo oxid_get_csn(OXid oxid);
+extern XLogRecPtr oxid_get_xlog_ptr(OXid oxid);
 extern void fill_current_oxid_csn(OXid *oxid, CommitSeqNo *csn);
 extern int	oxid_get_procnum(OXid oxid);
 extern bool xid_is_finished(OXid xid);
