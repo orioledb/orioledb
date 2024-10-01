@@ -1022,7 +1022,7 @@ recovery_finish(int worker_id)
 		if (cur_state->in_finished_list && worker_id < 0)
 		{
 			set_oxid_csn(cur_state->oxid, COMMITSEQNO_COMMITTING);
-			cur_state->csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+			cur_state->csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 			set_oxid_csn(cur_state->oxid, cur_state->csn);
 		}
 		if (cur_state->used_by)
@@ -1226,7 +1226,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
 		walk_checkpoint_stacks(csn, InvalidSubTransactionId, flush_undo_pos);
-		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		set_oxid_csn(oxid, csn);
 		set_oxid_xlog_ptr(oxid, XLOG_PTR_ALIGN(ptr));
 	}
@@ -1743,7 +1743,7 @@ update_proc_retain_undo_location(int worker_id)
 			if (!COMMITSEQNO_IS_ABORTED(state->csn))
 			{
 				set_oxid_csn(state->oxid, COMMITSEQNO_COMMITTING);
-				state->csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+				state->csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 				set_oxid_csn(state->oxid, state->csn);
 				set_oxid_xlog_ptr(state->oxid, XLOG_PTR_ALIGN(state->ptr));
 			}

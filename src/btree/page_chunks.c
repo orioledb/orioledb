@@ -177,7 +177,7 @@ perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
 	/* Make a page-level undo item if needed */
 	if (desc->undoType != UndoLogNone)
 	{
-		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		undoLocation = page_add_item_to_undo(desc, p, csn, NULL, 0);
 
 		/*

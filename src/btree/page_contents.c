@@ -118,7 +118,7 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 		memcpy(dest, p, ORIOLEDB_BLCKSZ);
 
 	if (readCsn)
-		*readCsn = pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo);
+		*readCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 
 	pg_read_barrier();
 	state2 = pg_atomic_read_u32(&(O_PAGE_HEADER(p)->state));

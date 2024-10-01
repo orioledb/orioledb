@@ -490,7 +490,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 									 &loc,
 									 newItemSize,
 									 insert_item->replace,
-									 pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo));
+									 pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo));
 
 		if (insert_item->level > 0 && page_is_under_checkpoint(desc, blkno))
 		{
@@ -641,7 +641,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 			/* Get CSN for undo item if needed */
 			if (needsUndo)
-				csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+				csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 			else
 				csn = COMMITSEQNO_INPROGRESS;
 

@@ -641,7 +641,9 @@ jf_cleanTupType_init_entry(TupleDesc desc,
 	else if (attributeName != NameStr(att->attname))
 		namestrcpy(&(att->attname), attributeName);
 
+#if PG_VERSION_NUM < 170000
 	att->attstattarget = -1;
+#endif
 	att->attcacheoff = -1;
 	att->atttypmod = typmod;
 
@@ -972,11 +974,20 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		 * columns, since we have no way to notify the caller that it should
 		 * do that.)
 		 */
+#if PG_VERSION_NUM >= 170000
+		fcache->returnsTuple = check_sql_fn_retval(queryTree_list,
+												   rettype,
+												   rettupdesc,
+												   procedureStruct->prokind,
+												   false,
+												   &resulttlist);
+#else
 		fcache->returnsTuple = check_sql_fn_retval(queryTree_list,
 												   rettype,
 												   rettupdesc,
 												   false,
 												   &resulttlist);
+#endif
 	}
 
 	/*
@@ -1154,7 +1165,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 	}
 
 	/* Mark fcache with time of creation to show it's valid */
-	fcache->lxid = MyProc->lxid;
+	fcache->lxid = MyProc->LXID;
 	fcache->subxid = GetCurrentSubTransactionId();
 
 	if (!o_proc)
@@ -1560,7 +1571,7 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 
 	if (fcache != NULL)
 	{
-		if (fcache->lxid != MyProc->lxid ||
+		if (fcache->lxid != MyProc->LXID ||
 			!SubTransactionIsActive(fcache->subxid))
 		{
 			/* It's stale; unlink and delete */

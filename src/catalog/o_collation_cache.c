@@ -126,8 +126,13 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	else
 		o_collation->collctype = NULL;
 
+#if PG_VERSION_NUM >= 170000
+	datum = SysCacheGetAttr(COLLOID, collationtup,
+							Anum_pg_collation_colllocale, &isNull);
+#else
 	datum = SysCacheGetAttr(COLLOID, collationtup,
 							Anum_pg_collation_colliculocale, &isNull);
+#endif
 	if (!isNull)
 		o_collation->colliculocale = TextDatumGetCString(datum);
 	else
@@ -241,11 +246,19 @@ o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid)
 		else
 			nulls[Anum_pg_collation_collctype - 1] = true;
 
+#if PG_VERSION_NUM >= 170000
+		if (o_collation->colliculocale)
+			values[Anum_pg_collation_colllocale - 1] =
+				CStringGetTextDatum(o_collation->colliculocale);
+		else
+			nulls[Anum_pg_collation_colllocale - 1] = true;
+#else
 		if (o_collation->colliculocale)
 			values[Anum_pg_collation_colliculocale - 1] =
 				CStringGetTextDatum(o_collation->colliculocale);
 		else
 			nulls[Anum_pg_collation_colliculocale - 1] = true;
+#endif
 #if PG_VERSION_NUM >= 160000
 		if (o_collation->collicurules)
 			values[Anum_pg_collation_collicurules - 1] =

@@ -71,20 +71,23 @@ tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
 /*
  * Saves the heap tuple to the reorder buffer.
  */
-static ReorderBufferTupleBuf *
+static REORDER_BUFFER_TUPLE_TYPE
 record_buffer_tuple(ReorderBuffer *reorder, HeapTuple htup, bool freeHtup)
 {
 	HeapTuple	changeTup;
-	ReorderBufferTupleBuf *result;
+	REORDER_BUFFER_TUPLE_TYPE result;
 
 	result = ReorderBufferGetTupleBuf(reorder, htup->t_len);
 
+#if PG_VERSION_NUM >= 170000
+	changeTup = result;
+#else
 	changeTup = &result->tuple;
+#endif
 	changeTup->t_tableOid = InvalidOid;
 	changeTup->t_len = htup->t_len;
 	changeTup->t_self = htup->t_self;
 	memcpy(changeTup->t_data, htup->t_data, htup->t_len);
-
 	if (freeHtup)
 		heap_freetuple(htup);
 
@@ -94,18 +97,15 @@ record_buffer_tuple(ReorderBuffer *reorder, HeapTuple htup, bool freeHtup)
 /*
  * Saves the tuple from the slot to the reorder buffer.
  */
-static ReorderBufferTupleBuf *
+static REORDER_BUFFER_TUPLE_TYPE
 record_buffer_tuple_slot(ReorderBuffer *reorder, TupleTableSlot *slot)
 {
 	HeapTuple	htup;
 	bool		freeHtup;
-	ReorderBufferTupleBuf *result;
 
 	htup = ExecFetchSlotHeapTuple(slot, false, &freeHtup);
 
-	result = record_buffer_tuple(reorder, htup, freeHtup);
-
-	return result;
+	return record_buffer_tuple(reorder, htup, freeHtup);
 }
 
 /* entry for a hash table we use to map from xid to our transaction state */

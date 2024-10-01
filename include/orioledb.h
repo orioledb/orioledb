@@ -189,6 +189,35 @@ typedef RelFileLocator RelFileNode;
 #define ORelOidsSetInvalid(oids) \
 	((oids).datoid = (oids).reloid = (oids).relnode = InvalidOid)
 
+#if PG_VERSION_NUM >= 170000
+
+#define LXID vxid.lxid
+#define REORDER_BUFFER_TUPLE_TYPE HeapTuple
+/* Renaming */
+#define	TRANSAM_VARIABLES TransamVariables
+#define WAIT_EVENT_MQ_PUT_MESSAGE WAIT_EVENT_MESSAGE_QUEUE_PUT_MESSAGE
+#define vacuum_is_relation_owner vacuum_is_permitted_for_relation
+/* Join BackendId and ProcNumber */
+#define BACKENDID procNumber
+#define PROCBACKENDID vxid.procNumber
+#define PROCNUMBER vxid.procNumber
+#define MyBackendId MyProcNumber
+/* Deprecated */
+#define palloc0fast palloc0
+
+#else
+
+#define LXID lxid
+#define REORDER_BUFFER_TUPLE_TYPE ReorderBufferTupleBuf *
+/* Before renaming */
+#define	TRANSAM_VARIABLES ShmemVariableCache
+/* BackendId and ProcNumber were separate */
+#define BACKENDID backendId
+#define PROCBACKENDID backendId
+#define PROCNUMBER pgprocno
+
+#endif
+
 typedef struct
 {
 	uint64		len:16,
@@ -286,9 +315,9 @@ extern char *s3_secretkey;
 extern char *s3_cainfo;
 
 #define GET_CUR_PROCDATA() \
-	(AssertMacro(MyProc->pgprocno >= 0 && \
-				 MyProc->pgprocno < max_procs), \
-	 &oProcData[MyProc->pgprocno])
+	(AssertMacro(MyProc->PROCNUMBER >= 0 && \
+				 MyProc->PROCNUMBER < max_procs), \
+	 &oProcData[MyProc->PROCNUMBER])
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
 	 (Page)(o_shared_buffers + ((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ)))

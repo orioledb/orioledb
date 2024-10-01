@@ -284,6 +284,10 @@ alter_table_type_to_string(AlterTableType cmdtype)
 		case AT_DropConstraintRecurse:
 			return "DROP CONSTRAINT";
 #endif
+#if PG_VERSION_NUM >= 170000
+		case AT_SetExpression:
+			return "ALTER COLUMN ... SET EXPRESSION";
+#endif
 		case AT_ReAddStatistics:
 			return NULL;		/* not real grammar */
 	}
@@ -1020,9 +1024,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		{
 			Oid			matviewOid;
 			Relation	matviewRel;
-
+#if PG_VERSION_NUM >= 170000
+			matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
+												  RangeVarCallbackMaintainsTable, NULL);
+#else
 			matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
 												  RangeVarCallbackOwnsTable, NULL);
+#endif
 			matviewRel = table_open(matviewOid, AccessShareLock);
 			savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
 			table_close(matviewRel, AccessShareLock);

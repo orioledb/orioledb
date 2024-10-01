@@ -398,7 +398,9 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	SortTuple	stup;
 	int			tupsize;
 	OTuple		written_tup;
-
+#if PG_VERSION_NUM >= 170000
+	Size 		tuplen;
+#endif
 	/*
 	 * Copy the given tuple into memory we control, and decrease availMem.
 	 * Then call the common code.
@@ -413,9 +415,18 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 								arg->tupDesc,
 								spec,
 								&stup.isnull1);
+#if PG_VERSION_NUM >= 170000
+	/* GetMemoryChunkSpace is not supported for bump contexts */
+	if (TupleSortUseBumpTupleCxt(public->sortopt))
+		tuplen = MAXALIGN(tupsize);
+	else
+		tuplen = GetMemoryChunkSpace(stup.tuple);
 
 	tuplesort_puttuple_common(state, &stup,
+							  public->sortKeys->abbrev_converter && !stup.isnull1, tuplen);
+#else
+	tuplesort_puttuple_common(state, &stup,
 							  public->sortKeys->abbrev_converter && !stup.isnull1);
-
+#endif
 	MemoryContextSwitchTo(oldcontext);
 }

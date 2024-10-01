@@ -1182,8 +1182,6 @@ orioledb_index_oids(PG_FUNCTION_ARGS)
 
 	o_indices_foreach_oids(o_index_oids_array_callback, rsinfo);
 
-	tuplestore_donestoring(tupstore);
-
 	return (Datum) 0;
 }
 

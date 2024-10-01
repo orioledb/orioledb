@@ -820,11 +820,21 @@ orioledb_relation_copy_for_cluster(Relation OldHeap, Relation NewHeap,
 }
 
 static bool
+#if PG_VERSION_NUM >= 170000
+orioledb_scan_analyze_next_block(TableScanDesc scan, ReadStream *stream)
+#else
 orioledb_scan_analyze_next_block(TableScanDesc scan, BlockNumber blockno,
 								 BufferAccessStrategy bstrategy)
+#endif
 {
 	OScanDesc	oscan = (OScanDesc) scan;
+#if PG_VERSION_NUM >= 170000
+	BufferAccessStrategy bstrategy = GetAccessStrategy(BAS_BULKREAD);
+	BlockNumber	blockno = read_stream_next_block(stream, &bstrategy);
 
+	if (blockno == InvalidBlockNumber)
+		return false;
+#endif
 	ItemPointerSetBlockNumber(&oscan->iptr, blockno);
 	ItemPointerSetOffsetNumber(&oscan->iptr, 1);
 

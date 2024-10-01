@@ -37,7 +37,11 @@ typedef struct
 	CommitSeqNo minCsn;
 	UndoLocation minUndoLoc;
 	/* Used for saving backend id number during NLR traversal. */
+#if PG_VERSION_NUM >= 170000
+	ProcNumber	backendIdInTraversal;
+#else
 	BackendId	backendIdInTraversal;
+#endif
 	bool		hasCsn;
 	/* hash mapping of the backend id with the number of   */
 	HTAB	   *backendIdHash;
@@ -51,13 +55,22 @@ typedef struct
 	List	   *undosList[(int) UndoLogsCount];
 } BTreePrintData;
 
-typedef BackendId BackendIdHashKey;
 typedef OInMemoryBlkno PageHashKey;
+
+#if PG_VERSION_NUM >= 170000
+typedef	ProcNumber BackendIdHashKey;
+#else
+typedef BackendId BackendIdHashKey;
+#endif
 
 typedef struct
 {
 	BackendIdHashKey backendId;
-	BackendId	backendIdInTraversal;
+#if PG_VERSION_NUM >= 170000
+	ProcNumber	backendIdInTraversal;
+#else
+	BackendId       backendIdInTraversal;
+#endif
 } BackendIdHashEntry;
 
 typedef struct
@@ -560,7 +573,6 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 																			&procnum,
 																			HASH_ENTER,
 																			&found);
-
 					/*
 					 * if backend id wasn't in hash that means it first
 					 * appearence of backend saving id in traversal to hash
@@ -639,7 +651,12 @@ btree_print_csn(CommitSeqNo csn, StringInfo outbuf, BTreePrintData *printData, b
 static void
 btree_print_backend_id(OXid oxid, StringInfo outbuf, BTreePrintData *printData)
 {
+#if PG_VERSION_NUM >= 170000
+	ProcNumber	backendId = oxid_get_procnum(oxid);
+#else
 	BackendId	backendId = oxid_get_procnum(oxid);
+#endif
+
 	BackendIdHashEntry *hentry;
 	bool		found;
 

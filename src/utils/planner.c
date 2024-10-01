@@ -268,8 +268,13 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 		(void) get_func_result_type(procedureStruct->oid, &rettype,
 									&rettupdesc);
 
+#if PG_VERSION_NUM >= 170000
+		(void) check_sql_fn_retval(querytree_list, rettype, rettupdesc, procedureStruct->prokind, false,
+								   &resulttlist);
+#else
 		(void) check_sql_fn_retval(querytree_list, rettype, rettupdesc, false,
 								   &resulttlist);
+#endif
 	}
 
 	MemoryContextSwitchTo(oldcxt);

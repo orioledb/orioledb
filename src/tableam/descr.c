@@ -210,7 +210,6 @@ orioledb_get_evicted_trees(PG_FUNCTION_ARGS)
 	}
 
 	btree_iterator_free(it);
-	tuplestore_donestoring(tupstore);
 
 	return (Datum) 0;
 }
@@ -1559,8 +1558,6 @@ orioledb_get_table_descrs(PG_FUNCTION_ARGS)
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 
-	tuplestore_donestoring(tupstore);
-
 	return (Datum) 0;
 }
 
@@ -1601,8 +1598,6 @@ orioledb_get_index_descrs(PG_FUNCTION_ARGS)
 		values[3] = indexDescr->refcnt;
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
-
-	tuplestore_donestoring(tupstore);
 
 	return (Datum) 0;
 }

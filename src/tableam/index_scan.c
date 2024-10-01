@@ -175,7 +175,11 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	bool		result = true;
 
 	if (ostate->curKeyRangeIsLoaded)
+#if PG_VERSION_NUM >= 170000
+		result = _bt_start_prim_scan(scan, ForwardScanDirection);
+#else
 		result = _bt_advance_array_keys(scan, ForwardScanDirection);
+#endif
 	ostate->curKeyRangeIsLoaded = true;
 
 	ostate->exact = result;

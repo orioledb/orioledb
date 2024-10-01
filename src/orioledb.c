@@ -1082,7 +1082,7 @@ static void
 orioledb_on_shmem_exit(int code, Datum arg)
 {
 	if (MyProc)
-		pg_atomic_write_u64(&oProcData[MyProc->pgprocno].xmin, InvalidOXid);
+		pg_atomic_write_u64(&oProcData[MyProc->PROCNUMBER].xmin, InvalidOXid);
 
 	if (orioledb_s3_mode)
 		s3_delete_lock_file();
@@ -1405,8 +1405,6 @@ orioledb_page_stats(PG_FUNCTION_ARGS)
 		values[4] = Int64GetDatum(total_num_pages);
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 	}
-
-	tuplestore_donestoring(tupstore);
 
 	return (Datum) 0;
 }

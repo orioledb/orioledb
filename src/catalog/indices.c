@@ -203,7 +203,11 @@ assign_new_oids(OTable *oTable, Relation rel)
 		if (OidIsValid(toast_relid))
 		{
 			params.options &= ~(REINDEXOPT_MISSING_OK);
+#if PG_VERSION_NUM >= 170000
+			reindex_relation(NULL, toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
+#else
 			reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
+#endif
 		}
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}

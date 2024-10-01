@@ -152,9 +152,9 @@ extern PendingTruncatesMeta *pending_truncates_meta;
 											 ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainStartLocation) && \
 											  (location) < pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainEndLocation)))
 #define UNDO_REC_XACT_RETAIN(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcTransactionRetainLocation))
-#define GET_CUR_UNDO_STACK_LOCATIONS(undoType) (AssertMacro(MyProc->pgprocno >= 0 && MyProc->pgprocno < max_procs), \
+#define GET_CUR_UNDO_STACK_LOCATIONS(undoType) (AssertMacro(MyProc->PROCNUMBER >= 0 && MyProc->PROCNUMBER < max_procs), \
 										AssertMacro((int) (undoType) >= 0 && (int) (undoType) < (int) UndoLogsCount), \
-										&oProcData[MyProc->pgprocno].undoStackLocations[oProcData[MyProc->pgprocno].autonomousNestingLevel][(int) (undoType)])
+										&oProcData[MyProc->PROCNUMBER].undoStackLocations[oProcData[MyProc->PROCNUMBER].autonomousNestingLevel][(int) (undoType)])
 
 extern Size undo_shmem_needs(void);
 extern void undo_shmem_init(Pointer buf, bool found);

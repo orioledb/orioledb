@@ -219,7 +219,7 @@ dequeue_self(OInMemoryBlkno blkno)
 
 	proclist_foreach_modify(iter, &O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList, lwWaitLink)
 	{
-		if (iter.cur == MyProc->pgprocno)
+		if (iter.cur == MyProc->PROCNUMBER)
 		{
 			proclist_delete(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList, iter.cur, lwWaitLink);
 			found = true;
@@ -292,7 +292,7 @@ lock_page(OInMemoryBlkno blkno)
 			break;
 
 		proclist_push_tail(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList,
-						   MyProc->pgprocno,
+						   MyProc->PROCNUMBER,
 						   lwWaitLink);
 		MyProc->lwWaiting = true;
 		MyProc->lwWaitMode = LW_EXCLUSIVE;
@@ -344,7 +344,7 @@ page_wait_for_read_enable(OInMemoryBlkno blkno)
 			break;
 
 		proclist_push_tail(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList,
-						   MyProc->pgprocno,
+						   MyProc->PROCNUMBER,
 						   lwWaitLink);
 		MyProc->lwWaiting = true;
 		MyProc->lwWaitMode = LW_SHARED;
@@ -400,7 +400,7 @@ page_wait_for_changecount(OInMemoryBlkno blkno, uint32 state)
 		(void) pg_atomic_fetch_or_u32(&header->state, PAGE_STATE_HAS_WAITERS_FLAG);
 
 		proclist_push_tail(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList,
-						   MyProc->pgprocno,
+						   MyProc->PROCNUMBER,
 						   lwWaitLink);
 		MyProc->lwWaiting = true;
 		MyProc->lwWaitMode = LW_SHARED;

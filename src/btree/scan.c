@@ -196,7 +196,7 @@ load_first_historical_page(BTreeSeqScan *scan)
 		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
 		{
 			ereport(ERROR,
-					(errcode(ERRCODE_SNAPSHOT_TOO_OLD),
+					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("snapshot too old")));
 		}
 
@@ -251,7 +251,7 @@ load_next_historical_page(BTreeSeqScan *scan)
 		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
 		{
 			ereport(ERROR,
-					(errcode(ERRCODE_SNAPSHOT_TOO_OLD),
+					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("snapshot too old")));
 		}
 		(void) get_page_from_undo(scan->desc, header->undoLocation,

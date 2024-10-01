@@ -89,7 +89,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 		needsUndo = false;
 
 	if (needsUndo)
-		csn = pg_atomic_fetch_add_u64(&ShmemVariableCache->nextCommitSeqNo, 1);
+		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 	else
 		csn = COMMITSEQNO_INPROGRESS;
 

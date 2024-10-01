@@ -614,8 +614,6 @@ orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 
 	btree_iterator_free(it);
 
-	tuplestore_donestoring(tupstore);
-
 	return (Datum) 0;
 }
 

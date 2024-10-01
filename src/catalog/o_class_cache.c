@@ -117,7 +117,9 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		class_attr->attrelid = typcache_attr->attrelid;
 		class_attr->attname = typcache_attr->attname;
 		class_attr->atttypid = typcache_attr->atttypid;
+#if PG_VERSION_NUM < 170000
 		class_attr->attstattarget = typcache_attr->attstattarget;
+#endif
 		class_attr->attlen = typcache_attr->attlen;
 		class_attr->attnum = typcache_attr->attnum;
 		class_attr->attndims = typcache_attr->attndims;

@@ -34,7 +34,11 @@
 #include "recovery/recovery.h"
 #include "utils/catcache.h"
 #include "utils/pg_locale.h"
+#if PG_VERSION_NUM >= 170000
+#include "utils/resowner.h"
+#else
 #include "utils/resowner_private.h"
+#endif
 #include "access/xlogrecovery.h"
 
 /*

@@ -87,7 +87,11 @@ static int64 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
 static void orioledb_amendscan(IndexScanDesc scan);
 static void orioledb_ammarkpos(IndexScanDesc scan);
 static void orioledb_amrestrpos(IndexScanDesc scan);
+#if PG_VERSION_NUM >= 170000
+static Size orioledb_amestimateparallelscan(int nkeys, int norderbys);
+#else
 static Size orioledb_amestimateparallelscan(void);
+#endif
 static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
 
@@ -976,8 +980,11 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 			{
 				ScalarArrayOpExpr *saop = (ScalarArrayOpExpr *) clause;
 				Node	   *other_operand = (Node *) lsecond(saop->args);
+#if PG_VERSION_NUM >= 170000
+				int                     alength = estimate_array_length(root, other_operand);
+#else
 				int			alength = estimate_array_length(other_operand);
-
+#endif
 				clause_op = saop->opno;
 				found_saop = true;
 				/* count number of SA scans induced by indexBoundQuals only */
@@ -1612,7 +1619,11 @@ orioledb_amrestrpos(IndexScanDesc scan)
 }
 
 Size
+#if PG_VERSION_NUM >= 170000
+orioledb_amestimateparallelscan(int nkeys, int norderbys)
+#else
 orioledb_amestimateparallelscan(void)
+#endif
 {
 	return sizeof(uint8);
 }

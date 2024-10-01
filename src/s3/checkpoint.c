@@ -331,9 +331,13 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		int			excludeIdx;
 		bool		excludeFound;
 		ForkNumber	relForkNum; /* Type of fork if file is a relation */
+#if PG_VERSION_NUM >= 170000
+		unsigned    segno;
+		RelFileNumber relNumber;
+#else
 		int			relnumchars;	/* Chars in filename that are the
 									 * relnumber */
-
+#endif
 		/* Skip special stuff */
 		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
 			continue;
@@ -381,16 +385,30 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 			continue;
 
 		/* Exclude all forks for unlogged tables except the init fork */
+#if PG_VERSION_NUM >= 170000
+		if (isDbDir &&
+			parse_filename_for_nontemp_relation(de->d_name, &relNumber,
+												&relForkNum, &segno))
+#else
 		if (isDbDir &&
 			parse_filename_for_nontemp_relation(de->d_name, &relnumchars,
 												&relForkNum))
+#endif
 		{
 			/* Never exclude init forks */
 			if (relForkNum != INIT_FORKNUM)
 			{
 				char		initForkFile[MAXPGPATH];
-				char		relNumber[OIDCHARS + 1];
+#if PG_VERSION_NUM >= 170000
+				if (segno == 0)
+					snprintf(initForkFile, sizeof(initForkFile), "%s/%u_init",
+							 path, relNumber);
+				else
+					snprintf(initForkFile, sizeof(initForkFile), "%s/%u.%u_init",
+							 path, relNumber, segno);
 
+#else
+				char		relNumber[OIDCHARS + 1];
 				/*
 				 * If any other type of fork, check if there is an init fork
 				 * with the same RelFileNumber. If so, the file can be
@@ -400,6 +418,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 				relNumber[relnumchars] = '\0';
 				snprintf(initForkFile, sizeof(initForkFile), "%s/%s_init",
 						 path, relNumber);
+#endif
 
 				if (lstat(initForkFile, &statbuf) == 0)
 				{
