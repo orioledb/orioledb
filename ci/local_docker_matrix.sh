@@ -6,7 +6,7 @@ set -Eeo pipefail
 # and check the logs in ./log_docker_build/*.*.log
 
 # Full matrix of test builds 2x2x12 = 48 builds
-pg_major_list=( 16 15)
+pg_major_list=( 16 17)
 compiler_list=( clang gcc )
 base_list=(
    # alpine versions

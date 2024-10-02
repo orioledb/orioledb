@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        pg_version: [16]
+        pg_version: [17]
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v4
