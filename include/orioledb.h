@@ -202,8 +202,9 @@ typedef RelFileLocator RelFileNode;
 /* Join BackendId and ProcNumber */
 #define BACKENDID procNumber
 #define PROCBACKENDID vxid.procNumber
-#define PROCNUMBER vxid.procNumber
+#define MYPROCNUMBER MyProcNumber
 #define MyBackendId MyProcNumber
+#define	PROCNUMBER(proc) GetNumberFromPGProc(proc) 
 /* Deprecated */
 #define palloc0fast palloc0
 
@@ -216,7 +217,8 @@ typedef RelFileLocator RelFileNode;
 /* BackendId and ProcNumber were separate */
 #define BACKENDID backendId
 #define PROCBACKENDID backendId
-#define PROCNUMBER pgprocno
+#define MYPROCNUMBER MyProc->pgprocno
+#define PROCNUMBER(proc) ((proc)->pgprocno) 
 
 #endif
 
@@ -317,9 +319,9 @@ extern char *s3_secretkey;
 extern char *s3_cainfo;
 
 #define GET_CUR_PROCDATA() \
-	(AssertMacro(MyProc->PROCNUMBER >= 0 && \
-				 MyProc->PROCNUMBER < max_procs), \
-	 &oProcData[MyProc->PROCNUMBER])
+	(AssertMacro(MYPROCNUMBER >= 0 && \
+				 MYPROCNUMBER < max_procs), \
+	 &oProcData[MYPROCNUMBER])
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
 	 (Page)(o_shared_buffers + ((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ)))
