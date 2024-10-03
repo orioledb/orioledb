@@ -2952,10 +2952,12 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
 							  blkno, loc, rightBlkno, true))
 	{
-		release_undo_size(descr->undoType);
-		free_retained_undo_location(descr->undoType);
-
-		reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+		if (descr->undoType != UndoLogNone)
+		{
+			release_undo_size(descr->undoType);
+			free_retained_undo_location(descr->undoType);
+			reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+		}
 		return true;
 	}
 	else
