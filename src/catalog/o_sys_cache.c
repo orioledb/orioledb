@@ -70,22 +70,6 @@ typedef struct OCacheIdMapEntry
 	OSysCache  *sys_cache;
 } OCacheIdMapEntry;
 
-#if PG_VERSION_NUM >= 170000
-static void ResOwnerReleaseCatCache(Datum res);
-static char *ResOwnerPrintCatCache(Datum res);
-static void ReleaseCatCacheWithOwner(HeapTuple tuple, ResourceOwner resowner);
-
-static const ResourceOwnerDesc catcache_resowner_desc =
-{
-	/* catcache references */
-	.name = "catcache reference",
-	.release_phase = RESOURCE_RELEASE_AFTER_LOCKS,
-	.release_priority = RELEASE_PRIO_CATCACHE_REFS,
-	.ReleaseResource = ResOwnerReleaseCatCache,
-	.DebugPrint = ResOwnerPrintCatCache
-};
-#endif
-
 static Pointer o_sys_cache_get_from_tree(OSysCache *sys_cache,
 										 int nkeys,
 										 OSysCacheKey *key);
@@ -1402,56 +1386,6 @@ o_composite_type_element_save(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 	}
 }
 
-#if PG_VERSION_NUM >= 170000
-/* ResourceOwner callbacks */
-static void
-ResOwnerReleaseCatCache(Datum res)
-{
-   	ReleaseCatCacheWithOwner((HeapTuple) DatumGetPointer(res), NULL);
-}
-
-static void
-ReleaseCatCacheWithOwner(HeapTuple tuple, ResourceOwner resowner)
-{
-	CatCTup    *ct = (CatCTup *) (((char *) tuple) -
-                                   offsetof(CatCTup, tuple));
-
-     /* Safety checks to ensure we were handed a cache entry */
-     Assert(ct->ct_magic == CT_MAGIC);
-     Assert(ct->refcount > 0);
-
-     ct->refcount--;
-     if (resowner)
-         ResourceOwnerForgetCatCacheRef(CurrentResourceOwner, &ct->tuple);
-
-     if (
-#ifndef CATCACHE_FORCE_RELEASE
-         ct->dead &&
-#endif
-         ct->refcount == 0 &&
-         (ct->c_list == NULL || ct->c_list->refcount == 0))
-         CatCacheRemoveCTup(ct->my_cache, ct);
-}
-
-
-static char *
-ResOwnerPrintCatCache(Datum res)
-{
-	HeapTuple   tuple = (HeapTuple) DatumGetPointer(res);
-	CatCTup    *ct = (CatCTup *) (((char *) tuple) -
-	                               offsetof(CatCTup, tuple));
-
-	/* Safety check to ensure we were handed a cache entry */
-       	Assert(ct->ct_magic == CT_MAGIC);
-
-	return psprintf("cache %s (%d), tuple %u/%u has count %d",
-                     ct->my_cache->cc_relname, ct->my_cache->id,
-                     ItemPointerGetBlockNumber(&(tuple->t_self)),
-                     ItemPointerGetOffsetNumber(&(tuple->t_self)),
-                     ct->refcount);
-}
-#endif
-
 static CatCTup *
 heap_to_catctup(CatCache *cache, TupleDesc cc_tupdesc, HeapTuple tuple,
 				bool refcount)
@@ -1514,11 +1448,7 @@ heap_to_catctup(CatCache *cache, TupleDesc cc_tupdesc, HeapTuple tuple,
 	{
 		ResourceOwnerEnlargeCatCacheRefs(CurrentResourceOwner);
 		ct->refcount++;
-#if PG_VERSION_NUM >= 170000
-		ResourceOwnerRemember(CurrentResourceOwner, PointerGetDatum(&ct->tuple), &catcache_resowner_desc);
-#else
 		ResourceOwnerRememberCatCacheRef(CurrentResourceOwner, &ct->tuple);
-#endif
 	}
 	return ct;
 }

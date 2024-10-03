@@ -197,6 +197,8 @@ typedef RelFileLocator RelFileNode;
 #define	TRANSAM_VARIABLES TransamVariables
 #define WAIT_EVENT_MQ_PUT_MESSAGE WAIT_EVENT_MESSAGE_QUEUE_PUT_MESSAGE
 #define vacuum_is_relation_owner vacuum_is_permitted_for_relation
+#define ResourceOwnerEnlargeCatCacheRefs ResourceOwnerEnlarge
+#define ResourceOwnerEnlargeCatCacheListRefs ResourceOwnerEnlarge
 /* Join BackendId and ProcNumber */
 #define BACKENDID procNumber
 #define PROCBACKENDID vxid.procNumber

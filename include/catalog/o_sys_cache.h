@@ -36,9 +36,8 @@
 #include "utils/pg_locale.h"
 #if PG_VERSION_NUM >= 170000
 #include "utils/resowner.h"
-#else
-#include "utils/resowner_private.h"
 #endif
+#include "utils/resowner_private.h"
 #include "access/xlogrecovery.h"
 
 /*
