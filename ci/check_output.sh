@@ -16,7 +16,7 @@ fi
 
 # show diff if it exists
 for f in ` find . -name regression.diffs ` ; do
-	echo "========= Contents of $f" 
+	echo "========= Contents of $f"
 	cat $f
 	status=1
 done
@@ -50,7 +50,7 @@ if [ -n "$cores" ]; then
 				binary=$(gdb -quiet -core $corefile -batch -ex 'info auxv' | grep AT_EXECFN | perl -pe "s/^.*\"(.*)\"\$/\$1/g")
 			fi
 			echo dumping $corefile for $binary
-			gdb --batch --quiet -ex "thread apply all bt full" -ex "quit" $binary $corefile
+			gdb --batch --quiet -x ./orioledb/ci/cmds.gdb $binary $corefile
 			status=1
 		fi
 	done
