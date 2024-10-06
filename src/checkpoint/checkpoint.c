@@ -316,7 +316,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		if (!get_checkpoint_control_data(&control))
 			return;
 
-		checkpoint_state->control_identifier = control.control_identifier;
+		checkpoint_state->controlIdentifier = control.controlIdentifier;
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;
 		checkpoint_state->controlReplayStartPtr = control.replayStartPtr;
@@ -1242,20 +1242,20 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
 
-	if (checkpoint_state->control_identifier == 0)
+	if (checkpoint_state->controlIdentifier == 0)
 	{
 		struct timeval tv;
-		uint64		control_identifier = 0;
+		uint64		controlIdentifier = 0;
 
 		gettimeofday(&tv, NULL);
-		control_identifier = ((uint64) tv.tv_sec) << 32;
-		control_identifier |= ((uint64) tv.tv_usec) << 12;
-		control_identifier |= getpid() & 0xFFF;
+		controlIdentifier = ((uint64) tv.tv_sec) << 32;
+		controlIdentifier |= ((uint64) tv.tv_usec) << 12;
+		controlIdentifier |= getpid() & 0xFFF;
 
-		checkpoint_state->control_identifier = control_identifier;
+		checkpoint_state->controlIdentifier = controlIdentifier;
 	}
 
-	control.control_identifier = checkpoint_state->control_identifier;
+	control.controlIdentifier = checkpoint_state->controlIdentifier;
 	control.lastCheckpointNumber = checkpoint_state->lastCheckpointNumber;
 	control.lastCSN = pg_atomic_read_u64(&ShmemVariableCache->nextCommitSeqNo);
 	control.lastXid = pg_atomic_read_u64(&xid_meta->nextXid);

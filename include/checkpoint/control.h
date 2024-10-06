@@ -26,7 +26,7 @@ typedef struct
 
 typedef struct
 {
-	uint64		control_identifier;
+	uint64		controlIdentifier;
 	uint32		lastCheckpointNumber;
 	CommitSeqNo lastCSN;
 	OXid		lastXid;

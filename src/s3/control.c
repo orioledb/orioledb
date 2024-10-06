@@ -76,15 +76,15 @@ s3_check_control(const char **errmsgp, const char **errdetailp)
 	s3_control = (CheckpointControl *) buf.data;
 	check_checkpoint_control(s3_control);
 
-	if (control.control_identifier != s3_control->control_identifier)
+	if (control.controlIdentifier != s3_control->controlIdentifier)
 	{
 		*errmsgp = psprintf("OrioleDB and the S3 bucket have files from "
 							"different instances and they are incompatible with "
 							"each other");
 		*errdetailp = psprintf("OrioleDB control identifier " UINT64_FORMAT
 							   " differs from the S3 bucket identifier " UINT64_FORMAT,
-							   control.control_identifier,
-							   s3_control->control_identifier);
+							   control.controlIdentifier,
+							   s3_control->controlIdentifier);
 		goto cleanup;
 	}
 
