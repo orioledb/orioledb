@@ -56,7 +56,7 @@ init_index_scan_state(OScanState *ostate, Relation index,
 		/* punt if we have any unsatisfiable array keys */
 		if (so->numArrayKeys > 0)
 		{
-			_bt_start_array_keys(scan, ForwardScanDirection);
+			_bt_start_array_keys(scan, ForwardScanDirection); //
 		}
 	}
 	_bt_preprocess_keys(scan);
@@ -174,10 +174,34 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	MemoryContext oldcontext;
 	bool		result = true;
 
-	if (ostate->curKeyRangeIsLoaded)
 #if PG_VERSION_NUM >= 170000
-		result = _bt_start_prim_scan(scan, ForwardScanDirection);
+	if(so->numArrayKeys)
+	{
+		if (ostate->curKeyRangeIsLoaded)
+		{
+			result = _bt_start_prim_scan(scan, ForwardScanDirection);
+			elog(LOG, "_bt_start_prim_scan, result %u:", result); 
+			if(result) 
+			{
+				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection);
+				elog(LOG, "_bt_advance_array_keys_increment, result %u:", result);
+			}
+		}
+		else
+		{
+			_bt_start_array_keys(scan, ForwardScanDirection);
+			elog(LOG, "_bt_start_array_keys");
+			result = false;
+		}
+	}
+	else
+	{
+		result = false;
+//		so->needPrimScan = false;
+		elog(LOG, "no array keys");
+	}
 #else
+	if (ostate->curKeyRangeIsLoaded)
 		result = _bt_advance_array_keys(scan, ForwardScanDirection);
 #endif
 	ostate->curKeyRangeIsLoaded = true;
