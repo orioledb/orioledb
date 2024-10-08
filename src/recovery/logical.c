@@ -291,8 +291,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			}
 
+			/*
+			 * SnapBuildXactNeedsSkip() does strict comparison.  So, subtract
+			 * endXLogPtr by one to fit snapshot just taken after commit.
+			 */
 			if (rec_type == WAL_REC_COMMIT &&
-				!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
+				!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1))
 			{
 				ReorderBufferCommit(ctx->reorder, logicalXid,
 									startXLogPtr, endXLogPtr,
@@ -501,8 +505,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 											 changeXLogPtr,
 											 snap);
 				snap->active_count++;
-				/* XXX: why this matters? */
-				snap->csnSnapshotData.xlogptr = record->ReadRecPtr;
 			}
 
 
