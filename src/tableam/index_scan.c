@@ -183,7 +183,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 			elog(LOG, "_bt_start_prim_scan, result %u:", result); 
 			if(result) 
 			{
-				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection);
+//				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection);
 				elog(LOG, "_bt_advance_array_keys_increment, result %u:", result);
 			}
 		}
@@ -196,9 +196,17 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	}
 	else
 	{
+		if (ostate->curKeyRangeIsLoaded)
+		{
 		result = false;
-//		so->needPrimScan = false;
-		elog(LOG, "no array keys");
+		so->needPrimScan = false;
+		so->scanBehind = false;
+//		elog(LOG, "no array keys");
+		}
+		else
+		{
+		result = true;
+		}
 	}
 #else
 	if (ostate->curKeyRangeIsLoaded)
