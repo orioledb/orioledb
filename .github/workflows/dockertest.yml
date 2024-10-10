@@ -13,18 +13,38 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        postgres: [16]
-        compiler: [clang]
-        distr: [alpine, ubuntu]
         include:
-          - distr-version: 3.19
-            distr: alpine
-          - distr-version: focal
-            distr: ubuntu
+          # latest stable alpine versions for the docker publications
+          - postgres: "16"
+            compiler: "clang"
+            distr: "alpine"
+            distr-version: "3.20"
+            regression: "no"
 
-    name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
+          # ubuntu:focal - old python3.8 -> the regression tests are not working
+          - postgres: "16"
+            compiler: "clang"
+            distr: "ubuntu"
+            distr-version: "focal"
+            regression: "no"
+
+          # latest alpine dev version ( allowed to fail )
+          - postgres: "16"
+            compiler: "clang"
+            distr: "alpine"
+            distr-version: "edge"
+            regression: "yes"
+
+          # latest debian dev version ( allowed to fail )
+          - postgres: "16"
+            compiler: "clang"
+            distr: "ubuntu"
+            distr-version: "devel"
+            regression: "yes"
+
+    name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}-regr-${{ matrix.regression }}
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.alpine == 'edge' }}
+    continue-on-error: ${{ matrix.distr-version == 'edge' || matrix.distr-version == 'devel' }}
 
     steps:
       - name: Checkout source
@@ -45,3 +65,23 @@ jobs:
             PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
             DOCKER_PG_LLVM_DEPS=llvm-dev clang
+            RUN_REGRESSION_TESTS=${{ matrix.regression }}
+            DEBUG_MODE=false
+
+      # docker imgage testing with https://github.com/docker-library/official-images.git
+      # to check if the image is compatible with the official-images test suite
+      # the special orioledb test config is in the ./test/tests/orioledb-config.sh
+      # Read more: ./test/README.md
+      - name: Run Docker-official-postgres tests + extra orioledb tests
+        run: |
+          OFFIMG_LOCAL_CLONE=./log_docker_build/official-images
+          OFFIMG_REPO_URL=https://github.com/docker-library/official-images.git
+          mkdir -p "$OFFIMG_LOCAL_CLONE"
+          git clone --depth=1 --branch=master "$OFFIMG_REPO_URL" "$OFFIMG_LOCAL_CLONE"
+          "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
+              -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
+              -c "test/orioledb-config.sh" \
+              "orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}"
+
+      # if you want to push the tested image
+      # check this example:  https://docs.docker.com/build/ci/github-actions/test-before-push/
