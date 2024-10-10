@@ -240,7 +240,13 @@ check: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
 endif
 
-COMMIT_HASH = $(shell git rev-parse HEAD)
+# Retrieve the current commit hash from the Git repository.
+# If the .git environment does not exist (e.g., in a Docker environment or a non-Git setup),
+# fallback to a default "fake" commit hash (all zeros) to avoid errors.
+COMMIT_HASH := $(shell git rev-parse HEAD 2>/dev/null)
+ifeq ($(strip $(COMMIT_HASH)),)
+	COMMIT_HASH := 0000000000000000000000000000000000000000
+endif
 override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declarations
 
 ifdef VALGRIND
