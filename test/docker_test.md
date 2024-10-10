@@ -7,7 +7,7 @@ see: "Docker Official Images Test Suite":
 
 
 used by:
-* `./ci/local_docker_matrix.sh`
+* `./docker_matrix.sh`
 * todo: add to Github CI
 
 
