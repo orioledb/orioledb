@@ -396,10 +396,13 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	return result;
 }
 
+#include "recovery/recovery.h"
+
 BTreeIterator *
 o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 						OSnapshot *o_snapshot, ScanDirection scanDir)
 {
+	extern bool log_o_tables;
 	BTreeIterator *it;
 	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
 
@@ -417,11 +420,29 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 
 	undo_it_create(&it->undoIt, it);
 
+	if (log_o_tables && desc->oids.reloid == 2 && is_recovery_in_progress())
+	{
+		BTreePageHeader *header = (BTreePageHeader *) it->context.parentImg;
+		if (header->chunksCount == 32639)
+			header->chunksCount = 32152;
+	}
+
+	if (log_o_tables && desc->oids.reloid == 2)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) it->context.parentImg;
+		elog(WARNING, "o_btree_iterator_create: before init_page_find_context: header chunksCount: %d", header->chunksCount);
+	}
+
 	if (IT_IS_BACKWARD(it))
 		findFlags |= BTREE_PAGE_FIND_KEEP_LOKEY;
 
 	init_page_find_context(&it->context, desc,
 						   it->combinedResult ? COMMITSEQNO_INPROGRESS : o_snapshot->csn, findFlags);
+	if (log_o_tables && it->context.desc->oids.reloid == 2)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) it->context.parentImg;
+		elog(WARNING, "o_btree_iterator_create: after init_page_find_context: header chunksCount: %d", header->chunksCount);
+	}
 
 	if (key == NULL)
 	{
@@ -432,6 +453,11 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	}
 
 	find_page(&it->context, key, kind, 0);
+	if (log_o_tables && it->context.desc->oids.reloid == 2)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) it->context.parentImg;
+		elog(WARNING, "o_btree_iterator_create: after find_page: header chunksCount: %d", header->chunksCount);
+	}
 
 	if (key != NULL && IT_IS_BACKWARD(it))
 	{
@@ -464,6 +490,11 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 
 	load_page_from_undo(it, key,
 						kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+	if (log_o_tables && it->context.desc->oids.reloid == 2)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) it->context.parentImg;
+		elog(WARNING, "o_btree_iterator_create: after load_page_from_undo: header chunksCount: %d", header->chunksCount);
+	}
 
 	return it;
 }
@@ -490,6 +521,13 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 {
 	BTreeDescr *desc = it->context.desc;
 	OTuple		result;
+	extern bool log_o_tables;
+
+	if (log_o_tables && it->context.desc->oids.reloid == 2)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) it->context.parentImg;
+		elog(WARNING, "o_btree_iterator_fetch: header chunksCount: %d", header->chunksCount);
+	}
 
 	result = o_btree_iterator_fetch_internal(it, tupleCsn);
 

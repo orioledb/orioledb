@@ -411,42 +411,42 @@ class IndicesBuildTest(BaseTest):
 				                      'o_indices0_pkey')
 
 	def test_multiple_indices_build_replication(self):
-		with self.node as master:
-			master.start()
+		master = self.node
+		master.start()
 
-			# create a backup
-			with self.getReplica().start() as replica:
-				columns = ",\n".join(["val%d int" % x for x in range(1, 10)])
-				values = ", ".join(
-				    ["i + %d" % ((x + 1) * 1000) for x in range(0, 10)])
+		# create a backup
+		replica = self.getReplica().start()
+		columns = ",\n".join(["val%d int" % x for x in range(1, 10)])
+		values = ", ".join(
+			["i + %d" % ((x + 1) * 1000) for x in range(0, 10)])
 
-				master.safe_psql(
-				    'postgres', f"""
-					CREATE EXTENSION IF NOT EXISTS orioledb;
-					CREATE TABLE o_indices0
-					(
-						key TEXT NOT NULL,
-						PRIMARY KEY (key),
-						{columns}
-					) USING orioledb;
-					INSERT INTO o_indices0
-						SELECT {values} FROM generate_series(1, 500) AS i;
+		master.safe_psql(
+			'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_indices0
+			(
+				key TEXT NOT NULL,
+				PRIMARY KEY (key),
+				{columns}
+			) USING orioledb;
+			INSERT INTO o_indices0
+				SELECT {values} FROM generate_series(1, 500) AS i;
+		""")
+
+		# multiple CREATE INDEX in the same transaction
+		with master.connect() as con:
+			con.begin()
+			for i in range(1, 10):
+				con.execute(f"""
+					CREATE UNIQUE INDEX o_indices0_idx{i}
+					ON o_indices0 (val{i});
 				""")
-
-				# multiple CREATE INDEX in the same transaction
-				with master.connect() as con:
-					con.begin()
-					for i in range(1, 10):
-						con.execute(f"""
-							CREATE UNIQUE INDEX o_indices0_idx{i}
-							ON o_indices0 (val{i});
-						""")
-					con.commit()
-				self.catchup_orioledb(replica)
-				for i in range(1, 10):
-					self.check_used_index(
-					    replica, f"""SELECT * FROM o_indices0
-								WHERE val{i} > 0 ORDER BY val{i}""", f'o_indices0_idx{i}')
+			con.commit()
+		self.catchup_orioledb(replica)
+		for i in range(1, 10):
+			self.check_used_index(
+				replica, f"""SELECT * FROM o_indices0
+						WHERE val{i} > 0 ORDER BY val{i}""", f'o_indices0_idx{i}')
 
 	def test_indices_build_xip(self):
 		node = self.node

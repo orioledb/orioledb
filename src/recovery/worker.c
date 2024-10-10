@@ -172,6 +172,7 @@ handle_sigterm(SIGNAL_ARGS)
 	SetLatch(MyLatch);
 }
 
+bool log_o_tables = false;
 /*
  * Recovery worker main function.
  */
@@ -206,7 +207,9 @@ recovery_worker_main(Datum main_arg)
 		recovery_worker_queue = shm_mq_attach(GET_WORKER_QUEUE(id), NULL, NULL);
 
 		my_ptr = pg_atomic_read_u64(&worker_ptrs[id].commitPtr);
+		log_o_tables = true;
 		recovery_queue_process(recovery_worker_queue, id);
+		log_o_tables = false;
 		if (detached)
 		{
 			elog(ERROR, "orioledb recovery worker %d finished: unexpected detach from recovery messages queue.", id);

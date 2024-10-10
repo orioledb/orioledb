@@ -1386,13 +1386,18 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 {
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	OffsetNumber offset;
+	extern bool log_o_tables;
 
+	if (log_o_tables)
+		elog(WARNING, "page_locator_find_real_item: %d >= %d", locator->itemOffset, locator->chunkItemsCount);
 	while (locator->itemOffset >= locator->chunkItemsCount)
 	{
 		if (locator->chunkOffset >= header->chunksCount - 1)
 			return true;
 
 		offset = locator->itemOffset - locator->chunkItemsCount;
+		if (log_o_tables)
+			elog(WARNING, "partial: %c", partial ? 'Y' : 'N');
 		if (partial)
 		{
 			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1))

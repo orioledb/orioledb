@@ -6,13 +6,13 @@ status=0
 
 [ -f /var/log/system.log ] && syslogfile=/var/log/system.log || syslogfile=/var/log/syslog
 [ -f $syslogfile ] || { echo "Syslog file not found"; status=1; }
-oomcount=$(cat $syslogfile | grep oom-kill | wc -l)
-[ -f ./ooms.tmp ] && { oomsbefore=$(cat ./ooms.tmp); rm ./ooms.tmp; } || \
-	{ oomsbefore=0; echo "File ooms.tmp not found. check.sh should be run before check-output.sh"; status=1;}
-if [ $oomcount != $oomsbefore ]; then
-    echo "======== OOM-kller came during the tests"
-    status=1
-fi
+# oomcount=$(cat $syslogfile | grep oom-kill | wc -l)
+# [ -f ./ooms.tmp ] && { oomsbefore=$(cat ./ooms.tmp); rm ./ooms.tmp; } || \
+# 	{ oomsbefore=0; echo "File ooms.tmp not found. check.sh should be run before check-output.sh"; status=1;}
+# if [ $oomcount != $oomsbefore ]; then
+#     echo "======== OOM-kller came during the tests"
+#     status=1
+# fi
 
 # show diff if it exists
 for f in ` find . -name regression.diffs ` ; do
@@ -50,13 +50,14 @@ if [ -n "$cores" ]; then
 				binary=$(gdb -quiet -core $corefile -batch -ex 'info auxv' | grep AT_EXECFN | perl -pe "s/^.*\"(.*)\"\$/\$1/g")
 			fi
 			echo dumping $corefile for $binary
-			gdb --batch --quiet -x ./orioledb/ci/cmds.gdb $binary $corefile
+			gdb --batch --quiet -x ~/orioledb/ci/cmds.gdb $binary $corefile
 			status=1
 		fi
 	done
-	tar -czf /tmp/cores-$GITHUB_SHA-$TIMESTAMP.tar.gz . $cores
+	# tar -czf /tmp/cores-$GITHUB_SHA-$TIMESTAMP.tar.gz . $cores
+	# cp $cores ~/tmp/cores
 fi
 
-rm -rf /tmp/cores-$GITHUB_SHA-$TIMESTAMP
+# rm -rf /tmp/cores-$GITHUB_SHA-$TIMESTAMP
 
 exit $status

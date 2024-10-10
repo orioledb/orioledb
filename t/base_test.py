@@ -94,20 +94,13 @@ class BaseTest(unittest.TestCase):
 			self.node.stop(
 			)  # just comment it if node should not stops on fails
 			pass
-		if ok:
-			self.node.cleanup()
-		else:
-			print("\nBase directory: " + self.node.base_dir)
+		print("\nBase directory: " + self.node.base_dir)
 		if self.replica:
 			if self.replica.status() == NodeStatus.Running:
 				self.replica.stop(
 				)  # just comment it if node should not stops on fails
 				pass
-			if ok:
-				self.replica._custom_base_dir = None
-				self.replica.cleanup()
-			else:
-				print("\nReplica base directory: " + self.replica.base_dir)
+			print("\nReplica base directory: " + self.replica.base_dir)
 		t = time.time() - self.startTime
 		sys.stderr.write('%.3f s ' % (t, ))
 

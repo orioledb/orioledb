@@ -1063,6 +1063,9 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	return o_tables_add_version(table, oxid, csn, 0);
 }
 
+
+#include "recovery/recovery.h"
+extern bool log_o_tables;
 /*
  * Same as o_tables_get, if version not NULL find o_tables with passed version
  */
@@ -1083,6 +1086,8 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 		key.version = O_TABLE_INVALID_VERSION;
 
 	found_key = &key;
+	if (is_recovery_in_progress() && log_o_tables)
+		elog(WARNING, "o_tables_get_by_oids_and_version");
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
 											&o_non_deleted_snapshot,
