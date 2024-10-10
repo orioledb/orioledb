@@ -30,9 +30,6 @@ typedef struct
 	bool		enforceUnique;
 } OIndexBuildSortArg;
 
-#define COPYTUP(state,stup,tup) ((*(state)->copytup) (state, stup, tup))
-#define SortHaveRandomAccess(state) (TuplesortstateGetPublic(state)->sortopt & TUPLESORT_RANDOMACCESS)
-
 static void
 write_o_tuple(void *ptr, OTuple tup, int tupsize)
 {
@@ -59,8 +56,8 @@ read_o_tuple(void *ptr)
 static int
 comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate *state)
 {
-	TuplesortPublic *public = TuplesortstateGetPublic(state);
-	SortSupport sortKey = public->sortKeys;
+	TuplesortPublic *base = TuplesortstateGetPublic(state);
+	SortSupport sortKey = base->sortKeys;
 	OTuple		ltup;
 	OTuple		rtup;
 	TupleDesc	tupDesc;
@@ -72,7 +69,7 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 				datum2;
 	bool		isnull1,
 				isnull2;
-	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
+	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) base->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
 
 	/* Compare the leading sort key */
@@ -106,7 +103,7 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 		equal_hasnull = true;
 
 	sortKey++;
-	for (nkey = 1; nkey < public->nKeys; nkey++, sortKey++)
+	for (nkey = 1; nkey < base->nKeys; nkey++, sortKey++)
 	{
 		if (!OIgnoreColumn(arg->id, nkey))
 		{
@@ -150,16 +147,11 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 	return 0;
 }
 
-#define TAPEDECL LogicalTape *tape
-#define TAPEREAD(ptr, len) \
-	LogicalTapeReadExact(tape, (ptr), (len))
-#define TAPEWRITE(ptr, len) \
-	LogicalTapeWrite(tape, (ptr), (len))
-
 static void
-writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
+writetup_orioledb_index(Tuplesortstate *state, LogicalTape *tape, SortTuple *stup)
 {
-	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) TuplesortstateGetPublic(state)->arg;
+	TuplesortPublic *base = TuplesortstateGetPublic(state);
+	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) base->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
 	OTuple		tuple;
 	int			tuplen;
@@ -167,34 +159,34 @@ writetup_orioledb_index(Tuplesortstate *state, TAPEDECL, SortTuple *stup)
 	tuple = read_o_tuple(stup->tuple);
 	tuplen = o_tuple_size(tuple, spec) + sizeof(int) + 1;
 
-	TAPEWRITE((void *) &tuplen, sizeof(tuplen));
-	TAPEWRITE((void *) tuple.data, o_tuple_size(tuple, spec));
-	TAPEWRITE((void *) &tuple.formatFlags, 1);
-	if (SortHaveRandomAccess(state))	/* need trailing length word? */
-		TAPEWRITE((void *) &tuplen, sizeof(tuplen));
+	LogicalTapeWrite(tape, (void *) &tuplen, sizeof(tuplen));
+	LogicalTapeWrite(tape, (void *) tuple.data, o_tuple_size(tuple, spec));
+	LogicalTapeWrite(tape, (void *) &tuple.formatFlags, 1);
+	if (base->sortopt & TUPLESORT_RANDOMACCESS)	/* need trailing length word? */
+		LogicalTapeWrite(tape, (void *) &tuplen, sizeof(tuplen));
 }
 
 static void
 readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
-					   TAPEDECL, unsigned int len)
+					   LogicalTape *tape, unsigned int len)
 {
-	TuplesortPublic *public = TuplesortstateGetPublic(state);
-	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
+	TuplesortPublic *base = TuplesortstateGetPublic(state);
+	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) base->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
 	uint32		tuplen = len - sizeof(int) - 1;
 	Pointer		tup = (Pointer) tuplesort_readtup_alloc(state, MAXIMUM_ALIGNOF + tuplen);
 	OTuple		tuple;
 
 	/* read in the tuple proper */
-	TAPEREAD(tup + MAXIMUM_ALIGNOF, tuplen);
-	TAPEREAD(tup, 1);
-	if (SortHaveRandomAccess(state))	/* need trailing length word? */
-		TAPEREAD(&tuplen, sizeof(tuplen));
+	LogicalTapeReadExact(tape, tup + MAXIMUM_ALIGNOF, tuplen);
+	LogicalTapeReadExact(tape, tup, 1);
+	if (base->sortopt & TUPLESORT_RANDOMACCESS)	/* need trailing length word? */
+		LogicalTapeReadExact(tape, &tuplen, sizeof(tuplen));
 	stup->tuple = (void *) tup;
 	tuple = read_o_tuple(tup);
 	/* set up first-column key value */
 	stup->datum1 = o_fastgetattr(tuple,
-								 public->sortKeys[0].ssup_attno,
+								 base->sortKeys[0].ssup_attno,
 								 arg->tupDesc,
 								 spec,
 								 &stup->isnull1);
@@ -391,10 +383,10 @@ tuplesort_getotuple(Tuplesortstate *state, bool forward)
 void
 tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 {
-	TuplesortPublic *public = TuplesortstateGetPublic(state);
-	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) public->arg;
+	TuplesortPublic *base = TuplesortstateGetPublic(state);
+	OIndexBuildSortArg *arg = (OIndexBuildSortArg *) base->arg;
 	OTupleFixedFormatSpec *spec = &arg->id->leafSpec;
-	MemoryContext oldcontext = MemoryContextSwitchTo(public->sortcontext);
+	MemoryContext oldcontext = MemoryContextSwitchTo(base->tuplecontext);
 	SortTuple	stup;
 	int			tupsize;
 	OTuple		written_tup;
@@ -406,27 +398,27 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	 * Then call the common code.
 	 */
 	tupsize = o_tuple_size(tup, spec);
-	stup.tuple = MemoryContextAlloc(public->tuplecontext, MAXIMUM_ALIGNOF + tupsize);
+	stup.tuple = MemoryContextAlloc(base->tuplecontext, MAXIMUM_ALIGNOF + tupsize);
 	write_o_tuple(stup.tuple, tup, tupsize);
 	written_tup = read_o_tuple(stup.tuple);
 
 	stup.datum1 = o_fastgetattr(written_tup,
-								public->sortKeys[0].ssup_attno,
+								base->sortKeys[0].ssup_attno,
 								arg->tupDesc,
 								spec,
 								&stup.isnull1);
 #if PG_VERSION_NUM >= 170000
 	/* GetMemoryChunkSpace is not supported for bump contexts */
-	if (TupleSortUseBumpTupleCxt(public->sortopt))
+	if (TupleSortUseBumpTupleCxt(base->sortopt))
 		tuplen = MAXALIGN(tupsize);
 	else
 		tuplen = GetMemoryChunkSpace(stup.tuple);
 
 	tuplesort_puttuple_common(state, &stup,
-							  public->sortKeys->abbrev_converter && !stup.isnull1, tuplen);
+							  base->sortKeys->abbrev_converter && !stup.isnull1, tuplen);
 #else
 	tuplesort_puttuple_common(state, &stup,
-							  public->sortKeys->abbrev_converter && !stup.isnull1);
+							  base->sortKeys->abbrev_converter && !stup.isnull1);
 #endif
 	MemoryContextSwitchTo(oldcontext);
 }

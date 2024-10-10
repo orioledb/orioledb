@@ -393,6 +393,7 @@ extern void jsonb_push_null_key(JsonbParseState **state, char *key);
 extern void jsonb_push_bool_key(JsonbParseState **state, char *key, bool value);
 extern void jsonb_push_int8_key(JsonbParseState **state, char *key, int64 value);
 extern void jsonb_push_string_key(JsonbParseState **state, const char *key, const char *value);
+extern bool is_bump_memory_context(MemoryContext mxct);
 
 extern CheckPoint_hook_type next_CheckPoint_hook;
 

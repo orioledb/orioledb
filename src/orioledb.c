@@ -1704,3 +1704,12 @@ o_newlocale_from_collation()
 {
 	return shared_segment_initialized;
 }
+
+bool is_bump_memory_context(MemoryContext mcxt)
+{
+#if PG_VERSION_NUM >= 170000
+	return IsA(mcxt, BumpContext);
+#else
+	return false;
+#endif
+}
