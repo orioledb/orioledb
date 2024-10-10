@@ -2,7 +2,7 @@ CREATE SCHEMA partial;
 SET SESSION search_path = 'partial';
 CREATE EXTENSION orioledb;
 
-CREATE FUNCTION my_cmp_plpgsql(a int, b int) RETURNS int AS $$
+CREATE FUNCTION partial.my_cmp_plpgsql(a int, b int) RETURNS int AS $$
 DECLARE
 	a_tr int := (a::bit(5) & X'A8'::bit(5))::int;
 	b_tr int := (b::bit(5) & X'A8'::bit(5))::int;
@@ -11,65 +11,65 @@ BEGIN
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-CREATE FUNCTION my_cmp_sql(a int, b int) RETURNS int AS $$
+CREATE FUNCTION partial.my_cmp_sql(a int, b int) RETURNS int AS $$
 	SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					(b::bit(5) & X'A8'::bit(5))::int);
 $$ LANGUAGE SQL IMMUTABLE;
 
-CREATE FUNCTION my_cmp_sql_sql(a int, b int) RETURNS int AS $$
+CREATE FUNCTION partial.my_cmp_sql_sql(a int, b int) RETURNS int AS $$
 	SELECT extract(epoch from current_timestamp)::integer +
-		   my_cmp_sql(a, b);
+		   partial.my_cmp_sql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
 
-CREATE FUNCTION my_cmp_sql_plpgsql(a int, b int) RETURNS int AS $$
-	SELECT my_cmp_plpgsql(a, b);
+CREATE FUNCTION partial.my_cmp_sql_plpgsql(a int, b int) RETURNS int AS $$
+	SELECT partial.my_cmp_plpgsql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_cmp_sql_sql_sql(a int, b int) RETURNS int AS $$
-	SELECT my_cmp_sql_sql(a, b);
+	SELECT partial.my_cmp_sql_sql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
 
-CREATE FUNCTION my_cmp_sql_sql_plpgsql(a int, b int) RETURNS int AS $$
-	SELECT my_cmp_sql_plpgsql(a, b);
+CREATE FUNCTION partial.my_cmp_sql_sql_plpgsql(a int, b int) RETURNS int AS $$
+	SELECT partial.my_cmp_sql_plpgsql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
 
-CREATE FUNCTION my_cmp_sql_body(a int, b int) RETURNS int
+CREATE FUNCTION partial.my_cmp_sql_body(a int, b int) RETURNS int
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
 	SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					(b::bit(5) & X'A8'::bit(5))::int);
 END;
 
-CREATE FUNCTION my_cmp_inter(a int, b int) RETURNS int
+CREATE FUNCTION partial.my_cmp_inter(a int, b int) RETURNS int
 	AS 'btint4cmp'
 	LANGUAGE internal;
 
-CREATE FUNCTION my_c_func(a int, b int)
+CREATE FUNCTION partial.my_c_func(a int, b int)
 	RETURNS int8
 	AS 'orioledb', 'orioledb_compression_max_level'
 	LANGUAGE C STRICT IMMUTABLE;
 
 CREATE FUNCTION my_eq_p_p(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_plpgsql(a, b) = 0;
+	RETURN partial.my_cmp_plpgsql(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE FUNCTION my_eq_p_s(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_sql(a, b) = 0;
+	RETURN partial.my_cmp_sql(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE FUNCTION my_eq_p_sb(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_sql_body(a, b) = 0;
+	RETURN partial.my_cmp_sql_body(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE FUNCTION my_eq_p_i(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_inter(a, b) = 0;
+	RETURN partial.my_cmp_inter(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 
@@ -81,33 +81,33 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE FUNCTION my_eq_p_c(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN ((a % (my_c_func(a, b) - 20)) -
-			(b % (my_c_func(a, b) - 20))) = 0;
+	RETURN ((a % (partial.my_c_func(a, b) - 20)) -
+			(b % (partial.my_c_func(a, b) - 20))) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_p(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_plpgsql(a, b) = 0;
+	SELECT partial.my_cmp_plpgsql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_s(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql(a, b) = 0;
+	SELECT partial.my_cmp_sql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_s_s_s(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql_sql_sql(a, b) = 0;
+	SELECT partial.my_cmp_sql_sql_sql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_s_s_p(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql_sql_plpgsql(a, b) = 0;
+	SELECT partial.my_cmp_sql_sql_plpgsql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_sb(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql_body(a, b) = 0;
+	SELECT partial.my_cmp_sql_body(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_i(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_inter(a, b) = 0;
+	SELECT partial.my_cmp_inter(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_b(a int, b int) RETURNS bool AS $$
@@ -115,32 +115,32 @@ CREATE FUNCTION my_eq_s_b(a int, b int) RETURNS bool AS $$
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_s_c(a int, b int) RETURNS bool AS $$
-	SELECT ((a % (my_c_func(a, b) - 20)) -
-			(b % (my_c_func(a, b) - 20))) = 0;
+	SELECT ((a % (partial.my_c_func(a, b) - 20)) -
+			(b % (partial.my_c_func(a, b) - 20))) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 
 CREATE FUNCTION my_eq_sb_p(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_plpgsql(a, b) = 0;
+	SELECT partial.my_cmp_plpgsql(a, b) = 0;
 END;
 
 CREATE FUNCTION my_eq_sb_s(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_sql(a, b) = 0;
+	SELECT partial.my_cmp_sql(a, b) = 0;
 END;
 
 CREATE FUNCTION my_eq_sb_sb(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_sql_body(a, b) = 0;
+	SELECT partial.my_cmp_sql_body(a, b) = 0;
 END;
 
 CREATE FUNCTION my_eq_sb_i(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_inter(a, b) = 0;
+	SELECT partial.my_cmp_inter(a, b) = 0;
 END;
 
 CREATE FUNCTION my_eq_sb_b(a int, b int) RETURNS bool
@@ -152,8 +152,8 @@ END;
 CREATE FUNCTION my_eq_sb_c(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT ((a % (my_c_func(a, b) - 20)) -
-			(b % (my_c_func(a, b) - 20))) = 0;
+	SELECT ((a % (partial.my_c_func(a, b) - 20)) -
+			(b % (partial.my_c_func(a, b) - 20))) = 0;
 END;
 
 CREATE FUNCTION my_eq_i(a int, b int) RETURNS bool
@@ -210,7 +210,7 @@ CREATE INDEX o_test_sql_func_ix_i ON
 CREATE INDEX o_test_sql_func_ix_b ON
 	o_test_sql_func(val) WHERE (int4eq(val % 4, 3));
 CREATE INDEX o_test_sql_func_ix_c ON
-	o_test_sql_func(val) WHERE ((val % (my_c_func(val,
+	o_test_sql_func(val) WHERE ((val % (partial.my_c_func(val,
 														   val + 1) - 18)) =
 								0);
 
