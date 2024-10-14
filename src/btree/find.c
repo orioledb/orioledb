@@ -244,6 +244,17 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 		}
 
+
+		if (level != PAGE_GET_LEVEL(p))
+		{
+			if (intCxt.haveLock)
+			{
+				unlock_page(intCxt.blkno);
+				intCxt.haveLock = false;
+			}
+			continue;
+		}
+
 		if (STOPEVENTS_ENABLED())
 		{
 			params = btree_page_stopevent_params(desc, intCxt.pagePtr);
@@ -485,6 +496,13 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				loc = context->items[context->index].locator;
 				intCxt.pagePtr = p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 				noneLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
+
+				if (level != PAGE_GET_LEVEL(p))
+				{
+					unlock_page(intCxt.blkno);
+					intCxt.haveLock = false;
+					continue;
+				}
 
 				if (imageFlag && level == targetLevel + 1)
 				{
