@@ -180,8 +180,8 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 		if (ostate->curKeyRangeIsLoaded)
 		{
 			result = _bt_start_prim_scan(scan, ForwardScanDirection);
-			elog(LOG, "_bt_start_prim_scan, result %u:", result); 
-			if(result) 
+			elog(LOG, "_bt_start_prim_scan, result %u:", result);
+			if(result)
 			{
 //				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection);
 				elog(LOG, "_bt_advance_array_keys_increment, result %u:", result);
@@ -198,14 +198,14 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	{
 		if (ostate->curKeyRangeIsLoaded)
 		{
-		result = false;
-		so->needPrimScan = false;
-		so->scanBehind = false;
-//		elog(LOG, "no array keys");
+			result = false;
+			so->needPrimScan = false;
+			so->scanBehind = false;
+	//		elog(LOG, "no array keys");
 		}
 		else
 		{
-		result = true;
+			result = true;
 		}
 	}
 #else
@@ -228,7 +228,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
 											so->keyData,
 											so->numberOfKeys,
-											so->arrayKeys,
+											(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
 											indexDescr->nonLeafTupdesc->natts,
 											indexDescr->fields);
 
