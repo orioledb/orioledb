@@ -123,7 +123,8 @@ orioledb_get_indexam_handler(void)
 
 	amroutine->ambuild = orioledb_ambuild;
 	amroutine->ambuildempty = orioledb_ambuildempty;
-	amroutine->aminsert = orioledb_aminsert;
+	amroutine->aminsert = NULL;
+	amroutine->aminsertextended = orioledb_aminsert;
 	amroutine->amupdate = orioledb_amupdate;
 	amroutine->amdelete = orioledb_amdelete;
 	amroutine->ambulkdelete = orioledb_ambulkdelete;
