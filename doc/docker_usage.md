@@ -217,4 +217,4 @@ docker build --network=host --progress=plain \
 ## Developer notes:
 
 To build all Docker image variations on a local machine, run the following command:
-* `./ci/local_docker_matrix.sh`
+* `./ci/docker_matrix.sh --help`
