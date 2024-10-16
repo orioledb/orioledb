@@ -175,6 +175,10 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	bool		result = true;
 
 #if PG_VERSION_NUM >= 170000
+
+	if (!so->qual_ok)
+		return false;
+
 	if(so->numArrayKeys)
 	{
 		if (ostate->curKeyRangeIsLoaded)
