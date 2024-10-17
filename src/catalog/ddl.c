@@ -721,6 +721,151 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	MemoryContextDelete(private_context);
 }
 
+#if PG_VERSION_NUM >= 170000
+/*
+ * create_ctas_internal
+ *
+ * Internal utility used for the creation of the definition of a relation
+ * created via CREATE TABLE AS or a materialized view.  Caller needs to
+ * provide a list of attributes (ColumnDef nodes).
+ */
+static ObjectAddress
+create_ctas_internal(List *attrList, IntoClause *into)
+{
+	CreateStmt *create = makeNode(CreateStmt);
+	bool		is_matview;
+	char		relkind;
+	Datum		toast_options;
+	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+	ObjectAddress intoRelationAddr;
+
+	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
+	is_matview = (into->viewQuery != NULL);
+	relkind = is_matview ? RELKIND_MATVIEW : RELKIND_RELATION;
+
+	/*
+	 * Create the target relation by faking up a CREATE TABLE parsetree and
+	 * passing it to DefineRelation.
+	 */
+	create->relation = into->rel;
+	create->tableElts = attrList;
+	create->inhRelations = NIL;
+	create->ofTypename = NULL;
+	create->constraints = NIL;
+	create->options = into->options;
+	create->oncommit = into->onCommit;
+	create->tablespacename = into->tableSpaceName;
+	create->if_not_exists = false;
+	create->accessMethod = into->accessMethod;
+
+	/*
+	 * Create the relation.  (This will error out if there's an existing view,
+	 * so we don't need more code to complain if "replace" is false.)
+	 */
+	intoRelationAddr = DefineRelation(create, relkind, InvalidOid, NULL, NULL);
+
+	/*
+	 * If necessary, create a TOAST table for the target table.  Note that
+	 * NewRelationCreateToastTable ends with CommandCounterIncrement(), so
+	 * that the TOAST table will be visible for insertion.
+	 */
+	CommandCounterIncrement();
+
+	/* parse and validate reloptions for the toast table */
+	toast_options = transformRelOptions((Datum) 0,
+										create->options,
+										"toast",
+										validnsps,
+										true, false);
+
+	(void) heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
+
+	NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
+
+	/* Create the "view" part of a materialized view. */
+	if (is_matview)
+	{
+		/* StoreViewQuery scribbles on tree, so make a copy */
+		Query	   *query = (Query *) copyObject(into->viewQuery);
+
+		StoreViewQuery(intoRelationAddr.objectId, query, false);
+		CommandCounterIncrement();
+	}
+
+	return intoRelationAddr;
+}
+
+/*
+ * create_ctas_nodata
+ *
+ * Create CTAS or materialized view when WITH NO DATA is used, starting from
+ * the targetlist of the SELECT or view definition.
+ */
+static ObjectAddress
+create_ctas_nodata(List *tlist, IntoClause *into)
+{
+	List	   *attrList;
+	ListCell   *t,
+			   *lc;
+
+	/*
+	 * Build list of ColumnDefs from non-junk elements of the tlist.  If a
+	 * column name list was specified in CREATE TABLE AS, override the column
+	 * names in the query.  (Too few column names are OK, too many are not.)
+	 */
+	attrList = NIL;
+	lc = list_head(into->colNames);
+	foreach(t, tlist)
+	{
+		TargetEntry *tle = (TargetEntry *) lfirst(t);
+
+		if (!tle->resjunk)
+		{
+			ColumnDef  *col;
+			char	   *colname;
+
+			if (lc)
+			{
+				colname = strVal(lfirst(lc));
+				lc = lnext(into->colNames, lc);
+			}
+			else
+				colname = tle->resname;
+
+			col = makeColumnDef(colname,
+								exprType((Node *) tle->expr),
+								exprTypmod((Node *) tle->expr),
+								exprCollation((Node *) tle->expr));
+
+			/*
+			 * It's possible that the column is of a collatable type but the
+			 * collation could not be resolved, so double-check.  (We must
+			 * check this here because DefineRelation would adopt the type's
+			 * default collation rather than complaining.)
+			 */
+			if (!OidIsValid(col->collOid) &&
+				type_is_collatable(col->typeName->typeOid))
+				ereport(ERROR,
+						(errcode(ERRCODE_INDETERMINATE_COLLATION),
+						 errmsg("no collation was derived for column \"%s\" with collatable type %s",
+								col->colname,
+								format_type_be(col->typeName->typeOid)),
+						 errhint("Use the COLLATE clause to set the collation explicitly.")));
+
+			attrList = lappend(attrList, col);
+		}
+	}
+
+	if (lc != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("too many column names were specified")));
+
+	/* Create the relation definition using the ColumnDef list */
+	return create_ctas_internal(attrList, into);
+}
+#endif
+
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
@@ -1016,6 +1161,39 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		o_find_collation_dependencies(collOid);
 	}
+#if PG_VERSION_NUM >= 170000
+	else if (IsA(pstmt->utilityStmt, CreateTableAsStmt))
+	{
+		CreateTableAsStmt *stmt = (CreateTableAsStmt *) pstmt->utilityStmt;
+		IntoClause *into = stmt->into;
+
+		if (!into->skipData)
+		{
+			bool		is_matview = (into->viewQuery != NULL);
+			if (is_matview && strcmp(into->accessMethod, "orioledb") == 0)
+			{
+				Query	   *query = castNode(Query, stmt->query);
+				IntoClause *into = stmt->into;
+				ObjectAddress address;
+				Relation	matviewRel;
+
+				Assert(query->commandType == CMD_SELECT);
+
+				address = create_ctas_nodata(query->targetList, into);
+
+				savedDataQuery = into->viewQuery;
+				RefreshMatViewByOid(address.objectId, true, false,
+									queryString, NULL, qc);
+				savedDataQuery = NULL;
+
+				if (qc)
+					qc->commandTag = CMDTAG_SELECT;
+
+				call_next = false;
+			}
+		}
+	}
+#endif
 	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
 	{
 		RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
