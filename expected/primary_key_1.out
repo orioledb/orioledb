@@ -1,0 +1,2861 @@
+CREATE SCHEMA primary_key;
+SET SESSION search_path = 'primary_key';
+CREATE EXTENSION orioledb;
+-- Test for integer primary key
+CREATE TABLE o_pk1
+(
+	key integer NOT NULL,
+	payload text,
+	PRIMARY KEY(key)
+) USING orioledb;
+INSERT INTO o_pk1 (key, payload)
+SELECT i, '*' || i || repeat('*', i % 5) FROM generate_series(1, 60, 3) AS i;
+SELECT * FROM o_pk1;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(20 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1;
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 1)
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = 1;
+ key | payload 
+-----+---------
+   1 | *1*
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 4;
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 4)
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = 4;
+ key | payload 
+-----+---------
+   4 | *4****
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 20;
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 20)
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = 20;
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT payload FROM o_pk1 WHERE key = 19;
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = 19)
+(2 rows)
+
+SELECT payload FROM o_pk1 WHERE key = 19;
+ payload 
+---------
+ *19****
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{1,4,13,20}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+  13 | *13***
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key = 1) OR (key = 4) OR (key = 13) OR (key = 20))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+  13 | *13***
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key > 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
+ key | payload 
+-----+---------
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(13 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key > 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
+ key | payload 
+-----+---------
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(13 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key >= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
+ key | payload 
+-----+---------
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(14 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key >= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
+ key | payload 
+-----+---------
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(14 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key < 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
+ key | payload 
+-----+---------
+  13 | *13***
+  16 | *16*
+(2 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key < 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
+ key | payload 
+-----+---------
+  10 | *10
+  13 | *13***
+  16 | *16*
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key <= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
+ key | payload 
+-----+---------
+  13 | *13***
+  16 | *16*
+  19 | *19****
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key >= 10) AND (key <= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
+ key | payload 
+-----+---------
+  10 | *10
+  13 | *13***
+  16 | *16*
+  19 | *19****
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key > 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key > 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key >= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key >= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
+                QUERY PLAN                 
+-------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key < 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key < 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key < 10) AND (key <= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key <= 19;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key <= 10) AND (key <= 19))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 AND key <= 19;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key >  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key > 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 OR  key >  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(16 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key >  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key >= 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 OR  key >  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+  10 | *10
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(17 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key >= 19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key > 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 OR  key >= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(16 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key >= 19 AND payload LIKE '%7*%';
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key >= 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 OR  key >= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+  10 | *10
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(17 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key <  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key > 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 OR  key <  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   7 | *7**
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(17 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key <  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key >= 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 OR  key <  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   7 | *7**
+  10 | *10
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(18 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key <= 19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key > 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >  10 OR  key <= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   7 | *7**
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(17 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key <= 19 AND payload LIKE '%7*%';
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key >= 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key >= 10 OR  key <= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   7 | *7**
+  10 | *10
+  13 | *13***
+  16 | *16*
+  19 | *19****
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(18 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key >  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key < 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 OR  key >  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  37 | *37**
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key >  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key <= 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 OR  key >  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+  37 | *37**
+(5 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key >= 19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key < 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 OR  key >= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  37 | *37**
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key >= 19 AND payload LIKE '%7*%';
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key <= 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 OR  key >= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+  37 | *37**
+(5 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key <  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key < 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 OR  key <  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key <  19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key <= 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 OR  key <  19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key <= 19 AND payload LIKE '%7*%';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key < 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <  10 OR  key <= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key <= 19 AND payload LIKE '%7*%';
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key <= 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10 OR  key <= 19 AND payload LIKE '%7*%';
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1
+WHERE key >  10 AND key <  19 AND key = (SELECT i FROM generate_series(13,13) AS i);
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: ((key > 10) AND (key < 19) AND (key = (InitPlan 1).col1))
+   InitPlan 1
+     ->  Function Scan on generate_series i
+(4 rows)
+
+SELECT * FROM o_pk1
+WHERE key >  10 AND key <  19 AND key = (SELECT i FROM generate_series(13,13) AS i);
+ key | payload 
+-----+---------
+  13 | *13***
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1
+WHERE key <  10 OR  key >  19 OR key = (SELECT i FROM generate_series(13,13) AS i);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key < 10) OR (key > 19) OR (key = (InitPlan 1).col1))
+   InitPlan 1
+     ->  Function Scan on generate_series i
+(4 rows)
+
+SELECT * FROM o_pk1
+WHERE key <  10 OR  key >  19 OR key = (SELECT i FROM generate_series(13,13) AS i);
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  13 | *13***
+  22 | *22**
+  25 | *25
+  28 | *28***
+  31 | *31*
+  34 | *34****
+  37 | *37**
+  40 | *40
+  43 | *43***
+  46 | *46*
+  49 | *49****
+  52 | *52**
+  55 | *55
+  58 | *58***
+(17 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4]);
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{4}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4]);
+ key | payload 
+-----+---------
+   4 | *4****
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{4,10}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
+ key | payload 
+-----+---------
+   4 | *4****
+  10 | *10
+(2 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10, NULL]);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{4,10,NULL}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10, NULL]);
+ key | payload 
+-----+---------
+   4 | *4****
+  10 | *10
+(2 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4]);
+                QUERY PLAN                
+------------------------------------------
+ Seq Scan on o_pk1
+   Filter: (key = ALL ('{4}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4]);
+ key | payload 
+-----+---------
+   4 | *4****
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10]);
+                 QUERY PLAN                  
+---------------------------------------------
+ Seq Scan on o_pk1
+   Filter: (key = ALL ('{4,10}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10]);
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10, NULL]);
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: (key = ALL ('{4,10,NULL}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10, NULL]);
+ key | payload 
+-----+---------
+(0 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key < ANY ('{4}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
+ key | payload 
+-----+---------
+   1 | *1*
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key < ANY ('{4,10}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10, NULL]);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key < ANY ('{4,10,NULL}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10, NULL]);
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4]);
+                QUERY PLAN                
+------------------------------------------
+ Seq Scan on o_pk1
+   Filter: (key < ALL ('{4}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4]);
+ key | payload 
+-----+---------
+   1 | *1*
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,10]);
+                 QUERY PLAN                  
+---------------------------------------------
+ Seq Scan on o_pk1
+   Filter: (key < ALL ('{4,10}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,10]);
+ key | payload 
+-----+---------
+   1 | *1*
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on o_pk1
+   Filter: (key < ALL ('{4,5,NULL}'::integer[]))
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
+ key | payload 
+-----+---------
+(0 rows)
+
+-- Check for non-coersible case
+SET enable_seqscan = OFF;
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
+            QUERY PLAN            
+----------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key)::numeric = 1.0)
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key = 1.0;
+ key | payload 
+-----+---------
+   1 | *1*
+(1 row)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10.0;
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on o_pk1
+   Filter: ((key)::numeric <= 10.0)
+(2 rows)
+
+SELECT * FROM o_pk1 WHERE key <= 10.0;
+ key | payload 
+-----+---------
+   1 | *1*
+   4 | *4****
+   7 | *7**
+  10 | *10
+(4 rows)
+
+RESET enable_seqscan;
+-- Test for float8 primary key
+CREATE TABLE o_pk2
+(
+	value text,
+	id float8 NOT NULL,
+	PRIMARY KEY(id)
+) USING orioledb;
+INSERT INTO o_pk2
+SELECT 'abc' || repeat('def', i % 3), i FROM generate_series(1, 100) AS i;
+ANALYZE o_pk2;
+SELECT id, value FROM o_pk2;
+ id  |   value   
+-----+-----------
+   1 | abcdef
+   2 | abcdefdef
+   3 | abc
+   4 | abcdef
+   5 | abcdefdef
+   6 | abc
+   7 | abcdef
+   8 | abcdefdef
+   9 | abc
+  10 | abcdef
+  11 | abcdefdef
+  12 | abc
+  13 | abcdef
+  14 | abcdefdef
+  15 | abc
+  16 | abcdef
+  17 | abcdefdef
+  18 | abc
+  19 | abcdef
+  20 | abcdefdef
+  21 | abc
+  22 | abcdef
+  23 | abcdefdef
+  24 | abc
+  25 | abcdef
+  26 | abcdefdef
+  27 | abc
+  28 | abcdef
+  29 | abcdefdef
+  30 | abc
+  31 | abcdef
+  32 | abcdefdef
+  33 | abc
+  34 | abcdef
+  35 | abcdefdef
+  36 | abc
+  37 | abcdef
+  38 | abcdefdef
+  39 | abc
+  40 | abcdef
+  41 | abcdefdef
+  42 | abc
+  43 | abcdef
+  44 | abcdefdef
+  45 | abc
+  46 | abcdef
+  47 | abcdefdef
+  48 | abc
+  49 | abcdef
+  50 | abcdefdef
+  51 | abc
+  52 | abcdef
+  53 | abcdefdef
+  54 | abc
+  55 | abcdef
+  56 | abcdefdef
+  57 | abc
+  58 | abcdef
+  59 | abcdefdef
+  60 | abc
+  61 | abcdef
+  62 | abcdefdef
+  63 | abc
+  64 | abcdef
+  65 | abcdefdef
+  66 | abc
+  67 | abcdef
+  68 | abcdefdef
+  69 | abc
+  70 | abcdef
+  71 | abcdefdef
+  72 | abc
+  73 | abcdef
+  74 | abcdefdef
+  75 | abc
+  76 | abcdef
+  77 | abcdefdef
+  78 | abc
+  79 | abcdef
+  80 | abcdefdef
+  81 | abc
+  82 | abcdef
+  83 | abcdefdef
+  84 | abc
+  85 | abcdef
+  86 | abcdefdef
+  87 | abc
+  88 | abcdef
+  89 | abcdefdef
+  90 | abc
+  91 | abcdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(100 rows)
+
+SELECT count(*) FROM o_pk2;
+ count 
+-------
+   100
+(1 row)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 ORDER BY id;
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+(1 row)
+
+SELECT id, value FROM o_pk2 ORDER BY id;
+ id  |   value   
+-----+-----------
+   1 | abcdef
+   2 | abcdefdef
+   3 | abc
+   4 | abcdef
+   5 | abcdefdef
+   6 | abc
+   7 | abcdef
+   8 | abcdefdef
+   9 | abc
+  10 | abcdef
+  11 | abcdefdef
+  12 | abc
+  13 | abcdef
+  14 | abcdefdef
+  15 | abc
+  16 | abcdef
+  17 | abcdefdef
+  18 | abc
+  19 | abcdef
+  20 | abcdefdef
+  21 | abc
+  22 | abcdef
+  23 | abcdefdef
+  24 | abc
+  25 | abcdef
+  26 | abcdefdef
+  27 | abc
+  28 | abcdef
+  29 | abcdefdef
+  30 | abc
+  31 | abcdef
+  32 | abcdefdef
+  33 | abc
+  34 | abcdef
+  35 | abcdefdef
+  36 | abc
+  37 | abcdef
+  38 | abcdefdef
+  39 | abc
+  40 | abcdef
+  41 | abcdefdef
+  42 | abc
+  43 | abcdef
+  44 | abcdefdef
+  45 | abc
+  46 | abcdef
+  47 | abcdefdef
+  48 | abc
+  49 | abcdef
+  50 | abcdefdef
+  51 | abc
+  52 | abcdef
+  53 | abcdefdef
+  54 | abc
+  55 | abcdef
+  56 | abcdefdef
+  57 | abc
+  58 | abcdef
+  59 | abcdefdef
+  60 | abc
+  61 | abcdef
+  62 | abcdefdef
+  63 | abc
+  64 | abcdef
+  65 | abcdefdef
+  66 | abc
+  67 | abcdef
+  68 | abcdefdef
+  69 | abc
+  70 | abcdef
+  71 | abcdefdef
+  72 | abc
+  73 | abcdef
+  74 | abcdefdef
+  75 | abc
+  76 | abcdef
+  77 | abcdefdef
+  78 | abc
+  79 | abcdef
+  80 | abcdefdef
+  81 | abc
+  82 | abcdef
+  83 | abcdefdef
+  84 | abc
+  85 | abcdef
+  86 | abcdefdef
+  87 | abc
+  88 | abcdef
+  89 | abcdefdef
+  90 | abc
+  91 | abcdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(100 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 ORDER BY id DESC;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+(1 row)
+
+SELECT id, value FROM o_pk2 ORDER BY id DESC;
+ id  |   value   
+-----+-----------
+ 100 | abcdef
+  99 | abc
+  98 | abcdefdef
+  97 | abcdef
+  96 | abc
+  95 | abcdefdef
+  94 | abcdef
+  93 | abc
+  92 | abcdefdef
+  91 | abcdef
+  90 | abc
+  89 | abcdefdef
+  88 | abcdef
+  87 | abc
+  86 | abcdefdef
+  85 | abcdef
+  84 | abc
+  83 | abcdefdef
+  82 | abcdef
+  81 | abc
+  80 | abcdefdef
+  79 | abcdef
+  78 | abc
+  77 | abcdefdef
+  76 | abcdef
+  75 | abc
+  74 | abcdefdef
+  73 | abcdef
+  72 | abc
+  71 | abcdefdef
+  70 | abcdef
+  69 | abc
+  68 | abcdefdef
+  67 | abcdef
+  66 | abc
+  65 | abcdefdef
+  64 | abcdef
+  63 | abc
+  62 | abcdefdef
+  61 | abcdef
+  60 | abc
+  59 | abcdefdef
+  58 | abcdef
+  57 | abc
+  56 | abcdefdef
+  55 | abcdef
+  54 | abc
+  53 | abcdefdef
+  52 | abcdef
+  51 | abc
+  50 | abcdefdef
+  49 | abcdef
+  48 | abc
+  47 | abcdefdef
+  46 | abcdef
+  45 | abc
+  44 | abcdefdef
+  43 | abcdef
+  42 | abc
+  41 | abcdefdef
+  40 | abcdef
+  39 | abc
+  38 | abcdefdef
+  37 | abcdef
+  36 | abc
+  35 | abcdefdef
+  34 | abcdef
+  33 | abc
+  32 | abcdefdef
+  31 | abcdef
+  30 | abc
+  29 | abcdefdef
+  28 | abcdef
+  27 | abc
+  26 | abcdefdef
+  25 | abcdef
+  24 | abc
+  23 | abcdefdef
+  22 | abcdef
+  21 | abc
+  20 | abcdefdef
+  19 | abcdef
+  18 | abc
+  17 | abcdefdef
+  16 | abcdef
+  15 | abc
+  14 | abcdefdef
+  13 | abcdef
+  12 | abc
+  11 | abcdefdef
+  10 | abcdef
+   9 | abc
+   8 | abcdefdef
+   7 | abcdef
+   6 | abc
+   5 | abcdefdef
+   4 | abcdef
+   3 | abc
+   2 | abcdefdef
+   1 | abcdef
+(100 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id = 71;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id = '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id = 71;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+(1 row)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id = '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+(1 row)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id DESC;
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id = '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id = 71 ORDER BY id DESC;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+(1 row)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71;
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id <= '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71;
+ id |   value   
+----+-----------
+  1 | abcdef
+  2 | abcdefdef
+  3 | abc
+  4 | abcdef
+  5 | abcdefdef
+  6 | abc
+  7 | abcdef
+  8 | abcdefdef
+  9 | abc
+ 10 | abcdef
+ 11 | abcdefdef
+ 12 | abc
+ 13 | abcdef
+ 14 | abcdefdef
+ 15 | abc
+ 16 | abcdef
+ 17 | abcdefdef
+ 18 | abc
+ 19 | abcdef
+ 20 | abcdefdef
+ 21 | abc
+ 22 | abcdef
+ 23 | abcdefdef
+ 24 | abc
+ 25 | abcdef
+ 26 | abcdefdef
+ 27 | abc
+ 28 | abcdef
+ 29 | abcdefdef
+ 30 | abc
+ 31 | abcdef
+ 32 | abcdefdef
+ 33 | abc
+ 34 | abcdef
+ 35 | abcdefdef
+ 36 | abc
+ 37 | abcdef
+ 38 | abcdefdef
+ 39 | abc
+ 40 | abcdef
+ 41 | abcdefdef
+ 42 | abc
+ 43 | abcdef
+ 44 | abcdefdef
+ 45 | abc
+ 46 | abcdef
+ 47 | abcdefdef
+ 48 | abc
+ 49 | abcdef
+ 50 | abcdefdef
+ 51 | abc
+ 52 | abcdef
+ 53 | abcdefdef
+ 54 | abc
+ 55 | abcdef
+ 56 | abcdefdef
+ 57 | abc
+ 58 | abcdef
+ 59 | abcdefdef
+ 60 | abc
+ 61 | abcdef
+ 62 | abcdefdef
+ 63 | abc
+ 64 | abcdef
+ 65 | abcdefdef
+ 66 | abc
+ 67 | abcdef
+ 68 | abcdefdef
+ 69 | abc
+ 70 | abcdef
+ 71 | abcdefdef
+(71 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id;
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id <= '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id;
+ id |   value   
+----+-----------
+  1 | abcdef
+  2 | abcdefdef
+  3 | abc
+  4 | abcdef
+  5 | abcdefdef
+  6 | abc
+  7 | abcdef
+  8 | abcdefdef
+  9 | abc
+ 10 | abcdef
+ 11 | abcdefdef
+ 12 | abc
+ 13 | abcdef
+ 14 | abcdefdef
+ 15 | abc
+ 16 | abcdef
+ 17 | abcdefdef
+ 18 | abc
+ 19 | abcdef
+ 20 | abcdefdef
+ 21 | abc
+ 22 | abcdef
+ 23 | abcdefdef
+ 24 | abc
+ 25 | abcdef
+ 26 | abcdefdef
+ 27 | abc
+ 28 | abcdef
+ 29 | abcdefdef
+ 30 | abc
+ 31 | abcdef
+ 32 | abcdefdef
+ 33 | abc
+ 34 | abcdef
+ 35 | abcdefdef
+ 36 | abc
+ 37 | abcdef
+ 38 | abcdefdef
+ 39 | abc
+ 40 | abcdef
+ 41 | abcdefdef
+ 42 | abc
+ 43 | abcdef
+ 44 | abcdefdef
+ 45 | abc
+ 46 | abcdef
+ 47 | abcdefdef
+ 48 | abc
+ 49 | abcdef
+ 50 | abcdefdef
+ 51 | abc
+ 52 | abcdef
+ 53 | abcdefdef
+ 54 | abc
+ 55 | abcdef
+ 56 | abcdefdef
+ 57 | abc
+ 58 | abcdef
+ 59 | abcdefdef
+ 60 | abc
+ 61 | abcdef
+ 62 | abcdefdef
+ 63 | abc
+ 64 | abcdef
+ 65 | abcdefdef
+ 66 | abc
+ 67 | abcdef
+ 68 | abcdefdef
+ 69 | abc
+ 70 | abcdef
+ 71 | abcdefdef
+(71 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id DESC;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: (id <= '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 ORDER BY id DESC;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+ 70 | abcdef
+ 69 | abc
+ 68 | abcdefdef
+ 67 | abcdef
+ 66 | abc
+ 65 | abcdefdef
+ 64 | abcdef
+ 63 | abc
+ 62 | abcdefdef
+ 61 | abcdef
+ 60 | abc
+ 59 | abcdefdef
+ 58 | abcdef
+ 57 | abc
+ 56 | abcdefdef
+ 55 | abcdef
+ 54 | abc
+ 53 | abcdefdef
+ 52 | abcdef
+ 51 | abc
+ 50 | abcdefdef
+ 49 | abcdef
+ 48 | abc
+ 47 | abcdefdef
+ 46 | abcdef
+ 45 | abc
+ 44 | abcdefdef
+ 43 | abcdef
+ 42 | abc
+ 41 | abcdefdef
+ 40 | abcdef
+ 39 | abc
+ 38 | abcdefdef
+ 37 | abcdef
+ 36 | abc
+ 35 | abcdefdef
+ 34 | abcdef
+ 33 | abc
+ 32 | abcdefdef
+ 31 | abcdef
+ 30 | abc
+ 29 | abcdefdef
+ 28 | abcdef
+ 27 | abc
+ 26 | abcdefdef
+ 25 | abcdef
+ 24 | abc
+ 23 | abcdefdef
+ 22 | abcdef
+ 21 | abc
+ 20 | abcdefdef
+ 19 | abcdef
+ 18 | abc
+ 17 | abcdefdef
+ 16 | abcdef
+ 15 | abc
+ 14 | abcdefdef
+ 13 | abcdef
+ 12 | abc
+ 11 | abcdefdef
+ 10 | abcdef
+  9 | abc
+  8 | abcdefdef
+  7 | abcdef
+  6 | abc
+  5 | abcdefdef
+  4 | abcdef
+  3 | abc
+  2 | abcdefdef
+  1 | abcdef
+(71 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71;
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id >= '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71;
+ id  |   value   
+-----+-----------
+  71 | abcdefdef
+  72 | abc
+  73 | abcdef
+  74 | abcdefdef
+  75 | abc
+  76 | abcdef
+  77 | abcdefdef
+  78 | abc
+  79 | abcdef
+  80 | abcdefdef
+  81 | abc
+  82 | abcdef
+  83 | abcdefdef
+  84 | abc
+  85 | abcdef
+  86 | abcdefdef
+  87 | abc
+  88 | abcdef
+  89 | abcdefdef
+  90 | abc
+  91 | abcdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(30 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id;
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: (id >= '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id;
+ id  |   value   
+-----+-----------
+  71 | abcdefdef
+  72 | abc
+  73 | abcdef
+  74 | abcdefdef
+  75 | abc
+  76 | abcdef
+  77 | abcdefdef
+  78 | abc
+  79 | abcdef
+  80 | abcdefdef
+  81 | abc
+  82 | abcdef
+  83 | abcdefdef
+  84 | abc
+  85 | abcdef
+  86 | abcdefdef
+  87 | abc
+  88 | abcdef
+  89 | abcdefdef
+  90 | abc
+  91 | abcdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(30 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id DESC;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: (id >= '71'::double precision)
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 ORDER BY id DESC;
+ id  |   value   
+-----+-----------
+ 100 | abcdef
+  99 | abc
+  98 | abcdefdef
+  97 | abcdef
+  96 | abc
+  95 | abcdefdef
+  94 | abcdef
+  93 | abc
+  92 | abcdefdef
+  91 | abcdef
+  90 | abc
+  89 | abcdefdef
+  88 | abcdef
+  87 | abc
+  86 | abcdefdef
+  85 | abcdef
+  84 | abc
+  83 | abcdefdef
+  82 | abcdef
+  81 | abc
+  80 | abcdefdef
+  79 | abcdef
+  78 | abc
+  77 | abcdefdef
+  76 | abcdef
+  75 | abc
+  74 | abcdefdef
+  73 | abcdef
+  72 | abc
+  71 | abcdefdef
+(30 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id <= '71'::double precision) AND (id > '19'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19;
+ id |   value   
+----+-----------
+ 20 | abcdefdef
+ 21 | abc
+ 22 | abcdef
+ 23 | abcdefdef
+ 24 | abc
+ 25 | abcdef
+ 26 | abcdefdef
+ 27 | abc
+ 28 | abcdef
+ 29 | abcdefdef
+ 30 | abc
+ 31 | abcdef
+ 32 | abcdefdef
+ 33 | abc
+ 34 | abcdef
+ 35 | abcdefdef
+ 36 | abc
+ 37 | abcdef
+ 38 | abcdefdef
+ 39 | abc
+ 40 | abcdef
+ 41 | abcdefdef
+ 42 | abc
+ 43 | abcdef
+ 44 | abcdefdef
+ 45 | abc
+ 46 | abcdef
+ 47 | abcdefdef
+ 48 | abc
+ 49 | abcdef
+ 50 | abcdefdef
+ 51 | abc
+ 52 | abcdef
+ 53 | abcdefdef
+ 54 | abc
+ 55 | abcdef
+ 56 | abcdefdef
+ 57 | abc
+ 58 | abcdef
+ 59 | abcdefdef
+ 60 | abc
+ 61 | abcdef
+ 62 | abcdefdef
+ 63 | abc
+ 64 | abcdef
+ 65 | abcdefdef
+ 66 | abc
+ 67 | abcdef
+ 68 | abcdefdef
+ 69 | abc
+ 70 | abcdef
+ 71 | abcdefdef
+(52 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id <= '71'::double precision) AND (id > '19'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id;
+ id |   value   
+----+-----------
+ 20 | abcdefdef
+ 21 | abc
+ 22 | abcdef
+ 23 | abcdefdef
+ 24 | abc
+ 25 | abcdef
+ 26 | abcdefdef
+ 27 | abc
+ 28 | abcdef
+ 29 | abcdefdef
+ 30 | abc
+ 31 | abcdef
+ 32 | abcdefdef
+ 33 | abc
+ 34 | abcdef
+ 35 | abcdefdef
+ 36 | abc
+ 37 | abcdef
+ 38 | abcdefdef
+ 39 | abc
+ 40 | abcdef
+ 41 | abcdefdef
+ 42 | abc
+ 43 | abcdef
+ 44 | abcdefdef
+ 45 | abc
+ 46 | abcdef
+ 47 | abcdefdef
+ 48 | abc
+ 49 | abcdef
+ 50 | abcdefdef
+ 51 | abc
+ 52 | abcdef
+ 53 | abcdefdef
+ 54 | abc
+ 55 | abcdef
+ 56 | abcdefdef
+ 57 | abc
+ 58 | abcdef
+ 59 | abcdefdef
+ 60 | abc
+ 61 | abcdef
+ 62 | abcdefdef
+ 63 | abc
+ 64 | abcdef
+ 65 | abcdefdef
+ 66 | abc
+ 67 | abcdef
+ 68 | abcdefdef
+ 69 | abc
+ 70 | abcdef
+ 71 | abcdefdef
+(52 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id DESC;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: ((id <= '71'::double precision) AND (id > '19'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 AND id > 19 ORDER BY id DESC;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+ 70 | abcdef
+ 69 | abc
+ 68 | abcdefdef
+ 67 | abcdef
+ 66 | abc
+ 65 | abcdefdef
+ 64 | abcdef
+ 63 | abc
+ 62 | abcdefdef
+ 61 | abcdef
+ 60 | abc
+ 59 | abcdefdef
+ 58 | abcdef
+ 57 | abc
+ 56 | abcdefdef
+ 55 | abcdef
+ 54 | abc
+ 53 | abcdefdef
+ 52 | abcdef
+ 51 | abc
+ 50 | abcdefdef
+ 49 | abcdef
+ 48 | abc
+ 47 | abcdefdef
+ 46 | abcdef
+ 45 | abc
+ 44 | abcdefdef
+ 43 | abcdef
+ 42 | abc
+ 41 | abcdefdef
+ 40 | abcdef
+ 39 | abc
+ 38 | abcdefdef
+ 37 | abcdef
+ 36 | abc
+ 35 | abcdefdef
+ 34 | abcdef
+ 33 | abc
+ 32 | abcdefdef
+ 31 | abcdef
+ 30 | abc
+ 29 | abcdefdef
+ 28 | abcdef
+ 27 | abc
+ 26 | abcdefdef
+ 25 | abcdef
+ 24 | abc
+ 23 | abcdefdef
+ 22 | abcdef
+ 21 | abc
+ 20 | abcdefdef
+(52 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id >= '71'::double precision) AND (id < '91'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+ 72 | abc
+ 73 | abcdef
+ 74 | abcdefdef
+ 75 | abc
+ 76 | abcdef
+ 77 | abcdefdef
+ 78 | abc
+ 79 | abcdef
+ 80 | abcdefdef
+ 81 | abc
+ 82 | abcdef
+ 83 | abcdefdef
+ 84 | abc
+ 85 | abcdef
+ 86 | abcdefdef
+ 87 | abc
+ 88 | abcdef
+ 89 | abcdefdef
+ 90 | abc
+(20 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Index Cond: ((id >= '71'::double precision) AND (id < '91'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id;
+ id |   value   
+----+-----------
+ 71 | abcdefdef
+ 72 | abc
+ 73 | abcdef
+ 74 | abcdefdef
+ 75 | abc
+ 76 | abcdef
+ 77 | abcdefdef
+ 78 | abc
+ 79 | abcdef
+ 80 | abcdefdef
+ 81 | abc
+ 82 | abcdef
+ 83 | abcdefdef
+ 84 | abc
+ 85 | abcdef
+ 86 | abcdefdef
+ 87 | abc
+ 88 | abcdef
+ 89 | abcdefdef
+ 90 | abc
+(20 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id DESC;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Index Cond: ((id >= '71'::double precision) AND (id < '91'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id DESC;
+ id |   value   
+----+-----------
+ 90 | abc
+ 89 | abcdefdef
+ 88 | abcdef
+ 87 | abc
+ 86 | abcdefdef
+ 85 | abcdef
+ 84 | abc
+ 83 | abcdefdef
+ 82 | abcdef
+ 81 | abc
+ 80 | abcdefdef
+ 79 | abcdef
+ 78 | abc
+ 77 | abcdefdef
+ 76 | abcdef
+ 75 | abc
+ 74 | abcdefdef
+ 73 | abcdef
+ 72 | abc
+ 71 | abcdefdef
+(20 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Seq Scan on o_pk2
+   Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
+ id  |   value   
+-----+-----------
+   1 | abcdef
+   2 | abcdefdef
+   3 | abc
+   4 | abcdef
+   5 | abcdefdef
+   6 | abc
+   7 | abcdef
+   8 | abcdefdef
+   9 | abc
+  10 | abcdef
+  11 | abcdefdef
+  12 | abc
+  13 | abcdef
+  14 | abcdefdef
+  15 | abc
+  16 | abcdef
+  17 | abcdefdef
+  18 | abc
+  19 | abcdef
+  20 | abcdefdef
+  21 | abc
+  22 | abcdef
+  23 | abcdefdef
+  24 | abc
+  25 | abcdef
+  26 | abcdefdef
+  27 | abc
+  28 | abcdef
+  29 | abcdefdef
+  30 | abc
+  31 | abcdef
+  32 | abcdefdef
+  33 | abc
+  34 | abcdef
+  35 | abcdefdef
+  36 | abc
+  37 | abcdef
+  38 | abcdefdef
+  39 | abc
+  40 | abcdef
+  41 | abcdefdef
+  42 | abc
+  43 | abcdef
+  44 | abcdefdef
+  45 | abc
+  46 | abcdef
+  47 | abcdefdef
+  48 | abc
+  49 | abcdef
+  50 | abcdefdef
+  51 | abc
+  52 | abcdef
+  53 | abcdefdef
+  54 | abc
+  55 | abcdef
+  56 | abcdefdef
+  57 | abc
+  58 | abcdef
+  59 | abcdefdef
+  60 | abc
+  61 | abcdef
+  62 | abcdefdef
+  63 | abc
+  64 | abcdef
+  65 | abcdefdef
+  66 | abc
+  67 | abcdef
+  68 | abcdefdef
+  69 | abc
+  70 | abcdef
+  71 | abcdefdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(80 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id;
+ id  |   value   
+-----+-----------
+   1 | abcdef
+   2 | abcdefdef
+   3 | abc
+   4 | abcdef
+   5 | abcdefdef
+   6 | abc
+   7 | abcdef
+   8 | abcdefdef
+   9 | abc
+  10 | abcdef
+  11 | abcdefdef
+  12 | abc
+  13 | abcdef
+  14 | abcdefdef
+  15 | abc
+  16 | abcdef
+  17 | abcdefdef
+  18 | abc
+  19 | abcdef
+  20 | abcdefdef
+  21 | abc
+  22 | abcdef
+  23 | abcdefdef
+  24 | abc
+  25 | abcdef
+  26 | abcdefdef
+  27 | abc
+  28 | abcdef
+  29 | abcdefdef
+  30 | abc
+  31 | abcdef
+  32 | abcdefdef
+  33 | abc
+  34 | abcdef
+  35 | abcdefdef
+  36 | abc
+  37 | abcdef
+  38 | abcdefdef
+  39 | abc
+  40 | abcdef
+  41 | abcdefdef
+  42 | abc
+  43 | abcdef
+  44 | abcdefdef
+  45 | abc
+  46 | abcdef
+  47 | abcdefdef
+  48 | abc
+  49 | abcdef
+  50 | abcdefdef
+  51 | abc
+  52 | abcdef
+  53 | abcdefdef
+  54 | abc
+  55 | abcdef
+  56 | abcdefdef
+  57 | abc
+  58 | abcdef
+  59 | abcdefdef
+  60 | abc
+  61 | abcdef
+  62 | abcdefdef
+  63 | abc
+  64 | abcdef
+  65 | abcdefdef
+  66 | abc
+  67 | abcdef
+  68 | abcdefdef
+  69 | abc
+  70 | abcdef
+  71 | abcdefdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(80 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id DESC;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id DESC;
+ id  |   value   
+-----+-----------
+ 100 | abcdef
+  99 | abc
+  98 | abcdefdef
+  97 | abcdef
+  96 | abc
+  95 | abcdefdef
+  94 | abcdef
+  93 | abc
+  92 | abcdefdef
+  71 | abcdefdef
+  70 | abcdef
+  69 | abc
+  68 | abcdefdef
+  67 | abcdef
+  66 | abc
+  65 | abcdefdef
+  64 | abcdef
+  63 | abc
+  62 | abcdefdef
+  61 | abcdef
+  60 | abc
+  59 | abcdefdef
+  58 | abcdef
+  57 | abc
+  56 | abcdefdef
+  55 | abcdef
+  54 | abc
+  53 | abcdefdef
+  52 | abcdef
+  51 | abc
+  50 | abcdefdef
+  49 | abcdef
+  48 | abc
+  47 | abcdefdef
+  46 | abcdef
+  45 | abc
+  44 | abcdefdef
+  43 | abcdef
+  42 | abc
+  41 | abcdefdef
+  40 | abcdef
+  39 | abc
+  38 | abcdefdef
+  37 | abcdef
+  36 | abc
+  35 | abcdefdef
+  34 | abcdef
+  33 | abc
+  32 | abcdefdef
+  31 | abcdef
+  30 | abc
+  29 | abcdefdef
+  28 | abcdef
+  27 | abc
+  26 | abcdefdef
+  25 | abcdef
+  24 | abc
+  23 | abcdefdef
+  22 | abcdef
+  21 | abc
+  20 | abcdefdef
+  19 | abcdef
+  18 | abc
+  17 | abcdefdef
+  16 | abcdef
+  15 | abc
+  14 | abcdefdef
+  13 | abcdef
+  12 | abc
+  11 | abcdefdef
+  10 | abcdef
+   9 | abc
+   8 | abcdefdef
+   7 | abcdef
+   6 | abc
+   5 | abcdefdef
+   4 | abcdef
+   3 | abc
+   2 | abcdefdef
+   1 | abcdef
+(80 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Seq Scan on o_pk2
+   Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
+ id  |   value   
+-----+-----------
+   1 | abcdef
+   2 | abcdefdef
+   3 | abc
+   4 | abcdef
+   5 | abcdefdef
+   6 | abc
+   7 | abcdef
+   8 | abcdefdef
+   9 | abc
+  10 | abcdef
+  11 | abcdefdef
+  12 | abc
+  13 | abcdef
+  14 | abcdefdef
+  15 | abc
+  16 | abcdef
+  17 | abcdefdef
+  18 | abc
+  71 | abcdefdef
+  72 | abc
+  73 | abcdef
+  74 | abcdefdef
+  75 | abc
+  76 | abcdef
+  77 | abcdefdef
+  78 | abc
+  79 | abcdef
+  80 | abcdefdef
+  81 | abc
+  82 | abcdef
+  83 | abcdefdef
+  84 | abc
+  85 | abcdef
+  86 | abcdefdef
+  87 | abc
+  88 | abcdef
+  89 | abcdefdef
+  90 | abc
+  91 | abcdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(48 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Index Scan using o_pk2_pkey on o_pk2
+   Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id;
+ id  |   value   
+-----+-----------
+   1 | abcdef
+   2 | abcdefdef
+   3 | abc
+   4 | abcdef
+   5 | abcdefdef
+   6 | abc
+   7 | abcdef
+   8 | abcdefdef
+   9 | abc
+  10 | abcdef
+  11 | abcdefdef
+  12 | abc
+  13 | abcdef
+  14 | abcdefdef
+  15 | abc
+  16 | abcdef
+  17 | abcdefdef
+  18 | abc
+  71 | abcdefdef
+  72 | abc
+  73 | abcdef
+  74 | abcdefdef
+  75 | abc
+  76 | abcdef
+  77 | abcdefdef
+  78 | abc
+  79 | abcdef
+  80 | abcdefdef
+  81 | abc
+  82 | abcdef
+  83 | abcdefdef
+  84 | abc
+  85 | abcdef
+  86 | abcdefdef
+  87 | abc
+  88 | abcdef
+  89 | abcdefdef
+  90 | abc
+  91 | abcdef
+  92 | abcdefdef
+  93 | abc
+  94 | abcdef
+  95 | abcdefdef
+  96 | abc
+  97 | abcdef
+  98 | abcdefdef
+  99 | abc
+ 100 | abcdef
+(48 rows)
+
+EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id DESC;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Index Scan Backward using o_pk2_pkey on o_pk2
+   Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
+(2 rows)
+
+SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id DESC;
+ id  |   value   
+-----+-----------
+ 100 | abcdef
+  99 | abc
+  98 | abcdefdef
+  97 | abcdef
+  96 | abc
+  95 | abcdefdef
+  94 | abcdef
+  93 | abc
+  92 | abcdefdef
+  91 | abcdef
+  90 | abc
+  89 | abcdefdef
+  88 | abcdef
+  87 | abc
+  86 | abcdefdef
+  85 | abcdef
+  84 | abc
+  83 | abcdefdef
+  82 | abcdef
+  81 | abc
+  80 | abcdefdef
+  79 | abcdef
+  78 | abc
+  77 | abcdefdef
+  76 | abcdef
+  75 | abc
+  74 | abcdefdef
+  73 | abcdef
+  72 | abc
+  71 | abcdefdef
+  18 | abc
+  17 | abcdefdef
+  16 | abcdef
+  15 | abc
+  14 | abcdefdef
+  13 | abcdef
+  12 | abc
+  11 | abcdefdef
+  10 | abcdef
+   9 | abc
+   8 | abcdefdef
+   7 | abcdef
+   6 | abc
+   5 | abcdefdef
+   4 | abcdef
+   3 | abc
+   2 | abcdefdef
+   1 | abcdef
+(48 rows)
+
+RESET enable_seqscan;
+-- Test for composite primary key
+CREATE TABLE o_pk3
+(
+	id1 float8 NOT NULL,
+	id2 text NOT NULL,
+	PRIMARY KEY(id1, id2)
+) USING orioledb;
+SET enable_seqscan = off;
+INSERT INTO o_pk3
+SELECT a, repeat('x', b) || repeat ('y', c)
+FROM
+	generate_series(1, 4) as a,
+	generate_series(1, 4) as b,
+	generate_series(1, 4) as c;
+SELECT count(*) FROM o_pk3;
+ count 
+-------
+    64
+(1 row)
+
+SELECT id1, id2 FROM o_pk3;
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
+
+\i 'sql/composite_pk_quals'
+sql/composite_pk_quals: No such file or directory
+DROP TABLE o_pk3;
+RESET enable_seqscan;
+CREATE TABLE o_pk3
+(
+	id2 text NOT NULL,
+	id1 float8 NOT NULL,
+	PRIMARY KEY(id1, id2)
+) USING orioledb;
+SET enable_seqscan = off;
+INSERT INTO o_pk3
+SELECT a, repeat('x', b) || repeat ('y', c)
+FROM
+	generate_series(1, 4) as a,
+	generate_series(1, 4) as b,
+	generate_series(1, 4) as c;
+ERROR:  column "id1" is of type double precision but expression is of type text
+LINE 2: SELECT a, repeat('x', b) || repeat ('y', c)
+                  ^
+HINT:  You will need to rewrite or cast the expression.
+SELECT count(*) FROM o_pk3;
+ count 
+-------
+     0
+(1 row)
+
+SELECT id1, id2 FROM o_pk3;
+ id1 | id2 
+-----+-----
+(0 rows)
+
+\i 'sql/composite_pk_quals'
+sql/composite_pk_quals: No such file or directory
+DROP TABLE o_pk3;
+RESET enable_seqscan;
+CREATE TABLE o_pk3
+(
+	id1 float8 NOT NULL,
+	id2 text NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX o_pk3_idx ON o_pk3 (id1, id2 DESC);
+SET enable_seqscan = off;
+INSERT INTO o_pk3
+SELECT a, repeat('x', b) || repeat ('y', c)
+FROM
+	generate_series(1, 4) as a,
+	generate_series(1, 4) as b,
+	generate_series(1, 4) as c;
+SELECT count(*) FROM o_pk3;
+ count 
+-------
+    64
+(1 row)
+
+SELECT id1, id2 FROM o_pk3;
+ id1 |   id2    
+-----+----------
+   1 | xy
+   1 | xxy
+   1 | xxxy
+   1 | xxxxy
+   2 | xy
+   2 | xxy
+   2 | xxxy
+   2 | xxxxy
+   3 | xy
+   3 | xxy
+   3 | xxxy
+   3 | xxxxy
+   4 | xy
+   4 | xxy
+   4 | xxxy
+   4 | xxxxy
+   1 | xyy
+   1 | xxyy
+   1 | xxxyy
+   1 | xxxxyy
+   2 | xyy
+   2 | xxyy
+   2 | xxxyy
+   2 | xxxxyy
+   3 | xyy
+   3 | xxyy
+   3 | xxxyy
+   3 | xxxxyy
+   4 | xyy
+   4 | xxyy
+   4 | xxxyy
+   4 | xxxxyy
+   1 | xyyy
+   1 | xxyyy
+   1 | xxxyyy
+   1 | xxxxyyy
+   2 | xyyy
+   2 | xxyyy
+   2 | xxxyyy
+   2 | xxxxyyy
+   3 | xyyy
+   3 | xxyyy
+   3 | xxxyyy
+   3 | xxxxyyy
+   4 | xyyy
+   4 | xxyyy
+   4 | xxxyyy
+   4 | xxxxyyy
+   1 | xyyyy
+   1 | xxyyyy
+   1 | xxxyyyy
+   1 | xxxxyyyy
+   2 | xyyyy
+   2 | xxyyyy
+   2 | xxxyyyy
+   2 | xxxxyyyy
+   3 | xyyyy
+   3 | xxyyyy
+   3 | xxxyyyy
+   3 | xxxxyyyy
+   4 | xyyyy
+   4 | xxyyyy
+   4 | xxxyyyy
+   4 | xxxxyyyy
+(64 rows)
+
+\i 'sql/composite_pk_quals'
+sql/composite_pk_quals: No such file or directory
+DROP TABLE o_pk3;
+RESET enable_seqscan;
+CREATE TABLE o_pk3
+(
+	id2 text NOT NULL,
+	id1 float8 NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX o_pk3_idx ON o_pk3 (id1 DESC, id2 DESC);
+SET enable_seqscan = off;
+INSERT INTO o_pk3
+SELECT a, repeat('x', b) || repeat ('y', c)
+FROM
+	generate_series(1, 4) as a,
+	generate_series(1, 4) as b,
+	generate_series(1, 4) as c;
+ERROR:  column "id1" is of type double precision but expression is of type text
+LINE 2: SELECT a, repeat('x', b) || repeat ('y', c)
+                  ^
+HINT:  You will need to rewrite or cast the expression.
+SELECT count(*) FROM o_pk3;
+ count 
+-------
+     0
+(1 row)
+
+SELECT id1, id2 FROM o_pk3;
+ id1 | id2 
+-----+-----
+(0 rows)
+
+\i 'sql/composite_pk_quals'
+sql/composite_pk_quals: No such file or directory
+DROP TABLE o_pk3;
+RESET enable_seqscan;
+-- Check for key length limits
+CREATE TABLE o_pk4
+(
+	idx integer NOT NULL,
+	txt text NOT NULL,
+	PRIMARY KEY (txt)
+) USING orioledb;
+INSERT INTO o_test1 VALUES (1, repeat('x', 2673));
+ERROR:  relation "o_test1" does not exist
+LINE 1: INSERT INTO o_test1 VALUES (1, repeat('x', 2673));
+                    ^
+INSERT INTO o_test1 VALUES (2, repeat('x', 2680));
+ERROR:  relation "o_test1" does not exist
+LINE 1: INSERT INTO o_test1 VALUES (2, repeat('x', 2680));
+                    ^
+INSERT INTO o_test1 VALUES (3, repeat('x', 2672));
+ERROR:  relation "o_test1" does not exist
+LINE 1: INSERT INTO o_test1 VALUES (3, repeat('x', 2672));
+                    ^
+SELECT * FROM o_pk4;
+ idx | txt 
+-----+-----
+(0 rows)
+
+-- Check for datetime types
+CREATE TABLE o_pk5 (
+	i int4 NOT NULL,
+	dt date NOT NULL,
+	PRIMARY KEY (i, dt)
+) USING orioledb;
+INSERT INTO o_pk5
+SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
+SET enable_seqscan = OFF;
+EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Only Scan using o_pk5_pkey on o_pk5
+   Index Cond: ((i = 2) AND (dt >= 'Mon Mar 01 00:00:00 2021'::timestamp without time zone))
+(2 rows)
+
+SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
+ i |     dt     
+---+------------
+ 2 | 03-01-2021
+ 2 | 04-01-2021
+ 2 | 05-01-2021
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Index Only Scan using o_pk5_pkey on o_pk5
+   Index Cond: ((i = 2) AND (dt >= '03-01-2021'::date))
+(2 rows)
+
+SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
+ i |     dt     
+---+------------
+ 2 | 03-01-2021
+ 2 | 04-01-2021
+ 2 | 05-01-2021
+(3 rows)
+
+RESET enable_seqscan;
+CREATE TABLE o_pk6 (
+	i int4 NOT NULL,
+	dt timestamp NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX o_pk6_idx ON o_pk6 (dt DESC, i DESC);
+INSERT INTO o_pk6
+SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
+SET enable_seqscan = OFF;
+EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::timestamp;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_pk6
+   Bitmap heap scan
+   Recheck Cond: ((dt = 'Mon Mar 01 00:00:00 2021'::timestamp without time zone) AND (i <= 2))
+   ->  Bitmap Index Scan on o_pk6_idx
+         Index Cond: ((dt = 'Mon Mar 01 00:00:00 2021'::timestamp without time zone) AND (i <= 2))
+(5 rows)
+
+SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
+ i |            dt            
+---+--------------------------
+ 2 | Mon Mar 01 00:00:00 2021
+ 2 | Thu Apr 01 00:00:00 2021
+ 2 | Sat May 01 00:00:00 2021
+(3 rows)
+
+EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::date;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (o_scan) on o_pk6
+   Bitmap heap scan
+   Recheck Cond: ((dt = '03-01-2021'::date) AND (i <= 2))
+   ->  Bitmap Index Scan on o_pk6_idx
+         Index Cond: ((dt = '03-01-2021'::date) AND (i <= 2))
+(5 rows)
+
+SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::date;
+ i |            dt            
+---+--------------------------
+ 2 | Mon Mar 01 00:00:00 2021
+ 2 | Thu Apr 01 00:00:00 2021
+ 2 | Sat May 01 00:00:00 2021
+(3 rows)
+
+RESET enable_seqscan;
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to table o_pk1
+drop cascades to table o_pk2
+drop cascades to table o_pk4
+drop cascades to table o_pk5
+drop cascades to table o_pk6
+DROP SCHEMA primary_key CASCADE;
+RESET search_path;
