@@ -1173,15 +1173,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (is_matview && strcmp(into->accessMethod, "orioledb") == 0)
 			{
 				Query	   *query = castNode(Query, stmt->query);
-				IntoClause *into = stmt->into;
 				ObjectAddress address;
-				Relation	matviewRel;
 
 				Assert(query->commandType == CMD_SELECT);
 
 				address = create_ctas_nodata(query->targetList, into);
 
-				savedDataQuery = into->viewQuery;
+				savedDataQuery = (Query *) copyObject(into->viewQuery);
 				RefreshMatViewByOid(address.objectId, true, false,
 									queryString, NULL, qc);
 				savedDataQuery = NULL;
