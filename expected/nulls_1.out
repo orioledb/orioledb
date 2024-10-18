@@ -150,11 +150,10 @@ EXPLAIN (COSTS off) select max(id) from o_test_null_clauses;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  Result
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Limit
            ->  Index Only Scan Backward using o_test_null_clauses_pkey on o_test_null_clauses
-                 Index Cond: (id IS NOT NULL)
-(5 rows)
+(4 rows)
 
 select max(id) from o_test_null_clauses;
  max 
@@ -371,25 +370,21 @@ CREATE TABLE o_test_unique_nulls_not_distinct (
 	val_1 int UNIQUE NULLS NOT DISTINCT,
 	val_2 text
 ) USING orioledb;
-ERROR:  syntax error at or near "NULLS"
-LINE 2:  val_1 int UNIQUE NULLS NOT DISTINCT,
-                          ^
 TABLE o_test_unique_nulls_not_distinct;
-ERROR:  relation "o_test_unique_nulls_not_distinct" does not exist
-LINE 1: TABLE o_test_unique_nulls_not_distinct;
-              ^
+ val_1 | val_2 
+-------+-------
+(0 rows)
+
 INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('six');
-ERROR:  relation "o_test_unique_nulls_not_distinct" does not exist
-LINE 1: INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES (...
-                    ^
 INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('seven');
-ERROR:  relation "o_test_unique_nulls_not_distinct" does not exist
-LINE 1: INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES (...
-                    ^
+ERROR:  duplicate key value violates unique constraint "o_test_unique_nulls_not_distinct_val_1_key"
+DETAIL:  Key (val_1)=(null) already exists.
 TABLE o_test_unique_nulls_not_distinct;
-ERROR:  relation "o_test_unique_nulls_not_distinct" does not exist
-LINE 1: TABLE o_test_unique_nulls_not_distinct;
-              ^
+ val_1 | val_2 
+-------+-------
+       | six
+(1 row)
+
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -397,11 +392,12 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to table o_test_null_clauses
 drop cascades to table o_test_null_comparison
 drop cascades to table o_test_null_row_comparison
 drop cascades to table o_test_row_comparison_nulls_first
 drop cascades to table o_test_nulls
+drop cascades to table o_test_unique_nulls_not_distinct
 DROP SCHEMA nulls_schema CASCADE;
 RESET search_path;
