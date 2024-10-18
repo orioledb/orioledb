@@ -1080,6 +1080,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	o_set_syscache_hooks();
 	o_database_cache_set_database_encoding();
+#if PG_VERSION_NUM >= 170000
+	o_database_cache_set_default_locale_provider();
+#endif
 
 	memset(&control, 0, sizeof(control));
 

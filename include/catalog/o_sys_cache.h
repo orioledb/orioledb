@@ -608,11 +608,15 @@ typedef struct ODatabase
 {
 	OSysCacheKey1 key;
 	int32		encoding;
+	char		datlocprovider;
 } ODatabase;
 
 O_SYS_CACHE_DECLS(database_cache, ODatabase, 1);
 extern int32 o_database_cache_get_database_encoding(void);
 extern void o_database_cache_set_database_encoding(void);
+#if PG_VERSION_NUM >= 170000
+extern void o_database_cache_set_default_locale_provider(void);
+#endif
 extern void o_database_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									   OTuple tup, Pointer arg);
 

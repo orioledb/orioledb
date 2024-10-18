@@ -79,6 +79,7 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	}
 
 	o_database->encoding = dbform->encoding;
+	o_database->datlocprovider = dbform->datlocprovider;
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(databasetup);
@@ -109,6 +110,21 @@ o_database_cache_set_database_encoding()
 
 	SetDatabaseEncoding(encoding);
 }
+
+#if PG_VERSION_NUM >= 170000
+void
+o_database_cache_set_default_locale_provider()
+{
+	XLogRecPtr	cur_lsn;
+	ODatabase  *o_database;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+	o_database = o_database_cache_search(Template1DbOid, Template1DbOid, cur_lsn,
+										 database_cache->nkeys);
+	default_locale.provider = o_database->datlocprovider;
+	default_locale.deterministic = true;
+}
+#endif
 
 /*
  * A tuple print function for o_print_btree_pages()
