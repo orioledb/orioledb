@@ -1363,6 +1363,23 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	return scan;
 }
 
+static int
+get_num_prefix_exact_keys(ScanKey scankey, int nscankeys)
+{
+	AttrNumber	prevAttr = 0;
+	int		i;
+
+	for (i = 0; i < nscankeys; i++)
+	{
+		if (scankey[i].sk_attno != prevAttr + 1 ||
+			scankey[i].sk_strategy != BTEqualStrategyNumber)
+			break;
+
+		prevAttr = scankey[i].sk_attno;
+	}
+	return i;
+}
+
 void
 orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
@@ -1372,6 +1389,7 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 	MemoryContextReset(o_scan->cxt);
 	o_scan->iterator = NULL;
 	o_scan->curKeyRangeIsLoaded = false;
+	o_scan->numPrefixExactKeys = get_num_prefix_exact_keys(scankey, nscankeys);
 	btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 }
 

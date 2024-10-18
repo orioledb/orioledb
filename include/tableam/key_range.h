@@ -67,6 +67,7 @@ extern bool o_key_data_to_key_range(OBTreeKeyRange *res,
 									ScanKeyData *keyData,
 									int numberOfKeys,
 									BTArrayKeyInfo *arrayKeys,
+									int numPrefixExactKeys,
 									int resultNKeys,
 									OIndexField *fields);
 

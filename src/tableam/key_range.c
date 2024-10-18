@@ -81,6 +81,7 @@ o_fill_row_key_bound(OBTreeKeyBound *bound,
 bool
 o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 						int numberOfKeys, BTArrayKeyInfo *arrayKeys,
+						int numPrefixExactKeys,
 						int resultNKeys, OIndexField *fields)
 {
 	int			i;
@@ -168,11 +169,27 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		{
 			if (o_key_range_is_unbounded(res, attnum))
 			{
-				o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->cur_elem],
-								  key->sk_subtype,
-								  setLow ? &low : NULL,
-								  setHigh ? &high : NULL,
-								  field);
+				if (i < numPrefixExactKeys)
+				{
+					o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->cur_elem],
+									  key->sk_subtype,
+									  setLow ? &low : NULL,
+									  setHigh ? &high : NULL,
+									  field);
+				}
+				else
+				{
+					o_fill_key_bounds(arrayKeys->elem_values[0],
+									  key->sk_subtype,
+									  setLow ? &low : NULL,
+									  NULL,
+									  field);
+					o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->num_elems - 1],
+									  key->sk_subtype,
+									  NULL,
+									  setHigh ? &high : NULL,
+									  field);
+				}
 				if (setLow)
 					res->low.keys[attnum] = low;
 				if (setHigh)

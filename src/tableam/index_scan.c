@@ -17,12 +17,15 @@
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "tableam/index_scan.h"
+#include "tableam/descr.h"
+#include "tableam/key_range.h"
 #include "tableam/tree.h"
 #include "tuple/slot.h"
 
 #include "access/nbtree.h"
 #include "access/skey.h"
 #include "executor/nodeIndexscan.h"
+#include "parser/parse_coerce.h"
 
 void
 init_index_scan_state(OScanState *ostate, Relation index,
@@ -107,14 +110,23 @@ row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 	return valid;
 }
 
+static inline bool
+o_bound_is_coercible(OBTreeValueBound *bound, OIndexField *field)
+{
+	return (bound->flags & O_VALUE_BOUND_COERCIBLE) ||
+		IsBinaryCoercible(bound->type, field->inputtype);
+}
+
 static bool
-is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range)
+is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
+			   BTScanOpaque so, int numPrefixExactKeys)
 {
 	int			i;
 	OBTreeKeyBound *low = &range->low;
 	OBTreeKeyBound *high = &range->high;
 	bool		valid = true;
 	int			keynum;
+	BTArrayKeyInfo *arrayKeys = so->arrayKeys;
 
 	Assert(low->nkeys == high->nkeys);
 
@@ -161,8 +173,117 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range)
 			valid = false;
 	}
 
+	for (i = 0; i < so->numberOfKeys; i++)
+	{
+		ScanKey		key = so->keyData + i;
+
+		if ((key->sk_flags & SK_SEARCHARRAY) &&
+			key->sk_strategy == BTEqualStrategyNumber &&
+			arrayKeys && arrayKeys->num_elems > 0)
+		{
+			if (i >= numPrefixExactKeys)
+			{
+				int			j;
+				bool		isnull;
+				Datum		value = o_fastgetattr(tup, key->sk_attno, id->leafTupdesc,
+												  &id->leafSpec, &isnull);
+				bool		found = false;
+				OBTreeValueBound *bound = &low->keys[key->sk_attno - 1];
+				OIndexField *field = &id->fields[key->sk_attno - 1];
+
+				for (j = 0; j < arrayKeys->num_elems; j++)
+				{
+					int		cmp;
+
+					if (o_bound_is_coercible(bound, field))
+						cmp = o_call_comparator(field->comparator,
+					  		value, arrayKeys->elem_values[j]);
+					else
+						cmp = o_call_comparator(bound->comparator,
+					  		value, arrayKeys->elem_values[j]);
+					if (cmp == 0)
+					{
+						found = true;
+						break;
+					}
+				}
+
+				if (!found)
+					valid = false;
+			}
+
+			arrayKeys++;
+		}
+	}
+
 	return valid;
 }
+
+#if PG_VERSION_NUM >= 170000
+static bool
+o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
+{
+	IndexScanDesc scan = &ostate->scandesc;
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+	int		i = so->numArrayKeys - 1;
+	int		j;
+
+	for (j = ostate->numPrefixExactKeys; j < so->numberOfKeys; j++)
+	{
+		ScanKey		key = so->keyData + j;
+
+		if ((key->sk_flags & SK_SEARCHARRAY) &&
+			 key->sk_strategy == BTEqualStrategyNumber)
+			i--;
+	}
+
+	/*
+	 * We must advance the last array key most quickly, since it will
+	 * correspond to the lowest-order index column among the available
+	 * qualifications
+	 */
+	for (; i >= 0; i--)
+	{
+		BTArrayKeyInfo *curArrayKey = &so->arrayKeys[i];
+		ScanKey		skey = &so->keyData[curArrayKey->scan_key];
+		int			cur_elem = curArrayKey->cur_elem;
+		int			num_elems = curArrayKey->num_elems;
+		bool		rolled = false;
+
+		if (ScanDirectionIsForward(dir) && ++cur_elem >= num_elems)
+		{
+			cur_elem = 0;
+			rolled = true;
+		}
+		else if (ScanDirectionIsBackward(dir) && --cur_elem < 0)
+		{
+			cur_elem = num_elems - 1;
+			rolled = true;
+		}
+
+		curArrayKey->cur_elem = cur_elem;
+		skey->sk_argument = curArrayKey->elem_values[cur_elem];
+		if (!rolled)
+			return true;
+
+		/* Need to advance next array key, if any */
+	}
+
+	/*
+	 * The array keys are now exhausted.  (There isn't actually a distinct
+	 * state that represents array exhaustion, since index scans don't always
+	 * end after btgettuple returns "false".)
+	 *
+	 * Restore the array keys to the state they were in immediately before we
+	 * were called.  This ensures that the arrays only ever ratchet in the
+	 * current scan direction.  Without this, scans would overlook matching
+	 * tuples if and when the scan's direction was subsequently reversed.
+	 */
+	_bt_start_array_keys(scan, -dir);
+
+	return false;
+}
+#endif
 
 static bool
 switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
@@ -183,7 +304,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	{
 		if (ostate->curKeyRangeIsLoaded)
 		{
-			result = _bt_advance_array_keys_increment(scan, ForwardScanDirection);
+			result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
 			elog(LOG, "_bt_start_prim_scan, result %u:", result);
 			if(result)
 			{
@@ -193,7 +314,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 		}
 		else
 		{
-			_bt_start_array_keys(scan, ForwardScanDirection);
+			_bt_start_array_keys(scan, ostate->scanDir);
 			elog(LOG, "_bt_start_array_keys");
 			result = true;
 		}
@@ -233,6 +354,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 											so->keyData,
 											so->numberOfKeys,
 											(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
+											ostate->numPrefixExactKeys,
 											indexDescr->nonLeafTupdesc->natts,
 											indexDescr->fields);
 
@@ -259,6 +381,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 {
 	OTuple		tup = {0};
 	bool		tup_fetched = false;
+	IndexScanDesc scan = &ostate->scandesc;
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 
 	if (ostate->exact || ostate->curKeyRange.empty)
 	{
@@ -302,7 +426,9 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 				else
 				{
 					tup_is_valid = is_tuple_valid(tup, indexDescr,
-												  &ostate->curKeyRange);
+												  &ostate->curKeyRange,
+												  so,
+												  ostate->numPrefixExactKeys);
 					if (tup_is_valid)
 						tup_fetched = true;
 				}

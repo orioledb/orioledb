@@ -29,6 +29,7 @@ typedef struct OScanState
 	bool		onlyCurIx;
 	bool		returning;
 	bool		curKeyRangeIsLoaded;
+	int			numPrefixExactKeys;
 	bool		exact;
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
