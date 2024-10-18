@@ -162,8 +162,9 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 				break;
 		}
 
-		if ((key->sk_flags & SK_SEARCHARRAY) && arrayKeys &&
-			arrayKeys->num_elems > 0)
+		if ((key->sk_flags & SK_SEARCHARRAY) &&
+			key->sk_strategy == BTEqualStrategyNumber &&
+			arrayKeys && arrayKeys->num_elems > 0)
 		{
 			if (o_key_range_is_unbounded(res, attnum))
 			{
