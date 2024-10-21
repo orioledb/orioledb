@@ -332,7 +332,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		bool		excludeFound;
 		ForkNumber	relForkNum; /* Type of fork if file is a relation */
 #if PG_VERSION_NUM >= 170000
-		unsigned    segno;
+		unsigned	segno;
 		RelFileNumber relNumber;
 #else
 		int			relnumchars;	/* Chars in filename that are the
@@ -409,6 +409,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 
 #else
 				char		relNumber[OIDCHARS + 1];
+
 				/*
 				 * If any other type of fork, check if there is an init fork
 				 * with the same RelFileNumber. If so, the file can be

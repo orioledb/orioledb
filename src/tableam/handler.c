@@ -830,7 +830,7 @@ orioledb_scan_analyze_next_block(TableScanDesc scan, BlockNumber blockno,
 	OScanDesc	oscan = (OScanDesc) scan;
 #if PG_VERSION_NUM >= 170000
 	BufferAccessStrategy bstrategy = GetAccessStrategy(BAS_BULKREAD);
-	BlockNumber	blockno = read_stream_next_block(stream, &bstrategy);
+	BlockNumber blockno = read_stream_next_block(stream, &bstrategy);
 
 	if (blockno == InvalidBlockNumber)
 		return false;

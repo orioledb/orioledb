@@ -1170,6 +1170,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (!into->skipData)
 		{
 			bool		is_matview = (into->viewQuery != NULL);
+
 			if (is_matview && strcmp(into->accessMethod, "orioledb") == 0)
 			{
 				Query	   *query = castNode(Query, stmt->query);

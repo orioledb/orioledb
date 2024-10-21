@@ -427,7 +427,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			}
 		}
 		/* Free the primary key memory except for bump context */
-		if(!is_bump_memory_context(CurrentMemoryContext))
+		if (!is_bump_memory_context(CurrentMemoryContext))
 			pfree(pkey.data);
 	}
 

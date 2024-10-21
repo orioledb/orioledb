@@ -162,7 +162,7 @@ writetup_orioledb_index(Tuplesortstate *state, LogicalTape *tape, SortTuple *stu
 	LogicalTapeWrite(tape, (void *) &tuplen, sizeof(tuplen));
 	LogicalTapeWrite(tape, (void *) tuple.data, o_tuple_size(tuple, spec));
 	LogicalTapeWrite(tape, (void *) &tuple.formatFlags, 1);
-	if (base->sortopt & TUPLESORT_RANDOMACCESS)	/* need trailing length word? */
+	if (base->sortopt & TUPLESORT_RANDOMACCESS) /* need trailing length word? */
 		LogicalTapeWrite(tape, (void *) &tuplen, sizeof(tuplen));
 }
 
@@ -180,7 +180,7 @@ readtup_orioledb_index(Tuplesortstate *state, SortTuple *stup,
 	/* read in the tuple proper */
 	LogicalTapeReadExact(tape, tup + MAXIMUM_ALIGNOF, tuplen);
 	LogicalTapeReadExact(tape, tup, 1);
-	if (base->sortopt & TUPLESORT_RANDOMACCESS)	/* need trailing length word? */
+	if (base->sortopt & TUPLESORT_RANDOMACCESS) /* need trailing length word? */
 		LogicalTapeReadExact(tape, &tuplen, sizeof(tuplen));
 	stup->tuple = (void *) tup;
 	tuple = read_o_tuple(tup);
@@ -391,8 +391,9 @@ tuplesort_putotuple(Tuplesortstate *state, OTuple tup)
 	int			tupsize;
 	OTuple		written_tup;
 #if PG_VERSION_NUM >= 170000
-	Size 		tuplen;
+	Size		tuplen;
 #endif
+
 	/*
 	 * Copy the given tuple into memory we control, and decrease availMem.
 	 * Then call the common code.

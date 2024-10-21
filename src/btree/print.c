@@ -58,7 +58,7 @@ typedef struct
 typedef OInMemoryBlkno PageHashKey;
 
 #if PG_VERSION_NUM >= 170000
-typedef	ProcNumber BackendIdHashKey;
+typedef ProcNumber BackendIdHashKey;
 #else
 typedef BackendId BackendIdHashKey;
 #endif
@@ -69,7 +69,7 @@ typedef struct
 #if PG_VERSION_NUM >= 170000
 	ProcNumber	backendIdInTraversal;
 #else
-	BackendId       backendIdInTraversal;
+	BackendId	backendIdInTraversal;
 #endif
 } BackendIdHashEntry;
 
@@ -573,6 +573,7 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 																			&procnum,
 																			HASH_ENTER,
 																			&found);
+
 					/*
 					 * if backend id wasn't in hash that means it first
 					 * appearence of backend saving id in traversal to hash

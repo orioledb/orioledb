@@ -59,7 +59,8 @@ init_index_scan_state(OScanState *ostate, Relation index,
 		/* punt if we have any unsatisfiable array keys */
 		if (so->numArrayKeys > 0)
 		{
-			_bt_start_array_keys(scan, ForwardScanDirection); //
+			_bt_start_array_keys(scan, ForwardScanDirection);
+			//
 		}
 	}
 	_bt_preprocess_keys(scan);
@@ -193,14 +194,14 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 				for (j = 0; j < arrayKeys->num_elems; j++)
 				{
-					int		cmp;
+					int			cmp;
 
 					if (o_bound_is_coercible(bound, field))
 						cmp = o_call_comparator(field->comparator,
-					  		value, arrayKeys->elem_values[j]);
+												value, arrayKeys->elem_values[j]);
 					else
 						cmp = o_call_comparator(bound->comparator,
-					  		value, arrayKeys->elem_values[j]);
+												value, arrayKeys->elem_values[j]);
 					if (cmp == 0)
 					{
 						found = true;
@@ -225,15 +226,15 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 {
 	IndexScanDesc scan = &ostate->scandesc;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
-	int		i = so->numArrayKeys - 1;
-	int		j;
+	int			i = so->numArrayKeys - 1;
+	int			j;
 
 	for (j = ostate->numPrefixExactKeys; j < so->numberOfKeys; j++)
 	{
 		ScanKey		key = so->keyData + j;
 
 		if ((key->sk_flags & SK_SEARCHARRAY) &&
-			 key->sk_strategy == BTEqualStrategyNumber)
+			key->sk_strategy == BTEqualStrategyNumber)
 			i--;
 	}
 
@@ -300,15 +301,15 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	if (!so->qual_ok)
 		return false;
 
-	if(so->numArrayKeys)
+	if (so->numArrayKeys)
 	{
 		if (ostate->curKeyRangeIsLoaded)
 		{
 			result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
 			elog(LOG, "_bt_start_prim_scan, result %u:", result);
-			if(result)
+			if (result)
 			{
-//				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection);
+/* 				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection); */
 				elog(LOG, "_bt_advance_array_keys_increment, result %u:", result);
 			}
 		}
@@ -326,7 +327,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 			result = false;
 			so->needPrimScan = false;
 			so->scanBehind = false;
-	//		elog(LOG, "no array keys");
+			/* elog(LOG, "no array keys"); */
 		}
 		else
 		{
