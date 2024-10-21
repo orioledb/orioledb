@@ -434,6 +434,10 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
+
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+
 RESET enable_seqscan;
 
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test66 USING(idi, idv);
@@ -667,6 +671,9 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
 SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
@@ -781,6 +788,9 @@ SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idv = '22';
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
 SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
+
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
 
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test69 USING(idi, idv);

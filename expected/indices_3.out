@@ -2194,6 +2194,23 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
    3 | 22
 (4 rows)
 
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Index Only Scan using o_test66_reg1 on o_test66
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
+
+SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+ idi | idv 
+-----+-----
+   2 | 12
+   2 | 22
+   3 | 12
+   3 | 22
+(4 rows)
+
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test66 USING(idi, idv);
                                     QUERY PLAN                                     
@@ -3872,6 +3889,23 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
    2 | 22
 (4 rows)
 
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Index Only Scan Backward using o_test68_reg1 on o_test68
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
+
+SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+ idi | idv 
+-----+-----
+   2 | 22
+   2 | 12
+   3 | 22
+   3 | 12
+(4 rows)
+
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
                                     QUERY PLAN                                     
@@ -4705,6 +4739,24 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
    2 | 12
    3 | 12
    2 | 22
+   3 | 22
+(4 rows)
+
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Sort Key: idi
+   ->  Index Only Scan using o_test69_reg1 on o_test69
+         Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi > 1))
+(4 rows)
+
+SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+ idi | idv 
+-----+-----
+   2 | 12
+   2 | 22
+   3 | 12
    3 | 22
 (4 rows)
 
