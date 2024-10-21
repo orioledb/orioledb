@@ -629,6 +629,9 @@ o_set_sys_cache_search_datoid(Oid datoid)
 		if (!OidIsValid(MyDatabaseId))
 		{
 			o_database_cache_set_database_encoding();
+#if PG_VERSION_NUM >= 170000
+			o_database_cache_set_default_locale_provider();
+#endif
 		}
 	}
 }
