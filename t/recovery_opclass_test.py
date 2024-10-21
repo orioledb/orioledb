@@ -68,28 +68,28 @@ class RecoveryOpclassTest(BaseTest):
 			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
-				CREATE OR REPLACE FUNCTION my_int_cmp(a int, b int) RETURNS int
+				CREATE OR REPLACE FUNCTION public.my_int_cmp(a int, b int) RETURNS int
 				AS $$
 					SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 									(b::bit(5) & X'A8'::bit(5))::int);
 				$$ LANGUAGE SQL IMMUTABLE;
 
-				CREATE FUNCTION my_int_cmp_s_s_i(a int, b int)
+				CREATE FUNCTION public.my_int_cmp_s_s_i(a int, b int)
 					RETURNS int
 				AS $$
-					SELECT my_int_cmp(a, b);
+					SELECT public.my_int_cmp(a, b);
 				$$ LANGUAGE SQL IMMUTABLE;
 
-				CREATE FUNCTION my_int_cmp_s_s_s_i(a int, b int)
+				CREATE FUNCTION public.my_int_cmp_s_s_s_i(a int, b int)
 					RETURNS int
 				AS $$
-					SELECT my_int_cmp_s_s_i(a, b);
+					SELECT public.my_int_cmp_s_s_i(a, b);
 				$$ LANGUAGE SQL IMMUTABLE;
 
 				CREATE FUNCTION my_int_cmp_deep_sql(a int, b int)
 					RETURNS int
 				AS $$
-					SELECT my_int_cmp_s_s_s_i(a, b);
+					SELECT public.my_int_cmp_s_s_s_i(a, b);
 				$$ LANGUAGE SQL IMMUTABLE;
 
 				CREATE OPERATOR <^ (
@@ -238,7 +238,7 @@ class RecoveryOpclassTest(BaseTest):
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
 				CREATE FUNCTION my_int_cmp_generate_series(a int, b int)
-					RETURNS int
+                    RETURNS int
 				AS $$
 					SELECT a % COUNT(*) - b % COUNT(*) FROM
 						generate_series(1, 7);
@@ -402,13 +402,13 @@ class RecoveryOpclassTest(BaseTest):
 			    'postgres', """
 				CREATE EXTENSION IF NOT EXISTS orioledb;
 
-				CREATE FUNCTION my_test_func(a int, b int) RETURNS int AS $$
+				CREATE FUNCTION public.my_test_func(a int, b int) RETURNS int AS $$
 					SELECT LEAST(a, a)%8 - GREATEST(b, b)%8;
 				$$ LANGUAGE SQL IMMUTABLE;
 				CREATE FUNCTION my_int_cmp_rows_func(a int, b int)
 					RETURNS int
 				AS $$
-					SELECT * FROM ROWS FROM(my_test_func(a, b));
+					SELECT * FROM ROWS FROM(public.my_test_func(a, b));
 				$$ LANGUAGE SQL IMMUTABLE;
 
 				CREATE OPERATOR <^ (
@@ -871,7 +871,7 @@ class RecoveryOpclassTest(BaseTest):
 					val_2 my_rec_arr
 				);
 
-				CREATE FUNCTION my_rec_cmp(a my_record, b my_record)
+				CREATE FUNCTION public.my_rec_cmp(a my_record, b my_record)
 					RETURNS integer
 				AS $$
 					SELECT COALESCE(NULLIF(((a).val_2::int -
@@ -883,7 +883,7 @@ class RecoveryOpclassTest(BaseTest):
 					RETURNS boolean
 				AS $$
 					BEGIN
-						RETURN my_rec_cmp(a,b) < 0;
+						RETURN public.my_rec_cmp(a,b) < 0;
 					END;
 				$$ LANGUAGE plpgsql IMMUTABLE STRICT;
 
@@ -891,7 +891,7 @@ class RecoveryOpclassTest(BaseTest):
 					RETURNS boolean
 				AS $$
 					BEGIN
-						RETURN my_rec_cmp(a,b) = 0;
+						RETURN public.my_rec_cmp(a,b) = 0;
 					END;
 				$$ LANGUAGE plpgsql IMMUTABLE STRICT;
 

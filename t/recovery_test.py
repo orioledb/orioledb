@@ -1487,25 +1487,25 @@ class RecoveryTest(BaseTest):
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
-			CREATE FUNCTION my_cmp_sql(a int, b int) RETURNS int AS $$
+			CREATE FUNCTION public.my_cmp_sql(a int, b int) RETURNS int AS $$
 				SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 								(b::bit(5) & X'A8'::bit(5))::int);
 			$$ LANGUAGE SQL IMMUTABLE;
 
-			CREATE FUNCTION my_cmp_sql_sql(a int, b int) RETURNS int
+			CREATE FUNCTION public.my_cmp_sql_sql(a int, b int) RETURNS int
 			AS $$
-				SELECT my_cmp_sql(a, b);
+				SELECT public.my_cmp_sql(a, b);
 			$$ LANGUAGE SQL IMMUTABLE;
 
-			CREATE FUNCTION my_cmp_sql_sql_sql(a int, b int) RETURNS int
+			CREATE FUNCTION public.my_cmp_sql_sql_sql(a int, b int) RETURNS int
 			AS $$
-				SELECT my_cmp_sql_sql(a, b);
+				SELECT public.my_cmp_sql_sql(a, b);
 			$$ LANGUAGE SQL IMMUTABLE;
 
 			CREATE FUNCTION my_eq_sql_sql_sql_sql(a int, b int)
 				RETURNS bool
 			AS $$
-				SELECT my_cmp_sql_sql_sql(a, b) = 0;
+				SELECT public.my_cmp_sql_sql_sql(a, b) = 0;
 			$$ LANGUAGE SQL IMMUTABLE;
 
 			CREATE TABLE IF NOT EXISTS o_test (
@@ -1564,7 +1564,7 @@ class RecoveryTest(BaseTest):
 		self.assertEqual(
 		    6,
 		    node.execute("""
-							WITH o_test_cte AS (
+                                                       WITH o_test_cte AS (
 								SELECT * FROM o_test WHERE (key * 100)
 									BETWEEN 300 AND 800
 							) SELECT COUNT(*) FROM o_test_cte;
@@ -1579,29 +1579,29 @@ class RecoveryTest(BaseTest):
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 
-			CREATE OR REPLACE FUNCTION my_cmp_sql(a int, b int) RETURNS int
+			CREATE OR REPLACE FUNCTION public.my_cmp_sql(a int, b int) RETURNS int
 			AS $$
 				SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 								(b::bit(5) & X'A8'::bit(5))::int);
 			$$ LANGUAGE SQL IMMUTABLE;
 
-			CREATE FUNCTION my_cmp_s_s(a int, b int) RETURNS int
+			CREATE FUNCTION public.my_cmp_s_s(a int, b int) RETURNS int
 			AS $$
- 				SELECT my_cmp_sql(a, b);
+                SELECT public.my_cmp_sql(a, b);
 			$$ LANGUAGE SQL IMMUTABLE;
 
-			CREATE FUNCTION my_cmp_s_s_s(a int, b int) RETURNS int
+			CREATE FUNCTION public.my_cmp_s_s_s(a int, b int) RETURNS int
 			AS $$
-				SELECT my_cmp_s_s(a, b);
+				SELECT public.my_cmp_s_s(a, b);
 			$$ LANGUAGE SQL IMMUTABLE;
 
 			CREATE FUNCTION my_cmp_s_s_s_s(a int, b int) RETURNS int
 			AS $$
-				SELECT my_cmp_s_s_s(a, b);
+				SELECT public.my_cmp_s_s_s(a, b);
 			$$ LANGUAGE SQL IMMUTABLE;
 
 			CREATE FUNCTION my_eq(a int, b int) RETURNS bool AS $$
-				SELECT my_cmp_sql(a, b) = 0;
+				SELECT public.my_cmp_sql(a, b) = 0;
 			$$ LANGUAGE SQL IMMUTABLE;
 
 			CREATE OPERATOR =^ (
