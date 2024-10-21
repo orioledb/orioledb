@@ -2024,12 +2024,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2176,12 +2175,11 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2193,12 +2191,11 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -2886,12 +2883,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3032,12 +3028,11 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3725,12 +3720,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3871,12 +3865,11 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3888,12 +3881,11 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan Backward using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -4579,12 +4571,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                   QUERY PLAN                    
--------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = ANY ('{12,22}'::text[]))
-   Filter: (idi = ANY ('{2,4}'::integer[]))
-(3 rows)
+   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = ANY ('{2,4}'::integer[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
