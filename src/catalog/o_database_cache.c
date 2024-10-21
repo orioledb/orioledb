@@ -19,6 +19,7 @@
 
 #include "catalog/o_sys_cache.h"
 
+#include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
 #include "utils/syscache.h"
 #include "mb/pg_wchar.h"
@@ -121,8 +122,16 @@ o_database_cache_set_default_locale_provider()
 	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 	o_database = o_database_cache_search(Template1DbOid, Template1DbOid, cur_lsn,
 										 database_cache->nkeys);
-	default_locale.provider = o_database->datlocprovider;
-	default_locale.deterministic = true;
+	if (o_database)
+	{
+		default_locale.provider = o_database->datlocprovider;
+		default_locale.deterministic = true;
+	}
+	else
+	{
+		default_locale.provider = COLLPROVIDER_DEFAULT;
+		default_locale.deterministic = true;
+	}
 }
 #endif
 

@@ -48,6 +48,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
+#include "catalog/pg_extension.h"
 #include "catalog/pg_inherits.h"
 #if PG_VERSION_NUM >= 160000
 #include "catalog/pg_namespace.h"
@@ -2086,7 +2087,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 {
 	Relation	rel;
 
-	if (access == OAT_DROP && classId == RelationRelationId)
+	if (access == OAT_POST_CREATE && classId == ExtensionRelationId)
+	{
+#if PG_VERSION_NUM >= 170000
+		if (IsTransactionState())
+		{
+			XLogRecPtr	cur_lsn;
+
+			o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+			o_database_cache_add_if_needed(Template1DbOid, Template1DbOid, cur_lsn, NULL);
+		}
+#endif
+	}
+	else if (access == OAT_DROP && classId == RelationRelationId)
 	{
 		ObjectAccessDrop *drop_arg = (ObjectAccessDrop *) arg;
 
