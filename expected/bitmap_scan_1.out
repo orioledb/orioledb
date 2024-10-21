@@ -359,6 +359,7 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
        "Strategy": "Plain",                          +
        "Partial Mode": "Simple",                     +
        "Parallel Aware": false,                      +
+       "Async Capable": false,                       +
        "Actual Startup Time": x,                     +
        "Actual Total Time": x,                       +
        "Actual Rows": x,                             +
@@ -379,6 +380,7 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
            "Parent Relationship": "Outer",           +
            "Custom Plan Provider": "o_scan",         +
            "Parallel Aware": false,                  +
+           "Async Capable": false,                   +
            "Relation Name": "bitmap_test",           +
            "Alias": "bitmap_test",                   +
            "Actual Startup Time": x,                 +
@@ -393,6 +395,7 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
                "Node Type": "Bitmap Index Scan",     +
                "Parent Relationship": "Outer",       +
                "Parallel Aware": false,              +
+               "Async Capable": false,               +
                "Index Name": "bitmap_test_ixx",      +
                "Actual Startup Time": x,             +
                "Actual Total Time": x,               +
@@ -482,19 +485,19 @@ EXPLAIN (COSTS OFF)
 	SELECT COUNT(*) FROM bitmap_test
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                     QUERY PLAN                     
-----------------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: (i = ANY ($0))
+         Recheck Cond: (i = ANY ((InitPlan 1).col1))
          ->  Bitmap Index Scan on bitmap_test_ix1
-               Index Cond: (i = ANY ($0))
+               Index Cond: (i = ANY ((InitPlan 1).col1))
 (11 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1)
@@ -512,19 +515,19 @@ EXPLAIN (COSTS OFF)
 	SELECT COUNT(*) FROM bitmap_test
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                     QUERY PLAN                     
-----------------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: (i = ANY ($0))
+         Recheck Cond: (i = ANY ((InitPlan 1).col1))
          ->  Bitmap Index Scan on bitmap_test_ix1
-               Index Cond: (i = ANY ($0))
+               Index Cond: (i = ANY ((InitPlan 1).col1))
 (11 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 50)
@@ -542,19 +545,19 @@ EXPLAIN (COSTS OFF)
 	SELECT COUNT(*) FROM bitmap_test
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                     QUERY PLAN                     
-----------------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: (i = ANY ($0))
+         Recheck Cond: (i = ANY ((InitPlan 1).col1))
          ->  Bitmap Index Scan on bitmap_test_ix1
-               Index Cond: (i = ANY ($0))
+               Index Cond: (i = ANY ((InitPlan 1).col1))
 (11 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 300)
@@ -574,14 +577,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -594,12 +597,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -621,14 +624,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -639,14 +642,14 @@ EXPLAIN (COSTS OFF)
                                    ->  Subquery Scan on "*SELECT* 2"
                                          ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
-         Filter: ((i = ANY ($0)) OR ((j = ANY ($1)) AND ((id & '-1024'::integer) = 103424)))
+         Filter: ((i = ANY ((InitPlan 1).col1)) OR ((j = ANY ((InitPlan 2).col1)) AND ((id & '-1024'::integer) = 103424)))
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -668,26 +671,26 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -709,26 +712,26 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -750,26 +753,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -791,14 +794,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -811,12 +814,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -838,14 +841,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -856,14 +859,14 @@ EXPLAIN (COSTS OFF)
                                    ->  Subquery Scan on "*SELECT* 2"
                                          ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
-         Filter: ((i = ANY ($0)) OR ((j = ANY ($1)) AND ((id & '-1024'::integer) = 103424)))
+         Filter: ((i = ANY ((InitPlan 1).col1)) OR ((j = ANY ((InitPlan 2).col1)) AND ((id & '-1024'::integer) = 103424)))
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -885,26 +888,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -926,26 +929,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -967,26 +970,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -1008,16 +1011,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i ORDER BY i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1026,12 +1029,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 69),
@@ -1053,26 +1056,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -1094,26 +1097,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -1135,26 +1138,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti OFFSET 200 LIMIT 10),
@@ -1176,26 +1179,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 10),
@@ -1217,16 +1220,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1235,12 +1238,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 69),
@@ -1262,16 +1265,16 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -1284,12 +1287,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (26 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1311,16 +1314,16 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -1331,14 +1334,14 @@ EXPLAIN (COSTS OFF)
                                    ->  Subquery Scan on "*SELECT* 2"
                                          ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test
-         Filter: ((i = ANY ($0)) OR ((j = ANY ($1)) AND ((id & '-1024'::integer) = 103424)))
+         Filter: ((i = ANY ((InitPlan 1).col1)) OR ((j = ANY ((InitPlan 2).col1)) AND ((id & '-1024'::integer) = 103424)))
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (26 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1360,16 +1363,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1378,12 +1381,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1405,16 +1408,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1423,12 +1426,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1450,16 +1453,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1468,12 +1471,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1495,16 +1498,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1513,12 +1516,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1540,16 +1543,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1558,12 +1561,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1585,16 +1588,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1603,12 +1606,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1630,16 +1633,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1648,12 +1651,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1675,16 +1678,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1693,12 +1696,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1720,16 +1723,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1738,12 +1741,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -1765,16 +1768,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                         
------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1783,12 +1786,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((j = ANY ($1)) AND (i = ANY ($0)))
+         Recheck Cond: ((j = ANY ((InitPlan 2).col1)) AND (i = ANY ((InitPlan 1).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i OFFSET 79 LIMIT 10),
@@ -1810,16 +1813,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_high(id) = test_const_high_int();
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -1828,12 +1831,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((id & '-1024'::integer) = 103424)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i OFFSET 79 LIMIT 1),
@@ -2251,16 +2254,16 @@ EXPLAIN (COSTS OFF)
                          QUERY PLAN                          
 -------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: (i = ANY ($0))
+         Recheck Cond: (i = ANY ((InitPlan 1).col1))
          ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-               Index Cond: (i = ANY ($0))
+               Index Cond: (i = ANY ((InitPlan 1).col1))
 (11 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1)
@@ -2281,16 +2284,16 @@ EXPLAIN (COSTS OFF)
                          QUERY PLAN                          
 -------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: (i = ANY ($0))
+         Recheck Cond: (i = ANY ((InitPlan 1).col1))
          ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-               Index Cond: (i = ANY ($0))
+               Index Cond: (i = ANY ((InitPlan 1).col1))
 (11 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 50)
@@ -2311,16 +2314,16 @@ EXPLAIN (COSTS OFF)
                          QUERY PLAN                          
 -------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: (i = ANY ($0))
+         Recheck Cond: (i = ANY ((InitPlan 1).col1))
          ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-               Index Cond: (i = ANY ($0))
+               Index Cond: (i = ANY ((InitPlan 1).col1))
 (11 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 300)
@@ -2340,14 +2343,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -2360,12 +2363,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2387,14 +2390,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -2405,14 +2408,14 @@ EXPLAIN (COSTS OFF)
                                    ->  Subquery Scan on "*SELECT* 2"
                                          ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
-         Filter: ((i = ANY ($0)) OR ((j = ANY ($1)) AND (((((ctid)::text)::point)[0])::integer = 0)))
+         Filter: ((i = ANY ((InitPlan 1).col1)) OR ((j = ANY ((InitPlan 2).col1)) AND (((((ctid)::text)::point)[0])::integer = 0)))
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2434,26 +2437,26 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2475,26 +2478,26 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2516,26 +2519,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 1),
@@ -2557,14 +2560,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -2577,12 +2580,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2604,14 +2607,14 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -2622,14 +2625,14 @@ EXPLAIN (COSTS OFF)
                                    ->  Subquery Scan on "*SELECT* 2"
                                          ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
-         Filter: ((i = ANY ($0)) OR ((j = ANY ($1)) AND (((((ctid)::text)::point)[0])::integer = 0)))
+         Filter: ((i = ANY ((InitPlan 1).col1)) OR ((j = ANY ((InitPlan 2).col1)) AND (((((ctid)::text)::point)[0])::integer = 0)))
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (24 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2651,26 +2654,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2692,26 +2695,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2733,26 +2736,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2774,16 +2777,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i ORDER BY i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -2792,12 +2795,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 69),
@@ -2819,26 +2822,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2860,26 +2863,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 5),
@@ -2901,26 +2904,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti OFFSET 200 LIMIT 10),
@@ -2942,26 +2945,26 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (18 rows)
 
 WITH s1 AS (SELECT i FROM bti LIMIT 10),
@@ -2983,16 +2986,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i DESC
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3001,12 +3004,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i DESC LIMIT 69),
@@ -3028,16 +3031,16 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -3050,12 +3053,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (26 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3077,16 +3080,16 @@ EXPLAIN (COSTS OFF)
 		WHERE i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			  j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[]) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Subquery Scan on s2
                  ->  Limit
@@ -3097,14 +3100,14 @@ EXPLAIN (COSTS OFF)
                                    ->  Subquery Scan on "*SELECT* 2"
                                          ->  Seq Scan on btj
    ->  Custom Scan (o_scan) on bitmap_test_ctid
-         Filter: ((i = ANY ($0)) OR ((j = ANY ($1)) AND (((((ctid)::text)::point)[0])::integer = 0)))
+         Filter: ((i = ANY ((InitPlan 1).col1)) OR ((j = ANY ((InitPlan 2).col1)) AND (((((ctid)::text)::point)[0])::integer = 0)))
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (26 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3126,16 +3129,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3144,12 +3147,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3171,16 +3174,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3189,12 +3192,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3216,16 +3219,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3234,12 +3237,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3261,16 +3264,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3279,12 +3282,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3306,16 +3309,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3324,12 +3327,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3351,16 +3354,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3369,12 +3372,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3396,16 +3399,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3414,12 +3417,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3441,16 +3444,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3459,12 +3462,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3486,16 +3489,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3504,12 +3507,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i LIMIT 72),
@@ -3531,16 +3534,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) AND
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3549,12 +3552,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) AND (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) AND (j = ANY ((InitPlan 2).col1)))
          ->  BitmapAnd
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i OFFSET 79 LIMIT 10),
@@ -3576,16 +3579,16 @@ EXPLAIN (COSTS OFF)
 		WHERE (i = ANY((SELECT ARRAY_AGG(i) FROM s1)::int4[]) OR
 			   j = ANY((SELECT ARRAY_AGG(j) FROM s2)::int4[])) AND
 			  bitmap_test_ctid_high(ctid) = test_const_high_ctid();
-                         QUERY PLAN                          
--------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Aggregate
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Aggregate
            ->  Limit
                  ->  Sort
                        Sort Key: bti.i
                        ->  Seq Scan on bti
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Aggregate
            ->  Limit
                  ->  Sort
@@ -3594,12 +3597,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test_ctid
          Filter: (((((ctid)::text)::point)[0])::integer = 0)
          Bitmap heap scan
-         Recheck Cond: ((i = ANY ($0)) OR (j = ANY ($1)))
+         Recheck Cond: ((i = ANY ((InitPlan 1).col1)) OR (j = ANY ((InitPlan 2).col1)))
          ->  BitmapOr
                ->  Bitmap Index Scan on bitmap_test_ctid_ix1
-                     Index Cond: (i = ANY ($0))
+                     Index Cond: (i = ANY ((InitPlan 1).col1))
                ->  Bitmap Index Scan on bitmap_test_ctid_ix2
-                     Index Cond: (j = ANY ($1))
+                     Index Cond: (j = ANY ((InitPlan 2).col1))
 (22 rows)
 
 WITH s1 AS (SELECT i FROM bti ORDER BY i OFFSET 79 LIMIT 1),
@@ -3858,24 +3861,24 @@ SELECT smart_explain(
 	 (SELECT id * 500 FROM bitmap_test_complex WHERE id = 1),
 	 GREATEST(1,2), LEAST(11,12), COALESCE (NULL, NULL, 12),
 	 15) ORDER BY id;');
-                                           smart_explain                                            
-----------------------------------------------------------------------------------------------------
+                                             smart_explain                                              
+--------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: bitmap_test_complex.id
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Custom Scan (o_scan) on bitmap_test_complex bitmap_test_complex_1
            Bitmap heap scan
            Recheck Cond: (id2 = 1)
            ->  Bitmap Index Scan on bitmap_test_complex_ix2
                  Index Cond: (id2 = 1)
-   InitPlan 2 (returns $1)
+   InitPlan 2
      ->  Index Only Scan using bitmap_test_complex_ix4 on bitmap_test_complex bitmap_test_complex_2
            Index Cond: (id = 1)
    ->  Custom Scan (o_scan) on bitmap_test_complex
          Bitmap heap scan
-         Recheck Cond: (id = ANY (ARRAY[abs($0), $1, 2, 11, 12, 15]))
+         Recheck Cond: (id = ANY (ARRAY[abs((InitPlan 1).col1), (InitPlan 2).col1, 2, 11, 12, 15]))
          ->  Bitmap Index Scan on bitmap_test_complex_ix4
-               Index Cond: (id = ANY (ARRAY[abs($0), $1, 2, 11, 12, 15]))
+               Index Cond: (id = ANY (ARRAY[abs((InitPlan 1).col1), (InitPlan 2).col1, 2, 11, 12, 15]))
 (16 rows)
 
 SELECT * FROM bitmap_test_complex WHERE id IN

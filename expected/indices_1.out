@@ -1614,12 +1614,12 @@ SELECT idi, idv FROM o_test66 ORDER BY idi, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv;
-                     QUERY PLAN                     
-----------------------------------------------------
- Sort
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Incremental Sort
    Sort Key: idi DESC, idv
-   ->  Custom Scan (o_scan) on o_test66
-         Backward index only scan of: o_test66_reg1
+   Presorted Key: idi
+   ->  Index Only Scan Backward using o_test66_reg1 on o_test66
 (4 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv;
@@ -1655,12 +1655,12 @@ SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi, idv DESC;
-                    QUERY PLAN                     
----------------------------------------------------
- Sort
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Incremental Sort
    Sort Key: idi, idv DESC
-   ->  Custom Scan (o_scan) on o_test66
-         Forward index only scan of: o_test66_reg1
+   Presorted Key: idi
+   ->  Index Only Scan using o_test66_reg1 on o_test66
 (4 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi, idv DESC;
@@ -1784,13 +1784,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
 
 -- Test Result node processing
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
-                      QUERY PLAN                       
--------------------------------------------------------
+        QUERY PLAN        
+--------------------------
  Result
    One-Time Filter: false
-   ->  Index Only Scan using o_test66_reg1 on o_test66
-         Index Cond: (idi = 2)
-(4 rows)
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
  idi | idv 
@@ -2026,12 +2024,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2178,12 +2175,11 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2194,16 +2190,34 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
    3 | 22
 (4 rows)
 
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Index Only Scan using o_test66_reg1 on o_test66
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
+
+SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+ idi | idv 
+-----+-----
+   2 | 12
+   2 | 22
+   3 | 12
+   3 | 22
+(4 rows)
+
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test66 USING(idi, idv);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Hash Join
-   Hash Cond: ((test66.idi = o_test66.idi) AND ((test66.idv)::text = (o_test66.idv)::text))
-   ->  Seq Scan on test66
-   ->  Hash
-         ->  Seq Scan on o_test66
-(5 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_test66
+   ->  Memoize
+         Cache Key: o_test66.idi, o_test66.idv
+         Cache Mode: logical
+         ->  Index Only Scan using test66_pkey on test66
+               Index Cond: ((idi = o_test66.idi) AND (idv = (o_test66.idv)::text))
+(7 rows)
 
 SELECT * FROM test66 JOIN o_test66 USING(idi, idv);
  idi | idv | idp 
@@ -2869,12 +2883,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3015,12 +3028,11 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3033,14 +3045,16 @@ SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
 
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test67 USING(idi, idv);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Hash Join
-   Hash Cond: ((test66.idi = o_test67.idi) AND ((test66.idv)::text = (o_test67.idv)::text))
-   ->  Seq Scan on test66
-   ->  Hash
-         ->  Seq Scan on o_test67
-(5 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_test67
+   ->  Memoize
+         Cache Key: o_test67.idi, o_test67.idv
+         Cache Mode: logical
+         ->  Index Only Scan using test66_pkey on test66
+               Index Cond: ((idi = o_test67.idi) AND (idv = (o_test67.idv)::text))
+(7 rows)
 
 SELECT * FROM test66 JOIN o_test67 USING(idi, idv);
  idi | idv | idp 
@@ -3269,12 +3283,12 @@ SELECT idi, idv FROM o_test68 ORDER BY idi DESC;
 RESET enable_seqscan;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi, idv;
-                     QUERY PLAN                     
-----------------------------------------------------
- Sort
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Incremental Sort
    Sort Key: idi, idv
-   ->  Custom Scan (o_scan) on o_test68
-         Backward index only scan of: o_test68_reg1
+   Presorted Key: idi
+   ->  Index Only Scan Backward using o_test68_reg1 on o_test68
 (4 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi, idv;
@@ -3386,12 +3400,12 @@ SELECT idi, idv FROM o_test68 ORDER BY idi, idv DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv DESC;
-                    QUERY PLAN                     
----------------------------------------------------
- Sort
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Incremental Sort
    Sort Key: idi DESC, idv DESC
-   ->  Custom Scan (o_scan) on o_test68
-         Forward index only scan of: o_test68_reg1
+   Presorted Key: idi
+   ->  Index Only Scan using o_test68_reg1 on o_test68
 (4 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv DESC;
@@ -3706,12 +3720,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3852,12 +3865,11 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3868,16 +3880,34 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
    2 | 22
 (4 rows)
 
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Index Only Scan Backward using o_test68_reg1 on o_test68
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
+
+SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+ idi | idv 
+-----+-----
+   2 | 22
+   2 | 12
+   3 | 22
+   3 | 12
+(4 rows)
+
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Hash Join
-   Hash Cond: ((test66.idi = o_test68.idi) AND ((test66.idv)::text = (o_test68.idv)::text))
-   ->  Seq Scan on test66
-   ->  Hash
-         ->  Seq Scan on o_test68
-(5 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_test68
+   ->  Memoize
+         Cache Key: o_test68.idi, o_test68.idv
+         Cache Mode: logical
+         ->  Index Only Scan using test66_pkey on test66
+               Index Cond: ((idi = o_test68.idi) AND (idv = (o_test68.idv)::text))
+(7 rows)
 
 SELECT * FROM test66 JOIN o_test68 USING(idi, idv);
  idi | idv | idp 
@@ -4142,12 +4172,12 @@ SELECT idi, idv FROM o_test69 ORDER BY idv, idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi;
-                     QUERY PLAN                     
-----------------------------------------------------
- Sort
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Incremental Sort
    Sort Key: idv DESC, idi
-   ->  Custom Scan (o_scan) on o_test69
-         Backward index only scan of: o_test69_reg1
+   Presorted Key: idv
+   ->  Index Only Scan Backward using o_test69_reg1 on o_test69
 (4 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi;
@@ -4183,12 +4213,12 @@ SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv, idi DESC;
-                    QUERY PLAN                     
----------------------------------------------------
- Sort
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Incremental Sort
    Sort Key: idv, idi DESC
-   ->  Custom Scan (o_scan) on o_test69
-         Forward index only scan of: o_test69_reg1
+   Presorted Key: idv
+   ->  Index Only Scan using o_test69_reg1 on o_test69
 (4 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv, idi DESC;
@@ -4541,12 +4571,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                   QUERY PLAN                    
--------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = ANY ('{12,22}'::text[]))
-   Filter: (idi = ANY ('{2,4}'::integer[]))
-(3 rows)
+   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = ANY ('{2,4}'::integer[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -4702,16 +4731,36 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
    3 | 22
 (4 rows)
 
+EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Sort Key: idi
+   ->  Index Only Scan using o_test69_reg1 on o_test69
+         Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi > 1))
+(4 rows)
+
+SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
+ idi | idv 
+-----+-----
+   2 | 12
+   2 | 22
+   3 | 12
+   3 | 22
+(4 rows)
+
 RESET enable_seqscan;
 EXPLAIN (COSTS off) SELECT * FROM test66 JOIN o_test69 USING(idi, idv);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Hash Join
-   Hash Cond: ((test66.idi = o_test69.idi) AND ((test66.idv)::text = (o_test69.idv)::text))
-   ->  Seq Scan on test66
-   ->  Hash
-         ->  Seq Scan on o_test69
-(5 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on o_test69
+   ->  Memoize
+         Cache Key: o_test69.idi, o_test69.idv
+         Cache Mode: logical
+         ->  Index Only Scan using test66_pkey on test66
+               Index Cond: ((idi = o_test69.idi) AND (idv = (o_test69.idv)::text))
+(7 rows)
 
 SELECT * FROM test66 JOIN o_test69 USING(idi, idv);
  idi | idv | idp 
@@ -7438,32 +7487,32 @@ SELECT * FROM o_test_pkey_mixed ORDER BY f2;
  100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
 (3 rows)
 
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY f3;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Index Scan using o_test_pkey_mixed_ix3 on o_test_pkey_mixed
+EXPLAIN (COSTS OFF) SELECT f3, f2, pk4, f1, pk4, pk3, pk1, pk2 FROM o_test_pkey_mixed ORDER BY f3;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Index Only Scan using o_test_pkey_mixed_ix3 on o_test_pkey_mixed
 (1 row)
 
-SELECT * FROM o_test_pkey_mixed ORDER BY f3;
- f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
------+-----+-----+-----+-----+-----+-----+-----+-----
-   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
-  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
- 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+SELECT f3, f2, pk4, f1, pk4, pk3, pk1, pk2 FROM o_test_pkey_mixed ORDER BY f3;
+ f3  | f2  | pk4 | f1  | pk4 | pk3 | pk1 | pk2 
+-----+-----+-----+-----+-----+-----+-----+-----
+   3 |   2 |   9 |   1 |   9 |   8 |   6 |   7
+  30 |  20 |  90 |  10 |  90 |  80 |  60 |  70
+ 300 | 200 | 900 | 100 | 900 | 800 | 600 | 700
 (3 rows)
 
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY i1;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Index Scan using o_test_pkey_mixed_ix4 on o_test_pkey_mixed
+EXPLAIN (COSTS OFF) SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Index Only Scan using o_test_pkey_mixed_ix4 on o_test_pkey_mixed
 (1 row)
 
-SELECT * FROM o_test_pkey_mixed ORDER BY i1;
- f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
+SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
+ i1  | f1  | pk4 | f2  | pk4 | pk3 | i2  | pk1 | pk2 
 -----+-----+-----+-----+-----+-----+-----+-----+-----
-   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |   9
-  10 |  20 |  30 |  40 |  50 |  60 |  70 |  80 |  90
- 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+   4 |   1 |   9 |   2 |   9 |   8 |   5 |   6 |   7
+  40 |  10 |  90 |  20 |  90 |  80 |  50 |  60 |  70
+ 400 | 100 | 900 | 200 | 900 | 800 | 500 | 600 | 700
 (3 rows)
 
 RESET enable_seqscan;
