@@ -389,9 +389,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	if (OidIsValid(indoid))
 		index = index_open(indoid, AccessShareLock);
 
-	if (OidIsValid(indoid))
-		index = index_open(indoid, AccessShareLock);
-
 	ORelOidsSetFromRel(oids, heap);
 
 	options = (OBTOptions *) index->rd_options;
@@ -529,10 +526,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		ix_num = old_ix_num;
 		table_index = &o_table->indices[ix_num];
 	}
-	if (!unique_as_pkey)
-		o_table->indices = (OTableIndex *)
-			repalloc(o_table->indices, sizeof(OTableIndex) *
-						(o_table->nindices + 1));
 
 	if (!reuse_relnode)
 		memcpy(&table_index->name, &index->rd_rel->relname,
@@ -560,6 +553,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	{
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
+
 		recreate_o_table(old_o_table, o_table);
 	}
 	else

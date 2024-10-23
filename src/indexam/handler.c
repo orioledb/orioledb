@@ -10,6 +10,7 @@
  *
  *-------------------------------------------------------------------------
  */
+
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -189,8 +190,6 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		reindex = true;
 		reindex_list = list_delete(reindex_list, relname);
 	}
-
-	(void) btbuild(heap, index, indexInfo);
 
 	(void) btbuild(heap, index, indexInfo);
 
@@ -412,9 +411,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	int			skipped = 0;
 	CommitSeqNo csn;
-
-	if (OidIsValid(rel->rd_rel->relrewrite))
-		return true;
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
 		return true;
@@ -688,132 +684,6 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	result = o_tbl_index_delete(index_descr, ix_num, slot, oxid, oSnapshot.csn);
-	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
-	{
-		if (vfree[i])
-			pfree(DatumGetPointer(values[i]));
-	}
-	pfree(vfree);
-
-	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
-	{
-		if (vfree[i])
-			pfree(DatumGetPointer(valuesOld[i]));
-	}
-	pfree(vfree);
-
-	if (!result.success)
-	{
-		switch (result.action)
-		{
-			case BTreeOperationUpdate:
-				{
-					StringInfo	str = makeStringInfo();
-
-					if (result.failedIxNum == PrimaryIndexNumber)
-						break;	/* it is ok */
-
-					appendStringInfo(str, "(");
-					for (i = 0; i < index_descr->nUniqueFields; i++)
-					{
-						if (i != 0)
-							appendStringInfo(str, ", ");
-						if (isnull[i])
-							appendStringInfo(str, "null");
-						else
-						{
-							Oid			typoutput;
-							bool		typisvarlena;
-							char	   *res;
-
-							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
-											  &typoutput, &typisvarlena);
-							res = OidOutputFunctionCall(typoutput, values[i]);
-							appendStringInfo(str, "'%s'", res);
-						}
-					}
-					appendStringInfo(str, ")");
-					ereport(ERROR,
-							(errcode(ERRCODE_INTERNAL_ERROR),
-							 errmsg("unable to remove tuple from secondary index in \"%s\"",
-									RelationGetRelationName(rel)),
-							 errdetail("Unable to remove %s from index \"%s\"",
-									   str->data,
-									   index_descr->name.data),
-							 errtableconstraint(rel, "sk")));
-					break;
-				}
-			case BTreeOperationInsert:
-				break;
-			default:
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unsupported BTreeOperationType.")));
-				break;
-		}
-	}
-
-	return result.success;
-}
-bool
-orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
-				  Datum tupleid, Relation heapRel, IndexInfo *indexInfo)
-{
-	OTableModifyResult result;
-	ORelOids	oids;
-	OIndexType	ix_type;
-	OIndexDescr *index_descr;
-	OTableDescr *descr;
-	OIndexNumber ix_num;
-	CommitSeqNo csn;
-	OXid		oxid;
-	uint32		version;
-	TupleTableSlot *slot;
-	OTuple		tuple;
-	bool	   *vfree;
-	int			i;
-
-	if (rel->rd_index->indisprimary)
-		return true;
-
-	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
-	Assert(index_descr != NULL);
-	descr = o_fetch_table_descr(index_descr->tableOids);
-	Assert(descr != NULL);
-
-	/* Find ix_num */
-	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
-	{
-		OIndexDescr *index;
-
-		index = descr->indices[ix_num];
-		if (index->oids.reloid == rel->rd_rel->oid)
-			break;
-	}
-	Assert(ix_num < descr->nIndices);
-
-	slot = index_descr->old_leaf_slot;
-	append_rowid_values(index_descr,
-						GET_PRIMARY(descr)->nonLeafTupdesc,
-						&GET_PRIMARY(descr)->nonLeafSpec,
-						tupleid, values, isnull,
-						&csn, &version);
-	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
-	detoast_passed_values(index_descr, values, isnull, vfree);
-	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-						 version, values, isnull);
-	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
-
-	fill_current_oxid_csn(&oxid, &csn);
-
-	result = o_tbl_index_delete(index_descr, ix_num, slot, oxid, csn);
 	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
 	{
 		if (vfree[i])
@@ -1344,10 +1214,6 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	/* Find ix_num */
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
-		OIndexDescr *index;
-
-		index = descr->indices[ix_num];
-		if (index->oids.reloid == rel->rd_rel->oid)
 		OIndexDescr *index;
 
 		index = descr->indices[ix_num];

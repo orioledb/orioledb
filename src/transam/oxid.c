@@ -487,43 +487,6 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 }
 
 /*
- * Read csn of given xid from xidmap.
- */
-static XLogRecPtr
-map_oxid_xlog_ptr(OXid oxid)
-{
-	XLogRecPtr	ptr;
-
-	/* Optimisticly try to read csn from circular buffer */
-	ptr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
-	pg_read_barrier();
-
-	/* Did we manage to read the correct csn? */
-	if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
-		return ptr;
-
-	/*
-	 * Wait for the concurrent write operation if needed.
-	 */
-	if (oxid >= pg_atomic_read_u64(&xid_meta->writtenXmin))
-	{
-		LWLockAcquire(&xid_meta->xidMapWriteLock, LW_SHARED);
-		LWLockRelease(&xid_meta->xidMapWriteLock);
-	}
-
-	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
-	o_buffers_read(&buffersDesc, (Pointer) &ptr,
-				   oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, commitPtr),
-				   sizeof(XLogRecPtr));
-
-	/* Recheck if globalXmin was advanced concurrently */
-	if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
-		return COMMITSEQNO_FROZEN;
-
-	return ptr;
-}
-
-/*
  * Write some data from circular buffer to o_buffers
  */
 static void
@@ -1096,7 +1059,6 @@ get_current_oxid(void)
 												  COMMITSEQNO_STATUS_IN_PROGRESS));
 		curOxid = newOxid;
 		logicalXid = acquire_logical_xid();
-		logicalNextXid = XidFromFullTransactionId(TRANSAM_VARIABLES->nextXid);
 	}
 
 	return curOxid;
