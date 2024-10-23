@@ -130,7 +130,7 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 	Assert(low->nkeys == high->nkeys);
 
-	for (i = 0; valid && i < low->nkeys; i++)
+	for (i = numPrefixExactKeys + 1; valid && i < low->nkeys; i++)
 	{
 		int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
 														  id, i + 1);
@@ -223,7 +223,7 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 {
 	IndexScanDesc scan = &ostate->scandesc;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
-	int		i;
+	int			i;
 
 	/*
 	 * We must advance the last array key most quickly, since it will

@@ -122,6 +122,11 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					high.flags = O_VALUE_BOUND_UPPER;
 					if (key->sk_strategy == BTLessEqualStrategyNumber)
 						high.flags |= O_VALUE_BOUND_INCLUSIVE;
+					if (field->nullfirst)
+					{
+						setLow = true;
+						low.flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_NULL;
+					}
 				}
 				break;
 			case BTEqualStrategyNumber:
@@ -148,6 +153,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 				{
 					if (field->nullfirst)
 						low.flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_NULL;
+
 				}
 				else
 				{
@@ -155,6 +161,11 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					low.flags = O_VALUE_BOUND_LOWER;
 					if (key->sk_strategy == BTGreaterEqualStrategyNumber)
 						low.flags |= O_VALUE_BOUND_INCLUSIVE;
+					if (!field->nullfirst)
+					{
+						setHigh = true;
+						high.flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_NULL;
+					}
 				}
 				break;
 
