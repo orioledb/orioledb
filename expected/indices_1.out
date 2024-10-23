@@ -8421,6 +8421,149 @@ CREATE UNIQUE INDEX o_test_unique_include_ix1
 INSERT INTO o_test_unique_include
     SELECT a, repeat('x', a) FROM generate_series(1, 1000) as a;
 COMMIT;
+CREATE TABLE o_test_saop (
+	i int NOT NULL,
+	j int NOT NULL,
+	k int NOT NULL,
+	PRIMARY KEY (i, j, k)
+) USING orioledb;
+INSERT INTO o_test_saop
+	(SELECT i % 10, (i / 10) % 10, i / 100 FROM generate_series(1, 1000) i);
+EXPLAIN (COSTS OFF)
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Index Only Scan using o_test_saop_pkey on o_test_saop
+   Index Cond: ((i < ANY ('{3,4,5}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
+   Filter: (k > ALL ('{7,8}'::integer[]))
+(3 rows)
+
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
+ i | j | k 
+---+---+---
+ 0 | 3 | 9
+ 0 | 4 | 9
+ 0 | 5 | 9
+ 1 | 3 | 9
+ 1 | 4 | 9
+ 1 | 5 | 9
+ 2 | 3 | 9
+ 2 | 4 | 9
+ 2 | 5 | 9
+ 3 | 3 | 9
+ 3 | 4 | 9
+ 3 | 5 | 9
+ 4 | 3 | 9
+ 4 | 4 | 9
+ 4 | 5 | 9
+(15 rows)
+
+EXPLAIN (COSTS OFF)
+SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Index Only Scan using o_test_saop_pkey on o_test_saop
+   Index Cond: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
+(2 rows)
+
+SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
+ i | j | k 
+---+---+---
+ 1 | 0 | 3
+ 1 | 0 | 5
+ 1 | 1 | 3
+ 1 | 1 | 5
+ 1 | 2 | 3
+ 1 | 2 | 5
+ 1 | 3 | 3
+ 1 | 3 | 5
+ 1 | 4 | 3
+ 1 | 4 | 5
+ 1 | 5 | 3
+ 1 | 5 | 5
+ 1 | 6 | 3
+ 1 | 6 | 5
+ 1 | 7 | 3
+ 1 | 7 | 5
+ 1 | 8 | 3
+ 1 | 8 | 5
+ 1 | 9 | 3
+ 1 | 9 | 5
+ 3 | 0 | 3
+ 3 | 0 | 5
+ 3 | 1 | 3
+ 3 | 1 | 5
+ 3 | 2 | 3
+ 3 | 2 | 5
+ 3 | 3 | 3
+ 3 | 3 | 5
+ 3 | 4 | 3
+ 3 | 4 | 5
+ 3 | 5 | 3
+ 3 | 5 | 5
+ 3 | 6 | 3
+ 3 | 6 | 5
+ 3 | 7 | 3
+ 3 | 7 | 5
+ 3 | 8 | 3
+ 3 | 8 | 5
+ 3 | 9 | 3
+ 3 | 9 | 5
+(40 rows)
+
+EXPLAIN (COSTS OFF)
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Index Only Scan using o_test_saop_pkey on o_test_saop
+   Index Cond: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
+(2 rows)
+
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
+ i | j | k 
+---+---+---
+ 0 | 1 | 0
+ 0 | 1 | 1
+ 0 | 1 | 2
+ 0 | 1 | 3
+ 0 | 1 | 4
+ 0 | 1 | 5
+ 0 | 1 | 6
+ 0 | 1 | 7
+ 0 | 1 | 8
+ 0 | 1 | 9
+ 0 | 3 | 0
+ 0 | 3 | 1
+ 0 | 3 | 2
+ 0 | 3 | 3
+ 0 | 3 | 4
+ 0 | 3 | 5
+ 0 | 3 | 6
+ 0 | 3 | 7
+ 0 | 3 | 8
+ 0 | 3 | 9
+ 1 | 1 | 0
+ 1 | 1 | 1
+ 1 | 1 | 2
+ 1 | 1 | 3
+ 1 | 1 | 4
+ 1 | 1 | 5
+ 1 | 1 | 6
+ 1 | 1 | 7
+ 1 | 1 | 8
+ 1 | 1 | 9
+ 1 | 3 | 0
+ 1 | 3 | 1
+ 1 | 3 | 2
+ 1 | 3 | 3
+ 1 | 3 | 4
+ 1 | 3 | 5
+ 1 | 3 | 6
+ 1 | 3 | 7
+ 1 | 3 | 8
+ 1 | 3 | 9
+(40 rows)
+
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -8428,7 +8571,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 55 other objects
+NOTICE:  drop cascades to 56 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8484,6 +8627,7 @@ drop cascades to table o_test_pkey_include_same_fields
 drop cascades to table o_test_include_same_as_pkey
 drop cascades to table o_test_index_already_exists_skip
 drop cascades to table o_test_unique_include
+drop cascades to table o_test_saop
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)
