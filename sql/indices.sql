@@ -1928,6 +1928,28 @@ INSERT INTO o_test_unique_include
 
 COMMIT;
 
+CREATE TABLE o_test_saop (
+	i int NOT NULL,
+	j int NOT NULL,
+	k int NOT NULL,
+	PRIMARY KEY (i, j, k)
+) USING orioledb;
+
+INSERT INTO o_test_saop
+	(SELECT i % 10, (i / 10) % 10, i / 100 FROM generate_series(1, 1000) i);
+
+EXPLAIN (COSTS OFF)
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
+
+EXPLAIN (COSTS OFF)
+SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
+SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
+
+EXPLAIN (COSTS OFF)
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
+SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
