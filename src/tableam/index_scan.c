@@ -173,46 +173,44 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 			valid = false;
 	}
 
-	for (i = 0; i < so->numberOfKeys; i++)
+	for (i = 0; i < so->numArrayKeys; i++)
 	{
-		ScanKey		key = so->keyData + i;
+		BTArrayKeyInfo *arrayKey = arrayKeys + i;
+		ScanKey		key = so->keyData + arrayKey->scan_key;
 
-		if ((key->sk_flags & SK_SEARCHARRAY) &&
-			key->sk_strategy == BTEqualStrategyNumber &&
-			arrayKeys && arrayKeys->num_elems > 0)
+		Assert((key->sk_flags & SK_SEARCHARRAY) &&
+			   key->sk_strategy == BTEqualStrategyNumber &&
+			   arrayKey->num_elems > 0);
+
+		if (arrayKey->scan_key >= numPrefixExactKeys)
 		{
-			if (i >= numPrefixExactKeys)
+			int			j;
+			bool		isnull;
+			Datum		value = o_fastgetattr(tup, key->sk_attno, id->leafTupdesc,
+											  &id->leafSpec, &isnull);
+			bool		found = false;
+			OBTreeValueBound *bound = &low->keys[key->sk_attno - 1];
+			OIndexField *field = &id->fields[key->sk_attno - 1];
+
+			for (j = 0; j < arrayKey->num_elems; j++)
 			{
-				int			j;
-				bool		isnull;
-				Datum		value = o_fastgetattr(tup, key->sk_attno, id->leafTupdesc,
-												  &id->leafSpec, &isnull);
-				bool		found = false;
-				OBTreeValueBound *bound = &low->keys[key->sk_attno - 1];
-				OIndexField *field = &id->fields[key->sk_attno - 1];
+				int			cmp;
 
-				for (j = 0; j < arrayKeys->num_elems; j++)
+				if (o_bound_is_coercible(bound, field))
+					cmp = o_call_comparator(field->comparator,
+											value, arrayKey->elem_values[j]);
+				else
+					cmp = o_call_comparator(bound->comparator,
+											value, arrayKey->elem_values[j]);
+				if (cmp == 0)
 				{
-					int			cmp;
-
-					if (o_bound_is_coercible(bound, field))
-						cmp = o_call_comparator(field->comparator,
-												value, arrayKeys->elem_values[j]);
-					else
-						cmp = o_call_comparator(bound->comparator,
-												value, arrayKeys->elem_values[j]);
-					if (cmp == 0)
-					{
-						found = true;
-						break;
-					}
+					found = true;
+					break;
 				}
-
-				if (!found)
-					valid = false;
 			}
 
-			arrayKeys++;
+			if (!found)
+				valid = false;
 		}
 	}
 
@@ -225,30 +223,23 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 {
 	IndexScanDesc scan = &ostate->scandesc;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
-	int			i = so->numArrayKeys - 1;
-	int			j;
-
-	for (j = ostate->numPrefixExactKeys; j < so->numberOfKeys; j++)
-	{
-		ScanKey		key = so->keyData + j;
-
-		if ((key->sk_flags & SK_SEARCHARRAY) &&
-			key->sk_strategy == BTEqualStrategyNumber)
-			i--;
-	}
+	int		i;
 
 	/*
 	 * We must advance the last array key most quickly, since it will
 	 * correspond to the lowest-order index column among the available
 	 * qualifications
 	 */
-	for (; i >= 0; i--)
+	for (i = so->numArrayKeys - 1; i >= 0; i--)
 	{
 		BTArrayKeyInfo *curArrayKey = &so->arrayKeys[i];
 		ScanKey		skey = &so->keyData[curArrayKey->scan_key];
 		int			cur_elem = curArrayKey->cur_elem;
 		int			num_elems = curArrayKey->num_elems;
 		bool		rolled = false;
+
+		if (curArrayKey->scan_key >= ostate->numPrefixExactKeys)
+			continue;
 
 		if (ScanDirectionIsForward(dir) && ++cur_elem >= num_elems)
 		{
