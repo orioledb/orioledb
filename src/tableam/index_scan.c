@@ -60,7 +60,6 @@ init_index_scan_state(OScanState *ostate, Relation index,
 		if (so->numArrayKeys > 0)
 		{
 			_bt_start_array_keys(scan, ForwardScanDirection);
-			//
 		}
 	}
 	_bt_preprocess_keys(scan);
