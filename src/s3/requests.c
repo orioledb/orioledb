@@ -21,6 +21,7 @@
 #include "s3/requests.h"
 
 #include "common/base64.h"
+#include "common/sha2.h"
 #include "lib/stringinfo.h"
 #include "utils/wait_event.h"
 
@@ -56,7 +57,7 @@ hex_string(Pointer data, int len)
 
 	hex_encode(data, len, result);
 
-	result[len * 2] = 0;
+	result[len * 2] = '\0';
 	return result;
 }
 
@@ -188,7 +189,7 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	struct curl_slist *slist;
 	char	   *tmp;
 	int			sc;
-	unsigned char hash[32];
+	unsigned char hash[PG_SHA256_DIGEST_STRING_LENGTH];
 	char	   *contenthash;
 	char	   *objectpath = objectname;
 	long		http_code = 0;
@@ -258,6 +259,7 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	pfree(signature);
 	if (objectpath != objectname)
 		pfree(objectpath);
+	pfree(contenthash);
 
 	return http_code;
 }
@@ -293,7 +295,7 @@ s3_delete_object(char *objectname)
 	char	   *tmp;
 	int			sc;
 	StringInfoData buf;
-	unsigned char hash[32];
+	unsigned char hash[PG_SHA256_DIGEST_STRING_LENGTH];
 	char	   *contenthash;
 	char	   *objectpath = objectname;
 	long		http_code = 0;
@@ -360,6 +362,7 @@ s3_delete_object(char *objectname)
 	pfree(buf.data);
 	if (objectpath != objectname)
 		pfree(objectpath);
+	pfree(contenthash);
 }
 
 /*
@@ -463,7 +466,7 @@ write_file_part(const char *filename, uint64 offset,
 /*
  * Read the whole file.
  */
-static Pointer
+Pointer
 read_file(const char *filename, uint64 *size)
 {
 	return read_file_part(filename, 0, UINT64_MAX, size);
@@ -481,11 +484,13 @@ write_file(const char *filename, Pointer data, uint64 size)
 /*
  * Put object with given binary contents to S3.
  *
+ * If dataHash is NULL the function calculates hash of the content.
+ *
  * Returns HTTP status code.
  */
-static long
+long
 s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
-							bool ifNoneMatch)
+							char *dataHash, bool ifNoneMatch)
 {
 	CURL	   *curl;
 	char	   *url;
@@ -498,11 +503,17 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	char	   *tmp;
 	int			sc;
 	StringInfoData buf;
-	unsigned char hash[32];
 	long		http_code = 0;
 
-	(void) SHA256((unsigned char *) data, dataSize, hash);
-	contenthash = hex_string((Pointer) hash, sizeof(hash));
+	if (dataHash == NULL)
+	{
+		unsigned char hash[PG_SHA256_DIGEST_STRING_LENGTH];
+
+		(void) SHA256((unsigned char *) data, dataSize, hash);
+		contenthash = hex_string((Pointer) hash, sizeof(hash));
+	}
+	else
+		contenthash = dataHash;
 
 	if (s3_prefix)
 	{
@@ -575,8 +586,6 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	curl_easy_cleanup(curl);
 
 	curl_slist_free_all(slist);
-	if (data)
-		pfree(data);
 	pfree(url);
 	pfree(datestring);
 	pfree(datetimestring);
@@ -584,6 +593,8 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	pfree(buf.data);
 	if (objectpath != objectname)
 		pfree(objectpath);
+	if (contenthash != dataHash)
+		pfree(contenthash);
 
 	return http_code;
 }
@@ -596,11 +607,17 @@ s3_put_file(char *objectname, char *filename, bool ifNoneMatch)
 {
 	Pointer		data;
 	uint64		dataSize = 0;
+	long		res = -1;
 
 	data = read_file(filename, &dataSize);
 	if (data)
-		return s3_put_object_with_contents(objectname, data, dataSize, ifNoneMatch);
-	return -1;
+	{
+		res = s3_put_object_with_contents(objectname, data, dataSize, NULL,
+										  ifNoneMatch);
+		pfree(data);
+	}
+
+	return res;
 }
 
 /*
@@ -629,14 +646,19 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 {
 	Pointer		data;
 	uint64		dataSize;
+	long		res = -1;
 
 	data = read_file_part(filename,
 						  partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
 						  ORIOLEDB_S3_PART_SIZE,
 						  &dataSize);
 	if (data)
-		return s3_put_object_with_contents(objectname, data, dataSize, false);
-	return -1;
+	{
+		res = s3_put_object_with_contents(objectname, data, dataSize, NULL, false);
+		pfree(data);
+	}
+
+	return res;
 }
 
 /*
@@ -664,7 +686,7 @@ s3_get_file_part(char *objectname, char *filename, int partnum)
 void
 s3_put_empty_dir(char *objectname)
 {
-	s3_put_object_with_contents(objectname, NULL, 0, false);
+	s3_put_object_with_contents(objectname, NULL, 0, NULL, false);
 }
 
 /*

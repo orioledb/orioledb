@@ -181,6 +181,64 @@ class S3Test(S3BaseTest):
 		                 node.execute("SELECT * FROM o_test_1"))
 		node.stop()
 
+	def test_s3_checkpoint_unchanged(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+		""")
+		node.start()
+
+		# 1st CHECKPOINT
+		node.safe_psql("""
+			CREATE TABLE test_1 (
+				val_1 int
+			) USING heap;
+			INSERT INTO test_1 SELECT * FROM generate_series(1, 2000);
+			CREATE TABLE test_2 (
+				val_2 int
+			) USING heap;
+			INSERT INTO test_2 SELECT * FROM generate_series(2000, 4000);
+		""")
+
+		test_1_filepath = node.execute(
+		    "SELECT pg_catalog.pg_relation_filepath('test_1'::regclass)")[0][0]
+		test_2_filepath = node.execute(
+		    "SELECT pg_catalog.pg_relation_filepath('test_2'::regclass)")[0][0]
+
+		node.safe_psql("CHECKPOINT")
+
+		objects_1 = self.client.list_objects(Bucket=self.bucket_name)
+		objects_1 = objects_1.get("Contents", [])
+		objects_1 = sorted(list(x["Key"] for x in objects_1))
+
+		self.assertIn("data/1/orioledb_data/pg_files.crc", objects_1)
+		self.assertIn("data/1/" + test_1_filepath, objects_1)
+		self.assertIn("data/1/" + test_2_filepath, objects_1)
+
+		# 2nd CHECKPOINT
+		node.safe_psql("""
+			INSERT INTO test_2 SELECT * FROM generate_series(1, 100);
+		""")
+		node.safe_psql("CHECKPOINT")
+
+		objects_2 = self.client.list_objects(Bucket=self.bucket_name)
+		objects_2 = objects_2.get("Contents", [])
+		objects_2 = sorted(list(x["Key"] for x in objects_2))
+
+		self.assertIn("data/2/orioledb_data/pg_files.crc", objects_2)
+		self.assertNotIn("data/2/" + test_1_filepath, objects_2)
+		self.assertIn("data/2/" + test_2_filepath, objects_2)
+
+		node.stop()
+
 	def test_s3_ddl_recovery(self):
 		node = self.node
 		node.append_conf(
