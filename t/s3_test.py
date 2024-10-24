@@ -631,10 +631,9 @@ class S3Test(S3BaseTest):
 				self.assertIn('differs from the S3 bucket identifier',
 				              f.read())
 
-			# Test that PostgreSQL won't start in caes of wrong CRC of the control file
+			# Test that PostgreSQL won't start in case of wrong CRC of the control file
 			with open(control_filename, "rb+") as f:
-				f.seek(3)
-				f.write(b'\x11')
+				f.write(b'\x11\x11\x11\x11\x11\x11\x11\x11')
 
 			with self.assertRaises(StartNodeException) as e:
 				node.start()
