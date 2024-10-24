@@ -153,6 +153,20 @@ SELECT * FROM (SELECT val_1 || val_2 AS val_3 FROM o_test_temp_inherit
 			   SELECT val_3 FROM o_test_temp_inherit2) t
 	ORDER BY 1 LIMIT 8;
 
+CREATE TEMP TABLE o_test_reinsert_to_primary (
+	val_1 int
+) USING orioledb;
+
+INSERT INTO o_test_reinsert_to_primary(val_1)
+	(SELECT val_1 - 5 FROM generate_series (1, 5) val_1);
+SELECT * FROM o_test_reinsert_to_primary;
+
+CREATE INDEX ON o_test_reinsert_to_primary(val_1);
+
+UPDATE o_test_reinsert_to_primary SET val_1 = val_1 * 6;
+
+SELECT * FROM o_test_reinsert_to_primary;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA temp_schema CASCADE;
 RESET search_path;

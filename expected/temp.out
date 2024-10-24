@@ -577,8 +577,35 @@ SELECT * FROM (SELECT val_1 || val_2 AS val_3 FROM o_test_temp_inherit
  ty
 (8 rows)
 
+CREATE TEMP TABLE o_test_reinsert_to_primary (
+	val_1 int
+) USING orioledb;
+INSERT INTO o_test_reinsert_to_primary(val_1)
+	(SELECT val_1 - 5 FROM generate_series (1, 5) val_1);
+SELECT * FROM o_test_reinsert_to_primary;
+ val_1 
+-------
+    -4
+    -3
+    -2
+    -1
+     0
+(5 rows)
+
+CREATE INDEX ON o_test_reinsert_to_primary(val_1);
+UPDATE o_test_reinsert_to_primary SET val_1 = val_1 * 6;
+SELECT * FROM o_test_reinsert_to_primary;
+ val_1 
+-------
+   -24
+   -18
+   -12
+    -6
+     0
+(5 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 7 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table o_test_temp_indices
 drop cascades to table o_tmp_1
 drop cascades to table o_test_1
@@ -586,6 +613,7 @@ drop cascades to table o_test_temp_inherit
 drop cascades to table o_test_temp_inherit2
 drop cascades to table o_test_temp_inherit_child
 drop cascades to table o_test_temp_inherit_child2
+drop cascades to table o_test_reinsert_to_primary
 DROP SCHEMA temp_schema CASCADE;
 NOTICE:  drop cascades to function func_1(integer)
 RESET search_path;
