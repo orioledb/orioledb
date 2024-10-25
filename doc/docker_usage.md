@@ -287,6 +287,25 @@ To build all Docker image variations on a local machine, run the following comma
 - Supported base image architectures:
   - [ amd64, arm32v6, arm32v7, arm64v8, i386, ppc64le, riscv64, s390x ]
 
+#### macOS
+On macOS you might need to install `bash` and `gnu-getopt` from Homebrew. To install them run the command:
+
+```bash
+brew install bash gnu-getopt
+```
+
+Update your `/etc/shells`:
+
+```bash
+echo /opt/homebrew/bin/bash >> /etc/shells
+```
+
+You may need to update your `PATH` variable in the `.bashrc` or `.zshrc` file:
+
+```
+PATH=/opt/homebrew/bin:/opt/homebrew/opt/gnu-getopt/bin:$PATH
+```
+
 ##### Other:
 
 * Testing: If you can test on architectures other than `amd64`, please let us know!
