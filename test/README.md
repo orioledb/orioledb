@@ -5,7 +5,7 @@ see: "Docker Official Images Test Suite":
 * https://github.com/docker-library/official-images/tree/master/test
 
 Used by:
-* `./docker_matrix.sh`
+* `./ci/docker_matrix.sh`
 * `./.github/workflows/dockertest.yml`
 * todo: add to `./.github/workflows/docker.yml`
 
