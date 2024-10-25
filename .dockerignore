@@ -75,6 +75,10 @@ Dockerfile.ubuntu
 # as they are not needed inside the Docker image.
 test/
 ci/local_docker_matrix.sh
+ci/docker_matrix.sh
 
 # Documentation files, which are not needed inside the Docker image.
 doc/
+
+# Exclude the PostGIS Docker build directory
+docker-postgis

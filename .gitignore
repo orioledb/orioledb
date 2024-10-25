@@ -47,3 +47,6 @@ lib*.pc
 /include/utils/stopevents_data.h
 /orioledb.typedefs
 !ci/antithesis/libvoidstar.so
+
+# Exclude the PostGIS Docker build directory
+/docker-postgis
