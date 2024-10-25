@@ -1,15 +1,13 @@
-
-# Official Postgres Docker Image test
+# Testing OrioleDB Docker images
 
 Running the Docker Official Image tests against orioledb images,
 see: "Docker Official Images Test Suite":
 * https://github.com/docker-library/official-images/tree/master/test
 
-
-used by:
-* `./ci/local_docker_matrix.sh`
-* todo: add to Github CI
-
+Used by:
+* `./docker_matrix.sh`
+* `./.github/workflows/dockertest.yml`
+* todo: add to `./.github/workflows/docker.yml`
 
 ## Running docker test suite
 
