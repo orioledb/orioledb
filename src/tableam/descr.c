@@ -1167,7 +1167,7 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	}
 
 	/*
-	 * Finally, look for plain comparison function.  Throw erro if not found.
+	 * Finally, look for plain comparison function.  Throw error if not found.
 	 */
 	if (!comparator.haveSortSupport)
 	{
