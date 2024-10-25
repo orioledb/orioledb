@@ -1,26 +1,32 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.19 3.18 3.17 3.16 3.15 3.14 3.13 ]
-ARG ALPINE_VERSION=3.19
+# set ALPINE_VERSION= [ edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 ]
+ARG ALPINE_VERSION=3.20
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION
-# Set PG_MAJOR = [16 15]
+
+# Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=16
-ENV PG_MAJOR ${PG_MAJOR}
+ENV PG_MAJOR=${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
 ARG BUILD_CC_COMPILER=clang
-ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
+ENV BUILD_CC_COMPILER=${BUILD_CC_COMPILER}
+
+# Enable debug mode and preserve the build environments for debugging.
+# In this case, each image size exceeds 1GB
+ARG DEBUG_MODE=false
+ENV DEBUG_MODE=${DEBUG_MODE}
 
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
 # They are useful for building downstream extensions using the same LLVM, like PostGIS alpine https://github.com/postgis/docker-postgis
-# Note: PostgreSQL does not support LLVM 16. Therefore, for Alpine >=3.18, please use "llvm15-dev clang15".
+# Note: Some older PostgreSQL version does not support LLVM 16. Therefore, for Alpine >=3.18, please use "llvm15-dev clang15".
 # Reference: https://github.com/docker-library/postgres/pull/1077
 ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
-ENV DOCKER_PG_LLVM_DEPS ${DOCKER_PG_LLVM_DEPS}
+ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
 
 # 70 is the standard uid/gid for "postgres" in Alpine
 # https://git.alpinelinux.org/aports/tree/main/postgresql/postgresql.pre-install?h=3.12-stable
@@ -34,13 +40,15 @@ RUN set -eux; \
 
 # make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
 # alpine doesn't require explicit locale-file generation
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 RUN mkdir -p /usr/src/postgresql/contrib/orioledb
 
 COPY . /usr/src/postgresql/contrib/orioledb
 
 RUN mkdir /docker-entrypoint-initdb.d
+
+RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
 
 RUN set -eux; \
 	\
@@ -49,11 +57,11 @@ RUN set -eux; \
 	ORIOLEDB_BUILDTIME=$(date -Iseconds) ; \
 	ALPINE_VERSION=$(cat /etc/os-release | grep VERSION_ID | cut -d = -f 2 | cut -d . -f 1,2 | cut -d _ -f 1) ; \
 	\
-# To get support for all locales: IF >=Alpine3.16 THEN install icu-data-full
-# https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
-# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
+	# To get support for all locales: IF >=Alpine3.16 THEN install icu-data-full
+	# https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
+	# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18 | 3.19 | 3.20* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
+		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
 		*) : ;; \
 	esac ; \
 	\
@@ -65,8 +73,9 @@ RUN set -eux; \
 	echo "ALPINE_VERSION=$ALPINE_VERSION" ; \
 	echo "EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES" ; \
 	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
+	echo "DEBUG_MODE=$DEBUG_MODE" ; \
 	\
-# check if the custom llvm version is set, and if so, set the LLVM_CONFIG and CLANG variables
+	# check if the custom llvm version is set, and if so, set the LLVM_CONFIG and CLANG variables
 	CUSTOM_LLVM_VERSION=$(echo "$DOCKER_PG_LLVM_DEPS" | sed -n 's/.*llvm\([0-9]*\).*/\1/p') ; \
 	if [ ! -z "${CUSTOM_LLVM_VERSION}" ];  then \
 		echo "CUSTOM_LLVM_VERSION=$CUSTOM_LLVM_VERSION" ; \
@@ -129,6 +138,10 @@ RUN set -eux; \
 	rm postgresql.tar.gz; \
 	\
 	cd /usr/src/postgresql; \
+	\
+	POSTGRESQL_VERSION=$(grep "PACKAGE_VERSION=" ./configure | cut -d"'" -f2) ; \
+    echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
+	\
 # update "DEFAULT_PGSOCKET_DIR" to "/var/run/postgresql" (matching Debian)
 # see https://anonscm.debian.org/git/pkg-postgresql/postgresql.git/tree/debian/patches/51-default-sockets-in-var.patch?id=8b539fcb3e093a521c095e70bdfa76887217b89f
 	awk '$1 == "#define" && $2 == "DEFAULT_PGSOCKET_DIR" && $3 == "\"/tmp\"" { $3 = "\"/var/run/postgresql\""; print; next } { print }' src/include/pg_config_manual.h > src/include/pg_config_manual.h.new; \
@@ -136,8 +149,8 @@ RUN set -eux; \
 	mv src/include/pg_config_manual.h.new src/include/pg_config_manual.h; \
 	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
 # explicitly update autoconf config.guess and config.sub so they support more arches/libcs
-	wget -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
-	wget -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget --tries=10 --timeout=60 -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget --tries=10 --timeout=60 -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
 # configure options taken from:
 # https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
 	( CC=${BUILD_CC_COMPILER} ./configure \
@@ -170,48 +183,58 @@ RUN set -eux; \
 		--with-llvm \
 		--with-lz4 \
 		--with-zstd \
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} alpine:${ALPINE_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME}" \
+		# The "testgres" package expects the PostgreSQL version as the last word.
+		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} alpine:${ALPINE_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+	# install postgresql
 	make -j "$(nproc)"; \
 	make -C contrib -j "$(nproc)"; \
-	make -C contrib/orioledb -j "$(nproc)"; \
 	make install; \
 	make -C contrib install; \
-	make -C contrib/orioledb install; \
+	# install orioledb extension
+	cd /usr/src/postgresql/contrib/orioledb; \
+	make USE_PGXS=1 -j "$(nproc)"; \
+	make USE_PGXS=1 install; \
 	\
-	runDeps="$( \
-		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
-			| tr ',' '\n' \
-			| sort -u \
-			| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
-# Remove plperl, plpython and pltcl dependencies by default to save image size
-# To use the pl extensions, those have to be installed in a derived image
-			| grep -v -e perl -e python -e tcl \
-	)"; \
-	apk add --no-cache --virtual .postgresql-rundeps \
-		$runDeps \
+	# Clean up only if not in debug mode
+	if [ "$DEBUG_MODE" != "true" ]; then \
+		runDeps="$( \
+			scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
+				| tr ',' '\n' \
+				| sort -u \
+				| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
+				# Remove plperl, plpython and pltcl dependencies by default to save image size
+				# To use the pl extensions, those have to be installed in a derived image
+				| grep -v -e perl -e python -e tcl \
+		)"; \
+		apk add --no-cache --virtual .postgresql-rundeps \
+			$runDeps \
+		; \
+		apk del --no-network .build-deps; \
+		rm -rf \
+			/usr/src/postgresql \
+			/usr/local/share/doc \
+			/usr/local/share/man \
+			/tmp/* \
+		; \
+	fi ; \
+	\
+	apk add --no-cache \
 		bash \
 		su-exec \
-# tzdata is optional, but only adds around 1Mb to image size and is recommended by Django documentation:
-# https://docs.djangoproject.com/en/1.10/ref/databases/#optimizing-postgresql-s-configuration
+		# tzdata is optional, but only adds around 1Mb to image size and is recommended by Django documentation:
+		# https://docs.djangoproject.com/en/1.10/ref/databases/#optimizing-postgresql-s-configuration
 		tzdata \
-# install extra icu packages ( >=Alpine3.16 )
+		# install extra icu packages ( >=Alpine3.16 )
 		$EXTRA_ICU_PACKAGES \
 	; \
-	apk del --no-network .build-deps; \
-	cd /; \
-	rm -rf \
-		/usr/src/postgresql \
-		/usr/local/share/doc \
-		/usr/local/share/man \
-	; \
-	\
-	postgres --version
+	cd / ; \
+	postgres --version ; \
+	initdb --version
 
-RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
-
-ENV PGDATA /var/lib/postgresql/data
+ENV PGDATA=/var/lib/postgresql/data
 # this 777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
 RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PGDATA"
 VOLUME /var/lib/postgresql/data

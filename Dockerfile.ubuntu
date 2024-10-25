@@ -1,26 +1,32 @@
 # This is modified Dockerfile from 16/bookworm in
 # https://github.com/docker-library/postgres
 
-# Set UBUNTU_VERSION = [ devel 23.10  22.04 20.04 ]
-#                   or [ devel mantic jammy focal ]
-ARG UBUNTU_VERSION=focal
+# Set UBUNTU_VERSION = [ devel 24.10    24.04 22.04 20.04 ]
+#                   or [ devel oracular noble jammy focal ]
+
+ARG UBUNTU_VERSION=noble
 FROM ubuntu:${UBUNTU_VERSION}
 
 ARG UBUNTU_VERSION
 
-# Set PG_MAJOR = [16 15]
+# Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=16
-ENV PG_MAJOR ${PG_MAJOR}
+ENV PG_MAJOR=${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
 ARG BUILD_CC_COMPILER=clang
-ENV BUILD_CC_COMPILER ${BUILD_CC_COMPILER}
+ENV BUILD_CC_COMPILER=${BUILD_CC_COMPILER}
+
+# Enable debug mode and preserve the build environments for debugging.
+# In this case, each image size exceeds ~1GB
+ARG DEBUG_MODE=false
+ENV DEBUG_MODE=${DEBUG_MODE}
 
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
 # Reference: https://github.com/docker-library/postgres/pull/1077
 ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
-ENV DOCKER_PG_LLVM_DEPS ${DOCKER_PG_LLVM_DEPS}
+ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
 
 # explicitly set user/group IDs
 RUN set -eux; \
@@ -54,11 +60,11 @@ RUN set -eux; \
 	apt-get clean
 
 # make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 # grab gosu for easy step-down from root
 # https://github.com/tianon/gosu/releases
-ENV GOSU_VERSION 1.17
+ENV GOSU_VERSION=1.17
 RUN set -eux; \
 	savedAptMark="$(apt-mark showmanual)"; \
 	apt-get update; \
@@ -85,7 +91,9 @@ COPY . /usr/src/postgresql/contrib/orioledb
 
 RUN mkdir /docker-entrypoint-initdb.d
 
-ENV PATH $PATH:/usr/lib/postgresql/$PG_MAJOR/bin
+RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
+
+ENV PATH=$PATH:/usr/lib/postgresql/$PG_MAJOR/bin
 RUN set -eux; \
 	\
 	PGTAG=$(grep "^$PG_MAJOR: " /usr/src/postgresql/contrib/orioledb/.pgtags | cut -d' ' -f2-) ; \
@@ -98,6 +106,7 @@ RUN set -eux; \
 	echo "ORIOLEDB_VERSION=$ORIOLEDB_VERSION" ; \
 	echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
 	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
+	echo "DEBUG_MODE=$DEBUG_MODE" ;	\
 	\
 	LLVM_RUNTIME_DEPS=$(echo "$DOCKER_PG_LLVM_DEPS" | grep -o 'llvm[0-9]*') ; \
 	echo "LLVM_RUNTIME_DEPS=$LLVM_RUNTIME_DEPS" ; \
@@ -155,10 +164,14 @@ RUN set -eux; \
 	rm postgresql.tar.gz; \
 	\
 	cd /usr/src/postgresql; \
+	\
+	POSTGRESQL_VERSION=$(grep "PACKAGE_VERSION=" ./configure | cut -d"'" -f2) ; \
+    echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
+	\
 	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
 # explicitly update autoconf config.guess and config.sub so they support more arches/libcs
-	wget -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
-	wget -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget --tries=10 --timeout=60 -O config/config.guess 'https://git.savannah.gnu.org/cgit/config.git/plain/config.guess?id=7d3d27baf8107b630586c962c057e22149653deb'; \
+	wget --tries=10 --timeout=60 -O config/config.sub 'https://git.savannah.gnu.org/cgit/config.git/plain/config.sub?id=7d3d27baf8107b630586c962c057e22149653deb'; \
 # configure options taken from:
 # https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
 	( CC=${BUILD_CC_COMPILER} ./configure \
@@ -192,53 +205,63 @@ RUN set -eux; \
 		--with-llvm \
 		--with-lz4 \
 		--with-zstd \
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME}" \
+		# The "testgres" package expects the PostgreSQL version as the last word.
+		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+	# install postgresql
 	make -j "$(nproc)"; \
 	make -C contrib -j "$(nproc)"; \
-	make -C contrib/orioledb -j "$(nproc)"; \
 	make install; \
 	make -C contrib install; \
-	make -C contrib/orioledb install; \
+	# install orioledb extension
+	cd /usr/src/postgresql/contrib/orioledb; \
+	make USE_PGXS=1 -j "$(nproc)"; \
+	make USE_PGXS=1 install; \
 	\
-	apt-get -y remove \
-		${DOCKER_PG_LLVM_DEPS} \
-		bison \
-		build-essential \
-		curl \
-		flex \
-		gdb \
-		git \
-		libicu-dev \
-		libipc-run-perl \
-		liblz4-dev \
-		libreadline-dev \
-		libxml2-dev \
-		libxslt1-dev \
-		libzstd-dev \
-		make \
-		pkg-config \
-		python3-dev \
-		python3-pip \
-		uuid-dev \
-		wget \
-	; \
-	apt-get -y autoremove; \
-	rm -rf /var/cache/apt/archives /var/lib/apt/lists/*; \
-	apt-get clean; \
+	# Clean up only if not in debug mode
+	if [ "$DEBUG_MODE" != "true" ]; then \
+		apt-get -y remove \
+			${DOCKER_PG_LLVM_DEPS} \
+			bison \
+			build-essential \
+			curl \
+			flex \
+			gdb \
+			git \
+			libicu-dev \
+			libipc-run-perl \
+			liblz4-dev \
+			libreadline-dev \
+			libxml2-dev \
+			libxslt1-dev \
+			libzstd-dev \
+			make \
+			pkg-config \
+			python3-dev \
+			python3-pip \
+			uuid-dev \
+			wget \
+		; \
+		apt-get -y autoremove; \
+		rm -rf /var/cache/apt/archives /var/lib/apt/lists/*; \
+		apt-get clean; \
+		rm -rf \
+			/usr/src/postgresql \
+			/usr/local/share/doc \
+			/usr/local/share/man \
+			/tmp/* \
+		; \
+	fi ; \
+	\
 	cd /; \
-	rm -rf \
-		/usr/src/postgresql \
-		/usr/local/share/doc \
-		/usr/local/share/man \
-	; \
-	\
-	postgres --version
+	# Verify PostgreSQL installation
+	ldconfig ; \
+	postgres --version ; \
+	initdb --version
 
-RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
-
-ENV PGDATA /var/lib/postgresql/data
+ENV PGDATA=/var/lib/postgresql/data
 # this 777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
 RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PGDATA"
 VOLUME /var/lib/postgresql/data
