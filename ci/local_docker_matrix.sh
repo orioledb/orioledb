@@ -10,16 +10,17 @@ pg_major_list=( 16 17)
 compiler_list=( clang gcc )
 base_list=(
    # alpine versions
+   alpine:3.20
    alpine:3.19
    alpine:3.18
    alpine:3.17
    alpine:3.16
    alpine:3.15
    alpine:3.14
-   alpine:3.13
 
    # ubuntu versions
-   ubuntu:23.10
+   ubuntu:24.10
+   ubuntu:24.04
    ubuntu:22.04
    ubuntu:20.04
 

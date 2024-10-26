@@ -3,7 +3,7 @@ set -Eeo pipefail
 
 # Default values
 BASE_MATRIX="ubuntu:24.04"
-PG_MAJOR="16"
+PG_MAJOR="17"
 COMPILER="clang"
 DEBUG="false"
 DRY_RUN="false"
@@ -18,8 +18,8 @@ base_lists[all-debian]="ubuntu:devel ubuntu:24.10 ubuntu:24.04 ubuntu:22.04 ubun
 base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-debian]}"
 
 # Valid Alpine, Ubuntu, PG and Compiler versions
-VALID_ALPINE_VERSIONS="edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14"
-VALID_UBUNTU_VERSIONS="devel 24.10 24.04 22.04 20.04 oracular noble jammy focal"
+VALID_ALPINE_VERSIONS="edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 latest"
+VALID_UBUNTU_VERSIONS="devel 24.10 24.04 22.04 20.04 oracular noble jammy focal latest rolling"
 VALID_PG_MAJOR_VERSIONS="17 16"
 VALID_COMPILERS="clang gcc"
 
@@ -72,7 +72,7 @@ and you can check the build logs with:
 
 Examples:
   ./ci/docker_matrix.sh --base all-dev --pg-major all --compiler clang
-  ./ci/docker_matrix.sh --base alpine:3.20 --pg-major 16 --compiler gcc --debug true
+  ./ci/docker_matrix.sh --base alpine:3.20 --pg-major 17 --compiler gcc --debug true
   ./ci/docker_matrix.sh --base ubuntu:oracular --pg-major 16 --compiler all --debug false
 
 Default behavior:
