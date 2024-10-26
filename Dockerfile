@@ -8,7 +8,7 @@ FROM alpine:${ALPINE_VERSION}
 ARG ALPINE_VERSION
 
 # Set PG_MAJOR = [ 17 16 ]
-ARG PG_MAJOR=16
+ARG PG_MAJOR=17
 ENV PG_MAJOR=${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
@@ -140,7 +140,7 @@ RUN set -eux; \
 	cd /usr/src/postgresql; \
 	\
 	POSTGRESQL_VERSION=$(grep "PACKAGE_VERSION=" ./configure | cut -d"'" -f2) ; \
-    echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
+	echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
 	\
 # update "DEFAULT_PGSOCKET_DIR" to "/var/run/postgresql" (matching Debian)
 # see https://anonscm.debian.org/git/pkg-postgresql/postgresql.git/tree/debian/patches/51-default-sockets-in-var.patch?id=8b539fcb3e093a521c095e70bdfa76887217b89f

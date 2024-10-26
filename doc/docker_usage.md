@@ -13,41 +13,43 @@ Before you begin, make sure you have Docker installed on your local machine. If 
 Open a terminal and navigate to the OrioleDB project directory, if you are not already in it:
 * `cd path/to/orioledb`
 
-Build (Alpine) PostgreSQL 16 + OrioleDB extension:
+Build (Alpine) PostgreSQL 17 + OrioleDB extension:
 
-* `docker build -t orioletest:16 --pull --network=host --progress=plain --build-arg PG_MAJOR="16" .`
+```bash
+docker build -t orioletest:17 --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .
+```
 
 Create a simple password for testing:
-```
+```bash
 # echo -n OrioleDB | sha1sum
 8f50c87b77ab9621c9ac8bb396d0630f306adcb0  -
 ```
 
 Start server:
 
-```
-docker run --name orioletest16 \
-   -v orioletest16data:/var/lib/postgresql/data \
+```bash
+docker run --name orioletest17 \
+   -v orioletest17data:/var/lib/postgresql/data \
    -e POSTGRES_PASSWORD=8f50c87b77ab9621c9ac8bb396d0630f306adcb0 \
-   -d orioletest:16
+   -d orioletest:17
 ```
 
 Connect to the server via psql:
 
-```
-docker exec -ti orioletest16 psql -U postgres
+```bash
+docker exec -ti orioletest17 psql -U postgres
 ```
 
 You should expect a similar psql message:
-```
-psql (16.4 OrioleDB public beta 5 PGTAG=patches16_31 alpine:3.20+clang build:2024-10-25T05:38:48+00:00 16.4)
+```bash
+psql (17.0 OrioleDB public beta 5 PGTAG=patches17_3 alpine:3.20+clang build:2024-10-25T19:54:25+00:00 17.0)
 Type "help" for help.
 postgres=#
 ```
 
 Enable orioledb extension:
 
-```
+```sql
 create extension if not exists orioledb;
 ```
 
@@ -143,11 +145,19 @@ postgres=# \dx+ orioledb
  function pg_stopevents()
  function s3_get(text)
  function s3_put(text,text)
+ type orioledb_index
+ type orioledb_index[]
+ type orioledb_index_descr
+ type orioledb_index_descr[]
+ type orioledb_table
+ type orioledb_table[]
+ type orioledb_table_descr
+ type orioledb_table_descr[]
  view orioledb_index
  view orioledb_index_descr
  view orioledb_table
  view orioledb_table_descr
-(43 rows)
+(51 rows)
 ```
 
 Quit from the database:  `\q`
@@ -155,37 +165,19 @@ Quit from the database:  `\q`
 
 Stop the server:
 
-* `docker stop orioletest16`
+* `docker stop orioletest17`
 
 Remove container:
 
-* `docker container rm orioletest16`
+* `docker container rm orioletest17`
 
 Remove docker image:
 
-* `docker rmi orioletest:16`
+* `docker rmi orioletest:17`
 
 Remove the data volume:
 
-* `docker volume rm orioletest16data`
-
-## Building Docker Images
-
-To build a Docker image, use one of the following commands:
-
-#### To build PostgreSQL 17 + OrieleDB extension (alpine)
-```bash
-docker build --pull --network=host --progress=plain \
-   --build-arg PG_MAJOR="17" \
-   -t orioletest:17 .
-```
-
-#### To build PostgreSQL 16 + OrieleDB extension (alpine)
-```bash
-docker build --pull --network=host --progress=plain \
-   --build-arg PG_MAJOR="16" \
-   -t orioletest:16 .
-```
+* `docker volume rm orioletest17data`
 
 ## Supported environment variables:
 
@@ -206,14 +198,14 @@ Read more:  https://github.com/docker-library/docs/blob/master/postgres/README.m
 Please check the Dockerfiles for the full list of build args!
 - Alpine Linux: `./Dockerfile`
   - supported [ `edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14` ]
-  - example: `--build-arg ALPINE_VERSION="3.20"`
+  - example: `--build-arg ALPINE_VERSION="3.20" -f Dockerfile `
 - Ubuntu Linux: `./Dockerfile.ubuntu`
   - supported [ `devel 24.10 24.04 22.04 20.04 oracular noble jammy focal` ]
-  - example: `--build-arg UBUNTU_VERSION="24.04"`
+  - example: `--build-arg UBUNTU_VERSION="24.04" -f Dockerfile.ubuntu `
 
 Other important build args:
-* `--build-arg PG_MAJOR="16"`
-  * Choose the main version of PostgreSQL. Default is `16`.
+* `--build-arg PG_MAJOR="17"`
+  * Choose the main version of PostgreSQL. Default is `17`.
   * You can choose from `16`, `17`.
 * `--build-arg BUILD_CC_COMPILER="gcc"`
   * Choose the C compiler. Default is `clang`.
@@ -222,7 +214,7 @@ Other important build args:
 For example, to build an image using Alpine version `3.20`, the `gcc` compiler and PostgreSQL version `16`, use the following command:
 
 ```bash
-docker build --network=host --progress=plain \
+docker build --pull --network=host --progress=plain \
     --build-arg ALPINE_VERSION="3.20" \
     --build-arg BUILD_CC_COMPILER="gcc" \
     --build-arg PG_MAJOR="16" \
@@ -233,12 +225,12 @@ docker build --network=host --progress=plain \
 To build an image using Ubuntu version `devel`, the `clang` compiler and PostgreSQL version `17`, use the following command:
 
 ```bash
-docker build --network=host --progress=plain \
+docker build --pull --network=host --progress=plain \
     --build-arg UBUNTU_VERSION="devel" \
     --build-arg BUILD_CC_COMPILER="clang" \
     --build-arg PG_MAJOR="17" \
     -f Dockerfile.ubuntu \
-    -t orioletest:17-clang-ubuntudevel .
+    -t orioletest:17-clang-ubuntu-devel .
 ```
 The "devel" version is the latest development Ubuntu version, so it might not be stable.
 
@@ -317,5 +309,3 @@ PATH=/opt/homebrew/bin:/opt/homebrew/opt/gnu-getopt/bin:$PATH
 * Windows: If you encounter any problems, please use Windows Subsystem for Linux (WSL2).
 
 * Extending the current OrioleDB Docker images is not easy; you can't use Ubuntu PostgreSQL packages (like: `postgresql-16-mobilitydb`) - you need to build from source.
-
-* Some secu
