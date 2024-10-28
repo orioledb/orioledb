@@ -56,35 +56,35 @@ hex_string(Pointer data, int len)
 
 	hex_encode(data, len, result);
 
-	result[len * 2] = 0;
+	result[len * 2] = '\0';
 	return result;
 }
 
 /*
- * Calculate the hash of canocical request according to AWS4-HMAC-SHA256.
+ * Calculate the checksum of canonical request according to AWS4-HMAC-SHA256.
  */
 static char *
-canonical_request_hash(char *method, char *datetime, char *objectname,
-					   char *contenthash)
+canonical_request_checksum(char *method, char *datetime, char *objectname,
+						   char *contentchecksum)
 {
 	StringInfoData buf;
-	unsigned char hash[32];
+	unsigned char checksumbuf[32];
 
 	initStringInfo(&buf);
 	appendStringInfo(&buf, "%s\n", method);
 	appendStringInfo(&buf, "/%s\n", objectname);
 	appendStringInfo(&buf, "\n");
 	appendStringInfo(&buf, "host:%s\n", s3_host);
-	appendStringInfo(&buf, "x-amz-content-sha256:%s\n", contenthash);
+	appendStringInfo(&buf, "x-amz-content-sha256:%s\n", contentchecksum);
 	appendStringInfo(&buf, "x-amz-date:%s\n", datetime);
 	appendStringInfo(&buf, "\n");
 	appendStringInfo(&buf, "host;x-amz-content-sha256;x-amz-date\n");
-	appendStringInfo(&buf, "%s", contenthash);
+	appendStringInfo(&buf, "%s", contentchecksum);
 
-	(void) SHA256((unsigned char *) buf.data, buf.len, hash);
+	(void) SHA256((unsigned char *) buf.data, buf.len, checksumbuf);
 	pfree(buf.data);
 
-	return hex_string((Pointer) hash, sizeof(hash));
+	return hex_string((Pointer) checksumbuf, sizeof(checksumbuf));
 }
 
 /*
@@ -93,35 +93,35 @@ canonical_request_hash(char *method, char *datetime, char *objectname,
  */
 static char *
 s3_signature(char *method, char *datetimestring, char *datestring,
-			 char *objectname, char *secretkey, char *contenthash)
+			 char *objectname, char *secretkey, char *checksumstring)
 {
 	StringInfoData buf;
 	char	   *key;
-	char		hash[32];
-	char	   *chash;
+	char		checksumbuf[32];
+	char	   *canonical_checksum;
 
-	chash = canonical_request_hash(method, datetimestring,
-								   objectname, contenthash);
+	canonical_checksum = canonical_request_checksum(method, datetimestring,
+													objectname, checksumstring);
 
 	key = psprintf("AWS4%s", s3_secretkey);
-	hmac_sha256(datestring, hash, key, strlen(key));
-	hmac_sha256(s3_region, hash, hash, sizeof(hash));
-	hmac_sha256("s3", hash, hash, sizeof(hash));
-	hmac_sha256("aws4_request", hash, hash, sizeof(hash));
+	hmac_sha256(datestring, checksumbuf, key, strlen(key));
+	hmac_sha256(s3_region, checksumbuf, checksumbuf, sizeof(checksumbuf));
+	hmac_sha256("s3", checksumbuf, checksumbuf, sizeof(checksumbuf));
+	hmac_sha256("aws4_request", checksumbuf, checksumbuf, sizeof(checksumbuf));
 
 	initStringInfo(&buf);
 	appendStringInfo(&buf, "AWS4-HMAC-SHA256\n");
 	appendStringInfo(&buf, "%s\n", datetimestring);
 	appendStringInfo(&buf, "%s/%s/s3/aws4_request\n", datestring, s3_region);
-	appendStringInfo(&buf, "%s", chash);
+	appendStringInfo(&buf, "%s", canonical_checksum);
 
-	hmac_sha256(buf.data, hash, hash, sizeof(hash));
+	hmac_sha256(buf.data, checksumbuf, checksumbuf, sizeof(checksumbuf));
 
 	pfree(key);
-	pfree(chash);
+	pfree(canonical_checksum);
 	pfree(buf.data);
 
-	return hex_string(hash, 32);
+	return hex_string(checksumbuf, 32);
 }
 
 /*
@@ -188,13 +188,13 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	struct curl_slist *slist;
 	char	   *tmp;
 	int			sc;
-	unsigned char hash[32];
-	char	   *contenthash;
+	unsigned char checksumbuf[SHA256_DIGEST_LENGTH];
+	char	   *checksumstringbuf;
 	char	   *objectpath = objectname;
 	long		http_code = 0;
 
-	(void) SHA256(NULL, 0, hash);
-	contenthash = hex_string((Pointer) hash, sizeof(hash));
+	(void) SHA256(NULL, 0, checksumbuf);
+	checksumstringbuf = hex_string((Pointer) checksumbuf, sizeof(checksumbuf));
 
 	if (s3_prefix)
 	{
@@ -213,12 +213,12 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
 	signature = s3_signature("GET", datetimestring, datestring, objectpath,
-							 s3_secretkey, contenthash);
+							 s3_secretkey, checksumstringbuf);
 
 	slist = NULL;
 	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
 	pfree(tmp);
-	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", checksumstringbuf)));
 	pfree(tmp);
 	slist = curl_slist_append(slist,
 							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
@@ -258,6 +258,7 @@ s3_get_object(char *objectname, StringInfo str, bool missing_ok)
 	pfree(signature);
 	if (objectpath != objectname)
 		pfree(objectpath);
+	pfree(checksumstringbuf);
 
 	return http_code;
 }
@@ -293,13 +294,13 @@ s3_delete_object(char *objectname)
 	char	   *tmp;
 	int			sc;
 	StringInfoData buf;
-	unsigned char hash[32];
-	char	   *contenthash;
+	unsigned char checksumbuf[SHA256_DIGEST_LENGTH];
+	char	   *checksumstringbuf;
 	char	   *objectpath = objectname;
 	long		http_code = 0;
 
-	(void) SHA256(NULL, 0, hash);
-	contenthash = hex_string((Pointer) hash, sizeof(hash));
+	(void) SHA256(NULL, 0, checksumbuf);
+	checksumstringbuf = hex_string((Pointer) checksumbuf, sizeof(checksumbuf));
 
 	if (s3_prefix)
 	{
@@ -318,12 +319,12 @@ s3_delete_object(char *objectname)
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
 	signature = s3_signature("DELETE", datetimestring, datestring, objectpath,
-							 s3_secretkey, contenthash);
+							 s3_secretkey, checksumstringbuf);
 
 	slist = NULL;
 	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
 	pfree(tmp);
-	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", checksumstringbuf)));
 	pfree(tmp);
 	slist = curl_slist_append(slist,
 							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",
@@ -360,6 +361,7 @@ s3_delete_object(char *objectname)
 	pfree(buf.data);
 	if (objectpath != objectname)
 		pfree(objectpath);
+	pfree(checksumstringbuf);
 }
 
 /*
@@ -463,7 +465,7 @@ write_file_part(const char *filename, uint64 offset,
 /*
  * Read the whole file.
  */
-static Pointer
+Pointer
 read_file(const char *filename, uint64 *size)
 {
 	return read_file_part(filename, 0, UINT64_MAX, size);
@@ -481,28 +483,36 @@ write_file(const char *filename, Pointer data, uint64 size)
 /*
  * Put object with given binary contents to S3.
  *
+ * If dataChecksum is NULL the function calculates checksum of the content.
+ *
  * Returns HTTP status code.
  */
-static long
+long
 s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
-							bool ifNoneMatch)
+							char *dataChecksum, bool ifNoneMatch)
 {
 	CURL	   *curl;
 	char	   *url;
 	char	   *datestring;
 	char	   *datetimestring;
 	char	   *signature;
-	char	   *contenthash;
+	char	   *checksumstringbuf;
 	char	   *objectpath = objectname;
 	struct curl_slist *slist;
 	char	   *tmp;
 	int			sc;
 	StringInfoData buf;
-	unsigned char hash[32];
 	long		http_code = 0;
 
-	(void) SHA256((unsigned char *) data, dataSize, hash);
-	contenthash = hex_string((Pointer) hash, sizeof(hash));
+	if (dataChecksum == NULL)
+	{
+		unsigned char checksumbuf[SHA256_DIGEST_LENGTH];
+
+		(void) SHA256((unsigned char *) data, dataSize, checksumbuf);
+		checksumstringbuf = hex_string((Pointer) checksumbuf, sizeof(checksumbuf));
+	}
+	else
+		checksumstringbuf = dataChecksum;
 
 	if (s3_prefix)
 	{
@@ -521,12 +531,12 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	datestring = httpdate(NULL);
 	datetimestring = httpdatetime(NULL);
 	signature = s3_signature("PUT", datetimestring, datestring, objectpath,
-							 s3_secretkey, contenthash);
+							 s3_secretkey, checksumstringbuf);
 
 	slist = NULL;
 	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-date: %s", datetimestring)));
 	pfree(tmp);
-	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", contenthash)));
+	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", checksumstringbuf)));
 	pfree(tmp);
 	slist = curl_slist_append(slist, (tmp = psprintf("Content-Length: %lu", dataSize)));
 	pfree(tmp);
@@ -575,8 +585,6 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	curl_easy_cleanup(curl);
 
 	curl_slist_free_all(slist);
-	if (data)
-		pfree(data);
 	pfree(url);
 	pfree(datestring);
 	pfree(datetimestring);
@@ -584,6 +592,8 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	pfree(buf.data);
 	if (objectpath != objectname)
 		pfree(objectpath);
+	if (checksumstringbuf != dataChecksum)
+		pfree(checksumstringbuf);
 
 	return http_code;
 }
@@ -596,11 +606,17 @@ s3_put_file(char *objectname, char *filename, bool ifNoneMatch)
 {
 	Pointer		data;
 	uint64		dataSize = 0;
+	long		res = -1;
 
 	data = read_file(filename, &dataSize);
 	if (data)
-		return s3_put_object_with_contents(objectname, data, dataSize, ifNoneMatch);
-	return -1;
+	{
+		res = s3_put_object_with_contents(objectname, data, dataSize, NULL,
+										  ifNoneMatch);
+		pfree(data);
+	}
+
+	return res;
 }
 
 /*
@@ -629,14 +645,19 @@ s3_put_file_part(char *objectname, char *filename, int partnum)
 {
 	Pointer		data;
 	uint64		dataSize;
+	long		res = -1;
 
 	data = read_file_part(filename,
 						  partnum * ORIOLEDB_S3_PART_SIZE + ORIOLEDB_BLCKSZ,
 						  ORIOLEDB_S3_PART_SIZE,
 						  &dataSize);
 	if (data)
-		return s3_put_object_with_contents(objectname, data, dataSize, false);
-	return -1;
+	{
+		res = s3_put_object_with_contents(objectname, data, dataSize, NULL, false);
+		pfree(data);
+	}
+
+	return res;
 }
 
 /*
@@ -664,7 +685,7 @@ s3_get_file_part(char *objectname, char *filename, int partnum)
 void
 s3_put_empty_dir(char *objectname)
 {
-	s3_put_object_with_contents(objectname, NULL, 0, false);
+	s3_put_object_with_contents(objectname, NULL, 0, NULL, false);
 }
 
 /*

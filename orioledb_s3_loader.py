@@ -8,10 +8,9 @@ import struct
 import testgres
 
 from botocore.config import Config
-from botocore.exceptions import ParamValidationError
+from botocore.exceptions import ClientError, ParamValidationError
 from concurrent.futures import ThreadPoolExecutor
 from boto3.s3.transfer import TransferConfig
-from botocore.exceptions import ClientError
 from threading import Event
 from typing import Callable
 from urllib.parse import urlparse
@@ -116,7 +115,6 @@ class OrioledbS3ObjectLoader:
 		self.s3 = s3_client
 
 	def run(self):
-		wal_dir = os.path.join(self.data_dir, 'pg_wal')
 		chkp_num = self.last_checkpoint_number(self.bucket_name)
 		self.download_files_in_directory(self.bucket_name,
 		                                 'data/',
@@ -129,6 +127,15 @@ class OrioledbS3ObjectLoader:
 		                                 f"{self.data_dir}/orioledb_data",
 		                                 transform=self.transform_orioledb,
 		                                 filter=self.filter_orioledb)
+
+		self.download_unchanged_files(
+		    self.bucket_name, os.path.join("orioledb_data", "file_checksums"),
+		    chkp_num, None)
+
+		self.download_unchanged_small_files(
+		    self.bucket_name,
+		    os.path.join("orioledb_data", "small_file_checksums"), chkp_num,
+		    None)
 
 		control = get_control_data(self.data_dir)
 		orioledb_control = get_orioledb_control_data(self.data_dir)
@@ -247,7 +254,7 @@ class OrioledbS3ObjectLoader:
 			if not exist_ok or not os.path.isdir(name):
 				raise
 
-	def download_file(self, bucket_name, file_key, local_path):
+	def download_file(self, bucket_name, file_key, local_path) -> bool:
 		try:
 			transfer_config = TransferConfig(use_threads=False,
 			                                 max_concurrency=1)
@@ -291,6 +298,9 @@ class OrioledbS3ObjectLoader:
 			else:
 				print(f"An error occurred: {e}")
 			self._error_occurred.set()
+			return False
+
+		return True
 
 	def transform_orioledb(self, val: str) -> str:
 		offset = 0
@@ -353,6 +363,157 @@ class OrioledbS3ObjectLoader:
 					print("An error occurred. Stopping all downloads.")
 					executor.shutdown(wait=False, cancel_futures=True)
 					break
+
+	def download_unchanged_files(self, bucket_name: str,
+	                             file_checksums_name: str, chkp_num: int,
+	                             file_checksums: dict[str, str] | None):
+		# We won't be able to download unchanged previous files if this is
+		# the first checkpoint
+		if chkp_num <= 1:
+			return
+
+		prev_chkp_num = chkp_num - 1
+		prev_chkp_dir = os.path.join(self.prefix, "data", str(prev_chkp_num))
+
+		if file_checksums is None:
+			file_checksums_path = os.path.join(self.data_dir,
+			                                   file_checksums_name)
+			file_checksums = self.get_unchanged_file_checksums(
+			    file_checksums_path, chkp_num)
+
+		prev_file_checksums = {}
+		for filename, checkpoint in file_checksums.items():
+			# Ignore changed files
+			if int(checkpoint) == chkp_num:
+				continue
+
+			# This file needs to be downloaded from pre-previous checkpoint
+			if int(checkpoint) < prev_chkp_num:
+				prev_file_checksums[filename] = checkpoint
+				continue
+
+			remote_file = os.path.join(prev_chkp_dir, filename)
+			local_file = os.path.join(self.data_dir, filename)
+
+			self.download_file(bucket_name, remote_file, local_file)
+
+		# Some files are still missing
+		if len(prev_file_checksums) > 0:
+			# Recursively download unchanged files
+			self.download_unchanged_files(bucket_name, file_checksums_name,
+			                              prev_chkp_num, prev_file_checksums)
+
+	def download_unchanged_small_files(self, bucket_name: str,
+	                                   file_checksums_name: str, chkp_num: int,
+	                                   file_checksums: dict[str, str] | None):
+		# We won't be able to download unchanged previous files if this is
+		# the first checkpoint
+		if chkp_num <= 1:
+			return
+
+		prev_chkp_num = chkp_num - 1
+		prev_chkp_dir = os.path.join(self.prefix, "data", str(prev_chkp_num))
+
+		if file_checksums is None:
+			file_checksums_path = os.path.join(self.data_dir,
+			                                   file_checksums_name)
+			file_checksums = self.get_unchanged_file_checksums(
+			    file_checksums_path, chkp_num)
+
+		if len(file_checksums) == 0:
+			return
+
+		small_files_num = 0
+		files_restored = 0
+		while True:
+			small_filename = os.path.join("orioledb_data",
+			                              f"small_files_{small_files_num}")
+			remote_path = os.path.join(prev_chkp_dir, small_filename)
+			temp_path = os.path.join(self.data_dir,
+			                         f"{small_filename}.{prev_chkp_num}")
+
+			# Looks like the file doesn't exist, break
+			if not self.download_file(bucket_name, remote_path, temp_path):
+				break
+
+			with open(temp_path, 'rb') as file:
+				data = file.read()
+				numFiles = struct.unpack('i', data[0:4])[0]
+
+				for i in range(0, numFiles):
+					(nameOffset, dataOffset,
+					 dataLength) = struct.unpack('iii',
+					                             data[4 + i * 12:16 + i * 12])
+
+					name = data[nameOffset:data.find(b'\0', nameOffset
+					                                 )].decode('ascii')
+					fullname = os.path.join(self.data_dir, name)
+
+					if not name in file_checksums:
+						continue
+
+					if self.verbose:
+						print(f"{remote_path} -> {fullname}", flush=True)
+
+					self.makedirs(os.path.dirname(fullname),
+					              exist_ok=True,
+					              mode=0o700)
+
+					with open(fullname, 'wb') as file:
+						file.write(data[dataOffset:dataOffset + dataLength])
+					os.chmod(fullname, 0o600)
+
+					files_restored += 1
+					# Looks like we restored all unchanged files, break
+					if files_restored == len(file_checksums):
+						break
+
+			os.unlink(temp_path)
+			small_files_num += 1
+
+			# Looks like we restored all unchanged files, break
+			if files_restored == len(file_checksums):
+				break
+
+		# Not all files were restored, check the previous checkpoint recursively
+		if files_restored < len(file_checksums):
+			prev_file_checksums = {}
+			for filename, checkpoint in file_checksums:
+				if int(checkpoint) < prev_chkp_num:
+					prev_file_checksums[filename] = checkpoint
+
+			assert len(prev_file_checksums) > 0
+
+			# Recursively download unchanged small files
+			self.download_unchanged_small_files(bucket_name,
+			                                    file_checksums_name,
+			                                    prev_chkp_num,
+			                                    prev_file_checksums)
+
+	def get_unchanged_file_checksums(self, file_checksums_name: str,
+	                                 chkp_num: int) -> dict[str, str]:
+		res = {}
+
+		pattern_str = r"^FILE: (?P<filename>.+), CHECKSUM: (?P<checksum>.+), CHECKPOINT: (?P<checkpoint>\d+)$"
+		pattern = re.compile(pattern_str)
+		with open(file_checksums_name) as file:
+			for line in file:
+				m = pattern.search(line)
+
+				if m is None or len(m.groups()) != 3:
+					raise Exception(
+					    f"Invalid line format of the checksum file {file_checksums_name}: {line}"
+					)
+
+				line_dict = m.groupdict()
+
+				if int(line_dict["checkpoint"]) > chkp_num:
+					raise Exception(f'Unexpected checkpoint number "{line}"')
+
+				if int(line_dict["checkpoint"]) < chkp_num:
+					res[line_dict["filename"]] = line_dict["checkpoint"]
+
+		return res
 
 
 def get_control_data(data_dir: str):
