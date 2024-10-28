@@ -13,6 +13,6 @@
 #ifndef __S3_CHECKPOINT_H__
 #define __S3_CHECKPOINT_H__
 
-extern void s3_perform_backup(int flags, S3TaskLocation location);
+extern void s3_perform_backup(int flags, S3TaskLocation maxLocation);
 
 #endif							/* __S3_CHECKPOINT_H__ */

@@ -17,7 +17,9 @@
 
 #include "checkpoint/checkpoint.h"
 #include "s3/checkpoint.h"
+#include "s3/checksum.h"
 #include "s3/headers.h"
+#include "s3/requests.h"
 #include "s3/worker.h"
 
 #include "utils/wait_event.h"
@@ -199,11 +201,16 @@ typedef struct
 	List	   *smallFileSizes;
 	int			smallFilesTotalSize;
 	int			smallFilesNum;
+	S3ChecksumState *checksumState;
 	uint32		chkpNum;
 } S3BackupState;
 
 #define SMALL_FILE_THRESHOLD		0x10000
 #define SMALL_FILES_TOTAL_THRESHOLD 0x100000
+
+#define FILE_CHECKSUMS_MAX_LEN	100
+#define SMALL_FILE_CHECKSUMS_FILENAME	ORIOLEDB_DATA_DIR "/small_file_checksums"
+#define SMALL_FILE_CHECKSUMS_TMP_FILENAME	SMALL_FILE_CHECKSUMS_FILENAME ".0"
 
 static S3TaskLocation flush_small_files(S3BackupState *state);
 static S3TaskLocation accumulate_small_file(S3BackupState *state,
@@ -228,6 +235,7 @@ s3_perform_backup(int flags, S3TaskLocation maxLocation)
 	StringInfoData tablespaceMapData;
 	ListCell   *lc;
 	tablespaceinfo *newti;
+	S3FileChecksum *fileChecksums;
 	S3TaskLocation location;
 
 	backup_started_in_recovery = RecoveryInProgress();
@@ -236,18 +244,29 @@ s3_perform_backup(int flags, S3TaskLocation maxLocation)
 
 	s3_headers_sync();
 
+	s3_workers_checkpoint_init();
+
+	/* Just in case delete a leftover file */
+	unlink(SMALL_FILE_CHECKSUMS_TMP_FILENAME);
+
 	initStringInfo(&tablespaceMapData);
 	state.tablespaces = get_tablespaces(&tablespaceMapData);
 
 	/* Add a node for the base directory at the end */
 	newti = palloc0(sizeof(tablespaceinfo));
 	newti->size = -1;
+
+	fileChecksums = palloc(sizeof(S3FileChecksum) * FILE_CHECKSUMS_MAX_LEN);
+
 	state.tablespaces = lappend(state.tablespaces, newti);
 	state.chkpNum = chkpNum;
 	state.smallFileNames = NIL;
 	state.smallFileSizes = NIL;
 	state.smallFilesTotalSize = sizeof(int);
 	state.smallFilesNum = 0;
+	state.checksumState = makeS3ChecksumState(chkpNum, fileChecksums,
+											  FILE_CHECKSUMS_MAX_LEN,
+											  SMALL_FILE_CHECKSUMS_FILENAME);
 
 	/* Send off our tablespaces one by one */
 	foreach(lc, state.tablespaces)
@@ -280,7 +299,21 @@ s3_perform_backup(int flags, S3TaskLocation maxLocation)
 	location = flush_small_files(&state);
 	maxLocation = Max(maxLocation, location);
 
+	freeS3ChecksumState(state.checksumState);
+	list_free_deep(state.tablespaces);
 	pfree(tablespaceMapData.data);
+	s3_queue_wait_for_location(maxLocation);
+
+	/* Wait until all S3 workers finish flushing and compact checksum files */
+	s3_workers_checkpoint_finish();
+
+	location = s3_schedule_file_write(chkpNum, FILE_CHECKSUMS_FILENAME, false);
+	maxLocation = Max(maxLocation, location);
+
+	durable_rename(SMALL_FILE_CHECKSUMS_TMP_FILENAME, SMALL_FILE_CHECKSUMS_FILENAME, ERROR);
+	location = s3_schedule_file_write(chkpNum, SMALL_FILE_CHECKSUMS_FILENAME, false);
+	maxLocation = Max(maxLocation, location);
+
 	s3_queue_wait_for_location(maxLocation);
 }
 
@@ -575,7 +608,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 			if (statbuf.st_size < SMALL_FILE_THRESHOLD)
 				location = accumulate_small_file(state, pathbuf, statbuf.st_size);
 			else
-				location = s3_schedule_file_write(state->chkpNum, pathbuf, false);
+				location = s3_schedule_pg_file_write(state->chkpNum, pathbuf);
 			maxLocation = Max(maxLocation, location);
 		}
 		else
@@ -826,6 +859,37 @@ accumulate_small_file(S3BackupState *state, const char *path, int size)
 {
 	int			sizeRequired = 3 * sizeof(int) + strlen(path) + 1 + size;
 	S3TaskLocation location = 0;
+	Pointer		data;
+	uint64		dataSize;
+
+	/* First check if the file changed */
+	data = read_file(path, &dataSize);
+
+	if (data != NULL)
+	{
+		S3FileChecksum *entry;
+
+		if (state->checksumState->fileChecksumsLen == state->checksumState->fileChecksumsMaxLen)
+			flushS3ChecksumState(state->checksumState,
+								 SMALL_FILE_CHECKSUMS_TMP_FILENAME);
+
+		entry = getS3FileChecksum(state->checksumState, path, data, dataSize);
+
+		/*
+		 * If the file didn't change just exit the function and return 0.  We
+		 * could return maxLocation here, but it might be better to a caller
+		 * to decide.
+		 */
+		if (!entry->changed)
+		{
+			pfree(data);
+			return 0;
+		}
+
+		pfree(data);
+	}
+
+	/* The file changed, put it into the smallFileNames list */
 
 	if (state->smallFilesTotalSize + sizeRequired > SMALL_FILES_TOTAL_THRESHOLD)
 		location = flush_small_files(state);
