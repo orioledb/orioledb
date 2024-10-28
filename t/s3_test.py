@@ -259,7 +259,7 @@ class S3Test(S3BaseTest):
 		node.start()
 
 		small_file_checksums = os.path.join(node.data_dir, "orioledb_data",
-											"small_file_checksums")
+		                                    "small_file_checksums")
 
 		# Test that CHECKPOINT will fail in case of lack of permissions
 		open(small_file_checksums, "a").close()
@@ -269,12 +269,14 @@ class S3Test(S3BaseTest):
 			node.safe_psql("CHECKPOINT")
 
 		assert e.exception.message is not None
-		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+		self.assertTrue(
+		    e.exception.message.startswith(
+		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn(
-				'ERROR:  could not read file "orioledb_data/small_file_checksums": Permission denied',
-				f.read())
+			    'ERROR:  could not read file "orioledb_data/small_file_checksums": Permission denied',
+			    f.read())
 
 		os.unlink(small_file_checksums)
 
@@ -290,18 +292,22 @@ class S3Test(S3BaseTest):
 			assert m is not None
 
 			f.seek(0, os.SEEK_END)
-			f.write(f"FILE: {m.groups()[0]}, CHECKSUM: {m.groups()[1]}, CHECKPOINT: 100")
+			f.write(
+			    f"FILE: {m.groups()[0]}, CHECKSUM: {m.groups()[1]}, CHECKPOINT: 100"
+			)
 
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql("CHECKPOINT")
 
 		assert e.exception.message is not None
-		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+		self.assertTrue(
+		    e.exception.message.startswith(
+		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn(
-				'ERROR:  unexpected checkpoint number in the checksum file',
-				f.read())
+			    'ERROR:  unexpected checkpoint number in the checksum file',
+			    f.read())
 
 		# Test that CHECKPOINT will fail in case of duplicated entries
 		shutil.copy(f"{small_file_checksums}.copy", small_file_checksums)
@@ -315,12 +321,14 @@ class S3Test(S3BaseTest):
 			node.safe_psql("CHECKPOINT")
 
 		assert e.exception.message is not None
-		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+		self.assertTrue(
+		    e.exception.message.startswith(
+		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
 			self.assertIn(
-				'ERROR:  the file name is duplicated in the checksum file',
-				f.read())
+			    'ERROR:  the file name is duplicated in the checksum file',
+			    f.read())
 
 		# Test that CHECKPOINT will fail in case of invalid file
 		shutil.copy(f"{small_file_checksums}.copy", small_file_checksums)
@@ -336,13 +344,13 @@ class S3Test(S3BaseTest):
 			node.safe_psql("CHECKPOINT")
 
 		assert e.exception.message is not None
-		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+		self.assertTrue(
+		    e.exception.message.startswith(
+		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
-			self.assertIn(
-				'ERROR:  invalid line format of the checksum file',
-				f.read())
-
+			self.assertIn('ERROR:  invalid line format of the checksum file',
+			              f.read())
 
 	def test_s3_ddl_recovery(self):
 		node = self.node
