@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import re
 import shutil
 import signal
 from tempfile import mkdtemp, mkstemp
@@ -10,7 +11,7 @@ from unittest.mock import patch
 import testgres
 from testgres.defaults import default_dbname
 from testgres.enums import NodeStatus
-from testgres.exceptions import StartNodeException
+from testgres.exceptions import StartNodeException, QueryException
 
 from .s3_base_test import S3BaseTest, s3_test_attrs, mock_put_object, \
  mock_put_object_conflict, mock_moto_unkown_error
@@ -239,6 +240,109 @@ class S3Test(S3BaseTest):
 		self.assertIn("data/2/" + test_2_filepath, objects_2)
 
 		node.stop()
+
+	def test_s3_checkpoint_checksum_error(self):
+		node = self.node
+		node.append_conf(f"""
+			orioledb.s3_mode = true
+			orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
+			orioledb.s3_region = '{self.region}'
+			orioledb.s3_accesskey = '{self.access_key_id}'
+			orioledb.s3_secretkey = '{self.secret_access_key}'
+			orioledb.s3_cainfo = '{self.s3_cainfo}'
+
+			orioledb.s3_num_workers = 3
+			orioledb.recovery_pool_size = 1
+
+			autovacuum = off
+		""")
+		node.start()
+
+		small_file_checksums = os.path.join(node.data_dir, "orioledb_data",
+											"small_file_checksums")
+
+		# Test that CHECKPOINT will fail in case of lack of permissions
+		open(small_file_checksums, "a").close()
+		os.chmod(small_file_checksums, 0)
+
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("CHECKPOINT")
+
+		assert e.exception.message is not None
+		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+
+		with open(node.pg_log_file) as f:
+			self.assertIn(
+				'ERROR:  could not read file "orioledb_data/small_file_checksums": Permission denied',
+				f.read())
+
+		os.unlink(small_file_checksums)
+
+		# Test that CHECKPOINT will fail in case of incorrect checkpoint number
+		node.safe_psql("CHECKPOINT")
+		shutil.copy(small_file_checksums, f"{small_file_checksums}.copy")
+
+		pattern_str = r"^FILE: (?P<filename>.+), CHECKSUM: (?P<checksum>.+), CHECKPOINT: (?P<checkpoint>\d+)$"
+		pattern = re.compile(pattern_str)
+
+		with open(small_file_checksums, "r+") as f:
+			m = pattern.search(f.readline().rstrip())
+			assert m is not None
+
+			f.seek(0, os.SEEK_END)
+			f.write(f"FILE: {m.groups()[0]}, CHECKSUM: {m.groups()[1]}, CHECKPOINT: 100")
+
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("CHECKPOINT")
+
+		assert e.exception.message is not None
+		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+
+		with open(node.pg_log_file) as f:
+			self.assertIn(
+				'ERROR:  unexpected checkpoint number in the checksum file',
+				f.read())
+
+		# Test that CHECKPOINT will fail in case of duplicated entries
+		shutil.copy(f"{small_file_checksums}.copy", small_file_checksums)
+
+		with open(small_file_checksums, "r+") as f:
+			line = f.readline().rstrip()
+			f.seek(0, os.SEEK_END)
+			f.write(line)
+
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("CHECKPOINT")
+
+		assert e.exception.message is not None
+		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+
+		with open(node.pg_log_file) as f:
+			self.assertIn(
+				'ERROR:  the file name is duplicated in the checksum file',
+				f.read())
+
+		# Test that CHECKPOINT will fail in case of invalid file
+		shutil.copy(f"{small_file_checksums}.copy", small_file_checksums)
+
+		with open(small_file_checksums, "r+") as f:
+			m = pattern.search(f.readline().rstrip())
+			assert m is not None
+
+			f.seek(0, os.SEEK_END)
+			f.write(f"FILE: {m.groups()[0]}, CHECKSUM: {m.groups()[1]}")
+
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("CHECKPOINT")
+
+		assert e.exception.message is not None
+		self.assertTrue(e.exception.message.startswith("ERROR:  checkpoint request failed"))
+
+		with open(node.pg_log_file) as f:
+			self.assertIn(
+				'ERROR:  invalid line format of the checksum file',
+				f.read())
+
 
 	def test_s3_ddl_recovery(self):
 		node = self.node

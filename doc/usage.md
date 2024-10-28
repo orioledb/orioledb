@@ -204,7 +204,7 @@ CREATE TABLE s3_test
 )  USING orioledb
 ```
 
-In S3 mode all the tables and materialized views created with `using orioledb` are synchronized with S3 incrementally.  That is, only modified blocks are to be put into S3 bucket.  The table/materialized view not created with `using orioledb` will be saved completely at every checkpoint.  So, it's recommended to use S3 mode when you store the majority of your data using the OrioleDB engine.
+In S3 mode, all tables and materialized views are incrementally synchronized with S3, meaning only modified blocks are uploaded to the S3 bucket. However, for tables and materialized views not created with `using orioledb`, OrioleDB’s background workers will compute file checksums during each checkpoint. Therefore, it is recommended to use S3 mode when storing the majority of your data with the OrioleDB engine.
 
 For best results, it's recommended to turn on `Transfer acceleration` in **General** AWS S3 bucket settings (endpoint address will be given with `s3-accelerate.amazonaws.com` suffix) and have the bucket and compute instance within the same AWS region. Even better is to use **Directory** AWS bucket within the same AWS region and sub-region as the compute instance.
 
