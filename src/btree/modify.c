@@ -733,7 +733,7 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								BTreeOperationInsert, blkno,
 								O_PAGE_GET_CHANGE_COUNT(page),
 								&undoLocation);
-		leafTuphdr->undoLocation = InvalidUndoLocation | undoLocation;
+		leafTuphdr->undoLocation = InvalidUndoLocation | saved_undo_location[desc->undoType];
 	}
 }
 

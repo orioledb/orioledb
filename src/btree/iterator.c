@@ -302,7 +302,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				 * system tree.
 				 */
 				if (XACT_INFO_GET_OXID(xactInfo) == get_current_oxid_if_any() &&
-					(UndoLocationGetValue(tupHdr.undoLocation) <= saved_undo_location[desc->undoType] ||
+					(UndoLocationGetValue(tupHdr.undoLocation) < saved_undo_location[desc->undoType] ||
 					 IS_SYS_TREE_OIDS(desc->oids)) &&
 					oSnapshot->csn != COMMITSEQNO_MAX_NORMAL)
 					break;
