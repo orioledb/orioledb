@@ -280,7 +280,7 @@ SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
 
 CREATE TABLE o_test_partition_pkey_update_move (
   val_1 INT PRIMARY KEY
-) PARTITION BY LIST (val_1);
+) PARTITION BY LIST (val_1) USING orioledb;
 
 CREATE TABLE o_test_partition_pkey_update_move_child1
 	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (1);
