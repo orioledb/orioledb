@@ -518,15 +518,15 @@ SELECT regexp_replace(regexp_replace(
 		': \d+',
 		': NNN',
 		'g');
-                             regexp_replace                              
--------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0                   +
- state = free, datoid equal, relnode equal, ix_type = primary, clean    +
-     Leftmost, Rightmost                                                +
-   Chunk 0: offset = 0, location = 256, hikey location = 64             +
-     Item 0: offset = 264, tuple = ((NNN, (NNN), X/X, N), encoding: NNN)+
-     Item 1: offset = 320, tuple = ((NNN, (NNN), X/X, N), encoding: NNN)+
-                                                                        +
+                           regexp_replace                            
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = (((NNN, (NNN), X/X, N), 0), 40)  +
+     Item 1: offset = 368, tuple = (((NNN, (NNN), X/X, N), 0), 40)  +
+                                                                    +
  
 (1 row)
 

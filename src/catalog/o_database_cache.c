@@ -26,16 +26,32 @@
 
 static OSysCache *database_cache = NULL;
 
+typedef struct ODatabase
+{
+	OSysCacheKey1 key;
+	int32		encoding;
+	char		datlocprovider;
+#if PG_VERSION_NUM >= 170000
+	char	   *datlocale;
+	char	   *daticurules;
+#endif
+} ODatabase;
+
 static void o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 										Pointer arg);
 static void o_database_cache_free_entry(Pointer entry);
+static Pointer o_database_cache_serialize_entry(Pointer entry, int *len);
+static Pointer o_database_cache_deserialize_entry(MemoryContext mcxt,
+												  Pointer data, Size length);
 
 O_SYS_CACHE_FUNCS(database_cache, ODatabase, 1);
 
 static OSysCacheFuncs database_cache_funcs =
 {
 	.free_entry = o_database_cache_free_entry,
-	.fill_entry = o_database_cache_fill_entry
+	.fill_entry = o_database_cache_fill_entry,
+	.toast_serialize_entry = o_database_cache_serialize_entry,
+	.toast_deserialize_entry = o_database_cache_deserialize_entry,
 };
 
 /*
@@ -45,7 +61,7 @@ O_SYS_CACHE_INIT_FUNC(database_cache)
 {
 	Oid			keytypes[] = {OIDOID};
 
-	database_cache = o_create_sys_cache(SYS_TREES_DATABASE_CACHE, false,
+	database_cache = o_create_sys_cache(SYS_TREES_DATABASE_CACHE, true,
 										DatabaseOidIndexId, DATABASEOID, 1,
 										keytypes, 0, fastcache, mcxt,
 										&database_cache_funcs);
@@ -60,6 +76,10 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	ODatabase  *o_database = (ODatabase *) *entry_ptr;
 	MemoryContext prev_context;
 	Oid			dboid;
+#if PG_VERSION_NUM >= 170000
+	Datum		datum;
+	bool		isNull;
+#endif
 
 	dboid = DatumGetObjectId(key->keys[0]);
 
@@ -81,6 +101,22 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 
 	o_database->encoding = dbform->encoding;
 	o_database->datlocprovider = dbform->datlocprovider;
+
+#if PG_VERSION_NUM >= 170000
+	datum = SysCacheGetAttr(DATABASEOID, databasetup,
+							Anum_pg_database_datlocale, &isNull);
+	if (!isNull)
+		o_database->datlocale = TextDatumGetCString(datum);
+	else
+		o_database->datlocale = NULL;
+
+	datum = SysCacheGetAttr(DATABASEOID, databasetup,
+							Anum_pg_database_daticurules, &isNull);
+	if (!isNull)
+		o_database->daticurules = TextDatumGetCString(datum);
+	else
+		o_database->daticurules = NULL;
+#endif
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(databasetup);
@@ -124,6 +160,16 @@ o_database_cache_set_default_locale_provider()
 										 database_cache->nkeys);
 	if (o_database)
 	{
+		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
+		{
+			default_locale.info.builtin.locale = MemoryContextStrdup(TopMemoryContext,
+																	 o_database->datlocale);
+		}
+		else if (o_database->datlocprovider == COLLPROVIDER_ICU)
+		{
+			make_icu_collator(o_database->datlocale, o_database->daticurules, &default_locale);
+		}
+
 		default_locale.provider = o_database->datlocprovider;
 		default_locale.deterministic = true;
 	}
@@ -135,16 +181,57 @@ o_database_cache_set_default_locale_provider()
 }
 #endif
 
-/*
- * A tuple print function for o_print_btree_pages()
- */
-void
-o_database_cache_tup_print(BTreeDescr *desc, StringInfo buf,
-						   OTuple tup, Pointer arg)
+Pointer
+o_database_cache_serialize_entry(Pointer entry, int *len)
 {
-	ODatabase  *o_database = (ODatabase *) tup.data;
+	StringInfoData str;
+	ODatabase  *o_database = (ODatabase *) entry;
 
-	appendStringInfo(buf, "(");
-	o_sys_cache_key_print(desc, buf, tup, arg);
-	appendStringInfo(buf, ", encoding: %d)", o_database->encoding);
+	initStringInfo(&str);
+	appendBinaryStringInfo(&str, (Pointer) o_database,
+						   offsetof(ODatabase, datlocprovider));
+
+#if PG_VERSION_NUM >= 170000
+	appendBinaryStringInfo(&str, ((Pointer) o_database) + offsetof(ODatabase, datlocprovider),
+						   offsetof(ODatabase, datlocale) - offsetof(ODatabase, datlocprovider));
+	o_serialize_string(o_database->datlocale, &str);
+	o_serialize_string(o_database->daticurules, &str);
+#else
+	appendBinaryStringInfo(&str, ((Pointer) o_database) + offsetof(ODatabase, datlocprovider),
+						   sizeof(ODatabase) - offsetof(ODatabase, datlocprovider));
+#endif
+
+	*len = str.len;
+	return str.data;
+}
+
+Pointer
+o_database_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
+								   Size length)
+{
+	Pointer		ptr = data;
+	ODatabase  *o_database;
+	int			len;
+
+	o_database = (ODatabase *) palloc0(sizeof(ODatabase));
+	len = offsetof(ODatabase, datlocprovider);
+	Assert((ptr - data) + len <= length);
+	memcpy(o_database, ptr, len);
+	ptr += len;
+
+#if PG_VERSION_NUM >= 170000
+	len = offsetof(ODatabase, datlocale) - offsetof(ODatabase, datlocprovider);
+#else
+	len = sizeof(ODatabase) - offsetof(ODatabase, datlocprovider);
+#endif
+	Assert((ptr - data) + len <= length);
+	memcpy(((Pointer) o_database) + offsetof(ODatabase, datlocprovider), ptr, len);
+	ptr += len;
+
+#if PG_VERSION_NUM >= 170000
+	o_database->datlocale = o_deserialize_string(&ptr);
+	o_database->daticurules = o_deserialize_string(&ptr);
+#endif
+
+	return (Pointer) o_database;
 }
