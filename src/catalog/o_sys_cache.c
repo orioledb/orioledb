@@ -655,8 +655,8 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 	int			i;
 	bool		allocated = false;
 	OTuple		entry_tuple = {.data = entry};
-	int			key_len = o_btree_len(desc, entry_tuple, OTupleKeyLength);
-	int			entry_len = o_btree_len(desc, entry_tuple, OTupleLength);
+	int			key_len = -1;
+	int			entry_len = -1;
 
 	entry_key->common = key->common;
 	entry_key->common.dataLength = 0;
@@ -668,6 +668,18 @@ o_sys_cache_add(OSysCache *sys_cache, OSysCacheKey *key, Pointer entry)
 				{
 					Pointer		new_entry;
 					int			new_entry_len;
+
+					/*
+					 * In the code below we storing fields with Name type at
+					 * the end of entry. NAMEOID key fields now only used with
+					 * non-toast o_enum_cache
+					 */
+					Assert(!sys_cache->is_toast);
+					if (key_len == -1 && entry_len == -1)
+					{
+						key_len = o_btree_len(desc, entry_tuple, OTupleKeyLength);
+						entry_len = o_btree_len(desc, entry_tuple, OTupleLength);
+					}
 
 					new_entry_len = entry_len + sizeof(NameData);
 					new_entry = palloc0(new_entry_len);
