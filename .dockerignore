@@ -69,6 +69,9 @@ sql/orioledb--1.0.sql
 # Exclude version control and continuous integration (CI) directories
 .git
 .github
+.gitattributes
+.gitignore
+.style.yapf
 
 # Exclude Dockerfiles
 Dockerfile
@@ -76,12 +79,25 @@ Dockerfile.ubuntu
 
 # Exclude OrioleDB Docker test definitions and code
 # as they are not needed inside the Docker image.
-test/
-ci/local_docker_matrix.sh
+# And some files used only during CI runtime;
+# mapped as a runtime volume and unnecessary in the image build.
+ci/check_docker.sh
 ci/docker_matrix.sh
+ci/local_docker_matrix.sh
+expected/
+specs/
+sql/
+t/
+test/
 
 # Documentation files, which are not needed inside the Docker image.
 doc/
+**/*.md
 
-# Exclude the PostGIS Docker build directory
+
+# Exclude some files that are not needed inside the Docker image.
+# but sometimes left in the directory
 docker-postgis
+wal2json*
+**/*.log
+**/_*.*
