@@ -7,6 +7,7 @@ PG_MAJOR="17"
 COMPILER="clang"
 DEBUG="false"
 DRY_RUN="false"
+TEST_TARGETS="no"
 
 # Define base lists
 declare -A base_lists
@@ -14,14 +15,15 @@ base_lists[all-oldest]="ubuntu:22.04 alpine:3.14"
 base_lists[all-latest]="ubuntu:24.10 alpine:3.20"
 base_lists[all-dev]="ubuntu:devel alpine:edge"
 base_lists[all-alpine]="alpine:edge alpine:3.20 alpine:3.19 alpine:3.18 alpine:3.17 alpine:3.16 alpine:3.15 alpine:3.14"
-base_lists[all-debian]="ubuntu:devel ubuntu:24.10 ubuntu:24.04 ubuntu:22.04 ubuntu:20.04 "
-base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-debian]}"
+base_lists[all-ubuntu]="ubuntu:devel ubuntu:24.10 ubuntu:24.04 ubuntu:22.04 ubuntu:20.04 "
+base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-ubuntu]}"
 
 # Valid Alpine, Ubuntu, PG and Compiler versions
 VALID_ALPINE_VERSIONS="edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 latest"
 VALID_UBUNTU_VERSIONS="devel 24.10 24.04 22.04 20.04 oracular noble jammy focal latest rolling"
 VALID_PG_MAJOR_VERSIONS="17 16"
 VALID_COMPILERS="clang gcc"
+VALID_TEST_TARGETS="no show-build-env installcheck regresscheck isolationcheck testgrescheck testgrescheck_part_1 testgrescheck_part_2"
 
 
 # Function to display help message
@@ -37,7 +39,7 @@ Options:
   --base MATRIX|IMAGE Specify the base/matrix option or individual image
                       Matrix options:
                         all-alpine # [ ${base_lists[all-alpine]} ],
-                        all-debian # [ ${base_lists[all-debian]} ],
+                        all-ubuntu # [ ${base_lists[all-ubuntu]} ],
                         all-oldest # [ ${base_lists[all-oldest]} ],
                         all-latest # [ ${base_lists[all-latest]} ],
                         all-dev # [ ${base_lists[all-dev]} ],
@@ -56,27 +58,35 @@ Options:
                       In this case, each image size exceeds +1GB
                       Valid options: [ all true false ]
                       Default: $DEBUG
+  --test_targets      Space-separated list of test targets to run (in quotes)
+                      Valid options: [ $VALID_TEST_TARGETS ]
+                      Default: $TEST_TARGETS
   --dry-run           Only print commands without executing
                       Default: $([ "$DRY_RUN" = true ] && echo "enabled" || echo "disabled")
-  --clean             Clean Docker images ( remove orioletest:* )
-                      [ --dry-run mode is not working with this option! ]
   --help              Display this help message
 
 For the details: check the "--dry-run" and the Dockerfiles in the root directory
   - alpine Dockerfile : ./Dockerfile
   - ubuntu Dockerfile : ./Dockerfile.ubuntu
 
+Known issues:
+  the: ubuntu:20.04 && testgrescheck testgrescheck_part_1 testgrescheck_part_2 is not working properly
+
 The Docker build logs generated in the ./log_docker_build directory,
 and you can check the build logs with:
   grep -i -C 1 warning: ./log_docker_build/*/*.build.log
+And you can clean the orioletest test images with:
+  docker images | grep orioletest | awk '{print \$3}' | sort -u | xargs docker rmi -f
 
 Examples:
   ./ci/docker_matrix.sh --base all-dev --pg-major all --compiler clang
-  ./ci/docker_matrix.sh --base alpine:3.20 --pg-major 17 --compiler gcc --debug true
+  ./ci/docker_matrix.sh --base alpine:3.20 --compiler gcc --debug true
   ./ci/docker_matrix.sh --base ubuntu:oracular --pg-major 16 --compiler all --debug false
+  ./ci/docker_matrix.sh --base alpine:devel --compiler gcc --test_targets 'show-build-env'
+  ./ci/docker_matrix.sh --base alpine:latest --test_targets 'regresscheck isolationcheck'
 
 Default behavior:
-  ./ci/docker_matrix.sh --base $BASE_MATRIX --pg-major $PG_MAJOR --compiler $COMPILER --debug $DEBUG
+  ./ci/docker_matrix.sh --base $BASE_MATRIX --pg-major $PG_MAJOR --compiler $COMPILER --debug $DEBUG --test_targets $TEST_TARGETS
 
 EOF
 }
@@ -104,12 +114,6 @@ check_docker() {
     fi
 }
 
-# Function to clean Docker images
-clean_docker_images() {
-    echo "Cleaning Docker images..."
-    docker images | grep 'orioletest' | awk '{print $3}' | sort -u | xargs -r docker rmi -f
-}
-
 ## Function to format and optionally execute a command
 execute_command() {
     echo
@@ -119,7 +123,7 @@ execute_command() {
     # Formatting: insert line breaks before certain options
     # and at '|' and 'tee' for readability
     local formatted_cmd=$(echo "$cmd" | sed -E '
-        s/(\s)(\||tee|2>&1)/ \\\n  \2/g;
+        s/(\s)(\||tee|2>&1|bash|"orioletest:)/ \\\n  \2/g;
         s/ (\-[^ ]+)/ \\\n  \1/g
     ')
 
@@ -199,9 +203,12 @@ main() {
                         [[ $base_os == "ubuntu" ]] && dockerfile="Dockerfile.ubuntu"
                         local docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}-debug-${debug}"
 
+                        echo "#"
                         echo "#------------ $docker_tag ------------------"
+                        echo "#"
 
                         # Build Docker image
+                        execute_command "touch ${logpath}/${docker_tag}.build.progress"
                         execute_command "docker build --pull --network=host --progress=plain \
                             --build-arg ${base_os_upper}_VERSION=\"$base_tag\" \
                             --build-arg BUILD_CC_COMPILER=\"$compiler\" \
@@ -211,15 +218,36 @@ main() {
                             -t \"orioletest:${docker_tag}\" . \
                             2>&1 | \
                             tee \"${logpath}/${docker_tag}.build.log\""
+                        execute_command "rm ${logpath}/${docker_tag}.build.progress"
+                        execute_command "touch ${logpath}/${docker_tag}.build.ok"
 
                         # Run Docker tests
+                        execute_command "touch ${logpath}/${docker_tag}.test.progress"
                         execute_command "\"${OFFIMG_LOCAL_CLONE}/test/run.sh\" \
                             -c \"${OFFIMG_LOCAL_CLONE}/test/config.sh\" \
                             -c \"test/orioledb-config.sh\" \"orioletest:${docker_tag}\" \
                             2>&1 | \
                             tee \"${logpath}/${docker_tag}.test.log\""
+                        execute_command "rm ${logpath}/${docker_tag}.test.progress"
+                        execute_command "touch ${logpath}/${docker_tag}.test.ok"
 
-                        #TODO - add regression test - running inside in the docker container
+                        # Run specified test targets if not set to 'no'
+                        if [ "$TEST_TARGETS" != "no" ]; then
+                            execute_command "touch ${logpath}/${docker_tag}.check.progress"
+                            execute_command "docker run --rm --network=host \
+                                --volume $(pwd):/github/workspace/orioledb \
+                                \"orioletest:${docker_tag}\" \
+                                bash -c 'bash +x /github/workspace/orioledb/ci/check_docker.sh \"${TEST_TARGETS}\"' \
+                                2>&1 | \
+                                tee \"${logpath}/${docker_tag}.check.log\""
+
+                            # create status file if test passed
+                            execute_command "rm  ${logpath}/${docker_tag}.check.progress"
+                            execute_command "echo \"$TEST_TARGETS\" > ${logpath}/${docker_tag}.check.ok"
+
+                        fi
+
+
 
                 done
             done
@@ -261,13 +289,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                 DEBUG="$2"
                 shift 2
                 ;;
+           --test_targets)
+                TEST_TARGETS="$2"
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
-                ;;
-            --clean)
-                clean_docker_images
-                exit 0
                 ;;
             --help)
                 show_help
