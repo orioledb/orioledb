@@ -296,17 +296,10 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 		if (ostate->curKeyRangeIsLoaded)
 		{
 			result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
-			elog(LOG, "_bt_start_prim_scan, result %u:", result);
-			if (result)
-			{
-/* 				result = _bt_advance_array_keys_increment(scan, ForwardScanDirection); */
-				elog(LOG, "_bt_advance_array_keys_increment, result %u:", result);
-			}
 		}
 		else
 		{
 			_bt_start_array_keys(scan, ostate->scanDir);
-			elog(LOG, "_bt_start_array_keys");
 			result = true;
 		}
 	}
