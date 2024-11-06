@@ -480,6 +480,10 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	{
 		o_report_duplicate(heapRel, descr->indices[ix_num], slot);
 	}
+
+	if (tuple.data)
+        	pfree(tuple.data);
+
 	return success;
 }
 
@@ -600,6 +604,12 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							appendStringInfo(str, "'%s'", res);
 						}
 					}
+
+					if(old_tuple.data)
+						pfree(old_tuple.data);
+					if(new_tuple.data)
+						pfree(new_tuple.data);
+
 					appendStringInfo(str, ")");
 					ereport(ERROR,
 							(errcode(ERRCODE_INTERNAL_ERROR),
@@ -615,12 +625,21 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				o_report_duplicate(heapRel, index_descr, new_slot);
 				break;
 			default:
+				if(old_tuple.data)
+					pfree(old_tuple.data);
+				if(new_tuple.data)
+					pfree(new_tuple.data);
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
 						 errmsg("Unsupported BTreeOperationType.")));
 				break;
 		}
 	}
+
+	if(old_tuple.data)
+		pfree(old_tuple.data);
+	if(new_tuple.data)
+		pfree(new_tuple.data);
 
 	return result.success;
 }
@@ -722,6 +741,9 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 						}
 					}
 					appendStringInfo(str, ")");
+
+					if(tuple.data)
+						pfree(tuple.data);
 					ereport(ERROR,
 							(errcode(ERRCODE_INTERNAL_ERROR),
 							 errmsg("unable to remove tuple from secondary index in \"%s\"",
@@ -735,12 +757,18 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 			case BTreeOperationInsert:
 				break;
 			default:
+				if(tuple.data)
+					pfree(tuple.data);
+
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
 						 errmsg("Unsupported BTreeOperationType.")));
 				break;
 		}
 	}
+
+	if(tuple.data)
+		pfree(tuple.data);
 
 	return result.success;
 }
