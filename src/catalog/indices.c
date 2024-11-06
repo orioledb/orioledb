@@ -368,7 +368,7 @@ index_build_params(OTableIndex *index)
  */
 void
 o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
-			   OIndexNumber old_ix_num, IndexBuildResult *result)
+			   OIndexNumber old_ix_num, IndexBuildResult *result, bool btree)
 {
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
@@ -384,24 +384,27 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	int16		indnatts;
 	int16		indnkeyatts;
 	OCompress	compress = InvalidOCompress;
-	OBTOptions *options;
 
 	if (OidIsValid(indoid))
 		index = index_open(indoid, AccessShareLock);
 
 	ORelOidsSetFromRel(oids, heap);
 
-	options = (OBTOptions *) index->rd_options;
-
-	if (options)
+	if (btree)
 	{
-		if (options->compress_offset > 0)
-		{
-			char	   *str;
+		OBTOptions *options;
+		options = (OBTOptions *) index->rd_options;
 
-			str = (char *) (((Pointer) options) + options->compress_offset);
-			if (str)
-				compress = o_parse_compress(str);
+		if (options)
+		{
+			if (options->compress_offset > 0)
+			{
+				char	   *str;
+
+				str = (char *) (((Pointer) options) + options->compress_offset);
+				if (str)
+					compress = o_parse_compress(str);
+			}
 		}
 	}
 
@@ -534,13 +537,15 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
+	table_index->amoid = index->rd_rel->relam;
 
 	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);
 	else
 		o_tables_table_meta_lock(o_table);
 
-	o_opclass_cache_add_table(o_table);
+	if (table_index->amoid == BTREE_AM_OID)
+		o_opclass_cache_add_table(o_table);
 	custom_types_add_all(o_table, table_index);
 	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
