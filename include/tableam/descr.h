@@ -91,6 +91,7 @@ struct OIndexDescr
 {
 	ORelOids	oids;
 	ORelOids	tableOids;
+	Oid			amoid;
 
 	/* reference count */
 	int			refcnt;
