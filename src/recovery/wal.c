@@ -77,6 +77,50 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 	add_local_modify(rec_type, tuple, length);
 }
 
+void
+add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr)
+{
+	int			required_length;
+	ORelOids	oids = desc->oids;
+	OIndexType	type = desc->type;
+	WALRecBridgeErase *rec;
+
+	/* Do not write WAL during recovery */
+	if (OXidIsValid(recovery_oxid))
+		return;
+
+	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
+	{
+		OIndexDescr *id = (OIndexDescr *) desc->arg;
+
+		oids = id->tableOids;
+		type = oIndexInvalid;
+	}
+
+	Assert(!is_recovery_process());
+
+	required_length = sizeof(WALRecBridgeErase);
+
+	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+		required_length += sizeof(WALRecRelation);
+
+	flush_local_wal_if_needed(required_length);
+	Assert(local_wal_buffer_offset + required_length <= LOCAL_WAL_BUFFER_SIZE);
+
+	if (OXidIsValid(get_current_oxid_if_any()))
+		add_xid_wal_record_if_needed();
+
+	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+		add_rel_wal_record(oids, type);
+
+	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+
+	rec = (WALRecBridgeErase *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec->recType = WAL_REC_BRIDGE_ERASE;
+	memcpy(rec->iptr, iptr, sizeof(rec->iptr));
+	local_wal_buffer_offset += sizeof(*rec);
+}
+
 /*
  * Adds the record to the local_wal_buffer.
  */

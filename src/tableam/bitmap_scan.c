@@ -120,14 +120,19 @@ seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 	AttrNumber	attnum;
 	FormData_pg_attribute *attr;
 	Datum		val;
+	bool		is_null;
 
 	Assert(ix_descr->nPrimaryFields == 1);
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
+	/*
+	 * Currently bitmap scan works only for first field with int4, int8 or
+	 * ctid type
+	 */
 	attnum = ix_descr->primaryFieldsAttnums[0];
 	attr = &ix_descr->leafTupdesc->attrs[attnum - 1];
 	val = o_toast_nocachegetattr(tuple, attnum, ix_descr->leafTupdesc,
-								 &ix_descr->leafSpec);
+								 &ix_descr->leafSpec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
 }
 
@@ -137,6 +142,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	AttrNumber	attnum;
 	FormData_pg_attribute *attr;
 	Datum		val;
+	bool		is_null;
 
 	Assert(primary->nFields == 1);
 
@@ -147,7 +153,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	if (onlyPkey)
 		attnum = 1;
 	val = o_toast_nocachegetattr(tuple, attnum, primary->leafTupdesc,
-								 &primary->leafSpec);
+								 &primary->leafSpec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
 }
 
@@ -351,9 +357,11 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				double		nTuples = 0;
 				BitmapIndexScanState *node;
 				Instrumentation *instrument;
+				OBTOptions *options;
 
 				node = (BitmapIndexScanState *) planstate;
 				instrument = node->ss.ps.instrument;
+				options = (OBTOptions *) node->biss_RelationDesc->rd_options;
 
 				if (instrument)
 					InstrStartNode(instrument);
@@ -369,7 +377,58 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 					result = o_keybitmap_create();
 				}
 
-				nTuples = o_index_getbitmap(bitmap_state, node, result);
+				if ((options && options->index_bridging) ||
+					node->biss_RelationDesc->rd_rel->relam != BTREE_AM_OID)
+				{
+					TIDBitmap  *bridged_bitmap = tbm_create(work_mem * 1024L, NULL);
+					TBMIterator *tbmiterator;
+					TBMIterateResult *tbmres;
+					OIndexDescr *bridge = bitmap_state->scan->tbl_desc->bridge;
+					CommitSeqNo tupleCsn;
+					ItemPointerData iptr;
+
+					nTuples = (double) index_getbitmap(node->biss_ScanDesc, bridged_bitmap);
+
+					tbmiterator = tbm_begin_iterate(bridged_bitmap);
+
+					while ((tbmres = tbm_iterate(tbmiterator)) != NULL)
+					{
+						for (int i = 0; i < tbmres->ntuples; i++)
+						{
+							OBTreeKeyBound bridge_bound;
+							OTuple		bridge_tup;
+							uint64		data;
+
+							ItemPointerSet(&iptr, tbmres->blockno, tbmres->offsets[i]);
+
+							bridge_bound.keys[0].value = PointerGetDatum(&iptr);
+							bridge_bound.keys[0].type = TIDOID;
+							bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+							bridge_bound.keys[0].comparator = NULL;
+
+							o_btree_load_shmem(&bridge->desc);
+
+							bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
+																   (Pointer) &bridge_bound, BTreeKeyBound,
+																   &o_in_progress_snapshot, &tupleCsn,
+																   CurrentMemoryContext, NULL);
+							if (!O_TUPLE_IS_NULL(bridge_tup))
+							{
+								data = seconary_tuple_get_pk_data(bridge_tup, bridge);
+								o_keybitmap_insert(result, data);
+
+								pfree(bridge_tup.data);
+							}
+						}
+					}
+
+					tbm_end_iterate(tbmiterator);
+					tbm_free(bridged_bitmap);
+				}
+				else
+				{
+					nTuples = o_index_getbitmap(bitmap_state, node, result);
+				}
 				if (instrument)
 					InstrStopNode(instrument, nTuples);
 				break;

@@ -731,14 +731,17 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	MemoryContext idx_cxt;
 	int			i;
 	int			ctid_off;
+	int			allfields = o_table->nfields;
 
 	idx_cxt = OGetIndexContext(descr);
 	oldcxt = MemoryContextSwitchTo(idx_cxt);
 	ctid_off = o_table->has_primary ? 0 : 1;
 
+	if (o_table->index_bridging)
+		allfields++;
+
 	tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));
-	tupdesc->constr->missing = (AttrMissing *)
-		palloc0((o_table->nfields + ctid_off) * sizeof(AttrMissing));
+	tupdesc->constr->missing = (AttrMissing *) palloc0((allfields + ctid_off) * sizeof(AttrMissing));
 
 	if (!o_table->has_primary)
 		tupdesc->constr->missing[0].am_present = false;
@@ -756,6 +759,14 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 				datumCopy(o_table->missing[i].am_value, field->byval,
 						  field->typlen);
 		}
+	}
+
+	if (o_table->index_bridging)
+	{
+		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[o_table->nfields + ctid_off];
+
+		tupdesc_miss->am_present = false;
+		tupdesc_miss->am_value = 0;
 	}
 	MemoryContextSwitchTo(oldcxt);
 }
@@ -813,7 +824,7 @@ o_table_make_index_keys(OTable *table, int *num)
 	}
 
 	keys = (OTableIndexOidsKey *) palloc(sizeof(OTableIndexOidsKey) *
-										 (table->nindices + 2));
+										 (table->nindices + 3));
 
 	/* ctid primary index if needed */
 	if (table->nindices == 0 ||
@@ -829,6 +840,13 @@ o_table_make_index_keys(OTable *table, int *num)
 		keys[keys_num].type = table->indices[i].type;
 		keys[keys_num].ixNum = keys_num;
 		keys[keys_num++].oids = table->indices[i].oids;
+	}
+
+	if (ORelOidsIsValid(table->bridge_oids))
+	{
+		keys[keys_num].type = oIndexBridge;
+		keys[keys_num].ixNum = BridgeIndexNumber;
+		keys[keys_num++].oids = table->bridge_oids;
 	}
 
 	if (ORelOidsIsValid(table->toast_oids))
@@ -859,9 +877,14 @@ o_table_make_index_oids(OTable *table, int *num)
 	Assert(table && num);
 
 	oids_num = table->nindices;
-	oids = (ORelOids *) palloc(sizeof(ORelOids) * (oids_num + 2));
+	oids = (ORelOids *) palloc(sizeof(ORelOids) * (oids_num + 3));
 	for (i = 0; i < oids_num; i++)
 		oids[i] = table->indices[i].oids;
+
+	if (ORelOidsIsValid(table->bridge_oids))
+	{
+		oids[oids_num++] = table->bridge_oids;
+	}
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
@@ -1037,7 +1060,7 @@ o_tables_drop_all_temporary()
 }
 
 bool
-o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
+o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 {
 	OTableChunkKey key;
 	bool		result;
@@ -1049,7 +1072,7 @@ o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 
 	key.oids = table->oids;
 	key.chunknum = 0;
-	key.version = version;
+	key.version = 0;
 
 	systrees_modify_start();
 	o_tables_oids_indexes(NULL, table, oxid, csn);
@@ -1061,12 +1084,6 @@ o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn, uint32 version)
 	pfree(data);
 
 	return result;
-}
-
-bool
-o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
-{
-	return o_tables_add_version(table, oxid, csn, 0);
 }
 
 /*
@@ -1859,26 +1876,6 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
 		ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
 		relation_close(indexRel, AccessShareLock);
 	}
-}
-
-void
-o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table)
-{
-	ORelOids	temp_oids = old_o_table->oids;
-	ORelOids	temp_toast_oids = old_o_table->toast_oids;
-
-	old_o_table->oids.datoid = new_o_table->oids.datoid;
-	old_o_table->oids.reloid = new_o_table->oids.reloid;
-	old_o_table->toast_oids.datoid = new_o_table->toast_oids.datoid;
-	old_o_table->toast_oids.reloid = new_o_table->toast_oids.reloid;
-	new_o_table->oids.datoid = temp_oids.datoid;
-	new_o_table->oids.reloid = temp_oids.reloid;
-	new_o_table->toast_oids.datoid = temp_toast_oids.datoid;
-	new_o_table->toast_oids.reloid = temp_toast_oids.reloid;
-
-	new_o_table->default_compress = old_o_table->default_compress;
-	new_o_table->primary_compress = old_o_table->primary_compress;
-	new_o_table->toast_compress = old_o_table->toast_compress;
 }
 
 static int	recovery_num_o_tables_meta_locks = 0;

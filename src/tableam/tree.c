@@ -21,6 +21,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
+#include "storage/itemptr.h"
 #include "tableam/toast.h"
 #include "tableam/tree.h"
 #include "tuple/toast.h"
@@ -146,7 +147,7 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 		values[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
 	}
 
-	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL,
+	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, NULL,
 						   keepVersion ? o_tuple_get_version(tuple) : 0,
 						   values, isnull, NULL);
 
@@ -186,18 +187,22 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 				len;
 	OTuple		result;
 	uint32		version = keep_version ? o_tuple_get_version(tuple) : 0;
+	int			ctid_off = 0;
+
+	if (id->bridging && type == oIndexPrimary && !id->primaryIsCtid)
+		ctid_off = 1;
 
 	Assert(type == oIndexPrimary || type == oIndexRegular);
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum : i + 1;
+		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum + ctid_off : i + 1;
 
 		Assert(attnum > 0);
 		key[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
 	}
 
-	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, version, key, isnull, NULL);
+	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, NULL, version, key, isnull, NULL);
 	if (data)
 	{
 		memset(data, 0, len);
@@ -207,7 +212,7 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 	{
 		result.data = (Pointer) palloc0(len);
 	}
-	o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec, &result, len, NULL, version, key, isnull, NULL);
+	o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec, &result, len, NULL, NULL, version, key, isnull, NULL);
 
 	return result;
 }
@@ -294,6 +299,18 @@ hash_combine_mix_field(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 	return hash;
 }
 
+uint32
+o_hash_iptr(OIndexDescr *idx, ItemPointer iptr)
+{
+	register uint32 hash = HASH_INITIAL;
+
+	hash = hash_combine_mix((Pointer) &idx->desc.oids,
+							sizeof(idx->desc.oids), hash);
+	hash = hash_combine_mix((Pointer) iptr,
+							sizeof(*iptr), hash);
+	return hash_final(hash);
+}
+
 static uint32
 o_hash_key(OIndexDescr *idx, OTuple key)
 {
@@ -315,13 +332,17 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 	TupleDesc	tupdesc = idx->leafTupdesc;
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	int			i = 0;
+	int			ctid_off = 0;
+
+	if (idx->bridging && idx->desc.type == oIndexPrimary && !idx->primaryIsCtid)
+		ctid_off = 1;
 
 	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)
 	{
 		int			attnum;
 
 		if (idx->desc.type == oIndexPrimary)
-			attnum = idx->fields[i].tableAttnum;
+			attnum = idx->fields[i].tableAttnum + ctid_off;
 		else
 			attnum = i + 1;
 
@@ -485,44 +506,19 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 
 /* fills secondary index key bound from primary index tuple */
 void
-o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
-						   OTuple tuple, TupleTableSlot *slot,
-						   OBTreeKeyBound *bound)
+o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound)
 {
-	OIndexDescr *pt = o_get_tree_def(primary),
-			   *st = o_get_tree_def(secondary);
-	int			i,
-				attnum;
+	OIndexDescr *td = o_get_tree_def(secondary);
 	bool		isnull;
-	ListCell   *indexpr_item = list_head(st->expressions_state);
 
-	bound->nkeys = st->nonLeafTupdesc->natts;
-	for (i = 0; i < st->nonLeafTupdesc->natts; i++)
-	{
-		attnum = st->fields[i].tableAttnum;
-		if (attnum != EXPR_ATTNUM)
-		{
-			bound->keys[i].value = o_fastgetattr(tuple, attnum,
-												 pt->leafTupdesc,
-												 &pt->leafSpec, &isnull);
-			bound->keys[i].type = pt->leafTupdesc->attrs[attnum - 1].atttypid;
-		}
-		else
-		{
-			ExprState  *expr_state = (ExprState *) lfirst(indexpr_item);
+	bound->nkeys = 1;
 
-			st->econtext->ecxt_scantuple = slot;
-			bound->keys[i].value = ExecEvalExprSwitchContext(expr_state,
-															 st->econtext,
-															 &isnull);
-			bound->keys[i].type = st->nonLeafTupdesc->attrs[i].atttypid;
-			indexpr_item = lnext(st->expressions_state, indexpr_item);
-		}
-		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
-		if (isnull)
-			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
-		bound->keys[i].comparator = st->fields[i].comparator;
-	}
+	bound->keys[0].value = o_fastgetattr(tuple, td->nFields, td->leafTupdesc, &td->leafSpec, &isnull);
+	bound->keys[0].type = td->leafTupdesc->attrs[td->nFields - 1].atttypid;
+	bound->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+	if (isnull)
+		bound->keys[0].flags |= O_VALUE_BOUND_NULL;
+	bound->keys[0].comparator = td->fields[td->nFields - 1].comparator;
 }
 
 /* fills primary index key bound from tuple that belongs secondary index */
@@ -533,8 +529,13 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 {
 	OIndexDescr *id = o_get_tree_def(desc);
 	int			i;
-	int			pk_from = id->nFields - id->nPrimaryFields;
+	int			pk_from;
 	bool		isnull;
+
+	if (desc->type == oIndexBridge)
+		pk_from = 1;
+	else
+		pk_from = id->nFields - id->nPrimaryFields;
 
 	bound->nkeys = id->nPrimaryFields;
 	for (i = 0; i < id->nPrimaryFields; i++)
@@ -844,7 +845,6 @@ o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 	return 0;
 #endif
 }
-
 
 int
 o_idx_cmp(BTreeDescr *desc,

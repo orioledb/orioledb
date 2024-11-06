@@ -49,6 +49,7 @@ typedef enum
 	RecoveryMsgTypeInsert,
 	RecoveryMsgTypeUpdate,
 	RecoveryMsgTypeDelete,
+	RecoveryMsgTypeBridgeErase,
 	RecoveryMsgTypeCommit,
 	RecoveryMsgTypeRollback,
 	RecoveryMsgTypeFinished,
@@ -166,6 +167,7 @@ extern void apply_modify_record(OTableDescr *descr, OIndexDescr *id,
 extern bool apply_btree_modify_record(BTreeDescr *tree,
 									  RecoveryMsgType type,
 									  OTuple ptr, OXid oxid, CommitSeqNo csn);
+extern void replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr);
 
 extern OBTreeModifyCallbackAction recovery_insert_primary_callback(BTreeDescr *descr,
 																   OTuple tup, OTuple *newtup,

@@ -170,6 +170,14 @@ assign_new_oids(OTable *oTable, Relation rel)
 		table_close(toastrel, NoLock);
 	}
 
+	if (ORelOidsIsValid(oTable->bridge_oids))
+	{
+		oTable->bridge_oids.datoid = MyDatabaseId;
+		oTable->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+														  rel->rd_rel->relpersistence);
+		oTable->bridge_oids.reloid = oTable->bridge_oids.relnode;
+	}
+
 	PG_TRY();
 	{
 		List	   *indexIds;
@@ -191,8 +199,10 @@ assign_new_oids(OTable *oTable, Relation rel)
 		{
 			Oid			indexOid = lfirst_oid(indexId);
 			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
+			OBTOptions *options = (OBTOptions *) iRel->rd_options;
 
-			RelationSetNewRelfilenode(iRel, persistence);
+			if (iRel->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging))
+				RelationSetNewRelfilenode(iRel, persistence);
 			index_close(iRel, AccessExclusiveLock);
 		}
 
@@ -404,7 +414,9 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			if (str)
 				compress = o_parse_compress(str);
 		}
+
 		fillfactor = options->bt_options.fillfactor;
+		Assert(!options->index_bridging);
 	}
 
 	if (index->rd_index->indisprimary)
@@ -653,11 +665,14 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	Pointer		old_o_table_serialized = NULL;
 	int			i;
 	int			nindices = buildstate->spool->descr->nIndices;
+	int			nallindices = buildstate->spool->descr->nIndices + 1;
 	bool		in_recovery = is_recovery_in_progress();
 #ifdef DISABLE_LEADER_PARTICIPATION
 	leaderparticipates = false;
 #endif
 
+	if (btspool->descr->bridge)
+		nallindices += 1;
 
 	if (!in_recovery)
 	{
@@ -690,8 +705,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		if (buildstate->isrebuild)	/* Rebuild indices */
 		{
 			/* All indices plus TOAST sort states */
-			shm_toc_estimate_chunk(&pcxt->estimator, mul_size(estsort, nindices + 1));
-			shm_toc_estimate_keys(&pcxt->estimator, nindices + 1);
+			shm_toc_estimate_chunk(&pcxt->estimator, mul_size(estsort, nallindices));
+			shm_toc_estimate_keys(&pcxt->estimator, nallindices);
 		}
 		else					/* Add secondary index */
 		{
@@ -734,8 +749,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 			Assert(old_o_table_serialized);
 			memmove(((Pointer) &btshared->o_table_serialized) + o_table_size,
 					old_o_table_serialized, old_o_table_size);
-			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * (nindices + 1));
-			for (i = 0; i < nindices + 1; i++)
+			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * nallindices);
+			for (i = 0; i < nallindices; i++)
 			{
 				sharedsort[i] = (Sharedsort *) shm_toc_allocate(pcxt->toc, estsort);
 			}
@@ -770,9 +785,9 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 
 		if (buildstate->isrebuild)
 		{
-			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * (nindices + 1));
+			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * nallindices);
 
-			for (i = 0; i < nindices + 1; i++)
+			for (i = 0; i < nallindices; i++)
 			{
 				sharedsort[i] = (Sharedsort *) ((char *) recovery_sharedsort + i * tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1));
 			}
@@ -815,7 +830,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		 */
 		if (buildstate->isrebuild)
 		{
-			for (i = 0; i < nindices + 1; i++)
+			for (i = 0; i < nallindices; i++)
 			{
 				tuplesort_initialize_shared(sharedsort[i], scantuplesortstates, pcxt->seg);
 				shm_toc_insert(pcxt->toc, PARALLEL_KEY_TUPLESORT + i, sharedsort[i]);
@@ -853,7 +868,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		{
 			if (buildstate->isrebuild)
 			{
-				for (i = 0; i < nindices + 1; i++)
+				for (i = 0; i < nallindices; i++)
 				{
 					tuplesort_initialize_shared(sharedsort[i], btshared->scantuplesortstates, NULL);
 				}
@@ -1051,6 +1066,8 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 	BufferUsage *bufferusage;
 	int			sortmem;
 	int			i;
+	int			nallindices;
+
 
 #ifdef BTREE_BUILD_STATS
 	if (log_btree_build_stats)
@@ -1121,12 +1138,17 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 		o_fill_tmp_table_descr(btspool->old_descr, btspool->old_o_table);
 	}
 
+	nallindices = btspool->descr->nIndices + 1;
+
+	if (btspool->descr->bridge)
+		nallindices += 1;
+
 	if (!is_recovery_in_progress())
 	{
 		if (btshared->isrebuild)
 		{
-			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * (btspool->descr->nIndices + 1));
-			for (i = 0; i < btspool->descr->nIndices + 1; i++)
+			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * nallindices);
+			for (i = 0; i < nallindices; i++)
 			{
 				sharedsort[i] = shm_toc_lookup(toc, PARALLEL_KEY_TUPLESORT + i, false);
 				tuplesort_attach_shared(sharedsort[i], seg);
@@ -1143,8 +1165,8 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 	{
 		if (btshared->isrebuild)
 		{
-			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * (btspool->descr->nIndices + 1));
-			for (i = 0; i < btspool->descr->nIndices + 1; i++)
+			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * nallindices);
+			for (i = 0; i < nallindices; i++)
 			{
 				sharedsort[i] = (Sharedsort *) ((char *) recovery_sharedsort +
 												i * tuplesort_estimate_shared(recovery_idx_pool_size_guc + 1));
@@ -1407,7 +1429,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	o_unset_syscache_hooks();
 
 	btree_write_index_data(&idx->desc, idx->leafTupdesc, sortstates[0],
-						   ctid, &fileHeader);
+						   ctid, 0, &fileHeader);
 	/* End serial/leader sort */
 	tuplesort_end(sortstates[0]);
 	pfree(sortstates);
@@ -1481,12 +1503,16 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	ParallelOScanDesc poscan = &btshared->poscan;
 	int			i;
 	int			nIndices = btspool->descr->nIndices;
+	int			nallindices = nIndices + 1;
+
+	if (btspool->descr->bridge)
+		nallindices += 1;
 
 	indtuples = palloc0(sizeof(double) * nIndices);
-	coordinate = (SortCoordinate) palloc0(sizeof(SortCoordinateData) * (nIndices + 1));
+	coordinate = (SortCoordinate) palloc0(sizeof(SortCoordinateData) * nallindices);
 
 	/* Initialize local tuplesort coordination states */
-	for (i = PrimaryIndexNumber; i < nIndices + 1; i++)
+	for (i = PrimaryIndexNumber; i < nallindices; i++)
 	{
 		coordinate[i].isWorker = true;
 		coordinate[i].nParticipants = -1;
@@ -1503,7 +1529,7 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	}
 
 	/* Begin "partial" tuplesorts for all indexes to be rebuilt */
-	btspool->sortstates = palloc0(sizeof(Pointer) * (nIndices + 1));
+	btspool->sortstates = palloc0(sizeof(Pointer) * nallindices);
 	for (i = PrimaryIndexNumber; i < nIndices; i++)
 	{
 		btspool->sortstates[i] = tuplesort_begin_orioledb_index(btspool->descr->indices[i], work_mem, false, &(coordinate[i]));
@@ -1511,6 +1537,10 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	btspool->sortstates[nIndices] = tuplesort_begin_orioledb_toast(btspool->descr->toast,
 																   btspool->descr->indices[PrimaryIndexNumber],
 																   work_mem, false, &(coordinate[nIndices]));
+	if (btspool->descr->bridge)
+	{
+		btspool->sortstates[nIndices + 1] = tuplesort_begin_orioledb_index(btspool->descr->bridge, work_mem, false, &(coordinate[nIndices + 1]));
+	}
 
 	rebuild_indices_worker_heap_scan(btspool->old_descr, btspool->descr,
 									 poscan, btspool->sortstates, false,
@@ -1520,7 +1550,7 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	if (progress)
 		pgstat_progress_update_param(PROGRESS_CREATEIDX_SUBPHASE,
 									 PROGRESS_BTREE_PHASE_PERFORMSORT_1);
-	for (i = PrimaryIndexNumber; i < nIndices + 1; i++)
+	for (i = PrimaryIndexNumber; i < nallindices; i++)
 	{
 		tuplesort_performsort(btspool->sortstates[i]);
 	}
@@ -1543,7 +1573,7 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	pfree(indtuples);
 
 	/* We can end tuplesorts immediately */
-	for (i = PrimaryIndexNumber; i < nIndices + 1; i++)
+	for (i = PrimaryIndexNumber; i < nallindices; i++)
 	{
 		tuplesort_end(btspool->sortstates[i]);
 	}
@@ -1614,6 +1644,13 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 
 		tts_orioledb_toast_sort_add(primarySlot, descr, sortstates[descr->nIndices]);
 
+		if (descr->bridge)
+		{
+			OTuple		newTup = tts_orioledb_make_secondary_tuple(primarySlot, descr->bridge, true);
+
+			tuplesort_putotuple(sortstates[descr->nIndices + 1], newTup);
+		}
+
 		ExecClearTuple(primarySlot);
 	}
 
@@ -1633,21 +1670,30 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	double		heap_tuples;
 	double	   *index_tuples;
 	uint64		ctid;
+	uint64		bridge_ctid;
 	CheckpointFileHeader *fileHeaders;
 	oIdxBuildState buildstate = {0};
 	oIdxSpool  *btspool = NULL;
 	SortCoordinate *coordinate = NULL;
 	S3TaskLocation maxLocation = 0,
-				location;
+				location = 0;
+	BTreeDescr *old_td;
+	BTreeMetaPage *meta;
+	int			nallindices = descr->nIndices + 1;
 
-	sortstates = (Tuplesortstate **) palloc(sizeof(Tuplesortstate *) *
-											(descr->nIndices + 1));
-	fileHeaders = (CheckpointFileHeader *) palloc(sizeof(CheckpointFileHeader) *
-												  (descr->nIndices + 1));
-	coordinate = (SortCoordinate *) palloc0(sizeof(SortCoordinate *) * (descr->nIndices + 1));
+	if (descr->bridge)
+		nallindices += 1;
+
+	sortstates = (Tuplesortstate **) palloc(sizeof(Tuplesortstate *) * nallindices);
+	fileHeaders = (CheckpointFileHeader *) palloc(sizeof(CheckpointFileHeader) * nallindices);
+	coordinate = (SortCoordinate *) palloc0(sizeof(SortCoordinate *) * nallindices);
 	index_tuples = (double *) palloc0(sizeof(double) * descr->nIndices);
 
 	ctid = 0;
+	old_td = &GET_PRIMARY(old_descr)->desc;
+	o_btree_load_shmem(old_td);
+	meta = BTREE_GET_META(old_td);
+	bridge_ctid = pg_atomic_read_u64(&meta->bridge_ctid);
 
 	buildstate.btleader = NULL;
 
@@ -1674,7 +1720,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	 */
 	if (buildstate.btleader)
 	{
-		for (i = PrimaryIndexNumber; i < descr->nIndices + 1; i++)
+		for (i = PrimaryIndexNumber; i < nallindices; i++)
 		{
 			coordinate[i] = palloc0(sizeof(SortCoordinateData));
 			coordinate[i]->isWorker = false;
@@ -1694,6 +1740,12 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 																 descr->indices[PrimaryIndexNumber],
 																 work_mem, false, coordinate[descr->nIndices]);
 
+	if (descr->bridge)
+	{
+		btree_open_smgr(&descr->bridge->desc);
+		sortstates[descr->nIndices + 1] = tuplesort_begin_orioledb_index(descr->bridge, work_mem, false, coordinate[descr->nIndices + 1]);
+	}
+
 	/* Fill spool using either serial or parallel heap scan */
 	if (!buildstate.btleader)
 	{
@@ -1711,7 +1763,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	}
 
 	o_set_syscache_hooks();
-	for (i = PrimaryIndexNumber; i < descr->nIndices + 1; i++)
+	for (i = PrimaryIndexNumber; i < nallindices; i++)
 	{
 		tuplesort_performsort(sortstates[i]);
 		if (i < descr->nIndices)	/* Indices sort states */
@@ -1719,12 +1771,19 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			btree_write_index_data(&descr->indices[i]->desc, descr->indices[i]->leafTupdesc,
 								   sortstates[i],
 								   (i == PrimaryIndexNumber && descr->indices[PrimaryIndexNumber]->primaryIsCtid) ? ctid : 0,
+								   (i == PrimaryIndexNumber) ? bridge_ctid : 0,
 								   &fileHeaders[i]);
 		}
-		else					/* TOAST sort state */
+		else if (i == descr->nIndices)	/* TOAST sort state */
 		{
 			btree_write_index_data(&descr->toast->desc, descr->toast->leafTupdesc,
-								   sortstates[descr->nIndices], 0, &fileHeaders[i]);
+								   sortstates[descr->nIndices], 0, 0, &fileHeaders[i]);
+		}
+		else if (i == descr->nIndices + 1 && descr->bridge) /* bridge_index sort
+															 * state */
+		{
+			btree_write_index_data(&descr->bridge->desc, descr->bridge->leafTupdesc,
+								   sortstates[descr->nIndices + 1], 0, 0, &fileHeaders[i]);
 		}
 		tuplesort_end(sortstates[i]);
 	}
@@ -1747,7 +1806,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	 */
 	o_tables_table_meta_lock(o_table);
 
-	for (i = PrimaryIndexNumber; i < descr->nIndices + 1; i++)
+	for (i = PrimaryIndexNumber; i < nallindices; i++)
 	{
 		if (i < descr->nIndices)	/* Indices sort states */
 		{
@@ -1755,11 +1814,18 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			o_drop_shared_root_info(descr->indices[i]->desc.oids.datoid,
 									descr->indices[i]->desc.oids.relnode);
 		}
-		else					/* TOAST sort state */
+		else if (i == descr->nIndices)	/* TOAST sort state */
 		{
 			location = btree_write_file_header(&descr->toast->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->toast->desc.oids.datoid,
 									descr->toast->desc.oids.relnode);
+		}
+		else if (i == descr->nIndices + 1 && descr->bridge) /* index_bridge sort
+															 * state */
+		{
+			location = btree_write_file_header(&descr->bridge->desc, &fileHeaders[i]);
+			o_drop_shared_root_info(descr->bridge->desc.oids.datoid,
+									descr->bridge->desc.oids.relnode);
 		}
 		maxLocation = Max(maxLocation, location);
 	}

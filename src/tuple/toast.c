@@ -263,7 +263,7 @@ tableGetMaxChunkSize(void *key, void *arg)
 	values[natts + 2] = PointerGetDatum(&data);
 
 	minTupleSize = o_new_tuple_size(toast->leafTupdesc, &toast->leafSpec,
-									NULL, 1, values, isnull, NULL);
+									NULL, NULL, 1, values, isnull, NULL);
 
 	return MAXALIGN_DOWN(O_BTREE_MAX_TUPLE_SIZE * 3 - MAXALIGN(minTupleSize)) / 3 - minTupleSize - sizeof(LocationIndex);
 }
@@ -978,7 +978,7 @@ o_create_toast_tuple(OToastKey tkey, Pointer data_ptr, Size data_length,
 	result = o_form_tuple(arg->toast->leafTupdesc,
 						  &arg->toast->leafSpec,
 						  o_tuple_get_version(tkey.pk_tuple),
-						  key, isnull);
+						  key, isnull, NULL);
 	pfree(data);
 
 	return result;
@@ -1011,7 +1011,7 @@ o_create_toast_key(OToastKey tkey,
 	return o_form_tuple(arg->toast->nonLeafTupdesc,
 						&arg->toast->nonLeafSpec,
 						o_tuple_get_version(tkey.pk_tuple),
-						key, isnull);
+						key, isnull, NULL);
 }
 
 bool

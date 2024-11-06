@@ -378,6 +378,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	pg_atomic_init_u64(&metaPage->datafileLength[0], 0);
 	pg_atomic_init_u64(&metaPage->datafileLength[1], 0);
 	pg_atomic_init_u64(&metaPage->ctid, 0);
+	pg_atomic_init_u64(&metaPage->bridge_ctid, 0);
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
 		pg_atomic_init_u32(&metaPage->numSeqScans[i], 0);
 
@@ -503,6 +504,10 @@ o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p)
 	if (O_PAGE_IS(p, LEAF))
 	{
 		int			nVacated = 0;
+
+		/* Bridge tuples not treated as vacated */
+		if (desc->type == oIndexBridge)
+			return;
 
 		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 		{

@@ -17,6 +17,7 @@
 #include "btree/btree.h"
 #include "btree/io.h"
 #include "btree/modify.h"
+#include "btree/page_chunks.h"
 #include "btree/undo.h"
 #include "catalog/free_extents.h"
 #include "catalog/indices.h"
@@ -25,12 +26,15 @@
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
+#include "storage/itemptr.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
+#include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/dsa.h"
 #include "utils/inval.h"
+#include "utils/page_pool.h"
 #include "utils/stopevent.h"
 #include "utils/syscache.h"
 
@@ -1490,6 +1494,7 @@ apply_btree_modify_record(BTreeDescr *tree, RecoveryMsgType type,
 	bool		result;
 
 	callbackInfo.arg = &ptr;
+
 	if (IS_SYS_TREE_OIDS(tree->oids))
 	{
 		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
@@ -1498,7 +1503,7 @@ apply_btree_modify_record(BTreeDescr *tree, RecoveryMsgType type,
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_systree_callback;
 		}
 	}
-	else if (tree->type == oIndexPrimary || tree->type == oIndexToast)
+	else if (tree->type == oIndexPrimary || tree->type == oIndexToast || tree->type == oIndexBridge)
 	{
 		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
 		{
@@ -1554,6 +1559,56 @@ apply_btree_modify_record(BTreeDescr *tree, RecoveryMsgType type,
 	}
 
 	return result;
+}
+
+void
+replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
+{
+	OBTreeFindPageContext context;
+	OBTreeKeyBound bound;
+	OBtreePageFindItem *item;
+	OTuple		tuple;
+	Page		p;
+
+	bound.nkeys = 1;
+	bound.n_row_keys = 0;
+	bound.row_keys = NULL;
+	bound.keys[0].type = TIDOID;
+	bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+	bound.keys[0].comparator = bridge->fields[0].comparator;
+	bound.keys[0].value = ItemPointerGetDatum(iptr);
+
+	init_page_find_context(&context, &bridge->desc,
+						   COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY);
+
+	(void) find_page(&context, &bound, BTreeKeyBound, 0);
+
+	item = &context.items[context.index];
+	p = O_GET_IN_MEMORY_PAGE(item->blkno);
+
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
+	{
+		unlock_page(context.items[context.index].blkno);
+		return;
+	}
+
+	BTREE_PAGE_READ_TUPLE(tuple, p, &item->locator);
+
+	if (o_btree_cmp(&bridge->desc,
+					&bound, BTreeKeyBound,
+					&tuple, BTreeKeyLeafTuple) != 0)
+	{
+		unlock_page(context.items[context.index].blkno);
+		return;
+	}
+
+	START_CRIT_SECTION();
+	page_block_reads(item->blkno);
+	page_locator_delete_item(p, &item->locator);
+	MARK_DIRTY(&bridge->desc, item->blkno);
+	END_CRIT_SECTION();
+	unlock_page(context.items[context.index].blkno);
 }
 
 OTuple
@@ -2575,7 +2630,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else
 			{
-				Assert(ix_type == oIndexToast);
+				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 				descr = NULL;
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
 												 false, NULL);
@@ -2660,11 +2715,39 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			recovery_rollback_to_savepoint(parentSubid, -1);
 		}
+		else if (rec_type == WAL_REC_BRIDGE_ERASE)
+		{
+			ItemPointerData iptr;
+
+			memcpy(&iptr, ptr, sizeof(iptr));
+			ptr += sizeof(iptr);
+
+			Assert(indexDescr);
+
+			if (single)
+			{
+				recovery_switch_to_oxid(oxid, -1);
+				replay_erase_bridge_item(indexDescr, &iptr);
+			}
+			else
+			{
+				uint32		hash;
+				OTuple		tuple;
+
+				hash = o_hash_iptr(indexDescr, &iptr);
+				tuple.formatFlags = 0;
+				tuple.data = (Pointer) &iptr;
+				worker_send_modify(GET_WORKER_ID(hash), &indexDescr->desc,
+								   RecoveryMsgTypeBridgeErase, tuple, 0);
+			}
+		}
 		else
 		{
 			OFixedTuple tuple;
 
-			Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE);
+			Assert(rec_type == WAL_REC_INSERT ||
+				   rec_type == WAL_REC_UPDATE ||
+				   rec_type == WAL_REC_DELETE);
 
 			tuple.tuple.formatFlags = *ptr;
 			ptr++;
@@ -2719,6 +2802,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				/* nothing to do here */
 				ptr += length;
 				continue;
+			}
+
+			if (indexDescr->desc.type == oIndexBridge)
+			{
+				elog(LOG, "WAL change for bridge index");
 			}
 
 			if (single)
@@ -2892,9 +2980,9 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 		}
 		else
 		{
-			Assert(desc->type == oIndexToast);
+			Assert(desc->type == oIndexToast || desc->type == oIndexBridge);
 			oids = desc->oids;
-			type = oIndexToast;
+			type = desc->type;
 		}
 	}
 	else
@@ -2912,7 +3000,8 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 
 	Assert(recType == RecoveryMsgTypeInsert ||
 		   recType == RecoveryMsgTypeUpdate ||
-		   recType == RecoveryMsgTypeDelete);
+		   recType == RecoveryMsgTypeDelete ||
+		   recType == RecoveryMsgTypeBridgeErase);
 
 	if (RECOVERY_QUEUE_BUF_SIZE - state->queue_buf_len < max_msg_size)
 		worker_queue_flush(worker_id);
@@ -2923,7 +3012,8 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 	data += sizeof(RecoveryMsgHeader);
 	state->queue_buf_len += sizeof(RecoveryMsgHeader);
 
-	if (state->oxid != cur_state->oxid)
+	Assert(cur_state || recType == RecoveryMsgTypeBridgeErase);
+	if (recType != RecoveryMsgTypeBridgeErase && state->oxid != cur_state->oxid)
 	{
 		memcpy(data, &cur_state->oxid, sizeof(OXid));
 		data += sizeof(OXid);
@@ -2945,17 +3035,26 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 		state->type = type;
 	}
 
-	memcpy(data, &tuple_len, sizeof(int));
-	data += sizeof(int);
-	memcpy(data, &tuple.formatFlags, 1);
+	if (recType != RecoveryMsgTypeBridgeErase)
+	{
+		memcpy(data, &tuple_len, sizeof(int));
+		data += sizeof(int);
+		memcpy(data, &tuple.formatFlags, 1);
 
-	state->queue_buf_len += sizeof(int) + 1;
-	state->queue_buf_len = MAXALIGN(state->queue_buf_len);
-	data = state->queue_buf + state->queue_buf_len;
+		state->queue_buf_len += sizeof(int) + 1;
+		state->queue_buf_len = MAXALIGN(state->queue_buf_len);
+		data = state->queue_buf + state->queue_buf_len;
 
-	memcpy(data, tuple.data, tuple_len);
-	state->queue_buf_len += tuple_len;
-	state->queue_buf_len = MAXALIGN(state->queue_buf_len);
+		memcpy(data, tuple.data, tuple_len);
+		state->queue_buf_len += tuple_len;
+		state->queue_buf_len = MAXALIGN(state->queue_buf_len);
+	}
+	else
+	{
+		memcpy(data, tuple.data, sizeof(ItemPointerData));
+		state->queue_buf_len += sizeof(ItemPointerData);
+		state->queue_buf_len = MAXALIGN(state->queue_buf_len);
+	}
 }
 
 /*
@@ -3275,6 +3374,8 @@ recovery_msg_from_wal_record(uint8 wal_record)
 			return RecoveryMsgTypeDelete;
 		case WAL_REC_UPDATE:
 			return RecoveryMsgTypeUpdate;
+		case WAL_REC_BRIDGE_ERASE:
+			return RecoveryMsgTypeBridgeErase;
 		default:
 			Assert(false);
 			elog(ERROR, "Wrong WAL record modify type %d", wal_record);

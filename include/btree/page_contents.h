@@ -38,6 +38,8 @@ typedef struct
 	 * if an index key isn't defined.
 	 */
 	pg_atomic_uint64 ctid;
+	/* ctid used to map index record to primary key */
+	pg_atomic_uint64 bridge_ctid;
 	pg_atomic_uint32 leafPagesNum;
 
 	/* Number of running sequential scans depending on the checkpoint number */
@@ -77,6 +79,10 @@ typedef struct
 } BTreePageChunk;
 
 #define BTREE_PAGE_MAX_CHUNK_ITEMS \
+	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
+		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
+
+#define BTREE_PAGE_MAX_ITEMS \
 	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
 		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
 

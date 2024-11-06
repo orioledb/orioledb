@@ -29,6 +29,7 @@
 #include "tableam/handler.h"
 #include "tableam/operations.h"
 #include "tableam/tree.h"
+#include "tableam/vacuum.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
@@ -83,7 +84,7 @@ typedef OScanDescData *OScanDesc;
  */
 static void get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 								BTreeLocationHint *hint, CommitSeqNo *csn,
-								uint32 *version);
+								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
 
 
@@ -110,6 +111,7 @@ orioledb_slot_callbacks(Relation relation)
 typedef struct OrioledbIndexFetchData
 {
 	IndexFetchTableData xs_base;	/* AM independent part of the descriptor */
+	bool		bridged_tuple;
 } OrioledbIndexFetchData;
 
 /*
@@ -121,6 +123,17 @@ orioledb_index_fetch_begin(Relation rel)
 {
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
 
+	/* TODO: Remove this hack */
+	extern Relation o_current_index;
+
+	if (o_current_index)
+	{
+		OBTOptions *options = (OBTOptions *) o_current_index->rd_options;
+
+		o_scan->bridged_tuple = (options && options->index_bridging) ||
+			(o_current_index->rd_rel->relam != BTREE_AM_OID);
+		o_current_index = NULL;
+	}
 
 	o_scan->xs_base.rel = rel;
 
@@ -149,10 +162,11 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
 {
+	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 	OTableDescr *descr;
 	OBTreeKeyBound pkey;
 	OTuple		tuple;
-	BTreeLocationHint hint;
+	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 	CommitSeqNo csn;
 	OSnapshot	oSnapshot;
 	CommitSeqNo tupleCsn;
@@ -169,8 +183,31 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
-						&csn, &version);
+	if (o_scan->bridged_tuple)
+	{
+		OBTreeKeyBound bridge_bound;
+		OTuple		bridge_tup;
+
+		bridge_bound.keys[0].value = tupleid;
+		bridge_bound.keys[0].type = TIDOID;
+		bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		bridge_bound.keys[0].comparator = NULL;
+		csn = COMMITSEQNO_INPROGRESS;
+
+		o_btree_load_shmem(&descr->bridge->desc);
+
+		bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
+											   (Pointer) &bridge_bound, BTreeKeyBound,
+											   &o_in_progress_snapshot, &tupleCsn,
+											   slot->tts_mcxt, NULL);
+		if (O_TUPLE_IS_NULL(bridge_tup))
+			return false;
+
+		o_fill_pindex_tuple_key_bound(&descr->bridge->desc, bridge_tup, &pkey);
+	}
+	else
+		get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
+							&csn, &version, NULL);
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
 
 	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
@@ -246,7 +283,7 @@ orioledb_fetch_row_version(Relation relation,
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
-						&csn, &version);
+						&csn, &version, NULL);
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
 
 	tuple = o_btree_find_tuple_by_key_cb(&GET_PRIMARY(descr)->desc,
@@ -449,9 +486,10 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL, NULL);
 
-	mres = o_tbl_delete(descr, &pkey, oxid, oSnapshot.csn, &hint, &marg);
+	mres = o_tbl_delete(relation, descr, &pkey, oxid,
+						oSnapshot.csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
@@ -517,6 +555,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OXid		oxid;
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
+	ItemPointer bridge_ctid = NULL;
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 
@@ -539,7 +578,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	oxid = get_current_oxid();
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
-						&marg.csn, NULL);
+						&marg.csn, NULL, descr->bridge ? &bridge_ctid : NULL);
 	if (slot->tts_ops != descr->newTuple->tts_ops)
 	{
 		ExecCopySlot(descr->newTuple, slot);
@@ -558,7 +597,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 											   INDEX_ATTR_BITMAP_KEY);
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid,
-						oSnapshot.csn, &hint, &marg);
+						oSnapshot.csn, &hint, &marg, bridge_ctid);
 
 	if (mres.self_modified)
 	{
@@ -634,7 +673,7 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	larg.selfModified = false;
 	larg.deleted = false;
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL, NULL);
 
 	res = o_tbl_lock(descr, &pkey, mode, oxid, &larg, &hint);
 
@@ -753,6 +792,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		pfree(newTreeOids);
 	}
 
+	ASAN_UNPOISON_MEMORY_REGION(freezeXid, sizeof(*freezeXid));
 	*freezeXid = InvalidTransactionId;
 	*minmulti = InvalidMultiXactId;
 
@@ -908,9 +948,86 @@ orioledb_index_build_range_scan(Relation heapRelation,
 								void *callback_state,
 								TableScanDesc scan)
 {
-	/*
-	 * used for index creation
-	 */
+	OBTOptions *options = (OBTOptions *) indexRelation->rd_options;
+
+	if ((options && options->index_bridging) || indexRelation->rd_rel->relam != BTREE_AM_OID)
+	{
+		OTableDescr *descr;
+		BTreeSeqScan *seq_scan;
+		TupleTableSlot *primarySlot;
+		double		heap_tuples;
+		OTuple		tup;
+		BTreeLocationHint hint;
+		CommitSeqNo tupleCsn;
+		ExprState  *predicate;
+		EState	   *estate;
+		ExprContext *econtext;
+		Datum		values[INDEX_MAX_KEYS];
+		bool		isnull[INDEX_MAX_KEYS];
+
+		/*
+		 * Need an EState for evaluation of index expressions and
+		 * partial-index predicates.  Also a slot to hold the current tuple.
+		 */
+		estate = CreateExecutorState();
+		econtext = GetPerTupleExprContext(estate);
+
+		/* Set up execution state for predicate, if any. */
+		predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+
+		descr = relation_get_descr(heapRelation);
+		Assert(descr != NULL);
+
+		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, NULL);
+		primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+
+		/* Arrange for econtext's scan tuple to be the tuple under test */
+		econtext->ecxt_scantuple = primarySlot;
+
+		heap_tuples = 0;
+		while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(seq_scan, primarySlot->tts_mcxt, &tupleCsn, &hint)))
+		{
+			OTableSlot *oslot = (OTableSlot *) primarySlot;
+
+			tts_orioledb_store_tuple(primarySlot, tup, descr, tupleCsn, PrimaryIndexNumber, true, &hint);
+			slot_getallattrs(primarySlot);
+
+			heap_tuples++;
+
+			MemoryContextReset(econtext->ecxt_per_tuple_memory);
+
+			/*
+			 * In a partial index, discard tuples that don't satisfy the
+			 * predicate.
+			 */
+			if (predicate != NULL)
+			{
+				if (!ExecQual(predicate, econtext))
+					continue;
+			}
+
+			/*
+			 * For the current heap tuple, extract all the attributes we use
+			 * in this index, and note which are null.  This also performs
+			 * evaluation of any expressions needed.
+			 */
+			FormIndexDatum(indexInfo,
+						   primarySlot,
+						   estate,
+						   values,
+						   isnull);
+
+			/* Call the AM's callback routine to process the tuple */
+			callback(indexRelation, &oslot->bridge_ctid, values, isnull, true, callback_state);
+
+			ExecClearTuple(primarySlot);
+		}
+		ExecDropSingleTupleTableSlot(primarySlot);
+		FreeExecutorState(estate);
+		free_btree_seq_scan(seq_scan);
+
+		return heap_tuples;
+	}
 	return 0.0;
 }
 
@@ -1360,7 +1477,17 @@ static void
 orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 					BufferAccessStrategy bstrategy)
 {
-	/* nothing to do */
+	OTableDescr *descr;
+
+	descr = relation_get_descr(onerel);
+
+	/*
+	 * We do VACUUM only to cleanup bridged indexes.
+	 */
+	if (!descr->bridge || params->index_cleanup == VACOPTVALUE_DISABLED)
+		return;
+
+	orioledb_vacuum_bridged_indexes(onerel, descr, params, bstrategy);
 }
 
 static TransactionId
@@ -1818,6 +1945,11 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 								   NULL, validate_toast_compress, NULL,
 								   offsetof(ORelOptions,
 											toast_compress_offset));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Enables implicit ctid index and ctid column for all indices",
+								 false,
+								 offsetof(ORelOptions,
+										  index_bridging));
 		MemoryContextSwitchTo(oldcxt);
 		relopts_set = true;
 	}
@@ -1979,7 +2111,8 @@ relation_get_descr(Relation rel)
 
 static void
 get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
-					BTreeLocationHint *hint, CommitSeqNo *csn, uint32 *version)
+					BTreeLocationHint *hint, CommitSeqNo *csn, uint32 *version,
+					ItemPointer *bridge_ctid)
 {
 	bytea	   *rowid;
 	Pointer		p;
@@ -1995,12 +2128,19 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tuple.data = p;
-		tuple.formatFlags = add->flags;
 		*hint = add->hint;
 		if (csn)
 			*csn = add->csn;
+
+		if (id->bridging)
+		{
+			if (bridge_ctid)
+				*bridge_ctid = (ItemPointer) p;
+			p += MAXALIGN(sizeof(ItemPointerData));
+		}
+
+		tuple.data = p;
+		tuple.formatFlags = add->flags;
 		if (version)
 			*version = o_tuple_get_version(tuple);
 		o_fill_key_bound(id, tuple, BTreeKeyNonLeafKey, key);
@@ -2023,6 +2163,13 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		key->keys[0].type = TIDOID;
 		key->keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		key->keys[0].comparator = NULL;
+
+		if (id->bridging)
+		{
+			p += MAXALIGN(sizeof(ItemPointerData));
+			if (bridge_ctid)
+				*bridge_ctid = (ItemPointer) p;
+		}
 	}
 }
 

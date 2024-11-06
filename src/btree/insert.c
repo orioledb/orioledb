@@ -525,6 +525,12 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				LocationIndex newItemLen;
 
 				/*
+				 * No compaction should occur for bridge index: we need to
+				 * keep the entries for VACUUM.
+				 */
+				Assert(desc->type != oIndexBridge);
+
+				/*
 				 * Compact page might insert new item or resize existing item
 				 * for us.
 				 */

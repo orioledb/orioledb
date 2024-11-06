@@ -86,12 +86,13 @@ CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
 \set HIDE_TOAST_COMPRESSION false
 SET orioledb.table_description_compress = true;
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
  
 (1 row)
 
@@ -125,12 +126,13 @@ View definition:
 ALTER MATERIALIZED VIEW o_test_matview
 	ALTER COLUMN quantity SET COMPRESSION pglz;
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
  
 (1 row)
 

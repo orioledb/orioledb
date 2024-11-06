@@ -2091,6 +2091,7 @@ SELECT orioledb_tbl_indices('bitmap_second_field_pk'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 2, non-leaf tuple size: 1+
      Non-leaf tuple fields: value              +
+     Leaf tuple fields: key, value             +
  Index bitmap_second_field_pk_ix1              +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+

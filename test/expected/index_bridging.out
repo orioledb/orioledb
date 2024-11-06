@@ -1,0 +1,1899 @@
+CREATE SCHEMA index_bridging;
+SET SESSION search_path = 'index_bridging';
+CREATE EXTENSION orioledb;
+CREATE EXTENSION pageinspect;
+CREATE TABLE o_test_ix_ams (
+	i int NOT NULL,
+	j int4[],
+	p point,
+	pk1 int,
+	pk2 int
+) USING orioledb WITH (index_bridging);
+SELECT orioledb_table_description('o_test_ix_ams'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |      Type | Collation | Nullable | Droped      +
+       i |   integer |    (null) |    false |  false      +
+       j | integer[] |    (null) |     true |  false      +
+       p |     point |    (null) |     true |  false      +
+     pk1 |   integer |    (null) |     true |  false      +
+     pk2 |   integer |    (null) |     true |  false      +
+ 
+(1 row)
+
+\d+ o_test_ix_ams
+                            Table "index_bridging.o_test_ix_ams"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+ pk1    | integer   |           |          |         | plain    |              | 
+ pk2    | integer   |           |          |         | plain    |              | 
+Options: index_bridging=true
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 7, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                                 +
+     Index type: secondary                                          +
+     Leaf tuple size: 2, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: index_bridging_ctid                     +
+     Leaf tuple fields: index_bridging_ctid, ctid                   +
+ Index toast                                                        +
+     Index type: secondary                                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3                     +
+     Non-leaf tuple fields: ctid, attnum, chunknum                  +
+     Leaf tuple fields: ctid, attnum, chunknum, data                +
+ 
+(1 row)
+
+INSERT INTO o_test_ix_ams VALUES (1, ARRAY[2,3], point(4, 5), 6, 7);
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                orioledb_tbl_structure                                 
+---------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
+                                                                                      +
+ Index index_bridge contents                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                   +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                 +
+                                                                                      +
+ Index toast: not loaded                                                              +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams;
+ i |   j   |   p   | pk1 | pk2 
+---+-------+-------+-----+-----
+ 1 | {2,3} | (4,5) |   6 |   7
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                orioledb_tbl_structure                                 
+---------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
+                                                                                      +
+ Index index_bridge contents                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                   +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                 +
+                                                                                      +
+ Index toast: not loaded                                                              +
+ 
+(1 row)
+
+CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging, deduplicate_items = off);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+(1 row)
+
+\d+ o_test_ix_ams
+                            Table "index_bridging.o_test_ix_ams"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+ pk1    | integer   |           |          |         | plain    |              | 
+ pk2    | integer   |           |          |         | plain    |              | 
+Indexes:
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+Options: index_bridging=true
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 7, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                                 +
+     Index type: secondary                                          +
+     Leaf tuple size: 2, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: index_bridging_ctid                     +
+     Leaf tuple fields: index_bridging_ctid, ctid                   +
+ Index toast                                                        +
+     Index type: secondary                                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3                     +
+     Non-leaf tuple fields: ctid, attnum, chunknum                  +
+     Leaf tuple fields: ctid, attnum, chunknum, data                +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+ i |   j   |   p   | pk1 | pk2 
+---+-------+-------+-----+-----
+ 1 | {2,3} | (4,5) |   6 |   7
+(1 row)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                orioledb_tbl_structure                                 
+---------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
+                                                                                      +
+ Index index_bridge contents                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                   +
+     Leftmost, Rightmost                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                 +
+                                                                                      +
+ Index toast: not loaded                                                              +
+ 
+(1 row)
+
+INSERT INTO o_test_ix_ams VALUES (10, ARRAY[20,30], point(40, 50), 60, 70);
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                    orioledb_tbl_structure                                    
+----------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                         +
+     Leftmost, Rightmost                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')       +
+     Item 1: offset = 360, tuple = ('(0,2)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')+
+                                                                                             +
+ Index index_bridge contents                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                         +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                          +
+     Leftmost, Rightmost                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                        +
+     Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                        +
+                                                                                             +
+ Index toast: not loaded                                                                     +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+(2 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+ i  |    j    |    p    | pk1 | pk2 
+----+---------+---------+-----+-----
+  1 | {2,3}   | (4,5)   |   6 |   7
+ 10 | {20,30} | (40,50) |  60 |  70
+(2 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT j FROM o_test_ix_ams ORDER BY j;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Index Only Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT j FROM o_test_ix_ams ORDER BY j;
+    j    
+---------
+ {2,3}
+ {20,30}
+(2 rows)
+
+COMMIT;
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 7, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                                 +
+     Index type: secondary                                          +
+     Leaf tuple size: 2, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: index_bridging_ctid                     +
+     Leaf tuple fields: index_bridging_ctid, ctid                   +
+ Index toast                                                        +
+     Index type: secondary                                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3                     +
+     Non-leaf tuple fields: ctid, attnum, chunknum                  +
+     Leaf tuple fields: ctid, attnum, chunknum, data                +
+ 
+(1 row)
+
+ALTER TABLE o_test_ix_ams ADD PRIMARY KEY (pk2, pk1);
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                     orioledb_tbl_indices                      
+---------------------------------------------------------------
+ Index o_test_ix_ams_pkey                                     +
+     Index type: primary, unique                              +
+     Leaf tuple size: 6, non-leaf tuple size: 2               +
+     Non-leaf tuple fields: pk2, pk1                          +
+     Leaf tuple fields: index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                           +
+     Index type: secondary                                    +
+     Leaf tuple size: 3, non-leaf tuple size: 1               +
+     Non-leaf tuple fields: index_bridging_ctid               +
+     Leaf tuple fields: index_bridging_ctid, pk2, pk1         +
+ Index toast                                                  +
+     Index type: secondary                                    +
+     Leaf tuple size: 5, non-leaf tuple size: 4               +
+     Non-leaf tuple fields: pk2, pk1, attnum, chunknum        +
+     Leaf tuple fields: pk2, pk1, attnum, chunknum, data      +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                               orioledb_tbl_structure                                
+-------------------------------------------------------------------------------------
+ Index o_test_ix_ams_pkey contents                                                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('70', '60')   +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '{2,3}', '(4,5)', '6', '7')       +
+   Chunk 1: offset = 1, location = 360, hikey location = 72                         +
+     Item 1: offset = 368, tuple = ('(0,2)', '10', '{20,30}', '(40,50)', '60', '70')+
+                                                                                    +
+ Index index_bridge: not loaded                                                     +
+ Index toast: not loaded                                                            +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams;
+ i  |    j    |    p    | pk1 | pk2 
+----+---------+---------+-----+-----
+  1 | {2,3}   | (4,5)   |   6 |   7
+ 10 | {20,30} | (40,50) |  60 |  70
+(2 rows)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+(2 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+ i  |    j    |    p    | pk1 | pk2 
+----+---------+---------+-----+-----
+  1 | {2,3}   | (4,5)   |   6 |   7
+ 10 | {20,30} | (40,50) |  60 |  70
+(2 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                               orioledb_tbl_structure                                
+-------------------------------------------------------------------------------------
+ Index o_test_ix_ams_pkey contents                                                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('70', '60')   +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '{2,3}', '(4,5)', '6', '7')       +
+   Chunk 1: offset = 1, location = 360, hikey location = 72                         +
+     Item 1: offset = 368, tuple = ('(0,2)', '10', '{20,30}', '(40,50)', '60', '70')+
+                                                                                    +
+ Index index_bridge contents                                                        +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = bridge, clean                 +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('(0,2)')      +
+     Item 0: offset = 264, tuple = ('(0,1)', '7', '6')                              +
+   Chunk 1: offset = 1, location = 296, hikey location = 72                         +
+     Item 1: offset = 304, tuple = ('(0,2)', '70', '60')                            +
+                                                                                    +
+ Index toast: not loaded                                                            +
+ 
+(1 row)
+
+INSERT INTO o_test_ix_ams VALUES (100, ARRAY[200,300], point(400, 500), 600, 700);
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                   orioledb_tbl_structure                                   
+--------------------------------------------------------------------------------------------
+ Index o_test_ix_ams_pkey contents                                                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                       +
+     Leftmost, Rightmost                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('70', '60')          +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
+   Chunk 1: offset = 1, location = 360, hikey location = 72                                +
+     Item 1: offset = 368, tuple = ('(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
+     Item 2: offset = 464, tuple = ('(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
+                                                                                           +
+ Index index_bridge contents                                                               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                        +
+     Leftmost, Rightmost                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('(0,2)')             +
+     Item 0: offset = 264, tuple = ('(0,1)', '7', '6')                                     +
+   Chunk 1: offset = 1, location = 296, hikey location = 72                                +
+     Item 1: offset = 304, tuple = ('(0,2)', '70', '60')                                   +
+     Item 2: offset = 336, tuple = ('(0,3)', '700', '600')                                 +
+                                                                                           +
+ Index toast: not loaded                                                                   +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams;
+  i  |     j     |     p     | pk1 | pk2 
+-----+-----------+-----------+-----+-----
+   1 | {2,3}     | (4,5)     |   6 |   7
+  10 | {20,30}   | (40,50)   |  60 |  70
+ 100 | {200,300} | (400,500) | 600 | 700
+(3 rows)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+ (0,3) | (0,3) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+  i  |     j     |     p     | pk1 | pk2 
+-----+-----------+-----------+-----+-----
+   1 | {2,3}     | (4,5)     |   6 |   7
+  10 | {20,30}   | (40,50)   |  60 |  70
+ 100 | {200,300} | (400,500) | 600 | 700
+(3 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                   orioledb_tbl_structure                                   
+--------------------------------------------------------------------------------------------
+ Index o_test_ix_ams_pkey contents                                                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                       +
+     Leftmost, Rightmost                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('70', '60')          +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
+   Chunk 1: offset = 1, location = 360, hikey location = 72                                +
+     Item 1: offset = 368, tuple = ('(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
+     Item 2: offset = 464, tuple = ('(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
+                                                                                           +
+ Index index_bridge contents                                                               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                       +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                        +
+     Leftmost, Rightmost                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('(0,2)')             +
+     Item 0: offset = 264, tuple = ('(0,1)', '7', '6')                                     +
+   Chunk 1: offset = 1, location = 296, hikey location = 72                                +
+     Item 1: offset = 304, tuple = ('(0,2)', '70', '60')                                   +
+     Item 2: offset = 336, tuple = ('(0,3)', '700', '600')                                 +
+                                                                                           +
+ Index toast: not loaded                                                                   +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                     orioledb_tbl_indices                      
+---------------------------------------------------------------
+ Index o_test_ix_ams_pkey                                     +
+     Index type: primary, unique                              +
+     Leaf tuple size: 6, non-leaf tuple size: 2               +
+     Non-leaf tuple fields: pk2, pk1                          +
+     Leaf tuple fields: index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                           +
+     Index type: secondary                                    +
+     Leaf tuple size: 3, non-leaf tuple size: 1               +
+     Non-leaf tuple fields: index_bridging_ctid               +
+     Leaf tuple fields: index_bridging_ctid, pk2, pk1         +
+ Index toast                                                  +
+     Index type: secondary                                    +
+     Leaf tuple size: 5, non-leaf tuple size: 4               +
+     Non-leaf tuple fields: pk2, pk1, attnum, chunknum        +
+     Leaf tuple fields: pk2, pk1, attnum, chunknum, data      +
+ 
+(1 row)
+
+ALTER TABLE o_test_ix_ams DROP CONSTRAINT o_test_ix_ams_pkey;
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 7, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                                 +
+     Index type: secondary                                          +
+     Leaf tuple size: 2, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: index_bridging_ctid                     +
+     Leaf tuple fields: index_bridging_ctid, ctid                   +
+ Index toast                                                        +
+     Index type: secondary                                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3                     +
+     Non-leaf tuple fields: ctid, attnum, chunknum                  +
+     Leaf tuple fields: ctid, attnum, chunknum, data                +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams;
+  i  |     j     |     p     | pk1 | pk2 
+-----+-----------+-----------+-----+-----
+   1 | {2,3}     | (4,5)     |   6 |   7
+  10 | {20,30}   | (40,50)   |  60 |  70
+ 100 | {200,300} | (400,500) | 600 | 700
+(3 rows)
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                       orioledb_tbl_structure                                        
+-----------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                        +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
+     Leftmost, Rightmost                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,1)')                      +
+     Item 0: offset = 264, tuple = ('(0,0)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
+   Chunk 1: offset = 1, location = 360, hikey location = 80, hikey = ('(0,2)')                      +
+     Item 1: offset = 368, tuple = ('(0,1)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
+   Chunk 2: offset = 2, location = 464, hikey location = 88                                         +
+     Item 2: offset = 472, tuple = ('(0,2)', '(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
+                                                                                                    +
+ Index index_bridge: not loaded                                                                     +
+ Index toast: not loaded                                                                            +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+ (0,3) | (0,3) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+  i  |     j     |     p     | pk1 | pk2 
+-----+-----------+-----------+-----+-----
+   1 | {2,3}     | (4,5)     |   6 |   7
+  10 | {20,30}   | (40,50)   |  60 |  70
+ 100 | {200,300} | (400,500) | 600 | 700
+(3 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                       orioledb_tbl_structure                                        
+-----------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                        +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
+     Leftmost, Rightmost                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,1)')                      +
+     Item 0: offset = 264, tuple = ('(0,0)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
+   Chunk 1: offset = 1, location = 360, hikey location = 80, hikey = ('(0,2)')                      +
+     Item 1: offset = 368, tuple = ('(0,1)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
+   Chunk 2: offset = 2, location = 464, hikey location = 88                                         +
+     Item 2: offset = 472, tuple = ('(0,2)', '(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
+                                                                                                    +
+ Index index_bridge contents                                                                        +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                +
+ state = free, datoid equal, relnode equal, ix_type = bridge, clean                                 +
+     Leftmost, Rightmost                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,2)')                      +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,0)')                                               +
+   Chunk 1: offset = 1, location = 296, hikey location = 80, hikey = ('(0,3)')                      +
+     Item 1: offset = 304, tuple = ('(0,2)', '(0,1)')                                               +
+   Chunk 2: offset = 2, location = 336, hikey location = 88                                         +
+     Item 2: offset = 344, tuple = ('(0,3)', '(0,2)')                                               +
+                                                                                                    +
+ Index toast: not loaded                                                                            +
+ 
+(1 row)
+
+SELECT orioledb_table_description('o_test_ix_ams'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |      Type | Collation | Nullable | Droped      +
+       i |   integer |    (null) |    false |  false      +
+       j | integer[] |    (null) |     true |  false      +
+       p |     point |    (null) |     true |  false      +
+     pk1 |   integer |    (null) |    false |  false      +
+     pk2 |   integer |    (null) |    false |  false      +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 7, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                                 +
+     Index type: secondary                                          +
+     Leaf tuple size: 2, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: index_bridging_ctid                     +
+     Leaf tuple fields: index_bridging_ctid, ctid                   +
+ Index toast                                                        +
+     Index type: secondary                                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3                     +
+     Non-leaf tuple fields: ctid, attnum, chunknum                  +
+     Leaf tuple fields: ctid, attnum, chunknum, data                +
+ 
+(1 row)
+
+ALTER TABLE o_test_ix_ams ALTER j TYPE int USING 200-j[1];
+SELECT orioledb_table_description('o_test_ix_ams'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+       i | integer |    (null) |    false |  false        +
+       j | integer |    (null) |     true |  false        +
+       p |   point |    (null) |     true |  false        +
+     pk1 | integer |    (null) |    false |  false        +
+     pk2 | integer |    (null) |    false |  false        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 7, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
+ Index index_bridge                                                 +
+     Index type: secondary                                          +
+     Leaf tuple size: 2, non-leaf tuple size: 1                     +
+     Non-leaf tuple fields: index_bridging_ctid                     +
+     Leaf tuple fields: index_bridging_ctid, ctid                   +
+ Index toast                                                        +
+     Index type: secondary                                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3                     +
+     Non-leaf tuple fields: ctid, attnum, chunknum                  +
+     Leaf tuple fields: ctid, attnum, chunknum, data                +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams;
+  i  |  j  |     p     | pk1 | pk2 
+-----+-----+-----------+-----+-----
+   1 | 198 | (4,5)     |   6 |   7
+  10 | 180 | (40,50)   |  60 |  70
+ 100 |   0 | (400,500) | 600 | 700
+(3 rows)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+ (0,3) | (0,3) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+  i  |  j  |     p     | pk1 | pk2 
+-----+-----+-----------+-----+-----
+ 100 |   0 | (400,500) | 600 | 700
+  10 | 180 | (40,50)   |  60 |  70
+   1 | 198 | (4,5)     |   6 |   7
+(3 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                   orioledb_tbl_structure                                    
+---------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                        +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                        +
+     Leftmost, Rightmost                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                 +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '198', '(4,5)', '6', '7')        +
+     Item 1: offset = 336, tuple = ('(0,2)', '(0,2)', '10', '180', '(40,50)', '60', '70')   +
+     Item 2: offset = 408, tuple = ('(0,3)', '(0,3)', '100', '0', '(400,500)', '600', '700')+
+                                                                                            +
+ Index index_bridge contents                                                                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                        +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                         +
+     Leftmost, Rightmost                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                 +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                       +
+     Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                       +
+     Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                       +
+                                                                                            +
+ Index toast: not loaded                                                                    +
+ 
+(1 row)
+
+ALTER TABLE o_test_ix_ams ADD COLUMN k int;
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                          orioledb_tbl_indices                          
+------------------------------------------------------------------------
+ Index ctid_primary                                                    +
+     Index type: primary, unique, ctid                                 +
+     Leaf tuple size: 8, non-leaf tuple size: 1                        +
+     Non-leaf tuple fields: ctid                                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2, k+
+ Index index_bridge                                                    +
+     Index type: secondary                                             +
+     Leaf tuple size: 2, non-leaf tuple size: 1                        +
+     Non-leaf tuple fields: index_bridging_ctid                        +
+     Leaf tuple fields: index_bridging_ctid, ctid                      +
+ Index toast                                                           +
+     Index type: secondary                                             +
+     Leaf tuple size: 4, non-leaf tuple size: 3                        +
+     Non-leaf tuple fields: ctid, attnum, chunknum                     +
+     Leaf tuple fields: ctid, attnum, chunknum, data                   +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+ (0,3) | (0,3) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+  i  |  j  |     p     | pk1 | pk2 | k 
+-----+-----+-----------+-----+-----+---
+ 100 |   0 | (400,500) | 600 | 700 |  
+  10 | 180 | (40,50)   |  60 |  70 |  
+   1 | 198 | (4,5)     |   6 |   7 |  
+(3 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                      orioledb_tbl_structure                                       
+---------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                              +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                              +
+     Leftmost, Rightmost                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                       +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '198', '(4,5)', '6', '7', null)        +
+     Item 1: offset = 336, tuple = ('(0,2)', '(0,2)', '10', '180', '(40,50)', '60', '70', null)   +
+     Item 2: offset = 408, tuple = ('(0,3)', '(0,3)', '100', '0', '(400,500)', '600', '700', null)+
+                                                                                                  +
+ Index index_bridge contents                                                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                              +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                               +
+     Leftmost, Rightmost                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                       +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                             +
+     Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                             +
+     Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                             +
+                                                                                                  +
+ Index toast: not loaded                                                                          +
+ 
+(1 row)
+
+\d+ o_test_ix_ams
+                           Table "index_bridging.o_test_ix_ams"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           | not null |         | plain   |              | 
+ j      | integer |           |          |         | plain   |              | 
+ p      | point   |           |          |         | plain   |              | 
+ pk1    | integer |           | not null |         | plain   |              | 
+ pk2    | integer |           | not null |         | plain   |              | 
+ k      | integer |           |          |         | plain   |              | 
+Indexes:
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+Options: index_bridging=true
+
+-- Don't update bridge_index when updated column not indexed by any bridged index
+UPDATE o_test_ix_ams SET p = point(i * 40 + 1, i * 5);
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                       orioledb_tbl_structure                                       
+----------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                               +
+     Leftmost, Rightmost                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                        +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '198', '(41,5)', '6', '7', null)        +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,2)', '10', '180', '(401,50)', '60', '70', null)   +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,3)', '100', '0', '(4001,500)', '600', '700', null)+
+                                                                                                   +
+ Index index_bridge contents                                                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                               +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                +
+     Leftmost, Rightmost                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                        +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                              +
+     Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                              +
+     Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                              +
+                                                                                                   +
+ Index toast: not loaded                                                                           +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+ (0,3) | (0,3) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+  i  |  j  |     p      | pk1 | pk2 | k 
+-----+-----+------------+-----+-----+---
+ 100 |   0 | (4001,500) | 600 | 700 |  
+  10 | 180 | (401,50)   |  60 |  70 |  
+   1 | 198 | (41,5)     |   6 |   7 |  
+(3 rows)
+
+COMMIT;
+-- Now it should update bridging_ctid-s
+UPDATE o_test_ix_ams SET j = j/2 + 1000;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                        orioledb_tbl_structure                                         
+-------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                  +
+     Leftmost, Rightmost                                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', null)          +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', null)     +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', null)+
+                                                                                                      +
+ Index index_bridge contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                   +
+     Leftmost, Rightmost                                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                        +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                        +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                        +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                 +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                 +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                 +
+                                                                                                      +
+ Index toast: not loaded                                                                              +
+ 
+(1 row)
+
+-- Rows with new bridging_ctid now not stored in o_test_ix_ams_ix1
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,1) | (0,1) | 
+ (0,2) | (0,2) | 
+ (0,3) | (0,3) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+ i | j | p | pk1 | pk2 | k 
+---+---+---+-----+-----+---
+(0 rows)
+
+COMMIT;
+-- After reindex new rows should be visible
+REINDEX INDEX o_test_ix_ams_ix1;
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,4) | (0,4) | 
+ (0,5) | (0,5) | 
+ (0,6) | (0,6) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY j;
+  i  |  j   |     p      | pk1 | pk2 | k 
+-----+------+------------+-----+-----+---
+ 100 | 1000 | (4001,500) | 600 | 700 |  
+  10 | 1090 | (401,50)   |  60 |  70 |  
+   1 | 1099 | (41,5)     |   6 |   7 |  
+(3 rows)
+
+COMMIT;
+CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging, deduplicate_items = off);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                          orioledb_tbl_indices                          
+------------------------------------------------------------------------
+ Index ctid_primary                                                    +
+     Index type: primary, unique, ctid                                 +
+     Leaf tuple size: 8, non-leaf tuple size: 1                        +
+     Non-leaf tuple fields: ctid                                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2, k+
+ Index index_bridge                                                    +
+     Index type: secondary                                             +
+     Leaf tuple size: 2, non-leaf tuple size: 1                        +
+     Non-leaf tuple fields: index_bridging_ctid                        +
+     Leaf tuple fields: index_bridging_ctid, ctid                      +
+ Index toast                                                           +
+     Index type: secondary                                             +
+     Leaf tuple size: 4, non-leaf tuple size: 3                        +
+     Non-leaf tuple fields: ctid, attnum, chunknum                     +
+     Leaf tuple fields: ctid, attnum, chunknum, data                   +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,4) | (0,4) | 
+ (0,5) | (0,5) | 
+ (0,6) | (0,6) | 
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY k;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix2 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY k;
+  i  |  j   |     p      | pk1 | pk2 | k 
+-----+------+------------+-----+-----+---
+   1 | 1099 | (41,5)     |   6 |   7 |  
+  10 | 1090 | (401,50)   |  60 |  70 |  
+ 100 | 1000 | (4001,500) | 600 | 700 |  
+(3 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                        orioledb_tbl_structure                                         
+-------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                  +
+     Leftmost, Rightmost                                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', null)          +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', null)     +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', null)+
+                                                                                                      +
+ Index index_bridge contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                   +
+     Leftmost, Rightmost                                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                        +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                        +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                        +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                 +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                 +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                 +
+                                                                                                      +
+ Index toast: not loaded                                                                              +
+ 
+(1 row)
+
+INSERT INTO o_test_ix_ams VALUES (1000, 2000, point(4000, 5000), 6000, 7000, 8000);
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                           orioledb_tbl_structure                                            
+-------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                        +
+     Leftmost, Rightmost                                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', null)                +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', null)           +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', null)      +
+     Item 3: offset = 504, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000')+
+                                                                                                            +
+ Index index_bridge contents                                                                                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                         +
+     Leftmost, Rightmost                                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                              +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                              +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                              +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                       +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                       +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                       +
+     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                       +
+                                                                                                            +
+ Index toast: not loaded                                                                                    +
+ 
+(1 row)
+
+SELECT ctid, htid, tids FROM
+		 generate_series(1,
+						 (SELECT relpages - 1 FROM pg_class
+							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
+		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
+	ORDER BY ctid;
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,4) | (0,4) | 
+ (0,5) | (0,5) | 
+ (0,6) | (0,6) | 
+ (0,7) | (0,7) | 
+(4 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY k;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix2 on o_test_ix_ams
+(1 row)
+
+SELECT * FROM o_test_ix_ams ORDER BY k;
+  i   |  j   |      p      | pk1  | pk2  |  k   
+------+------+-------------+------+------+------
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000
+    1 | 1099 | (41,5)      |    6 |    7 |     
+   10 | 1090 | (401,50)    |   60 |   70 |     
+  100 | 1000 | (4001,500)  |  600 |  700 |     
+(4 rows)
+
+COMMIT;
+DROP INDEX o_test_ix_ams_ix2;
+UPDATE o_test_ix_ams SET k = j WHERE i < 1000;
+UPDATE o_test_ix_ams SET k = 8000 WHERE i = 1000;
+CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
+\d+ o_test_ix_ams
+                           Table "index_bridging.o_test_ix_ams"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           | not null |         | plain   |              | 
+ j      | integer |           |          |         | plain   |              | 
+ p      | point   |           |          |         | plain   |              | 
+ pk1    | integer |           | not null |         | plain   |              | 
+ pk2    | integer |           | not null |         | plain   |              | 
+ k      | integer |           |          |         | plain   |              | 
+Indexes:
+    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+Options: index_bridging=true
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                          orioledb_tbl_indices                          
+------------------------------------------------------------------------
+ Index ctid_primary                                                    +
+     Index type: primary, unique, ctid                                 +
+     Leaf tuple size: 8, non-leaf tuple size: 1                        +
+     Non-leaf tuple fields: ctid                                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2, k+
+ Index index_bridge                                                    +
+     Index type: secondary                                             +
+     Leaf tuple size: 2, non-leaf tuple size: 1                        +
+     Non-leaf tuple fields: index_bridging_ctid                        +
+     Leaf tuple fields: index_bridging_ctid, ctid                      +
+ Index toast                                                           +
+     Index type: secondary                                             +
+     Leaf tuple size: 4, non-leaf tuple size: 3                        +
+     Non-leaf tuple fields: ctid, attnum, chunknum                     +
+     Leaf tuple fields: ctid, attnum, chunknum, data                   +
+ 
+(1 row)
+
+SELECT * FROM hash_page_items(get_raw_page('o_test_ix_ams_hash_ix', 1));
+ itemoffset | ctid  |    data    
+------------+-------+------------
+          1 | (0,6) | 3454247188
+          2 | (0,4) | 4159514150
+(2 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE k = 8000;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Index Scan using o_test_ix_ams_hash_ix on o_test_ix_ams
+   Index Cond: (k = 8000)
+(2 rows)
+
+SELECT * FROM o_test_ix_ams WHERE k = 8000;
+  i   |  j   |      p      | pk1  | pk2  |  k   
+------+------+-------------+------+------+------
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000
+(1 row)
+
+COMMIT;
+-- Test bitmap scans
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE j < 2100;
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test_ix_ams
+   Bitmap heap scan
+   Recheck Cond: (j < 2100)
+   ->  Bitmap Index Scan on o_test_ix_ams_ix1
+         Index Cond: (j < 2100)
+(5 rows)
+
+SELECT * FROM o_test_ix_ams WHERE j < 2100;
+  i   |  j   |      p      | pk1  | pk2  |  k   
+------+------+-------------+------+------+------
+    1 | 1099 | (41,5)      |    6 |    7 | 1099
+   10 | 1090 | (401,50)    |   60 |   70 | 1090
+  100 | 1000 | (4001,500)  |  600 |  700 | 1000
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000
+(4 rows)
+
+COMMIT;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE k = 8000;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_test_ix_ams
+   Bitmap heap scan
+   Recheck Cond: (k = 8000)
+   ->  Bitmap Index Scan on o_test_ix_ams_hash_ix
+         Index Cond: (k = 8000)
+(5 rows)
+
+SELECT * FROM o_test_ix_ams WHERE k = 8000;
+  i   |  j   |      p      | pk1  | pk2  |  k   
+------+------+-------------+------+------+------
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000
+(1 row)
+
+COMMIT;
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                           orioledb_tbl_structure                                            
+-------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                        +
+     Leftmost, Rightmost                                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', '1099')              +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', '1090')         +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', '1000')    +
+     Item 3: offset = 504, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000')+
+                                                                                                            +
+ Index index_bridge contents                                                                                +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                         +
+     Leftmost, Rightmost                                                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                              +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                              +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                              +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                       +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                       +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                       +
+     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                       +
+                                                                                                            +
+ Index toast: not loaded                                                                                    +
+ 
+(1 row)
+
+ALTER TABLE o_test_ix_ams ADD COLUMN r int4[];
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                           orioledb_tbl_indices                            
+---------------------------------------------------------------------------
+ Index ctid_primary                                                       +
+     Index type: primary, unique, ctid                                    +
+     Leaf tuple size: 9, non-leaf tuple size: 1                           +
+     Non-leaf tuple fields: ctid                                          +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2, k, r+
+ Index index_bridge                                                       +
+     Index type: secondary                                                +
+     Leaf tuple size: 2, non-leaf tuple size: 1                           +
+     Non-leaf tuple fields: index_bridging_ctid                           +
+     Leaf tuple fields: index_bridging_ctid, ctid                         +
+ Index toast                                                              +
+     Index type: secondary                                                +
+     Leaf tuple size: 4, non-leaf tuple size: 3                           +
+     Non-leaf tuple fields: ctid, attnum, chunknum                        +
+     Leaf tuple fields: ctid, attnum, chunknum, data                      +
+ 
+(1 row)
+
+SELECT attname, atthasmissing, atthasdef FROM pg_attribute WHERE attrelid = 'o_test_ix_ams'::regclass;
+ attname  | atthasmissing | atthasdef 
+----------+---------------+-----------
+ tableoid | f             | f
+ cmax     | f             | f
+ xmax     | f             | f
+ cmin     | f             | f
+ xmin     | f             | f
+ ctid     | f             | f
+ i        | f             | f
+ j        | f             | f
+ p        | f             | f
+ pk1      | f             | f
+ pk2      | f             | f
+ k        | f             | f
+ r        | f             | f
+(13 rows)
+
+SELECT orioledb_table_description('o_test_ix_ams'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |      Type | Collation | Nullable | Droped      +
+       i |   integer |    (null) |    false |  false      +
+       j |   integer |    (null) |     true |  false      +
+       p |     point |    (null) |     true |  false      +
+     pk1 |   integer |    (null) |    false |  false      +
+     pk2 |   integer |    (null) |    false |  false      +
+       k |   integer |    (null) |     true |  false      +
+       r | integer[] |    (null) |     true |  false      +
+ 
+(1 row)
+
+\d+ o_test_ix_ams
+                            Table "index_bridging.o_test_ix_ams"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer   |           |          |         | plain    |              | 
+ p      | point     |           |          |         | plain    |              | 
+ pk1    | integer   |           | not null |         | plain    |              | 
+ pk2    | integer   |           | not null |         | plain    |              | 
+ k      | integer   |           |          |         | plain    |              | 
+ r      | integer[] |           |          |         | extended |              | 
+Indexes:
+    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+Options: index_bridging=true
+
+SELECT *, r IS NULL FROM o_test_ix_ams;
+  i   |  j   |      p      | pk1  | pk2  |  k   | r | ?column? 
+------+------+-------------+------+------+------+---+----------
+    1 | 1099 | (41,5)      |    6 |    7 | 1099 |   | t
+   10 | 1090 | (401,50)    |   60 |   70 | 1090 |   | t
+  100 | 1000 | (4001,500)  |  600 |  700 | 1000 |   | t
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000 |   | t
+(4 rows)
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                              orioledb_tbl_structure                                               
+-------------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                              +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                              +
+     Leftmost, Rightmost                                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                       +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', '1099', null)              +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', '1090', null)         +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', '1000', null)    +
+     Item 3: offset = 504, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000', null)+
+                                                                                                                  +
+ Index index_bridge contents                                                                                      +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                              +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                               +
+     Leftmost, Rightmost                                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                       +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                                    +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                                    +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                                    +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                             +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                             +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                             +
+     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                             +
+                                                                                                                  +
+ Index toast: not loaded                                                                                          +
+ 
+(1 row)
+
+UPDATE o_test_ix_ams SET r = ARRAY[(i*8+j)%100, 11];
+SELECT orioledb_table_description('o_test_ix_ams'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |      Type | Collation | Nullable | Droped      +
+       i |   integer |    (null) |    false |  false      +
+       j |   integer |    (null) |     true |  false      +
+       p |     point |    (null) |     true |  false      +
+     pk1 |   integer |    (null) |    false |  false      +
+     pk2 |   integer |    (null) |    false |  false      +
+       k |   integer |    (null) |     true |  false      +
+       r | integer[] |    (null) |     true |  false      +
+ 
+(1 row)
+
+\d+ o_test_ix_ams
+                            Table "index_bridging.o_test_ix_ams"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer   |           |          |         | plain    |              | 
+ p      | point     |           |          |         | plain    |              | 
+ pk1    | integer   |           | not null |         | plain    |              | 
+ pk2    | integer   |           | not null |         | plain    |              | 
+ k      | integer   |           |          |         | plain    |              | 
+ r      | integer[] |           |          |         | extended |              | 
+Indexes:
+    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+Options: index_bridging=true
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+                           orioledb_tbl_indices                            
+---------------------------------------------------------------------------
+ Index ctid_primary                                                       +
+     Index type: primary, unique, ctid                                    +
+     Leaf tuple size: 9, non-leaf tuple size: 1                           +
+     Non-leaf tuple fields: ctid                                          +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2, k, r+
+ Index index_bridge                                                       +
+     Index type: secondary                                                +
+     Leaf tuple size: 2, non-leaf tuple size: 1                           +
+     Non-leaf tuple fields: index_bridging_ctid                           +
+     Leaf tuple fields: index_bridging_ctid, ctid                         +
+ Index toast                                                              +
+     Index type: secondary                                                +
+     Leaf tuple size: 4, non-leaf tuple size: 3                           +
+     Non-leaf tuple fields: ctid, attnum, chunknum                        +
+     Leaf tuple fields: ctid, attnum, chunknum, data                      +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+                                                orioledb_tbl_structure                                                 
+-----------------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                  +
+     Leftmost, Rightmost                                                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                           +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', '1099', '{7,11}')              +
+     Item 1: offset = 376, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', '1090', '{70,11}')        +
+     Item 2: offset = 488, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', '1000', '{0,11}')    +
+     Item 3: offset = 600, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000', '{0,11}')+
+                                                                                                                      +
+ Index index_bridge contents                                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                                   +
+     Leftmost, Rightmost                                                                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                           +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                                        +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                                        +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                                        +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                                 +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                                 +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                                 +
+     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                                 +
+                                                                                                                      +
+ Index toast: not loaded                                                                                              +
+ 
+(1 row)
+
+SELECT * FROM o_test_ix_ams;
+  i   |  j   |      p      | pk1  | pk2  |  k   |    r    
+------+------+-------------+------+------+------+---------
+    1 | 1099 | (41,5)      |    6 |    7 | 1099 | {7,11}
+   10 | 1090 | (401,50)    |   60 |   70 | 1090 | {70,11}
+  100 | 1000 | (4001,500)  |  600 |  700 | 1000 | {0,11}
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000 | {0,11}
+(4 rows)
+
+CREATE INDEX o_test_ix_ams_ix3 ON o_test_ix_ams USING gin (r);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
+              QUERY PLAN               
+---------------------------------------
+ Seq Scan on o_test_ix_ams
+   Filter: (r @> '{11,11}'::integer[])
+(2 rows)
+
+SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
+  i   |  j   |      p      | pk1  | pk2  |  k   |    r    
+------+------+-------------+------+------+------+---------
+    1 | 1099 | (41,5)      |    6 |    7 | 1099 | {7,11}
+   10 | 1090 | (401,50)    |   60 |   70 | 1090 | {70,11}
+  100 | 1000 | (4001,500)  |  600 |  700 | 1000 | {0,11}
+ 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000 | {0,11}
+(4 rows)
+
+COMMIT;
+CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
+SELECT * FROM gist_page_items(get_raw_page('o_test_ix_ams_ix4', 0), 'o_test_ix_ams_ix4');
+ itemoffset | ctid  | itemlen | dead |              keys               
+------------+-------+---------+------+---------------------------------
+          1 | (0,4) |      40 | f    | (p)=("(41,5),(41,5)")
+          2 | (0,5) |      40 | f    | (p)=("(401,50),(401,50)")
+          3 | (0,6) |      40 | f    | (p)=("(4001,500),(4001,500)")
+          4 | (0,7) |      40 | f    | (p)=("(4000,5000),(4000,5000)")
+(4 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Index Only Scan using o_test_ix_ams_ix4 on o_test_ix_ams
+   Index Cond: (p <@ '(4000,5000),(0,0)'::box)
+(2 rows)
+
+SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
+      p      
+-------------
+ (41,5)
+ (401,50)
+ (4000,5000)
+(3 rows)
+
+COMMIT;
+CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb WITH (index_bridging);
+INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
+SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+                        orioledb_tbl_structure                         
+-----------------------------------------------------------------------
+ Index o_briging_vacuum_test_pkey contents                            +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty  +
+     Leftmost, Rightmost                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64           +
+     Item 0: offset = 272, tuple = ('(0,1)', '1', null, '(0.01,0.02)')+
+     Item 1: offset = 336, tuple = ('(0,2)', '2', null, '(0.02,0.04)')+
+     Item 2: offset = 400, tuple = ('(0,3)', '3', null, '(0.03,0.06)')+
+     Item 3: offset = 464, tuple = ('(0,4)', '4', null, '(0.04,0.08)')+
+     Item 4: offset = 528, tuple = ('(0,5)', '5', null, '(0.05,0.1)') +
+                                                                      +
+ Index index_bridge contents                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty   +
+     Leftmost, Rightmost                                              +
+   Chunk 0: offset = 0, location = 256, hikey location = 64           +
+     Item 0: offset = 272, tuple = ('(0,1)', '1')                     +
+     Item 1: offset = 304, tuple = ('(0,2)', '2')                     +
+     Item 2: offset = 336, tuple = ('(0,3)', '3')                     +
+     Item 3: offset = 368, tuple = ('(0,4)', '4')                     +
+     Item 4: offset = 400, tuple = ('(0,5)', '5')                     +
+                                                                      +
+ Index toast: not loaded                                              +
+ 
+(1 row)
+
+CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
+DELETE FROM o_briging_vacuum_test;
+VACUUM o_briging_vacuum_test;
+SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
+ id | val | p 
+----+-----+---
+(0 rows)
+
+SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+                             orioledb_tbl_structure                             
+--------------------------------------------------------------------------------
+ Index o_briging_vacuum_test_pkey contents                                     +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 320                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty           +
+     Leftmost, Rightmost                                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                    +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '1', null, '(0.01,0.02)')+
+     Item 1: deleted, offset = 336, tuple = ('(0,2)', '2', null, '(0.02,0.04)')+
+     Item 2: deleted, offset = 400, tuple = ('(0,3)', '3', null, '(0.03,0.06)')+
+     Item 3: deleted, offset = 464, tuple = ('(0,4)', '4', null, '(0.04,0.08)')+
+     Item 4: deleted, offset = 528, tuple = ('(0,5)', '5', null, '(0.05,0.1)') +
+                                                                               +
+ Index index_bridge contents                                                   +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                           +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty            +
+     Leftmost, Rightmost                                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                    +
+                                                                               +
+ Index toast: not loaded                                                       +
+ 
+(1 row)
+
+SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum_test_p_idx', 0), 'o_briging_vacuum_test_p_idx');
+ itemoffset | ctid | itemlen | dead | keys 
+------------+------+---------+------+------
+(0 rows)
+
+DROP TABLE o_briging_vacuum_test;
+CREATE TABLE o_test_bridging_with_regular_no_pkey (
+	i int NOT NULL,
+	j int
+) USING orioledb WITH (index_bridging);
+CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
+	o_test_bridging_with_regular_no_pkey using btree (j) WITH (index_bridging);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
+	o_test_bridging_with_regular_no_pkey using btree (j);
+INSERT INTO o_test_bridging_with_regular_no_pkey
+	SELECT v, v FROM generate_series(1, 10) v;
+ANALYZE o_test_bridging_with_regular_no_pkey;
+SELECT orioledb_tbl_indices('o_test_bridging_with_regular_no_pkey'::regclass);
+                  orioledb_tbl_indices                  
+--------------------------------------------------------
+ Index ctid_primary                                    +
+     Index type: primary, unique, ctid                 +
+     Leaf tuple size: 4, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: ctid                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j+
+ Index o_test_bridging_with_regular_no_pkey_ix2        +
+     Index type: secondary                             +
+     Leaf tuple size: 2, non-leaf tuple size: 2        +
+     Non-leaf tuple fields: j, ctid                    +
+     Leaf tuple fields: j, ctid                        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)', '1', '1')     +
+     Item 1: offset = 328, tuple = ('(0,2)', '(0,2)', '2', '2')     +
+     Item 2: offset = 376, tuple = ('(0,3)', '(0,3)', '3', '3')     +
+     Item 3: offset = 424, tuple = ('(0,4)', '(0,4)', '4', '4')     +
+     Item 4: offset = 472, tuple = ('(0,5)', '(0,5)', '5', '5')     +
+     Item 5: offset = 520, tuple = ('(0,6)', '(0,6)', '6', '6')     +
+     Item 6: offset = 568, tuple = ('(0,7)', '(0,7)', '7', '7')     +
+     Item 7: offset = 616, tuple = ('(0,8)', '(0,8)', '8', '8')     +
+     Item 8: offset = 664, tuple = ('(0,9)', '(0,9)', '9', '9')     +
+     Item 9: offset = 712, tuple = ('(0,10)', '(0,10)', '10', '10') +
+                                                                    +
+ Index o_test_bridging_with_regular_no_pkey_ix2 contents            +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '(0,1)')                   +
+     Item 1: offset = 312, tuple = ('2', '(0,2)')                   +
+     Item 2: offset = 344, tuple = ('3', '(0,3)')                   +
+     Item 3: offset = 376, tuple = ('4', '(0,4)')                   +
+     Item 4: offset = 408, tuple = ('5', '(0,5)')                   +
+     Item 5: offset = 440, tuple = ('6', '(0,6)')                   +
+     Item 6: offset = 472, tuple = ('7', '(0,7)')                   +
+     Item 7: offset = 504, tuple = ('8', '(0,8)')                   +
+     Item 8: offset = 536, tuple = ('9', '(0,9)')                   +
+     Item 9: offset = 568, tuple = ('10', '(0,10)')                 +
+                                                                    +
+ Index index_bridge contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty +
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)')               +
+     Item 1: offset = 312, tuple = ('(0,2)', '(0,2)')               +
+     Item 2: offset = 344, tuple = ('(0,3)', '(0,3)')               +
+     Item 3: offset = 376, tuple = ('(0,4)', '(0,4)')               +
+     Item 4: offset = 408, tuple = ('(0,5)', '(0,5)')               +
+     Item 5: offset = 440, tuple = ('(0,6)', '(0,6)')               +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,7)')               +
+     Item 7: offset = 504, tuple = ('(0,8)', '(0,8)')               +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,9)')               +
+     Item 9: offset = 568, tuple = ('(0,10)', '(0,10)')             +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+UPDATE o_test_bridging_with_regular_no_pkey SET j = j * 10 WHERE mod(i, 4) = 0;
+DELETE FROM o_test_bridging_with_regular_no_pkey WHERE mod(i, 4) = 0;
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 'ne');
+                          orioledb_tbl_structure                           
+---------------------------------------------------------------------------
+ Index ctid_primary contents                                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 96                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)', '1', '1')           +
+     Item 1: offset = 328, tuple = ('(0,2)', '(0,2)', '2', '2')           +
+     Item 2: offset = 376, tuple = ('(0,3)', '(0,3)', '3', '3')           +
+     Item 3: deleted, offset = 424, tuple = ('(0,4)', '(0,11)', '4', '40')+
+     Item 4: offset = 472, tuple = ('(0,5)', '(0,5)', '5', '5')           +
+     Item 5: offset = 520, tuple = ('(0,6)', '(0,6)', '6', '6')           +
+     Item 6: offset = 568, tuple = ('(0,7)', '(0,7)', '7', '7')           +
+     Item 7: deleted, offset = 616, tuple = ('(0,8)', '(0,12)', '8', '80')+
+     Item 8: offset = 664, tuple = ('(0,9)', '(0,9)', '9', '9')           +
+     Item 9: offset = 712, tuple = ('(0,10)', '(0,10)', '10', '10')       +
+                                                                          +
+ Index o_test_bridging_with_regular_no_pkey_ix2 contents                  +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 128                   +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('1', '(0,1)')                         +
+     Item 1: offset = 312, tuple = ('2', '(0,2)')                         +
+     Item 2: offset = 344, tuple = ('3', '(0,3)')                         +
+     Item 3: deleted, offset = 376, tuple = ('4', '(0,4)')                +
+     Item 4: offset = 408, tuple = ('5', '(0,5)')                         +
+     Item 5: offset = 440, tuple = ('6', '(0,6)')                         +
+     Item 6: offset = 472, tuple = ('7', '(0,7)')                         +
+     Item 7: deleted, offset = 504, tuple = ('8', '(0,8)')                +
+     Item 8: offset = 536, tuple = ('9', '(0,9)')                         +
+     Item 9: offset = 568, tuple = ('10', '(0,10)')                       +
+     Item 10: deleted, offset = 600, tuple = ('40', '(0,4)')              +
+     Item 11: deleted, offset = 632, tuple = ('80', '(0,8)')              +
+                                                                          +
+ Index index_bridge contents                                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty       +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)')                     +
+     Item 1: offset = 312, tuple = ('(0,2)', '(0,2)')                     +
+     Item 2: offset = 344, tuple = ('(0,3)', '(0,3)')                     +
+     Item 3: deleted, offset = 376, tuple = ('(0,4)', '(0,4)')            +
+     Item 4: offset = 408, tuple = ('(0,5)', '(0,5)')                     +
+     Item 5: offset = 440, tuple = ('(0,6)', '(0,6)')                     +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,7)')                     +
+     Item 7: deleted, offset = 504, tuple = ('(0,8)', '(0,8)')            +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,9)')                     +
+     Item 9: offset = 568, tuple = ('(0,10)', '(0,10)')                   +
+     Item 10: deleted, offset = 600, tuple = ('(0,11)', '(0,4)')          +
+     Item 11: deleted, offset = 632, tuple = ('(0,12)', '(0,8)')          +
+                                                                          +
+ Index toast: not loaded                                                  +
+ 
+(1 row)
+
+CREATE TABLE o_test_bridging_with_regular_pkey (
+	i int NOT NULL PRIMARY KEY,
+	j int,
+	k int
+) USING orioledb WITH (index_bridging);
+CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
+	o_test_bridging_with_regular_pkey using btree (j) WITH (index_bridging);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
+	o_test_bridging_with_regular_pkey using btree (k);
+INSERT INTO o_test_bridging_with_regular_pkey
+	SELECT v * 1000 + 673, 1000 - v * 100 + 15, v FROM generate_series(1, 10) v;
+ANALYZE o_test_bridging_with_regular_pkey;
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_pkey'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_bridging_with_regular_pkey_pkey contents              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1673', '915', '1')    +
+     Item 1: offset = 328, tuple = ('(0,2)', '2673', '815', '2')    +
+     Item 2: offset = 376, tuple = ('(0,3)', '3673', '715', '3')    +
+     Item 3: offset = 424, tuple = ('(0,4)', '4673', '615', '4')    +
+     Item 4: offset = 472, tuple = ('(0,5)', '5673', '515', '5')    +
+     Item 5: offset = 520, tuple = ('(0,6)', '6673', '415', '6')    +
+     Item 6: offset = 568, tuple = ('(0,7)', '7673', '315', '7')    +
+     Item 7: offset = 616, tuple = ('(0,8)', '8673', '215', '8')    +
+     Item 8: offset = 664, tuple = ('(0,9)', '9673', '115', '9')    +
+     Item 9: offset = 712, tuple = ('(0,10)', '10673', '15', '10')  +
+                                                                    +
+ Index o_test_bridging_with_regular_pkey_ix2 contents               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '1673')                    +
+     Item 1: offset = 304, tuple = ('2', '2673')                    +
+     Item 2: offset = 328, tuple = ('3', '3673')                    +
+     Item 3: offset = 352, tuple = ('4', '4673')                    +
+     Item 4: offset = 376, tuple = ('5', '5673')                    +
+     Item 5: offset = 400, tuple = ('6', '6673')                    +
+     Item 6: offset = 424, tuple = ('7', '7673')                    +
+     Item 7: offset = 448, tuple = ('8', '8673')                    +
+     Item 8: offset = 472, tuple = ('9', '9673')                    +
+     Item 9: offset = 496, tuple = ('10', '10673')                  +
+                                                                    +
+ Index index_bridge contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty +
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1673')                +
+     Item 1: offset = 312, tuple = ('(0,2)', '2673')                +
+     Item 2: offset = 344, tuple = ('(0,3)', '3673')                +
+     Item 3: offset = 376, tuple = ('(0,4)', '4673')                +
+     Item 4: offset = 408, tuple = ('(0,5)', '5673')                +
+     Item 5: offset = 440, tuple = ('(0,6)', '6673')                +
+     Item 6: offset = 472, tuple = ('(0,7)', '7673')                +
+     Item 7: offset = 504, tuple = ('(0,8)', '8673')                +
+     Item 8: offset = 536, tuple = ('(0,9)', '9673')                +
+     Item 9: offset = 568, tuple = ('(0,10)', '10673')              +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Scan using o_test_bridging_with_regular_pkey_ix2 on o_test_bridging_with_regular_pkey
+(1 row)
+
+SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
+   i   |  j  | k  
+-------+-----+----
+  1673 | 915 |  1
+  2673 | 815 |  2
+  3673 | 715 |  3
+  4673 | 615 |  4
+  5673 | 515 |  5
+  6673 | 415 |  6
+  7673 | 315 |  7
+  8673 | 215 |  8
+  9673 | 115 |  9
+ 10673 |  15 | 10
+(10 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Scan using o_test_bridging_with_regular_pkey_ix1 on o_test_bridging_with_regular_pkey
+(1 row)
+
+SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
+   i   |  j  | k  
+-------+-----+----
+ 10673 |  15 | 10
+  9673 | 115 |  9
+  8673 | 215 |  8
+  7673 | 315 |  7
+  6673 | 415 |  6
+  5673 | 515 |  5
+  4673 | 615 |  4
+  3673 | 715 |  3
+  2673 | 815 |  2
+  1673 | 915 |  1
+(10 rows)
+
+COMMIT;
+DROP EXTENSION pageinspect;
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table o_test_ix_ams
+drop cascades to table o_test_bridging_with_regular_no_pkey
+drop cascades to table o_test_bridging_with_regular_pkey
+DROP SCHEMA index_bridging CASCADE;
+RESET search_path;

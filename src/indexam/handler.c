@@ -1,7 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * handler.c
- *		Implementation of index access method handler
+ *		Implementation of btree index access method handler and
+ *		generic bridged index access method handler
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
  *
@@ -96,8 +97,25 @@ static Size orioledb_amestimateparallelscan(void);
 static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
 
+static IndexBuildResult *bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
+static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
+							 Datum tupleid, Relation heapRel,
+							 IndexUniqueCheck checkUnique,
+							 bool indexUnchanged,
+							 IndexInfo *indexInfo);
+static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
+
+typedef struct BrigedIndexAmRoutine
+{
+	IndexAmRoutine *original_routine;
+	IndexAmRoutine routine;
+	Oid			amhandler;
+} BrigedIndexAmRoutine;
+
+List	   *bridged_ams = NIL;
+
 static IndexAmRoutine *
-orioledb_get_indexam_handler(void)
+orioledb_btree_handler(void)
 {
 	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 
@@ -167,8 +185,52 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 		orioledb_tam_oid = GetSysCacheOid1(AMNAME, Anum_pg_am_oid,
 										   CStringGetDatum("orioledb"));
 
-	if (tamoid == orioledb_tam_oid && amhandler == F_BTHANDLER)
-		return orioledb_get_indexam_handler();
+	if (tamoid == orioledb_tam_oid)
+	{
+		if (amhandler == F_BTHANDLER)
+		{
+			return orioledb_btree_handler();
+		}
+		else
+		{
+			IndexAmRoutine *amroutine = NULL;
+			ListCell   *lc;
+
+			foreach(lc, bridged_ams)
+			{
+				BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+				if (bridged->amhandler == amhandler)
+				{
+					amroutine = palloc0(sizeof(IndexAmRoutine));
+					memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
+					break;
+				}
+			}
+
+			if (amroutine == NULL)
+			{
+				BrigedIndexAmRoutine *bridged;
+				MemoryContext old_mcxt;
+				Datum		datum;
+
+				old_mcxt = MemoryContextSwitchTo(TopMemoryContext);
+				bridged = palloc0(sizeof(BrigedIndexAmRoutine));
+				datum = OidFunctionCall0(amhandler);
+				bridged_ams = lappend(bridged_ams, bridged);
+				bridged->amhandler = amhandler;
+				bridged->original_routine = (IndexAmRoutine *) DatumGetPointer(datum);
+				bridged->routine = *bridged->original_routine;
+				bridged->routine.ambuild = bridged_ambuild;
+				bridged->routine.aminsertextended = bridged_aminsert;
+				bridged->routine.ambeginscan = bridged_ambeginscan;
+				MemoryContextSwitchTo(old_mcxt);
+				amroutine = palloc0(sizeof(IndexAmRoutine));
+				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
+			}
+			return amroutine;
+		}
+	}
 
 	return NULL;
 }
@@ -183,6 +245,32 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	bool		reindex = false;
 	IndexBuildResult *result;
 	String	   *relname;
+	OBTOptions *options = (OBTOptions *) index->rd_options;
+
+	if (options && options->index_bridging)
+	{
+		OTableDescr *descr;
+
+		descr = relation_get_descr(heap);
+
+		/*
+		 * During rewrite we are ignoring first ambuild, because we need descr
+		 * to exist in orioledb_index_build_range_scan, but descr for table
+		 * created later. So we performing new reindex_index in
+		 * redefine_indices after descr created.
+		 */
+		if (descr == NULL)
+		{
+			result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
+
+			result->heap_tuples = 0.0;
+			result->index_tuples = 0.0;
+
+			return result;
+		}
+		else
+			return btbuild(heap, index, indexInfo);
+	}
 
 	relname = makeString(index->rd_rel->relname.data);
 	if (list_member(reindex_list, relname))
@@ -310,19 +398,23 @@ append_rowid_values(OIndexDescr *id,
 	bytea	   *rowid;
 	Pointer		p;
 
+	rowid = DatumGetByteaP(pkDatum);
+	p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
 	if (!id->primaryIsCtid)
 	{
-		OTuple		tuple;
 		ORowIdAddendumNonCtid *add;
+		OTuple		tuple;
 
-		rowid = DatumGetByteaP(pkDatum);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		*csn = add->csn;
 
 		tuple.data = p;
+		if (id->bridging)
+			tuple.data += MAXALIGN(sizeof(ItemPointerData));
+
 		tuple.formatFlags = add->flags;
-		*csn = add->csn;
 		*version = o_tuple_get_version(tuple);
 
 		if (id->nPrimaryFields <= id->nFields)
@@ -349,13 +441,10 @@ append_rowid_values(OIndexDescr *id,
 		ORowIdAddendumCtid *add;
 		AttrNumber	attnum = id->nFields - 1;
 
-		rowid = DatumGetByteaP(pkDatum);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumCtid *) p;
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
@@ -411,6 +500,37 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	uint32		version;
 	OTuple		tuple;
 	CommitSeqNo csn;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+	{
+		bytea	   *rowid;
+		Pointer		p;
+
+		ORelOidsSetFromRel(oids, heapRel);
+
+		descr = o_fetch_table_descr(oids);
+		Assert(descr != NULL);
+
+		rowid = DatumGetByteaP(tupleid);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
+		if (!GET_PRIMARY(descr)->primaryIsCtid)
+		{
+			p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+			tupleid = PointerGetDatum(p);
+		}
+		else
+		{
+			p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+			p += MAXALIGN(sizeof(ItemPointerData));
+			tupleid = PointerGetDatum(p);
+		}
+
+		return btinsert(rel, values, isnull, tupleid, heapRel,
+						checkUnique, indexUnchanged, indexInfo);
+	}
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
 		return true;
@@ -470,7 +590,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 						tupleid, values, isnull,
 						&csn, &version);
 
-	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
 	slot = index_descr->old_leaf_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 	callbackInfo.arg = slot;
@@ -515,6 +635,10 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OTuple		old_tuple;
 	bool	   *vfree;
 	int			i;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -551,7 +675,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	/* TODO: Probably there is a better way than detoasting here */
 	detoast_passed_values(index_descr, valuesOld, isnullOld, vfree);
 	old_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-							 version, valuesOld, isnullOld);
+							 version, valuesOld, isnullOld, NULL);
 	old_slot = index_descr->old_leaf_slot;
 	tts_orioledb_store_non_leaf_tuple(old_slot, old_tuple, descr, csn, ix_num, false, NULL);
 
@@ -560,7 +684,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 						&GET_PRIMARY(descr)->nonLeafSpec,
 						tupleid, values, isnull,
 						&csn, &version);
-	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
 	new_slot = index_descr->new_leaf_slot;
 	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
@@ -665,6 +789,10 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	bool	   *vfree;
 	int			i;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -699,7 +827,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
 	detoast_passed_values(index_descr, values, isnull, vfree);
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-						 version, values, isnull);
+						 version, values, isnull, NULL);
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -779,6 +907,11 @@ IndexBulkDeleteResult *
 orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 					  IndexBulkDeleteCallback callback, void *callback_state)
 {
+	OBTOptions *options = (OBTOptions *) info->index->rd_options;
+
+	if (options && options->index_bridging)
+		return btbulkdelete(info, stats, callback, callback_state);
+
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return stats;
 }
@@ -786,12 +919,22 @@ orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 IndexBulkDeleteResult *
 orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 {
+	OBTOptions *options = (OBTOptions *) info->index->rd_options;
+
+	if (options && options->index_bridging)
+		return btvacuumcleanup(info, stats);
+
 	return stats;
 }
 
 bool
 orioledb_amcanreturn(Relation index, int attno)
 {
+	OBTOptions *options = (OBTOptions *) index->rd_options;
+
+	if (options && options->index_bridging)
+		return btcanreturn(index, attno);
+
 	return true;
 }
 
@@ -1177,6 +1320,11 @@ orioledb_amoptions(Datum reloptions, bool validate)
 								   "Compression level of a particular index",
 								   NULL, validate_index_compress, NULL,
 								   offsetof(OBTOptions, compress_offset));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Enable index bridging and using of postgresql btree indices via index bridging "
+								 "instead of orioledb btree indices. Works only if index_bridging option enabled for table",
+								 false,
+								 offsetof(OBTOptions, index_bridging));
 		MemoryContextSwitchTo(oldcxt);
 		relopts_set = true;
 	}
@@ -1235,6 +1383,9 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 {
 }
 
+/* TODO: Remove this hack; probably patch table_index_fetch_begin to accept indexRelation */
+Relation	o_current_index = NULL;
+
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
@@ -1245,6 +1396,15 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexDescr *index_descr;
 	OTableDescr *descr;
 	OIndexNumber ix_num;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	o_current_index = NULL;
+
+	if (options && options->index_bridging)
+	{
+		o_current_index = rel;
+		return btbeginscan(rel, nkeys, norderbys);
+	}
 
 	o_scan = (OScanState *) palloc0(sizeof(OScanState));
 
@@ -1310,6 +1470,10 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
 	OScanState *o_scan = (OScanState *) scan;
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 
 	MemoryContextReset(o_scan->cxt);
 	o_scan->iterator = NULL;
@@ -1355,7 +1519,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	TupleDesc	pk_tupdesc;
 	OTupleFixedFormatSpec *pk_spec;
 	int			result_size,
-				tuple_size;
+				tuple_size = 0;
 	Pointer		ptr;
 
 	slot = index_descr->index_slot;
@@ -1416,13 +1580,20 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		/* Ctid primary key: give hint + tid as rowid */
 		result_size = MAXALIGN(VARHDRSZ) +
 			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-			sizeof(ItemPointerData);
+			MAXALIGN(sizeof(ItemPointerData));
+		if (index_descr->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
 		rowid = (bytea *) palloc(result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
+		if (index_descr->bridging)
+		{
+			ptr += MAXALIGN(sizeof(ItemPointerData));
+			memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
+		}
 	}
 	else
 	{
@@ -1432,10 +1603,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
 		bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
 		int			i;
-
-		addNonCtid.hint = *hint;
-		addNonCtid.csn = tupleCsn;
-		addNonCtid.flags = tuple.formatFlags;
+		OTableSlot *oslot = (OTableSlot *) slot;
 
 		/*
 		 * Amount of index fields checked in o_define_index_validate
@@ -1459,17 +1627,34 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			rowid_isnull = temp_rowid_isnull;
 		}
 
-		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, 0, rowid_values, rowid_isnull, NULL);
 		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		result_size += tuple_size;
+		if (index_descr->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
+		else
+		{
+			tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, 0, rowid_values, rowid_isnull, NULL);
+			result_size += MAXALIGN(tuple_size);
+		}
 		rowid = (bytea *) palloc(result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
-		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (index_descr->bridging)
+		{
+			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
+			addNonCtid.flags = 0;
+		}
+		else
+		{
+			tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+			o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL, NULL,
+						 0, rowid_values, rowid_isnull, NULL);
+			addNonCtid.flags = tuple.formatFlags;
+		}
 
-		o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL,
-					 0, rowid_values, rowid_isnull, NULL);
+		addNonCtid.hint = *hint;
+		addNonCtid.csn = tupleCsn;
+
+		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
 	}
 
 	if (!scan->xs_rowid.isnull)
@@ -1504,6 +1689,10 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	MemoryContext tupleCxt = CurrentMemoryContext;
 	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 	CommitSeqNo csn;
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btgettuple(scan, dir);
 
 	o_scan->scanDir = dir;
 
@@ -1560,6 +1749,10 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btgetbitmap(scan, tbm);
 	return 0;
 }
 
@@ -1567,6 +1760,10 @@ void
 orioledb_amendscan(IndexScanDesc scan)
 {
 	OScanState *o_scan = (OScanState *) scan;
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btendscan(scan);
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
@@ -1576,11 +1773,19 @@ orioledb_amendscan(IndexScanDesc scan)
 void
 orioledb_ammarkpos(IndexScanDesc scan)
 {
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btmarkpos(scan);
 }
 
 void
 orioledb_amrestrpos(IndexScanDesc scan)
 {
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btrestrpos(scan);
 }
 
 Size
@@ -1601,4 +1806,111 @@ orioledb_aminitparallelscan(void *target)
 void
 orioledb_amparallelrescan(IndexScanDesc scan)
 {
+}
+
+static IndexAmRoutine *
+find_bridged_am(Relation index)
+{
+	IndexAmRoutine *amroutine = NULL;
+	ListCell   *lc;
+
+	foreach(lc, bridged_ams)
+	{
+		BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+		if (bridged->amhandler == index->rd_amhandler)
+		{
+			amroutine = bridged->original_routine;
+			break;
+		}
+	}
+
+	return amroutine;
+}
+
+static IndexBuildResult *
+bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
+{
+	IndexBuildResult *result;
+	OTableDescr *descr;
+
+	descr = relation_get_descr(heap);
+
+	/*
+	 * During rewrite we are ignoring first ambuild, because we need descr to
+	 * exist in orioledb_index_build_range_scan, but descr for table created
+	 * later. So we performing new reindex_index in redefine_indices after
+	 * descr created.
+	 */
+	if (descr == NULL)
+	{
+		result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
+
+		result->heap_tuples = 0.0;
+		result->index_tuples = 0.0;
+
+		return result;
+	}
+	else
+	{
+		IndexAmRoutine *amroutine = find_bridged_am(index);
+
+		Assert(amroutine != NULL);
+
+		return amroutine->ambuild(heap, index, indexInfo);
+	}
+}
+
+bool
+bridged_aminsert(Relation rel, Datum *values, bool *isnull,
+				 Datum tupleid, Relation heapRel,
+				 IndexUniqueCheck checkUnique,
+				 bool indexUnchanged,
+				 IndexInfo *indexInfo)
+{
+	ORelOids	oids;
+	OTableDescr *descr;
+	bytea	   *rowid;
+	Pointer		p;
+	IndexAmRoutine *amroutine = NULL;
+
+	ORelOidsSetFromRel(oids, heapRel);
+
+	descr = o_fetch_table_descr(oids);
+	Assert(descr != NULL);
+
+	rowid = DatumGetByteaP(tupleid);
+	p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
+	if (!GET_PRIMARY(descr)->primaryIsCtid)
+	{
+		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+		tupleid = PointerGetDatum(p);
+	}
+	else
+	{
+		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+		p += MAXALIGN(sizeof(ItemPointerData));
+		tupleid = PointerGetDatum(p);
+	}
+
+	amroutine = find_bridged_am(rel);
+
+	Assert(amroutine != NULL);
+
+	return amroutine->aminsertextended(rel, values, isnull, tupleid, heapRel,
+									   checkUnique, indexUnchanged, indexInfo);
+}
+
+IndexScanDesc
+bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
+{
+	IndexAmRoutine *amroutine = find_bridged_am(rel);
+
+	o_current_index = rel;
+
+	Assert(amroutine != NULL);
+
+	return amroutine->ambeginscan(rel, nkeys, norderbys);
 }

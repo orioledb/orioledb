@@ -30,6 +30,7 @@
 #define WAL_REC_ROLLBACK_TO_SAVEPOINT (11)
 #define WAL_REC_JOINT_COMMIT (12)
 #define WAL_REC_TRUNCATE	(13)
+#define WAL_REC_BRIDGE_ERASE (14)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -109,12 +110,19 @@ typedef struct
 	uint8		relnode[sizeof(Oid)];
 } WALRecTruncate;
 
+typedef struct
+{
+	uint8		recType;
+	uint8		iptr[sizeof(ItemPointerData)];
+} WALRecBridgeErase;
+
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);
+extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,

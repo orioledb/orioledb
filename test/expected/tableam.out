@@ -38,7 +38,7 @@ ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
 ERROR:  exclusion indices are not supported.
 CREATE INDEX o_tableam1_ix_hash on o_tableam1 using hash(key);
 ERROR:  'hash' access method is not supported
-HINT:  Only 'btree' access method supported now for indices on orioledb tables.
+HINT:  For other index access methods use 'index_bridging' option.
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
               orioledb_tbl_indices              
 ------------------------------------------------
@@ -46,6 +46,7 @@ SELECT orioledb_tbl_indices('o_tableam1'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, value       +
  
 (1 row)
 
@@ -60,6 +61,7 @@ SELECT orioledb_tbl_indices('o_tableam1'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, value       +
  Index o_tableam1_ix1                          +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -281,6 +283,7 @@ SELECT orioledb_tbl_indices('o_test_partial'::regclass);
      Index type: primary, unique                    +
      Leaf tuple size: 2, non-leaf tuple size: 1     +
      Non-leaf tuple fields: key                     +
+     Leaf tuple fields: key, value                  +
  Index o_test_partial_ix1                           +
      Index type: secondary                          +
      Predicate: (key > 10)                          +
@@ -1108,6 +1111,7 @@ SELECT orioledb_tbl_indices('o_test_expression'::regclass);
      Index type: primary, unique                                             +
      Leaf tuple size: 2, non-leaf tuple size: 1                              +
      Non-leaf tuple fields: key                                              +
+     Leaf tuple fields: key, value                                           +
  Index o_test_expression_ix1                                                 +
      Index type: secondary                                                   +
      Leaf tuple size: 2, non-leaf tuple size: 2                              +
@@ -1874,6 +1878,7 @@ SELECT orioledb_tbl_indices('o_tableam3'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 1, non-leaf tuple size: 1+
      Non-leaf tuple fields: id                 +
+     Leaf tuple fields: id                     +
  
 (1 row)
 
@@ -1947,22 +1952,23 @@ SELECT * FROM db_o_indices;
 (4 rows)
 
 SELECT orioledb_tbl_indices('o_tableam4'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 4, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
- Index o_tableam4_ix1                          +
-     Index type: secondary, unique             +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: key, ctid          +
-     Leaf tuple fields: key, ctid              +
- Index o_tableam4_ix2                          +
-     Index type: secondary                     +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: value, ctid        +
-     Leaf tuple fields: value, ctid            +
+              orioledb_tbl_indices               
+-------------------------------------------------
+ Index ctid_primary                             +
+     Index type: primary, unique, ctid          +
+     Leaf tuple size: 4, non-leaf tuple size: 1 +
+     Non-leaf tuple fields: ctid                +
+     Leaf tuple fields: ctid, key, value, value2+
+ Index o_tableam4_ix1                           +
+     Index type: secondary, unique              +
+     Leaf tuple size: 2, non-leaf tuple size: 2 +
+     Non-leaf tuple fields: key, ctid           +
+     Leaf tuple fields: key, ctid               +
+ Index o_tableam4_ix2                           +
+     Index type: secondary                      +
+     Leaf tuple size: 2, non-leaf tuple size: 2 +
+     Non-leaf tuple fields: value, ctid         +
+     Leaf tuple fields: value, ctid             +
  
 (1 row)
 
@@ -2046,6 +2052,7 @@ SELECT orioledb_tbl_indices('o_tableam5'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, id, val, val2    +
  Index o_tableam5_primary                      +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+

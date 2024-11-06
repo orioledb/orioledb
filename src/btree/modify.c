@@ -843,9 +843,11 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 	else
 		tuphdr->deleted = context->leafTuphdr.deleted;
 
-	PAGE_ADD_N_VACATED(page,
-					   BTreeLeafTuphdrSize +
-					   MAXALIGN(o_btree_len(desc, curTuple, OTupleLength)));
+	/* Bridge index deleted tuples not treated as vacated */
+	if (desc->type != oIndexBridge)
+		PAGE_ADD_N_VACATED(page,
+						   BTreeLeafTuphdrSize +
+						   MAXALIGN(o_btree_len(desc, curTuple, OTupleLength)));
 
 	MARK_DIRTY(desc, blkno);
 

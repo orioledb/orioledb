@@ -330,7 +330,8 @@ put_tuple_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 
 void
 btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
-					   Tuplesortstate *sortstate, uint64 ctid,
+					   Tuplesortstate *sortstate,
+					   uint64 ctid, uint64 bridge_ctid,
 					   CheckpointFileHeader *file_header)
 {
 	OTuple		idx_tup;
@@ -358,6 +359,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	pg_atomic_init_u64(&metaPageBlkno.numFreeBlocks, 0);
 	pg_atomic_init_u32(&metaPageBlkno.leafPagesNum, 0);
 	pg_atomic_init_u64(&metaPageBlkno.ctid, ctid);
+	pg_atomic_init_u64(&metaPageBlkno.bridge_ctid, bridge_ctid);
 	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)
 	{
 		/* init_page_first_chunk() needs leaf flag to be set */
@@ -440,6 +442,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	file_header->numFreeBlocks = pg_atomic_read_u64(&metaPageBlkno.numFreeBlocks);
 	file_header->leafPagesNum = pg_atomic_read_u32(&metaPageBlkno.leafPagesNum);
 	file_header->ctid = pg_atomic_read_u64(&metaPageBlkno.ctid);
+	file_header->bridgeCtid = pg_atomic_read_u64(&metaPageBlkno.bridge_ctid);
 }
 
 S3TaskLocation
