@@ -33,6 +33,7 @@
 #include "access/table.h"
 #include "access/tupmacs.h"
 #include "catalog/pg_type_d.h"
+#include "commands/defrem.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -1404,6 +1405,8 @@ orioledb_tbl_indices(PG_FUNCTION_ARGS)
 		if (OCompressIsValid(ct->compress))
 			appendStringInfo(&buf, ", compression = %d", ct->compress);
 		appendStringInfo(&buf, "%s\n", primary && ct->primaryIsCtid ? ", ctid" : "");
+		if (OidIsValid(ct->amoid))
+			appendStringInfo(&buf, "    Access method: %s\n", get_am_name(ct->amoid));
 		if (ct->predicate)
 			appendStringInfo(&buf, "    Predicate: %s\n", ct->predicate_str);
 		appendStringInfo(&buf, "    Leaf tuple size: %d, non-leaf tuple size: %d\n",

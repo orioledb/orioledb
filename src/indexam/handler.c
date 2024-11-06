@@ -204,7 +204,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 		ORelOidsSetFromRel(tbl_oids, heap);
 		o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-		o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, result);
+		o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, result, index->rd_rel->relam == BTREE_AM_OID);
 	}
 
 	return result;
