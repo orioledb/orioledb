@@ -2413,8 +2413,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						closed = true;
 						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
 							o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
-
-						o_table_free(o_table)
 					}
 				}
 				relation_close(tbl, AccessShareLock);
