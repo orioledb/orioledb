@@ -497,6 +497,8 @@ index_descr_free(OIndexDescr *tree)
 		ExecDropSingleTupleTableSlot(tree->old_leaf_slot);
 	if (tree->new_leaf_slot)
 		ExecDropSingleTupleTableSlot(tree->new_leaf_slot);
+	if (tree->index_slot)
+		ExecDropSingleTupleTableSlot(tree->index_slot);
 	if (tree->leafTupdesc)
 		FreeTupleDesc(tree->leafTupdesc);
 	if (tree->nonLeafTupdesc)

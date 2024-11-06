@@ -600,6 +600,12 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							appendStringInfo(str, "'%s'", res);
 						}
 					}
+
+					if(old_tuple.data)
+						pfree(old_tuple.data);
+					if(new_tuple.data)
+						pfree(new_tuple.data);
+
 					appendStringInfo(str, ")");
 					ereport(ERROR,
 							(errcode(ERRCODE_INTERNAL_ERROR),
@@ -621,6 +627,11 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				break;
 		}
 	}
+
+	if(old_tuple.data)
+		pfree(old_tuple.data);
+	if(new_tuple.data)
+		pfree(new_tuple.data);
 
 	return result.success;
 }
