@@ -1936,14 +1936,14 @@ EXPLAIN (COSTS OFF)
  Aggregate
    ->  Custom Scan (o_scan) on bitmap_test
          Bitmap heap scan
-         Recheck Cond: ((i < 1000) OR (j < 1000) OR (h > 19000))
+         Recheck Cond: ((h > 19000) OR (j < 1000) OR (i < 1000))
          ->  BitmapOr
-               ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i < 1000)
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j < 1000)
                ->  Bitmap Index Scan on bitmap_test_ix3
                      Index Cond: (h > 19000)
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j < 1000)
+               ->  Bitmap Index Scan on bitmap_test_ix1
+                     Index Cond: (i < 1000)
 (11 rows)
 
 SELECT count(*) FROM bitmap_test
@@ -1965,14 +1965,14 @@ EXPLAIN (COSTS OFF)
          Sort Key: i
          ->  Custom Scan (o_scan) on bitmap_test
                Bitmap heap scan
-               Recheck Cond: ((i < 1000) OR (j < 1000) OR (h > 19000))
+               Recheck Cond: ((h > 19000) OR (j < 1000) OR (i < 1000))
                ->  BitmapOr
-                     ->  Bitmap Index Scan on bitmap_test_ix1
-                           Index Cond: (i < 1000)
-                     ->  Bitmap Index Scan on bitmap_test_ix2
-                           Index Cond: (j < 1000)
                      ->  Bitmap Index Scan on bitmap_test_ix3
                            Index Cond: (h > 19000)
+                     ->  Bitmap Index Scan on bitmap_test_ix2
+                           Index Cond: (j < 1000)
+                     ->  Bitmap Index Scan on bitmap_test_ix1
+                           Index Cond: (i < 1000)
 (13 rows)
 
 SELECT * FROM bitmap_test WHERE i < 1000 OR j < 1000 OR h > 19000
@@ -2012,14 +2012,14 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on bitmap_test
          Filter: ((i < 1000) OR (j < 1000) OR ((h > 19000) AND (abs(h) > 10)))
          Bitmap heap scan
-         Recheck Cond: ((i < 1000) OR (j < 1000) OR (h > 19000))
+         Recheck Cond: ((h > 19000) OR (j < 1000) OR (i < 1000))
          ->  BitmapOr
-               ->  Bitmap Index Scan on bitmap_test_ix1
-                     Index Cond: (i < 1000)
-               ->  Bitmap Index Scan on bitmap_test_ix2
-                     Index Cond: (j < 1000)
                ->  Bitmap Index Scan on bitmap_test_ix3
                      Index Cond: (h > 19000)
+               ->  Bitmap Index Scan on bitmap_test_ix2
+                     Index Cond: (j < 1000)
+               ->  Bitmap Index Scan on bitmap_test_ix1
+                     Index Cond: (i < 1000)
 (12 rows)
 
 SELECT count(*) FROM bitmap_test
@@ -2043,14 +2043,14 @@ EXPLAIN (COSTS OFF)
          ->  Custom Scan (o_scan) on bitmap_test
                Filter: ((i < 1000) OR (j < 1000) OR ((h > 19000) AND (abs(h) > 10)))
                Bitmap heap scan
-               Recheck Cond: ((i < 1000) OR (j < 1000) OR (h > 19000))
+               Recheck Cond: ((h > 19000) OR (j < 1000) OR (i < 1000))
                ->  BitmapOr
-                     ->  Bitmap Index Scan on bitmap_test_ix1
-                           Index Cond: (i < 1000)
-                     ->  Bitmap Index Scan on bitmap_test_ix2
-                           Index Cond: (j < 1000)
                      ->  Bitmap Index Scan on bitmap_test_ix3
                            Index Cond: (h > 19000)
+                     ->  Bitmap Index Scan on bitmap_test_ix2
+                           Index Cond: (j < 1000)
+                     ->  Bitmap Index Scan on bitmap_test_ix1
+                           Index Cond: (i < 1000)
 (14 rows)
 
 SELECT * FROM bitmap_test

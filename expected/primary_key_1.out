@@ -102,10 +102,10 @@ SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Seq Scan on o_pk1
-   Filter: ((key = 1) OR (key = 4) OR (key = 13) OR (key = 20))
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Scan using o_pk1_pkey on o_pk1
+   Index Cond: (key = ANY ('{1,4,13,20}'::integer[]))
 (2 rows)
 
 SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
