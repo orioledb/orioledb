@@ -133,6 +133,7 @@ struct OIndexDescr
 	 * on ctid (no primary key is explicitly defined).
 	 */
 	bool		primaryIsCtid;
+	bool		bridging;
 
 	uint8		fillfactor;
 
@@ -201,6 +202,7 @@ struct OTableDescr
 	 * the primary key, reset of indeces array point to the secondary indices.
 	 */
 	OIndexDescr **indices;
+	OIndexDescr *bridge;
 	OIndexDescr *toast;
 
 	/* list of TOASTable values */
