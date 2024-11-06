@@ -694,6 +694,7 @@ SELECT orioledb_tbl_indices('o_test_unique_same_layout_as_pkey'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 2, non-leaf tuple size: 2+
      Non-leaf tuple fields: val1, val2         +
+     Leaf tuple fields: val1, val2             +
  Index o_test_unique_same_layout_as_pkey_idx1  +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -724,6 +725,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_include_same_field'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 1, non-leaf tuple size: 1+
      Non-leaf tuple fields: val_1              +
+     Leaf tuple fields: val_1                  +
  
 (1 row)
 

@@ -71,6 +71,7 @@ OBJS = src/btree/btree.o \
 	   src/tableam/operations.o \
 	   src/tableam/scan.o \
 	   src/tableam/tree.o \
+	   src/tableam/vacuum.o \
 	   src/transam/undo.o \
 	   src/transam/oxid.o \
 	   src/tuple/format.o \
@@ -99,6 +100,7 @@ REGRESSCHECKS = btree_sys_check \
 				foreign_keys \
 				generated \
 				getsomeattrs \
+				index_bridging \
 				indices \
 				indices_build \
 				inherits \
