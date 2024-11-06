@@ -1492,12 +1492,15 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 
 				}
 
+
 				if (found)
+				{
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("cannot alter type \"%s\" because index \"%s\" uses it",
 									RelationGetRelationName(origRelation),
 									NameStr(table->indices[i - 1].name))));
+				}
 				o_table_free(table);
 			}
 		}
@@ -1695,6 +1698,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 		 OCompressIsValid(primary_compress) ||
 		 OCompressIsValid(toast_compress)))
 	{
+		o_table_free(o_table);
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("temp and unlogged orioledb tables does not "
@@ -2413,6 +2417,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						closed = true;
 						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
 							o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
+
+						o_table_free(o_table);
 					}
 				}
 				relation_close(tbl, AccessShareLock);
