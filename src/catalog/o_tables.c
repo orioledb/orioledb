@@ -580,17 +580,17 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 	MemoryContext oldcxt;
 	MemoryContext tbl_cxt = OGetTableContext(o_table);
 	AttrMissing attrmiss_temp;
-	Node	   *defaultexpr;
 	AttrMissing *attrmiss = NULL;
-
-	if (field->hasdef)
-		defaultexpr = build_column_default(rel, fieldnum + 1);
-	else
-		defaultexpr = NULL;
 
 	if (!old_field->hasmissing && field->hasmissing)
 	{
+		Node	   *defaultexpr;
 		bool		missingIsNull = true;
+
+		if (field->hasdef)
+			defaultexpr = build_column_default(rel, fieldnum + 1);
+		else
+			defaultexpr = NULL;
 
 		attrmiss_temp.am_value = o_eval_default(o_table, rel, defaultexpr, NULL,
 												field->byval, field->typlen,

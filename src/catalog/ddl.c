@@ -20,6 +20,7 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "indexam/handler.h"
 #include "tableam/operations.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
@@ -54,6 +55,7 @@
 #include "catalog/pg_namespace.h"
 #endif
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_type.h"
 #include "catalog/toasting.h"
 #include "commands/createas.h"
@@ -892,10 +894,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	savedDataQuery = NULL;
 
 	/*
-	 * reindex_list is expected to be allocated in PortalContext so it isn't
-	 * freed by us and pointer may be invalid there
+	 * reindex_list and alter_type_exprs expected to be allocated in PortalContext
+	 * so they aren't freed by us and pointer may be invalid there
 	 */
 	reindex_list = NIL;
+	alter_type_exprs = NIL;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -906,12 +909,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		ObjectType	objtype;
 
 		objtype = atstmt->objtype;
-
-		/*
-		 * alter_type_exprs is expected to be allocated in PortalContext so it
-		 * isn't freed by us and pointer may be invalid there
-		 */
-		alter_type_exprs = NIL;
 
 		/*
 		 * Figure out lock mode, and acquire lock.  This also does basic
@@ -1906,6 +1903,36 @@ rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	SetMatViewPopulatedState(rel, true);
 }
 
+static bool
+OCheckIndexCompatible(OTable *o_table, OTableIndex *index, int field_num,
+					  OTableField *old_field, OTableField *new_field,
+					  Oid new_opclass)
+{
+	bool		ret = true;
+	OTableIndexField *old_index_field = &index->fields[field_num];
+
+	/*
+	 * We don't assess expressions or predicates; assume incompatibility.
+	 * Also, if the index is invalid for any reason, treat it as incompatible.
+	 */
+	if (index->predicate != NIL ||
+		index->expressions != NIL)
+		return false;
+
+	/* Any change in operator class or collation breaks compatibility. */
+	ret = old_index_field->opclass == new_opclass && old_field->collation == new_field->collation;
+
+	if (!ret)
+		return false;
+
+	/* For polymorphic opcintype, column type changes break compatibility. */
+	if (IsPolymorphicType(get_opclass_input_type(old_index_field->opclass)) &&
+		old_field->typid != new_field->typid)
+		return false;
+
+	return ret;
+}
+
 static void
 rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 {
@@ -1944,6 +1971,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		{
 			Node	   *expr = NULL;
 			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+			Form_pg_attribute new_attr = &new_slot->tts_tupleDescriptor->attrs[i];
 
 			ListCell   *lc;
 
@@ -1958,7 +1986,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				}
 			}
 
-			if (!expr && attr->atthasdef && !attr->atthasmissing &&
+			if (!expr && new_attr->atthasdef && !new_attr->atthasmissing &&
 				i >= primary_init_nfields &&
 				old_slot->tts_isnull[i])
 			{
@@ -1967,7 +1995,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defaultexpr;
 			}
 
-			if (!expr && attr->attgenerated && old_slot->tts_isnull[i])
+			if (!expr && new_attr->attgenerated)
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
@@ -2012,7 +2040,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			if (expr)
 			{
 				new_slot->tts_values[i] = o_eval_default(new_o_table, rel, expr, old_slot,
-														 attr->attbyval, attr->attlen,
+														 new_attr->attbyval, new_attr->attlen,
 														 &new_slot->tts_isnull[i]);
 			}
 			else
@@ -2080,6 +2108,70 @@ redefine_pkey_for_rel(Relation rel)
 	redefine_indices(rel, o_table, true);
 
 	o_table_free(o_table);
+}
+
+static bool
+check_if_rewrite(OTable *o_table, int subId,
+				 OTableField *old_field, OTableField *field)
+{
+	int		ix_num;
+	bool	changed;
+
+	changed = old_field->typid != field->typid ||
+			  old_field->collation != field->collation;
+
+	if (old_field->hasdef != field->hasdef && !field->hasmissing)
+	{
+		in_rewrite = true;
+		return changed;
+	}
+
+	if (changed && ATColumnChangeRequiresRewrite(old_field, field, subId))
+		in_rewrite = true;
+	if (!in_rewrite)
+	{
+		for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+		{
+			Relation	index_rel;
+			int			field_num;
+			OTableIndex *index;
+			Datum		datum;
+			oidvector  *indclass;
+			bool		isnull;
+
+			index = &o_table->indices[ix_num];
+
+			index_rel = index_open(index->oids.reloid, AccessShareLock);
+
+			datum = SysCacheGetAttr(INDEXRELID, index_rel->rd_indextuple,
+									Anum_pg_index_indclass, &isnull);
+			Assert(!isnull);
+			indclass = (oidvector *) DatumGetPointer(datum);
+
+			for (field_num = 0; field_num < index->nkeyfields; field_num++)
+			{
+				bool		has_field;
+
+				has_field = index->fields[field_num].attnum == subId - 1;
+
+				if (index->type == oIndexPrimary || has_field)
+				{
+					changed = !OCheckIndexCompatible(o_table, index, field_num,
+													 old_field, field,
+													 indclass->values[field_num]);
+
+					if (ATColumnChangeRequiresRewrite(old_field, field, subId))
+					{
+						in_rewrite = true;
+						break;
+					}
+				}
+			}
+			index_close(index_rel, AccessShareLock);
+		}
+	}
+
+	return changed;
 }
 
 static void
@@ -2326,6 +2418,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
 					orioledb_attr_to_field(field, attr);
 
+					if (get_typtype(field->typid) == TYPTYPE_DOMAIN && DomainHasConstraints(field->typid))
+						in_rewrite = true;
+
 					o_table_resize_constr(o_table);
 
 					o_tables_rel_meta_lock(rel);
@@ -2447,7 +2542,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				OTableField old_field;
 				OTableField *field;
-				bool		changed;
 
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
@@ -2455,16 +2549,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				attr = &rel->rd_att->attrs[subId - 1];
 				orioledb_attr_to_field(field, attr);
 
-				/* TODO: Probably use CheckIndexCompatible here */
-				changed = old_field.typid != field->typid ||
-					old_field.collation != field->collation;
-
-				if (changed)
-				{
-					if (ATColumnChangeRequiresRewrite(&old_field, field,
-													  subId))
-						in_rewrite = true;
-				}
+				check_if_rewrite(o_table, subId, &old_field, field);
 
 				if (!in_rewrite)
 				{
@@ -2529,16 +2614,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					attr = &rel->rd_att->attrs[subId - 1];
 					orioledb_attr_to_field(field, attr);
 
-					/* TODO: Probably use CheckIndexCompatible here */
-					changed = old_field.typid != field->typid ||
-						old_field.collation != field->collation;
-
-					if (changed)
-					{
-						if (ATColumnChangeRequiresRewrite(&old_field, field,
-														  subId))
-							in_rewrite = true;
-					}
+					changed = check_if_rewrite(o_table, subId, &old_field, field);
 
 					if (!in_rewrite)
 					{
@@ -2690,6 +2766,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					switch (tbl->rd_rel->relkind)
 					{
 						case RELKIND_RELATION:
+							Assert(in_rewrite);
 							rewrite_table(tbl, old_o_table, new_o_table);
 							break;
 						case RELKIND_MATVIEW:

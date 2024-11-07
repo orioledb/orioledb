@@ -327,6 +327,26 @@ SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 
 ROLLBACK;
 
+CREATE TABLE o_test_int_to_bool
+(
+	f1 text,
+	f2 varchar,
+	f3 integer
+) USING orioledb;
+
+SELECT * FROM o_test_int_to_bool;
+INSERT INTO o_test_int_to_bool VALUES ('1', '2', 6);
+SELECT * FROM o_test_int_to_bool;
+CREATE INDEX o_test_int_to_bool_ix1 ON o_test_int_to_bool(f3);
+ALTER TABLE o_test_int_to_bool ALTER COLUMN f3 SET NOT NULL;
+ALTER TABLE o_test_int_to_bool ADD PRIMARY KEY (f3);
+SELECT * FROM o_test_int_to_bool;
+ALTER TABLE o_test_int_to_bool ALTER COLUMN f3 TYPE boolean USING f3::int::boolean;
+SELECT * FROM o_test_int_to_bool;
+ALTER TABLE o_test_int_to_bool ALTER COLUMN f3 TYPE boolean USING NOT f3;
+SELECT * FROM o_test_int_to_bool;
+
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;
