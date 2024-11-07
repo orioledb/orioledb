@@ -45,7 +45,12 @@ OBJS = src/btree/btree.o \
 	   src/catalog/sys_trees.o \
 	   src/checkpoint/checkpoint.o \
 	   src/checkpoint/control.o \
+	   src/indexam/brinhandler.o \
+	   src/indexam/ginhandler.o \
+	   src/indexam/gisthandler.o \
 	   src/indexam/handler.o \
+	   src/indexam/hashhandler.o \
+	   src/indexam/spgisthandler.o \
 	   src/orioledb.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \

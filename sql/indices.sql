@@ -15,16 +15,19 @@ SELECT orioledb_parallel_debug_start();
 set log_error_verbosity = 'terse';
 CREATE TABLE o_test_ix_ams (
 	i int NOT NULL,
+	k int NOT NULL,
 	j int4[],
 	p point
 ) USING orioledb;
-create index o_test_ix_ams_ix1 on o_test_ix_ams using btree (j);
-create index o_test_ix_ams_ix2 on o_test_ix_ams using hash (j);
+create index o_test_ix_ams_ix1 on o_test_ix_ams using btree (i);
+create index o_test_ix_ams_ix2 on o_test_ix_ams using hash (k);
 create index o_test_ix_ams_ix3 on o_test_ix_ams using gin (j);
 CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 \d o_test_ix_ams
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass);
 RESET log_error_verbosity;
+EXPLAIN (COSTS off)
+	SELECT * FROM o_test_ix_ams WHERE k = 2;
 \q
 
 CREATE TABLE o_test50

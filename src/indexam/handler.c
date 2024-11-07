@@ -97,7 +97,7 @@ static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
 
 static IndexAmRoutine *
-orioledb_get_indexam_handler(void)
+orioledb_btree_indexam_handler(void)
 {
 	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 
@@ -167,8 +167,22 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 		orioledb_tam_oid = GetSysCacheOid1(AMNAME, Anum_pg_am_oid,
 										   CStringGetDatum("orioledb"));
 
-	if (tamoid == orioledb_tam_oid && amhandler == F_BTHANDLER)
-		return orioledb_get_indexam_handler();
+	if (tamoid == orioledb_tam_oid) {
+		switch (amhandler) {
+			case F_BTHANDLER:
+				return orioledb_btree_indexam_handler();
+			case F_HASHHANDLER:
+				return orioledb_hash_indexam_handler();
+			case F_GISTHANDLER:
+				return orioledb_gist_indexam_handler();
+			case F_SPGHANDLER:
+				return orioledb_spgist_indexam_handler();
+			case F_GINHANDLER:
+				return orioledb_gin_indexam_handler();
+			case F_BRINHANDLER:
+				return orioledb_brin_indexam_handler();
+		}
+	}
 
 	return NULL;
 }
