@@ -1238,7 +1238,19 @@ fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tup
 	scan->xs_hitupdesc = descr->tupdesc;
 	slot = descr->oldTuple;
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, PrimaryIndexNumber, false, hint);
+	if (!scan->xs_rowid.isnull)
+	{
+		/* free previously returned rowid */
+		pfree(DatumGetPointer(scan->xs_rowid.value));
+		scan->xs_rowid.isnull = true;
+	}
 	scan->xs_rowid.value = slot_getsysattr(slot, RowIdAttributeNumber, &scan->xs_rowid.isnull);
+	if (scan->xs_hitup)
+	{
+		/* free previously returned tuple */
+		pfree(scan->xs_hitup);
+		scan->xs_hitup = NULL;
+	}
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 }
 
@@ -1370,9 +1382,21 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr, CommitSeqNo tupl
 					 0, rowid_values, rowid_isnull, NULL);
 	}
 
+	if (!scan->xs_rowid.isnull)
+	{
+		/* free previously returned rowid */
+		pfree(DatumGetPointer(scan->xs_rowid.value));
+		scan->xs_rowid.isnull = true;
+	}
 	scan->xs_rowid.isnull = false;
 	scan->xs_rowid.value = PointerGetDatum(rowid);
 
+	if (scan->xs_itup)
+	{
+		/* free previously returned tuple */
+		pfree(scan->xs_itup);
+		scan->xs_itup = NULL;
+	}
 	scan->xs_itupdesc = index_descr->itupdesc;
 	scan->xs_itup = index_form_tuple(index_descr->itupdesc, slot->tts_values, slot->tts_isnull);
 
@@ -1431,6 +1455,24 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 
 	if (O_TUPLE_IS_NULL(tuple))
 	{
+		if (!scan->xs_rowid.isnull)
+		{
+			/* free previously returned rowid */
+			pfree(DatumGetPointer(scan->xs_rowid.value));
+			scan->xs_rowid.isnull = true;
+		}
+		if (scan->xs_itup)
+		{
+			/* free previously returned tuple */
+			pfree(scan->xs_itup);
+			scan->xs_itup = NULL;
+		}
+		if (scan->xs_hitup)
+		{
+			/* free previously returned tuple */
+			pfree(scan->xs_hitup);
+			scan->xs_hitup = NULL;
+		}
 		scan->xs_rowid.isnull = true;
 		res = false;
 	}
