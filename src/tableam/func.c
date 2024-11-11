@@ -17,6 +17,7 @@
 
 #include "btree/btree.h"
 #include "btree/check.h"
+#include "btree/chunk_ops.h"
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
@@ -908,9 +909,13 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 	Datum		values[4];
 	bool		nulls[4];
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageContext pageContext;
 	BTreePageHeader *pageHdr = (BTreePageHeader *) p;
 	int			j = 0;
 	BTreePageItemLocator loc;
+
+	page_context_init(&pageContext, desc);
+	page_context_set_page(&pageContext, p);
 
 	values[j] = Int64GetDatum(blkno);
 	nulls[j] = false;
@@ -934,7 +939,7 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 		JsonbValue *jsval;
 		OTuple		hikey;
 
-		BTREE_PAGE_GET_HIKEY(hikey, p);
+		hikey = page_get_hikey(&pageContext);
 		jsval = o_btree_key_to_jsonb(desc, hikey, &state);
 		values[j] = PointerGetDatum(JsonbValueToJsonb(jsval));
 		nulls[j] = false;
@@ -947,7 +952,10 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 	tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
 	if (O_PAGE_IS(p, LEAF))
+	{
+		page_context_release(&pageContext);
 		return;
+	}
 
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 	{
@@ -959,6 +967,7 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 								  tupdesc, tupstore);
 	}
 
+	page_context_release(&pageContext);
 }
 
 Datum
@@ -1476,7 +1485,7 @@ add_page_stat(BTreeDescr *desc, Page p, ORelationStat *stat)
 	int			level = PAGE_GET_LEVEL(p);
 
 	if (!O_PAGE_IS(p, RIGHTMOST))
-		copy_fixed_hikey(desc, &stat->levels[level].hikey, p);
+		copy_fixed_hikey_old(desc, &stat->levels[level].hikey, p);
 	else
 		clear_fixed_key(&stat->levels[level].hikey);
 
@@ -1509,7 +1518,10 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 	maxLevel = level;
 
 	if (maxLevel == 0)
+	{
+		release_page_find_context(&context);
 		return;
+	}
 
 	while (true)
 	{
@@ -1537,6 +1549,8 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 			}
 		}
 	}
+
+	release_page_find_context(&context);
 }
 
 Datum

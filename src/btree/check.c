@@ -89,6 +89,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 								   &checkpoint_number, &copy_blkno);
 	if (!result)
 	{
+		release_page_find_context(&status.context);
 		elog(NOTICE, "Tree is under checkpoint now");
 		return false;
 	}
@@ -98,23 +99,35 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	check_walk_btree(&status, desc->rootInfo.rootPageBlkno, OInvalidInMemoryBlkno);
 
 	if (status.hasError)
+	{
+		release_page_find_context(&status.context);
 		return false;
+	}
 
 	if (desc->storageType != BTreeStoragePersistence)
+	{
+		release_page_find_context(&status.context);
 		return true;
+	}
 
 	/* get free file extents */
 	get_free_extents(desc, &free_extents, force_file_check,
 					 checkpoint_number - 1);
 
 	if (status.hasError)
+	{
+		release_page_find_context(&status.context);
 		return false;
+	}
 
 	/* check extents */
 	status.hasError = !check_extents(&status.busy, &free_extents);
 
 	if (status.hasError)
+	{
+		release_page_find_context(&status.context);
 		return false;
+	}
 
 	if (data_file_len > status.busy.blocksCount + free_extents.blocksCount)
 	{
@@ -209,6 +222,8 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 			pfree(tmp_extents.extents);
 		}
 	}
+
+	release_page_find_context(&status.context);
 
 	return !status.hasError;
 }
@@ -683,5 +698,6 @@ check_btree_compression(BTreeDescr *desc, BTreeCompressStats *stats, OCompress l
 
 	btree_check_compression_recursive(desc, stats, lvl, &context, desc->rootInfo.rootPageBlkno);
 
+	release_page_find_context(&context);
 	o_tables_rel_unlock_extended(&desc->oids, AccessShareLock, recovery);
 }

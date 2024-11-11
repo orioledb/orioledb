@@ -979,6 +979,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	OBTreeFindPageContext pageFindContext;
 	int			pageReserveKind;
 	Jsonb	   *params = NULL;
+	OBTreeModifyResult result;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1009,10 +1010,14 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	else
 		(void) find_page(&pageFindContext, key, keyType, 0);
 
-	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
-								   key, keyType, opOxid, opCsn,
-								   lockMode, deleted, pageReserveKind,
-								   callbackInfo);
+	result = o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
+									 key, keyType, opOxid, opCsn,
+									 lockMode, deleted, pageReserveKind,
+									 callbackInfo);
+
+	release_page_find_context(&pageFindContext);
+
+	return result;
 }
 
 static bool
@@ -1209,6 +1214,7 @@ retry:
 					 */
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
+				release_page_find_context(&pageFindContext);
 				unlock_page(blkno);
 				LWLockRelease(uniqueLock);
 				return OBTreeModifyResultFound;
@@ -1227,6 +1233,7 @@ retry:
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
+						release_page_find_context(&pageFindContext);
 						unlock_page(blkno);
 						return OBTreeModifyResultFound;
 					}
@@ -1287,6 +1294,7 @@ retry:
 					 */
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
+				release_page_find_context(&pageFindContext);
 				LWLockRelease(uniqueLock);
 				return OBTreeModifyResultFound;
 			}
@@ -1304,7 +1312,10 @@ retry:
 														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
+					{
+						release_page_find_context(&pageFindContext);
 						return OBTreeModifyResultFound;
+					}
 				}
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
@@ -1326,6 +1337,7 @@ retry:
 									 BTreeLeafTupleNonDeleted, pageReserveKind,
 									 callbackInfo);
 
+	release_page_find_context(&pageFindContext);
 	LWLockRelease(uniqueLock);
 	return result;
 }

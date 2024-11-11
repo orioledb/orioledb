@@ -173,6 +173,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 
 	if (!found)
 	{
+		release_page_find_context(&context);
 		/* free extent not founded, increase file length */
 		result.len = len;
 		if (use_device)
@@ -253,6 +254,8 @@ get_extent(BTreeDescr *desc, uint16 len)
 				 tup.extent.offset, tup.extent.length);
 		}
 	}
+
+	release_page_find_context(&context);
 
 	result.off = deleted_tup.extent.offset;
 	result.len = len;

@@ -298,7 +298,7 @@ reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
 	}
 	else
 	{
-		copy_fixed_hikey(desc, &hikey, p);
+		copy_fixed_hikey_old(desc, &hikey, p);
 		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
 	}
 	btree_page_reorg(desc, p, items, i, hikeySize, hikey.tuple, location);
@@ -1374,7 +1374,7 @@ split_page_by_chunks(BTreeDescr *desc, Page p)
 	}
 	else
 	{
-		copy_fixed_hikey(desc, &hikey, p);
+		copy_fixed_hikey_old(desc, &hikey, p);
 		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
 	}
 

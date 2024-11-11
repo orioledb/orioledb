@@ -81,9 +81,13 @@ free_test_desc(TupleChunkTestDesc *testDesc)
 	if (testDesc->chunk != NULL)
 	{
 		release_chunk_desc(testDesc->chunk);
+		pfree(testDesc->chunk);
 	}
 	if (testDesc->chunkBuilder != NULL)
+	{
 		release_chunk_builder(testDesc->chunkBuilder);
+		pfree(testDesc->chunkBuilder);
+	}
 }
 
 static void

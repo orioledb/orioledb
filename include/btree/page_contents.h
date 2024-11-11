@@ -230,7 +230,7 @@ typedef struct PartialPageState PartialPageState;
 		(tup).formatFlags = (tuphdr)->formatFlags; \
 	} while (false)
 #define BTREE_PAGE_GET_HIKEY(hikey, p) \
-	(hikey) = page_get_hikey((p))
+	(hikey) = page_get_hikey_old((p))
 #define BTREE_PAGE_GET_HIKEY_SIZE(p) \
 	(page_get_hikey_size((p)))
 #define BTREE_PAGE_SET_HIKEY_FLAGS(p, flags)	\
@@ -297,7 +297,7 @@ typedef struct
 #define RIGHTLINK_GET_CHANGECOUNT(rightLink) (DOWNLINK_GET_IN_MEMORY_CHANGECOUNT((rightLink)))
 
 /* Tuple and key max sizes */
-#define O_BTREE_MAX_TUPLE_SIZE MAXALIGN_DOWN((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / 3 - sizeof(LocationIndex) - BTreeLeafTuphdrSize)
+#define O_BTREE_MAX_TUPLE_SIZE MAXALIGN_DOWN(((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / 3) - sizeof(LocationIndex) - BTreeLeafTuphdrSize)
 #define O_BTREE_MAX_KEY_SIZE	O_BTREE_MAX_TUPLE_SIZE
 
 typedef struct
@@ -362,14 +362,12 @@ extern void put_page_image(OInMemoryBlkno blkno, Page img);
 extern void page_cut_first_key(Page node);
 
 typedef struct ItemPointerData ItemPointerData;
-extern ItemPointerData btree_ctid_get_and_inc(BTreeDescr *desc);
-extern void btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid);
 
 extern void copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src);
 extern void copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src);
 extern void copy_fixed_page_key(BTreeDescr *desc, OFixedKey *dst,
 								Page p, BTreePageItemLocator *loc);
-extern void copy_fixed_hikey(BTreeDescr *desc, OFixedKey *dst, Page p);
+extern void copy_fixed_hikey_old(BTreeDescr *desc, OFixedKey *dst, Page p);
 extern void clear_fixed_tuple(OFixedTuple *dst);
 extern void clear_fixed_key(OFixedKey *dst);
 
@@ -377,13 +375,13 @@ extern void copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst,
 								 OTuple src);
 extern void copy_fixed_shmem_page_key(BTreeDescr *desc, OFixedShmemKey *dst,
 									  Page p, BTreePageItemLocator *loc);
-extern void copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst,
+extern void copy_fixed_shmem_hikey_old(BTreeDescr *desc, OFixedShmemKey *dst,
 								   Page p);
 extern void clear_fixed_shmem_key(OFixedShmemKey *dst);
 extern OTuple fixed_shmem_key_get_tuple(OFixedShmemKey *src);
 extern void copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src);
 
-extern OTuple page_get_hikey(Page p);
+extern OTuple page_get_hikey_old(Page p);
 extern int	page_get_hikey_size(Page p);
 extern void page_set_hikey_flags(Page p, uint8 flags);
 extern bool page_fits_hikey(Page p, LocationIndex newHikeySize);

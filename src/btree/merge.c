@@ -116,7 +116,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 		 * required for non-leaf pages.
 		 */
 		if (!O_PAGE_IS(parent, RIGHTMOST))
-			copy_fixed_hikey(desc, parent_hikey, parent);
+			copy_fixed_hikey_old(desc, parent_hikey, parent);
 		else
 			O_TUPLE_SET_NULL(parent_hikey->tuple);
 		unlock_page(parent_blkno);
@@ -248,7 +248,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	/* copy hikey of current page */
 	if (!O_PAGE_IS(target, RIGHTMOST))
-		copy_fixed_hikey(desc, &key, target);
+		copy_fixed_hikey_old(desc, &key, target);
 	else
 		O_TUPLE_SET_NULL(key.tuple);
 
@@ -493,6 +493,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (needsUndo)
 		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
+	release_page_find_context(&find_context);
 
 	Assert(!have_locked_pages());
 	return success;

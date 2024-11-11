@@ -26,6 +26,7 @@
 typedef struct
 {
 	OBTreeFindPageContext *context;
+	BTreePageContext pageContext;
 	void	   *key;
 	BTreeKeyType keyType;
 	Page		pagePtr;
@@ -35,6 +36,11 @@ typedef struct
 	PartialPageState *partial;
 	bool		haveLock;
 } OBTreeFindPageInternalContext;
+
+static void init_find_internal_context(OBTreeFindPageInternalContext *intCxt,
+									   OBTreeFindPageContext *context,
+									   void *key, BTreeKeyType keyType,
+									   uint16 targetLevel);
 
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
 static void step_upward_level(OBTreeFindPageInternalContext *intCxt);
@@ -54,6 +60,8 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 					   CommitSeqNo csn, uint16 flags)
 {
 	ASAN_UNPOISON_MEMORY_REGION(context, sizeof(*context));
+	page_context_init(&context->pageContext, desc);
+	page_context_set_page(&context->pageContext, context->img);
 	context->partial.isPartial = false;
 	context->desc = desc;
 	context->csn = csn;
@@ -61,6 +69,28 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->flags = flags;
 	context->imgUndoLoc = InvalidUndoLocation;
 	O_TUPLE_SET_NULL(context->lokey.tuple);
+}
+
+void
+release_page_find_context(OBTreeFindPageContext *context)
+{
+	page_context_release(&context->pageContext);
+}
+
+static void
+init_find_internal_context(OBTreeFindPageInternalContext *intCxt,
+						   OBTreeFindPageContext *context,
+						   void *key, BTreeKeyType keyType,
+						   uint16 targetLevel)
+{
+	memset(intCxt, 0, sizeof(*intCxt));
+	ASAN_UNPOISON_MEMORY_REGION(intCxt, sizeof(*intCxt));
+
+	page_context_init(&intCxt->pageContext, context->desc);
+	intCxt->context = context;
+	intCxt->key = key;
+	intCxt->keyType = keyType;
+	intCxt->targetLevel = targetLevel;
 }
 
 /*--
@@ -107,12 +137,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	Jsonb	   *params = NULL;
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 
-	memset(&intCxt, 0, sizeof(intCxt));
-	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
-	intCxt.context = context;
-	intCxt.key = key;
-	intCxt.keyType = keyType;
-	intCxt.targetLevel = targetLevel;
+	init_find_internal_context(&intCxt, context, key, keyType, targetLevel);
 
 	/*
 	 * See description of the function.
@@ -163,7 +188,11 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			if (tryFlag)
 			{
 				if (!try_lock_page(intCxt.blkno))
+				{
+					page_context_release(&intCxt.pageContext);
 					return false;
+				}
+				page_context_set_page(&intCxt.pageContext, p);
 				intCxt.pagePtr = p;
 				intCxt.haveLock = true;
 				needLock = false;
@@ -172,6 +201,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			{
 				lock_page(intCxt.blkno);
 			}
+			page_context_set_page(&intCxt.pageContext, p);
 			intCxt.pagePtr = p;
 			intCxt.haveLock = true;
 			needLock = false;
@@ -191,11 +221,13 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				 */
 				if (level <= targetLevel)
 				{
+					page_context_set_page(&intCxt.pageContext, context->img);
 					intCxt.pagePtr = context->img;
 					intCxt.partial = NULL;
 				}
 				else
 				{
+					page_context_set_page(&intCxt.pageContext, context->parentImg);
 					intCxt.pagePtr = context->parentImg;
 					intCxt.partial = &context->partial;
 				}
@@ -205,6 +237,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				/*
 				 * In other cases we can use the img to hold a partial data.
 				 */
+				page_context_set_page(&intCxt.pageContext, context->img);
 				intCxt.pagePtr = context->img;
 				intCxt.partial = &context->partial;
 			}
@@ -224,6 +257,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 				else if (result == ReadPageResultFailed)
 				{
+					page_context_release(&intCxt.pageContext);
 					return false;
 				}
 			}
@@ -273,14 +307,20 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				intCxt.haveLock = false;
 			}
 			if (tryFlag && shmemIsReloaded)
+			{
+				page_context_release(&intCxt.pageContext);
 				return false;
+			}
 			desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 			desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 			desc->rootInfo.rootPageChangeCount = 0;
 			if (tryFlag)
 			{
 				if (!o_btree_try_use_shmem(desc))
+				{
+					page_context_release(&intCxt.pageContext);
 					return false;
+				}
 			}
 			else
 			{
@@ -387,7 +427,10 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				 */
 				Assert(!intCxt.haveLock);
 				if (tryFlag)
+				{
+					page_context_release(&intCxt.pageContext);
 					return false;
+				}
 				continue;
 			}
 
@@ -434,6 +477,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		if (level != targetLevel && (!imageFlag || level > targetLevel) && !noneLeafHdr)
 		{
 			Assert(tryFlag);
+			page_context_release(&intCxt.pageContext);
 			if (intCxt.haveLock)
 			{
 				unlock_page(intCxt.blkno);
@@ -474,6 +518,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 			}
 
+			page_context_release(&intCxt.pageContext);
 			return true;
 		}
 		else if (!noneLeafHdr)
@@ -484,6 +529,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			if (tryFlag)
 			{
+				page_context_release(&intCxt.pageContext);
 				/*
 				 * Don't try to load page from write_page()
 				 */
@@ -497,7 +543,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				load_page(context);
 				intCxt.blkno = context->items[context->index].blkno;
 				loc = context->items[context->index].locator;
-				intCxt.pagePtr = p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
+				p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
+				page_context_set_page(&intCxt.pageContext, p);
+				intCxt.pagePtr = p;
 				noneLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
 
 				if (level != PAGE_GET_LEVEL(p))
@@ -556,12 +604,15 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		STOPEVENT(STOPEVENT_STEP_DOWN, params);
 	}
+
+	page_context_release(&intCxt.pageContext);
 }
 
 static bool
 follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 {
 	OBTreeFindPageContext *context = intCxt->context;
+	BTreePageContext *pageContext = &intCxt->pageContext;
 	BTreeDescr *desc = context->desc;
 	BTreeKeyType keykind = (intCxt->keyType == BTreeKeyPageHiKey ?
 							BTreeKeyNonLeafKey :
@@ -569,14 +620,15 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 	int			followVal = (intCxt->keyType == BTreeKeyPageHiKey ? 1 : 0);
 	OTuple		pageHiKey;
 
-	if (!O_PAGE_IS(intCxt->pagePtr, RIGHTMOST))
-		BTREE_PAGE_GET_HIKEY(pageHiKey, intCxt->pagePtr);
-	while (!O_PAGE_IS(intCxt->pagePtr, RIGHTMOST) &&
+	if (!O_PAGE_IS(pageContext->page, RIGHTMOST))
+		pageHiKey = page_get_hikey(pageContext);
+
+	while (!O_PAGE_IS(pageContext->page, RIGHTMOST) &&
 		   (intCxt->keyType == BTreeKeyRightmost ||
 			o_btree_cmp(desc, intCxt->key, keykind,
 						&pageHiKey, BTreeKeyNonLeafKey) >= followVal))
 	{
-		uint64		rightlink = BTREE_PAGE_GET_RIGHTLINK(intCxt->pagePtr);
+		uint64		rightlink = BTREE_PAGE_GET_RIGHTLINK(pageContext->page);
 
 		if (!OInMemoryBlknoIsValid(RIGHTLINK_GET_BLKNO(rightlink)))
 		{
@@ -590,11 +642,12 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 
 		if (BTREE_PAGE_FIND_IS(context, KEEP_LOKEY))
 		{
-			copy_fixed_hikey(desc, &context->lokey, intCxt->pagePtr);
-			\
-				Assert(!O_TUPLE_IS_NULL(context->lokey.tuple));
+			copy_fixed_hikey(pageContext, &context->lokey);
+			
+			Assert(!O_TUPLE_IS_NULL(context->lokey.tuple));
+
 			BTREE_PAGE_FIND_SET(context, LOKEY_EXISTS);
-			if (PAGE_GET_LEVEL(intCxt->pagePtr) == intCxt->targetLevel)
+			if (PAGE_GET_LEVEL(pageContext->page) == intCxt->targetLevel)
 			{
 				BTREE_PAGE_FIND_SET(context, LOKEY_SIBLING);
 				BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
@@ -614,8 +667,11 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 		if (intCxt->haveLock)
 		{
 			lock_page(intCxt->blkno);
+
 			intCxt->pagePtr = O_GET_IN_MEMORY_PAGE(intCxt->blkno);
+			page_context_set_page(pageContext, O_GET_IN_MEMORY_PAGE(intCxt->blkno));
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
+
 			if (intCxt->pageChangeCount !=
 				RIGHTLINK_GET_CHANGECOUNT(rightlink))
 			{
@@ -641,8 +697,9 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 				   O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr));
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
 		}
+
 		if (!O_PAGE_IS(intCxt->pagePtr, RIGHTMOST))
-			BTREE_PAGE_GET_HIKEY(pageHiKey, intCxt->pagePtr);
+			pageHiKey = page_get_hikey(pageContext);
 	}
 	return false;
 }
@@ -668,7 +725,7 @@ step_upward_level(OBTreeFindPageInternalContext *intCxt)
  */
 bool
 refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
-			uint16 level, OInMemoryBlkno _blkno, uint32 _pageChangeCount)
+			uint16 level, OInMemoryBlkno blkno, uint32 pageChangeCount)
 {
 	BTreeDescr *desc = context->desc;
 	OBTreeFindPageInternalContext intCxt;
@@ -677,14 +734,9 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	bool		item_found = true;
 	Pointer		p;
 
-	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
-	intCxt.context = context;
-	intCxt.key = key;
-	intCxt.keyType = keyType;
-	intCxt.blkno = _blkno;
-	intCxt.targetLevel = level;
-	intCxt.pageChangeCount = _pageChangeCount;
-	intCxt.partial = NULL;
+	init_find_internal_context(&intCxt, context, key, keyType, level);
+	intCxt.blkno = blkno;
+	intCxt.pageChangeCount = pageChangeCount;
 
 retry:
 
@@ -692,15 +744,20 @@ retry:
 	if (BTREE_PAGE_FIND_IS(context, MODIFY))
 	{
 		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
+		{
+			page_context_release(&intCxt.pageContext);
 			return find_page(context, key, keyType, level);
+		}
 
 		lock_page(intCxt.blkno);
 		intCxt.haveLock = true;
+		page_context_set_page(&intCxt.pageContext, p);
 		intCxt.pagePtr = p;
 		if (PAGE_GET_LEVEL(p) != level ||
 			O_PAGE_GET_CHANGE_COUNT(p) != intCxt.pageChangeCount ||
 			(O_PAGE_IS(p, BROKEN_SPLIT) && intCxt.blkno == desc->rootInfo.rootPageBlkno))
 		{
+			page_context_release(&intCxt.pageContext);
 			unlock_page(intCxt.blkno);
 			return find_page(context, key, keyType, level);
 		}
@@ -732,7 +789,10 @@ retry:
 		bool		success;
 
 		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
+		{
+			page_context_release(&intCxt.pageContext);
 			return find_page(context, key, keyType, level);
+		}
 
 		context->partial.isPartial = false;
 		intCxt.partial = &context->partial;
@@ -740,11 +800,13 @@ retry:
 									   keyType, intCxt.partial);
 
 		intCxt.haveLock = false;
+		page_context_set_page(&intCxt.pageContext, img);
 		intCxt.pagePtr = img;
 		if (!success ||
 			PAGE_GET_LEVEL(img) != level ||
 			(O_PAGE_IS(img, BROKEN_SPLIT) && intCxt.blkno == desc->rootInfo.rootPageBlkno))
 		{
+			page_context_release(&intCxt.pageContext);
 			return find_page(context, key, keyType, level);
 		}
 		Assert(O_PAGE_GET_CHANGE_COUNT(img) == intCxt.pageChangeCount);
@@ -763,6 +825,7 @@ retry:
 		if (follow_rightlink(&intCxt))
 		{
 			Assert(!intCxt.haveLock);
+			page_context_release(&intCxt.pageContext);
 			return find_page(context, key, keyType, level);
 		}
 	}
@@ -810,6 +873,7 @@ retry:
 			goto retry;
 	}
 
+	page_context_release(&intCxt.pageContext);
 	context->items[context->index].locator = loc;
 	context->items[context->index].blkno = intCxt.blkno;
 	context->items[context->index].pageChangeCount = intCxt.pageChangeCount;
@@ -866,7 +930,7 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		BTREE_PAGE_LOCATOR_NEXT(context->parentImg, &loc);
 
 	/* copy hikey */
-	copy_fixed_hikey(desc, hikey, context->img);
+	copy_fixed_hikey_old(desc, hikey, context->img);
 
 	/* Try to load next page using next parent downlink */
 	if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
@@ -935,6 +999,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	UndoLocation prevLoc;
 	Jsonb	   *params;
 	OTuple		imgHikey;
+	BTreePageContext pageContext;
 
 	Assert(BTREE_PAGE_FIND_IS(context, KEEP_LOKEY));
 
@@ -957,12 +1022,18 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	parentItem = &context->items[context->index - 1];
 	item = &context->items[context->index];
 
+	page_context_init(&pageContext, desc);
+	page_context_set_page(&pageContext, context->img);
+
 	prevLoc = context->imgUndoLoc;
 	while (true)
 	{
 		/* Nothing to do with leftmost page */
 		if (O_PAGE_IS(context->img, LEFTMOST))
+		{
+			page_context_release(&pageContext);
 			return false;
+		}
 
 		Assert(!O_TUPLE_IS_NULL(btree_find_context_lokey(context)));
 		copy_fixed_key(desc, hikey, btree_find_context_lokey(context));
@@ -1005,6 +1076,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 					success = btree_find_read_page(context, item->blkno, item->pageChangeCount,
 												   context->img, NULL,
 												   BTreeKeyRightmost, NULL);
+					page_context_set_invalid(&pageContext);
 
 					if (success &&
 						context->imgUndoLoc != InvalidUndoLocation &&
@@ -1019,7 +1091,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 						PAGE_GET_LEVEL(context->img) == level &&
 						!O_PAGE_IS(context->img, RIGHTMOST))
 					{
-						BTREE_PAGE_GET_HIKEY(imgHikey, context->img);
+						imgHikey = page_get_hikey(&pageContext);
 
 						if (o_btree_cmp(desc, &hikey->tuple, BTreeKeyNonLeafKey,
 										&imgHikey, BTreeKeyNonLeafKey) == 0)
@@ -1027,6 +1099,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 							Assert(O_PAGE_GET_CHANGE_COUNT(context->img) == item->pageChangeCount);
 							parentItem->locator = loc;
 							BTREE_PAGE_LOCATOR_LAST(context->img, &item->locator);
+							page_context_release(&pageContext);
 							return true;
 						}
 					}
@@ -1035,6 +1108,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		}
 
 		(void) find_page(context, &hikey->tuple, BTreeKeyPageHiKey, level);
+		page_context_set_invalid(&pageContext);
 
 		/* context levels may be changed */
 		parentItem = &context->items[context->index - 1];
@@ -1045,7 +1119,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 		if (COMMITSEQNO_IS_INPROGRESS(context->csn) &&
 			!O_PAGE_IS(context->img, RIGHTMOST))
-			BTREE_PAGE_GET_HIKEY(imgHikey, context->img);
+			imgHikey = page_get_hikey(&pageContext);
 
 		if (COMMITSEQNO_IS_INPROGRESS(context->csn) &&
 			(O_PAGE_IS(context->img, RIGHTMOST)
@@ -1065,6 +1139,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			BTREE_PAGE_LOCATOR_PREV(context->img, &item->locator);
 		}
 
+		page_context_release(&pageContext);
 		return true;
 	}
 

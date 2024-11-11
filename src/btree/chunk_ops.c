@@ -39,7 +39,6 @@ void
 release_chunk_desc(BTreeChunkDesc *desc)
 {
 	desc->ops->release(desc);
-	pfree(desc);
 }
 
 BTreeChunkBuilder *
@@ -59,5 +58,61 @@ make_chunk_builder(BTreeDescr *treeDesc, const BTreeChunkOps *ops)
 void
 release_chunk_builder(BTreeChunkBuilder *chunkBuilder)
 {
-	pfree(chunkBuilder);
+}
+
+/*
+ * Page context utility functions.
+ */
+
+void
+page_context_init(BTreePageContext *pageContext, BTreeDescr *treeDesc)
+{
+	memset(pageContext, 0, sizeof(*pageContext));
+
+	pageContext->treeDesc = treeDesc;
+}
+
+void
+page_context_release(BTreePageContext *pageContext)
+{
+	if (pageContext->hikeyChunk != NULL)
+	{
+		release_chunk_desc(pageContext->hikeyChunk);
+		pfree(pageContext->hikeyChunk);
+	}
+	pageContext->hikeyChunk = NULL;
+	pageContext->isInitialized = false;
+}
+
+void
+page_context_set_page(BTreePageContext *pageContext, Page page)
+{
+	page_context_set_invalid(pageContext);
+	pageContext->page = page;
+}
+
+void
+page_context_set_invalid(BTreePageContext *pageContext)
+{
+	if (pageContext->isInitialized)
+	{
+		pageContext->hikeyChunk->ops->release(pageContext->hikeyChunk);
+	}
+	pageContext->isInitialized = false;
+}
+
+void
+page_context_ensure_chunk_init(BTreePageContext *pageContext)
+{
+	BTreeChunkDesc *chunk = pageContext->hikeyChunk;
+
+	if (!pageContext->isInitialized)
+	{
+		if (pageContext->hikeyChunk == NULL)
+			pageContext->hikeyChunk = make_chunk_desc(pageContext->treeDesc,
+													  &HiKeyChunkOps,
+													  pageContext->page, 0);
+		else
+			chunk->ops->init(chunk, pageContext->page, 0);
+	}
 }

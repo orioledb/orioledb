@@ -13,7 +13,8 @@
 #ifndef __BTREE_FIND_H__
 #define __BTREE_FIND_H__
 
-#include "btree.h"
+#include "btree/btree.h"
+#include "btree/chunk_ops.h"
 #include "btree/page_contents.h"
 
 typedef struct
@@ -33,12 +34,17 @@ struct PartialPageState
 typedef struct
 {
 	BTreeDescr *desc;
+
 	char		img[ORIOLEDB_BLCKSZ];
 	char		parentImg[ORIOLEDB_BLCKSZ];
+
+	BTreePageContext pageContext;
+
 	PartialPageState partial;
 	CommitSeqNo csn;
 	CommitSeqNo imgReadCsn;
 	UndoLocation imgUndoLoc;
+
 	int			index;
 	OBtreePageFindItem items[ORIOLEDB_MAX_DEPTH];
 
@@ -83,6 +89,7 @@ extern bool btree_page_search(BTreeDescr *desc, Page p, Pointer key,
 extern void init_page_find_context(OBTreeFindPageContext *context,
 								   BTreeDescr *desc,
 								   CommitSeqNo csn, uint16 flags);
+extern void release_page_find_context(OBTreeFindPageContext *context);
 
 extern bool find_page(OBTreeFindPageContext *context, void *key,
 					  BTreeKeyType keyType, uint16 targetLevel);

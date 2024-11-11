@@ -2872,7 +2872,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 		if (!autonomous && !O_PAGE_IS(page, RIGHTMOST))
 		{
 			/* we did not forget about merge */
-			copy_fixed_shmem_hikey(descr, &state->stack[l].hikey, page);
+			copy_fixed_shmem_hikey_old(descr, &state->stack[l].hikey, page);
 			state->stack[l].bound = CheckpointBoundHikey;
 		}
 
@@ -2918,7 +2918,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 	checkpointer_update_autonomous(descr, state);
 	if (!state->stack[level].autonomous)
 	{
-		copy_fixed_shmem_hikey(descr, &state->stack[level].hikey, page);
+		copy_fixed_shmem_hikey_old(descr, &state->stack[level].hikey, page);
 		state->stack[level].bound = CheckpointBoundHikey;
 	}
 	else if (!autonomous)
@@ -3350,7 +3350,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				chkp_inc_changecount_before(state);
 				if (!O_PAGE_IS(page, RIGHTMOST))
 				{
-					copy_fixed_shmem_hikey(descr, &state->stack[level].hikey,
+					copy_fixed_shmem_hikey_old(descr, &state->stack[level].hikey,
 										   page);
 					state->stack[level].bound = CheckpointBoundHikey;
 					state->stack[level].hikeyBlkno = blkno;
@@ -3481,7 +3481,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				else
 				{
 					message.content.upwards.nextkeyType = NextKeyValue;
-					copy_fixed_hikey(descr, &message.content.upwards.nextkey, img);
+					copy_fixed_hikey_old(descr, &message.content.upwards.nextkey, img);
 				}
 				BTREE_PAGE_ITEMS_COUNT(img) = 0;
 				state->stack[level].nextkeyType = NextKeyNone;
@@ -3873,7 +3873,7 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 
 		downlink = autonomous_image_write(descr, state, writeback, cur_level, flags);
 
-		copy_fixed_hikey(descr, &hikey[cur_level % 2], curItem->image);
+		copy_fixed_hikey_old(descr, &hikey[cur_level % 2], curItem->image);
 		hikeySize[cur_level % 2] = BTREE_PAGE_GET_HIKEY_SIZE(curItem->image);
 
 		init_page_first_chunk(descr, curItem->image, 0);
@@ -4219,7 +4219,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				else
 				{
 					state->stack[level].nextkeyType = NextKeyValue;
-					copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
+					copy_fixed_shmem_hikey_old(descr, &state->stack[level].nextkey,
 										   page);
 				}
 			}
@@ -4312,7 +4312,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					copy_fixed_shmem_page_key(descr, &state->curKeyValue, page,
 											  &nextLoc);
 				else
-					copy_fixed_shmem_hikey(descr, &state->curKeyValue, page);
+					copy_fixed_shmem_hikey_old(descr, &state->curKeyValue, page);
 
 				update_lowest_level_hikey(descr, state, level,
 										  fixed_shmem_key_get_tuple(&state->curKeyValue));
@@ -4334,7 +4334,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			{
 				if (!O_PAGE_IS(page, RIGHTMOST))
 				{
-					copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
+					copy_fixed_shmem_hikey_old(descr, &state->stack[level].nextkey,
 										   page);
 					state->stack[level].nextkeyType = NextKeyValue;
 				}
@@ -4450,7 +4450,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			else
 			{
 				state->stack[level].nextkeyType = NextKeyValue;
-				copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
+				copy_fixed_shmem_hikey_old(descr, &state->stack[level].nextkey,
 									   page);
 			}
 			message->action = WalkContinue;
@@ -4600,7 +4600,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 	else
 	{
 		message->content.upwards.nextkeyType = NextKeyValue;
-		copy_fixed_hikey(descr, &message->content.upwards.nextkey, img);
+		copy_fixed_hikey_old(descr, &message->content.upwards.nextkey, img);
 	}
 
 	state->stack[level].nextkeyType = NextKeyNone;
@@ -4633,7 +4633,7 @@ prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
 	else
 	{
 		state->curKeyType = CurKeyValue;
-		copy_fixed_shmem_hikey(descr, &state->curKeyValue, page);
+		copy_fixed_shmem_hikey_old(descr, &state->curKeyValue, page);
 	}
 	chkp_inc_changecount_after(state);
 

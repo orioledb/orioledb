@@ -276,7 +276,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		keysize = stack[level].keysize;
 
 		stack[level].keysize = BTREE_PAGE_GET_HIKEY_SIZE(stack[level].img);
-		copy_fixed_hikey(desc, &stack[level].key, stack[level].img);
+		copy_fixed_hikey_old(desc, &stack[level].key, stack[level].img);
 
 		if (level > 0)
 		{

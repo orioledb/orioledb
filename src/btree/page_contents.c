@@ -597,7 +597,7 @@ copy_fixed_page_key(BTreeDescr *desc, OFixedKey *dst,
 }
 
 void
-copy_fixed_hikey(BTreeDescr *desc, OFixedKey *dst, Page p)
+copy_fixed_hikey_old(BTreeDescr *desc, OFixedKey *dst, Page p)
 {
 	OTuple		src;
 
@@ -660,7 +660,7 @@ copy_fixed_shmem_page_key(BTreeDescr *desc, OFixedShmemKey *dst,
 }
 
 void
-copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst, Page p)
+copy_fixed_shmem_hikey_old(BTreeDescr *desc, OFixedShmemKey *dst, Page p)
 {
 	OTuple		src;
 
@@ -695,7 +695,7 @@ fixed_shmem_key_get_tuple(OFixedShmemKey *src)
 }
 
 OTuple
-page_get_hikey(Page p)
+page_get_hikey_old(Page p)
 {
 	BTreePageChunkDesc *chunkDesc;
 	BTreePageHeader *header = (BTreePageHeader *) p;
