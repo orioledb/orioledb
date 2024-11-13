@@ -278,9 +278,13 @@ UPDATE o_test_partition_multiple_moves t1 SET val_1 = 2
 
 SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
 
+SET default_table_access_method to orioledb;
+
 CREATE TABLE o_test_partition_pkey_update_move (
   val_1 INT PRIMARY KEY
 ) PARTITION BY LIST (val_1);
+
+RESET default_table_access_method;
 
 CREATE TABLE o_test_partition_pkey_update_move_child1
 	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (1);
