@@ -1835,9 +1835,17 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
 	oTable->oids.reloid = rel->rd_id;
 	oTable->oids.relnode = RelFileNodeGetNode(newrnode);
 
-	toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
-	ORelOidsSetFromRel(oTable->toast_oids, toastRel);
-	table_close(toastRel, AccessShareLock);
+	if (rel->rd_rel->reltoastrelid)
+	{
+		toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
+		ORelOidsSetFromRel(oTable->toast_oids, toastRel);
+		table_close(toastRel, AccessShareLock);
+	}
+	else
+	{
+		/* Parent partition can't have toast_oids */
+		ORelOidsSetInvalid(oTable->toast_oids);
+	}
 
 	for (i = 0; i < oTable->nindices; i++)
 	{
