@@ -1624,8 +1624,8 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 	if (is_primary && is_ctid)
 	{
 		if (((OTableSlot *) slot)->tuple.data)
-                        pfree(((OTableSlot *) slot)->tuple.data);
-		
+			pfree(((OTableSlot *) slot)->tuple.data);
+
 		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
 						errmsg("ctid index key duplicate.")));
 	}

@@ -482,7 +482,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 
 	if (tuple.data)
-        	pfree(tuple.data);
+		pfree(tuple.data);
 
 	return success;
 }
@@ -605,9 +605,9 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 						}
 					}
 
-					if(old_tuple.data)
+					if (old_tuple.data)
 						pfree(old_tuple.data);
-					if(new_tuple.data)
+					if (new_tuple.data)
 						pfree(new_tuple.data);
 
 					appendStringInfo(str, ")");
@@ -625,9 +625,9 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				o_report_duplicate(heapRel, index_descr, new_slot);
 				break;
 			default:
-				if(old_tuple.data)
+				if (old_tuple.data)
 					pfree(old_tuple.data);
-				if(new_tuple.data)
+				if (new_tuple.data)
 					pfree(new_tuple.data);
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
@@ -636,9 +636,9 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 		}
 	}
 
-	if(old_tuple.data)
+	if (old_tuple.data)
 		pfree(old_tuple.data);
-	if(new_tuple.data)
+	if (new_tuple.data)
 		pfree(new_tuple.data);
 
 	return result.success;
@@ -742,7 +742,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 					}
 					appendStringInfo(str, ")");
 
-					if(tuple.data)
+					if (tuple.data)
 						pfree(tuple.data);
 					ereport(ERROR,
 							(errcode(ERRCODE_INTERNAL_ERROR),
@@ -757,7 +757,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 			case BTreeOperationInsert:
 				break;
 			default:
-				if(tuple.data)
+				if (tuple.data)
 					pfree(tuple.data);
 
 				ereport(ERROR,
@@ -767,7 +767,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		}
 	}
 
-	if(tuple.data)
+	if (tuple.data)
 		pfree(tuple.data);
 
 	return result.success;
