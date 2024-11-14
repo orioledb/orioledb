@@ -600,11 +600,11 @@ SELECT tableoid::regclass, * FROM o_test_partition_multiple_moves;
 CREATE TABLE o_test_partition_pkey_update_move (
   val_1 INT PRIMARY KEY
 ) PARTITION BY LIST (val_1) USING orioledb;
-ERROR:  specifying a table access method is not supported on a partitioned table
 -- Create it using default AM for PG16
 CREATE TABLE IF NOT EXISTS o_test_partition_pkey_update_move (
   val_1 INT PRIMARY KEY
 ) PARTITION BY LIST (val_1);
+NOTICE:  relation "o_test_partition_pkey_update_move" already exists, skipping
 CREATE TABLE o_test_partition_pkey_update_move_child1
 	PARTITION OF o_test_partition_pkey_update_move FOR VALUES IN (1);
 CREATE TABLE o_test_partition_pkey_update_move_child2 (
@@ -705,7 +705,7 @@ SELECT * FROM o_test_partition_truncate;
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 19 other objects
+NOTICE:  drop cascades to 21 other objects
 DETAIL:  drop cascades to table o_test_partition_on_conflict_range_child
 drop cascades to table o_test_partition_on_conflict_list_child
 drop cascades to table o_test_partition_on_conflict_update_same_trx_child
@@ -720,7 +720,9 @@ drop cascades to table o_test_partition_pkey_update_child
 drop cascades to table o_test_partition_multiple_moves_child1
 drop cascades to table o_test_partition_multiple_moves_child2
 drop cascades to table o_test_partition_multiple_moves_from
+drop cascades to table o_test_partition_pkey_update_move_child1
 drop cascades to table o_test_partition_pkey_update_move_child2
+drop cascades to table o_test_partition_pkey_update_move_child3
 drop cascades to table o_test_cross_partition_update_trigger_fk
 drop cascades to table o_test_cross_partition_update_trigger_child1
 drop cascades to table o_test_cross_partition_update_trigger_child2
