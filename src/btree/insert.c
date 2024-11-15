@@ -749,7 +749,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 void
 o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 							 OTuple tuple, LocationIndex tuplen,
-							 BTreeLeafTuphdr *tuphdr, bool replace,
+							 BTreeLeafTuphdr *tupheader, bool replace,
 							 int reserve_kind)
 {
 	BTreeInsertStackItem insert_item;
@@ -765,7 +765,7 @@ o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 	insert_item.context = context;
 	insert_item.tuple = tuple;
 	insert_item.tuplen = tuplen;
-	insert_item.tupheader = (Pointer) tuphdr;
+	insert_item.tupheader = (Pointer) tupheader;
 	insert_item.level = 0;
 	insert_item.replace = replace;
 	insert_item.left_blkno = OInvalidInMemoryBlkno;
