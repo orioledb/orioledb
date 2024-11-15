@@ -88,8 +88,7 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [15 (tag: patches15_22)](https://github.com/orioledb/postgres/tree/patches15_22) or [16 (tag: patches16_24)](https://github.com/orioledb/postgres/tree/patches16_24);
-   * for versions before 16 ``./config`` script should be run with `--with-icu`
+ * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [16 (tag: patches16_32)](https://github.com/orioledb/postgres/tree/patches16_32) or [17 (tag: patches17_4)](https://github.com/orioledb/postgres/tree/patches17_4);
  * Development package of libzstd;
  * python 3.5+ with testgres package.
 
@@ -113,7 +112,7 @@ shared_preload_libraries = 'orioledb.so'
 ```
 
 ## Collations
-OrioleDB tables support only ICU, C, and POSIX collations. 
+OrioleDB tables support only ICU, C, and POSIX collations.
 
 So that you don't have to write COLLATE for every "text" field of tables you have options:
 ### Create whole cluster with one of these collations:
@@ -129,9 +128,9 @@ initdb --locale-provider=icu --icu-locale=en -D...
 ```bash
 createdb --locale=C --template template0 ...
 # OR
-createdb --locale=POSIX --template template0 ... 
+createdb --locale=POSIX --template template0 ...
 # OR
-createdb --locale-provider=icu --icu-locale=en --template template0 ... 
+createdb --locale-provider=icu --icu-locale=en --template template0 ...
 ```
 Or using `CREATE DATABASE` with `LOCALE` or `ICU_LOCALE` parameters.
 

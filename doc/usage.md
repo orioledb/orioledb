@@ -33,48 +33,40 @@ CREATE INDEX blog_post_published_at ON blog_post(published_at);
 
 The created table could be used in regular DML queries, including SELECT/INSERT/UPDATE/DELETE and INSERT ON CONFLICT.
 
-Plans of queries involving OrioleDB tables could be viewed using `EXPLAIN` clause as usual.  OrioleDB uses Custom Scan nodes named o_scan for scanning tables.
+Plans of queries involving OrioleDB tables could be viewed using `EXPLAIN` clause as usual.
 
 ```sql
 # EXPLAIN SELECT * FROM blog_post ORDER BY published_at DESC LIMIT 10;
-                                   QUERY PLAN
------------------------------------------------------------------------
+                                                 QUERY PLAN
+------------------------------------------------------------------------------------------------------------
  Limit  (cost=0.15..1.67 rows=10 width=120)
-   ->  Custom Scan (o_scan) on blog_post  (cost=0.15..48.95 rows=320
-           width=120)
-         Backward index scan of: blog_post_published_at
-(3 rows)
+   ->  Index Scan Backward using blog_post_published_at on blog_post  (cost=0.15..48.95 rows=320 width=120)
+(2 rows)
 ```
 
 ```sql
 # EXPLAIN SELECT * FROM blog_post WHERE id = 1;
-                              QUERY PLAN
------------------------------------------------------------------------
- Custom Scan (o_scan) on blog_post  (cost=0.15..8.17 rows=1 width=120)
-   Forward index only scan of: blog_post_pkey
-   Conds: (id = 1)
-(3 rows)
+                                    QUERY PLAN
+----------------------------------------------------------------------------------
+ Index Scan using blog_post_pkey on blog_post  (cost=0.15..8.17 rows=1 width=120)
+   Index Cond: (id = 1)
+(2 rows)
 ```
 
 `EXPLAIN (ANALYZE, BUFFERS)` clause allows to view page access statistics.
 
 ```sql
-# EXPLAIN (ANALYZE, BUFFERS)
+# # EXPLAIN (ANALYZE, BUFFERS)
   SELECT * FROM blog_post ORDER BY published_at DESC LIMIT 10;
-                                                        QUERY PLAN
-----------------------------------------------------------------------
- Limit  (cost=0.15..1.64 rows=10 width=120) (actual time=0.024..0.044
-     rows=10 loops=1)
-   ->  Custom Scan (o_scan) on blog_post  (cost=0.15..66.87 rows=448
-           width=120) (actual time=0.022..0.038 rows=20 loops=1)
-         Backward index scan of: blog_post_published_at
-         Primary pages: read=20
-         Secondary index (blog_post_published_at) pages: read=2
+                                                                       QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.29..0.54 rows=10 width=42) (actual time=0.100..0.210 rows=10 loops=1)
+   ->  Index Scan Backward using blog_post_published_at on blog_post  (cost=0.29..251.27 rows=9999 width=42) (actual time=0.097..0.202 rows=10 loops=1)
  Planning:
-   Buffers: shared hit=2
- Planning Time: 0.175 ms
- Execution Time: 0.079 ms
-(9 rows)
+   Buffers: shared hit=35
+ Planning Time: 1.147 ms
+ Execution Time: 0.284 ms
+(6 rows)
 ```
 
 Block-level data compression
