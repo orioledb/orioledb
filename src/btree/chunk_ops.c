@@ -56,6 +56,6 @@ make_btree_chunk_builder(BTreeDescr *treeDesc, const BTreeChunkOps *ops)
 }
 
 void
-release_btree_chunk_builderh(BTreeChunkBuilder *chunkBuilder)
+release_btree_chunk_builder(BTreeChunkBuilder *chunkBuilder)
 {
 }

@@ -198,6 +198,6 @@ extern void release_btree_chunk_desc(BTreeChunkDesc *desc);
 
 extern BTreeChunkBuilder *make_btree_chunk_builder(BTreeDescr *treeDesc,
 												   const BTreeChunkOps *ops);
-extern void release_btree_chunk_builderh(BTreeChunkBuilder *chunkBuilder);
+extern void release_btree_chunk_builder(BTreeChunkBuilder *chunkBuilder);
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */

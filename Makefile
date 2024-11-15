@@ -15,6 +15,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/check.o \
 	   src/btree/chunk_ops.o \
 	   src/btree/find.o \
+	   src/btree/hikey_chunk.o \
 	   src/btree/insert.o \
 	   src/btree/io.o \
 	   src/btree/iterator.o \
@@ -26,6 +27,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/print.o \
 	   src/btree/scan.o \
 	   src/btree/split.o \
+	   src/btree/tuple_chunk.o \
 	   src/btree/undo.o \
 	   src/catalog/ddl.o \
 	   src/catalog/free_extents.o \
