@@ -61,7 +61,7 @@ typedef struct BTreeChunkDesc
 	/* Array of offsets of chunk items */
 	union {
 		BTreeChunkItem *tupleItems;
-		BTreePageChunkDesc *hikeyItems;
+		BTreeChunkItem hikeyItems[BTREE_PAGE_MAX_CHUNKS];
 	}			chunkItems;
 	/* Number of chunk items */
 	uint16		chunkItemsCount;
