@@ -21,14 +21,14 @@ typedef enum BTreeChunkOperationType
 	BTreeChunkOperationInsert,
 	BTreeChunkOperationUpdate,
 	BTreeChunkOperationDelete
-} BTreeChunkOperationType;
+}			BTreeChunkOperationType;
 
 typedef enum BTreeChunkType
 {
 	BTreeChunkHiKeys,
 	BTreeChunkNonLeaf,
 	BTreeChunkLeaf
-} BTreeChunkType;
+}			BTreeChunkType;
 
 typedef struct BTreeChunkBuilderData
 {
@@ -43,7 +43,7 @@ typedef struct BTreeChunkBuilderData
 	BTreePageChunk chunkItems[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	/* Number of chunk items */
 	uint16		chunkItemsCount;
-} BTreeChunkBuilderData;
+}			BTreeChunkBuilderData;
 
 typedef struct PartialPageState PartialPageState;
 
@@ -54,16 +54,17 @@ typedef struct BTreeChunkOps
 	/*
 	 * Estimate the new chunk size after the operation.
 	 */
-	int32		(*estimate_change) (BTreeChunkDesc *desc, OffsetNumber itemOffset,
+	int32		(*estimate_change) (BTreeChunkDesc * desc, OffsetNumber itemOffset,
 									BTreeChunkOperationType operation,
 									Pointer tupleHeader, OTuple tuple);
 
 	/*
 	 * Perform the operation.  A caller should take care about the size of the
-	 * chunk.  Extension of the chunk should be performed before "perform_change",
-	 * and shrinking of the chunk should be performed after "perform_change".
+	 * chunk.  Extension of the chunk should be performed before
+	 * "perform_change", and shrinking of the chunk should be performed after
+	 * "perform_change".
 	 */
-	void		(*perform_change) (BTreeChunkDesc *desc, OffsetNumber itemOffset,
+	void		(*perform_change) (BTreeChunkDesc * desc, OffsetNumber itemOffset,
 								   BTreeChunkOperationType operation,
 								   Pointer tupleHeader, OTuple tuple);
 
@@ -71,7 +72,7 @@ typedef struct BTreeChunkOps
 	 * Compare given key to the chunk tuple.  Return false if the chunk was
 	 * changed concurrently.
 	 */
-	bool		(*cmp) (BTreeChunkDesc *desc, PartialPageState *partial,
+	bool		(*cmp) (BTreeChunkDesc * desc, PartialPageState *partial,
 						Page page, OffsetNumber itemOffset,
 						void *key, BTreeKeyType keyType, int *result);
 
@@ -79,7 +80,7 @@ typedef struct BTreeChunkOps
 	 * Search for the given key in the chunk tuple.  Return false if the chunk
 	 * was changed concurrently.
 	 */
-	bool		(*search) (BTreeChunkDesc *desc, PartialPageState *partial,
+	bool		(*search) (BTreeChunkDesc * desc, PartialPageState *partial,
 						   Page page, void *key, BTreeKeyType keyType,
 						   OffsetNumber *itemOffset);
 
@@ -87,7 +88,7 @@ typedef struct BTreeChunkOps
 	 * Read the tuple from the chunk.  Return false if the chunk was changed
 	 * concurrently.
 	 */
-	bool		(*read_tuple) (BTreeChunkDesc *desc, PartialPageState *partial,
+	bool		(*read_tuple) (BTreeChunkDesc * desc, PartialPageState *partial,
 							   Page page, OffsetNumber itemOffset,
 							   Pointer *tupleHeader, OTuple *tuple,
 							   bool *needsFree);
@@ -95,26 +96,26 @@ typedef struct BTreeChunkOps
 	/*
 	 * Initialize the chunk builder.
 	 */
-	void		(*builder_init) (BTreeChunkBuilderData *builderData,
+	void		(*builder_init) (BTreeChunkBuilderData * builderData,
 								 BTreeDescr *treeDesc, BTreeChunkType chunkType);
 
 	/*
 	 * Estimate the chunk size after adding the tuple to the builder.
 	 */
-	int32		(*builder_estimate) (BTreeChunkBuilderData *builderData, OTuple tuple);
+	int32		(*builder_estimate) (BTreeChunkBuilderData * builderData, OTuple tuple);
 
 	/*
 	 * Add the tuple to the builder.
 	 */
-	void		(*builder_add) (BTreeChunkBuilderData *builderData, OTuple tuple,
+	void		(*builder_add) (BTreeChunkBuilderData * builderData, OTuple tuple,
 								uint64 downlink);
 
 	/*
 	 * Finish building the chunk.
 	 */
-	void		(*builder_finish) (BTreeChunkBuilderData *builderData,
-								   BTreeChunkDesc *chunkDesc);
-} BTreeChunkOps;
+	void		(*builder_finish) (BTreeChunkBuilderData * builderData,
+								   BTreeChunkDesc * chunkDesc);
+}			BTreeChunkOps;
 
 typedef struct BTreeChunkDesc
 {
@@ -132,6 +133,6 @@ typedef struct BTreeChunkDesc
 	BTreePageChunk *chunkItems;
 	/* Number of chunk items */
 	uint16		chunkItemsCount;
-} BTreeChunkDesc;
+}			BTreeChunkDesc;
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */
