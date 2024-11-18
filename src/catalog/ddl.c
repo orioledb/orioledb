@@ -1652,6 +1652,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 				primary_compress = default_primary_compress,
 				toast_compress = default_toast_compress;
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
+	bool		index_bridging = false;
 	OXid		oxid = InvalidOXid;
 	OSnapshot	oSnapshot;
 
@@ -1697,6 +1698,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 				if (str)
 					toast_compress = o_parse_compress(str);
 			}
+			index_bridging = options->index_bridging;
 		}
 		fillfactor = options->std_options.fillfactor;
 	}
@@ -1726,6 +1728,15 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 		o_table->default_compress = compress;
 		o_table->toast_compress = toast_compress;
 		o_table->primary_compress = primary_compress;
+		o_table->index_bridging = index_bridging;
+
+		if (index_bridging)
+		{
+			o_table->bridge_oids.datoid = MyDatabaseId;
+			o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+															rel->rd_rel->relpersistence);
+			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+		}
 	}
 	o_table->fillfactor = fillfactor;
 

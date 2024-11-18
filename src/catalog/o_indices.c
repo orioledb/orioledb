@@ -192,6 +192,8 @@ make_ctid_o_index(OTable *table)
 	result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
 	result->nLeafFields = table->nfields + 1;
+	if (table->index_bridging)
+		result->nLeafFields++;
 	result->nNonLeafFields = 1;
 	result->nPrimaryFields = 0;
 	result->nKeyFields = 1;
@@ -208,6 +210,11 @@ make_ctid_o_index(OTable *table)
 
 	for (i = 0; i < table->nfields; i++)
 		result->leafFields[i + 1] = table->fields[i];
+
+	if (table->index_bridging)
+		make_builtin_field(&result->leafFields[i + 1], NULL,
+						   TIDOID, "index_bridging_ctid", SelfItemPointerAttributeNumber,
+						   table->tid_btree_ops_oid);
 
 	return result;
 }
@@ -262,6 +269,11 @@ make_primary_o_index(OTable *table)
 												 result->nLeafFields);
 	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
 														 result->nNonLeafFields);
+
+	if (table->index_bridging)
+		make_builtin_field(&result->leafFields[0], NULL,
+						TIDOID, "index_bridging_ctid", SelfItemPointerAttributeNumber,
+						table->tid_btree_ops_oid);
 
 	for (i = 0; i < result->nLeafFields; i++)
 		result->leafFields[i] = table->fields[i];
@@ -478,6 +490,51 @@ make_toast_o_index(OTable *table)
 	return result;
 }
 
+static OIndex *
+make_bridge_o_index(OTable *table)
+{
+	OTableIndex *primary = NULL;
+	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
+	int			nadded;
+
+	if (table->has_primary)
+	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
+	}
+
+	result->indexOids = table->bridge_oids;
+	result->indexType = oIndexRegular;
+	namestrcpy(&result->name, "index_bridge");
+	result->tableOids = table->oids;
+	result->amoid = InvalidOid;
+	result->table_persistence = table->persistence;
+	result->primaryIsCtid = !table->has_primary;
+	result->compress = false;
+	result->nLeafFields = 1;
+	if (table->has_primary)
+		result->nLeafFields += primary->nfields;
+	else
+		result->nLeafFields++;
+	result->nNonLeafFields = result->nLeafFields;
+	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
+												 result->nLeafFields);
+	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
+														 result->nNonLeafFields);
+
+	nadded = 0;
+	make_builtin_field(&result->leafFields[0], &result->nonLeafFields[0],
+					TIDOID, "index_bridging_ctid", SelfItemPointerAttributeNumber,
+					table->tid_btree_ops_oid);
+	nadded++;
+	add_index_fields(result, table, primary, &nadded, true);
+	Assert(nadded == result->nLeafFields);
+	result->nLeafFields = nadded;
+	result->nUniqueFields = nadded;
+
+	return result;
+}
+
 void
 free_o_index(OIndex *o_index)
 {
@@ -635,6 +692,10 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 	else if (ixNum == TOASTIndexNumber)
 	{
 		index = make_toast_o_index(table);
+	}
+	else if (ixNum == BridgeIndexNumber)
+	{
+		index = make_bridge_o_index(table);
 	}
 	else
 	{
@@ -955,6 +1016,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
+
 	oIndex->createOxid = oxid;
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;

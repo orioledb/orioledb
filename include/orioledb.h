@@ -358,6 +358,7 @@ typedef struct ORelOptions
 	int			compress_offset;
 	int			primary_compress_offset;
 	int			toast_compress_offset;
+	bool		index_bridging;
 } ORelOptions;
 
 typedef struct OBTOptions

@@ -1419,17 +1419,14 @@ orioledb_tbl_indices(PG_FUNCTION_ARGS)
 				appendStringInfo(&buf, ", ");
 		}
 		appendStringInfo(&buf, "\n");
-		if (ct->desc.type != oIndexPrimary)
+		appendStringInfo(&buf, "    Leaf tuple fields: ");
+		for (j = 0; j < leafSize; j++)
 		{
-			appendStringInfo(&buf, "    Leaf tuple fields: ");
-			for (j = 0; j < leafSize; j++)
-			{
-				appendStringInfo(&buf, "%s", TupleDescAttr(ct->leafTupdesc, j)->attname.data);
-				if (j + 1 != nonLeafSize)
-					appendStringInfo(&buf, ", ");
-			}
-			appendStringInfo(&buf, "\n");
+			appendStringInfo(&buf, "%s", TupleDescAttr(ct->leafTupdesc, j)->attname.data);
+			if (j + 1 != leafSize)
+				appendStringInfo(&buf, ", ");
 		}
+		appendStringInfo(&buf, "\n");
 	}
 
 	relation_close(rel, AccessShareLock);

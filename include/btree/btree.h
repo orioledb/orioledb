@@ -33,6 +33,7 @@ typedef uint16 OIndexNumber;
 typedef uint64 OTupleXactInfo;
 
 #define PrimaryIndexNumber (0)
+#define BridgeIndexNumber (0xFFFD)
 #define TOASTIndexNumber (0xFFFE)
 #define InvalidIndexNumber (0xFFFF)
 
