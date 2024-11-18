@@ -211,7 +211,7 @@ make_ctid_o_index(OTable *table)
 
 	if (table->index_bridging)
 		make_builtin_field(&result->leafFields[i + 1], NULL,
-						   TIDOID, "index_bridging_ctid", SelfItemPointerAttributeNumber,
+						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
 
 	return result;
@@ -263,17 +263,20 @@ make_primary_o_index(OTable *table)
 	result->nKeyFields = tableIndex->nkeyfields;
 
 	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
-												 result->nLeafFields);
+												 (result->nLeafFields +
+												 	(table->index_bridging ? 1 : 0)));
 	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
 														 result->nNonLeafFields);
 
-	if (table->index_bridging)
-		make_builtin_field(&result->leafFields[0], NULL,
-						TIDOID, "index_bridging_ctid", SelfItemPointerAttributeNumber,
-						table->tid_btree_ops_oid);
-
 	for (i = 0; i < result->nLeafFields; i++)
 		result->leafFields[i] = table->fields[i];
+	if (table->index_bridging)
+	{
+		make_builtin_field(&result->leafFields[result->nLeafFields], NULL,
+						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
+						   table->tid_btree_ops_oid);
+		result->nLeafFields++;
+	}
 
 	j = 0;
 	for (i = 0; i < result->nNonLeafFields; i++)
@@ -505,7 +508,7 @@ make_bridge_o_index(OTable *table)
 	result->amoid = InvalidOid;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
-	result->compress = false;
+	result->compress = table->primary_compress;
 	result->nLeafFields = 1;
 	if (table->has_primary)
 		result->nLeafFields += primary->nfields;
@@ -519,7 +522,7 @@ make_bridge_o_index(OTable *table)
 
 	nadded = 0;
 	make_builtin_field(&result->leafFields[0], &result->nonLeafFields[0],
-					TIDOID, "index_bridging_ctid", SelfItemPointerAttributeNumber,
+					TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 					table->tid_btree_ops_oid);
 	nadded++;
 	add_index_fields(result, table, primary, &nadded, true);

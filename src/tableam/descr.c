@@ -1037,6 +1037,14 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 		descr->indices[cur_ix]->refcnt++;
 	}
 
+	if (ORelOidsIsValid(table->bridge_oids))
+	{
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexRegular, false);
+		descr->bridge->refcnt++;
+	}
+	else
+		descr->bridge = NULL;
+
 	if (ORelOidsIsValid(table->toast_oids))
 	{
 		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false);
