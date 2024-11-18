@@ -1369,16 +1369,59 @@ orioledb_tbl_compression_check(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(cstring_to_text(result.data));
 }
 
+static void
+index_description(StringInfo buf, OIndexDescr *ct, bool primary, bool oids)
+{
+	int			nonLeafSize = ct->nonLeafTupdesc->natts;
+	int			leafSize = ct->leafTupdesc->natts;
+	int			j;
+
+	appendStringInfo(buf, "Index %s\n", ct->name.data);
+	if (oids)
+	{
+		appendStringInfo(buf, "    reloid: %u\n", ct->oids.reloid);
+		appendStringInfo(buf, "    relnode: %u\n", ct->oids.relnode);
+	}
+	appendStringInfo(buf, "    Index type: %s", primary ? "primary" : "secondary");
+	appendStringInfo(buf, "%s", ct->unique ? ", unique" : "");
+	if (OCompressIsValid(ct->compress))
+		appendStringInfo(buf, ", compression = %d", ct->compress);
+	appendStringInfo(buf, "%s\n", primary && ct->primaryIsCtid ? ", ctid" : "");
+	if (OidIsValid(ct->amoid))
+		appendStringInfo(buf, "    Access method: %s\n", get_am_name(ct->amoid));
+	if (ct->predicate)
+		appendStringInfo(buf, "    Predicate: %s\n", ct->predicate_str);
+	appendStringInfo(buf, "    Leaf tuple size: %d, non-leaf tuple size: %d\n",
+						leafSize, nonLeafSize);
+	appendStringInfo(buf, "    Non-leaf tuple fields: ");
+	for (j = 0; j < nonLeafSize; j++)
+	{
+		appendStringInfo(buf, "%s", TupleDescAttr(ct->nonLeafTupdesc, j)->attname.data);
+		if (j + 1 != nonLeafSize)
+			appendStringInfo(buf, ", ");
+	}
+	appendStringInfo(buf, "\n");
+	appendStringInfo(buf, "    Leaf tuple fields: ");
+	for (j = 0; j < leafSize; j++)
+	{
+		appendStringInfo(buf, "%s", TupleDescAttr(ct->leafTupdesc, j)->attname.data);
+		if (j + 1 != leafSize)
+			appendStringInfo(buf, ", ");
+	}
+	appendStringInfo(buf, "\n");
+}
+
 Datum
 orioledb_tbl_indices(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
+	bool		internal = PG_GETARG_BOOL(1);
+	bool		oids = PG_GETARG_BOOL(2);
 	Relation	rel;
 	OTableDescr *descr;
 	StringInfoData buf;
 	text	   *result;
-	int			i,
-				j;
+	int			i;
 
 	orioledb_check_shmem();
 
@@ -1395,38 +1438,17 @@ orioledb_tbl_indices(PG_FUNCTION_ARGS)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		OIndexDescr *ct = descr->indices[i];
-		int			nonLeafSize = ct->nonLeafTupdesc->natts;
-		int			leafSize = ct->leafTupdesc->natts;
 		bool		primary = i == PrimaryIndexNumber;
 
-		appendStringInfo(&buf, "Index %s\n", ct->name.data);
-		appendStringInfo(&buf, "    Index type: %s", primary ? "primary" : "secondary");
-		appendStringInfo(&buf, "%s", ct->unique ? ", unique" : "");
-		if (OCompressIsValid(ct->compress))
-			appendStringInfo(&buf, ", compression = %d", ct->compress);
-		appendStringInfo(&buf, "%s\n", primary && ct->primaryIsCtid ? ", ctid" : "");
-		if (OidIsValid(ct->amoid))
-			appendStringInfo(&buf, "    Access method: %s\n", get_am_name(ct->amoid));
-		if (ct->predicate)
-			appendStringInfo(&buf, "    Predicate: %s\n", ct->predicate_str);
-		appendStringInfo(&buf, "    Leaf tuple size: %d, non-leaf tuple size: %d\n",
-						 leafSize, nonLeafSize);
-		appendStringInfo(&buf, "    Non-leaf tuple fields: ");
-		for (j = 0; j < nonLeafSize; j++)
-		{
-			appendStringInfo(&buf, "%s", TupleDescAttr(ct->nonLeafTupdesc, j)->attname.data);
-			if (j + 1 != nonLeafSize)
-				appendStringInfo(&buf, ", ");
-		}
-		appendStringInfo(&buf, "\n");
-		appendStringInfo(&buf, "    Leaf tuple fields: ");
-		for (j = 0; j < leafSize; j++)
-		{
-			appendStringInfo(&buf, "%s", TupleDescAttr(ct->leafTupdesc, j)->attname.data);
-			if (j + 1 != leafSize)
-				appendStringInfo(&buf, ", ");
-		}
-		appendStringInfo(&buf, "\n");
+		index_description(&buf, ct, primary, oids);
+	}
+
+	if (internal)
+	{
+		if (descr->bridge)
+			index_description(&buf, descr->bridge, false, oids);
+		if (descr->toast)
+			index_description(&buf, descr->toast, false, oids);
 	}
 
 	relation_close(rel, AccessShareLock);
