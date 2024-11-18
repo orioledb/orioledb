@@ -409,7 +409,15 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	if (tableIndex->nfields == tableIndex->nkeyfields)
 		result->nKeyFields = nadded;
 	Assert(nadded <= tableIndex->nfields);
-	add_index_fields(result, table, primary, &nadded, true);
+	if (table->index_bridging)
+	{
+		make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
+						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
+						   table->tid_btree_ops_oid);
+		nadded++;
+	}
+	else
+		add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded <= result->nLeafFields);
 	MemoryContextSwitchTo(old_mcxt);
 	result->nLeafFields = nadded;
