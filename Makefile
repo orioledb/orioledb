@@ -96,6 +96,7 @@ REGRESSCHECKS = btree_sys_check \
 				foreign_keys \
 				generated \
 				getsomeattrs \
+				index_bridging \
 				indices \
 				indices_build \
 				inherits \
