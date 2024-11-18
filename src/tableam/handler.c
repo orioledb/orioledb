@@ -1754,6 +1754,11 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 								   NULL, validate_toast_compress, NULL,
 								   offsetof(ORelOptions,
 											toast_compress_offset));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Enables implicit ctid index and ctid column for all indices",
+								 true,
+								 offsetof(ORelOptions,
+										  index_bridging));
 		MemoryContextSwitchTo(oldcxt);
 		relopts_set = true;
 	}
