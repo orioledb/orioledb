@@ -1119,6 +1119,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid)
 
 	o_set_sys_cache_search_datoid(datoid);
 	opclass = o_opclass_get(opclassoid);
+	Assert(opclass);
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
 	field->opfamily = opclass->opfamily;
