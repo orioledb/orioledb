@@ -415,35 +415,44 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
  *		Determine size of the data area of a tuple to be constructed
  */
 static Size
-o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr,
+o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, ItemPointer bridge_iptr,
 						  Datum *values, bool *isnull, char *to_toast,
 						  int natts)
 {
 	Size		data_length = 0;
 	int			i,
-				off = iptr ? 1 : 0;
+				ctid_off = 0;
+
+	if (iptr)
+		ctid_off++;
+	if (bridge_iptr)
+		ctid_off++;
 
 	for (i = 0; i < natts; i++)
 	{
 		Datum		val;
 		Form_pg_attribute atti;
 
-		if (!(i == 0 && iptr))
+		if (i == 0 && iptr)
+		{
+			val = PointerGetDatum(iptr);
+		}
+		else if (bridge_iptr && ((iptr && i == 1) || i == 0))
+		{
+			val = PointerGetDatum(bridge_iptr);
+		}
+		else
 		{
 			if (to_toast != NULL &&
-				to_toast[i - off] == ORIOLEDB_TO_TOAST_ON)
+				to_toast[i - ctid_off] == ORIOLEDB_TO_TOAST_ON)
 			{
 				data_length += sizeof(OToastValue);
 				continue;
 			}
 
-			if (isnull[i - off])
+			if (isnull[i - ctid_off])
 				continue;
-			val = values[i - off];
-		}
-		else
-		{
-			val = PointerGetDatum(iptr);
+			val = values[i - ctid_off];
 		}
 
 		atti = TupleDescAttr(tupleDesc, i);
@@ -480,24 +489,29 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr,
 
 Size
 o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-				 ItemPointer iptr, uint32 version,
+				 ItemPointer iptr, ItemPointer bridge_iptr, uint32 version,
 				 Datum *values, bool *isnull, char *to_toast)
 {
 	bool		hasnull = false;
 	bool		fixedFormat = (version == 0);
 	int			i,
 				natts,
-				off = iptr ? 1 : 0;
+				ctid_off = 0;
 	Size		result;
 
 	natts = tupleDesc->natts;
 
+	if (iptr)
+		ctid_off++;
+	if (bridge_iptr)
+		ctid_off++;
+
 	/*
 	 * Check for nulls
 	 */
-	for (i = off; i < natts; i++)
+	for (i = ctid_off; i < natts; i++)
 	{
-		if (isnull[i - off])
+		if (isnull[i - ctid_off])
 		{
 			fixedFormat = false;
 			hasnull = true;
@@ -521,7 +535,7 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 		natts = spec->natts;
 	}
 
-	result += o_tuple_compute_data_size(tupleDesc, iptr, values,
+	result += o_tuple_compute_data_size(tupleDesc, iptr, bridge_iptr, values,
 										isnull, to_toast, natts);
 
 	return result;
@@ -532,7 +546,8 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
  */
 void
 o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-			 OTuple *tuple, Size tuple_size, ItemPointer iptr, uint32 version,
+			 OTuple *tuple, Size tuple_size,
+			 ItemPointer iptr, ItemPointer bridge_iptr, uint32 version,
 			 Datum *values, bool *isnull, char *to_toast)
 {
 	OTupleHeader tup = (OTupleHeader) tuple->data;
@@ -541,18 +556,23 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	int			i;
 	int			natts = tupleDesc->natts;
 	int			hoff;
-	int			attOff = iptr ? 1 : 0;
+	int			ctid_off = 0;
 	Size		len;
 	bool		hasnull = false;
 	bool		fixedFormat = (version == 0);
 	Pointer		data;
 
+	if (iptr)
+		ctid_off++;
+	if (bridge_iptr)
+		ctid_off++;
+
 	/*
 	 * Check for nulls
 	 */
-	for (i = attOff; i < natts; i++)
+	for (i = ctid_off; i < natts; i++)
 	{
-		if (isnull[i - attOff])
+		if (isnull[i - ctid_off])
 		{
 			fixedFormat = false;
 			hasnull = true;
@@ -605,18 +625,24 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 		bool		null;
 		bool		cur_to_toast;
 
-		if (!(i == 0 && iptr))
-		{
-			cur_to_toast = (to_toast != NULL &&
-							to_toast[i - attOff] == ORIOLEDB_TO_TOAST_ON);
-			value = values[i - attOff];
-			null = isnull[i - attOff];
-		}
-		else
+		if (i == 0 && iptr)
 		{
 			cur_to_toast = false;
 			value = PointerGetDatum(iptr);
 			null = false;
+		}
+		else if (bridge_iptr && ((iptr && i == 1) || i == 0))
+		{
+			cur_to_toast = false;
+			value = PointerGetDatum(bridge_iptr);
+			null = false;
+		}
+		else
+		{
+			cur_to_toast = (to_toast != NULL &&
+							to_toast[i - ctid_off] == ORIOLEDB_TO_TOAST_ON);
+			value = values[i - ctid_off];
+			null = isnull[i - ctid_off];
 		}
 
 		if (cur_to_toast)
@@ -762,14 +788,15 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 
 OTuple
 o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-			 uint32 version, Datum *values, bool *isnull)
+			 uint32 version, Datum *values, bool *isnull,
+			 ItemPointer bridge_iptr)
 {
 	OTuple		result;
 	int			len;
 
-	len = o_new_tuple_size(tupleDesc, spec, NULL, version, values, isnull, NULL);
+	len = o_new_tuple_size(tupleDesc, spec, NULL, bridge_iptr, version, values, isnull, NULL);
 	result.data = (Pointer) palloc0(len);
-	o_tuple_fill(tupleDesc, spec, &result, len, NULL, version, values, isnull, NULL);
+	o_tuple_fill(tupleDesc, spec, &result, len, NULL, bridge_iptr, version, values, isnull, NULL);
 	return result;
 }
 

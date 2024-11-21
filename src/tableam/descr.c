@@ -1417,6 +1417,7 @@ comparison_shim(Datum x, Datum y, SortSupport ssup)
 void
 o_finish_sort_support_function(OComparator *comparator, SortSupport ssup)
 {
+	Assert(comparator);
 	if (comparator->haveSortSupport)
 	{
 		ssup->comparator = comparator->ssup_comparator;

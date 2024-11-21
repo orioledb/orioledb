@@ -179,13 +179,14 @@ make_ctid_o_index(OTable *table)
 {
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i;
+	int			ctid_off = 0;
 
 	Assert(!table->has_primary);
 	result->indexOids = table->oids;
 	result->indexType = oIndexPrimary;
 	namestrcpy(&result->name, "ctid_primary");
 	result->tableOids = table->oids;
-	result->amoid = InvalidOid;
+	result->amoid = BTREE_AM_OID;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
@@ -205,14 +206,19 @@ make_ctid_o_index(OTable *table)
 	make_builtin_field(&result->leafFields[0], &result->nonLeafFields[0],
 					   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 					   table->tid_btree_ops_oid);
-
-	for (i = 0; i < table->nfields; i++)
-		result->leafFields[i + 1] = table->fields[i];
+	ctid_off++;
 
 	if (table->index_bridging)
-		make_builtin_field(&result->leafFields[i + 1], NULL,
+	{
+		result->bridging = true;
+		make_builtin_field(&result->leafFields[1], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
+		ctid_off++;
+	}
+
+	for (i = 0; i < table->nfields; i++)
+		result->leafFields[i + ctid_off] = table->fields[i];
 
 	return result;
 }
@@ -241,6 +247,7 @@ make_primary_o_index(OTable *table)
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i,
 				j;
+	int			ctid_off = 0;
 
 	Assert(table->has_primary && table->nindices >= 1);
 	tableIndex = &table->indices[0];
@@ -267,16 +274,17 @@ make_primary_o_index(OTable *table)
 												 	(table->index_bridging ? 1 : 0)));
 	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
 														 result->nNonLeafFields);
-
-	for (i = 0; i < result->nLeafFields; i++)
-		result->leafFields[i] = table->fields[i];
 	if (table->index_bridging)
 	{
-		make_builtin_field(&result->leafFields[result->nLeafFields], NULL,
+		result->bridging = true;
+		make_builtin_field(&result->leafFields[0], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
-		result->nLeafFields++;
+		ctid_off++;
 	}
+
+	for (i = 0; i < result->nLeafFields; i++)
+		result->leafFields[i + ctid_off] = table->fields[i];
 
 	j = 0;
 	for (i = 0; i < result->nNonLeafFields; i++)
@@ -411,6 +419,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	Assert(nadded <= tableIndex->nfields);
 	if (table->index_bridging)
 	{
+		result->bridging = true;
 		make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
@@ -448,7 +457,7 @@ make_toast_o_index(OTable *table)
 	result->indexType = oIndexToast;
 	namestrcpy(&result->name, "toast");
 	result->tableOids = table->oids;
-	result->amoid = InvalidOid;
+	result->amoid = BTREE_AM_OID;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
@@ -513,7 +522,7 @@ make_bridge_o_index(OTable *table)
 	result->indexType = oIndexRegular;
 	namestrcpy(&result->name, "index_bridge");
 	result->tableOids = table->oids;
-	result->amoid = InvalidOid;
+	result->amoid = BTREE_AM_OID;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->primary_compress;
@@ -699,13 +708,23 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 	{
 		index = make_toast_o_index(table);
 	}
-	else if (ixNum == BridgeIndexNumber)
+	else if (ixNum == BridgeIndexNumber || (table->index_bridging && ixNum == 1))
 	{
 		index = make_bridge_o_index(table);
 	}
 	else
 	{
-		OTableIndex *tableIndex = &table->indices[ixNum - (primaryIsCtid ? 1 : 0)];
+		OTableIndex *tableIndex;
+		int ctid_off = 0;
+
+		if (primaryIsCtid)
+			ctid_off++;
+
+		if (table->index_bridging)
+			ctid_off++;
+
+		Assert(ixNum - ctid_off >= 0);
+		tableIndex = &table->indices[ixNum - ctid_off];
 
 		index = make_secondary_o_index(table, tableIndex);
 	}
@@ -895,6 +914,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 							   descr->leafTupdesc, i + 1);
 	}
 	descr->primaryIsCtid = oIndex->primaryIsCtid;
+	descr->bridging = oIndex->bridging;
 	descr->unique = (oIndex->indexType == oIndexUnique ||
 					 oIndex->indexType == oIndexPrimary);
 	descr->nulls_not_distinct = oIndex->nulls_not_distinct;
