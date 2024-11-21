@@ -132,6 +132,7 @@ struct OIndexDescr
 	 * on ctid (no primary key is explicitly defined).
 	 */
 	bool		primaryIsCtid;
+	bool		bridging;
 
 	/* Description of the index fields */
 	int			nFields;
