@@ -466,7 +466,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 						tupleid, values, isnull,
 						&csn, &version);
 
-	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
 	slot = index_descr->old_leaf_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 	callbackInfo.arg = slot;
@@ -547,7 +547,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	/* TODO: Probably there is a better way than detoasting here */
 	detoast_passed_values(index_descr, valuesOld, isnullOld, vfree);
 	old_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-							 version, valuesOld, isnullOld);
+							 version, valuesOld, isnullOld, NULL);
 	old_slot = index_descr->old_leaf_slot;
 	tts_orioledb_store_non_leaf_tuple(old_slot, old_tuple, descr, csn, ix_num, false, NULL);
 
@@ -556,7 +556,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 						&GET_PRIMARY(descr)->nonLeafSpec,
 						tupleid, values, isnull,
 						&csn, &version);
-	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull);
+	new_tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec, version, values, isnull, NULL);
 	new_slot = index_descr->new_leaf_slot;
 	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
@@ -695,7 +695,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	vfree = palloc0(sizeof(bool) * index_descr->nonLeafTupdesc->natts);
 	detoast_passed_values(index_descr, values, isnull, vfree);
 	tuple = o_form_tuple(index_descr->leafTupdesc, &index_descr->leafSpec,
-						 version, values, isnull);
+						 version, values, isnull, NULL);
 	tts_orioledb_store_tuple(slot, tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -1426,7 +1426,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			rowid_isnull = temp_rowid_isnull;
 		}
 
-		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, 0, rowid_values, rowid_isnull, NULL);
+		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, 0, rowid_values, rowid_isnull, NULL);
 		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		result_size += tuple_size;
 		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
@@ -1435,7 +1435,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
 		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 
-		o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL,
+		o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL, NULL,
 					 0, rowid_values, rowid_isnull, NULL);
 	}
 

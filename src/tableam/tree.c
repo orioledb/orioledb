@@ -146,7 +146,7 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 		values[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
 	}
 
-	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL,
+	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, NULL,
 						   keepVersion ? o_tuple_get_version(tuple) : 0,
 						   values, isnull, NULL);
 
@@ -197,7 +197,7 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 		key[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
 	}
 
-	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, version, key, isnull, NULL);
+	len = o_new_tuple_size(id->nonLeafTupdesc, &id->nonLeafSpec, NULL, NULL, version, key, isnull, NULL);
 	if (data)
 	{
 		memset(data, 0, len);
@@ -207,7 +207,7 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 	{
 		result.data = (Pointer) palloc0(len);
 	}
-	o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec, &result, len, NULL, version, key, isnull, NULL);
+	o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec, &result, len, NULL, NULL, version, key, isnull, NULL);
 
 	return result;
 }

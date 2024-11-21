@@ -29,6 +29,7 @@ typedef struct
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
+	bool		bridging;
 	OCompress	compress;
 	bool		nulls_not_distinct;
 	/* number of fields added using INCLUDE command explicitly */

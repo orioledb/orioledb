@@ -148,7 +148,7 @@ tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr)
 	}
 
 	result = o_form_tuple(id->nonLeafTupdesc, &id->nonLeafSpec,
-						  ((OTableSlot *) slot)->version, key, isnull);
+						  ((OTableSlot *) slot)->version, key, isnull, NULL);
 	return result;
 }
 
@@ -181,7 +181,7 @@ make_key_from_secondary_slot(TupleTableSlot *slot, OIndexDescr *idx, OTableDescr
 	}
 
 	result = o_form_tuple(GET_PRIMARY(descr)->nonLeafTupdesc, &GET_PRIMARY(descr)->nonLeafSpec,
-						  ((OTableSlot *) slot)->version, key, isnull);
+						  ((OTableSlot *) slot)->version, key, isnull, NULL);
 	return result;
 }
 
@@ -217,8 +217,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	/* Declaration of variables used throughout the function. */
 	int			natts,
 				attnum,
-				ctid_off,
-				res_ctidoff;
+				ctid_off = 0,
+				res_ctid_off = 0;
 	OTableDescr *descr = oslot->descr;	/* Descriptor for the table. */
 	Datum	   *values = slot->tts_values;	/* Array to store attribute
 											 * values. */
@@ -258,11 +258,14 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	 * ctid column.
 	 */
 	if (GET_PRIMARY(descr)->primaryIsCtid && oslot->ixnum == PrimaryIndexNumber)
-		ctid_off = 1;
-	else
-		ctid_off = 0;
+		ctid_off++;
 
-	res_ctidoff = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
+	/*
+	 * Determine the offset of the attributes due to the possible presence of
+	 * index_bridging_ctid column.
+	 */
+	if (GET_PRIMARY(descr)->bridging && oslot->ixnum == PrimaryIndexNumber)
+		ctid_off++;
 
 	/*
 	 * Determine the number of attributes to process based on the index type
@@ -418,7 +421,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 					memcpy(&toastValue, p, sizeof(toastValue));
 					values[attnum] = create_o_toast_external(descr, pkey,
-															 attnum + 1 + res_ctidoff,
+															 attnum + 1 + ctid_off,
 															 &toastValue,
 															 oslot->csn);
 					oslot->vfree[attnum] = true;
@@ -503,7 +506,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		tts_orioledb_get_index_values(slot, id, values, isnulls, false);
 		tuple_size = o_new_tuple_size(id->nonLeafTupdesc,
 									  &id->nonLeafSpec,
-									  NULL, oslot->version,
+									  NULL, NULL, oslot->version,
 									  values, isnulls, NULL);
 		result_size = MAXALIGN(VARHDRSZ) +
 			MAXALIGN(sizeof(ORowIdAddendumNonCtid));
@@ -513,7 +516,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
 		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec,
-					 &tuple, tuple_size, NULL, oslot->version, values, isnulls, NULL);
+					 &tuple, tuple_size, NULL, NULL, oslot->version, values, isnulls, NULL);
 
 		addNonCtid.csn = oslot->csn;
 		addNonCtid.flags = tuple.formatFlags;
@@ -786,7 +789,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			value = o_tuple_read_next_field(&oslot->state, &isnull);
 			slot->tts_tid = *((ItemPointer) value);
 		}
-		else
+		else if (!idx->bridging)
 		{
 			ItemPointer iptr;
 			bool		isnull;
@@ -801,6 +804,20 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			Assert(!isnull && iptr);
 			slot->tts_tid = *iptr;
 		}
+	}
+
+	if (idx->bridging)
+	{
+		if (oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
+		{
+			Datum		value;
+			bool		isnull;
+
+			value = o_tuple_read_next_field(&oslot->state, &isnull);
+			oslot->bridge_ctid = *((ItemPointer) value);
+		}
+		else
+			Assert(false); // TODO: Implement for other indices same as for ctid
 	}
 
 	slot->tts_tableOid = oslot->descr->oids.reloid;
@@ -877,6 +894,13 @@ get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 			if (typid)
 				*typid = TIDOID;
 			return PointerGetDatum(&slot->tts_tid);
+		}
+		else if (attnum == -1)
+		{
+			*isnull = false;
+			if (typid)
+				*typid = TIDOID;
+			return PointerGetDatum(&oSlot->bridge_ctid);
 		}
 		else
 		{
@@ -968,6 +992,7 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 	TupleDesc	tupleDesc;
 	OTupleFixedFormatSpec *spec;
 	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
+	OTableSlot *oslot = (OTableSlot *) slot;
 
 	slot_getsomeattrs(slot, idx->maxTableAttnum - ctid_off);
 
@@ -984,7 +1009,8 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 		spec = &idx->nonLeafSpec;
 	}
 
-	return o_form_tuple(tupleDesc, spec, 0, values, isnull);
+	return o_form_tuple(tupleDesc, spec, 0, values, isnull,
+						idx->bridging ? &oslot->bridge_ctid : NULL);
 }
 
 /* fills key bound from tuple or index tuple that belongs to current BTree */
@@ -1106,6 +1132,7 @@ expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 	tup_size = o_new_tuple_size(idx->leafTupdesc,
 								&idx->leafSpec,
 								idx->primaryIsCtid ? &slot->tts_tid : NULL,
+								idx->bridging ? &oslot->bridge_ctid : NULL,
 								oslot->version,
 								slot->tts_values,
 								slot->tts_isnull,
@@ -1306,6 +1333,7 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	bool		primaryIsCtid = idx->primaryIsCtid;
 	ItemPointer iptr;
+	ItemPointer bridge_iptr;
 
 	if (!O_TUPLE_IS_NULL(oslot->tuple) && oslot->descr == descr &&
 		oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
@@ -1322,14 +1350,19 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 	else
 		iptr = NULL;
 
-	len = o_new_tuple_size(tupleDescriptor, spec, iptr,
+	if (descr->bridge)
+		bridge_iptr = &oslot->bridge_ctid;
+	else
+		bridge_iptr = NULL;
+
+	len = o_new_tuple_size(tupleDescriptor, spec, iptr, bridge_iptr,
 						   0, slot->tts_values, slot->tts_isnull,
 						   oslot->to_toast);
 
 	tuple.data = (Pointer) MemoryContextAllocZero(slot->tts_mcxt, len);
 
 	o_tuple_fill(tupleDescriptor, spec, &tuple, len,
-				 iptr, 0,
+				 iptr, bridge_iptr, 0,
 				 slot->tts_values, slot->tts_isnull, oslot->to_toast);
 
 	if (TTS_SHOULDFREE(slot) && !O_TUPLE_IS_NULL(oslot->tuple))
@@ -1372,6 +1405,7 @@ tts_orioledb_form_orphan_tuple(TupleTableSlot *slot,
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	bool		primaryIsCtid = idx->primaryIsCtid;
 	ItemPointer iptr;
+	ItemPointer bridge_iptr;
 
 	if (idx->leafTupdesc->natts > MaxTupleAttributeNumber)
 		ereport(ERROR,
@@ -1384,13 +1418,18 @@ tts_orioledb_form_orphan_tuple(TupleTableSlot *slot,
 	else
 		iptr = NULL;
 
-	len = o_new_tuple_size(tupleDescriptor, spec, iptr, oslot->version,
+	if (descr->bridge)
+		bridge_iptr = &oslot->bridge_ctid;
+	else
+		bridge_iptr = NULL;
+
+	len = o_new_tuple_size(tupleDescriptor, spec, iptr, bridge_iptr, oslot->version,
 						   slot->tts_values, slot->tts_isnull, oslot->to_toast);
 
 	tuple.data = (Pointer) palloc0(len);
 
 	o_tuple_fill(tupleDescriptor, spec, &tuple, len,
-				 iptr, oslot->version,
+				 iptr, bridge_iptr, oslot->version,
 				 slot->tts_values, slot->tts_isnull, oslot->to_toast);
 
 	return tuple;
@@ -1769,6 +1808,7 @@ tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr)
 {
 	OTableSlot *oslot = (OTableSlot *) slot;
 
+	elog(WARNING, "tts_tid 8 =");
 	slot->tts_tid = *iptr;
 	if (!O_TUPLE_IS_NULL(oslot->tuple) &&
 		oslot->ixnum == PrimaryIndexNumber &&

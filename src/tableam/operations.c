@@ -182,6 +182,14 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		tts_orioledb_set_ctid(slot, &iptr);
 	}
 
+	if (descr->bridge)
+	{
+		OTableSlot *oslot = (OTableSlot *) slot;
+
+		o_btree_load_shmem(&primary->desc);
+		oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc);
+	}
+
 	tts_orioledb_toast(slot, descr);
 
 	tup = tts_orioledb_form_tuple(slot, descr);
