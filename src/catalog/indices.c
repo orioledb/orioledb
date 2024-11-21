@@ -129,7 +129,7 @@ static void build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDes
 static void rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 										Sharedsort **sharedsort, int sortmem,
 										bool progress);
-static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[], uint64 *ctid);
+static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[], uint64 *ctid, uint64 *bridge_ctid);
 
 
 /* copied from tablecmds.c */
@@ -1513,7 +1513,7 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 
 	rebuild_indices_worker_heap_scan(btspool->old_descr, btspool->descr,
 									 poscan, btspool->sortstates, false,
-									 &heaptuples, &indtuples, NULL);
+									 &heaptuples, &indtuples, NULL, NULL);
 
 	/* Execute this worker's part of the sort */
 	if (progress)
@@ -1553,7 +1553,7 @@ static void
 rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 								 ParallelOScanDesc poscan, Tuplesortstate **sortstates,
 								 bool progress, double *heap_tuples, double *index_tuples[],
-								 uint64 *ctid)
+								 uint64 *ctid, uint64 *bridge_ctid)
 {
 	void	   *sscan;
 	OIndexDescr *idx;
@@ -1599,6 +1599,20 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 					(*ctid)++;
 				}
 
+				if (idx->bridging)
+				{
+					OTableSlot *oslot = (OTableSlot *) primarySlot;
+
+					/* TODO: This is wrong; get previous bridge_ctid from scan_getnextslot */
+
+					Assert(bridge_ctid);
+					oslot->bridge_ctid.ip_posid = (OffsetNumber) (*bridge_ctid);
+					BlockIdSet(&oslot->bridge_ctid.ip_blkid,
+							   (uint32) (*bridge_ctid >> 16));
+					(*bridge_ctid)++;
+
+				}
+
 				newTup = tts_orioledb_form_orphan_tuple(primarySlot, descr);
 			}
 			else
@@ -1632,6 +1646,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	double		heap_tuples;
 	double	   *index_tuples;
 	uint64		ctid;
+	uint64		bridge_ctid;
 	CheckpointFileHeader *fileHeaders;
 	oIdxBuildState buildstate = {0};
 	oIdxSpool  *btspool = NULL;
@@ -1647,6 +1662,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	index_tuples = (double *) palloc0(sizeof(double) * descr->nIndices);
 
 	ctid = 0;
+	bridge_ctid = 0;
 
 	buildstate.btleader = NULL;
 
@@ -1699,7 +1715,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		/* Serial build */
 		rebuild_indices_worker_heap_scan(old_descr, descr, NULL, sortstates,
 										 false, &heap_tuples, &index_tuples,
-										 &ctid);
+										 &ctid, &bridge_ctid);
 	}
 	else
 	{

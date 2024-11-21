@@ -2208,6 +2208,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						if (descr->indices[ix_num]->primaryIsCtid)
 							ix_num--;
+						if (descr->indices[ix_num]->bridging)
+							ix_num--;
 						relation_close(rel, AccessShareLock);
 						is_open = false;
 

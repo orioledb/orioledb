@@ -36,6 +36,7 @@ typedef struct OTableSlot
 	uint32		version;
 	OTupleReaderState state;
 	BTreeLocationHint hint;
+	ItemPointerData bridge_ctid;
 } OTableSlot;
 
 #define ORIOLEDB_TO_TOAST_OFF ('\0')
