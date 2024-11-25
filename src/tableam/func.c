@@ -342,6 +342,8 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 	/* index trees + toast tree */
 	for (treen = 0; treen < descr->nIndices; treen++)
 		tree_structure(&buf, descr->indices[treen], printOptions, depth);
+	if (descr->bridge)
+		tree_structure(&buf, descr->bridge, printOptions, depth);
 	tree_structure(&buf, descr->toast, printOptions, depth);
 
 	result = cstring_to_text(buf.data);

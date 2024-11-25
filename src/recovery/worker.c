@@ -633,6 +633,15 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 									slot->tts_tid);
 	}
 
+	if (descr->bridge)
+	{
+		OTableSlot *oslot = (OTableSlot *) slot;
+
+		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
+									oslot->bridge_ctid);
+	}
+
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		isPrimary = (i == PrimaryIndexNumber);
