@@ -299,8 +299,29 @@ btree_bridge_ctid_get_and_inc(BTreeDescr *desc)
 
 	ItemPointerSet(&result,
 				   (uint32) (ctid / (MaxOffsetNumber - FirstOffsetNumber)),
-				   (OffsetNumber) (ctid % (MaxOffsetNumber - FirstOffsetNumber)));
+				   (OffsetNumber) (ctid % (MaxOffsetNumber - FirstOffsetNumber) + FirstOffsetNumber));
 	return result;
+}
+
+void
+btree_bridge_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
+{
+	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	uint64		old_ctid,
+				new_ctid;
+
+	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+	new_ctid = (uint64) ItemPointerGetBlockNumber(&ctid) * (MaxOffsetNumber - FirstOffsetNumber);
+	new_ctid += ctid.ip_posid - FirstOffsetNumber;
+	Assert(new_ctid < (uint64) (MaxOffsetNumber - FirstOffsetNumber) * (uint64) InvalidBlockNumber);
+
+	new_ctid++;
+	do
+	{
+		old_ctid = pg_atomic_read_u64(&metaPageBlkno->bridge_ctid);
+		if (old_ctid >= new_ctid)
+			break;
+	} while (!pg_atomic_compare_exchange_u64(&metaPageBlkno->bridge_ctid, &old_ctid, new_ctid));
 }
 
 static inline OIndexDescr *
