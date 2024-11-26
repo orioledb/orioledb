@@ -24,7 +24,8 @@
 #include "replication/message.h"
 #include "storage/proc.h"
 
-static char local_wal_buffer[LOCAL_WAL_BUFFER_SIZE];
+WalShmem *walShmem;
+static Pointer wal_buffer;
 static int	local_wal_buffer_offset = 0;
 static bool local_wal_has_material_changes = false;
 static ORelOids local_oids = {InvalidOid, InvalidOid, InvalidOid};
@@ -37,6 +38,38 @@ static void add_xid_wal_record_if_needed(void);
 static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length);
+
+Size
+wal_shmem_needs(void)
+{
+	Size        size;
+
+	size = CACHELINEALIGN(sizeof(WalShmem));
+	size = add_size(size, CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections));
+
+return size;
+}
+
+void
+wal_shmem_init(Pointer buf, bool found)
+{
+	Pointer     ptr = buf;
+
+	walShmem = (WalShmem *) ptr;
+	ptr += CACHELINEALIGN(sizeof(WalShmem));
+
+	wal_buffer = ptr;
+
+	if (!found)
+	{
+		memset(wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE * MaxConnections);
+		walShmem->walLockTrancheId = LWLockNewTrancheId();
+		LWLockInitialize(&walShmem->walLock,
+						 walShmem->walLockTrancheId);
+	}
+	LWLockRegisterTranche(walShmem->walLockTrancheId,
+						  "WalQueueLockTranche");
+}
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
@@ -84,6 +117,7 @@ static inline void
 add_local_modify(uint8 record_type, OTuple record, OffsetNumber length)
 {
 	WALRecModify *wal_rec;
+	Pointer 	 local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -190,6 +224,7 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
 	WALRecFinish *rec;
 	CommitSeqNo csn;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
@@ -211,6 +246,7 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin)
 {
 	WALRecJointCommit *rec;
 	CommitSeqNo csn;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -234,6 +270,7 @@ static void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	Assert(OXidIsValid(oxid));
@@ -263,6 +300,7 @@ add_xid_wal_record_if_needed(void)
 static void
 add_rel_wal_record(ORelOids oids, OIndexType type)
 {
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	Assert(!is_recovery_process());
@@ -284,6 +322,7 @@ void
 add_o_tables_meta_lock_wal_record(void)
 {
 	WALRec	   *rec;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -302,6 +341,7 @@ void
 add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 {
 	WALRecOTablesUnlockMeta *rec;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -326,6 +366,7 @@ add_savepoint_wal_record(SubTransactionId parentSubid,
 {
 	WALRecSavepoint *rec;
 	TransactionId logicalXid = get_current_logical_xid();
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -347,6 +388,7 @@ void
 add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 {
 	WALRecRollbackToSavepoint *rec;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -376,6 +418,7 @@ flush_local_wal(bool commit)
 {
 	XLogRecPtr	location;
 	int			length = local_wal_buffer_offset;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	Assert(length > 0);
@@ -399,6 +442,8 @@ flush_local_wal(bool commit)
 static void
 flush_local_wal_if_needed(int required_length)
 {
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
+
 	Assert(!is_recovery_process());
 	if (local_wal_buffer_offset + required_length > LOCAL_WAL_BUFFER_SIZE)
 	{
@@ -486,6 +531,7 @@ void
 add_truncate_wal_record(ORelOids oids)
 {
 	WALRecTruncate *rec;
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MyBackendId;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
