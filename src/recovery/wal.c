@@ -38,6 +38,7 @@ static void add_xid_wal_record_if_needed(void);
 static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length);
+static XLogRecPtr log_logical_wal_container(int length);
 
 Size
 wal_shmem_needs(void)
@@ -418,14 +419,13 @@ flush_local_wal(bool commit)
 {
 	XLogRecPtr	location;
 	int			length = local_wal_buffer_offset;
-	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MYPROCNUMBER;
 
 	Assert(!is_recovery_process());
 	Assert(length > 0);
 
 	if (commit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, OWalTmpCommitPos);
-	location = log_logical_wal_container(local_wal_buffer, length);
+	location = log_logical_wal_container(length);
 	if (commit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, location);
 
@@ -442,12 +442,10 @@ flush_local_wal(bool commit)
 static void
 flush_local_wal_if_needed(int required_length)
 {
-	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MYPROCNUMBER;
-
 	Assert(!is_recovery_process());
 	if (local_wal_buffer_offset + required_length > LOCAL_WAL_BUFFER_SIZE)
 	{
-		log_logical_wal_container(local_wal_buffer, local_wal_buffer_offset);
+		log_logical_wal_container(local_wal_buffer_offset);
 
 		local_wal_buffer_offset = 0;
 		local_type = oIndexInvalid;
@@ -458,11 +456,13 @@ flush_local_wal_if_needed(int required_length)
 	}
 }
 
-XLogRecPtr
-log_logical_wal_container(Pointer ptr, int length)
+static XLogRecPtr
+log_logical_wal_container(int length)
 {
+	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MYPROCNUMBER;
+
 	XLogBeginInsert();
-	XLogRegisterData(ptr, length);
+	XLogRegisterData(local_wal_buffer, length);
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 }
 
