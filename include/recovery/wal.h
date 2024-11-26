@@ -37,6 +37,13 @@
 
 typedef struct
 {
+	LWLock		walLock;
+	int			walLockTrancheId;
+}
+WalShmem;
+
+typedef struct
+{
 	uint8		recType;
 } WALRec;
 
@@ -135,5 +142,7 @@ extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
+extern Size wal_shmem_needs(void);
+extern void wal_shmem_init(Pointer ptr, bool found);
 
 #endif							/* __WAL_H__ */
