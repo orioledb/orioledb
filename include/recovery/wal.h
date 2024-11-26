@@ -134,7 +134,6 @@ extern XLogRecPtr wal_joint_commit(OXid oxid, TransactionId logicalXid,
 								   TransactionId xid);
 extern void wal_after_commit(void);
 extern void wal_rollback(OXid oxid, TransactionId logicalXid);
-extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length);
 extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_update(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple);
