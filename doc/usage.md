@@ -74,7 +74,7 @@ Block-level data compression
 
 OrioleDB implements block-level compression.  The following options control the compression level of a table:
 
- * `compress` – default compression level for all table data structures,
+ * `compress` – compression level for all table data structures,
  * `primary_compress` – compression level for the table primary key,
  * `toast_compress` – compression level for the table TOASTed values.
 
@@ -159,6 +159,9 @@ Settings
  * `orioledb.device_filename` -- path to the block device for block device mode. Not set by default.
  * `orioledb.device_length` -- the length of the block device.  The default is `1 GB`.
  * `orioledb.use_mmap` -- specify whether use `mmap` to work with the block device.  It could be `on` and `off`.  We recommend setting `on` value for NVRAM.  The default is `off`.
+ * `orioledb.default_compress` -- default block-level compression level for all tables' data structures. The default is = `-1` (no compression).
+ * `orioledb.primary_compress` -- default block-level compression level for all tables' primary keys. The default is = `-1` (no compression).
+ * `orioledb.toast_compress` -- default block-level compression level for all tables' TOASTed values. The default is = `-1` (no compression).
 
 All the GUC parameters above require the postmaster restart.
 
