@@ -485,44 +485,22 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 
 /* fills secondary index key bound from primary index tuple */
 void
-o_fill_secondary_key_bound(BTreeDescr *primary, BTreeDescr *secondary,
-						   OTuple tuple, TupleTableSlot *slot,
-						   OBTreeKeyBound *bound)
+o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound)
 {
-	OIndexDescr *pt = o_get_tree_def(primary),
-			   *st = o_get_tree_def(secondary);
+	OIndexDescr *td = o_get_tree_def(secondary);
 	int			i,
 				attnum;
 	bool		isnull;
-	ListCell   *indexpr_item = list_head(st->expressions_state);
 
-	bound->nkeys = st->nonLeafTupdesc->natts;
-	for (i = 0; i < st->nonLeafTupdesc->natts; i++)
-	{
-		attnum = st->fields[i].tableAttnum;
-		if (attnum != EXPR_ATTNUM)
-		{
-			bound->keys[i].value = o_fastgetattr(tuple, attnum,
-												 pt->leafTupdesc,
-												 &pt->leafSpec, &isnull);
-			bound->keys[i].type = pt->leafTupdesc->attrs[attnum - 1].atttypid;
-		}
-		else
-		{
-			ExprState  *expr_state = (ExprState *) lfirst(indexpr_item);
+	bound->nkeys = 1;
+	attnum = td->fields[td->nFields - 1].tableAttnum;
 
-			st->econtext->ecxt_scantuple = slot;
-			bound->keys[i].value = ExecEvalExprSwitchContext(expr_state,
-															 st->econtext,
-															 &isnull);
-			bound->keys[i].type = st->nonLeafTupdesc->attrs[i].atttypid;
-			indexpr_item = lnext(st->expressions_state, indexpr_item);
-		}
-		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
-		if (isnull)
-			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
-		bound->keys[i].comparator = st->fields[i].comparator;
-	}
+	bound->keys[0].value = o_fastgetattr(tuple, td->nFields, td->leafTupdesc, &td->leafSpec, &isnull);
+	bound->keys[0].type = td->leafTupdesc->attrs[td->nFields - 1].atttypid;
+	bound->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+	if (isnull)
+		bound->keys[0].flags |= O_VALUE_BOUND_NULL;
+	bound->keys[0].comparator = td->fields[td->nFields - 1].comparator;
 }
 
 /* fills primary index key bound from tuple that belongs secondary index */
