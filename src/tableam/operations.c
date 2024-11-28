@@ -218,6 +218,51 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	if (primary->desc.storageType == BTreeStoragePersistence)
 		o_wal_insert(&primary->desc, tup);
 
+	if (descr->bridge)
+	{
+		OTableSlot *oslot = (OTableSlot *) slot;
+		bool		success;
+		BTreeModifyCallbackInfo callbackInfo =
+		{
+			.waitCallback = NULL,
+			.modifyDeletedCallback = o_insert_callback,
+			.modifyCallback = NULL,
+			.needsUndoForSelfCreated = true
+		};
+		OSnapshot	o_snapshot;
+		OXid		oxid;
+		TupleTableSlot *bridge_slot;
+		uint32		version = 0;
+		OTuple		tuple;
+		Datum		values[INDEX_MAX_KEYS];
+		bool		isnull[INDEX_MAX_KEYS];
+
+		values[0] = PointerGetDatum(&oslot->bridge_ctid);
+		isnull[0] = false;
+		Assert(descr->indices[0]->primaryIsCtid); // TODO: Use append_rowid_values here
+		values[1] = PointerGetDatum(&slot->tts_tid);
+		isnull[1] = false;
+
+		tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
+							 values, isnull, NULL);
+		bridge_slot = descr->bridge->old_leaf_slot;
+		tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
+		callbackInfo.arg = bridge_slot;
+
+		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+
+		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
+									oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+
+		if (!success)
+		{
+			o_report_duplicate(relation, descr->bridge, bridge_slot);
+		}
+
+		if (tuple.data)
+			pfree(tuple.data);
+	}
+
 	return slot;
 }
 
