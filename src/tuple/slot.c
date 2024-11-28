@@ -825,7 +825,16 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			oslot->bridge_ctid = *((ItemPointer) value);
 		}
 		else
-			Assert(false); // TODO: Implement for other indices same as for ctid
+		{
+			ItemPointer bridge_iptr;
+			bool		isnull;
+
+			Assert(oslot->leafTuple);
+			bridge_iptr = o_tuple_get_last_iptr(idx->leafTupdesc, &idx->leafSpec,
+												oslot->tuple, &isnull);
+			Assert(!isnull && bridge_iptr);
+			oslot->bridge_ctid = *bridge_iptr;
+		}
 	}
 
 	slot->tts_tableOid = oslot->descr->oids.reloid;
@@ -1814,7 +1823,6 @@ tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr)
 {
 	OTableSlot *oslot = (OTableSlot *) slot;
 
-	elog(WARNING, "tts_tid 8 =");
 	slot->tts_tid = *iptr;
 	if (!O_TUPLE_IS_NULL(oslot->tuple) &&
 		oslot->ixnum == PrimaryIndexNumber &&
