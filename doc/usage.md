@@ -148,7 +148,7 @@ Settings
 --------
 
 ### Main parameters
- * `orioledb.main_buffers` -- the size of shared memory, where hot data pages of OrioleDB tables are cached.  This parameter is analog of the built-in `shared_buffers` GUC parameter. The default is `64 MB`. A good starting point for this parameter if only OrioleDB tables are used is 1/4 of RAM and setting `shared_buffers` to default value `128 MB`. If OrioleDB and heap tables are used equally, then this parameter and `shared_buffers` to 1/8 of RAM each.
+ * `orioledb.main_buffers` -- the size of shared memory, where hot data pages of OrioleDB tables are cached.  This parameter is analog of the built-in `shared_buffers` GUC parameter. The default is `64 MB`. A good starting point for this parameter if only OrioleDB tables are used is 1/4 of RAM and setting `shared_buffers` to default value `128 MB`. If OrioleDB and heap tables are used equally, then 1/8 of RAM for this parameter and 1/8 of RAM for `shared_buffers`.
  * `orioledb.free_tree_buffers` -- shared memory size for metadata of block allocators for compressed tables. The default is `8 MB`. We recommend increasing the value of this parameter to work with large compressed tables.
  * `orioledb.catalog_buffers` -- shared memory size of table metadata. The default value is `8 MB`. We recommend increasing the value of this parameter to work with a large number of tables.
  * `orioledb.undo_buffers` -- the shared memory ring buffer size for older versions of rows and pages.  The default is `1 MB`.
