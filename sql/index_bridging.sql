@@ -36,6 +36,8 @@ COMMIT;
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
+\q
+
 INSERT INTO o_test_ix_ams VALUES (10, ARRAY[20,30], point(40, 50), 60, 70);
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
