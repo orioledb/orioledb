@@ -25,8 +25,21 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
 CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j);
 
-SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+INSERT INTO o_test_ix_ams VALUES (10, ARRAY[20,30], point(40, 50), 60, 70);
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+\q
 
 ALTER TABLE o_test_ix_ams ADD PRIMARY KEY (pk2, pk1);
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
