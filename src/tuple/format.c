@@ -633,6 +633,7 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 		}
 		else if (bridge_iptr && ((iptr && i == 1) || i == 0))
 		{
+			/* This branch should be used only for pkey */
 			cur_to_toast = false;
 			value = PointerGetDatum(bridge_iptr);
 			null = false;
