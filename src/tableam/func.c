@@ -346,6 +346,8 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 	if (descr->bridge)
 		tree_structure(&buf, descr->bridge, printOptions, depth);
 	tree_structure(&buf, descr->toast, printOptions, depth);
+	if (descr->bridge)
+		tree_structure(&buf, descr->bridge, printOptions, depth);
 
 	result = cstring_to_text(buf.data);
 	relation_close(rel, AccessShareLock);
@@ -857,6 +859,8 @@ orioledb_idx_structure(PG_FUNCTION_ARGS)
 	}
 	if (!strcmp(treeName, NameStr(descr->toast->name)))
 		tree_structure(&buf, descr->toast, printOptions, depth);
+	if (descr->bridge && !strcmp(treeName, NameStr(descr->bridge->name)))
+		tree_structure(&buf, descr->bridge, printOptions, depth);
 
 	result = cstring_to_text(buf.data);
 	relation_close(rel, AccessShareLock);
