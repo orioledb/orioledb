@@ -239,7 +239,10 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 
 	/* Ensure the descriptor is not NULL. */
 	Assert(descr);
-	idx = descr->indices[oslot->ixnum];
+	if (oslot->ixnum == BridgeIndexNumber)
+		idx = descr->bridge;
+	else
+		idx = descr->indices[oslot->ixnum];
 
 	/* Determine if the attributes should be fetched in index order. */
 	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
@@ -770,7 +773,12 @@ static void
 tts_orioledb_init_reader(TupleTableSlot *slot)
 {
 	OTableSlot *oslot = (OTableSlot *) slot;
-	OIndexDescr *idx = oslot->descr->indices[oslot->ixnum];
+	OIndexDescr *idx;
+
+	if (oslot->ixnum == BridgeIndexNumber)
+		idx = oslot->descr->bridge;
+	else
+		idx = oslot->descr->indices[oslot->ixnum];
 
 	if (oslot->leafTuple)
 		o_tuple_init_reader(&oslot->state, oslot->tuple,
@@ -992,7 +1000,6 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 	TupleDesc	tupleDesc;
 	OTupleFixedFormatSpec *spec;
 	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
-	OTableSlot *oslot = (OTableSlot *) slot;
 
 	slot_getsomeattrs(slot, idx->maxTableAttnum - ctid_off);
 
@@ -1009,8 +1016,7 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 		spec = &idx->nonLeafSpec;
 	}
 
-	return o_form_tuple(tupleDesc, spec, 0, values, isnull,
-						idx->bridging ? &oslot->bridge_ctid : NULL);
+	return o_form_tuple(tupleDesc, spec, 0, values, isnull, NULL);
 }
 
 /* fills key bound from tuple or index tuple that belongs to current BTree */
