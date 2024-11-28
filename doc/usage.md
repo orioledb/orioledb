@@ -147,13 +147,22 @@ In order to activate block device mode, one should specify `orioledb.device_file
 Settings
 --------
 
- * `orioledb.main_buffers` -- the size of shared memory, where hot data pages of OrioleDB tables are cached.  This parameter is analog of the built-in `shared_buffers` GUC parameter. Default is `64 MB`.
+### Main parameters
+ * `orioledb.main_buffers` -- the size of shared memory, where hot data pages of OrioleDB tables are cached.  This parameter is analog of the built-in `shared_buffers` GUC parameter. The default is `64 MB`. We recommend setting it to 1/4 of RAM and setting `shared_buffers` to default value `128 MB` if only OrioleDB tables are used. If OrioleDB and heap tables are used equally, then set this parameter and `shared_buffers` to 1/8 of RAM each.
  * `orioledb.free_tree_buffers` -- shared memory size for metadata of block allocators for compressed tables. The default is `8 MB`. We recommend increasing the value of this parameter to work with large compressed tables.
  * `orioledb.catalog_buffers` -- shared memory size of table metadata. The default value is `8 MB`. We recommend increasing the value of this parameter to work with a large number of tables.
  * `orioledb.undo_buffers` -- the shared memory ring buffer size for older versions of rows and pages.  The default is `1 MB`.
+ * `orioledb.undo_system_buffers` -- the shared memory ring buffer size for older versions of rows and pages in system tables.  The default is `1 MB`.
+ * `orioledb.xid_buffers` -- the shared memory ring buffer size for xids.  The default is `1 MB`.
  * `orioledb.recovery_pool_size` -- the number of recovery workers row-level WAL based recovery. The default is 3.  We recommend increasing the value of this parameter for the systems with a large number of CPU cores.
+ * `orioledb.recovery_idx_pool_size` -- the number of recovery index build workers. The default is 3.  We recommend increasing the value of this parameter for the systems with a large number of CPU cores.
+ * `orioledb.recovery_parallel_indices_rebuild_limit` -- Sets the maximum number of indices that could be rebuilt in parallel in recovery. The default is 32. 
  * `orioledb.recovery_queue_size` -- the size of shared memory for message queues related to recovery workers. The default is `8 MB`.
  * `orioledb.checkpoint_completion_ratio` -- the fraction of OrioleDB tables checkpoint time within the whole checkpoint time.  The default is `0.5`.  We recommend setting this value to `1.0` if only OrioleDB tables are used.
+
+### Advanced config options
+ * `orioledb.remove_old_checkpoint_files` -- Remove temporary *.tmp and *.map files after checkpoint. The default is `on`.
+ * `orioledb.skip_unmodified_trees` -- Skip reading of unmodified trees during checkpointing. The default is `on`.
  * `orioledb.bgwriter_num_workers` -- the number background writer processes, which flushes dirty pages of OrioleDB tables in background. We recommend setting values greater than `1` for the systems with a large number of CPU cores.  The default is `1`.
  * `orioledb.max_io_concurrency` -- maximum number of concurrent IO operations issued by OrioleDB in parallel. We recommend setting this parameter when the OS kernel becomes a bottleneck for high concurrent IO. The default is `0` (off).
  * `orioledb.device_filename` -- path to the block device for block device mode. Not set by default.
@@ -162,6 +171,14 @@ Settings
  * `orioledb.default_compress` -- default block-level compression level for all tables' data structures. The default is = `-1` (no compression).
  * `orioledb.primary_compress` -- default block-level compression level for all tables' primary keys. The default is = `-1` (no compression).
  * `orioledb.toast_compress` -- default block-level compression level for all tables' TOASTed values. The default is = `-1` (no compression).
+ * `orioledb.table_description_compress` -- Display compression column in orioledb_table_description. The default is `off`.
+
+### Debugging options
+* `orioledb.debug_disable_pools_limit` -- Disable minimal limit for `orioledb.main_buffers`, `orioledb.free_tree_buffers`, `orioledb.catalog_buffers` for debug. The default is `off`.
+* `orioledb.enable_stopevents` -- Enable stop events. The default is `off`.
+* `orioledb.trace_stopevents` -- Trace all the stop events to the system log. The default is `off`.
+* `orioledb.debug_disable_bgwriter` -- Disable bgwriter for debug. The default is `off`.
+* `orioledb.debug_checkpoint_timeout` -- Sets the maximum time between automatic WAL checkpoints. The default is `checkpoint_timeout` value. Setting this value to a lower value can make OrioleDB checkpoints more often for testing.
 
 All the GUC parameters above require the postmaster restart.
 
