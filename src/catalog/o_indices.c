@@ -308,7 +308,8 @@ make_primary_o_index(OTable *table)
 }
 
 static void
-add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nadded, bool fillPrimary)
+add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nadded, bool fillPrimary,
+				 bool fillOnlyLeaf)
 {
 	int			i;
 	int			expr_field = 0;
@@ -352,7 +353,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 			else
 				index->leafFields[*nadded] = tableIndex->exprfields[expr_field++];
 			Assert(index->leafFields[*nadded].typid);
-			index->nonLeafFields[*nadded] = tableIndex->fields[i];
+			if (!fillOnlyLeaf)
+				index->nonLeafFields[*nadded] = tableIndex->fields[i];
 			if (fillPrimary)
 				index->primaryFieldsAttnums[index->nPrimaryFields++] = *nadded + 1;
 			(*nadded)++;
@@ -360,7 +362,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 	}
 	else
 	{
-		make_builtin_field(&index->leafFields[*nadded], &index->nonLeafFields[*nadded],
+		OTableIndexField *nonLeafField = fillOnlyLeaf ? NULL : &index->nonLeafFields[*nadded];
+		make_builtin_field(&index->leafFields[*nadded], nonLeafField,
 						   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 						   table->tid_btree_ops_oid);
 		if (fillPrimary)
@@ -413,7 +416,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	if (result->predicate)
 		result->predicate_str = pstrdup(tableIndex->predicate_str);
 	result->expressions = list_copy_deep(tableIndex->expressions);
-	add_index_fields(result, table, tableIndex, &nadded, false);
+	add_index_fields(result, table, tableIndex, &nadded, false, false);
 	if (tableIndex->nfields == tableIndex->nkeyfields)
 		result->nKeyFields = nadded;
 	Assert(nadded <= tableIndex->nfields);
@@ -423,10 +426,11 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 		make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
+		result->primaryFieldsAttnums[result->nPrimaryFields++] = nadded + 1;
 		nadded++;
 	}
 	else
-		add_index_fields(result, table, primary, &nadded, true);
+		add_index_fields(result, table, primary, &nadded, true, false);
 	Assert(nadded <= result->nLeafFields);
 	MemoryContextSwitchTo(old_mcxt);
 	result->nLeafFields = nadded;
@@ -483,7 +487,7 @@ make_toast_o_index(OTable *table)
 														 result->nNonLeafFields);
 
 	nadded = 0;
-	add_index_fields(result, table, primary, &nadded, true);
+	add_index_fields(result, table, primary, &nadded, true, false);
 	make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
 					   INT2OID, "attnum", FirstLowInvalidHeapAttributeNumber,
 					   INT2_BTREE_OPS_OID);
@@ -531,7 +535,7 @@ make_bridge_o_index(OTable *table)
 		result->nLeafFields += primary->nfields;
 	else
 		result->nLeafFields++;
-	result->nNonLeafFields = result->nLeafFields;
+	result->nNonLeafFields = 1;
 	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
 												 result->nLeafFields);
 	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
@@ -542,7 +546,7 @@ make_bridge_o_index(OTable *table)
 					TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 					table->tid_btree_ops_oid);
 	nadded++;
-	add_index_fields(result, table, primary, &nadded, true);
+	add_index_fields(result, table, primary, &nadded, true, true);
 	Assert(nadded == result->nLeafFields);
 	result->nLeafFields = nadded;
 	result->nUniqueFields = nadded;
@@ -902,8 +906,16 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	else if (oIndex->indexType == oIndexRegular ||
 			 oIndex->indexType == oIndexUnique)
 	{
-		Assert(oIndex->nNonLeafFields == oIndex->nLeafFields);
-		descr->nonLeafTupdesc = CreateTupleDescCopy(descr->leafTupdesc);
+		if (oIndex->nNonLeafFields == oIndex->nLeafFields)
+			descr->nonLeafTupdesc = CreateTupleDescCopy(descr->leafTupdesc);
+		else
+		{
+			Assert(strncmp(oIndex->name.data, "index_bridge", NAMEDATALEN) == 0);
+			Assert(oIndex->nNonLeafFields == 1);
+			descr->nonLeafTupdesc = CreateTemplateTupleDesc(oIndex->nNonLeafFields);
+			TupleDescCopyEntry(descr->nonLeafTupdesc, 1,
+							   descr->leafTupdesc, 1);
+		}
 	}
 	else if (oIndex->indexType == oIndexToast)
 	{
