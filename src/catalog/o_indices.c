@@ -527,6 +527,7 @@ make_bridge_o_index(OTable *table)
 	namestrcpy(&result->name, "index_bridge");
 	result->tableOids = table->oids;
 	result->amoid = BTREE_AM_OID;
+	result->bridging = true;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->primary_compress;
