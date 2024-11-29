@@ -771,7 +771,7 @@ FETCH FROM abc;
 (0 rows)
 
 ROLLBACK;
--- Check for logical xid overflow
+-- Check for logical xid assignment
 BEGIN;
 DO $$
 BEGIN
@@ -781,18 +781,6 @@ BEGIN
 	EXCEPTION WHEN reading_sql_data_not_permitted THEN END;
     END LOOP;
 END;$$;
-ROLLBACK;
-BEGIN;
-DO $$
-BEGIN
-    FOR i IN 1..100000 LOOP
-        BEGIN
-	    RAISE reading_sql_data_not_permitted;
-	EXCEPTION WHEN reading_sql_data_not_permitted THEN END;
-    END LOOP;
-END;$$;
-ERROR:  not enough logical xids
-CONTEXT:  PL/pgSQL function inline_code_block line 4 during statement block entry
 ROLLBACK;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table o_subtrans

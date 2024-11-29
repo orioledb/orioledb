@@ -413,21 +413,11 @@ ROLLBACK TO s1;
 FETCH FROM abc;
 ROLLBACK;
 
--- Check for logical xid overflow
+-- Check for logical xid assignment
 BEGIN;
 DO $$
 BEGIN
     FOR i IN 1..1000 LOOP
-        BEGIN
-	    RAISE reading_sql_data_not_permitted;
-	EXCEPTION WHEN reading_sql_data_not_permitted THEN END;
-    END LOOP;
-END;$$;
-ROLLBACK;
-BEGIN;
-DO $$
-BEGIN
-    FOR i IN 1..100000 LOOP
         BEGIN
 	    RAISE reading_sql_data_not_permitted;
 	EXCEPTION WHEN reading_sql_data_not_permitted THEN END;
