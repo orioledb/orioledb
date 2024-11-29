@@ -1,13 +1,35 @@
 # This is modified Dockerfile from 16/bookworm in
 # https://github.com/docker-library/postgres
 
-# Set UBUNTU_VERSION = [ devel 24.10    24.04 22.04 20.04 ]
-#                   or [ devel oracular noble jammy focal ]
+# Set BASE_IMAGE = [ ubuntu, debian ]
+#   For Ubuntu, BASE_VERSION = [ devel 24.10    24.04 22.04 20.04 ]
+#                           or [ devel oracular noble jammy focal ]
+#   For Debian, BASE_VERSION = [ bookworm, bookworm-backports, bookworm-slim
+#                                bullseye, bullseye-backports, bullseye-slim
+#                                testing,  unstable, experimental ]
 
-ARG UBUNTU_VERSION=noble
-FROM ubuntu:${UBUNTU_VERSION}
+# Base image configuration
+# New recommended way:
+#   docker build --build-arg BASE_IMAGE=ubuntu --build-arg BASE_VERSION=noble     -t orioletest:ubuntu-noble .
+#   docker build --build-arg BASE_IMAGE=debian --build-arg BASE_VERSION=bookworm  -t orioletest:debian-bookworm .
+ARG BASE_IMAGE=ubuntu
+ARG BASE_VERSION=noble
 
+# Legacy support (deprecated, will be removed):
+#   docker build --build-arg UBUNTU_VERSION=noble -f Dockerfile.ubuntu -t orioletest:ubuntu-noble .
 ARG UBUNTU_VERSION
+# If UBUNTU_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
+ARG BASE_IMAGE=${UBUNTU_VERSION:+ubuntu}
+ARG BASE_VERSION=${UBUNTU_VERSION:+${UBUNTU_VERSION}}
+
+FROM ${BASE_IMAGE}:${BASE_VERSION}
+
+# Re-declare ARGs after FROM for use in subsequent instructions
+ARG BASE_IMAGE
+ARG BASE_VERSION
+
+# Record build information
+ENV BUILD_OS="${BASE_IMAGE}:${BASE_VERSION}"
 
 # Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=17
@@ -207,7 +229,7 @@ RUN set -eux; \
 		--with-zstd \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BUILD_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	# install postgresql

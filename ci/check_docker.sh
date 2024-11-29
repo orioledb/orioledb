@@ -58,8 +58,8 @@ cd /github/workspace/orioledb
 
 # install some stuff for testing
 cat /etc/os-release
-if grep -q '^ID=ubuntu' /etc/os-release; then
-    echo "Running on Ubuntu - install some stuff for testing"
+if grep -Eq '^ID=(ubuntu|debian)' /etc/os-release; then
+    echo "Running on Ubuntu/Debian - install some stuff for testing"
     export DEBIAN_FRONTEND=noninteractive
     apt update
     apt-get -y install --no-install-recommends \
@@ -69,7 +69,7 @@ elif grep -q '^ID=alpine' /etc/os-release; then
     echo "Running on Alpine - install some stuff for testing"
     apk add --no-cache \
         python3 python3-dev py3-pip py3-virtualenv \
-        linux-headers \
+        linux-headers libffi-dev \
         build-base ${DOCKER_PG_LLVM_DEPS} libc-dev make sudo wget
 else
     echo "Unsupported OS. Exiting. (please add support!)"

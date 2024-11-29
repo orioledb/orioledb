@@ -2,7 +2,8 @@
 set -Eeo pipefail
 
 # Default values
-BASE_MATRIX="ubuntu:24.04"
+BASE_IMAGE="ubuntu"
+BASE_VERSION="24.04"
 PG_MAJOR="17"
 COMPILER="clang"
 DEBUG="false"
@@ -11,16 +12,18 @@ TEST_TARGETS="no"
 
 # Define base lists
 declare -A base_lists
-base_lists[all-oldest]="ubuntu:22.04 alpine:3.14"
-base_lists[all-latest]="ubuntu:24.10 alpine:3.20"
-base_lists[all-dev]="ubuntu:devel alpine:edge"
-base_lists[all-alpine]="alpine:edge alpine:3.20 alpine:3.19 alpine:3.18 alpine:3.17 alpine:3.16 alpine:3.15 alpine:3.14"
-base_lists[all-ubuntu]="ubuntu:devel ubuntu:24.10 ubuntu:24.04 ubuntu:22.04 ubuntu:20.04 "
-base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-ubuntu]}"
+base_lists[all-oldest]="ubuntu:20.04 alpine:3.13 debian:bullseye"
+base_lists[all-latest]="ubuntu:latest alpine:latest debian:latest"
+base_lists[all-dev]="ubuntu:devel alpine:edge debian:testing"
+base_lists[all-alpine]="alpine:edge alpine:3.20 alpine:3.19 alpine:3.18 alpine:3.17 alpine:3.16 alpine:3.15 alpine:3.14 alpine:3.13"
+base_lists[all-ubuntu]="ubuntu:devel ubuntu:24.10 ubuntu:24.04 ubuntu:22.04 ubuntu:20.04"
+base_lists[all-debian]="debian:experimental debian:unstable debian:testing debian:bookworm debian:bullseye"
+base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-ubuntu]} ${base_lists[all-debian]}"
 
 # Valid Alpine, Ubuntu, PG and Compiler versions
-VALID_ALPINE_VERSIONS="edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 latest"
-VALID_UBUNTU_VERSIONS="devel 24.10 24.04 22.04 20.04 oracular noble jammy focal latest rolling"
+VALID_ALPINE_VERSIONS="edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13 latest"
+VALID_UBUNTU_VERSIONS="devel 25.04 24.10 24.04 22.04 20.04 plucky oracular noble jammy focal latest rolling"
+VALID_DEBIAN_VERSIONS="unstable testing experimental bookworm bookworm-backports bookworm-slim bullseye bullseye-backports bullseye-slim trixie trixie-backports trixie-slim sid 11 12 stable oldstable latest"
 VALID_PG_MAJOR_VERSIONS="17 16"
 VALID_COMPILERS="clang gcc"
 VALID_TEST_TARGETS="no show-build-env installcheck regresscheck isolationcheck testgrescheck testgrescheck_part_1 testgrescheck_part_2"
@@ -40,6 +43,7 @@ Options:
                       Matrix options:
                         all-alpine # [ ${base_lists[all-alpine]} ],
                         all-ubuntu # [ ${base_lists[all-ubuntu]} ],
+                        all-debian # [ ${base_lists[all-debian]} ],
                         all-oldest # [ ${base_lists[all-oldest]} ],
                         all-latest # [ ${base_lists[all-latest]} ],
                         all-dev # [ ${base_lists[all-dev]} ],
@@ -47,7 +51,8 @@ Options:
                       Individual image examples:
                         alpine:* [ $VALID_ALPINE_VERSIONS ],
                         ubuntu:* [ $VALID_UBUNTU_VERSIONS ],
-                      Default: $BASE_MATRIX
+                        debian:* [ $VALID_DEBIAN_VERSIONS ],
+                      Default: $BASE_IMAGE:$BASE_VERSION
   --pg-major VERSION  Specify PostgreSQL major version
                       Valid options: [ all $VALID_PG_MAJOR_VERSIONS ]
                       Default: $PG_MAJOR
@@ -68,9 +73,10 @@ Options:
 For the details: check the "--dry-run" and the Dockerfiles in the root directory
   - alpine Dockerfile : ./docker/Dockerfile
   - ubuntu Dockerfile : ./docker/Dockerfile.ubuntu
+  - debian Dockerfile : ./docker/Dockerfile.ubuntu
 
 Known issues:
-  the: ubuntu:20.04 && testgrescheck testgrescheck_part_1 testgrescheck_part_2 is not working properly
+  (ubuntu:20.04, alpine:3.13, debian:bullseye) && testgrescheck not working properly
 
 The Docker build logs generated in the ./log_docker_build directory,
 and you can check the build logs with:
@@ -82,11 +88,13 @@ Examples:
   ./ci/docker_matrix.sh --base all-dev --pg-major all --compiler clang
   ./ci/docker_matrix.sh --base alpine:3.20 --compiler gcc --debug true
   ./ci/docker_matrix.sh --base ubuntu:oracular --pg-major 16 --compiler all --debug false
+  ./ci/docker_matrix.sh --base debian:bookworm --pg-major 17
   ./ci/docker_matrix.sh --base alpine:devel --compiler gcc --test_targets 'show-build-env'
-  ./ci/docker_matrix.sh --base alpine:latest --test_targets 'regresscheck isolationcheck'
+  ./ci/docker_matrix.sh --base all-oldest --test_targets 'regresscheck isolationcheck'
+  ./ci/docker_matrix.sh --base all-latest --test_targets 'regresscheck isolationcheck testgrescheck'
 
 Default behavior:
-  ./ci/docker_matrix.sh --base $BASE_MATRIX --pg-major $PG_MAJOR --compiler $COMPILER --debug $DEBUG --test_targets $TEST_TARGETS
+  ./ci/docker_matrix.sh --base $BASE_IMAGE:$BASE_VERSION --pg-major $PG_MAJOR --compiler $COMPILER --debug $DEBUG --test_targets $TEST_TARGETS
 
 EOF
 }
@@ -160,6 +168,14 @@ process_base_parameter() {
             echo "Invalid Ubuntu version: $version" >&2
             exit 1
         fi
+    elif [[ $base == debian:* ]]; then
+        local version="${base#debian:}"
+        if [[ " $VALID_DEBIAN_VERSIONS " == *" $version "* ]]; then
+            echo "$base"
+        else
+            echo "Invalid Debian version: $version" >&2
+            exit 1
+        fi
     else
         echo "Invalid base parameter: $base" >&2
         exit 1
@@ -198,9 +214,9 @@ main() {
 
                         local base_os="${base%%:*}"
                         local base_tag="${base##*:}"
-                        local base_os_upper="${base_os^^}"
+
                         local dockerfile="./docker/Dockerfile"
-                        [[ $base_os == "ubuntu" ]] && dockerfile="./docker/Dockerfile.ubuntu"
+                        [[ $base_os == "ubuntu" || $base_os == "debian" ]] && dockerfile="./docker/Dockerfile.ubuntu"
                         local docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}-debug-${debug}"
 
                         echo "#"
@@ -210,7 +226,8 @@ main() {
                         # Build Docker image
                         execute_command "touch ${logpath}/${docker_tag}.build.progress"
                         execute_command "docker build --pull --network=host --progress=plain \
-                            --build-arg ${base_os_upper}_VERSION=\"$base_tag\" \
+                            --build-arg BASE_IMAGE=\"$base_os\" \
+                            --build-arg BASE_VERSION=\"$base_tag\" \
                             --build-arg BUILD_CC_COMPILER=\"$compiler\" \
                             --build-arg PG_MAJOR=\"$pg_major\" \
                             --build-arg DEBUG_MODE=\"$debug\" \
