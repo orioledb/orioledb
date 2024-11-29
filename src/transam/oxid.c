@@ -260,6 +260,7 @@ acquire_logical_xid(void)
 				if (nloops > 16)
 					elog(ERROR, "not enough logical xids");
 			}
+			continue;
 		}
 		bitnum = pg_ceil_log2_32(bit);
 		Assert(bit == (1 << bitnum));
@@ -312,6 +313,10 @@ release_logical_xid(TransactionId xid)
 void
 assign_subtransaction_logical_xid(void)
 {
+	TransactionId nextLogicalXid;
+
+	nextLogicalXid = acquire_logical_xid();
+
 	if (TransactionIdIsValid(logicalXid))
 	{
 		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
@@ -324,7 +329,7 @@ assign_subtransaction_logical_xid(void)
 		MemoryContextSwitchTo(mcxt);
 	}
 
-	logicalXid = acquire_logical_xid();
+	logicalXid = nextLogicalXid;
 }
 
 /*

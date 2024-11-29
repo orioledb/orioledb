@@ -1565,9 +1565,9 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	{
 		case SUBXACT_EVENT_START_SUB:
 			(void) get_current_oxid();
+			add_subxact_undo_item(parentSubid);
 			prentLogicalXid = get_current_logical_xid();
 			assign_subtransaction_logical_xid();
-			add_subxact_undo_item(parentSubid);
 			add_savepoint_wal_record(parentSubid, prentLogicalXid);
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
