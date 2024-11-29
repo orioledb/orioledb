@@ -309,13 +309,16 @@ append_rowid_values(OIndexDescr *id,
 	bytea	   *rowid;
 	Pointer		p;
 
+	rowid = DatumGetByteaP(pkDatum);
+	p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
 	if (!id->primaryIsCtid)
 	{
 		OTuple		tuple;
 		ORowIdAddendumNonCtid *add;
 
-		rowid = DatumGetByteaP(pkDatum);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		Assert(!id->bridging); // Not implemented yet
+
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 
@@ -348,13 +351,12 @@ append_rowid_values(OIndexDescr *id,
 		ORowIdAddendumCtid *add;
 		AttrNumber	attnum = id->nFields - 1;
 
-		rowid = DatumGetByteaP(pkDatum);
-		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumCtid *) p;
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-
+		if (id->bridging)
+			p += MAXALIGN(sizeof(ItemPointer));
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
@@ -1383,13 +1385,20 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		/* Ctid primary key: give hint + tid as rowid */
 		result_size = MAXALIGN(VARHDRSZ) +
 			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-			sizeof(ItemPointerData);
+			MAXALIGN(sizeof(ItemPointerData));
+		if (index_descr->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
 		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
+		if (index_descr->bridging)
+		{
+			ptr += MAXALIGN(sizeof(ItemPointerData));
+			memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
+		}
 	}
 	else
 	{

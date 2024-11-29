@@ -371,16 +371,19 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else if (res_attnum == -1)
 		{
-			/* Special handling for ctid attribute. */
-			Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
-			bool		iptr_null;
+			if (!idx->bridging)
+			{
+				/* Special handling for ctid attribute. */
+				Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
+				bool		iptr_null;
 
-			iptr_value = o_tuple_read_next_field(&oslot->state,
-												 &iptr_null);
+				iptr_value = o_tuple_read_next_field(&oslot->state,
+													&iptr_null);
 
-			Assert(iptr_null == false);
-			Assert(memcmp(&slot->tts_tid,
-						  (ItemPointer) iptr_value, sizeof(ItemPointerData)) == 0);
+				Assert(iptr_null == false);
+				Assert(memcmp(&slot->tts_tid,
+							(ItemPointer) iptr_value, sizeof(ItemPointerData)) == 0);
+			}
 		}
 		else if (res_attnum == -2)
 		{
@@ -490,13 +493,20 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 			/* Ctid primary key: give hint + tid as rowid */
 			result_size = MAXALIGN(VARHDRSZ) +
 				MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-				sizeof(ItemPointerData);
+				MAXALIGN(sizeof(ItemPointerData));
+			if (id->bridging)
+				result_size += MAXALIGN(sizeof(ItemPointerData));
 			result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 			SET_VARSIZE(result, result_size);
 			ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
 			memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 			ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 			memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
+			if (id->bridging)
+			{
+				ptr += MAXALIGN(sizeof(ItemPointerData));
+				memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
+			}
 			*isnull = false;
 			oslot->rowid = result;
 			return PointerGetDatum(result);
@@ -816,7 +826,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 
 	if (idx->bridging)
 	{
-		if (oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
+		if ((oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple) || oslot->ixnum == BridgeIndexNumber)
 		{
 			Datum		value;
 			bool		isnull;

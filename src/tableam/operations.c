@@ -749,6 +749,7 @@ o_is_index_predicate_satisfied(OIndexDescr *idx, TupleTableSlot *slot,
 static void
 fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 {
+	OTableSlot *oslot = (OTableSlot *) slot;
 	int			i;
 
 	slot_getallattrs(slot);
@@ -764,8 +765,17 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 
 		if (typid == TIDOID)
 		{
-			isnull = false;
-			value = PointerGetDatum(&slot->tts_tid);
+			// TODO: Do more complex check here, because it ignores ctid when bridging enabled
+			if (idx->bridging)
+			{
+				isnull = false;
+				value = PointerGetDatum(&oslot->bridge_ctid);
+			}
+			else
+			{
+				isnull = false;
+				value = PointerGetDatum(&slot->tts_tid);
+			}
 		}
 		else
 		{

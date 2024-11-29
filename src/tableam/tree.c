@@ -488,12 +488,9 @@ void
 o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound)
 {
 	OIndexDescr *td = o_get_tree_def(secondary);
-	int			i,
-				attnum;
 	bool		isnull;
 
 	bound->nkeys = 1;
-	attnum = td->fields[td->nFields - 1].tableAttnum;
 
 	bound->keys[0].value = o_fastgetattr(tuple, td->nFields, td->leafTupdesc, &td->leafSpec, &isnull);
 	bound->keys[0].type = td->leafTupdesc->attrs[td->nFields - 1].atttypid;

@@ -470,6 +470,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 											 (Pointer) &bridge_bound, BTreeKeyBound,
 											 &ostate->o_snapshot, tupleCsn,
 											 tupleCxt, NULL);
+			Assert(!O_TUPLE_IS_NULL(bridge_tup));
 			pfree(tup.data);
 
 			/* fetch primary index key from tuple and search raw tuple */
