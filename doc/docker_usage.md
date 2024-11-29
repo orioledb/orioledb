@@ -42,7 +42,7 @@ docker exec -ti orioletest17 psql -U postgres
 
 You should expect a similar psql message:
 ```bash
-psql (17.0 OrioleDB public beta 6 PGTAG=patches17_4 alpine:3.20+clang build:2024-10-25T19:54:25+00:00 17.0)
+psql (17.0 OrioleDB public beta 7 PGTAG=patches17_5 alpine:3.20+clang build:2024-10-25T19:54:25+00:00 17.0)
 Type "help" for help.
 postgres=#
 ```
@@ -58,7 +58,7 @@ Test some commands:
 postgres=# select orioledb_version();
     orioledb_version
 ------------------------
- OrioleDB public beta 6
+ OrioleDB public beta 7
 (1 row)
 
 postgres=# CREATE TABLE oriole_test (a int) USING orioledb;

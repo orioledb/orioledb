@@ -32,7 +32,7 @@
 #include "utils/rel.h"
 #include "utils/relcache.h"
 
-#define ORIOLEDB_VERSION "OrioleDB public beta 6"
+#define ORIOLEDB_VERSION "OrioleDB public beta 7"
 #define ORIOLEDB_BINARY_VERSION 5
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
