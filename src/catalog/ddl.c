@@ -2411,6 +2411,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
 
+						if (rel->rd_rel->relam != BTREE_AM_OID)
+						{
+							ereport(ERROR, errmsg("'%s' access method is not supported",
+												  get_am_name(rel->rd_rel->relam)),
+									errhint("Only 'btree' access method supported now "
+											"for indices on orioledb tables."));
+						}
+
 						if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
 							o_define_index_validate(table_oids, rel, NULL, NULL);
 						relation_close(rel, AccessShareLock);
