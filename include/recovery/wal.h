@@ -38,9 +38,17 @@
 typedef struct
 {
 	LWLock		walLock;
-	int			walLockTrancheId;
+	int		walLockTrancheId;
 }
 WalShmem;
+
+typedef struct
+{
+	pg_atomic_uint32 next;
+	XLogRecPtr	 recptr;
+	bool isMember;
+}
+WalClearGroupEntry;
 
 typedef struct
 {

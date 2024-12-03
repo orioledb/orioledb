@@ -189,6 +189,8 @@ typedef RelFileLocator RelFileNode;
 #define ORelOidsSetInvalid(oids) \
 	((oids).datoid = (oids).reloid = (oids).relnode = InvalidOid)
 
+//#define INVALID_PROC_NUMBER INVALID_PGPROCNO
+
 #if PG_VERSION_NUM >= 170000
 
 #define LXID vxid.lxid
