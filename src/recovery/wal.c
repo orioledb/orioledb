@@ -47,6 +47,7 @@ wal_shmem_needs(void)
 
 	size = CACHELINEALIGN(sizeof(WalShmem));
 	size = add_size(size, CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections));
+	size = add_size(size, CACHELINEALIGN(sizeof(WalClearGroupArray) * MaxConnections);
 
 return size;
 }
@@ -60,10 +61,14 @@ wal_shmem_init(Pointer buf, bool found)
 	ptr += CACHELINEALIGN(sizeof(WalShmem));
 
 	wal_buffer = ptr;
+	ptr += CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections);
+
+	wal_clear_group_array = ptr;
 
 	if (!found)
 	{
 		memset(wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE * MaxConnections);
+		memset(wal_wal_clear_group_array, 0, sizeof(WalClearGroupArray) * MaxConnections);
 		walShmem->walLockTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&walShmem->walLock,
 						 walShmem->walLockTrancheId);
@@ -461,9 +466,72 @@ log_logical_wal_container(int length)
 {
 	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MYPROCNUMBER;
 
-	XLogBeginInsert();
-	XLogRegisterData(local_wal_buffer, length);
-	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+	/*
+     * If we can immediately acquire walLock, we flush our WAL buffer
+     * and release the lock. If not, use group WAL wtiting to improve
+     * efficiency.
+     */
+	if (LWLockConditionalAcquire(&walShmem->walLock, LW_EXCLUSIVE))
+	{
+///		ProcArrayEndTransactionInternal(proc, latestXid);
+		XLogBeginInsert();
+		XLogRegisterData(local_wal_buffer, length);
+		return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+		LWLockRelease(&walShmem->walLock);
+	}
+	else
+	{
+		WalClearGroupInfo * local_wal_clear_info;
+		/* Add ourselves to the list of processes needing a group WAL clear. */
+
+		local_wal_clear_info = (WalClearGroupInfo *) wal_clear_group_array + sizeof(WalClearGroupInfo) *MYPROCNUMBER;
+		Assert(local_wal_clear_info->member == false);
+
+		local_wal_clear_info->member = true;
+		nextidx = pg_atomic_read_u32(&WalClearGroupFirst);
+		while (true)
+		{
+			pg_atomic_write_u32(&WalClearGroupNext, nextidx);
+
+			if (pg_atomic_compare_exchange_u32(&WalClearGroupGroupFirst,
+												&nextidx,
+												MYPROCNUMBER))
+			break;
+		}
+
+		/* If the list was not empty, the leader will clear our XID. */
+		if (nextidx != INVALID_PGPROCNO)
+		{
+			int         extraWaits = 0;
+
+			/* Sleep until the leader flushes our WAL. */
+//			pgstat_report_wait_start(WAIT_EVENT_WAL_GROUP_FLUSH);
+			for (;;)
+			{
+				/* acts as a read barrier */
+				PGSemaphoreLock(proc->sem);
+				if (!local_wal_clear_info->member)
+					break;
+				extraWaits++;
+				pgstat_report_wait_end();
+				/* Fix semaphore count for any absorbed wakeups */
+				while (extraWaits-- > 0)
+					PGSemaphoreUnlock(proc->sem);
+				return;
+			}
+		}
+
+		/* We are the leader.  Acquire the lock on behalf of everyone. */
+
+
+			}
+
+		}
+
+	///	ProcArrayGroupClearXid(proc, latestXid);
+	}
+
+
 }
 
 /*

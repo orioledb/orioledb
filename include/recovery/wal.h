@@ -44,6 +44,14 @@ WalShmem;
 
 typedef struct
 {
+	pg_atomic_uint32 First;
+	pg_atomic_uint32 Next;
+	bool isMember;
+}
+WalClearGroupInfo;
+
+typedef struct
+{
 	uint8		recType;
 } WALRec;
 
