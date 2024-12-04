@@ -10,6 +10,9 @@ name: dockerTEST
 #    - new calling style:  BASE_IMAGE, BASE_VERSION ( debian )
 # 2. Official Docker Postgres library compatibility testing
 # 3. OrioleDB-specific test suite execution
+# 4. Docker image push to the registry ( docker.io , ghcr.io )
+#
+# TODO: remove the old calling style and use the new calling style for all distributions
 #
 
 on:
@@ -19,6 +22,18 @@ on:
 defaults:
   run:
     shell: bash
+
+env:
+  MAIN_BRANCH: refs/heads/main  # Set to the main branch name for docker push
+  DOCKER_IMAGE: orioletest  # Change this to your preferred image name
+  GITHUB_REGISTRY: ghcr.io/${{ secrets.GHCR_USERNAME  || 'orioledb'  }}   # Change this to your preferred docker registry path
+  DOCKER_REGISTRY: docker.io/${{ secrets.DOCKERHUB_USERNAME  || 'orioledb' }} # Change this to your preferred github registry path
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+  # it will be overrwritten by the workflow
+  DOCKER_TAG:               # based on the matrix
+  PUSH_TO_DOCKER_REGISTRY:  # IF secrets.DOCKERHUB_USERNAME THEN true
+  PUSH_TO_GITHUB_REGISTRY:  # IF secrets.GHCR_USERNAME THEN true
 
 jobs:
   test-docker-builds:
@@ -30,41 +45,70 @@ jobs:
           # clang-ubuntu-focal ( 20.04 )  We don't run testgrescheck; python 3.8 is too old
           - { compiler: "clang", distr: "ubuntu", distr-version: "focal",
               test_targets: "regresscheck isolationcheck" }
-          # clang-alpine-latest
-          - { compiler: "clang", distr: "alpine", distr-version: "latest",
+          # clang-alpine-3.20
+          - { compiler: "clang", distr: "alpine", distr-version: "3.20",
               test_targets: "regresscheck isolationcheck testgrescheck"}
-          # clang-ubuntu-latest
-          - { compiler: "clang", distr: "ubuntu", distr-version: "latest",
+          # clang-ubuntu-noble
+          - { compiler: "clang", distr: "ubuntu", distr-version: "noble",
               test_targets: "regresscheck isolationcheck testgrescheck" }
-          # clang-debian-latest
-          - { compiler: "clang", distr: "debian", distr-version: "latest",
+          # clang-debian-bookworm-slim
+          - { compiler: "clang", distr: "debian", distr-version: "bookworm-slim",
               test_targets: "regresscheck isolationcheck testgrescheck" }
 
         # extra test cases
         include:
-          # 17-gcc-alpine-latest
+          # 17-gcc-alpine-3.20
           - postgres: 17
-            os: { compiler: "gcc", distr: "alpine", distr-version: "latest",
+            os: { compiler: "gcc", distr: "alpine", distr-version: "3.20",
                   test_targets: "regresscheck isolationcheck testgrescheck" }
-          # 17-gcc-ubuntu-latest
+          # 17-gcc-ubuntu-noble
           - postgres: 17
-            os: { compiler: "gcc", distr: "ubuntu", distr-version: "latest",
+            os: { compiler: "gcc", distr: "ubuntu", distr-version: "noble",
                   test_targets: "regresscheck isolationcheck testgrescheck" }
           # 17-clang-alpine-edge  : allowed to fail ( continue-on-error)
           - postgres: 17
             os: { compiler: "clang", distr: "alpine", distr-version: "edge",
                   test_targets: "regresscheck isolationcheck testgrescheck" }
 
-    name: docker ${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}
+    name: "docker ${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}"
     runs-on: ubuntu-latest
-    continue-on-error: ${{ contains(fromJSON('["edge", "devel", "testing", "unstable", "experimental"]'), matrix.os.distr-version) }}
+    continue-on-error: ${{ contains(fromJSON('["edge", "devel", "testing", "unstable", "unstable-slim", "experimental"]'), matrix.os.distr-version) }}
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Configure PUSH_TO_DOCKER_REGISTRY
+        id: config_docker
+        run: |
+          if [ -n "${{ env.DOCKERHUB_USERNAME }}" ]; then
+            echo "PUSH_TO_DOCKER_REGISTRY=true" >> $GITHUB_ENV
+          else
+            echo "No DOCKERHUB_USERNAME secret found. Disabling push to docker.io"
+            echo "PUSH_TO_DOCKER_REGISTRY=false" >> $GITHUB_ENV
+          fi
+
+      - name: Configure PUSH_TO_GITHUB_REGISTRY
+        id: config_github
+        run: |
+          if [ -n "${{ env.GHCR_USERNAME }}" ]; then
+            echo "PUSH_TO_GITHUB_REGISTRY=true" >> $GITHUB_ENV
+          else
+            echo "No GHCR_USERNAME secret found. Disabling push to ghcr.io"
+            echo "PUSH_TO_GITHUB_REGISTRY=false" >> $GITHUB_ENV
+          fi
+
+      - name: Set Docker tag
+        id: set-tag
+        run: |
+          echo "DOCKER_TAG=${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}" >> $GITHUB_ENV
+
+      - name: Verify Docker tag
+        run: |
+          echo "DOCKER_TAG=${{ env.DOCKER_TAG }}"
+
       # old calling style with ALPINE_VERSION and UBUNTU_VERSION
-      - name: oldstyle docker build orioletest:${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}
+      - name: oldstyle docker build
         if: matrix.os.distr != 'debian'
         uses: docker/build-push-action@v6
         # https://github.com/docker/build-push-action
@@ -74,7 +118,9 @@ jobs:
           platforms: linux/amd64
           push: false
           pull: true
-          tags: orioletest:${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}
+          tags: |
+             "${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
+             "${{ env.GITHUB_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
           # for alpine+ubuntu: using the old calling style ( deprecated )
           build-args: |
             ALPINE_VERSION=${{ matrix.os.distr == 'alpine' && matrix.os.distr-version || '' }}
@@ -85,7 +131,7 @@ jobs:
             DEBUG_MODE=false
 
       # new calling style:  BASE_IMAGE, BASE_VERSION
-      - name: newstyle docker build orioletest:${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}
+      - name: newstyle docker build
         if: matrix.os.distr == 'debian'
         uses: docker/build-push-action@v6
         # https://github.com/docker/build-push-action
@@ -95,7 +141,9 @@ jobs:
           platforms: linux/amd64
           push: false
           pull: true
-          tags: orioletest:${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}
+          tags: |
+             "${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
+             "${{ env.GITHUB_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
           # for debian: testing the new calling style
           build-args: |
             BASE_IMAGE=${{ matrix.os.distr }}
@@ -118,15 +166,54 @@ jobs:
           "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
               -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
               -c "test/orioledb-config.sh" \
-              orioletest:${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}
+              ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
 
       # run some make <check_targets> in the docker image
       - name: Run test_targets "${{ matrix.os.test_targets }}"
         run: |
           docker run --rm \
             --volume $(pwd):/github/workspace/orioledb \
-            orioletest:${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }} \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} \
             bash -c 'bash +x /github/workspace/orioledb/ci/check_docker.sh "${{ matrix.os.test_targets }}"'
 
-      # For pushing the tested image to a registry
-      # check this example:  https://docs.docker.com/build/ci/github-actions/test-before-push/
+      - name: Login to docker.io
+        uses: docker/login-action@v3
+        if: ${{ (env.PUSH_TO_DOCKER_REGISTRY =='true') && (github.ref == env.MAIN_BRANCH) && (github.event_name != 'pull_request')  }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        if: ${{ (env.PUSH_TO_GITHUB_REGISTRY =='true') && (github.ref == env.MAIN_BRANCH) && (github.event_name != 'pull_request')  }}
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Push to docker.io
+        if: ${{ (env.PUSH_TO_DOCKER_REGISTRY =='true') && (github.ref == env.MAIN_BRANCH) && (github.event_name != 'pull_request')  }}
+        run: docker push ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+
+      - name: Push to ghcr.io
+        if: ${{ (env.PUSH_TO_GITHUB_REGISTRY =='true') && (github.ref == env.MAIN_BRANCH) && (github.event_name != 'pull_request')  }}
+        run: docker push ${{ env.GITHUB_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+
+
+#----------------------
+# How to ...
+#
+# Configuring Secrets in GitHub Actions
+# - Click on Settings > Secrets and variables > Actions.    https://github.com/<user>/orioledb/settings/secrets/actions
+# - Click New repository secret.
+# - Add DOCKERHUB_USERNAME, DOCKERHUB_TOKEN , ...
+#
+#  Making a ghcr.io Image Public
+# - Go to your GitHub profile and access GitHub Packages
+# - Locate and select your container image
+# - Click "Package Settings" in the right sidebar
+# - Scroll to the "Danger Zone" section
+# - Find "Change package visibility" and click "Change Visibility"
+# - Select "Public" visibility
+# - Confirm your choice to complete the process
+# Your container image will now be publicly accessible via ghcr.io.
