@@ -1039,7 +1039,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexRegular, false);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false);
 		descr->bridge->refcnt++;
 	}
 	else
