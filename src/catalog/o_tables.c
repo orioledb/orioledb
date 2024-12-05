@@ -822,7 +822,7 @@ o_table_make_index_keys(OTable *table, int *num)
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		keys[keys_num].type = oIndexRegular;
+		keys[keys_num].type = oIndexBridge;
 		keys[keys_num].ixNum = BridgeIndexNumber;
 		keys[keys_num++].oids = table->bridge_oids;
 	}

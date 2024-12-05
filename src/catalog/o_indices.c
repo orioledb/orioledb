@@ -528,7 +528,7 @@ make_bridge_o_index(OTable *table)
 	}
 
 	result->indexOids = table->bridge_oids;
-	result->indexType = oIndexRegular;
+	result->indexType = oIndexBridge;
 	namestrcpy(&result->name, "index_bridge");
 	result->tableOids = table->oids;
 	result->amoid = BTREE_AM_OID;
@@ -910,7 +910,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		}
 	}
 	else if (oIndex->indexType == oIndexRegular ||
-			 oIndex->indexType == oIndexUnique)
+			 oIndex->indexType == oIndexUnique ||
+			 oIndex->indexType == oIndexBridge)
 	{
 		if (oIndex->nNonLeafFields == oIndex->nLeafFields)
 			descr->nonLeafTupdesc = CreateTupleDescCopy(descr->leafTupdesc);
@@ -1241,6 +1242,8 @@ index_type_to_str(OIndexType type)
 			return "unique";
 		case oIndexRegular:
 			return "regular";
+		case oIndexBridge:
+			return "bridge";
 		default:
 			return "invalid";
 	}
@@ -1257,6 +1260,8 @@ index_type_from_str(const char *s, int len)
 		return oIndexUnique;
 	else if (!strncmp(s, "regular", len))
 		return oIndexRegular;
+	else if (!strncmp(s, "bridge", len))
+		return oIndexBridge;
 	else
 		return oIndexInvalid;
 }
