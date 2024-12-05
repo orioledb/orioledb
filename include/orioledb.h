@@ -88,9 +88,10 @@ typedef enum
 {
 	oIndexInvalid = 0,
 	oIndexToast = 1,
-	oIndexPrimary = 2,
-	oIndexUnique = 3,
-	oIndexRegular = 4
+	oIndexBridge = 2,
+	oIndexPrimary = 3,
+	oIndexUnique = 4,
+	oIndexRegular = 5,
 } OIndexType;
 
 #define PROC_XID_ARRAY_SIZE	32
