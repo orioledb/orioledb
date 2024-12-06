@@ -7,7 +7,7 @@ on:
 jobs:
   check:
     runs-on:
-      - ubuntu-22.04
+      - ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -16,7 +16,7 @@ jobs:
         check_type:
           [normal, debug, alignment, check_page, valgrind_1, valgrind_2]
     env:
-      LLVM_VER: 12
+      LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
       CHECK_TYPE: ${{ matrix.check_type }}
       COMPILER: ${{ matrix.compiler }}
