@@ -14,7 +14,7 @@ jobs:
         pg_version: [16, 17]
         compiler: [clang, gcc]
     env:
-      LLVM_VER: 12
+      LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
       CHECK_TYPE: static
       COMPILER: ${{ matrix.compiler }}

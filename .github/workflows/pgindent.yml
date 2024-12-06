@@ -13,7 +13,7 @@ jobs:
       matrix:
         pg_version: [17]
     env:
-      LLVM_VER: 12
+      LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
       CHECK_TYPE: pgindent
       COMPILER: gcc
