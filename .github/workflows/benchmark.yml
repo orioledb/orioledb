@@ -4,21 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       instance_type:
-        description: 'EC2 Instance Type'
+        description: "EC2 Instance Type"
         required: true
-        default: 'c5d.metal'
+        default: "c5d.metal"
       pg_version:
-        description: 'PostgreSQL version'
+        description: "PostgreSQL version"
         required: true
-        default: '16'
+        default: "16"
       compiler:
-        description: 'Compiler'
+        description: "Compiler"
         required: true
-        default: 'clang'
+        default: "clang"
       args:
-        description: 'Benchmark script args'
+        description: "Benchmark script args"
         required: true
-        default: '--shared_buffers=32GB --max_wal_size=4GB --clients=160,180,200,220,240 --max_connections=300 --time=60 --engines=orioledb,builtin --tests=read-only-9,read-write-proc --scale=1000 --base_dir=/mnt'
+        default: "--shared_buffers=32GB --max_wal_size=4GB --clients=160,180,200,220,240 --max_connections=300 --time=60 --engines=orioledb,builtin --tests=read-only-9,read-write-proc --scale=1000 --base_dir=/mnt"
 jobs:
   start-runner:
     name: Start self-hosted EC2 runner
@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
     env:
-      LLVM_VER: 12
+      LLVM_VER: 18
       CHECK_TYPE: debug
       COMPILER: ${{ github.event.inputs.compiler }}
     steps:
