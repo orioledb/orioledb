@@ -653,7 +653,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	int			o_table_size = 0;
 	Pointer		o_table_serialized;
 	int			old_o_table_size = 0;
-	Pointer		old_o_table_serialized;
+	Pointer		old_o_table_serialized = NULL;
 	int			i;
 	int			nindices = buildstate->spool->descr->nIndices;
 	bool		in_recovery = is_recovery_in_progress();
@@ -734,6 +734,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		memmove(&btshared->o_table_serialized, o_table_serialized, o_table_size);
 		if (buildstate->isrebuild)
 		{
+			Assert(old_o_table_serialized);
 			memmove(((Pointer) &btshared->o_table_serialized) + o_table_size,
 					old_o_table_serialized, old_o_table_size);
 			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * (nindices + 1));
