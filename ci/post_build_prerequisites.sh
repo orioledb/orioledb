@@ -2,7 +2,9 @@
 
 set -eu
 
-export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
+python3 -m venv $GITHUB_WORKSPACE/python3-venv
+
+export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PATH"
 
 # psycopg2 depends on existing postgres installation
 if [ $GITHUB_JOB = "run-benchmark" ]; then
