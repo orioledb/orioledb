@@ -441,10 +441,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			}
 			reindex = ix_num != InvalidIndexNumber &&
 				ix_num < o_table->nindices;
-		}
 
-		if (reindex)
-		{
 			o_index_drop(heap, ix_num);
 
 			if (ix_type == oIndexPrimary)
@@ -461,9 +458,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 				o_table = old_o_table;
 				reindex = false;
 			}
+			is_build = true;
+			table_index = &o_table->indices[ix_num];
 		}
-
-		if (!reindex)
+		else
 		{
 			ORelOids	primary_oids;
 
@@ -514,11 +512,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 				table_index->compress = o_table->primary_compress;
 			else
 				table_index->compress = o_table->default_compress;
-		}
-		else
-		{
-			is_build = true;
-			table_index = &o_table->indices[ix_num];
 		}
 	}
 	else
@@ -639,7 +632,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 static void
 _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int request)
 {
-	ParallelContext *pcxt;
+	ParallelContext *pcxt = NULL;
 	int			scantuplesortstates;
 	Size		estbtshared;
 	Size		estsort = 0;
@@ -653,7 +646,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	int			o_table_size = 0;
 	Pointer		o_table_serialized;
 	int			old_o_table_size = 0;
-	Pointer		old_o_table_serialized;
+	Pointer		old_o_table_serialized = NULL;
 	int			i;
 	int			nindices = buildstate->spool->descr->nIndices;
 	bool		in_recovery = is_recovery_in_progress();
@@ -734,6 +727,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		memmove(&btshared->o_table_serialized, o_table_serialized, o_table_size);
 		if (buildstate->isrebuild)
 		{
+			Assert(old_o_table_serialized);
 			memmove(((Pointer) &btshared->o_table_serialized) + o_table_size,
 					old_o_table_serialized, old_o_table_size);
 			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * (nindices + 1));
@@ -808,6 +802,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 
 	if (!in_recovery)
 	{
+		Assert(pcxt);
 		shm_toc_insert(pcxt->toc, PARALLEL_KEY_BTREE_SHARED, btshared);
 
 		/*

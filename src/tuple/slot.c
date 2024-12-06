@@ -1593,8 +1593,8 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 	for (i = 0; i < descr->ntoastable; i++)
 	{
 		int			toast_attn;
-		Datum		oldValue,
-					newValue;
+		Datum		oldValue = 0,
+					newValue = 0;
 		bool		newToast = false,
 					oldToast = false;
 		bool		insertNew = false;

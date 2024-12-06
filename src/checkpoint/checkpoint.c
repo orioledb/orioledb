@@ -475,7 +475,6 @@ perform_writeback_and_relock(BTreeDescr *desc,
 	ORelOids	treeOids = desc->oids;
 	OIndexType	type = desc->type;
 	OIndexDescr *indexDescr;
-	Jsonb	   *params;
 
 	if (!IS_SYS_TREE_OIDS(treeOids))
 	{
@@ -483,9 +482,12 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 
 		if (STOPEVENTS_ENABLED())
-			params = prepare_checkpoint_step_params(desc, state,
+		{
+			Jsonb	   *params = prepare_checkpoint_step_params(desc, state,
 													message, level);
-		STOPEVENT(STOPEVENT_CHECKPOINT_WRITEBACK, params);
+
+			STOPEVENT(STOPEVENT_CHECKPOINT_WRITEBACK, params);
+		}
 
 		perform_writeback(desc, writeback);
 
@@ -3170,7 +3172,6 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 	OInMemoryBlkno blkno = descr->rootInfo.rootPageBlkno;
 	uint32		page_chage_count = InvalidOPageChangeCount;
 	uint		blcksz = OCompressIsValid(descr->compress) ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
-	Jsonb	   *params;
 	uint32		chkpNum = checkpoint_state->lastCheckpointNumber + 1;
 
 	memset(&message, 0, sizeof(WalkMessage));
@@ -3205,9 +3206,11 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 		MemoryContextReset(tmp_context);
 
 		if (STOPEVENTS_ENABLED())
-			params = prepare_checkpoint_step_params(descr, state,
+		{
+			Jsonb	   *params = prepare_checkpoint_step_params(descr, state,
 													&message, level);
-		STOPEVENT(STOPEVENT_CHECKPOINT_STEP, params);
+			STOPEVENT(STOPEVENT_CHECKPOINT_STEP, params);
+		}
 
 		if (message.action == WalkDownwards &&
 			level >= 4 &&
@@ -4620,7 +4623,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	uint32		chkpNum = (checkpoint_state->lastCheckpointNumber + 1);
 	int			cur_chkp_index = chkpNum % 2;
 	MemoryContext prev_context;
-	Jsonb	   *params;
 
 	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 
@@ -4632,8 +4634,11 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	}
 
 	if (STOPEVENTS_ENABLED())
-		params = prepare_checkpoint_table_start_params(tableOids, treeOids);
-	STOPEVENT(STOPEVENT_CHECKPOINT_TABLE_START, params);
+	{
+		Jsonb	   *params = prepare_checkpoint_table_start_params(tableOids, treeOids);
+
+		STOPEVENT(STOPEVENT_CHECKPOINT_TABLE_START, params);
+	}
 
 	descr = o_fetch_index_descr(treeOids, type, true, NULL);
 	if (descr != NULL && o_btree_load_shmem_checkpoint(&descr->desc))
@@ -4659,8 +4664,11 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 		if (STOPEVENTS_ENABLED())
-			params = prepare_checkpoint_tree_start_params(td);
-		STOPEVENT(STOPEVENT_CHECKPOINT_INDEX_START, params);
+		{
+			Jsonb      *params = prepare_checkpoint_tree_start_params(td);
+
+			STOPEVENT(STOPEVENT_CHECKPOINT_INDEX_START, params);
+		}
 
 		checkpoint_ix_init_state(checkpoint_state, td);
 		checkpoint_init_new_seq_bufs(td, chkpNum);
