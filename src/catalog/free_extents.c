@@ -71,13 +71,13 @@ FileExtent
 get_extent(BTreeDescr *desc, uint16 len)
 {
 	BTreeMetaPage *metaPage = BTREE_GET_META(desc);
-	BTreeLeafTuphdr *header;
+	BTreeLeafTuphdr *header = NULL;
 	FreeTreeTuple tup,
 				deleted_tup,
-			   *cur_tup;
+			   *cur_tup = NULL;
 	FileExtent	result;
 	OBTreeFindPageContext context;
-	Page		p;
+	Page		p = NULL;
 	bool		old_enable_stopevents;
 	bool		found = false,
 				end = false,

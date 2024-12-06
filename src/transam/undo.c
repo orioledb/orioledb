@@ -257,11 +257,11 @@ update_min_undo_locations(UndoLogType undoType,
 				minRetainLocation,
 				minTransactionRetainLocation,
 				lastUsedLocation;
-	UndoLocation oldCleanedLocation,
-				oldCheckpointStartLocation,
-				oldCheckpointEndLocation,
-				newCheckpointStartLocation,
-				newCheckpointEndLocation;
+	UndoLocation oldCleanedLocation = InvalidUndoLocation,
+				oldCheckpointStartLocation = InvalidUndoLocation,
+				oldCheckpointEndLocation = InvalidUndoLocation,
+				newCheckpointStartLocation = InvalidUndoLocation,
+				newCheckpointEndLocation = InvalidUndoLocation;
 	int			i;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 
