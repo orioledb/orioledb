@@ -1,11 +1,29 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 ]
-ARG ALPINE_VERSION=3.20
-FROM alpine:${ALPINE_VERSION}
+# Base image configuration
+# BASE_IMAGE=alpine
+# BASE_VERSION= [ edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13]
+# New recommended way:
+#   docker build --build-arg BASE_IMAGE=alpine --build-arg BASE_VERSION=3.20 -t orioletest:alpine-3.20 .
+ARG BASE_IMAGE=alpine
+ARG BASE_VERSION=3.20
 
+# Legacy support (deprecated, will be removed):
+#   docker build --build-arg ALPINE_VERSION=3.20 -t orioletest:ubuntu-noble .
 ARG ALPINE_VERSION
+# If ALPINE_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
+ARG BASE_IMAGE=${ALPINE_VERSION:+alpine}
+ARG BASE_VERSION=${ALPINE_VERSION:+${ALPINE_VERSION}}
+
+FROM ${BASE_IMAGE}:${BASE_VERSION}
+
+# Re-declare ARGs after FROM for use in subsequent instructions
+ARG BASE_IMAGE
+ARG BASE_VERSION
+
+# Record build information
+ENV BUILD_OS="${BASE_IMAGE}:${BASE_VERSION}"
 
 # Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=17
@@ -62,7 +80,7 @@ RUN set -eux; \
 	# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
 		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
-		*) : ;; \
+		*) echo "Unsupported Alpine version: $ALPINE_VERSION" && exit 1 ;; \
 	esac ; \
 	\
 	echo "PG_MAJOR=$PG_MAJOR" ; \
@@ -185,7 +203,7 @@ RUN set -eux; \
 		--with-zstd \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} alpine:${ALPINE_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BUILD_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	# install postgresql

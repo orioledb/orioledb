@@ -196,21 +196,30 @@ endif
 
 PG_REGRESS_ARGS=--no-locale
 
-regresscheck: | install
+# Control installation dependency and wrapper based on NO_INSTALL
+# in the docker environment, we don't need to install the extension
+ifdef NO_INSTALL
+INSTALL_DEP =
+TEMP_INSTALL_WRAPPER =
+else
+INSTALL_DEP = | install
+TEMP_INSTALL_WRAPPER = $(with_temp_install)
+endif
+
+regresscheck: $(INSTALL_DEP)
 	$(pg_regress_check) \
 		--temp-config orioledb_regression.conf \
 		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
-isolationcheck: | install
+isolationcheck: $(INSTALL_DEP)
 	$(pg_isolation_regress_check) \
 		--temp-config orioledb_isolation.conf \
 		$(PG_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
-	$(with_temp_install) \
-	python3 -W ignore::DeprecationWarning -m unittest -v $@
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): $(INSTALL_DEP)
+	$(TEMP_INSTALL_WRAPPER) python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 installcheck: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
@@ -314,6 +323,21 @@ yapf:
 	yapf -i t/*.py
 	yapf -i *.py
 
+show-build-env:
+	@echo "Build Environment Information:"
+	@echo "----------------------------"
+	@echo "Operating System:"
+	@cat /etc/os-release 2>/dev/null || uname -a
+	@echo "\nPostgreSQL Configuration:"
+	@pg_config || echo "pg_config not found"
+	@echo "\nPython Version:"
+	@python3 --version
+	@echo "\nPython Packages:"
+	@pip3 list
+	@echo "\nZstd Version:"
+	@zstd --version
+
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck pgindent \
+	show-build-env \
 	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2)
