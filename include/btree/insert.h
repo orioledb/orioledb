@@ -20,7 +20,7 @@ extern void o_btree_split_fix_and_unlock(BTreeDescr *descr,
 										 OInMemoryBlkno left_blkno);
 extern void o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 										 OTuple tuple, LocationIndex tuplen,
-										 BTreeLeafTuphdr *leaf_header,
+										 BTreeLeafTuphdr *tupheader,
 										 bool replace,
 										 int reserve_kind);
 extern bool o_btree_split_is_incomplete(OInMemoryBlkno left_blkno,
