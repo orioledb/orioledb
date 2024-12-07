@@ -15,13 +15,13 @@ declare -A base_lists
 base_lists[all-oldest]="ubuntu:20.04 alpine:3.13 debian:bullseye"
 base_lists[all-latest]="ubuntu:latest alpine:latest debian:latest"
 base_lists[all-dev]="ubuntu:devel alpine:edge debian:testing"
-base_lists[all-alpine]="alpine:edge alpine:3.20 alpine:3.19 alpine:3.18 alpine:3.17 alpine:3.16 alpine:3.15 alpine:3.14 alpine:3.13"
+base_lists[all-alpine]="alpine:edge alpine:3.21 alpine:3.20 alpine:3.19 alpine:3.18 alpine:3.17 alpine:3.16 alpine:3.15 alpine:3.14 alpine:3.13"
 base_lists[all-ubuntu]="ubuntu:devel ubuntu:24.10 ubuntu:24.04 ubuntu:22.04 ubuntu:20.04"
 base_lists[all-debian]="debian:experimental debian:unstable debian:testing debian:bookworm debian:bullseye"
 base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-ubuntu]} ${base_lists[all-debian]}"
 
 # Valid Alpine, Ubuntu, PG and Compiler versions
-VALID_ALPINE_VERSIONS="edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13 latest"
+VALID_ALPINE_VERSIONS="edge 3.21 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13 latest"
 VALID_UBUNTU_VERSIONS="devel 25.04 24.10 24.04 22.04 20.04 plucky oracular noble jammy focal latest rolling"
 VALID_DEBIAN_VERSIONS="unstable testing experimental bookworm bookworm-backports bookworm-slim bullseye bullseye-backports bullseye-slim trixie trixie-backports trixie-slim sid 11 12 stable oldstable latest"
 VALID_PG_MAJOR_VERSIONS="17 16"
