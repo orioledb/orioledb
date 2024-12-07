@@ -3,14 +3,14 @@
 
 # Base image configuration
 # BASE_IMAGE=alpine
-# BASE_VERSION= [ edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13]
+# BASE_VERSION= [ edge 3.21 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13]
 # New recommended way:
-#   docker build --build-arg BASE_IMAGE=alpine --build-arg BASE_VERSION=3.20 -t orioletest:alpine-3.20 .
+#   docker build --build-arg BASE_IMAGE=alpine --build-arg BASE_VERSION=3.21 -t orioletest:alpine-3.21 .
 ARG BASE_IMAGE=alpine
-ARG BASE_VERSION=3.20
+ARG BASE_VERSION=3.21
 
 # Legacy support (deprecated, will be removed):
-#   docker build --build-arg ALPINE_VERSION=3.20 -t orioletest:ubuntu-noble .
+#   docker build --build-arg ALPINE_VERSION=3.21 -t orioletest:ubuntu-noble .
 ARG ALPINE_VERSION
 # If ALPINE_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
 ARG BASE_IMAGE=${ALPINE_VERSION:+alpine}
@@ -79,7 +79,7 @@ RUN set -eux; \
 	# https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
 	# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
 	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
+		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21 | 3.22* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
 		*) echo "Unsupported Alpine version: $ALPINE_VERSION" && exit 1 ;; \
 	esac ; \
 	\

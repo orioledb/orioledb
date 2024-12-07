@@ -10,6 +10,7 @@ pg_major_list=( 16 17)
 compiler_list=( clang gcc )
 base_list=(
    # alpine versions
+   alpine:3.21
    alpine:3.20
    alpine:3.19
    alpine:3.18
@@ -17,6 +18,10 @@ base_list=(
    alpine:3.16
    alpine:3.15
    alpine:3.14
+
+   # debian versions
+   debian:bullseye
+   debian:bookworm
 
    # ubuntu versions
    ubuntu:24.10
@@ -26,6 +31,7 @@ base_list=(
 
    # developer versions
    alpine:edge
+   debian:testing
    ubuntu:devel
   )
 

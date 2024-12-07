@@ -1,7 +1,8 @@
-name: dockerTEST
+name: docker-nightly
 #
 # This CI workflow performs automated Docker image building and testing for OrioleDB
-# across multiple PostgreSQL versions and distributions.
+# across multiple PostgreSQL versions and distributions,
+# and creating orioledb-nightly docker images.
 #
 # Test Phases:
 # -----------
@@ -9,11 +10,11 @@ name: dockerTEST
 #    - old calling style with ALPINE_VERSION and UBUNTU_VERSION
 #    - new calling style:  BASE_IMAGE, BASE_VERSION ( debian )
 # 2. Official Docker Postgres library compatibility testing
-# 3. OrioleDB-specific test suite execution
+# 3. OrioleDB-specific test suite execution ( make <check_targets> )
 # 4. Docker image push to the registry ( docker.io , ghcr.io )
 #
+
 # TODO: remove the old calling style and use the new calling style for all distributions
-#
 
 on:
   push:
@@ -25,7 +26,7 @@ defaults:
 
 env:
   MAIN_BRANCH: refs/heads/main  # Set to the main branch name for docker push
-  DOCKER_IMAGE: orioletest  # Change this to your preferred image name
+  DOCKER_IMAGE: orioledb-nightly  # Change this to your preferred image name
   GITHUB_REGISTRY: ghcr.io/${{ secrets.GHCR_USERNAME  || 'orioledb'  }}   # Change this to your preferred docker registry path
   DOCKER_REGISTRY: docker.io/${{ secrets.DOCKERHUB_USERNAME  || 'orioledb' }} # Change this to your preferred github registry path
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -45,8 +46,8 @@ jobs:
           # clang-ubuntu-focal ( 20.04 )  We don't run testgrescheck; python 3.8 is too old
           - { compiler: "clang", distr: "ubuntu", distr-version: "focal",
               test_targets: "regresscheck isolationcheck" }
-          # clang-alpine-3.20
-          - { compiler: "clang", distr: "alpine", distr-version: "3.20",
+          # clang-alpine-3.21
+          - { compiler: "clang", distr: "alpine", distr-version: "3.21",
               test_targets: "regresscheck isolationcheck testgrescheck"}
           # clang-ubuntu-noble
           - { compiler: "clang", distr: "ubuntu", distr-version: "noble",
@@ -57,9 +58,9 @@ jobs:
 
         # extra test cases
         include:
-          # 17-gcc-alpine-3.20
+          # 17-gcc-alpine-3.21
           - postgres: 17
-            os: { compiler: "gcc", distr: "alpine", distr-version: "3.20",
+            os: { compiler: "gcc", distr: "alpine", distr-version: "3.21",
                   test_targets: "regresscheck isolationcheck testgrescheck" }
           # 17-gcc-ubuntu-noble
           - postgres: 17
@@ -107,6 +108,15 @@ jobs:
         run: |
           echo "DOCKER_TAG=${{ env.DOCKER_TAG }}"
 
+      - name: Extract metadata labels for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+             "${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}"
+             "${{ env.GITHUB_REGISTRY }}/${{ env.DOCKER_IMAGE }}"
+          tags: ${{ env.DOCKER_TAG }}
+
       # old calling style with ALPINE_VERSION and UBUNTU_VERSION
       - name: oldstyle docker build
         if: matrix.os.distr != 'debian'
@@ -118,9 +128,11 @@ jobs:
           platforms: linux/amd64
           push: false
           pull: true
+          load: true
           tags: |
              "${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
              "${{ env.GITHUB_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
+          labels: ${{ steps.meta.outputs.labels }}
           # for alpine+ubuntu: using the old calling style ( deprecated )
           build-args: |
             ALPINE_VERSION=${{ matrix.os.distr == 'alpine' && matrix.os.distr-version || '' }}
@@ -141,9 +153,11 @@ jobs:
           platforms: linux/amd64
           push: false
           pull: true
+          load: true
           tags: |
              "${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
              "${{ env.GITHUB_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
+          labels: ${{ steps.meta.outputs.labels }}
           # for debian: testing the new calling style
           build-args: |
             BASE_IMAGE=${{ matrix.os.distr }}

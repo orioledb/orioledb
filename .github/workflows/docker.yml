@@ -10,6 +10,10 @@ on:
         required: false
         default: ""
 
+env:
+  # fork friendly: use your own dockerhub username
+  DOCKER_IMAGE: "${{ secrets.DOCKERHUB_USERNAME || 'orioledb' }}/orioledb"
+
 jobs:
   push_to_registry:
     strategy:
@@ -19,9 +23,11 @@ jobs:
         compiler: [clang]
         distr: [alpine, ubuntu]
         include:
-          - distr-version: 3.19
+          - distr-version: "3.21"
+            test_targets: "regresscheck isolationcheck testgrescheck"
             distr: alpine
-          - distr-version: focal
+          - distr-version: "focal"
+            test_targets: "regresscheck isolationcheck"
             distr: ubuntu
 
     name: Push Docker image to Docker Hub
@@ -31,35 +37,90 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
-          images: orioledb/orioledb
+          images: ${{ env.DOCKER_IMAGE }}
           tags: ${{ github.event.inputs.tags }}
           flavor: |
             latest=auto
             prefix=
             suffix=${{ contains(github.ref, 's3') && '-s3' || '' }}-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+# ----------------------
+# Build linux/amd64 for testing ( no push )
+# adapted from  https://docs.docker.com/build/ci/github-actions/test-before-push/
+# ----------------------
+      - name: Build orioledb-amd64 for testing (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
+          platforms: linux/amd64
+          push: false
+          pull: true
+          load: true
+          tags: |
+            "orioledb-amd64:latest"
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
+            PG_MAJOR=${{ matrix.postgres }}
+            BUILD_CC_COMPILER=${{ matrix.compiler }}
+            DOCKER_PG_LLVM_DEPS=llvm-dev clang
+            DEBUG_MODE=false
+
+# ----------------------
+# test linux/amd64 docker image
+# ----------------------
+      # docker image testing with https://github.com/docker-library/official-images.git
+      # to check if the image is compatible with the official-images test suite
+      # the special orioledb test config is in the ./test/tests/orioledb-config.sh
+      # Read more: ./test/README.md
+      - name: Run Docker-official-postgres tests + minimal orioledb test
+        run: |
+          OFFIMG_LOCAL_CLONE=./log_docker_build/official-images
+          OFFIMG_REPO_URL=https://github.com/docker-library/official-images.git
+          mkdir -p "$OFFIMG_LOCAL_CLONE"
+          git clone --depth=1 --branch=master "$OFFIMG_REPO_URL" "$OFFIMG_LOCAL_CLONE"
+          "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
+              -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
+              -c "test/orioledb-config.sh" \
+              orioledb-amd64:latest
+
+      # run some make <check_targets> in the docker image
+      - name: "Run test_targets: ${{ matrix.test_targets }}"
+        run: |
+          docker run --rm \
+            --volume $(pwd):/github/workspace/orioledb \
+            orioledb-amd64:latest \
+            bash -c 'bash +x /github/workspace/orioledb/ci/check_docker.sh "${{ matrix.test_targets }}"'
+
+# ----------------------
+# final build and push
+# - linux/amd64 should build from docker cache ( orioledb-amd64 )
+# ----------------------
+      - name: Build and push Docker image ( linux/amd64,linux/arm64 )
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.distr == 'ubuntu' && './docker/Dockerfile.ubuntu' || './docker/Dockerfile' }}
           platforms: linux/amd64,linux/arm64
           push: true
+          pull: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -68,3 +129,7 @@ jobs:
             PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
             DOCKER_PG_LLVM_DEPS=llvm-dev clang
+            DEBUG_MODE=false
+
+      - name: List docker images ( debug)
+        run: docker images -a
