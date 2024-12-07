@@ -21,15 +21,13 @@ ARG UBUNTU_VERSION
 # If UBUNTU_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
 ARG BASE_IMAGE=${UBUNTU_VERSION:+ubuntu}
 ARG BASE_VERSION=${UBUNTU_VERSION:+${UBUNTU_VERSION}}
+ARG BUILD_OS=${BASE_IMAGE:-ubuntu}:${BASE_VERSION:-noble}
 
-FROM ${BASE_IMAGE}:${BASE_VERSION}
-
+FROM ${BUILD_OS}
 # Re-declare ARGs after FROM for use in subsequent instructions
-ARG BASE_IMAGE
-ARG BASE_VERSION
-
+ARG BUILD_OS
 # Record build information
-ENV BUILD_OS="${BASE_IMAGE}:${BASE_VERSION}"
+ENV BUILD_OS="${BUILD_OS}"
 
 # Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=17
