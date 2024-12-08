@@ -49,14 +49,26 @@ EXPLAIN (COSTS OFF)
 	SELECT j FROM o_test_ix_ams ORDER BY j;
 SELECT j FROM o_test_ix_ams ORDER BY j;
 COMMIT;
-\q
 
-SELECT orioledb_sys_tree_structure(2);
-SELECT orioledb_sys_tree_structure(3);
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 ALTER TABLE o_test_ix_ams ADD PRIMARY KEY (pk2, pk1);
-\q
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+SELECT * FROM o_test_ix_ams;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+\q
 
 -- CREATE INDEX o_test_ix_ams_ix2 ON o_test_ix_ams USING hash (j);
 -- CREATE INDEX o_test_ix_ams_ix3 ON o_test_ix_ams USING gin (j);

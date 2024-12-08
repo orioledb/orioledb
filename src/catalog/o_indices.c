@@ -179,7 +179,7 @@ make_ctid_o_index(OTable *table)
 {
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i;
-	int			ctid_off = 0;
+	int			nadded = 0;
 
 	Assert(!table->has_primary);
 	result->indexOids = table->oids;
@@ -198,27 +198,23 @@ make_ctid_o_index(OTable *table)
 	result->nKeyFields = 1;
 	result->nUniqueFields = 1;
 
-	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
-												 result->nLeafFields);
-	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
-														 result->nNonLeafFields);
+	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
+	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
-	make_builtin_field(&result->leafFields[0], &result->nonLeafFields[0],
+	make_builtin_field(&result->leafTableFields[nadded++], &result->leafFields[0],
 					   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 					   table->tid_btree_ops_oid);
-	ctid_off++;
+
+	for (i = 0; i < table->nfields; i++)
+		result->leafTableFields[nadded++] = table->fields[i];
 
 	if (table->index_bridging)
 	{
 		result->bridging = true;
-		make_builtin_field(&result->leafFields[1], NULL,
+		make_builtin_field(&result->leafTableFields[nadded++], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
-		ctid_off++;
 	}
-
-	for (i = 0; i < table->nfields; i++)
-		result->leafFields[i + ctid_off] = table->fields[i];
 
 	return result;
 }
@@ -231,8 +227,8 @@ find_existing_field(OIndex *index, int maxIndex, OTableIndexField *field)
 	for (i = 0; i < maxIndex; i++)
 	{
 		if (field->attnum != EXPR_ATTNUM &&
-			field->attnum == index->nonLeafFields[i].attnum &&
-			field->opclass == index->nonLeafFields[i].opclass)
+			field->attnum == index->leafFields[i].attnum &&
+			field->opclass == index->leafFields[i].opclass)
 		{
 			return i;
 		}
@@ -247,7 +243,8 @@ make_primary_o_index(OTable *table)
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i,
 				j;
-	int			ctid_off = 0;
+	int			saved_nLeafFields;
+	int			nadded = 0;
 
 	Assert(table->has_primary && table->nindices >= 1);
 	tableIndex = &table->indices[0];
@@ -263,28 +260,27 @@ make_primary_o_index(OTable *table)
 		result->compress = tableIndex->compress;
 	else
 		result->compress = table->primary_compress;
+	saved_nLeafFields = table->nfields;
 	result->nLeafFields = table->nfields;
+	if (table->index_bridging)
+		result->nLeafFields++;
 	result->nNonLeafFields = tableIndex->nfields;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nPrimaryFields = 0;
 	result->nKeyFields = tableIndex->nkeyfields;
 
-	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
-												 (result->nLeafFields +
-												 	(table->index_bridging ? 1 : 0)));
-	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
-														 result->nNonLeafFields);
+	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
+	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
+
+	for (i = 0; i < saved_nLeafFields; i++)
+		result->leafTableFields[nadded++] = table->fields[i];
 	if (table->index_bridging)
 	{
 		result->bridging = true;
-		make_builtin_field(&result->leafFields[0], NULL,
+		make_builtin_field(&result->leafTableFields[nadded++], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
-		ctid_off++;
 	}
-
-	for (i = 0; i < result->nLeafFields; i++)
-		result->leafFields[i + ctid_off] = table->fields[i];
 
 	j = 0;
 	for (i = 0; i < result->nNonLeafFields; i++)
@@ -298,7 +294,7 @@ make_primary_o_index(OTable *table)
 			continue;
 		}
 
-		result->nonLeafFields[j++] = tableIndex->fields[i];
+		result->leafFields[j++] = tableIndex->fields[i];
 	}
 	Assert(j <= result->nNonLeafFields);
 	result->nUniqueFields = result->nKeyFields;
@@ -308,8 +304,7 @@ make_primary_o_index(OTable *table)
 }
 
 static void
-add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nadded, bool fillPrimary,
-				 bool fillOnlyLeaf)
+add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nadded, bool fillPrimary)
 {
 	int			i;
 	int			expr_field = 0;
@@ -349,12 +344,11 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 			}
 
 			if (attnum != EXPR_ATTNUM)
-				index->leafFields[*nadded] = table->fields[attnum];
+				index->leafTableFields[*nadded] = table->fields[attnum];
 			else
-				index->leafFields[*nadded] = tableIndex->exprfields[expr_field++];
-			Assert(index->leafFields[*nadded].typid);
-			if (!fillOnlyLeaf)
-				index->nonLeafFields[*nadded] = tableIndex->fields[i];
+				index->leafTableFields[*nadded] = tableIndex->exprfields[expr_field++];
+			Assert(index->leafTableFields[*nadded].typid);
+			index->leafFields[*nadded] = tableIndex->fields[i];
 			if (fillPrimary)
 				index->primaryFieldsAttnums[index->nPrimaryFields++] = *nadded + 1;
 			(*nadded)++;
@@ -362,8 +356,7 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 	}
 	else
 	{
-		OTableIndexField *nonLeafField = fillOnlyLeaf ? NULL : &index->nonLeafFields[*nadded];
-		make_builtin_field(&index->leafFields[*nadded], nonLeafField,
+		make_builtin_field(&index->leafTableFields[*nadded], &index->leafFields[*nadded],
 						   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 						   table->tid_btree_ops_oid);
 		if (fillPrimary)
@@ -403,10 +396,8 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	else
 		result->nLeafFields++;
 	result->nNonLeafFields = result->nLeafFields;
-	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
-												 result->nLeafFields);
-	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
-														 result->nNonLeafFields);
+	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
+	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 	result->nKeyFields = tableIndex->nkeyfields;
 
 	nadded = 0;
@@ -416,21 +407,21 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	if (result->predicate)
 		result->predicate_str = pstrdup(tableIndex->predicate_str);
 	result->expressions = list_copy_deep(tableIndex->expressions);
-	add_index_fields(result, table, tableIndex, &nadded, false, false);
+	add_index_fields(result, table, tableIndex, &nadded, false);
 	if (tableIndex->nfields == tableIndex->nkeyfields)
 		result->nKeyFields = nadded;
 	Assert(nadded <= tableIndex->nfields);
 	if (table->index_bridging)
 	{
 		result->bridging = true;
-		make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
+		make_builtin_field(&result->leafTableFields[nadded], &result->leafFields[nadded],
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
 		result->primaryFieldsAttnums[result->nPrimaryFields++] = nadded + 1;
 		nadded++;
 	}
 	else
-		add_index_fields(result, table, primary, &nadded, true, false);
+		add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded <= result->nLeafFields);
 	MemoryContextSwitchTo(old_mcxt);
 	result->nLeafFields = nadded;
@@ -481,25 +472,23 @@ make_toast_o_index(OTable *table)
 	result->nLeafFields += TOAST_LEAF_FIELDS_NUM;
 	result->nNonLeafFields += TOAST_NON_LEAF_FIELDS_NUM;
 
-	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
-												 result->nLeafFields);
-	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
-														 result->nNonLeafFields);
+	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
+	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
 	nadded = 0;
-	add_index_fields(result, table, primary, &nadded, true, false);
-	make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
+	add_index_fields(result, table, primary, &nadded, true);
+	make_builtin_field(&result->leafTableFields[nadded], &result->leafFields[nadded],
 					   INT2OID, "attnum", FirstLowInvalidHeapAttributeNumber,
 					   INT2_BTREE_OPS_OID);
 	nadded++;
-	make_builtin_field(&result->leafFields[nadded], &result->nonLeafFields[nadded],
+	make_builtin_field(&result->leafTableFields[nadded], &result->leafFields[nadded],
 					   INT4OID, "chunknum", FirstLowInvalidHeapAttributeNumber,
 					   INT4_BTREE_OPS_OID);
 	nadded++;
 	Assert(nadded <= result->nNonLeafFields);
 	result->nUniqueFields = nadded;
 	result->nNonLeafFields = nadded;
-	make_builtin_field(&result->leafFields[nadded], NULL,
+	make_builtin_field(&result->leafTableFields[nadded], NULL,
 					   BYTEAOID, "data", FirstLowInvalidHeapAttributeNumber,
 					   InvalidOid);
 	nadded++;
@@ -537,17 +526,15 @@ make_bridge_o_index(OTable *table)
 	else
 		result->nLeafFields++;
 	result->nNonLeafFields = 1;
-	result->leafFields = (OTableField *) palloc0(sizeof(OTableField) *
-												 result->nLeafFields);
-	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
-														 result->nNonLeafFields);
+	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
+	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
 	nadded = 0;
-	make_builtin_field(&result->leafFields[0], &result->nonLeafFields[0],
+	make_builtin_field(&result->leafTableFields[0], &result->leafFields[0],
 					TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 					table->tid_btree_ops_oid);
 	nadded++;
-	add_index_fields(result, table, primary, &nadded, true, true);
+	add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded == result->nLeafFields);
 	result->nLeafFields = nadded;
 	result->nUniqueFields = nadded;
@@ -558,8 +545,8 @@ make_bridge_o_index(OTable *table)
 void
 free_o_index(OIndex *o_index)
 {
+	pfree(o_index->leafTableFields);
 	pfree(o_index->leafFields);
-	pfree(o_index->nonLeafFields);
 	if (o_index->index_mctx)
 	{
 		MemoryContextDelete(o_index->index_mctx);
@@ -638,10 +625,10 @@ serialize_o_index(OIndex *o_index, int *size)
 	appendBinaryStringInfo(&str,
 						   (Pointer) o_index + offsetof(OIndex, tableOids),
 						   offsetof(OIndex, leafFields) - offsetof(OIndex, tableOids));
+	appendBinaryStringInfo(&str, (Pointer) o_index->leafTableFields,
+						   o_index->nLeafFields * sizeof(o_index->leafTableFields[0]));
 	appendBinaryStringInfo(&str, (Pointer) o_index->leafFields,
 						   o_index->nLeafFields * sizeof(o_index->leafFields[0]));
-	appendBinaryStringInfo(&str, (Pointer) o_index->nonLeafFields,
-						   o_index->nNonLeafFields * sizeof(o_index->nonLeafFields[0]));
 	o_serialize_node((Node *) o_index->predicate, &str);
 	if (o_index->predicate)
 		o_serialize_string(o_index->predicate_str, &str);
@@ -671,15 +658,15 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	ptr += len;
 
 	len = oIndex->nLeafFields * sizeof(OTableField);
-	oIndex->leafFields = (OTableField *) palloc(len);
+	oIndex->leafTableFields = (OTableField *) palloc(len);
 	Assert((ptr - data) + len <= length);
-	memcpy(oIndex->leafFields, ptr, len);
+	memcpy(oIndex->leafTableFields, ptr, len);
 	ptr += len;
 
-	len = oIndex->nNonLeafFields * sizeof(OTableIndexField);
-	oIndex->nonLeafFields = (OTableIndexField *) palloc(len);
+	len = oIndex->nLeafFields * sizeof(OTableIndexField);
+	oIndex->leafFields = (OTableIndexField *) palloc(len);
 	Assert((ptr - data) + len <= length);
-	memcpy(oIndex->nonLeafFields, ptr, len);
+	memcpy(oIndex->leafFields, ptr, len);
 	ptr += len;
 
 	mcxt = OGetIndexContext(oIndex);
@@ -713,7 +700,7 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 	{
 		index = make_toast_o_index(table);
 	}
-	else if (ixNum == BridgeIndexNumber || (table->index_bridging && ixNum == 1))
+	else if (ixNum == BridgeIndexNumber)
 	{
 		index = make_bridge_o_index(table);
 	}
@@ -723,9 +710,6 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 		int ctid_off = 0;
 
 		if (primaryIsCtid)
-			ctid_off++;
-
-		if (table->index_bridging)
 			ctid_off++;
 
 		Assert(ixNum - ctid_off >= 0);
@@ -832,7 +816,7 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 		}
 		else
 		{
-			TupleDescCopyEntry(index_descr->itupdesc, i + 1, index_descr->nonLeafTupdesc, cur_attr + 1);
+			TupleDescCopyEntry(index_descr->itupdesc, i + 1, index_descr->leafTupdesc, cur_attr + 1);
 			cur_attr++;
 		}
 	}
@@ -857,7 +841,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	descr->refcnt = 0;
 	descr->valid = true;
 	namestrcpy(&descr->name, oIndex->name.data);
-	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafFields,
+	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafTableFields,
 													 oIndex->nLeafFields);
 
 	if (oIndex->indexType == oIndexPrimary)
@@ -886,7 +870,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		if (oIndex->primaryIsCtid)
 		{
 			Assert(oIndex->nNonLeafFields == 1);
-			Assert(oIndex->nonLeafFields[0].attnum == SelfItemPointerAttributeNumber);
+			Assert(oIndex->leafFields[0].attnum == SelfItemPointerAttributeNumber);
 			TupleDescCopyEntry(descr->nonLeafTupdesc, 1,
 							   descr->leafTupdesc, 1);
 		}
@@ -894,7 +878,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		{
 			for (i = 0; i < oIndex->nNonLeafFields; i++)
 			{
-				int			attnum = oIndex->nonLeafFields[i].attnum;
+				int			attnum = oIndex->leafFields[i].attnum;
 
 				Assert(attnum >= 0 && attnum < oIndex->nLeafFields);
 				TupleDescCopyEntry(descr->nonLeafTupdesc,
@@ -937,12 +921,12 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
-	for (i = 0; i < oIndex->nNonLeafFields; i++)
+	for (i = 0; i < oIndex->nLeafFields; i++)
 	{
 		OIndexField *field = &descr->fields[i];
-		OTableIndexField *iField = &oIndex->nonLeafFields[i];
+		OTableField *tField = &oIndex->leafTableFields[i];
+		OTableIndexField *iField = &oIndex->leafFields[i];
 		int			attnum = iField->attnum;
-		bool		add_opclass = false;
 
 		if (attnum == SelfItemPointerAttributeNumber)
 		{
@@ -961,6 +945,14 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 
 		field->tableAttnum = attnum;
 		maxTableAttnum = Max(maxTableAttnum, attnum);
+	}
+
+	for (i = 0; i < oIndex->nNonLeafFields; i++)
+	{
+		OIndexField *field = &descr->fields[i];
+		OTableIndexField *iField = &oIndex->leafFields[i];
+		bool		add_opclass = false;
+
 		field->collation = TupleDescAttr(descr->nonLeafTupdesc, i)->attcollation;
 		if (OidIsValid(iField->collation))
 			field->collation = iField->collation;
@@ -1327,7 +1319,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	max_collation_str = strlen(collation_str);
 	for (i = 0; i < index->nLeafFields; i++)
 	{
-		OTableField *field = &index->leafFields[i];
+		OTableField *field = &index->leafTableFields[i];
 		char	   *typename = o_get_type_name(field->typid, field->typmod);
 		char	   *colname = get_collation_name(field->collation);
 
@@ -1357,7 +1349,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 
 	for (i = 0; i < index->nLeafFields; i++)
 	{
-		OTableField *field = &index->leafFields[i];
+		OTableField *field = &index->leafTableFields[i];
 		char	   *typename = o_get_type_name(field->typid, field->typmod);
 		char	   *colname = get_collation_name(field->collation);
 
@@ -1372,7 +1364,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	appendStringInfo(&buf, "\nKey fields: (");
 	for (i = 0; i < index->nNonLeafFields; i++)
 	{
-		OTableIndexField *nonLeafField = &index->nonLeafFields[i];
+		OTableIndexField *nonLeafField = &index->leafFields[i];
 		OTableField *leafField;
 
 		if (type == oIndexPrimary)
@@ -1380,16 +1372,16 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 			if (nonLeafField->attnum == SelfItemPointerAttributeNumber)
 			{
 				Assert(index->primaryIsCtid);
-				leafField = &index->leafFields[0];
+				leafField = &index->leafTableFields[0];
 			}
 			if (index->primaryIsCtid)
-				leafField = &index->leafFields[nonLeafField->attnum + 1];
+				leafField = &index->leafTableFields[nonLeafField->attnum + 1];
 			else
-				leafField = &index->leafFields[nonLeafField->attnum];
+				leafField = &index->leafTableFields[nonLeafField->attnum];
 		}
 		else
 		{
-			leafField = &index->leafFields[i];
+			leafField = &index->leafTableFields[i];
 		}
 		if (i != 0)
 			appendStringInfo(&buf, ", ");
