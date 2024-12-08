@@ -680,6 +680,18 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	free_o_index(index);
 	descr->toast = indexDescr;
 
+	if (ORelOidsIsValid(o_table->bridge_oids))
+	{
+		index = make_o_index(o_table, BridgeIndexNumber);
+		indexDescr = palloc0(sizeof(OIndexDescr));
+		o_index_fill_descr(indexDescr, index, o_table);
+		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							  indexDescr->oids, index->indexType,
+							  index->table_persistence, index->createOxid, indexDescr);
+		free_o_index(index);
+		descr->bridge = indexDescr;
+	}
+
 	o_find_toastable_attrs(descr);
 	MemoryContextSwitchTo(old_context);
 }
@@ -1007,13 +1019,13 @@ static void
 o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 {
 	OIndexNumber cur_ix,
-				ix_off = 0;
+				 ctid_off = 0;
 
 	descr->nIndices = table->nindices;
 	if (!table->has_primary)
 	{
 		descr->nIndices++;
-		ix_off = 1;
+		ctid_off = 1;
 	}
 
 	descr->indices = (OIndexDescr **) palloc0(sizeof(OIndexDescr *) * descr->nIndices);
@@ -1029,8 +1041,8 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 		}
 		else
 		{
-			ixOids = table->indices[cur_ix - ix_off].oids;
-			ixType = table->indices[cur_ix - ix_off].type;
+			ixOids = table->indices[cur_ix - ctid_off].oids;
+			ixType = table->indices[cur_ix - ctid_off].type;
 		}
 
 		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false);
