@@ -820,18 +820,18 @@ o_table_make_index_keys(OTable *table, int *num)
 		keys[keys_num++].oids = table->oids;
 	}
 
-	if (ORelOidsIsValid(table->bridge_oids))
-	{
-		keys[keys_num].type = oIndexBridge;
-		keys[keys_num].ixNum = BridgeIndexNumber;
-		keys[keys_num++].oids = table->bridge_oids;
-	}
-
 	for (i = 0; i < table->nindices; i++)
 	{
 		keys[keys_num].type = table->indices[i].type;
 		keys[keys_num].ixNum = keys_num;
 		keys[keys_num++].oids = table->indices[i].oids;
+	}
+
+	if (ORelOidsIsValid(table->bridge_oids))
+	{
+		keys[keys_num].type = oIndexBridge;
+		keys[keys_num].ixNum = BridgeIndexNumber;
+		keys[keys_num++].oids = table->bridge_oids;
 	}
 
 	if (ORelOidsIsValid(table->toast_oids))

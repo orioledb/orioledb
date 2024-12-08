@@ -415,17 +415,16 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
  *		Determine size of the data area of a tuple to be constructed
  */
 static Size
-o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, ItemPointer bridge_iptr,
+o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, BrigeData *bridge_data,
 						  Datum *values, bool *isnull, char *to_toast,
 						  int natts)
 {
 	Size		data_length = 0;
+	bool		has_bridge_ctid = bridge_data && bridge_data->attnum != InvalidAttrNumber;
 	int			i,
 				ctid_off = 0;
 
 	if (iptr)
-		ctid_off++;
-	if (bridge_iptr)
 		ctid_off++;
 
 	for (i = 0; i < natts; i++)
@@ -437,9 +436,9 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, ItemPointer bri
 		{
 			val = PointerGetDatum(iptr);
 		}
-		else if (bridge_iptr && ((iptr && i == 1) || i == 0))
+		else if (has_bridge_ctid && i == bridge_data->attnum - 1)
 		{
-			val = PointerGetDatum(bridge_iptr);
+			val = PointerGetDatum(bridge_data->bridge_iptr);
 		}
 		else
 		{
@@ -489,7 +488,7 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, ItemPointer bri
 
 Size
 o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-				 ItemPointer iptr, ItemPointer bridge_iptr, uint32 version,
+				 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
 				 Datum *values, bool *isnull, char *to_toast)
 {
 	bool		hasnull = false;
@@ -502,8 +501,6 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	natts = tupleDesc->natts;
 
 	if (iptr)
-		ctid_off++;
-	if (bridge_iptr)
 		ctid_off++;
 
 	/*
@@ -535,7 +532,7 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 		natts = spec->natts;
 	}
 
-	result += o_tuple_compute_data_size(tupleDesc, iptr, bridge_iptr, values,
+	result += o_tuple_compute_data_size(tupleDesc, iptr, bridge_data, values,
 										isnull, to_toast, natts);
 
 	return result;
@@ -547,7 +544,7 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 void
 o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			 OTuple *tuple, Size tuple_size,
-			 ItemPointer iptr, ItemPointer bridge_iptr, uint32 version,
+			 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
 			 Datum *values, bool *isnull, char *to_toast)
 {
 	OTupleHeader tup = (OTupleHeader) tuple->data;
@@ -561,10 +558,9 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	bool		hasnull = false;
 	bool		fixedFormat = (version == 0);
 	Pointer		data;
+	bool		has_bridge_ctid = bridge_data && bridge_data->attnum != InvalidAttrNumber;
 
 	if (iptr)
-		ctid_off++;
-	if (bridge_iptr)
 		ctid_off++;
 
 	/*
@@ -631,11 +627,10 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			value = PointerGetDatum(iptr);
 			null = false;
 		}
-		else if (bridge_iptr && ((iptr && i == 1) || i == 0))
+		else if (has_bridge_ctid && i == bridge_data->attnum - 1)
 		{
-			/* This branch should be used only for pkey */
 			cur_to_toast = false;
-			value = PointerGetDatum(bridge_iptr);
+			value = PointerGetDatum(bridge_data->bridge_iptr);
 			null = false;
 		}
 		else
@@ -790,14 +785,14 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 OTuple
 o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			 uint32 version, Datum *values, bool *isnull,
-			 ItemPointer bridge_iptr)
+			 BrigeData *bridge_data)
 {
 	OTuple		result;
 	int			len;
 
-	len = o_new_tuple_size(tupleDesc, spec, NULL, bridge_iptr, version, values, isnull, NULL);
+	len = o_new_tuple_size(tupleDesc, spec, NULL, bridge_data, version, values, isnull, NULL);
 	result.data = (Pointer) palloc0(len);
-	o_tuple_fill(tupleDesc, spec, &result, len, NULL, bridge_iptr, version, values, isnull, NULL);
+	o_tuple_fill(tupleDesc, spec, &result, len, NULL, bridge_data, version, values, isnull, NULL);
 	return result;
 }
 

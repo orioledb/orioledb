@@ -46,6 +46,13 @@ typedef struct
 typedef OTupleHeaderData *OTupleHeader;
 #define SizeOfOTupleHeader MAXALIGN(sizeof(OTupleHeaderData))
 
+typedef struct BrigeData {
+	bool	is_pkey;
+	ItemPointer bridge_iptr;
+	// compared with InvalidAttrNumber, so should be greater than 0
+	AttrNumber attnum;
+} BrigeData;
+
 /*
  * Works with orioledb table tuples in primary index. It can fetch
  * TOAST pointers from table tuple.
@@ -187,15 +194,15 @@ extern Pointer o_toast_nocachegetattr_ptr(OTuple tuple, int attnum,
 										  OTupleFixedFormatSpec *spec);
 extern Pointer o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec);
 extern Size o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-							 ItemPointer iptr, ItemPointer bridge_iptr, uint32 version,
+							 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
 							 Datum *values, bool *isnull, char *to_toast);
 extern void o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						 OTuple *tuple, Size tuple_size,
-						 ItemPointer iptr, ItemPointer bridge_iptr, uint32 version,
+						 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
 						 Datum *values, bool *isnull, char *to_toast);
 extern OTuple o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						   uint32 version, Datum *values, bool *isnull,
-						   ItemPointer bridge_iptr);
+						   BrigeData *bridge_data);
 extern uint32 o_tuple_get_version(OTuple tuple);
 extern void o_tuple_set_version(OTupleFixedFormatSpec *spec, OTuple *tuple,
 								uint32 version);
