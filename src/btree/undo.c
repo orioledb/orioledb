@@ -982,7 +982,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				   bool *is_left, bool *is_right, OFixedKey *lokey,
 				   OFixedKey *page_lokey, OTuple *page_hikey)
 {
-	UndoPageImageHeader header = {UndoPageImageInvalid, 0 , 0};
+	UndoPageImageHeader header = {UndoPageImageInvalid, 0, 0};
 	int			cmp,
 				cmp_expected;
 	OTuple		hikey;

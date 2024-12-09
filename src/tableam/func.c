@@ -230,7 +230,7 @@ print_unloaded_tree(StringInfoData *buf, BTreeDescr *td, const char *treeName,
 		appendStringInfo(buf, "datoid = %d, relnode = %d, ",
 						 td->oids.datoid, td->oids.relnode);
 		if (DiskDownlinkIsValid(file_header.rootDownlink))
-			// cppcheck-suppress unknownMacro
+			/* cppcheck-suppress unknownMacro */
 			appendStringInfo(buf, "rootOffset = " UINT64_FORMAT ", %u",
 							 DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 							 DOWNLINK_GET_DISK_LEN(file_header.rootDownlink));

@@ -81,7 +81,7 @@ s3_check_control(const char **errmsgp, const char **errdetailp)
 		*errmsgp = psprintf("OrioleDB and the S3 bucket have files from "
 							"different instances and they are incompatible with "
 							"each other");
-		// cppcheck-suppress unknownMacro
+		/* cppcheck-suppress unknownMacro */
 		*errdetailp = psprintf("OrioleDB control identifier " UINT64_FORMAT
 							   " differs from the S3 bucket identifier " UINT64_FORMAT,
 							   control.controlIdentifier,

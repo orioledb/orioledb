@@ -484,7 +484,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		if (STOPEVENTS_ENABLED())
 		{
 			Jsonb	   *params = prepare_checkpoint_step_params(desc, state,
-													message, level);
+																message, level);
 
 			STOPEVENT(STOPEVENT_CHECKPOINT_WRITEBACK, params);
 		}
@@ -3208,7 +3208,8 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 		if (STOPEVENTS_ENABLED())
 		{
 			Jsonb	   *params = prepare_checkpoint_step_params(descr, state,
-													&message, level);
+																&message, level);
+
 			STOPEVENT(STOPEVENT_CHECKPOINT_STEP, params);
 		}
 
@@ -4665,7 +4666,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 		if (STOPEVENTS_ENABLED())
 		{
-			Jsonb      *params = prepare_checkpoint_tree_start_params(td);
+			Jsonb	   *params = prepare_checkpoint_tree_start_params(td);
 
 			STOPEVENT(STOPEVENT_CHECKPOINT_INDEX_START, params);
 		}
