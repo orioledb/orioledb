@@ -5,11 +5,12 @@ set -Eeo pipefail
 # run from project root: ./ci/local_docker_matrix.sh
 # and check the logs in ./log_docker_build/*.*.log
 
-# Full matrix of test builds 2x2x12 = 48 builds
+# Full matrix of test builds 2x2x13 = 52 builds
 pg_major_list=( 16 17)
 compiler_list=( clang gcc )
 base_list=(
    # alpine versions
+   alpine:3.21
    alpine:3.20
    alpine:3.19
    alpine:3.18
@@ -17,6 +18,10 @@ base_list=(
    alpine:3.16
    alpine:3.15
    alpine:3.14
+
+   # debian versions
+   debian:bullseye
+   debian:bookworm
 
    # ubuntu versions
    ubuntu:24.10
@@ -26,10 +31,11 @@ base_list=(
 
    # developer versions
    alpine:edge
+   debian:testing
    ubuntu:devel
   )
 
-
+test_targets="installcheck"
 
 # set and prepare $logpath for build logs
 mkdir -p ./log_docker_build
@@ -84,6 +90,12 @@ for pg_major in "${pg_major_list[@]}" ; do
           -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
           -c "test/orioledb-config.sh" \
           "orioletest:${docker_tag}" 2>&1 | tee ${logpath}/"${docker_tag}".test.log
+
+      # run the oriole test suite
+      time docker run --rm \
+          --volume $(pwd):/github/workspace/orioledb \
+          "orioletest:${docker_tag}" \
+          bash -c "bash +x /github/workspace/orioledb/ci/check_docker.sh \"${test_targets}\""
 
     done
   done
