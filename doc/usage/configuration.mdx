@@ -137,23 +137,23 @@ Specify whether to use `mmap` to work with the block device. We recommend settin
 | ----------- | ------------------- |
 | **Default** | -1 (no compression) |
 
-Default block-level compression level for all tables' data structures.
+Default block-level compression level for tables' data structures.
 
-### `orioledb.primary_compress`
-
-|             |                     |
-| ----------- | ------------------- |
-| **Default** | -1 (no compression) |
-
-Default block-level compression level for all tables' primary keys.
-
-### `orioledb.toast_compress`
+### `orioledb.default_primary_compress`
 
 |             |                     |
 | ----------- | ------------------- |
 | **Default** | -1 (no compression) |
 
-Default block-level compression level for all tables' TOASTed values.
+Default block-level compression level for tables' primary keys.
+
+### `orioledb.default_toast_compress`
+
+|             |                     |
+| ----------- | ------------------- |
+| **Default** | -1 (no compression) |
+
+Default block-level compression level for tables' TOASTed values.
 
 ### `orioledb.table_description_compress`
 
