@@ -68,13 +68,44 @@ class RecoveryWorkerTest(BaseTest):
 
 		node.append_conf(
 		    'postgresql.conf', "max_worker_processes = 8\n"
-		    "orioledb.recovery_pool_size = 12\n")
+		    "orioledb.recovery_pool_size = 12\n"
+		    "orioledb.restart_after_crash = off\n")
 
-		try:
-			node.start()
-			self.assertFalse(True)
-		except Exception:
-			self.assertTrue(True)
+		node.start()
+		self.assertEqual(
+		    node.execute('SELECT count(*) FROM o_test;')[0][0], 1000)
+		with open(node.pg_log_file) as f:
+			self.assertIn('WARNING:  unable to start recovery workers',
+			              f.read())
+
+	def test_too_much_index_workers(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text\n"
+		    ") USING orioledb;\n"
+		    "INSERT INTO o_test\n"
+		    "	(SELECT id, id || 'val' FROM generate_series(1, 1000, 1) id);\n"
+		    "CREATE INDEX o_test_idx ON o_test(val);")
+		node.stop(['-m', 'immediate'])
+
+		node.append_conf(
+		    'postgresql.conf', "max_worker_processes = 8\n"
+		    "orioledb.recovery_pool_size = 3\n"
+		    "orioledb.recovery_idx_pool_size = 12\n"
+		    "orioledb.restart_after_crash = off\n")
+
+		node.start()
+		self.assertEqual(
+		    node.execute(
+		        'SELECT count(*) FROM (SELECT * FROM o_test ORDER BY val) x;')
+		    [0][0], 1000)
+		with open(node.pg_log_file) as f:
+			self.assertIn('WARNING:  unable to start recovery workers',
+			              f.read())
 
 	def wait_recovery_breakpoint(self, block_pid):
 		recovery_pid = None

@@ -314,6 +314,7 @@ static inline void spread_idx_modify(BTreeDescr *desc, uint16 recType,
 									 OTuple rec);
 
 static inline uint16 recovery_msg_from_wal_record(uint8 wal_record);
+static void recovery_send_init(int worker_num);
 
 /*
  * Returns full size of the shared memory needed to recovery.
@@ -621,12 +622,18 @@ o_recovery_start_hook(void)
 				/*
 				 * Not enough slots for background workers.
 				 */
-				abort_recovery(workers_pool, false);
+				for (i--; i >= 0; i--)
+					TerminateBackgroundWorker(workers_pool[i].handle);
 
-				ereport(ERROR,
+				recovery_single = *recovery_single_process = true;
+				finish = -1;
+
+				ereport(WARNING,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.  Fallback to recovery in single-process mode.")));
+
+				break;
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
@@ -635,6 +642,7 @@ o_recovery_start_hook(void)
 		{
 			if (shm_mq_wait_for_attach(workers_pool[i].queue) != SHM_MQ_SUCCESS)
 				elog(ERROR, "unable to attach recovery workers to shm queue");
+			recovery_send_init(i);
 		}
 	}
 
@@ -907,21 +915,20 @@ recovery_init(int worker_id)
 
 			workers_pool[i].handle = recovery_worker_register(i);
 
-			/*
-			 * (BackgroundWorkerHandle *)
-			 * &recovery_oidxshared->worker_handle[i];
-			 */
 			if (workers_pool[i].handle == NULL)
 			{
 				/*
 				 * Not enough slots for background workers.
 				 */
-				abort_recovery(workers_pool, true);
+				for (i--; i >= index_build_first_worker; i--)
+					TerminateBackgroundWorker(workers_pool[i].handle);
 
-				ereport(ERROR,
+				recovery_idx_pool_size_guc = 1;
+
+				ereport(WARNING,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_idx_pool_size value. Fallback to index build in single-process mode.")));
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
@@ -931,6 +938,7 @@ recovery_init(int worker_id)
 		{
 			if (shm_mq_wait_for_attach(workers_pool[i].queue) != SHM_MQ_SUCCESS)
 				elog(ERROR, "unable to attach recovery workers to shm queue");
+			recovery_send_init(i);
 		}
 	}
 
@@ -2266,6 +2274,19 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 		}
 	}
 	pfree(msg);
+}
+
+static void
+recovery_send_init(int worker_num)
+{
+	RecoveryMsgEmpty msg;
+
+	Assert(!(*recovery_single_process));
+
+	msg.header.type = RECOVERY_INIT;
+
+	worker_send_msg(worker_num, (Pointer) &msg, sizeof(msg));
+	worker_queue_flush(worker_num);
 }
 
 static void
