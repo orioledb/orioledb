@@ -45,6 +45,7 @@
 
 static bool detached = false;
 static CommitSeqNo my_ptr;
+static bool recovery_initialized = false;
 
 static void recovery_queue_process(shm_mq_handle *queue, int id);
 static inline Pointer recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id);
@@ -198,9 +199,6 @@ recovery_worker_main(Datum main_arg)
 
 		pqsignal(SIGTERM, handle_sigterm);
 		BackgroundWorkerUnblockSignals();
-
-		before_shmem_exit(recovery_on_proc_exit, main_arg);
-		recovery_init(id);
 
 		shm_mq_set_receiver(GET_WORKER_QUEUE(id), MyProc);
 		recovery_worker_queue = shm_mq_attach(GET_WORKER_QUEUE(id), NULL, NULL);
@@ -471,6 +469,14 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				update_worker_ptr(id, msg->ptr);
 				data_pos += sizeof(RecoveryMsgRollbackToSavepoint);
 			}
+			else if (recovery_header->type & RECOVERY_INIT)
+			{
+				Assert(!recovery_initialized);
+				before_shmem_exit(recovery_on_proc_exit, Int32GetDatum(id));
+				recovery_init(id);
+				recovery_initialized = true;
+				data_pos += sizeof(RecoveryMsgEmpty);
+			}
 			else
 			{
 				Assert(false);
@@ -564,8 +570,11 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		prev_rec_ptr = InvalidXLogRecPtr;
 
 		pg_usleep(usleep_time);
-		update_proc_retain_undo_location(id);
-		update_recovery_undo_loc_flush(false, id);
+		if (recovery_initialized)
+		{
+			update_proc_retain_undo_location(id);
+			update_recovery_undo_loc_flush(false, id);
+		}
 
 		if (!PostmasterIsAlive() || detached)
 		{
