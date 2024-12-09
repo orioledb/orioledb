@@ -25,7 +25,9 @@ typedef enum
 	/* produced by pages split */
 	UndoPageImageSplit,
 	/* produced by pages merge */
-	UndoPageImageMerge
+	UndoPageImageMerge,
+	/* unknown value for default init */
+	UndoPageImageInvalid
 } UndoPageImageType;
 
 /*

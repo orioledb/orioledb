@@ -462,7 +462,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 	for (i = 0; i < count; i++)
 	{
 		RecoveryXidState *state;
-		XidFileRec	xidRec;
+		XidFileRec	xidRec = {0};
 		bool		found;
 
 		if (OFileRead(xidFile, (Pointer) &xidRec,
