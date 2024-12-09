@@ -435,7 +435,7 @@ set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr)
 static void
 map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 {
-	OXidMapItem mapItem;
+	OXidMapItem mapItem = {0};
 
 	if (is_recovery_process() && outCsn)
 	{

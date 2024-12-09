@@ -651,6 +651,7 @@ page_merge_chunks(Page p, OffsetNumber index)
 		MAXALIGN(sizeof(LocationIndex) * count2) -
 		MAXALIGN(sizeof(LocationIndex) * (count1 + count2));
 
+	tmpItems[0] = 0;
 	for (i = 0; i < count2; i++)
 	{
 		tmpItems[i] = loc2.chunk->items[i] -
