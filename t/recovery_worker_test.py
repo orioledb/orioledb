@@ -70,11 +70,8 @@ class RecoveryWorkerTest(BaseTest):
 		    'postgresql.conf', "max_worker_processes = 8\n"
 		    "orioledb.recovery_pool_size = 12\n")
 
-		try:
-			node.start()
-			self.assertFalse(True)
-		except Exception:
-			self.assertTrue(True)
+		node.start()
+		self.assertEqual(node.execute('SELECT count(*) FROM o_test;')[0][0], 1000)
 
 	def wait_recovery_breakpoint(self, block_pid):
 		recovery_pid = None

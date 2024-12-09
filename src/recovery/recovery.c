@@ -621,12 +621,19 @@ o_recovery_start_hook(void)
 				/*
 				 * Not enough slots for background workers.
 				 */
-				abort_recovery(workers_pool, false);
 
-				ereport(ERROR,
+				for (i--; i >= 0; i--)
+					TerminateBackgroundWorker(workers_pool[i].handle);
+
+				recovery_single = *recovery_single_process = true;
+				finish = -1;
+
+				ereport(WARNING,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 						 errmsg("unable to start recovery workers"),
-						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.")));
+						 errdetail("You must increase max_worker_processes value or decrease orioledb.recovery_pool_size value.  Fallback to recovery in single-process mode.")));
+
+				break;
 			}
 			state->queue = shm_mq_attach(GET_WORKER_QUEUE(i), NULL, workers_pool[i].handle);
 			state->queue_buf_len = 0;
