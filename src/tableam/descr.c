@@ -888,7 +888,7 @@ void
 o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 {
 	OTuple		sharedRootInfoTuple;
-	SharedRootInfo sharedRootInfo;
+	SharedRootInfo sharedRootInfo = {0};
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
 
 	sharedRootInfoTuple.formatFlags = 0;

@@ -696,6 +696,8 @@ check_pending_truncates(void)
 	int			relNodesAllocated = 0;
 	File		pendingTruncatesFile;
 
+	ORelOidsSetInvalid(relOids);
+
 	if (have_backup_in_progress() || pending_truncates_meta->pendingTruncatesLocation == 0)
 		return;
 
@@ -980,7 +982,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				   bool *is_left, bool *is_right, OFixedKey *lokey,
 				   OFixedKey *page_lokey, OTuple *page_hikey)
 {
-	UndoPageImageHeader header;
+	UndoPageImageHeader header = {UndoPageImageInvalid, 0 , 0};
 	int			cmp,
 				cmp_expected;
 	OTuple		hikey;
@@ -1128,7 +1130,7 @@ static void
 clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 						   BTreeLeafTuphdr *pageTuphdr, OInMemoryBlkno blkno)
 {
-	BTreeLeafTuphdr tuphdr;
+	BTreeLeafTuphdr tuphdr = {0, 0};
 	UndoLocation retainedUndoLocation;
 
 	if (!is_recovery_process())
@@ -1553,7 +1555,7 @@ void
 get_prev_leaf_header_from_undo(UndoLogType undoType,
 							   BTreeLeafTuphdr *tuphdr, bool inPage)
 {
-	BTreeLeafTuphdr prevTuphdr;
+	BTreeLeafTuphdr prevTuphdr = {0, 0};
 
 	Assert(UndoLocationIsValid(tuphdr->undoLocation));
 	Assert(UNDO_REC_EXISTS(undoType, tuphdr->undoLocation));
