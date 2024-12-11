@@ -239,9 +239,24 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 
 		values[0] = PointerGetDatum(&oslot->bridge_ctid);
 		isnull[0] = false;
-		Assert(descr->indices[0]->primaryIsCtid); // TODO: Use append_rowid_values here
-		values[1] = PointerGetDatum(&slot->tts_tid);
-		isnull[1] = false;
+		if (descr->bridge->primaryIsCtid)
+		{
+			values[1] = PointerGetDatum(&slot->tts_tid);
+			isnull[1] = false;
+		}
+		else
+		{
+			int			i;
+
+			/* Amount of index fields checked in o_define_index_validate */
+			for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
+			{
+				AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
+
+				values[i + 1] = slot->tts_values[attnum];
+				isnull[i + 1] = slot->tts_isnull[attnum];
+			}
+		}
 
 		tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
 							 values, isnull, NULL);
@@ -252,7 +267,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+									  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
 
 		if (!success)
 		{
