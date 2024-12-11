@@ -314,34 +314,43 @@ append_rowid_values(OIndexDescr *id,
 
 	if (!id->primaryIsCtid)
 	{
-		OTuple		tuple;
 		ORowIdAddendumNonCtid *add;
-
-		Assert(!id->bridging); // Not implemented yet
 
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tuple.data = p;
-		tuple.formatFlags = add->flags;
 		*csn = add->csn;
-		*version = o_tuple_get_version(tuple);
 
-		if (id->nPrimaryFields < id->nFields)
+		if (id->bridging)
 		{
-			int			i;
-			int			pk_from;
+			AttrNumber	attnum = id->nFields - 1;
+			values[attnum] = PointerGetDatum(p);
+			isnull[attnum] = false;
+			*version = O_TABLE_INVALID_VERSION;
+		}
+		else
+		{
+			OTuple		tuple;
 
-			pk_from = id->nFields - id->nPrimaryFields;
+			tuple.data = p;
+			tuple.formatFlags = add->flags;
+			*version = o_tuple_get_version(tuple);
 
-			/* Amount of index fields checked in o_define_index_validate */
-			for (i = 0; i < id->nPrimaryFields; i++)
+			if (id->nPrimaryFields < id->nFields)
 			{
-				AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
+				int			i;
+				int			pk_from;
 
-				if (attnum >= pk_from)
+				pk_from = id->nFields - id->nPrimaryFields;
+
+				/* Amount of index fields checked in o_define_index_validate */
+				for (i = 0; i < id->nPrimaryFields; i++)
 				{
-					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
+					AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
+
+					if (attnum >= pk_from)
+					{
+						values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
+					}
 				}
 			}
 		}
@@ -356,7 +365,7 @@ append_rowid_values(OIndexDescr *id,
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		if (id->bridging)
-			p += MAXALIGN(sizeof(ItemPointer));
+			p += MAXALIGN(sizeof(ItemPointerData));
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
@@ -1408,10 +1417,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
 		bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
 		int			i;
-
-		addNonCtid.hint = *hint;
-		addNonCtid.csn = tupleCsn;
-		addNonCtid.flags = tuple.formatFlags;
+		OTableSlot *oslot = (OTableSlot *) slot;
 
 		/*
 		 * Amount of index fields checked in o_define_index_validate
@@ -1435,17 +1441,34 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			rowid_isnull = temp_rowid_isnull;
 		}
 
-		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, 0, rowid_values, rowid_isnull, NULL);
 		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		result_size += tuple_size;
+		if (index_descr->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
+		else
+		{
+			tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, 0, rowid_values, rowid_isnull, NULL);
+			result_size += MAXALIGN(tuple_size);
+		}
 		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
-		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (index_descr->bridging)
+		{
+			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
+			addNonCtid.flags = 0;
+		}
+		else
+		{
+			tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+			o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL, NULL,
+						 0, rowid_values, rowid_isnull, NULL);
+			addNonCtid.flags = tuple.formatFlags;
+		}
 
-		o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL, NULL,
-					 0, rowid_values, rowid_isnull, NULL);
+		addNonCtid.hint = *hint;
+		addNonCtid.csn = tupleCsn;
+
+		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
 	}
 
 	if (!scan->xs_rowid.isnull)

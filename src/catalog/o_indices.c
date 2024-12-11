@@ -531,6 +531,8 @@ make_bridge_o_index(OTable *table)
 	else
 		result->nLeafFields++;
 	result->nNonLeafFields = 1;
+	result->nKeyFields = 1;
+	result->nUniqueFields = 1;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
@@ -542,7 +544,6 @@ make_bridge_o_index(OTable *table)
 	add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded == result->nLeafFields);
 	result->nLeafFields = nadded;
-	result->nUniqueFields = nadded;
 
 	return result;
 }
@@ -929,7 +930,6 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	for (i = 0; i < oIndex->nLeafFields; i++)
 	{
 		OIndexField *field = &descr->fields[i];
-		OTableField *tField = &oIndex->leafTableFields[i];
 		OTableIndexField *iField = &oIndex->leafFields[i];
 		int			attnum = iField->attnum;
 
