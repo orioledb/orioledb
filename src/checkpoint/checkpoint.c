@@ -5057,7 +5057,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 	pg_atomic_write_u32(&meta_page->leafPagesNum, file_header.leafPagesNum);
 	pg_atomic_write_u64(&meta_page->ctid, file_header.ctid);
 	pg_atomic_write_u64(&meta_page->bridge_ctid, file_header.bridgeCtid);
-	pg_atomic_write_u64(&meta_page->bridge_ctid, 100); // TODO: Revert it, just for distinction from ctid during debug
+
 	if (*evicted_data)
 	{
 		meta_page->dirtyFlag1 = (*evicted_data)->dirtyFlag1;
