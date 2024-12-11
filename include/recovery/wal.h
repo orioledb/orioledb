@@ -44,11 +44,11 @@ WalShmem;
 
 typedef struct
 {
-	pg_atomic_uint32 First;
-	pg_atomic_uint32 Next;
+	pg_atomic_uint32 next;
+	PGSemaphore sem;            /* ONE semaphore to sleep on */
 	bool isMember;
 }
-WalClearGroupInfo;
+WalClearGroupEntry;
 
 typedef struct
 {
