@@ -1936,12 +1936,15 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tuple.data = p;
-		tuple.formatFlags = add->flags;
 		*hint = add->hint;
 		if (csn)
 			*csn = add->csn;
+
+		if (id->bridging)
+			p += MAXALIGN(sizeof(ItemPointerData));
+
+		tuple.data = p;
+		tuple.formatFlags = add->flags;
 		if (version)
 			*version = o_tuple_get_version(tuple);
 		o_fill_key_bound(id, tuple, BTreeKeyNonLeafKey, key);
@@ -1959,6 +1962,8 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		if (version)
 			*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+		if (id->bridging)
+			p += MAXALIGN(sizeof(ItemPointerData));
 
 		key->keys[0].value = PointerGetDatum(p);
 		key->keys[0].type = TIDOID;

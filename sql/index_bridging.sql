@@ -68,6 +68,20 @@ COMMIT;
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
+INSERT INTO o_test_ix_ams VALUES (100, ARRAY[200,300], point(400, 500), 600, 700);
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams;
+SELECT * FROM o_test_ix_ams;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
 \q
 
 -- CREATE INDEX o_test_ix_ams_ix2 ON o_test_ix_ams USING hash (j);
