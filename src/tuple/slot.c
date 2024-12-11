@@ -340,6 +340,16 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		Assert(res_attnum >= -2);
 		if (res_attnum >= 0)
 		{
+		 	if (oslot->ixnum == BridgeIndexNumber && attnum == 0)
+			{
+				/*
+				 * first bridge_ctid attribute was already read in tts_orioledb_init_reader
+				 */
+				values[res_attnum] = PointerGetDatum(&oslot->bridge_ctid);
+				isnull[res_attnum] = false;
+				continue;
+			}
+
 			/*
 			 * Read the next field value and update the slot's value and null
 			 * arrays.
@@ -515,19 +525,25 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		/*
 		 * General-case primary key: prepend tuple with maxaligned hint.
 		 */
+		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (id->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
 		tts_orioledb_getsomeattrs(slot, id->maxTableAttnum - ctid_off);
 		tts_orioledb_get_index_values(slot, id, values, isnulls, false);
 		tuple_size = o_new_tuple_size(id->nonLeafTupdesc,
-									  &id->nonLeafSpec,
-									  NULL, NULL, oslot->version,
-									  values, isnulls, NULL);
-		result_size = MAXALIGN(VARHDRSZ) +
-			MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		result_size += tuple_size;
+									&id->nonLeafSpec,
+									NULL, NULL, oslot->version,
+									values, isnulls, NULL);
+		result_size += MAXALIGN(tuple_size);
 		result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(result, result_size);
 		ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
-		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (id->bridging)
+		{
+			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
+		}
+
+		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)) + MAXALIGN(sizeof(ItemPointerData));
 		o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec,
 					 &tuple, tuple_size, NULL, NULL, oslot->version, values, isnulls, NULL);
 
