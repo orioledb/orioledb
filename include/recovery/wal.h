@@ -38,14 +38,14 @@
 typedef struct
 {
 	LWLock		walLock;
-	int			walLockTrancheId;
+	int		walLockTrancheId;
 }
 WalShmem;
 
 typedef struct
 {
 	pg_atomic_uint32 next;
-	PGSemaphore sem;            /* ONE semaphore to sleep on */
+	XLogRecPtr	 recptr;
 	bool isMember;
 }
 WalClearGroupEntry;

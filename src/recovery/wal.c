@@ -20,9 +20,14 @@
 #include "recovery/wal.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
+#include "utils/wait_event.h"
 
 #include "replication/message.h"
 #include "storage/proc.h"
+
+#if PG_VERSION_NUM >= 170000
+#include "storage/procnumber.h"
+#endif
 
 WalShmem *walShmem;
 static pg_atomic_uint32 *wal_clear_group_first;
@@ -49,8 +54,8 @@ wal_shmem_needs(void)
 
 	size = CACHELINEALIGN(sizeof(WalShmem));
 	size = add_size(size, CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections));
-	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32));
-	size = add_size(size, CACHELINEALIGN(sizeof(WalClearGroupEntry) * MaxConnections);
+	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
+	size = add_size(size, CACHELINEALIGN(sizeof(WalClearGroupEntry) * MaxConnections));
 
 return size;
 }
@@ -65,17 +70,20 @@ wal_shmem_init(Pointer buf, bool found)
 
 	wal_buffer = ptr;
 	ptr += CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections);
-	wal_clear_group_first = ptr;
+
+	wal_clear_group_first = (pg_atomic_uint32 *) ptr;
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
-	wal_clear_group_array = ptr;
+
+	wal_clear_group_array = (WalClearGroupEntry *) ptr;
 
 	if (!found)
 	{
 		memset(wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE * MaxConnections);
-		pg_atomic_init_u32(wal_clear_group_first, InvalidProcNumber);
+		pg_atomic_init_u32(wal_clear_group_first, INVALID_PROC_NUMBER);
 		for(int i = 0; i < MaxConnections; i++)
 		{
 			wal_clear_group_array[i].isMember = false;
+			wal_clear_group_array[i].recptr = InvalidXLogRecPtr;
 			pg_atomic_init_u32(&wal_clear_group_array[i].next, INVALID_PROC_NUMBER);
 		}
 
@@ -475,7 +483,7 @@ static XLogRecPtr
 log_logical_wal_container(int length)
 {
 	Pointer      local_wal_buffer = wal_buffer + LOCAL_WAL_BUFFER_SIZE * MYPROCNUMBER;
-
+	XLogRecPtr   ret;
 	/*
      * If we can immediately acquire walLock, we flush our WAL buffer
      * and release the lock. If not, use group WAL writing to improve
@@ -485,8 +493,9 @@ log_logical_wal_container(int length)
 	{
 		XLogBeginInsert();
 		XLogRegisterData(local_wal_buffer, length);
-		return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+		ret = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 		LWLockRelease(&walShmem->walLock);
+		return ret;
 	}
 	else
 	{
@@ -495,9 +504,9 @@ log_logical_wal_container(int length)
 
 		/* Add ourselves to the list of processes needing a group WAL clear. */
 
-		Assert(wal_clear_group_array[MYPROCNUMBER]->isMember == false);
+		Assert(wal_clear_group_array[MYPROCNUMBER].isMember == false);
 
-		wal_clear_group_array[MYPROCNUMBER]->isMember = true;
+		wal_clear_group_array[MYPROCNUMBER].isMember = true;
 		nextidx = pg_atomic_read_u32(wal_clear_group_first);
 		while (true)
 		{
@@ -520,22 +529,26 @@ log_logical_wal_container(int length)
 			{
 				/* acts as a read barrier */
 				PGSemaphoreLock(MyProc->sem);
-				if (!wal_clear_group_array[MYPROCNUMBER]->isMember)
+				if (!wal_clear_group_array[MYPROCNUMBER].isMember)
 					break;
 				extraWaits++;
-				pgstat_report_wait_end();
-
-				Assert(pg_atomic_read_u32(&(wal_clear_group_array[MYPROCNUMBER].next) == INVALID_PROC_NUMBER);
-
-				/* Fix semaphore count for any absorbed wakeups */
-				while (extraWaits-- > 0)
-					PGSemaphoreUnlock(MyProc->sem);
-				return;
 			}
+			pgstat_report_wait_end();
+
+			Assert(pg_atomic_read_u32(&(wal_clear_group_array[MYPROCNUMBER].next)) == INVALID_PROC_NUMBER);
+
+			/* Fix semaphore count for any absorbed wakeups */
+			while (extraWaits-- > 0)
+				PGSemaphoreUnlock(MyProc->sem);
+
+			Assert(!XLogRecPtrIsInvalid(wal_clear_group_array[MYPROCNUMBER].recptr));
+
+			return wal_clear_group_array[MYPROCNUMBER].recptr;
 		}
 
 		/* We are the leader.  Acquire the lock on behalf of everyone. */
 		LWLockAcquire(&walShmem->walLock, LW_EXCLUSIVE);
+
 		/*
 		 * Now that we've got the lock, clear the list of processes waiting for
 		 * group WAL flushing, saving a pointer to the head of the list.  Trying
@@ -551,10 +564,10 @@ log_logical_wal_container(int length)
 		{
 			XLogBeginInsert();
 			XLogRegisterData(wal_buffer + LOCAL_WAL_BUFFER_SIZE * nextidx, length);
-			return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+			wal_clear_group_array[nextidx].recptr = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 
 			/* Move to next proc in list. */
-			nextidx = pg_atomic_read_u32(&(wal_clear_group_array[nextidx].next);
+			nextidx = pg_atomic_read_u32(&(wal_clear_group_array[nextidx].next));
 		}
 		/* We're done with the lock now. */
 		LWLockRelease(&walShmem->walLock);
@@ -568,8 +581,8 @@ log_logical_wal_container(int length)
 		 */
 		while (wakeidx != INVALID_PROC_NUMBER)
 		{
-			wakeidx = pg_atomic_read_u32(&(wal_clear_group_array[wakeidx].next);
-			pg_atomic_write_u32(&(wal_clear_group_array[wakeidx].next, INVALID_PROC_NUMBER);
+			wakeidx = pg_atomic_read_u32(&(wal_clear_group_array[wakeidx].next));
+			pg_atomic_write_u32(&(wal_clear_group_array[wakeidx].next), INVALID_PROC_NUMBER);
 
 			/* ensure all previous writes are visible before follower continues. */
 			pg_write_barrier();
@@ -579,6 +592,9 @@ log_logical_wal_container(int length)
 				PGSemaphoreUnlock(GetPGProcByNumber(nextidx)->sem);
 		}
 	}
+	Assert(!XLogRecPtrIsInvalid(wal_clear_group_array[MYPROCNUMBER].recptr));
+
+	return wal_clear_group_array[MYPROCNUMBER].recptr;
 
 }
 
