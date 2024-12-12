@@ -39,7 +39,7 @@
 #include "pgstat.h"
 
 #include "openssl/sha.h"
-#include <sys/fcntl.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 
