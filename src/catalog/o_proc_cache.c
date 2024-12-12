@@ -788,6 +788,25 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 	if (o_proc)
 	{
 		fcache->fname = pstrdup(o_proc->proname);
+		rettype = o_proc->rettype;
+		fcache->rettype = rettype;
+
+		o_type_cache_fill_info(o_proc->rettype,
+							   &fcache->typlen, &fcache->typbyval,
+							   NULL, NULL, NULL);
+		fcache->returnsSet = o_proc->retset;
+		fcache->readonly_func = sql_func->readonly_func;
+
+		/*
+		 * We need the actual argument types to pass to the parser.  Also make
+		 * sure that parameter symbols are considered to have the function's
+		 * resolved input collation.
+		 */
+		fcache->pinfo = o_prepare_sql_fn_parse_info(o_proc,
+													finfo->fn_expr,
+													collation);
+		fcache->src = pstrdup(sql_func->src);
+		fcache->returnsTuple = sql_func->returnsTuple;
 	}
 	else
 	{
@@ -805,32 +824,14 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		 */
 		fcache->fname = pstrdup(NameStr(procedureStruct->proname));
 		MemoryContextSetIdentifier(fcontext, fcache->fname);
-	}
 
-	if (o_proc)
-	{
-		rettype = o_proc->rettype;
-	}
-	else
-	{
 		/*
 		 * Resolve any polymorphism, obtaining the actual result type, and the
 		 * corresponding tupdesc if it's a rowtype.
 		 */
 		(void) get_call_result_type(fcinfo, &rettype, &rettupdesc);
-	}
-	fcache->rettype = rettype;
+		fcache->rettype = rettype;
 
-	if (o_proc)
-	{
-		o_type_cache_fill_info(o_proc->rettype,
-							   &fcache->typlen, &fcache->typbyval,
-							   NULL, NULL, NULL);
-		fcache->returnsSet = o_proc->retset;
-		fcache->readonly_func = sql_func->readonly_func;
-	}
-	else
-	{
 		/* Fetch the typlen and byval info for the result type */
 		get_typlenbyval(rettype, &fcache->typlen, &fcache->typbyval);
 
@@ -841,21 +842,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		/* Remember if function is STABLE/IMMUTABLE */
 		fcache->readonly_func =
 			(procedureStruct->provolatile != PROVOLATILE_VOLATILE);
-	}
 
-	if (o_proc)
-	{
-		/*
-		 * We need the actual argument types to pass to the parser.  Also make
-		 * sure that parameter symbols are considered to have the function's
-		 * resolved input collation.
-		 */
-		fcache->pinfo = o_prepare_sql_fn_parse_info(o_proc,
-													finfo->fn_expr,
-													collation);
-	}
-	else
-	{
 		/*
 		 * We need the actual argument types to pass to the parser.  Also make
 		 * sure that parameter symbols are considered to have the function's
@@ -864,14 +851,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		fcache->pinfo = prepare_sql_fn_parse_info(procedureTuple,
 												  finfo->fn_expr,
 												  collation);
-	}
 
-	if (o_proc)
-	{
-		fcache->src = pstrdup(sql_func->src);
-	}
-	else
-	{
 		/*
 		 * And of course we need the function body text.
 		 */
@@ -947,14 +927,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		 * Check that there are no statements we don't want to allow.
 		 */
 		check_sql_fn_statements(queryTree_list);
-	}
 
-	if (o_proc)
-	{
-		fcache->returnsTuple = sql_func->returnsTuple;
-	}
-	else
-	{
 		/*
 		 * Check that the function returns the type it claims to.  Although in
 		 * simple cases this was already done when the function was defined,

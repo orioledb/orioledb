@@ -842,8 +842,10 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
 
 	if (STOPEVENTS_ENABLED())
+	{
 		params = btree_page_stopevent_params(desc, context->img);
-	STOPEVENT(STOPEVENT_STEP_RIGHT, params);
+		STOPEVENT(STOPEVENT_STEP_RIGHT, params);
+	}
 
 	level = PAGE_GET_LEVEL(context->img);
 
@@ -939,8 +941,10 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
 
 	if (STOPEVENTS_ENABLED())
+	{
 		params = btree_page_stopevent_params(desc, context->img);
-	STOPEVENT(STOPEVENT_STEP_LEFT, params);
+		STOPEVENT(STOPEVENT_STEP_LEFT, params);
+	}
 
 	level = PAGE_GET_LEVEL(context->img);
 	/* In this case, we shoudn't be in the rootPageBlkno... */
