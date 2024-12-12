@@ -457,24 +457,35 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		 */
 		if (ostate->ixNum != PrimaryIndexNumber)
 		{
-			OBTreeKeyBound	bridge_bound,
-							bound;
-			OTuple			bridge_tup,
-							ptup;
+			OBTreeKeyBound	bound;
+			OTuple			ptup;
 			OIndexDescr *primary = GET_PRIMARY(descr);
 
-			o_fill_bridge_index_key_bound(&id->desc, tup, &bridge_bound);
+			if (descr->bridge)
+			{
+				OBTreeKeyBound	bridge_bound;
+				OTuple			bridge_tup;
 
-			o_btree_load_shmem(&descr->bridge->desc);
-			bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
-											 (Pointer) &bridge_bound, BTreeKeyBound,
-											 &ostate->o_snapshot, tupleCsn,
-											 tupleCxt, NULL);
-			Assert(!O_TUPLE_IS_NULL(bridge_tup));
-			pfree(tup.data);
+				o_btree_load_shmem(&descr->bridge->desc);
 
-			/* fetch primary index key from tuple and search raw tuple */
-			o_fill_pindex_tuple_key_bound(&descr->bridge->desc, bridge_tup, &bound);
+				o_fill_bridge_index_key_bound(&id->desc, tup, &bridge_bound);
+
+				bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
+												(Pointer) &bridge_bound, BTreeKeyBound,
+												&ostate->o_snapshot, tupleCsn,
+												tupleCxt, NULL);
+				Assert(!O_TUPLE_IS_NULL(bridge_tup));
+				pfree(tup.data);
+
+				/* fetch primary index key from tuple and search raw tuple */
+				o_fill_pindex_tuple_key_bound(&descr->bridge->desc, bridge_tup, &bound);
+
+				tup = bridge_tup;
+			}
+			else
+			{
+				o_fill_pindex_tuple_key_bound(&id->desc, tup, &bound);
+			}
 
 			if (hint)
 			{
@@ -487,7 +498,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 											 (Pointer) &bound, BTreeKeyBound,
 											 &ostate->o_snapshot, tupleCsn,
 											 tupleCxt, hint);
-			pfree(bridge_tup.data);
+			pfree(tup.data);
 			tup = ptup;
 
 			/*
