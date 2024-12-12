@@ -27,6 +27,7 @@
 
 #if PG_VERSION_NUM >= 170000
 #include "storage/procnumber.h"
+#define INVALID_PGPROCNO INVALID_PROC_NUMBER
 #endif
 
 WalShmem *walShmem;
@@ -79,12 +80,12 @@ wal_shmem_init(Pointer buf, bool found)
 	if (!found)
 	{
 		memset(wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE * MaxConnections);
-		pg_atomic_init_u32(wal_clear_group_first, INVALID_PROC_NUMBER);
+		pg_atomic_init_u32(wal_clear_group_first, INVALID_PGPROCNO);
 		for(int i = 0; i < MaxConnections; i++)
 		{
 			wal_clear_group_array[i].isMember = false;
 			wal_clear_group_array[i].recptr = InvalidXLogRecPtr;
-			pg_atomic_init_u32(&wal_clear_group_array[i].next, INVALID_PROC_NUMBER);
+			pg_atomic_init_u32(&wal_clear_group_array[i].next, INVALID_PGPROCNO);
 		}
 
 		walShmem->walLockTrancheId = LWLockNewTrancheId();
@@ -519,7 +520,7 @@ log_logical_wal_container(int length)
 		}
 
 		/* If the list was not empty, the leader will clear our XID. */
-		if (nextidx != INVALID_PROC_NUMBER)
+		if (nextidx != INVALID_PGPROCNO)
 		{
 			int         extraWaits = 0;
 
@@ -535,7 +536,7 @@ log_logical_wal_container(int length)
 			}
 			pgstat_report_wait_end();
 
-			Assert(pg_atomic_read_u32(&(wal_clear_group_array[MYPROCNUMBER].next)) == INVALID_PROC_NUMBER);
+			Assert(pg_atomic_read_u32(&(wal_clear_group_array[MYPROCNUMBER].next)) == INVALID_PGPROCNO);
 
 			/* Fix semaphore count for any absorbed wakeups */
 			while (extraWaits-- > 0)
@@ -555,12 +556,12 @@ log_logical_wal_container(int length)
 		 * to pop elements one at a time could lead to an ABA problem.
 		 */
 		nextidx = pg_atomic_exchange_u32(wal_clear_group_first,
-										 INVALID_PROC_NUMBER);
+										 INVALID_PGPROCNO);
 
 		/* Remember head of list so we can perform wakeups after dropping lock. */
 		wakeidx = nextidx;
 		/* Walk the list and clear all XIDs. */
-		while (nextidx != INVALID_PROC_NUMBER)
+		while (nextidx != INVALID_PGPROCNO)
 		{
 			XLogBeginInsert();
 			XLogRegisterData(wal_buffer + LOCAL_WAL_BUFFER_SIZE * nextidx, length);
@@ -579,10 +580,10 @@ log_logical_wal_container(int length)
 		 * up are probably much slower than the simple memory writes we did while
 		 * holding the lock.
 		 */
-		while (wakeidx != INVALID_PROC_NUMBER)
+		while (wakeidx != INVALID_PGPROCNO)
 		{
 			wakeidx = pg_atomic_read_u32(&(wal_clear_group_array[wakeidx].next));
-			pg_atomic_write_u32(&(wal_clear_group_array[wakeidx].next), INVALID_PROC_NUMBER);
+			pg_atomic_write_u32(&(wal_clear_group_array[wakeidx].next), INVALID_PGPROCNO);
 
 			/* ensure all previous writes are visible before follower continues. */
 			pg_write_barrier();
