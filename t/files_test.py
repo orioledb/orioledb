@@ -166,13 +166,13 @@ class FilesTest(BaseTest):
 		orioledb_dir = self.node.data_dir + "/orioledb_data"
 		for ff in os.listdir(orioledb_dir):
 			dbDir = os.path.join(orioledb_dir, ff)
-			if re.match(".*\.xid$", ff):
+			if re.match(r".*\.xid$", ff):
 				xid_files.append(ff)
 			elif os.path.isdir(dbDir):
 				for f in os.listdir(dbDir):
-					if re.match(".*\.map$", f):
+					if re.match(r".*\.map$", f):
 						map_files.append(ff + '_' + f)
-					if re.match(".*\.tmp$", f):
+					if re.match(r".*\.tmp$", f):
 						tmp_files.append(ff + '_' + f)
 
 		self.assertEqual(1, len(xid_files))
@@ -347,15 +347,15 @@ class FilesTest(BaseTest):
 		tmp_files = ""
 
 		for f in glob.glob(orioledb_dir + '/*/*'):
-			if re.match(".*\.map$", f):
+			if re.match(r".*\.map$", f):
 				map_files = map_files + " " + f
-			if re.match(".*\.tmp$", f):
+			if re.match(r".*\.tmp$", f):
 				tmp_files = tmp_files + " " + f
 
 		# all files should exists
-		self.assertTrue(bool(re.match(".*-1\.map.*", map_files)))
-		self.assertTrue(bool(re.match(".*-2\.map.*", map_files)))
-		self.assertTrue(bool(re.match(".*-2\.tmp.*", tmp_files)))
+		self.assertTrue(bool(re.match(r".*-1\.map.*", map_files)))
+		self.assertTrue(bool(re.match(r".*-2\.map.*", map_files)))
+		self.assertTrue(bool(re.match(r".*-2\.tmp.*", tmp_files)))
 
 	def test_drop_table_cleanup(self):
 		node = self.node
@@ -378,10 +378,10 @@ class FilesTest(BaseTest):
 				# do not check files of trees duplicating syscach
 				all_files = all_files + " " + f
 
-		self.assertFalse(bool(re.match(".*\.map", all_files)))
-		self.assertFalse(bool(re.match(".*\.tmp", all_files)))
-		self.assertFalse(bool(re.match(".*evt", all_files)))
-		self.assertFalse(bool(re.match("[0-9]*_[0-9]*_[0-9]*", all_files)))
+		self.assertFalse(bool(re.match(r".*\.map", all_files)))
+		self.assertFalse(bool(re.match(r".*\.tmp", all_files)))
+		self.assertFalse(bool(re.match(r".*evt", all_files)))
+		self.assertFalse(bool(re.match(r"[0-9]*_[0-9]*_[0-9]*", all_files)))
 
 	def test_drop_extension_cleanup(self):
 		node = self.node
@@ -404,10 +404,10 @@ class FilesTest(BaseTest):
 				# DROP EXTENSION saves o_tables BTree files, skip it
 				all_files = all_files + " " + f
 
-		self.assertFalse(bool(re.match(".*\.map", all_files)))
-		self.assertFalse(bool(re.match(".*\.tmp", all_files)))
-		self.assertFalse(bool(re.match(".*evt", all_files)))
-		self.assertFalse(bool(re.match("[0-9]*_[0-9]*_[0-9]*", all_files)))
+		self.assertFalse(bool(re.match(r".*\.map", all_files)))
+		self.assertFalse(bool(re.match(r".*\.tmp", all_files)))
+		self.assertFalse(bool(re.match(r".*evt", all_files)))
+		self.assertFalse(bool(re.match(r"[0-9]*_[0-9]*_[0-9]*", all_files)))
 
 	def test_drop_database_cleanup(self):
 		node = self.node
@@ -457,10 +457,10 @@ class FilesTest(BaseTest):
 				# DROP EXTENSION saves o_tables BTree files, skip it
 				all_files = all_files + " " + f
 
-		self.assertFalse(bool(re.match(".*\.map", all_files)))
-		self.assertFalse(bool(re.match(".*\.tmp", all_files)))
-		self.assertFalse(bool(re.match(".*evt", all_files)))
-		self.assertFalse(bool(re.match("[0-9]*_[0-9]*_[0-9]*", all_files)))
+		self.assertFalse(bool(re.match(r".*\.map", all_files)))
+		self.assertFalse(bool(re.match(r".*\.tmp", all_files)))
+		self.assertFalse(bool(re.match(r".*evt", all_files)))
+		self.assertFalse(bool(re.match(r"[0-9]*_[0-9]*_[0-9]*", all_files)))
 
 	def test_evt_cleanup(self):
 		node = self.node

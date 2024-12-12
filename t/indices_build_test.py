@@ -657,7 +657,7 @@ class IndicesBuildTest(BaseTest):
 			dbDir = os.path.join(orioledb_dir, ff)
 			if os.path.isdir(dbDir):
 				for f in os.listdir(dbDir):
-					if re.match(".*\.map$", f):
+					if re.match(r".*\.map$", f):
 						map_files.append(ff + '_' + f)
 
 		map_files = [re.split(r'\.|-|_', f) for f in map_files]

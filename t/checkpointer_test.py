@@ -106,6 +106,6 @@ class CheckpointerTest(BaseTest):
 			dbDir = os.path.join(orioledb_dir, f)
 			if os.path.isdir(dbDir):
 				for ff in os.listdir(dbDir):
-					if re.match(".*[1-9]\.map$", ff):
+					if re.match(r".*[1-9]\.map$", ff):
 						exist = True
 		return exist
