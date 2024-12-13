@@ -855,7 +855,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			ItemPointer bridge_iptr;
 			bool		isnull;
 
-			Assert(oslot->leafTuple);
+			/* pkey and also secondary tuples have bridge_ctid at the end */
 			bridge_iptr = o_tuple_get_last_iptr(idx->leafTupdesc, &idx->leafSpec,
 												oslot->tuple, &isnull);
 			Assert(!isnull && bridge_iptr);
