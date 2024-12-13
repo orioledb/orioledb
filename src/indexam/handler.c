@@ -364,8 +364,6 @@ append_rowid_values(OIndexDescr *id,
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-		if (id->bridging)
-			p += MAXALIGN(sizeof(ItemPointerData));
 		values[attnum] = PointerGetDatum(p);
 		isnull[attnum] = false;
 	}
