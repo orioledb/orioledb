@@ -1962,8 +1962,6 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		if (version)
 			*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
-		if (id->bridging)
-			p += MAXALIGN(sizeof(ItemPointerData));
 
 		key->keys[0].value = PointerGetDatum(p);
 		key->keys[0].type = TIDOID;
