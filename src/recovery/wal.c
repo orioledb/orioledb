@@ -582,14 +582,16 @@ log_logical_wal_container(int length)
 		 */
 		while (wakeidx != INVALID_PGPROCNO)
 		{
-			wakeidx = pg_atomic_read_u32(&(wal_clear_group_array[wakeidx].next));
-			pg_atomic_write_u32(&(wal_clear_group_array[wakeidx].next), INVALID_PGPROCNO);
+			WalClearGroupEntry *nextentry = &wal_clear_group_array[wakeidx];
+
+			wakeidx = pg_atomic_read_u32(&nextentry->next);
+			pg_atomic_write_u32(&nextentry->next, INVALID_PGPROCNO);
 
 			/* ensure all previous writes are visible before follower continues. */
 			pg_write_barrier();
 
-			wal_clear_group_array[wakeidx].isMember = false;
-			if (wakeidx != MYPROCNUMBER)
+			nextentry->isMember = false;
+			if (nextentry != &wal_clear_group_array[MYPROCNUMBER])
 				PGSemaphoreUnlock(GetPGProcByNumber(wakeidx)->sem);
 		}
 	}
