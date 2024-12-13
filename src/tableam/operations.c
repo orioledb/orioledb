@@ -151,6 +151,70 @@ update_arg_get_slot(OModifyCallbackArg *arg)
 		return arg->tmpSlot;
 }
 
+static void
+apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlot *slot, CommitSeqNo csn)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	OTableSlot *oslot = (OTableSlot *) slot;
+	bool		success;
+	BTreeModifyCallbackInfo callbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyDeletedCallback = o_insert_callback,
+		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = true
+	};
+	OSnapshot	o_snapshot;
+	OXid		oxid;
+	TupleTableSlot *bridge_slot;
+	uint32		version = 0;
+	OTuple		tuple;
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+
+	o_btree_load_shmem(&primary->desc);
+	oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc);
+
+	values[0] = PointerGetDatum(&oslot->bridge_ctid);
+	isnull[0] = false;
+	if (descr->bridge->primaryIsCtid)
+	{
+		values[1] = PointerGetDatum(&slot->tts_tid);
+		isnull[1] = false;
+	}
+	else
+	{
+		int			i;
+
+		for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
+		{
+			AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
+
+			values[i + 1] = slot->tts_values[attnum];
+			isnull[i + 1] = slot->tts_isnull[attnum];
+		}
+	}
+
+	tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
+							values, isnull, NULL);
+	bridge_slot = descr->bridge->old_leaf_slot;
+	tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
+	callbackInfo.arg = bridge_slot;
+
+	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+
+	success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
+									oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+
+	if (!success)
+	{
+		o_report_duplicate(relation, descr->bridge, bridge_slot);
+	}
+
+	if (tuple.data)
+		pfree(tuple.data);
+}
+
 TupleTableSlot *
 o_tbl_insert(OTableDescr *descr, Relation relation,
 			 TupleTableSlot *slot, OXid oxid, CommitSeqNo csn)
@@ -183,12 +247,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	}
 
 	if (descr->bridge)
-	{
-		OTableSlot *oslot = (OTableSlot *) slot;
-
-		o_btree_load_shmem(&primary->desc);
-		oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc);
-	}
+		apply_new_bridge_index_ctid(descr, relation, slot, csn);
 
 	tts_orioledb_toast(slot, descr);
 
@@ -217,66 +276,6 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	tup = tts_orioledb_form_tuple(slot, descr);
 	if (primary->desc.storageType == BTreeStoragePersistence)
 		o_wal_insert(&primary->desc, tup);
-
-	if (descr->bridge)
-	{
-		OTableSlot *oslot = (OTableSlot *) slot;
-		bool		success;
-		BTreeModifyCallbackInfo callbackInfo =
-		{
-			.waitCallback = NULL,
-			.modifyDeletedCallback = o_insert_callback,
-			.modifyCallback = NULL,
-			.needsUndoForSelfCreated = true
-		};
-		OSnapshot	o_snapshot;
-		OXid		oxid;
-		TupleTableSlot *bridge_slot;
-		uint32		version = 0;
-		OTuple		tuple;
-		Datum		values[INDEX_MAX_KEYS];
-		bool		isnull[INDEX_MAX_KEYS];
-
-		values[0] = PointerGetDatum(&oslot->bridge_ctid);
-		isnull[0] = false;
-		if (descr->bridge->primaryIsCtid)
-		{
-			values[1] = PointerGetDatum(&slot->tts_tid);
-			isnull[1] = false;
-		}
-		else
-		{
-			int			i;
-
-			/* Amount of index fields checked in o_define_index_validate */
-			for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
-			{
-				AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
-
-				values[i + 1] = slot->tts_values[attnum];
-				isnull[i + 1] = slot->tts_isnull[attnum];
-			}
-		}
-
-		tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
-							 values, isnull, NULL);
-		bridge_slot = descr->bridge->old_leaf_slot;
-		tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
-		callbackInfo.arg = bridge_slot;
-
-		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
-
-		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
-
-		if (!success)
-		{
-			o_report_duplicate(relation, descr->bridge, bridge_slot);
-		}
-
-		if (tuple.data)
-			pfree(tuple.data);
-	}
 
 	return slot;
 }
@@ -583,6 +582,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		Assert(DatumGetPointer(oldPkey->keys[0].value));
 		slot->tts_tid = *((ItemPointerData *) DatumGetPointer(oldPkey->keys[0].value));
 	}
+
+	if (descr->bridge)
+		apply_new_bridge_index_ctid(descr, rel, slot, csn);
 
 	tts_orioledb_toast(slot, descr);
 	newTup = tts_orioledb_form_tuple(slot, descr);

@@ -115,6 +115,38 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams ORDER BY j;
 COMMIT;
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+ALTER TABLE o_test_ix_ams ADD COLUMN k int;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
+UPDATE o_test_ix_ams SET k = j/2 + 1000;
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+\q
+
+CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k);
+
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+INSERT INTO o_test_ix_ams VALUES (10, ARRAY[20,30], point(40, 50), 60, 70);
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
 \q
 
 -- CREATE INDEX o_test_ix_ams_ix2 ON o_test_ix_ams USING hash (j);
