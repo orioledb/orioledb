@@ -589,8 +589,8 @@ log_logical_wal_container(int length)
 			pg_write_barrier();
 
 			wal_clear_group_array[wakeidx].isMember = false;
-			if (nextidx != MYPROCNUMBER)
-				PGSemaphoreUnlock(GetPGProcByNumber(nextidx)->sem);
+			if (wakeidx != MYPROCNUMBER)
+				PGSemaphoreUnlock(GetPGProcByNumber(wakeidx)->sem);
 		}
 	}
 	Assert(!XLogRecPtrIsInvalid(wal_clear_group_array[MYPROCNUMBER].recptr));
