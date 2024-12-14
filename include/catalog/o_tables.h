@@ -63,7 +63,6 @@ typedef struct
 {
 	NameData	name;
 	ORelOids	oids;
-	Oid			amoid;
 	OIndexType	type;
 	OCompress	compress;
 	bool		nulls_not_distinct;

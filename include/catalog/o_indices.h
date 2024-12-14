@@ -23,7 +23,6 @@ typedef struct
 	ORelOids	indexOids;
 	OIndexType	indexType;
 	ORelOids	tableOids;
-	Oid			amoid;
 	char		table_persistence;
 	uint8		fillfactor;
 	OXid		createOxid;
