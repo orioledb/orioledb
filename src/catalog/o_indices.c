@@ -186,7 +186,6 @@ make_ctid_o_index(OTable *table)
 	result->indexType = oIndexPrimary;
 	namestrcpy(&result->name, "ctid_primary");
 	result->tableOids = table->oids;
-	result->amoid = BTREE_AM_OID;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
@@ -253,7 +252,6 @@ make_primary_o_index(OTable *table)
 	namestrcpy(&result->name, tableIndex->name.data);
 	Assert(tableIndex->type == oIndexPrimary);
 	result->tableOids = table->oids;
-	result->amoid = tableIndex->amoid;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = false;
 	if (OCompressIsValid(tableIndex->compress))
@@ -384,7 +382,6 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->indexType = tableIndex->type;
 	namestrcpy(&result->name, tableIndex->name.data);
 	result->tableOids = table->oids;
-	result->amoid = tableIndex->amoid;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
@@ -442,7 +439,6 @@ make_toast_o_index(OTable *table)
 	result->indexType = oIndexToast;
 	namestrcpy(&result->name, "toast");
 	result->tableOids = table->oids;
-	result->amoid = BTREE_AM_OID;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
@@ -505,7 +501,6 @@ make_bridge_o_index(OTable *table)
 	result->indexType = oIndexBridge;
 	namestrcpy(&result->name, "index_bridge");
 	result->tableOids = table->oids;
-	result->amoid = BTREE_AM_OID;
 	result->bridging = true;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
@@ -828,7 +823,6 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
 	descr->tableOids = oIndex->tableOids;
-	descr->amoid = oIndex->amoid;
 	descr->refcnt = 0;
 	descr->valid = true;
 	namestrcpy(&descr->name, oIndex->name.data);
@@ -958,7 +952,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 			field->nullfirst = (iField->nullsOrdering == SORTBY_NULLS_FIRST);
 		}
 
-		add_opclass = !OIgnoreColumn(descr, i) && oIndex->amoid == BTREE_AM_OID;
+		add_opclass = !OIgnoreColumn(descr, i);
 		if (add_opclass)
 			oFillFieldOpClassAndComparator(field, oIndex->tableOids.datoid,
 										   iField->opclass);
