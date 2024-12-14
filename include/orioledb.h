@@ -367,6 +367,7 @@ typedef struct OBTOptions
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	BTOptions	bt_options;
 	int			compress_offset;
+	bool		index_bridging;
 } OBTOptions;
 
 extern int16 o_parse_compress(const char *value);

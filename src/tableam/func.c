@@ -1388,8 +1388,6 @@ index_description(StringInfo buf, OIndexDescr *ct, bool primary, bool oids)
 	if (OCompressIsValid(ct->compress))
 		appendStringInfo(buf, ", compression = %d", ct->compress);
 	appendStringInfo(buf, "%s\n", primary && ct->primaryIsCtid ? ", ctid" : "");
-	if (OidIsValid(ct->amoid))
-		appendStringInfo(buf, "    Access method: %s\n", get_am_name(ct->amoid));
 	if (ct->predicate)
 		appendStringInfo(buf, "    Predicate: %s\n", ct->predicate_str);
 	appendStringInfo(buf, "    Leaf tuple size: %d, non-leaf tuple size: %d\n",

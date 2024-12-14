@@ -183,6 +183,10 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	bool		reindex = false;
 	IndexBuildResult *result;
 	String	   *relname;
+	OBTOptions *options = (OBTOptions *) index->rd_options;
+
+	if (options && options->index_bridging)
+		return btbuild(heap, index, indexInfo);
 
 	relname = makeString(index->rd_rel->relname.data);
 	if (list_member(reindex_list, relname))
@@ -204,7 +208,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 		ORelOidsSetFromRel(tbl_oids, heap);
 		o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-		o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, result, index->rd_rel->relam == BTREE_AM_OID);
+		o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, result);
 	}
 
 	return result;
@@ -420,6 +424,11 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	int			skipped = 0;
 	CommitSeqNo csn;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+		return btinsert(rel, values, isnull, tupleid, heapRel,
+						checkUnique, indexUnchanged, indexInfo);
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
 		return true;
@@ -520,6 +529,10 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OTuple		old_tuple;
 	bool	   *vfree;
 	int			i;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+		Assert(false); // Probably return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -670,6 +683,10 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	bool	   *vfree;
 	int			i;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+		Assert(false); // Probably return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -786,6 +803,11 @@ IndexBulkDeleteResult *
 orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 					  IndexBulkDeleteCallback callback, void *callback_state)
 {
+	OBTOptions *options = (OBTOptions *) info->index->rd_options;
+
+	if (options && options->index_bridging)
+		return btbulkdelete(info, stats, callback, callback_state);
+
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return stats;
 }
@@ -793,12 +815,22 @@ orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 IndexBulkDeleteResult *
 orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 {
+	OBTOptions *options = (OBTOptions *) info->index->rd_options;
+
+	if (options && options->index_bridging)
+		return btvacuumcleanup(info, stats);
+
 	return stats;
 }
 
 bool
 orioledb_amcanreturn(Relation index, int attno)
 {
+	OBTOptions *options = (OBTOptions *) index->rd_options;
+
+	if (options && options->index_bridging)
+		return btcanreturn(index, attno);
+
 	return true;
 }
 
@@ -1155,6 +1187,11 @@ orioledb_amoptions(Datum reloptions, bool validate)
 								   "Compression level of a particular index",
 								   NULL, validate_index_compress, NULL,
 								   offsetof(OBTOptions, compress_offset));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								   "Enable index bridging and using of postgresql btree indices via index bridging "
+								   "instead of orioledb btree indices. Works only if index_bridging option enabled for table",
+								   false,
+								   offsetof(OBTOptions, index_bridging));
 		MemoryContextSwitchTo(oldcxt);
 		relopts_set = true;
 	}
@@ -1223,6 +1260,10 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexDescr *index_descr;
 	OTableDescr *descr;
 	OIndexNumber ix_num;
+	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	if (options && options->index_bridging)
+		return btbeginscan(rel, nkeys, norderbys);
 
 	o_scan = (OScanState *) palloc0(sizeof(OScanState));
 
@@ -1288,6 +1329,10 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
 	OScanState *o_scan = (OScanState *) scan;
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 
 	MemoryContextReset(o_scan->cxt);
 	o_scan->iterator = NULL;
@@ -1504,6 +1549,10 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	MemoryContext tupleCxt = CurrentMemoryContext;
 	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 	CommitSeqNo csn;
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btgettuple(scan, dir);
 
 	o_scan->scanDir = dir;
 
@@ -1579,6 +1628,10 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btgetbitmap(scan, tbm);
 	return 0;
 }
 
@@ -1586,6 +1639,10 @@ void
 orioledb_amendscan(IndexScanDesc scan)
 {
 	OScanState *o_scan = (OScanState *) scan;
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btendscan(scan);
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
@@ -1595,11 +1652,19 @@ orioledb_amendscan(IndexScanDesc scan)
 void
 orioledb_ammarkpos(IndexScanDesc scan)
 {
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btmarkpos(scan);
 }
 
 void
 orioledb_amrestrpos(IndexScanDesc scan)
 {
+	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+		return btrestrpos(scan);
 }
 
 Size
