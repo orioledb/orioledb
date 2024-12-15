@@ -124,7 +124,9 @@ orioledb_index_fetch_begin(Relation rel)
 	if (o_current_index)
 	{
 		OBTOptions *options = (OBTOptions *) o_current_index->rd_options;
-		o_scan->bridged_tuple = options && options->index_bridging;
+
+		o_scan->bridged_tuple = (options && options->index_bridging) ||
+								(o_current_index->rd_rel->relam != BTREE_AM_OID);
 		o_current_index = NULL;
 	}
 
@@ -928,7 +930,7 @@ orioledb_index_build_range_scan(Relation heapRelation,
 {
 	OBTOptions *options = (OBTOptions *) indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if ((options && options->index_bridging) || indexRelation->rd_rel->relam != BTREE_AM_OID)
 	{
 		OTableDescr		   *descr;
 		BTreeSeqScan	   *seq_scan;
