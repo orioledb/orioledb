@@ -427,8 +427,39 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && options->index_bridging)
+	{
+		bytea	   *rowid;
+		Pointer		p;
+
+		ORelOidsSetFromRel(oids, heapRel);
+
+		descr = o_fetch_table_descr(oids);
+		Assert(descr != NULL);
+
+		rowid = DatumGetByteaP(tupleid);
+		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
+		if (!GET_PRIMARY(descr)->primaryIsCtid)
+		{
+			ORowIdAddendumNonCtid *add;
+
+			p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+			tupleid = PointerGetDatum(p);
+		}
+		else
+		{
+			ORowIdAddendumCtid *add;
+
+			add = (ORowIdAddendumCtid *) p;
+			p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+			p += MAXALIGN(sizeof(ItemPointerData));
+			tupleid = PointerGetDatum(p);
+		}
+
 		return btinsert(rel, values, isnull, tupleid, heapRel,
 						checkUnique, indexUnchanged, indexInfo);
+	}
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
 		return true;
