@@ -965,6 +965,7 @@ orioledb_index_build_range_scan(Relation heapRelation,
 		predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
 
 		descr = relation_get_descr(heapRelation);
+		Assert(descr != NULL);
 
 		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, NULL);
 		primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
