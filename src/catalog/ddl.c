@@ -2087,7 +2087,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 		{
 			OBTOptions *options = (OBTOptions *) ind->rd_options;
 
-			if (options && options->index_bridging)
+			if ((options && options->index_bridging) || ind->rd_rel->relam != BTREE_AM_OID)
 			{
 				ReindexParams reindex_params = {0};
 				relation_close(ind, AccessShareLock);

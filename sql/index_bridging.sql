@@ -161,9 +161,20 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_ix_ams ORDER BY k;
 SELECT * FROM o_test_ix_ams ORDER BY k;
 COMMIT;
-\q
 
--- CREATE INDEX o_test_ix_ams_ix2 ON o_test_ix_ams USING hash (j);
+DROP INDEX o_test_ix_ams_ix2;
+
+CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
+\d+ o_test_ix_ams
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE k = 8000;
+SELECT * FROM o_test_ix_ams WHERE k = 8000;
+COMMIT;
+
 -- CREATE INDEX o_test_ix_ams_ix3 ON o_test_ix_ams USING gin (j);
 -- CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 DROP EXTENSION orioledb CASCADE;
