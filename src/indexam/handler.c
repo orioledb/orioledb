@@ -1248,6 +1248,9 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 {
 }
 
+/* TODO: Remove this hack; probably patch table_index_fetch_begin to accept indexRelation */
+Relation o_current_index = NULL;
+
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
@@ -1260,8 +1263,13 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexNumber ix_num;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
+	o_current_index = NULL;
+
 	if (options && options->index_bridging)
+	{
+		o_current_index = rel;
 		return btbeginscan(rel, nkeys, norderbys);
+	}
 
 	o_scan = (OScanState *) palloc0(sizeof(OScanState));
 

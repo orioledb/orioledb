@@ -35,6 +35,7 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_ix_ams ORDER BY j;
 SELECT * FROM o_test_ix_ams ORDER BY j;
 COMMIT;
+\q
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
