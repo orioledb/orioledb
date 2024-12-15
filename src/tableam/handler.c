@@ -107,6 +107,7 @@ orioledb_slot_callbacks(Relation relation)
 typedef struct OrioledbIndexFetchData
 {
 	IndexFetchTableData xs_base;	/* AM independent part of the descriptor */
+	bool				bridged_tuple;
 } OrioledbIndexFetchData;
 
 /*
@@ -117,7 +118,15 @@ static IndexFetchTableData *
 orioledb_index_fetch_begin(Relation rel)
 {
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
+	/* TODO: Remove this hack */
+	extern Relation o_current_index;
 
+	if (o_current_index)
+	{
+		OBTOptions *options = (OBTOptions *) o_current_index->rd_options;
+		o_scan->bridged_tuple = options && options->index_bridging;
+		o_current_index = NULL;
+	}
 
 	o_scan->xs_base.rel = rel;
 
@@ -146,10 +155,11 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
 {
+	OrioledbIndexFetchData *o_scan = (OrioledbIndexFetchData *) scan;
 	OTableDescr *descr;
 	OBTreeKeyBound pkey;
 	OTuple		tuple;
-	BTreeLocationHint hint;
+	BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 	CommitSeqNo csn;
 	OSnapshot	oSnapshot;
 	CommitSeqNo tupleCsn;
@@ -166,8 +176,30 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
-						&csn, &version);
+	if (o_scan->bridged_tuple)
+	{
+		OBTreeKeyBound	bridge_bound;
+		OTuple			bridge_tup;
+
+		bridge_bound.keys[0].value = tupleid;
+		bridge_bound.keys[0].type = TIDOID;
+		bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		bridge_bound.keys[0].comparator = NULL;
+		csn = COMMITSEQNO_INPROGRESS;
+
+		o_btree_load_shmem(&descr->bridge->desc);
+
+		bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
+											   (Pointer) &bridge_bound, BTreeKeyBound,
+											   &oSnapshot, &tupleCsn,
+											   slot->tts_mcxt, NULL);
+		Assert(!O_TUPLE_IS_NULL(bridge_tup));
+
+		o_fill_pindex_tuple_key_bound(&descr->bridge->desc, bridge_tup, &pkey);
+	}
+	else
+		get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
+							&csn, &version);
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
 
 	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
@@ -894,9 +926,95 @@ orioledb_index_build_range_scan(Relation heapRelation,
 								void *callback_state,
 								TableScanDesc scan)
 {
-	/*
-	 * used for index creation
-	 */
+	OBTOptions *options = (OBTOptions *) indexRelation->rd_options;
+
+	if (options && options->index_bridging)
+	{
+		OTableDescr		   *descr;
+		BTreeSeqScan	   *seq_scan;
+		TupleTableSlot	   *primarySlot;
+		double				heap_tuples;
+		OTuple				tup;
+		BTreeLocationHint	hint;
+		CommitSeqNo			tupleCsn;
+		bool				checking_uniqueness;
+		ExprState		   *predicate;
+		EState			   *estate;
+		ExprContext		   *econtext;
+		Datum				values[INDEX_MAX_KEYS];
+		bool				isnull[INDEX_MAX_KEYS];
+
+		/* See whether we're verifying uniqueness/exclusion properties */
+		checking_uniqueness = (indexInfo->ii_Unique ||
+							indexInfo->ii_ExclusionOps != NULL);
+
+		/*
+		* "Any visible" mode is not compatible with uniqueness checks; make sure
+		* only one of those is requested.
+		*/
+		Assert(!(anyvisible && checking_uniqueness));
+
+		/*
+		* Need an EState for evaluation of index expressions and partial-index
+		* predicates.  Also a slot to hold the current tuple.
+		*/
+		estate = CreateExecutorState();
+		econtext = GetPerTupleExprContext(estate);
+
+		/* Set up execution state for predicate, if any. */
+		predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+
+		descr = relation_get_descr(heapRelation);
+
+		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, NULL);
+		primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+
+		/* Arrange for econtext's scan tuple to be the tuple under test */
+		econtext->ecxt_scantuple = primarySlot;
+
+		heap_tuples = 0;
+		while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(seq_scan, primarySlot->tts_mcxt, &tupleCsn, &hint)))
+		{
+			OTableSlot *oslot = (OTableSlot *) primarySlot;
+			tts_orioledb_store_tuple(primarySlot, tup, descr, tupleCsn, PrimaryIndexNumber, true, &hint);
+			slot_getallattrs(primarySlot);
+
+			heap_tuples++;
+
+			MemoryContextReset(econtext->ecxt_per_tuple_memory);
+
+			/*
+			* In a partial index, discard tuples that don't satisfy the
+			* predicate.
+			*/
+			if (predicate != NULL)
+			{
+				if (!ExecQual(predicate, econtext))
+					continue;
+			}
+
+			/*
+			* For the current heap tuple, extract all the attributes we use in
+			* this index, and note which are null.  This also performs evaluation
+			* of any expressions needed.
+			*/
+			FormIndexDatum(indexInfo,
+						   primarySlot,
+						   estate,
+						   values,
+						   isnull);
+
+			/* Call the AM's callback routine to process the tuple */
+			callback(indexRelation, &oslot->bridge_ctid, values, isnull, true, callback_state);
+
+			ExecClearTuple(primarySlot);
+		}
+		ExecDropSingleTupleTableSlot(primarySlot);
+		FreeExecutorState(estate);
+		free_btree_seq_scan(seq_scan);
+
+		return heap_tuples;
+	}
 	return 0.0;
 }
 
