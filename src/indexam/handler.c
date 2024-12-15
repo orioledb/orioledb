@@ -578,7 +578,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && options->index_bridging)
-		Assert(false); // Probably return true;
+		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -732,7 +732,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && options->index_bridging)
-		Assert(false); // Probably return true;
+		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
