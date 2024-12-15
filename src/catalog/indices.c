@@ -420,6 +420,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			return;
 		}
 		fillfactor = options->bt_options.fillfactor;
+		Assert(!options->index_bridging);
 	}
 
 	if (index->rd_index->indisprimary)
