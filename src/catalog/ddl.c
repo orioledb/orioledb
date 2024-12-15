@@ -2085,10 +2085,23 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 
 		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
 		{
-			o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
-			relation_close(ind, AccessShareLock);
-			o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
-			closed = true;
+			OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+			if (options && options->index_bridging)
+			{
+				ReindexParams reindex_params = {0};
+				relation_close(ind, AccessShareLock);
+				reindex_index(NULL, indexOid, 0,
+							  ind->rd_rel->relpersistence, &reindex_params);
+				closed = true;
+			}
+			else
+			{
+				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+				relation_close(ind, AccessShareLock);
+				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
+				closed = true;
+			}
 		}
 		if (!closed)
 			relation_close(ind, AccessShareLock);

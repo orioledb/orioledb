@@ -186,7 +186,27 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
 	if (options && options->index_bridging)
-		return btbuild(heap, index, indexInfo);
+	{
+		OTableDescr		   *descr;
+
+		descr = relation_get_descr(heap);
+		/* During rewrite we are ignoring first ambuild,
+		 * because we need descr to exist in orioledb_index_build_range_scan,
+		 * but descr for table created later.
+		 * So we performing new reindex_index in redefine_indices after descr created.
+		 */
+		if (descr == NULL)
+		{
+			result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
+
+			result->heap_tuples = 0.0;
+			result->index_tuples = 0.0;
+
+			return result;
+		}
+		else
+			return btbuild(heap, index, indexInfo);
+	}
 
 	relname = makeString(index->rd_rel->relname.data);
 	if (list_member(reindex_list, relname))
@@ -441,17 +461,12 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 		if (!GET_PRIMARY(descr)->primaryIsCtid)
 		{
-			ORowIdAddendumNonCtid *add;
-
 			p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 
 			tupleid = PointerGetDatum(p);
 		}
 		else
 		{
-			ORowIdAddendumCtid *add;
-
-			add = (ORowIdAddendumCtid *) p;
 			p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 			p += MAXALIGN(sizeof(ItemPointerData));
 			tupleid = PointerGetDatum(p);
