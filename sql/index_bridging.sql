@@ -52,8 +52,6 @@ EXPLAIN (COSTS OFF)
 SELECT j FROM o_test_ix_ams ORDER BY j;
 COMMIT;
 
-\q
-
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 ALTER TABLE o_test_ix_ams ADD PRIMARY KEY (pk2, pk1);
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -119,6 +117,7 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams ORDER BY j;
 COMMIT;
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+\q
 
 ALTER TABLE o_test_ix_ams ADD COLUMN k int;
 
