@@ -199,8 +199,10 @@ assign_new_oids(OTable *oTable, Relation rel)
 		{
 			Oid			indexOid = lfirst_oid(indexId);
 			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
+			OBTOptions *options = (OBTOptions *) iRel->rd_options;
 
-			RelationSetNewRelfilenode(iRel, persistence);
+			if (!options || !options->index_bridging)
+				RelationSetNewRelfilenode(iRel, persistence);
 			index_close(iRel, AccessExclusiveLock);
 		}
 
