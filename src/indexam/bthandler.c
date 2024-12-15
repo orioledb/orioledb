@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
- * handler.c
- *		Implementation of index access method handler
+ * bthandler.c
+ *		Implementation of btree index access method handler
  *
  * Copyright (c) 2021-2024, Oriole DB Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/indexam/handler.c
+ *	  contrib/orioledb/src/indexam/bthandler.c
  *
  *-------------------------------------------------------------------------
  */
@@ -97,7 +97,7 @@ static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
 
 static IndexAmRoutine *
-orioledb_get_indexam_handler(void)
+orioledb_btree_handler(void)
 {
 	IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 
@@ -167,8 +167,19 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 		orioledb_tam_oid = GetSysCacheOid1(AMNAME, Anum_pg_am_oid,
 										   CStringGetDatum("orioledb"));
 
-	if (tamoid == orioledb_tam_oid && amhandler == F_BTHANDLER)
-		return orioledb_get_indexam_handler();
+	if (tamoid == orioledb_tam_oid)
+	{
+		switch (amhandler)
+		{
+			case F_BTHANDLER:
+				return orioledb_btree_handler();
+			case F_HASHHANDLER:
+				return orioledb_hash_handler();
+
+			default:
+				break;
+		}
+	}
 
 	return NULL;
 }

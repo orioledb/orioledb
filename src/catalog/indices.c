@@ -201,7 +201,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
 			OBTOptions *options = (OBTOptions *) iRel->rd_options;
 
-			if (!options || !options->index_bridging)
+			if (iRel->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging))
 				RelationSetNewRelfilenode(iRel, persistence);
 			index_close(iRel, AccessExclusiveLock);
 		}
