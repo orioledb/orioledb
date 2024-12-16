@@ -58,6 +58,8 @@ include/utils/stopevents_data.h
 orioledb.typedefs
 ci/antithesis
 
+# Ignore generated scripts
+sql/orioledb--1.0.sql
 
 
 #######################################################

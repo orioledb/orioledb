@@ -49,5 +49,8 @@ lib*.pc
 /orioledb.typedefs
 !ci/antithesis/libvoidstar.so
 
+# Ignore generated scripts
+sql/orioledb--1.0.sql
+
 # Exclude the PostGIS Docker build directory
 /docker-postgis
