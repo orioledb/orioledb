@@ -1,4 +1,4 @@
-/* contrib/orioledb/orioledb--1.0.sql */
+/* contrib/orioledb/sql/orioledb--1.0.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION orioledb" to load this file. \quit

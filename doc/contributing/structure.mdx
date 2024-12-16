@@ -29,6 +29,7 @@ orioledb
 |  |- orioledb-config.sh -- Docker images tests configuration
 |  |- postgresql.docker.conf -- configuration file used by Docker images
 |- include -- C-headers of extension
+|- sql -- installation scripts with definitions of the extension's SQL-level objects
 |- src -- C-sources of extension
 |- test
 |  |- expected -- expected output for regression and isolation tests
@@ -40,7 +41,6 @@ orioledb
 |- LICENSE -- defines PostgreSQL-licence for the project
 |- Makefile -- defines make targets
 |- README.md -- main documentation entrypoint
-|- orioledb--1.0.sql -- script for definition of extension SQL-level objects
 |- orioledb.control -- extension control file
 |- stopevents.txt -- list of "stop event"
 |- stopevents_gen.py -- generates include/utils/stopevents_(defs|data).h from stopevents.txt
