@@ -175,6 +175,22 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams WHERE k = 8000;
 COMMIT;
 
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE j < 2100;
+SELECT * FROM o_test_ix_ams WHERE j < 2100;
+COMMIT;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE k = 8000;
+SELECT * FROM o_test_ix_ams WHERE k = 8000;
+COMMIT;
+
 -- CREATE INDEX o_test_ix_ams_ix3 ON o_test_ix_ams USING gin (j);
 -- CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 DROP EXTENSION orioledb CASCADE;
