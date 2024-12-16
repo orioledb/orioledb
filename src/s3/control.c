@@ -13,7 +13,7 @@
 
 #include "postgres.h"
 
-#include <sys/fcntl.h>
+#include <fcntl.h>
 #include <sys/time.h>
 #include <unistd.h>
 
