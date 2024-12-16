@@ -19,11 +19,11 @@ status=0
 
 cd orioledb
 if [ $CHECK_TYPE = "valgrind_1" ]; then
-	make USE_PGXS=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $(nproc) || status=$?
+	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "valgrind_2" ]; then
-	make USE_PGXS=1 VALGRIND=1 testgrescheck_part_2 -j $(nproc) || status=$?
+	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_2 -j $(nproc) || status=$?
 else
-	make USE_PGXS=1 installcheck -j $(nproc) || status=$?
+	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi
 cd ..
 
