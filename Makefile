@@ -2,9 +2,11 @@
 
 MODULE_big = orioledb
 EXTENSION = orioledb
-DATA = sql/orioledb--1.0.sql sql/orioledb--1.0--1.1.sql sql/orioledb--1.1--1.2.sql
 PGFILEDESC = "orioledb - orioledb transactional storage engine via TableAm"
 SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
+
+DATA_built = $(patsubst %_prod.sql,%.sql,$(wildcard sql/*_prod.sql))
+DATA = $(filter-out $(wildcard sql/*_*.sql) $(DATA_built), $(wildcard sql/*sql))
 
 EXTRA_CLEAN = include/utils/stopevents_defs.h \
 			  include/utils/stopevents_data.h
@@ -181,6 +183,13 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test
 
+ifdef IS_DEV
+sql/%.sql:
+	@cat sql/$*_prod.sql sql/$*_dev.sql > $@
+else
+sql/%.sql:
+	@cat sql/$*_prod.sql > $@
+endif
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

@@ -62,7 +62,7 @@ cd ..
 git clone https://github.com/orioledb/orioledb.git
 cd orioledb
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
-compiledb make USE_PGXS=1
+compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
 echo "compile_commands.json" >> .git/info/exclude
 ```
@@ -85,14 +85,14 @@ code orioledb
 
 ```bash
 cd orioledb
-make USE_PGXS=1 installcheck
+make USE_PGXS=1 IS_DEV=1 installcheck
 ```
 
 #### Manual installation and running
 
 ```bash
 cd orioledb
-make USE_PGXS=1 install
+make USE_PGXS=1 IS_DEV=1 install
 initdb --no-locale -D $HOME/pgdata
 sed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log
@@ -163,7 +163,7 @@ cd ..
 git clone https://github.com/orioledb/orioledb.git
 cd orioledb
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
-compiledb make USE_PGXS=1
+compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
 echo "compile_commands.json" >> .git/info/exclude
 ```
@@ -186,14 +186,14 @@ code orioledb
 
 ```bash
 cd orioledb
-make USE_PGXS=1 installcheck
+make USE_PGXS=1 IS_DEV=1 installcheck
 ```
 
 #### Manual installation and running
 
 ```bash
 cd orioledb
-make USE_PGXS=1 install
+make USE_PGXS=1 IS_DEV=1 install
 initdb --no-locale -D $HOME/pgdata
 gsed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log
@@ -270,7 +270,7 @@ cd ..
 git clone https://github.com/orioledb/orioledb.git
 cd orioledb
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
-compiledb make USE_PGXS=1
+compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
 echo "compile_commands.json" >> .git/info/exclude
 ```
@@ -298,13 +298,13 @@ code --install-extension ms-vscode.cpptools
 #### Run automated tests
 
 ```bash
-make USE_PGXS=1 installcheck
+make USE_PGXS=1 IS_DEV=1 installcheck
 ```
 
 #### Manual installation and running
 
 ```bash
-make USE_PGXS=1 install
+make USE_PGXS=1 IS_DEV=1 install
 initdb --no-locale -D $HOME/pgdata
 sed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log

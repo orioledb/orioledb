@@ -195,8 +195,8 @@ RUN set -eux; \
 	make -C contrib install; \
 	# install orioledb extension
 	cd /usr/src/postgresql/contrib/orioledb; \
-	make USE_PGXS=1 -j "$(nproc)"; \
-	make USE_PGXS=1 install; \
+	make USE_PGXS=1 IS_DEV=1 -j "$(nproc)"; \
+	make USE_PGXS=1 IS_DEV=1 install; \
 	\
 	# Clean up only if not in debug mode
 	if [ "$DEBUG_MODE" != "true" ]; then \
