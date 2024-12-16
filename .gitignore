@@ -36,13 +36,14 @@ lib*dll.def
 lib*.pc
 
 # Local excludes in root directory
-/t/__pycache__/
-/log/
+/test/t/__pycache__/
+/test/__pycache__/
+/test/log/
 /log_docker_build/
-/results/
-/tmp_check/
-/tmp_check_iso/
-/output_iso/
+/test/results/
+/test/tmp_check/
+/test/tmp_check_iso/
+/test/output_iso/
 /include/utils/stopevents_defs.h
 /include/utils/stopevents_data.h
 /orioledb.typedefs

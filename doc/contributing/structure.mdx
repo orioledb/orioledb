@@ -20,13 +20,18 @@ orioledb
 |
 |- ci  -- scripts used within build.yml workflow
 |- doc -- documentation
-|- expected -- expected output for regression and isolation tests
 |- include -- C-headers of extension
-|- specs -- isolation tests
-|- sql -- regression tests
 |- src -- C-sources of extension
-|- t -- python tests
-|
+|- test
+|  |- expected -- expected output for regression and isolation tests
+|  |- specs -- isolation tests
+|  |- sql -- regression tests
+|  |- t -- python tests
+|  |- tests -- Docker images tests
+|  |- README.md -- Docker images tests documentation
+|  |- orioledb-config.sh -- Docker images tests configuration
+|  |- orioledb_isolation.conf -- configuration file used during isolation tests
+|  |- orioledb_regression.conf -- configuration file used during regression tests
 |- Dockerfile -- Dockerfile used within docker.yml workflow
 |- LICENSE -- defines PostgreSQL-licence for the project
 |- Makefile -- defines make targets
@@ -34,8 +39,6 @@ orioledb
 |- docker-entrypoint.sh -- entrypoint file for Docker images
 |- orioledb--1.0.sql -- script for definition of extension SQL-level objects
 |- orioledb.control -- extension control file
-|- orioledb_isolation.conf -- configuration file used during isolation tests
-|- orioledb_regression.conf -- configuration file used during regression tests
 |- stopevents.txt -- list of "stop event"
 |- stopevents_gen.py -- generates include/utils/stopevents_(defs|data).h from stopevents.txt
 |- typedefs_gen.py -- generates list of C-symbols in orioledb.so to orioledb.typedefs
