@@ -1,4 +1,4 @@
-/* contrib/orioledb/orioledb--1.1--1.2.sql */
+/* contrib/orioledb/sql/orioledb--1.1--1.2.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "ALTER EXTENSION orioledb UPDATE TO '1.2'" to load this file. \quit
