@@ -140,44 +140,47 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_subtrans \
 				  table_lock_test \
 				  uniq
-TESTGRESCHECKS_PART_1 = t/checkpointer_test.py \
-						t/eviction_bgwriter_test.py \
-						t/eviction_compression_test.py \
-						t/eviction_test.py \
-						t/file_operations_test.py \
-						t/files_test.py \
-						t/incomplete_split_test.py \
-						t/merge_test.py \
-						t/o_tables_test.py \
-						t/o_tables_2_test.py \
-						t/recovery_test.py \
-						t/recovery_opclass_test.py \
-						t/recovery_worker_test.py \
-						t/replication_test.py \
-						t/types_test.py \
-						t/undo_eviction_test.py
-TESTGRESCHECKS_PART_2 = t/checkpoint_concurrent_test.py \
-						t/checkpoint_eviction_test.py \
-						t/checkpoint_same_trx_test.py \
-						t/checkpoint_split1_test.py \
-						t/checkpoint_split2_test.py \
-						t/checkpoint_split3_test.py \
-						t/checkpoint_update_compress_test.py \
-						t/checkpoint_update_test.py \
-						t/ddl_test.py \
-						t/eviction_full_memory_test.py \
-						t/include_indices_test.py \
-						t/indices_build_test.py \
-						t/logical_test.py \
-						t/not_supported_yet_test.py \
-						t/parallel_test.py \
-						t/reindex_test.py \
-						t/s3_test.py \
-						t/schema_test.py \
-						t/toast_index_test.py \
-						t/trigger_test.py \
-						t/unlogged_test.py \
-						t/vacuum_test.py
+TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
+						test/t/eviction_bgwriter_test.py \
+						test/t/eviction_compression_test.py \
+						test/t/eviction_test.py \
+						test/t/file_operations_test.py \
+						test/t/files_test.py \
+						test/t/incomplete_split_test.py \
+						test/t/merge_test.py \
+						test/t/o_tables_test.py \
+						test/t/o_tables_2_test.py \
+						test/t/recovery_test.py \
+						test/t/recovery_opclass_test.py \
+						test/t/recovery_worker_test.py \
+						test/t/replication_test.py \
+						test/t/types_test.py \
+						test/t/undo_eviction_test.py
+TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
+						test/t/checkpoint_eviction_test.py \
+						test/t/checkpoint_same_trx_test.py \
+						test/t/checkpoint_split1_test.py \
+						test/t/checkpoint_split2_test.py \
+						test/t/checkpoint_split3_test.py \
+						test/t/checkpoint_update_compress_test.py \
+						test/t/checkpoint_update_test.py \
+						test/t/ddl_test.py \
+						test/t/eviction_full_memory_test.py \
+						test/t/include_indices_test.py \
+						test/t/indices_build_test.py \
+						test/t/logical_test.py \
+						test/t/not_supported_yet_test.py \
+						test/t/parallel_test.py \
+						test/t/reindex_test.py \
+						test/t/s3_test.py \
+						test/t/schema_test.py \
+						test/t/toast_index_test.py \
+						test/t/trigger_test.py \
+						test/t/unlogged_test.py \
+						test/t/vacuum_test.py
+
+PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test
+
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
@@ -190,21 +193,19 @@ ifeq ($(shell expr $(MAJORVERSION) \>= 14), 1)
 endif
 
 ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
-  TESTGRESCHECKS_PART_2 += t/merge_into_test.py
+  TESTGRESCHECKS_PART_2 += test/t/merge_into_test.py
   ISOLATIONCHECKS += isol_merge
 endif
 
-PG_REGRESS_ARGS=--no-locale
-
 regresscheck: | install
 	$(pg_regress_check) \
-		--temp-config orioledb_regression.conf \
+		--temp-config test/orioledb_regression.conf \
 		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
 isolationcheck: | install
 	$(pg_isolation_regress_check) \
-		--temp-config orioledb_isolation.conf \
+		--temp-config test/orioledb_isolation.conf \
 		$(PG_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
@@ -224,12 +225,14 @@ include $(top_srcdir)/contrib/contrib-global.mk
 
 regresscheck: | submake-regress submake-orioledb temp-install
 	$(pg_regress_check) \
-		--temp-config $(top_srcdir)/contrib/orioledb/orioledb_regression.conf \
+		--temp-config $(top_srcdir)/contrib/orioledb/test/orioledb_regression.conf \
+		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
 isolationcheck: | submake-isolation submake-orioledb temp-install
 	$(pg_isolation_regress_check) \
-		--temp-config $(top_srcdir)/contrib/orioledb/orioledb_isolation.conf \
+		--temp-config $(top_srcdir)/contrib/orioledb/test/orioledb_isolation.conf \
+		$(PG_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
 $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | submake-orioledb temp-install
@@ -311,7 +314,7 @@ pgindent: orioledb.typedefs
 	include/*/*.h
 
 yapf:
-	yapf -i t/*.py
+	yapf -i test/t/*.py
 	yapf -i *.py
 
 .PHONY: submake-orioledb submake-regress check \

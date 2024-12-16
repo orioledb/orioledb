@@ -19,7 +19,7 @@ class TypesTest(BaseTest):
 	@classmethod
 	def parse_sys_tree_names(cls):
 		dirname = os.path.dirname(__file__)
-		filename = os.path.join(dirname, '../include/catalog/sys_trees.h')
+		filename = os.path.join(dirname, '../../include/catalog/sys_trees.h')
 		f = open(filename, 'r')
 		pattern = re.compile(r"^#define SYS_TREES_(\w+)\s+\((\d+)\)")
 		line = f.readline()
