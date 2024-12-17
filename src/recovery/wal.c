@@ -563,12 +563,14 @@ log_logical_wal_container(int length)
 		/* Walk the list and clear all XIDs. */
 		while (nextidx != INVALID_PGPROCNO)
 		{
+			WalClearGroupEntry *nextentry = &wal_clear_group_array[nextidx];
+
 			XLogBeginInsert();
 			XLogRegisterData(wal_buffer + LOCAL_WAL_BUFFER_SIZE * nextidx, length);
-			wal_clear_group_array[nextidx].recptr = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
+			nextentry->recptr = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 
 			/* Move to next proc in list. */
-			nextidx = pg_atomic_read_u32(&(wal_clear_group_array[nextidx].next));
+			nextidx = pg_atomic_read_u32(&nextentry->next);
 		}
 		/* We're done with the lock now. */
 		LWLockRelease(&walShmem->walLock);
@@ -583,6 +585,7 @@ log_logical_wal_container(int length)
 		while (wakeidx != INVALID_PGPROCNO)
 		{
 			WalClearGroupEntry *nextentry = &wal_clear_group_array[wakeidx];
+			PGPROC 		   *nextproc = GetPGProcByNumber(wakeidx);
 
 			wakeidx = pg_atomic_read_u32(&nextentry->next);
 			pg_atomic_write_u32(&nextentry->next, INVALID_PGPROCNO);
@@ -592,7 +595,7 @@ log_logical_wal_container(int length)
 
 			nextentry->isMember = false;
 			if (nextentry != &wal_clear_group_array[MYPROCNUMBER])
-				PGSemaphoreUnlock(GetPGProcByNumber(wakeidx)->sem);
+				PGSemaphoreUnlock(nextproc->sem);
 		}
 	}
 	Assert(!XLogRecPtrIsInvalid(wal_clear_group_array[MYPROCNUMBER].recptr));
