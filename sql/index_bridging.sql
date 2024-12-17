@@ -8,6 +8,7 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
+-- ) USING heap;
 -- ) USING orioledb;
 ) USING orioledb WITH (index_bridging);
 
@@ -191,7 +192,23 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams WHERE k = 8000;
 COMMIT;
 
--- CREATE INDEX o_test_ix_ams_ix3 ON o_test_ix_ams USING gin (j);
+ALTER TABLE o_test_ix_ams ADD COLUMN r int4[];
+UPDATE o_test_ix_ams SET r = ARRAY[(i*8+j)%100, 11];
+SELECT orioledb_table_description('o_test_ix_ams'::regclass);
+\d+ o_test_ix_ams
+SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+SELECT * FROM o_test_ix_ams;
+CREATE INDEX o_test_ix_ams_ix3 ON o_test_ix_ams USING gin (r);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
+SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
+COMMIT;
+
 -- CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
