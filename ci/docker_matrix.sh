@@ -26,7 +26,7 @@ VALID_UBUNTU_VERSIONS="devel 25.04 24.10 24.04 22.04 20.04 plucky oracular noble
 VALID_DEBIAN_VERSIONS="unstable testing experimental bookworm bookworm-backports bookworm-slim bullseye bullseye-backports bullseye-slim trixie trixie-backports trixie-slim sid 11 12 stable oldstable latest"
 VALID_PG_MAJOR_VERSIONS="17 16"
 VALID_COMPILERS="clang gcc"
-VALID_TEST_TARGETS="no show-build-env installcheck regresscheck isolationcheck testgrescheck testgrescheck_part_1 testgrescheck_part_2"
+VALID_TEST_TARGETS="no installcheck regresscheck isolationcheck testgrescheck testgrescheck_part_1 testgrescheck_part_2"
 
 
 # Function to display help message
@@ -89,7 +89,7 @@ Examples:
   ./ci/docker_matrix.sh --base alpine:3.20 --compiler gcc --debug true
   ./ci/docker_matrix.sh --base ubuntu:oracular --pg-major 16 --compiler all --debug false
   ./ci/docker_matrix.sh --base debian:bookworm --pg-major 17
-  ./ci/docker_matrix.sh --base alpine:devel --compiler gcc --test_targets 'show-build-env'
+  ./ci/docker_matrix.sh --base alpine:devel --compiler gcc --test_targets 'testgrescheck'
   ./ci/docker_matrix.sh --base all-oldest --test_targets 'regresscheck isolationcheck'
   ./ci/docker_matrix.sh --base all-latest --test_targets 'regresscheck isolationcheck testgrescheck'
 

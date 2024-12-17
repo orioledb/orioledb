@@ -323,21 +323,6 @@ yapf:
 	yapf -i t/*.py
 	yapf -i *.py
 
-show-build-env:
-	@echo "Build Environment Information:"
-	@echo "----------------------------"
-	@echo "Operating System:"
-	@cat /etc/os-release 2>/dev/null || uname -a
-	@echo "\nPostgreSQL Configuration:"
-	@pg_config || echo "pg_config not found"
-	@echo "\nPython Version:"
-	@python3 --version
-	@echo "\nPython Packages:"
-	@pip3 list
-	@echo "\nZstd Version:"
-	@zstd --version
-
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck pgindent \
-	show-build-env \
 	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2)
