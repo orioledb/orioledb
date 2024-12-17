@@ -1,12 +1,13 @@
 /*-------------------------------------------------------------------------
  *
- * bthandler.c
- *		Implementation of btree index access method handler
+ * handler.c
+ *		Implementation of btree index access method handler and
+ *		generic bridged index access method handler
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/indexam/bthandler.c
+ *	  contrib/orioledb/src/indexam/handler.c
  *
  *-------------------------------------------------------------------------
  */
@@ -96,6 +97,22 @@ static Size orioledb_amestimateparallelscan(void);
 static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
 
+static IndexBuildResult *bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
+static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
+							  Datum tupleid, Relation heapRel,
+							  IndexUniqueCheck checkUnique,
+							  bool indexUnchanged,
+							  IndexInfo *indexInfo);
+static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
+
+typedef struct BrigedIndexAmRoutine {
+	IndexAmRoutine *original_routine;
+	IndexAmRoutine routine;
+	Oid amhandler;
+} BrigedIndexAmRoutine;
+
+List *bridged_ams = NIL;
+
 static IndexAmRoutine *
 orioledb_btree_handler(void)
 {
@@ -169,15 +186,48 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 
 	if (tamoid == orioledb_tam_oid)
 	{
-		switch (amhandler)
+		if (amhandler == F_BTHANDLER)
 		{
-			case F_BTHANDLER:
-				return orioledb_btree_handler();
-			case F_HASHHANDLER:
-				return orioledb_hash_handler();
+			return orioledb_btree_handler();
+		}
+		else
+		{
+			IndexAmRoutine *amroutine = NULL;
+			ListCell *lc;
 
-			default:
-				break;
+			foreach(lc, bridged_ams)
+			{
+				BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+				if (bridged->amhandler == amhandler)
+				{
+					amroutine = palloc0(sizeof(IndexAmRoutine));
+					memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
+					break;
+				}
+			}
+
+			if (amroutine == NULL)
+			{
+				BrigedIndexAmRoutine *bridged;
+				MemoryContext		 old_mcxt;
+				Datum				 datum;
+
+				old_mcxt = MemoryContextSwitchTo(TopMemoryContext);
+				bridged = palloc0(sizeof(BrigedIndexAmRoutine));
+				datum = OidFunctionCall0(amhandler);
+				bridged_ams = lappend(bridged_ams, bridged);
+				bridged->amhandler = amhandler;
+				bridged->original_routine = (IndexAmRoutine *) DatumGetPointer(datum);
+				bridged->routine = *bridged->original_routine;
+				bridged->routine.ambuild = bridged_ambuild;
+				bridged->routine.aminsertextended = bridged_aminsert;
+				bridged->routine.ambeginscan = bridged_ambeginscan;
+				MemoryContextSwitchTo(old_mcxt);
+				amroutine = palloc0(sizeof(IndexAmRoutine));
+				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
+			}
+			return amroutine;
 		}
 	}
 
@@ -1748,4 +1798,120 @@ orioledb_aminitparallelscan(void *target)
 void
 orioledb_amparallelrescan(IndexScanDesc scan)
 {
+}
+
+static IndexBuildResult *
+bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
+{
+	IndexBuildResult *result;
+	OTableDescr		   *descr;
+
+	descr = relation_get_descr(heap);
+	/* During rewrite we are ignoring first ambuild,
+	 * because we need descr to exist in orioledb_index_build_range_scan,
+	 * but descr for table created later.
+	 * So we performing new reindex_index in redefine_indices after descr created.
+	 */
+	if (descr == NULL)
+	{
+		result = (IndexBuildResult *) palloc(sizeof(IndexBuildResult));
+
+		result->heap_tuples = 0.0;
+		result->index_tuples = 0.0;
+
+		return result;
+	}
+	else
+	{
+		IndexAmRoutine *amroutine = NULL;
+		ListCell *lc;
+
+		foreach(lc, bridged_ams)
+		{
+			BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+			if (bridged->amhandler == index->rd_amhandler)
+			{
+				amroutine = bridged->original_routine;
+				break;
+			}
+		}
+
+		Assert(amroutine != NULL);
+		return amroutine->ambuild(heap, index, indexInfo);
+	}
+}
+
+bool
+bridged_aminsert(Relation rel, Datum *values, bool *isnull,
+				 Datum tupleid, Relation heapRel,
+				 IndexUniqueCheck checkUnique,
+				 bool indexUnchanged,
+				 IndexInfo *indexInfo)
+{
+	ORelOids	oids;
+	OTableDescr *descr;
+	bytea	   *rowid;
+	Pointer		p;
+	IndexAmRoutine *amroutine = NULL;
+	ListCell *lc;
+
+	ORelOidsSetFromRel(oids, heapRel);
+
+	descr = o_fetch_table_descr(oids);
+	Assert(descr != NULL);
+
+	rowid = DatumGetByteaP(tupleid);
+	p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
+	if (!GET_PRIMARY(descr)->primaryIsCtid)
+	{
+		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+		tupleid = PointerGetDatum(p);
+	}
+	else
+	{
+		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+		p += MAXALIGN(sizeof(ItemPointerData));
+		tupleid = PointerGetDatum(p);
+	}
+
+	foreach(lc, bridged_ams)
+	{
+		BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+		if (bridged->amhandler == rel->rd_amhandler)
+		{
+			amroutine = bridged->original_routine;
+			break;
+		}
+	}
+
+	Assert(amroutine != NULL);
+	return amroutine->aminsertextended(rel, values, isnull, tupleid, heapRel,
+									   checkUnique, indexUnchanged, indexInfo);
+}
+
+IndexScanDesc
+bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
+{
+	IndexAmRoutine *amroutine = NULL;
+	ListCell *lc;
+
+	o_current_index = rel;
+
+	foreach(lc, bridged_ams)
+	{
+		BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+		if (bridged->amhandler == rel->rd_amhandler)
+		{
+			amroutine = bridged->original_routine;
+			break;
+		}
+	}
+
+	Assert(amroutine != NULL);
+	return amroutine->ambeginscan(rel, nkeys, norderbys);
 }
