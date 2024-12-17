@@ -54,9 +54,9 @@ wal_shmem_needs(void)
 	Size        size;
 
 	size = CACHELINEALIGN(sizeof(WalShmem));
-	size = add_size(size, CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections));
+	size = add_size(size, CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * max_procs));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
-	size = add_size(size, CACHELINEALIGN(sizeof(WalClearGroupEntry) * MaxConnections));
+	size = add_size(size, CACHELINEALIGN(sizeof(WalClearGroupEntry) * max_procs));
 
 return size;
 }
@@ -70,7 +70,7 @@ wal_shmem_init(Pointer buf, bool found)
 	ptr += CACHELINEALIGN(sizeof(WalShmem));
 
 	wal_buffer = ptr;
-	ptr += CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * MaxConnections);
+	ptr += CACHELINEALIGN(LOCAL_WAL_BUFFER_SIZE * max_procs);
 
 	wal_clear_group_first = (pg_atomic_uint32 *) ptr;
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
@@ -79,9 +79,9 @@ wal_shmem_init(Pointer buf, bool found)
 
 	if (!found)
 	{
-		memset(wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE * MaxConnections);
+		memset(wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE * max_procs);
 		pg_atomic_init_u32(wal_clear_group_first, INVALID_PGPROCNO);
-		for(int i = 0; i < MaxConnections; i++)
+		for(int i = 0; i < max_procs; i++)
 		{
 			wal_clear_group_array[i].isMember = false;
 			wal_clear_group_array[i].recptr = InvalidXLogRecPtr;
