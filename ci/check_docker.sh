@@ -8,7 +8,6 @@ Usage: ./ci/check_docker.sh [TEST_TARGETS]
 
 TEST_TARGETS (optional): Space-separated list of test targets to run, enclosed in quotes.
   Valid targets include:
-    - show-build-env          : Useful for debugging purposes.
     - installcheck
     - regresscheck
     - isolationcheck
@@ -19,7 +18,6 @@ TEST_TARGETS (optional): Space-separated list of test targets to run, enclosed i
 Examples: ( expects to be run inside a Docker container! )
   /github/workspace/orioledb/ci/check_docker.sh 'installcheck'
   /github/workspace/orioledb/ci/check_docker.sh 'regresscheck isolationcheck'
-  /github/workspace/orioledb/ci/check_docker.sh "show-build-env"
 
 Usage/Note:
   '-j\$(nproc)' is hard coded for parallel builds!

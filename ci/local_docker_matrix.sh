@@ -35,7 +35,34 @@ base_list=(
    ubuntu:devel
   )
 
-test_targets="installcheck"
+# Function test targets
+# if OS(python3.10+)
+#    then set test targets to "regresscheck isolationcheck testgrescheck"
+#    else                     "regresscheck isolationcheck"
+#
+get_test_targets() {
+    local base="$1"
+    local base_test_targets="installcheck"
+
+    # Define minimal test targets for Python < 3.10
+    local minimal_versions=(
+        "alpine:3.15"     # python3.9
+        "alpine:3.14"     # python3.9
+        "debian:bullseye" # python3.9
+        "ubuntu:20.04"    # python3.8
+    )
+
+    # Check if current base is in minimal versions list
+    for ver in "${minimal_versions[@]}"; do
+        if [ "$base" = "$ver" ]; then
+            echo "regresscheck isolationcheck"
+            return
+        fi
+    done
+
+    # Default to full test targets for other versions
+    echo "regresscheck isolationcheck testgrescheck"
+}
 
 # set and prepare $logpath for build logs
 mkdir -p ./log_docker_build
@@ -73,8 +100,11 @@ for pg_major in "${pg_major_list[@]}" ; do
         dockerfile="docker/Dockerfile.ubuntu"
       fi
 
+      # Get appropriate test targets for this base image
+      test_targets=$(get_test_targets "$base")
+
       docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}"
-      echo "------------ $docker_tag ------------------"
+      echo "------------ $docker_tag : $test_targets ------------------"
 
       rm -f ${logpath}/"${docker_tag}".*.log
 
@@ -95,7 +125,8 @@ for pg_major in "${pg_major_list[@]}" ; do
       time docker run --rm \
           --volume $(pwd):/github/workspace/orioledb \
           "orioletest:${docker_tag}" \
-          bash -c "bash +x /github/workspace/orioledb/ci/check_docker.sh \"${test_targets}\""
+          bash -c "bash +x /github/workspace/orioledb/ci/check_docker.sh \"${test_targets}\"" 2>&1 \
+           | tee ${logpath}/"${docker_tag}".check.log
 
     done
   done
