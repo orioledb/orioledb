@@ -2423,6 +2423,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						int			ix_num = InvalidIndexNumber;
 						int			i;
+						bool		define = false;
 
 						for (i = 0; i < o_table->nindices; i++)
 						{
@@ -2435,7 +2436,27 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
 
-						if (rel->rd_rel->relam == BTREE_AM_OID)
+						if (!o_table->index_bridging)
+						{
+							if (rel->rd_rel->relam == BTREE_AM_OID)
+							{
+								OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+								if (options && options->index_bridging)
+									ereport(ERROR, errmsg("Cannot use 'index_bridging' on table without 'index_bridging' option"));
+								define = true;
+							}
+							else
+								ereport(ERROR, errmsg("'%s' access method is not supported",
+													get_am_name(rel->rd_rel->relam)),
+										errhint("For other index access methods use 'index_bridging' option."));
+						}
+						else if (rel->rd_rel->relam == BTREE_AM_OID)
+						{
+							define = true;
+						}
+
+						if (define)
 						{
 							if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
 								o_define_index_validate(table_oids, rel, NULL, NULL);
