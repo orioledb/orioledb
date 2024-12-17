@@ -209,7 +209,15 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
 COMMIT;
 
--- CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
+CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
+SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
 RESET search_path;
