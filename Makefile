@@ -28,6 +28,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/scan.o \
 	   src/btree/split.o \
 	   src/btree/tuple_chunk.o \
+	   src/btree/tuple_chunk_test.o \
 	   src/btree/undo.o \
 	   src/catalog/ddl.o \
 	   src/catalog/free_extents.o \
@@ -124,6 +125,7 @@ REGRESSCHECKS = btree_sys_check \
 				temp \
 				toast \
 				trigger \
+				tuple_chunk \
 				types
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
