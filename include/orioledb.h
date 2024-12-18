@@ -94,6 +94,7 @@ typedef enum
 } OIndexType;
 
 #define PROC_XID_ARRAY_SIZE	32
+#define LOCAL_WAL_BUFFER_SIZE	(8192)
 
 typedef enum
 {
