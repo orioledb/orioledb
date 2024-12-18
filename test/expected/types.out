@@ -271,6 +271,7 @@ SELECT orioledb_tbl_indices('o_test_enum_index'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 2, non-leaf tuple size: 1+
      Non-leaf tuple fields: happiness          +
+     Leaf tuple fields: num_weeks, happiness   +
  Index o_test_enum_index_ix1                   +
      Index type: secondary                     +
      Leaf tuple size: 1, non-leaf tuple size: 1+
@@ -305,12 +306,13 @@ SELECT orioledb_table_description('o_test_enum_index'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_indices('o_test_enum_index'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 3, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+               orioledb_tbl_indices                
+---------------------------------------------------
+ Index ctid_primary                               +
+     Index type: primary, unique, ctid            +
+     Leaf tuple size: 3, non-leaf tuple size: 1   +
+     Non-leaf tuple fields: ctid                  +
+     Leaf tuple fields: ctid, num_weeks, happiness+
  
 (1 row)
 
@@ -384,6 +386,7 @@ SELECT orioledb_tbl_indices('o_test_domain_index'::regclass);
      Index type: primary, unique                        +
      Leaf tuple size: 7, non-leaf tuple size: 7         +
      Non-leaf tuple fields: key, key2, val, t, a, b, net+
+     Leaf tuple fields: key, key2, t, a, b, val, net    +
  
 (1 row)
 
@@ -415,12 +418,13 @@ SELECT orioledb_table_description('o_test_domain_index'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_indices('o_test_domain_index'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 8, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                   orioledb_tbl_indices                    
+-----------------------------------------------------------
+ Index ctid_primary                                       +
+     Index type: primary, unique, ctid                    +
+     Leaf tuple size: 8, non-leaf tuple size: 1           +
+     Non-leaf tuple fields: ctid                          +
+     Leaf tuple fields: ctid, key, key2, t, a, b, val, net+
  
 (1 row)
 
