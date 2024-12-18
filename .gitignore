@@ -45,6 +45,8 @@ lib*.pc
 /test/tmp_check_iso/
 /test/tmp_check_t/
 /test/output_iso/
+/test/regression.diffs
+/test/regression.out
 /include/utils/stopevents_defs.h
 /include/utils/stopevents_data.h
 /orioledb.typedefs
