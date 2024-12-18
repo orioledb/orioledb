@@ -1001,6 +1001,10 @@ o_proc_shmem_init(Pointer ptr, bool found)
 				}
 				oProcData[i].vxids[j].oxid = InvalidOXid;
 			}
+			oProcData[i].walClearGroupMember = false;
+			oProcData[i].walClearGroupRecPtr = InvalidXLogRecPtr;
+			pg_atomic_init_u32(&oProcData[i].walClearGroupNext, INVALID_PGPROCNO);
+			memset(&oProcData[i].wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE);
 		}
 	}
 }
