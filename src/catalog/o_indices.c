@@ -807,7 +807,7 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 		}
 		else
 		{
-			TupleDescCopyEntry(index_descr->itupdesc, i + 1, index_descr->leafTupdesc, cur_attr + 1);
+			TupleDescCopyEntry(index_descr->itupdesc, i + 1, index_descr->nonLeafTupdesc, cur_attr + 1);
 			cur_attr++;
 		}
 	}
@@ -973,7 +973,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	{
 		descr->old_leaf_slot = MakeSingleTupleTableSlot(descr->leafTupdesc, &TTSOpsOrioleDB);
 		descr->new_leaf_slot = MakeSingleTupleTableSlot(descr->leafTupdesc, &TTSOpsOrioleDB);
-		cache_scan_tupdesc_and_slot(descr, oIndex);
+		if (oIndex->indexType != oIndexBridge)
+			cache_scan_tupdesc_and_slot(descr, oIndex);
 	}
 
 	o_set_syscache_hooks();
