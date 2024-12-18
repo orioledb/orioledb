@@ -73,6 +73,11 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
+#if PG_VERSION_NUM >= 170000
+#include "storage/procnumber.h"
+#define INVALID_PGPROCNO INVALID_PROC_NUMBER
+#endif
+
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
@@ -1001,6 +1006,10 @@ o_proc_shmem_init(Pointer ptr, bool found)
 				}
 				oProcData[i].vxids[j].oxid = InvalidOXid;
 			}
+			oProcData[i].walClearGroupMember = false;
+			oProcData[i].walClearGroupRecptr = InvalidXLogRecPtr;
+			pg_atomic_init_u32(&oProcData[i].walClearGroupNext, INVALID_PGPROCNO);
+			memset(&oProcData[i].wal_buffer, 0, LOCAL_WAL_BUFFER_SIZE);
 		}
 	}
 }

@@ -37,18 +37,11 @@
 
 typedef struct
 {
-	LWLock		walLock;
-	int		walLockTrancheId;
+	LWLock				walLock;
+	int					walLockTrancheId;
+	pg_atomic_uint32 	walClearGroupFirst;
 }
-WalShmem;
-
-typedef struct
-{
-	pg_atomic_uint32 next;
-	XLogRecPtr	 recptr;
-	bool isMember;
-}
-WalClearGroupEntry;
+WalGroupClearShmem;
 
 typedef struct
 {
@@ -124,7 +117,6 @@ typedef struct
 	uint8		relnode[sizeof(Oid)];
 } WALRecTruncate;
 
-#define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
