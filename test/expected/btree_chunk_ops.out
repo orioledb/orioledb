@@ -1,0 +1,1101 @@
+CREATE SCHEMA tuple_chunk;
+SET SESSION search_path = 'tuple_chunk';
+CREATE EXTENSION orioledb;
+CREATE TABLE tuple_chunk_test
+(
+    id int PRIMARY KEY,
+    value text
+) USING orioledb;
+SELECT test_btree_leaf_tuple_chunk('tuple_chunk_test'::regclass);
+INFO:  Estimate INSERT operation ('1', 'value 1') at position 0: 48
+INFO:  Perform INSERT operation ('1', 'value 1') at position 0
+INFO:  Perform INSERT operation ('2', 'value 2') at position 1
+INFO:  Perform INSERT operation ('3', 'value 3') at position 2
+INFO:  Perform INSERT operation ('4', 'value 4') at position 3
+INFO:  Perform INSERT operation ('5', 'value 5') at position 4
+INFO:  Perform INSERT operation ('6', 'value 6') at position 5
+INFO:  Perform INSERT operation ('7', 'value 7') at position 6
+INFO:  Perform INSERT operation ('8', 'value 8') at position 7
+INFO:  Perform INSERT operation ('9', 'value 9') at position 8
+INFO:  Perform INSERT operation ('10', 'value 10') at position 9
+INFO:  Perform INSERT operation ('11', 'value 11') at position 10
+INFO:  Perform INSERT operation ('12', 'value 12') at position 11
+INFO:  Perform INSERT operation ('13', 'value 13') at position 12
+INFO:  Perform INSERT operation ('14', 'value 14') at position 13
+INFO:  Perform INSERT operation ('15', 'value 15') at position 14
+INFO:  Perform INSERT operation ('16', 'value 16') at position 15
+INFO:  Perform INSERT operation ('17', 'value 17') at position 16
+INFO:  Perform INSERT operation ('18', 'value 18') at position 17
+INFO:  Perform INSERT operation ('19', 'value 19') at position 18
+INFO:  Perform INSERT operation ('20', 'value 20') at position 19
+INFO:  Perform INSERT operation ('21', 'value 21') at position 20
+INFO:  Perform INSERT operation ('22', 'value 22') at position 21
+INFO:  Perform INSERT operation ('23', 'value 23') at position 22
+INFO:  Perform INSERT operation ('24', 'value 24') at position 23
+INFO:  Perform INSERT operation ('25', 'value 25') at position 24
+INFO:  Perform INSERT operation ('26', 'value 26') at position 25
+INFO:  Perform INSERT operation ('27', 'value 27') at position 26
+INFO:  Perform INSERT operation ('28', 'value 28') at position 27
+INFO:  Perform INSERT operation ('29', 'value 29') at position 28
+INFO:  Perform INSERT operation ('30', 'value 30') at position 29
+INFO:  Perform INSERT operation ('31', 'value 31') at position 30
+INFO:  Perform INSERT operation ('32', 'value 32') at position 31
+INFO:  Perform INSERT operation ('33', 'value 33') at position 32
+INFO:  Perform INSERT operation ('34', 'value 34') at position 33
+INFO:  Perform INSERT operation ('35', 'value 35') at position 34
+INFO:  Perform INSERT operation ('36', 'value 36') at position 35
+INFO:  Perform INSERT operation ('37', 'value 37') at position 36
+INFO:  Perform INSERT operation ('38', 'value 38') at position 37
+INFO:  Perform INSERT operation ('39', 'value 39') at position 38
+INFO:  Perform INSERT operation ('40', 'value 40') at position 39
+INFO:  Perform INSERT operation ('41', 'value 41') at position 40
+INFO:  Perform INSERT operation ('42', 'value 42') at position 41
+INFO:  Perform INSERT operation ('43', 'value 43') at position 42
+INFO:  Perform INSERT operation ('44', 'value 44') at position 43
+INFO:  Perform INSERT operation ('45', 'value 45') at position 44
+INFO:  Perform INSERT operation ('46', 'value 46') at position 45
+INFO:  Perform INSERT operation ('47', 'value 47') at position 46
+INFO:  Perform INSERT operation ('48', 'value 48') at position 47
+INFO:  Perform INSERT operation ('49', 'value 49') at position 48
+INFO:  Perform INSERT operation ('50', 'value 50') at position 49
+INFO:  Read tuple at position 0: ('1', 'value 1')
+INFO:  Read tuple at position 1: ('2', 'value 2')
+INFO:  Read tuple at position 2: ('3', 'value 3')
+INFO:  Read tuple at position 3: ('4', 'value 4')
+INFO:  Read tuple at position 4: ('5', 'value 5')
+INFO:  Read tuple at position 5: ('6', 'value 6')
+INFO:  Read tuple at position 6: ('7', 'value 7')
+INFO:  Read tuple at position 7: ('8', 'value 8')
+INFO:  Read tuple at position 8: ('9', 'value 9')
+INFO:  Read tuple at position 9: ('10', 'value 10')
+INFO:  Read tuple at position 10: ('11', 'value 11')
+INFO:  Read tuple at position 11: ('12', 'value 12')
+INFO:  Read tuple at position 12: ('13', 'value 13')
+INFO:  Read tuple at position 13: ('14', 'value 14')
+INFO:  Read tuple at position 14: ('15', 'value 15')
+INFO:  Read tuple at position 15: ('16', 'value 16')
+INFO:  Read tuple at position 16: ('17', 'value 17')
+INFO:  Read tuple at position 17: ('18', 'value 18')
+INFO:  Read tuple at position 18: ('19', 'value 19')
+INFO:  Read tuple at position 19: ('20', 'value 20')
+INFO:  Read tuple at position 20: ('21', 'value 21')
+INFO:  Read tuple at position 21: ('22', 'value 22')
+INFO:  Read tuple at position 22: ('23', 'value 23')
+INFO:  Read tuple at position 23: ('24', 'value 24')
+INFO:  Read tuple at position 24: ('25', 'value 25')
+INFO:  Read tuple at position 25: ('26', 'value 26')
+INFO:  Read tuple at position 26: ('27', 'value 27')
+INFO:  Read tuple at position 27: ('28', 'value 28')
+INFO:  Read tuple at position 28: ('29', 'value 29')
+INFO:  Read tuple at position 29: ('30', 'value 30')
+INFO:  Read tuple at position 30: ('31', 'value 31')
+INFO:  Read tuple at position 31: ('32', 'value 32')
+INFO:  Read tuple at position 32: ('33', 'value 33')
+INFO:  Read tuple at position 33: ('34', 'value 34')
+INFO:  Read tuple at position 34: ('35', 'value 35')
+INFO:  Read tuple at position 35: ('36', 'value 36')
+INFO:  Read tuple at position 36: ('37', 'value 37')
+INFO:  Read tuple at position 37: ('38', 'value 38')
+INFO:  Read tuple at position 38: ('39', 'value 39')
+INFO:  Read tuple at position 39: ('40', 'value 40')
+INFO:  Read tuple at position 40: ('41', 'value 41')
+INFO:  Read tuple at position 41: ('42', 'value 42')
+INFO:  Read tuple at position 42: ('43', 'value 43')
+INFO:  Read tuple at position 43: ('44', 'value 44')
+INFO:  Read tuple at position 44: ('45', 'value 45')
+INFO:  Read tuple at position 45: ('46', 'value 46')
+INFO:  Read tuple at position 46: ('47', 'value 47')
+INFO:  Read tuple at position 47: ('48', 'value 48')
+INFO:  Read tuple at position 48: ('49', 'value 49')
+INFO:  Read tuple at position 49: ('50', 'value 50')
+INFO:  Compare tuple ('0', 'value') at position 0: -1
+INFO:  Compare tuple ('1', 'value') at position 1: -1
+INFO:  Compare tuple ('2', 'value') at position 2: -1
+INFO:  Compare tuple ('3', 'value') at position 3: -1
+INFO:  Compare tuple ('4', 'value') at position 4: -1
+INFO:  Compare tuple ('5', 'value') at position 5: -1
+INFO:  Compare tuple ('6', 'value') at position 6: -1
+INFO:  Compare tuple ('7', 'value') at position 7: -1
+INFO:  Compare tuple ('8', 'value') at position 8: -1
+INFO:  Compare tuple ('9', 'value') at position 9: -1
+INFO:  Compare tuple ('10', 'value') at position 10: -1
+INFO:  Compare tuple ('11', 'value') at position 11: -1
+INFO:  Compare tuple ('12', 'value') at position 12: -1
+INFO:  Compare tuple ('13', 'value') at position 13: -1
+INFO:  Compare tuple ('14', 'value') at position 14: -1
+INFO:  Compare tuple ('15', 'value') at position 15: -1
+INFO:  Compare tuple ('16', 'value') at position 16: -1
+INFO:  Compare tuple ('17', 'value') at position 17: -1
+INFO:  Compare tuple ('18', 'value') at position 18: -1
+INFO:  Compare tuple ('19', 'value') at position 19: -1
+INFO:  Compare tuple ('20', 'value') at position 20: -1
+INFO:  Compare tuple ('21', 'value') at position 21: -1
+INFO:  Compare tuple ('22', 'value') at position 22: -1
+INFO:  Compare tuple ('23', 'value') at position 23: -1
+INFO:  Compare tuple ('24', 'value') at position 24: -1
+INFO:  Compare tuple ('25', 'value') at position 25: -1
+INFO:  Compare tuple ('26', 'value') at position 26: -1
+INFO:  Compare tuple ('27', 'value') at position 27: -1
+INFO:  Compare tuple ('28', 'value') at position 28: -1
+INFO:  Compare tuple ('29', 'value') at position 29: -1
+INFO:  Compare tuple ('30', 'value') at position 30: -1
+INFO:  Compare tuple ('31', 'value') at position 31: -1
+INFO:  Compare tuple ('32', 'value') at position 32: -1
+INFO:  Compare tuple ('33', 'value') at position 33: -1
+INFO:  Compare tuple ('34', 'value') at position 34: -1
+INFO:  Compare tuple ('35', 'value') at position 35: -1
+INFO:  Compare tuple ('36', 'value') at position 36: -1
+INFO:  Compare tuple ('37', 'value') at position 37: -1
+INFO:  Compare tuple ('38', 'value') at position 38: -1
+INFO:  Compare tuple ('39', 'value') at position 39: -1
+INFO:  Compare tuple ('40', 'value') at position 40: -1
+INFO:  Compare tuple ('41', 'value') at position 41: -1
+INFO:  Compare tuple ('42', 'value') at position 42: -1
+INFO:  Compare tuple ('43', 'value') at position 43: -1
+INFO:  Compare tuple ('44', 'value') at position 44: -1
+INFO:  Compare tuple ('45', 'value') at position 45: -1
+INFO:  Compare tuple ('46', 'value') at position 46: -1
+INFO:  Compare tuple ('47', 'value') at position 47: -1
+INFO:  Compare tuple ('48', 'value') at position 48: -1
+INFO:  Compare tuple ('49', 'value') at position 49: -1
+INFO:  Compare tuple ('1', 'value') at position 0: 0
+INFO:  Compare tuple ('2', 'value') at position 1: 0
+INFO:  Compare tuple ('3', 'value') at position 2: 0
+INFO:  Compare tuple ('4', 'value') at position 3: 0
+INFO:  Compare tuple ('5', 'value') at position 4: 0
+INFO:  Compare tuple ('6', 'value') at position 5: 0
+INFO:  Compare tuple ('7', 'value') at position 6: 0
+INFO:  Compare tuple ('8', 'value') at position 7: 0
+INFO:  Compare tuple ('9', 'value') at position 8: 0
+INFO:  Compare tuple ('10', 'value') at position 9: 0
+INFO:  Compare tuple ('11', 'value') at position 10: 0
+INFO:  Compare tuple ('12', 'value') at position 11: 0
+INFO:  Compare tuple ('13', 'value') at position 12: 0
+INFO:  Compare tuple ('14', 'value') at position 13: 0
+INFO:  Compare tuple ('15', 'value') at position 14: 0
+INFO:  Compare tuple ('16', 'value') at position 15: 0
+INFO:  Compare tuple ('17', 'value') at position 16: 0
+INFO:  Compare tuple ('18', 'value') at position 17: 0
+INFO:  Compare tuple ('19', 'value') at position 18: 0
+INFO:  Compare tuple ('20', 'value') at position 19: 0
+INFO:  Compare tuple ('21', 'value') at position 20: 0
+INFO:  Compare tuple ('22', 'value') at position 21: 0
+INFO:  Compare tuple ('23', 'value') at position 22: 0
+INFO:  Compare tuple ('24', 'value') at position 23: 0
+INFO:  Compare tuple ('25', 'value') at position 24: 0
+INFO:  Compare tuple ('26', 'value') at position 25: 0
+INFO:  Compare tuple ('27', 'value') at position 26: 0
+INFO:  Compare tuple ('28', 'value') at position 27: 0
+INFO:  Compare tuple ('29', 'value') at position 28: 0
+INFO:  Compare tuple ('30', 'value') at position 29: 0
+INFO:  Compare tuple ('31', 'value') at position 30: 0
+INFO:  Compare tuple ('32', 'value') at position 31: 0
+INFO:  Compare tuple ('33', 'value') at position 32: 0
+INFO:  Compare tuple ('34', 'value') at position 33: 0
+INFO:  Compare tuple ('35', 'value') at position 34: 0
+INFO:  Compare tuple ('36', 'value') at position 35: 0
+INFO:  Compare tuple ('37', 'value') at position 36: 0
+INFO:  Compare tuple ('38', 'value') at position 37: 0
+INFO:  Compare tuple ('39', 'value') at position 38: 0
+INFO:  Compare tuple ('40', 'value') at position 39: 0
+INFO:  Compare tuple ('41', 'value') at position 40: 0
+INFO:  Compare tuple ('42', 'value') at position 41: 0
+INFO:  Compare tuple ('43', 'value') at position 42: 0
+INFO:  Compare tuple ('44', 'value') at position 43: 0
+INFO:  Compare tuple ('45', 'value') at position 44: 0
+INFO:  Compare tuple ('46', 'value') at position 45: 0
+INFO:  Compare tuple ('47', 'value') at position 46: 0
+INFO:  Compare tuple ('48', 'value') at position 47: 0
+INFO:  Compare tuple ('49', 'value') at position 48: 0
+INFO:  Compare tuple ('50', 'value') at position 49: 0
+INFO:  Compare tuple ('2', 'value') at position 0: 1
+INFO:  Compare tuple ('3', 'value') at position 1: 1
+INFO:  Compare tuple ('4', 'value') at position 2: 1
+INFO:  Compare tuple ('5', 'value') at position 3: 1
+INFO:  Compare tuple ('6', 'value') at position 4: 1
+INFO:  Compare tuple ('7', 'value') at position 5: 1
+INFO:  Compare tuple ('8', 'value') at position 6: 1
+INFO:  Compare tuple ('9', 'value') at position 7: 1
+INFO:  Compare tuple ('10', 'value') at position 8: 1
+INFO:  Compare tuple ('11', 'value') at position 9: 1
+INFO:  Compare tuple ('12', 'value') at position 10: 1
+INFO:  Compare tuple ('13', 'value') at position 11: 1
+INFO:  Compare tuple ('14', 'value') at position 12: 1
+INFO:  Compare tuple ('15', 'value') at position 13: 1
+INFO:  Compare tuple ('16', 'value') at position 14: 1
+INFO:  Compare tuple ('17', 'value') at position 15: 1
+INFO:  Compare tuple ('18', 'value') at position 16: 1
+INFO:  Compare tuple ('19', 'value') at position 17: 1
+INFO:  Compare tuple ('20', 'value') at position 18: 1
+INFO:  Compare tuple ('21', 'value') at position 19: 1
+INFO:  Compare tuple ('22', 'value') at position 20: 1
+INFO:  Compare tuple ('23', 'value') at position 21: 1
+INFO:  Compare tuple ('24', 'value') at position 22: 1
+INFO:  Compare tuple ('25', 'value') at position 23: 1
+INFO:  Compare tuple ('26', 'value') at position 24: 1
+INFO:  Compare tuple ('27', 'value') at position 25: 1
+INFO:  Compare tuple ('28', 'value') at position 26: 1
+INFO:  Compare tuple ('29', 'value') at position 27: 1
+INFO:  Compare tuple ('30', 'value') at position 28: 1
+INFO:  Compare tuple ('31', 'value') at position 29: 1
+INFO:  Compare tuple ('32', 'value') at position 30: 1
+INFO:  Compare tuple ('33', 'value') at position 31: 1
+INFO:  Compare tuple ('34', 'value') at position 32: 1
+INFO:  Compare tuple ('35', 'value') at position 33: 1
+INFO:  Compare tuple ('36', 'value') at position 34: 1
+INFO:  Compare tuple ('37', 'value') at position 35: 1
+INFO:  Compare tuple ('38', 'value') at position 36: 1
+INFO:  Compare tuple ('39', 'value') at position 37: 1
+INFO:  Compare tuple ('40', 'value') at position 38: 1
+INFO:  Compare tuple ('41', 'value') at position 39: 1
+INFO:  Compare tuple ('42', 'value') at position 40: 1
+INFO:  Compare tuple ('43', 'value') at position 41: 1
+INFO:  Compare tuple ('44', 'value') at position 42: 1
+INFO:  Compare tuple ('45', 'value') at position 43: 1
+INFO:  Compare tuple ('46', 'value') at position 44: 1
+INFO:  Compare tuple ('47', 'value') at position 45: 1
+INFO:  Compare tuple ('48', 'value') at position 46: 1
+INFO:  Compare tuple ('49', 'value') at position 47: 1
+INFO:  Compare tuple ('50', 'value') at position 48: 1
+INFO:  Compare tuple ('51', 'value') at position 49: 1
+INFO:  Search for tuple ('0', 'value'): 0
+INFO:  Search for tuple ('1', 'value'): 0
+INFO:  Search for tuple ('2', 'value'): 1
+INFO:  Search for tuple ('3', 'value'): 2
+INFO:  Search for tuple ('4', 'value'): 3
+INFO:  Search for tuple ('5', 'value'): 4
+INFO:  Search for tuple ('6', 'value'): 5
+INFO:  Search for tuple ('7', 'value'): 6
+INFO:  Search for tuple ('8', 'value'): 7
+INFO:  Search for tuple ('9', 'value'): 8
+INFO:  Search for tuple ('10', 'value'): 9
+INFO:  Search for tuple ('11', 'value'): 10
+INFO:  Search for tuple ('12', 'value'): 11
+INFO:  Search for tuple ('13', 'value'): 12
+INFO:  Search for tuple ('14', 'value'): 13
+INFO:  Search for tuple ('15', 'value'): 14
+INFO:  Search for tuple ('16', 'value'): 15
+INFO:  Search for tuple ('17', 'value'): 16
+INFO:  Search for tuple ('18', 'value'): 17
+INFO:  Search for tuple ('19', 'value'): 18
+INFO:  Search for tuple ('20', 'value'): 19
+INFO:  Search for tuple ('21', 'value'): 20
+INFO:  Search for tuple ('22', 'value'): 21
+INFO:  Search for tuple ('23', 'value'): 22
+INFO:  Search for tuple ('24', 'value'): 23
+INFO:  Search for tuple ('25', 'value'): 24
+INFO:  Search for tuple ('26', 'value'): 25
+INFO:  Search for tuple ('27', 'value'): 26
+INFO:  Search for tuple ('28', 'value'): 27
+INFO:  Search for tuple ('29', 'value'): 28
+INFO:  Search for tuple ('30', 'value'): 29
+INFO:  Search for tuple ('31', 'value'): 30
+INFO:  Search for tuple ('32', 'value'): 31
+INFO:  Search for tuple ('33', 'value'): 32
+INFO:  Search for tuple ('34', 'value'): 33
+INFO:  Search for tuple ('35', 'value'): 34
+INFO:  Search for tuple ('36', 'value'): 35
+INFO:  Search for tuple ('37', 'value'): 36
+INFO:  Search for tuple ('38', 'value'): 37
+INFO:  Search for tuple ('39', 'value'): 38
+INFO:  Search for tuple ('40', 'value'): 39
+INFO:  Search for tuple ('41', 'value'): 40
+INFO:  Search for tuple ('42', 'value'): 41
+INFO:  Search for tuple ('43', 'value'): 42
+INFO:  Search for tuple ('44', 'value'): 43
+INFO:  Search for tuple ('45', 'value'): 44
+INFO:  Search for tuple ('46', 'value'): 45
+INFO:  Search for tuple ('47', 'value'): 46
+INFO:  Search for tuple ('48', 'value'): 47
+INFO:  Search for tuple ('49', 'value'): 48
+INFO:  Search for tuple ('50', 'value'): 49
+INFO:  Search for tuple ('51', 'value'): 50
+INFO:  Estimate UPDATE operation ('1', 'value 2') at position 0: 0
+INFO:  Estimate DELETE operation at position 0: -40
+INFO:  Perform UPDATE operation ('100', 'value 100') at position 0
+INFO:  Perform UPDATE operation ('101', 'value 101') at position 1
+INFO:  Perform UPDATE operation ('102', 'value 102') at position 2
+INFO:  Perform UPDATE operation ('103', 'value 103') at position 3
+INFO:  Perform UPDATE operation ('104', 'value 104') at position 4
+INFO:  Perform UPDATE operation ('105', 'value 105') at position 5
+INFO:  Perform UPDATE operation ('106', 'value 106') at position 6
+INFO:  Perform UPDATE operation ('107', 'value 107') at position 7
+INFO:  Perform UPDATE operation ('108', 'value 108') at position 8
+INFO:  Perform UPDATE operation ('109', 'value 109') at position 9
+INFO:  Perform UPDATE operation ('110', 'value 110') at position 10
+INFO:  Perform UPDATE operation ('111', 'value 111') at position 11
+INFO:  Perform UPDATE operation ('112', 'value 112') at position 12
+INFO:  Perform UPDATE operation ('113', 'value 113') at position 13
+INFO:  Perform UPDATE operation ('114', 'value 114') at position 14
+INFO:  Perform UPDATE operation ('115', 'value 115') at position 15
+INFO:  Perform UPDATE operation ('116', 'value 116') at position 16
+INFO:  Perform UPDATE operation ('117', 'value 117') at position 17
+INFO:  Perform UPDATE operation ('118', 'value 118') at position 18
+INFO:  Perform UPDATE operation ('119', 'value 119') at position 19
+INFO:  Perform UPDATE operation ('120', 'value 120') at position 20
+INFO:  Perform UPDATE operation ('121', 'value 121') at position 21
+INFO:  Perform UPDATE operation ('122', 'value 122') at position 22
+INFO:  Perform UPDATE operation ('123', 'value 123') at position 23
+INFO:  Perform UPDATE operation ('124', 'value 124') at position 24
+INFO:  Perform UPDATE operation ('125', 'value 125') at position 25
+INFO:  Perform UPDATE operation ('126', 'value 126') at position 26
+INFO:  Perform UPDATE operation ('127', 'value 127') at position 27
+INFO:  Perform UPDATE operation ('128', 'value 128') at position 28
+INFO:  Perform UPDATE operation ('129', 'value 129') at position 29
+INFO:  Perform UPDATE operation ('130', 'value 130') at position 30
+INFO:  Perform UPDATE operation ('131', 'value 131') at position 31
+INFO:  Perform UPDATE operation ('132', 'value 132') at position 32
+INFO:  Perform UPDATE operation ('133', 'value 133') at position 33
+INFO:  Perform UPDATE operation ('134', 'value 134') at position 34
+INFO:  Perform UPDATE operation ('135', 'value 135') at position 35
+INFO:  Perform UPDATE operation ('136', 'value 136') at position 36
+INFO:  Perform UPDATE operation ('137', 'value 137') at position 37
+INFO:  Perform UPDATE operation ('138', 'value 138') at position 38
+INFO:  Perform UPDATE operation ('139', 'value 139') at position 39
+INFO:  Perform UPDATE operation ('140', 'value 140') at position 40
+INFO:  Perform UPDATE operation ('141', 'value 141') at position 41
+INFO:  Perform UPDATE operation ('142', 'value 142') at position 42
+INFO:  Perform UPDATE operation ('143', 'value 143') at position 43
+INFO:  Perform UPDATE operation ('144', 'value 144') at position 44
+INFO:  Perform UPDATE operation ('145', 'value 145') at position 45
+INFO:  Perform UPDATE operation ('146', 'value 146') at position 46
+INFO:  Perform UPDATE operation ('147', 'value 147') at position 47
+INFO:  Perform UPDATE operation ('148', 'value 148') at position 48
+INFO:  Perform UPDATE operation ('149', 'value 149') at position 49
+INFO:  Read tuple at position 0: ('100', 'value 100')
+INFO:  Read tuple at position 1: ('101', 'value 101')
+INFO:  Read tuple at position 2: ('102', 'value 102')
+INFO:  Read tuple at position 3: ('103', 'value 103')
+INFO:  Read tuple at position 4: ('104', 'value 104')
+INFO:  Read tuple at position 5: ('105', 'value 105')
+INFO:  Read tuple at position 6: ('106', 'value 106')
+INFO:  Read tuple at position 7: ('107', 'value 107')
+INFO:  Read tuple at position 8: ('108', 'value 108')
+INFO:  Read tuple at position 9: ('109', 'value 109')
+INFO:  Read tuple at position 10: ('110', 'value 110')
+INFO:  Read tuple at position 11: ('111', 'value 111')
+INFO:  Read tuple at position 12: ('112', 'value 112')
+INFO:  Read tuple at position 13: ('113', 'value 113')
+INFO:  Read tuple at position 14: ('114', 'value 114')
+INFO:  Read tuple at position 15: ('115', 'value 115')
+INFO:  Read tuple at position 16: ('116', 'value 116')
+INFO:  Read tuple at position 17: ('117', 'value 117')
+INFO:  Read tuple at position 18: ('118', 'value 118')
+INFO:  Read tuple at position 19: ('119', 'value 119')
+INFO:  Read tuple at position 20: ('120', 'value 120')
+INFO:  Read tuple at position 21: ('121', 'value 121')
+INFO:  Read tuple at position 22: ('122', 'value 122')
+INFO:  Read tuple at position 23: ('123', 'value 123')
+INFO:  Read tuple at position 24: ('124', 'value 124')
+INFO:  Read tuple at position 25: ('125', 'value 125')
+INFO:  Read tuple at position 26: ('126', 'value 126')
+INFO:  Read tuple at position 27: ('127', 'value 127')
+INFO:  Read tuple at position 28: ('128', 'value 128')
+INFO:  Read tuple at position 29: ('129', 'value 129')
+INFO:  Read tuple at position 30: ('130', 'value 130')
+INFO:  Read tuple at position 31: ('131', 'value 131')
+INFO:  Read tuple at position 32: ('132', 'value 132')
+INFO:  Read tuple at position 33: ('133', 'value 133')
+INFO:  Read tuple at position 34: ('134', 'value 134')
+INFO:  Read tuple at position 35: ('135', 'value 135')
+INFO:  Read tuple at position 36: ('136', 'value 136')
+INFO:  Read tuple at position 37: ('137', 'value 137')
+INFO:  Read tuple at position 38: ('138', 'value 138')
+INFO:  Read tuple at position 39: ('139', 'value 139')
+INFO:  Read tuple at position 40: ('140', 'value 140')
+INFO:  Read tuple at position 41: ('141', 'value 141')
+INFO:  Read tuple at position 42: ('142', 'value 142')
+INFO:  Read tuple at position 43: ('143', 'value 143')
+INFO:  Read tuple at position 44: ('144', 'value 144')
+INFO:  Read tuple at position 45: ('145', 'value 145')
+INFO:  Read tuple at position 46: ('146', 'value 146')
+INFO:  Read tuple at position 47: ('147', 'value 147')
+INFO:  Read tuple at position 48: ('148', 'value 148')
+INFO:  Read tuple at position 49: ('149', 'value 149')
+INFO:  Compare tuple ('100', 'value 100') at position 0: 0
+INFO:  Search for tuple ('100', 'value 100'): 0
+INFO:  Perform UPDATE operation ('100', '100') at position 0
+INFO:  Perform UPDATE operation ('101', '101') at position 1
+INFO:  Perform UPDATE operation ('102', '102') at position 2
+INFO:  Perform UPDATE operation ('103', '103') at position 3
+INFO:  Perform UPDATE operation ('104', '104') at position 4
+INFO:  Perform UPDATE operation ('105', '105') at position 5
+INFO:  Perform UPDATE operation ('106', '106') at position 6
+INFO:  Perform UPDATE operation ('107', '107') at position 7
+INFO:  Perform UPDATE operation ('108', '108') at position 8
+INFO:  Perform UPDATE operation ('109', '109') at position 9
+INFO:  Perform UPDATE operation ('110', '110') at position 10
+INFO:  Perform UPDATE operation ('111', '111') at position 11
+INFO:  Perform UPDATE operation ('112', '112') at position 12
+INFO:  Perform UPDATE operation ('113', '113') at position 13
+INFO:  Perform UPDATE operation ('114', '114') at position 14
+INFO:  Perform UPDATE operation ('115', '115') at position 15
+INFO:  Perform UPDATE operation ('116', '116') at position 16
+INFO:  Perform UPDATE operation ('117', '117') at position 17
+INFO:  Perform UPDATE operation ('118', '118') at position 18
+INFO:  Perform UPDATE operation ('119', '119') at position 19
+INFO:  Perform UPDATE operation ('120', '120') at position 20
+INFO:  Perform UPDATE operation ('121', '121') at position 21
+INFO:  Perform UPDATE operation ('122', '122') at position 22
+INFO:  Perform UPDATE operation ('123', '123') at position 23
+INFO:  Perform UPDATE operation ('124', '124') at position 24
+INFO:  Perform UPDATE operation ('125', '125') at position 25
+INFO:  Perform UPDATE operation ('126', '126') at position 26
+INFO:  Perform UPDATE operation ('127', '127') at position 27
+INFO:  Perform UPDATE operation ('128', '128') at position 28
+INFO:  Perform UPDATE operation ('129', '129') at position 29
+INFO:  Perform UPDATE operation ('130', '130') at position 30
+INFO:  Perform UPDATE operation ('131', '131') at position 31
+INFO:  Perform UPDATE operation ('132', '132') at position 32
+INFO:  Perform UPDATE operation ('133', '133') at position 33
+INFO:  Perform UPDATE operation ('134', '134') at position 34
+INFO:  Perform UPDATE operation ('135', '135') at position 35
+INFO:  Perform UPDATE operation ('136', '136') at position 36
+INFO:  Perform UPDATE operation ('137', '137') at position 37
+INFO:  Perform UPDATE operation ('138', '138') at position 38
+INFO:  Perform UPDATE operation ('139', '139') at position 39
+INFO:  Perform UPDATE operation ('140', '140') at position 40
+INFO:  Perform UPDATE operation ('141', '141') at position 41
+INFO:  Perform UPDATE operation ('142', '142') at position 42
+INFO:  Perform UPDATE operation ('143', '143') at position 43
+INFO:  Perform UPDATE operation ('144', '144') at position 44
+INFO:  Perform UPDATE operation ('145', '145') at position 45
+INFO:  Perform UPDATE operation ('146', '146') at position 46
+INFO:  Perform UPDATE operation ('147', '147') at position 47
+INFO:  Perform UPDATE operation ('148', '148') at position 48
+INFO:  Perform UPDATE operation ('149', '149') at position 49
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 39
+INFO:  Perform DELETE operation at position 38
+INFO:  Perform DELETE operation at position 37
+INFO:  Perform DELETE operation at position 36
+INFO:  Perform DELETE operation at position 35
+INFO:  Perform DELETE operation at position 34
+INFO:  Perform DELETE operation at position 33
+INFO:  Perform DELETE operation at position 32
+INFO:  Perform DELETE operation at position 31
+INFO:  Perform DELETE operation at position 30
+INFO:  Read tuple at position 0: ('110', '110')
+INFO:  Read tuple at position 1: ('111', '111')
+INFO:  Read tuple at position 2: ('112', '112')
+INFO:  Read tuple at position 3: ('113', '113')
+INFO:  Read tuple at position 4: ('114', '114')
+INFO:  Read tuple at position 5: ('115', '115')
+INFO:  Read tuple at position 6: ('116', '116')
+INFO:  Read tuple at position 7: ('117', '117')
+INFO:  Read tuple at position 8: ('118', '118')
+INFO:  Read tuple at position 9: ('119', '119')
+INFO:  Read tuple at position 10: ('120', '120')
+INFO:  Read tuple at position 11: ('121', '121')
+INFO:  Read tuple at position 12: ('122', '122')
+INFO:  Read tuple at position 13: ('123', '123')
+INFO:  Read tuple at position 14: ('124', '124')
+INFO:  Read tuple at position 15: ('125', '125')
+INFO:  Read tuple at position 16: ('126', '126')
+INFO:  Read tuple at position 17: ('127', '127')
+INFO:  Read tuple at position 18: ('128', '128')
+INFO:  Read tuple at position 19: ('129', '129')
+INFO:  Read tuple at position 20: ('130', '130')
+INFO:  Read tuple at position 21: ('131', '131')
+INFO:  Read tuple at position 22: ('132', '132')
+INFO:  Read tuple at position 23: ('133', '133')
+INFO:  Read tuple at position 24: ('134', '134')
+INFO:  Read tuple at position 25: ('135', '135')
+INFO:  Read tuple at position 26: ('136', '136')
+INFO:  Read tuple at position 27: ('137', '137')
+INFO:  Read tuple at position 28: ('138', '138')
+INFO:  Read tuple at position 29: ('139', '139')
+INFO:  Compare tuple ('100', 'value 100') at position 0: -1
+INFO:  Search for tuple ('100', 'value 100'): 0
+INFO:  Compaction: before: chunkDataSize 1264, chunkItemsCount 30, after: chunkDataSize 1032, chunkItemsCount 30
+INFO:  Perform UPDATE operation ('110', '110') at position 10
+INFO:  Perform UPDATE operation ('111', '111') at position 11
+INFO:  Perform UPDATE operation ('112', '112') at position 12
+INFO:  Perform UPDATE operation ('113', '113') at position 13
+INFO:  Perform UPDATE operation ('114', '114') at position 14
+INFO:  Perform UPDATE operation ('115', '115') at position 15
+INFO:  Perform UPDATE operation ('116', '116') at position 16
+INFO:  Perform UPDATE operation ('117', '117') at position 17
+INFO:  Perform UPDATE operation ('118', '118') at position 18
+INFO:  Perform UPDATE operation ('119', '119') at position 19
+INFO:  Read tuple at position 0: ('110', '110')
+INFO:  Read tuple at position 1: ('111', '111')
+INFO:  Read tuple at position 2: ('112', '112')
+INFO:  Read tuple at position 3: ('113', '113')
+INFO:  Read tuple at position 4: ('114', '114')
+INFO:  Read tuple at position 5: ('115', '115')
+INFO:  Read tuple at position 6: ('116', '116')
+INFO:  Read tuple at position 7: ('117', '117')
+INFO:  Read tuple at position 8: ('118', '118')
+INFO:  Read tuple at position 9: ('119', '119')
+INFO:  Read tuple at position 10: ('110', '110'), deleted
+INFO:  Read tuple at position 11: ('111', '111'), deleted
+INFO:  Read tuple at position 12: ('112', '112'), deleted
+INFO:  Read tuple at position 13: ('113', '113'), deleted
+INFO:  Read tuple at position 14: ('114', '114'), deleted
+INFO:  Read tuple at position 15: ('115', '115'), deleted
+INFO:  Read tuple at position 16: ('116', '116'), deleted
+INFO:  Read tuple at position 17: ('117', '117'), deleted
+INFO:  Read tuple at position 18: ('118', '118'), deleted
+INFO:  Read tuple at position 19: ('119', '119'), deleted
+INFO:  Read tuple at position 20: ('130', '130')
+INFO:  Read tuple at position 21: ('131', '131')
+INFO:  Read tuple at position 22: ('132', '132')
+INFO:  Read tuple at position 23: ('133', '133')
+INFO:  Read tuple at position 24: ('134', '134')
+INFO:  Read tuple at position 25: ('135', '135')
+INFO:  Read tuple at position 26: ('136', '136')
+INFO:  Read tuple at position 27: ('137', '137')
+INFO:  Read tuple at position 28: ('138', '138')
+INFO:  Read tuple at position 29: ('139', '139')
+INFO:  Compaction: before: chunkDataSize 1032, chunkItemsCount 30, after: chunkDataSize 688, chunkItemsCount 20
+INFO:  Read tuple at position 0: ('110', '110')
+INFO:  Read tuple at position 1: ('111', '111')
+INFO:  Read tuple at position 2: ('112', '112')
+INFO:  Read tuple at position 3: ('113', '113')
+INFO:  Read tuple at position 4: ('114', '114')
+INFO:  Read tuple at position 5: ('115', '115')
+INFO:  Read tuple at position 6: ('116', '116')
+INFO:  Read tuple at position 7: ('117', '117')
+INFO:  Read tuple at position 8: ('118', '118')
+INFO:  Read tuple at position 9: ('119', '119')
+INFO:  Read tuple at position 10: ('130', '130')
+INFO:  Read tuple at position 11: ('131', '131')
+INFO:  Read tuple at position 12: ('132', '132')
+INFO:  Read tuple at position 13: ('133', '133')
+INFO:  Read tuple at position 14: ('134', '134')
+INFO:  Read tuple at position 15: ('135', '135')
+INFO:  Read tuple at position 16: ('136', '136')
+INFO:  Read tuple at position 17: ('137', '137')
+INFO:  Read tuple at position 18: ('138', '138')
+INFO:  Read tuple at position 19: ('139', '139')
+ test_btree_leaf_tuple_chunk 
+-----------------------------
+ 
+(1 row)
+
+SELECT test_btree_leaf_tuple_chunk_builder('tuple_chunk_test'::regclass);
+INFO:  Estimate adding tuple ('1', 'value 1') to builder: 48
+INFO:  Perform adding tuple ('1', 'value 1') to builder
+INFO:  Perform adding tuple ('2', 'value 2') to builder
+INFO:  Perform adding tuple ('3', 'value 3') to builder
+INFO:  Perform adding tuple ('4', 'value 4') to builder
+INFO:  Perform adding tuple ('5', 'value 5') to builder
+INFO:  Perform adding tuple ('6', 'value 6') to builder
+INFO:  Perform adding tuple ('7', 'value 7') to builder
+INFO:  Perform adding tuple ('8', 'value 8') to builder
+INFO:  Perform adding tuple ('9', 'value 9') to builder
+INFO:  Perform adding tuple ('10', 'value 10') to builder
+INFO:  Perform adding tuple ('11', 'value 11') to builder
+INFO:  Perform adding tuple ('12', 'value 12') to builder
+INFO:  Perform adding tuple ('13', 'value 13') to builder
+INFO:  Perform adding tuple ('14', 'value 14') to builder
+INFO:  Perform adding tuple ('15', 'value 15') to builder
+INFO:  Perform adding tuple ('16', 'value 16') to builder
+INFO:  Perform adding tuple ('17', 'value 17') to builder
+INFO:  Perform adding tuple ('18', 'value 18') to builder
+INFO:  Perform adding tuple ('19', 'value 19') to builder
+INFO:  Perform adding tuple ('20', 'value 20') to builder
+INFO:  Perform adding tuple ('21', 'value 21') to builder
+INFO:  Perform adding tuple ('22', 'value 22') to builder
+INFO:  Perform adding tuple ('23', 'value 23') to builder
+INFO:  Perform adding tuple ('24', 'value 24') to builder
+INFO:  Perform adding tuple ('25', 'value 25') to builder
+INFO:  Perform adding tuple ('26', 'value 26') to builder
+INFO:  Perform adding tuple ('27', 'value 27') to builder
+INFO:  Perform adding tuple ('28', 'value 28') to builder
+INFO:  Perform adding tuple ('29', 'value 29') to builder
+INFO:  Perform adding tuple ('30', 'value 30') to builder
+INFO:  Perform adding tuple ('31', 'value 31') to builder
+INFO:  Perform adding tuple ('32', 'value 32') to builder
+INFO:  Perform adding tuple ('33', 'value 33') to builder
+INFO:  Perform adding tuple ('34', 'value 34') to builder
+INFO:  Perform adding tuple ('35', 'value 35') to builder
+INFO:  Perform adding tuple ('36', 'value 36') to builder
+INFO:  Perform adding tuple ('37', 'value 37') to builder
+INFO:  Perform adding tuple ('38', 'value 38') to builder
+INFO:  Perform adding tuple ('39', 'value 39') to builder
+INFO:  Perform adding tuple ('40', 'value 40') to builder
+INFO:  Perform adding tuple ('41', 'value 41') to builder
+INFO:  Perform adding tuple ('42', 'value 42') to builder
+INFO:  Perform adding tuple ('43', 'value 43') to builder
+INFO:  Perform adding tuple ('44', 'value 44') to builder
+INFO:  Perform adding tuple ('45', 'value 45') to builder
+INFO:  Perform adding tuple ('46', 'value 46') to builder
+INFO:  Perform adding tuple ('47', 'value 47') to builder
+INFO:  Perform adding tuple ('48', 'value 48') to builder
+INFO:  Perform adding tuple ('49', 'value 49') to builder
+INFO:  Perform adding tuple ('50', 'value 50') to builder
+INFO:  Finished building tuple chunk
+INFO:  Read tuple at position 0: ('1', 'value 1')
+INFO:  Read tuple at position 1: ('2', 'value 2')
+INFO:  Read tuple at position 2: ('3', 'value 3')
+INFO:  Read tuple at position 3: ('4', 'value 4')
+INFO:  Read tuple at position 4: ('5', 'value 5')
+INFO:  Read tuple at position 5: ('6', 'value 6')
+INFO:  Read tuple at position 6: ('7', 'value 7')
+INFO:  Read tuple at position 7: ('8', 'value 8')
+INFO:  Read tuple at position 8: ('9', 'value 9')
+INFO:  Read tuple at position 9: ('10', 'value 10')
+INFO:  Read tuple at position 10: ('11', 'value 11')
+INFO:  Read tuple at position 11: ('12', 'value 12')
+INFO:  Read tuple at position 12: ('13', 'value 13')
+INFO:  Read tuple at position 13: ('14', 'value 14')
+INFO:  Read tuple at position 14: ('15', 'value 15')
+INFO:  Read tuple at position 15: ('16', 'value 16')
+INFO:  Read tuple at position 16: ('17', 'value 17')
+INFO:  Read tuple at position 17: ('18', 'value 18')
+INFO:  Read tuple at position 18: ('19', 'value 19')
+INFO:  Read tuple at position 19: ('20', 'value 20')
+INFO:  Read tuple at position 20: ('21', 'value 21')
+INFO:  Read tuple at position 21: ('22', 'value 22')
+INFO:  Read tuple at position 22: ('23', 'value 23')
+INFO:  Read tuple at position 23: ('24', 'value 24')
+INFO:  Read tuple at position 24: ('25', 'value 25')
+INFO:  Read tuple at position 25: ('26', 'value 26')
+INFO:  Read tuple at position 26: ('27', 'value 27')
+INFO:  Read tuple at position 27: ('28', 'value 28')
+INFO:  Read tuple at position 28: ('29', 'value 29')
+INFO:  Read tuple at position 29: ('30', 'value 30')
+INFO:  Read tuple at position 30: ('31', 'value 31')
+INFO:  Read tuple at position 31: ('32', 'value 32')
+INFO:  Read tuple at position 32: ('33', 'value 33')
+INFO:  Read tuple at position 33: ('34', 'value 34')
+INFO:  Read tuple at position 34: ('35', 'value 35')
+INFO:  Read tuple at position 35: ('36', 'value 36')
+INFO:  Read tuple at position 36: ('37', 'value 37')
+INFO:  Read tuple at position 37: ('38', 'value 38')
+INFO:  Read tuple at position 38: ('39', 'value 39')
+INFO:  Read tuple at position 39: ('40', 'value 40')
+INFO:  Read tuple at position 40: ('41', 'value 41')
+INFO:  Read tuple at position 41: ('42', 'value 42')
+INFO:  Read tuple at position 42: ('43', 'value 43')
+INFO:  Read tuple at position 43: ('44', 'value 44')
+INFO:  Read tuple at position 44: ('45', 'value 45')
+INFO:  Read tuple at position 45: ('46', 'value 46')
+INFO:  Read tuple at position 46: ('47', 'value 47')
+INFO:  Read tuple at position 47: ('48', 'value 48')
+INFO:  Read tuple at position 48: ('49', 'value 49')
+INFO:  Read tuple at position 49: ('50', 'value 50')
+ test_btree_leaf_tuple_chunk_builder 
+-------------------------------------
+ 
+(1 row)
+
+SELECT test_btree_hikey_chunk('tuple_chunk_test'::regclass);
+INFO:  Estimate INSERT operation ('1') at position 0: 8
+INFO:  Perform INSERT operation ('1') at position 0
+INFO:  Perform INSERT operation ('2') at position 1
+INFO:  Perform INSERT operation ('3') at position 2
+INFO:  Perform INSERT operation ('4') at position 3
+INFO:  Perform INSERT operation ('5') at position 4
+INFO:  Perform INSERT operation ('6') at position 5
+INFO:  Perform INSERT operation ('7') at position 6
+INFO:  Perform INSERT operation ('8') at position 7
+INFO:  Perform INSERT operation ('9') at position 8
+INFO:  Perform INSERT operation ('10') at position 9
+INFO:  Perform INSERT operation ('11') at position 10
+INFO:  Perform INSERT operation ('12') at position 11
+INFO:  Perform INSERT operation ('13') at position 12
+INFO:  Perform INSERT operation ('14') at position 13
+INFO:  Perform INSERT operation ('15') at position 14
+INFO:  Perform INSERT operation ('16') at position 15
+INFO:  Perform INSERT operation ('17') at position 16
+INFO:  Perform INSERT operation ('18') at position 17
+INFO:  Perform INSERT operation ('19') at position 18
+INFO:  Perform INSERT operation ('20') at position 19
+INFO:  Perform INSERT operation ('21') at position 20
+INFO:  Perform INSERT operation ('22') at position 21
+INFO:  Perform INSERT operation ('23') at position 22
+INFO:  Perform INSERT operation ('24') at position 23
+INFO:  Perform INSERT operation ('25') at position 24
+INFO:  Perform INSERT operation ('26') at position 25
+INFO:  Perform INSERT operation ('27') at position 26
+INFO:  Perform INSERT operation ('28') at position 27
+INFO:  Perform INSERT operation ('29') at position 28
+INFO:  Perform INSERT operation ('30') at position 29
+INFO:  Perform INSERT operation ('31') at position 30
+INFO:  Perform INSERT operation ('32') at position 31
+INFO:  Perform INSERT operation ('33') at position 32
+INFO:  Perform INSERT operation ('34') at position 33
+INFO:  Perform INSERT operation ('35') at position 34
+INFO:  Perform INSERT operation ('36') at position 35
+INFO:  Perform INSERT operation ('37') at position 36
+INFO:  Perform INSERT operation ('38') at position 37
+INFO:  Read tuple at position 0: ('1')
+INFO:  Read tuple at position 1: ('2')
+INFO:  Read tuple at position 2: ('3')
+INFO:  Read tuple at position 3: ('4')
+INFO:  Read tuple at position 4: ('5')
+INFO:  Read tuple at position 5: ('6')
+INFO:  Read tuple at position 6: ('7')
+INFO:  Read tuple at position 7: ('8')
+INFO:  Read tuple at position 8: ('9')
+INFO:  Read tuple at position 9: ('10')
+INFO:  Read tuple at position 10: ('11')
+INFO:  Read tuple at position 11: ('12')
+INFO:  Read tuple at position 12: ('13')
+INFO:  Read tuple at position 13: ('14')
+INFO:  Read tuple at position 14: ('15')
+INFO:  Read tuple at position 15: ('16')
+INFO:  Read tuple at position 16: ('17')
+INFO:  Read tuple at position 17: ('18')
+INFO:  Read tuple at position 18: ('19')
+INFO:  Read tuple at position 19: ('20')
+INFO:  Read tuple at position 20: ('21')
+INFO:  Read tuple at position 21: ('22')
+INFO:  Read tuple at position 22: ('23')
+INFO:  Read tuple at position 23: ('24')
+INFO:  Read tuple at position 24: ('25')
+INFO:  Read tuple at position 25: ('26')
+INFO:  Read tuple at position 26: ('27')
+INFO:  Read tuple at position 27: ('28')
+INFO:  Read tuple at position 28: ('29')
+INFO:  Read tuple at position 29: ('30')
+INFO:  Read tuple at position 30: ('31')
+INFO:  Read tuple at position 31: ('32')
+INFO:  Read tuple at position 32: ('33')
+INFO:  Read tuple at position 33: ('34')
+INFO:  Read tuple at position 34: ('35')
+INFO:  Read tuple at position 35: ('36')
+INFO:  Read tuple at position 36: ('37')
+INFO:  Read tuple at position 37: ('38')
+INFO:  Compare tuple ('0') at position 0: -1
+INFO:  Compare tuple ('1') at position 1: -1
+INFO:  Compare tuple ('2') at position 2: -1
+INFO:  Compare tuple ('3') at position 3: -1
+INFO:  Compare tuple ('4') at position 4: -1
+INFO:  Compare tuple ('5') at position 5: -1
+INFO:  Compare tuple ('6') at position 6: -1
+INFO:  Compare tuple ('7') at position 7: -1
+INFO:  Compare tuple ('8') at position 8: -1
+INFO:  Compare tuple ('9') at position 9: -1
+INFO:  Compare tuple ('10') at position 10: -1
+INFO:  Compare tuple ('11') at position 11: -1
+INFO:  Compare tuple ('12') at position 12: -1
+INFO:  Compare tuple ('13') at position 13: -1
+INFO:  Compare tuple ('14') at position 14: -1
+INFO:  Compare tuple ('15') at position 15: -1
+INFO:  Compare tuple ('16') at position 16: -1
+INFO:  Compare tuple ('17') at position 17: -1
+INFO:  Compare tuple ('18') at position 18: -1
+INFO:  Compare tuple ('19') at position 19: -1
+INFO:  Compare tuple ('20') at position 20: -1
+INFO:  Compare tuple ('21') at position 21: -1
+INFO:  Compare tuple ('22') at position 22: -1
+INFO:  Compare tuple ('23') at position 23: -1
+INFO:  Compare tuple ('24') at position 24: -1
+INFO:  Compare tuple ('25') at position 25: -1
+INFO:  Compare tuple ('26') at position 26: -1
+INFO:  Compare tuple ('27') at position 27: -1
+INFO:  Compare tuple ('28') at position 28: -1
+INFO:  Compare tuple ('29') at position 29: -1
+INFO:  Compare tuple ('30') at position 30: -1
+INFO:  Compare tuple ('31') at position 31: -1
+INFO:  Compare tuple ('32') at position 32: -1
+INFO:  Compare tuple ('33') at position 33: -1
+INFO:  Compare tuple ('34') at position 34: -1
+INFO:  Compare tuple ('35') at position 35: -1
+INFO:  Compare tuple ('36') at position 36: -1
+INFO:  Compare tuple ('37') at position 37: -1
+INFO:  Compare tuple ('1') at position 0: 0
+INFO:  Compare tuple ('2') at position 1: 0
+INFO:  Compare tuple ('3') at position 2: 0
+INFO:  Compare tuple ('4') at position 3: 0
+INFO:  Compare tuple ('5') at position 4: 0
+INFO:  Compare tuple ('6') at position 5: 0
+INFO:  Compare tuple ('7') at position 6: 0
+INFO:  Compare tuple ('8') at position 7: 0
+INFO:  Compare tuple ('9') at position 8: 0
+INFO:  Compare tuple ('10') at position 9: 0
+INFO:  Compare tuple ('11') at position 10: 0
+INFO:  Compare tuple ('12') at position 11: 0
+INFO:  Compare tuple ('13') at position 12: 0
+INFO:  Compare tuple ('14') at position 13: 0
+INFO:  Compare tuple ('15') at position 14: 0
+INFO:  Compare tuple ('16') at position 15: 0
+INFO:  Compare tuple ('17') at position 16: 0
+INFO:  Compare tuple ('18') at position 17: 0
+INFO:  Compare tuple ('19') at position 18: 0
+INFO:  Compare tuple ('20') at position 19: 0
+INFO:  Compare tuple ('21') at position 20: 0
+INFO:  Compare tuple ('22') at position 21: 0
+INFO:  Compare tuple ('23') at position 22: 0
+INFO:  Compare tuple ('24') at position 23: 0
+INFO:  Compare tuple ('25') at position 24: 0
+INFO:  Compare tuple ('26') at position 25: 0
+INFO:  Compare tuple ('27') at position 26: 0
+INFO:  Compare tuple ('28') at position 27: 0
+INFO:  Compare tuple ('29') at position 28: 0
+INFO:  Compare tuple ('30') at position 29: 0
+INFO:  Compare tuple ('31') at position 30: 0
+INFO:  Compare tuple ('32') at position 31: 0
+INFO:  Compare tuple ('33') at position 32: 0
+INFO:  Compare tuple ('34') at position 33: 0
+INFO:  Compare tuple ('35') at position 34: 0
+INFO:  Compare tuple ('36') at position 35: 0
+INFO:  Compare tuple ('37') at position 36: 0
+INFO:  Compare tuple ('38') at position 37: 0
+INFO:  Search for tuple ('0'): 0
+INFO:  Search for tuple ('1'): 1
+INFO:  Search for tuple ('2'): 2
+INFO:  Search for tuple ('3'): 3
+INFO:  Search for tuple ('4'): 4
+INFO:  Search for tuple ('5'): 5
+INFO:  Search for tuple ('6'): 6
+INFO:  Search for tuple ('7'): 7
+INFO:  Search for tuple ('8'): 8
+INFO:  Search for tuple ('9'): 9
+INFO:  Search for tuple ('10'): 10
+INFO:  Search for tuple ('11'): 11
+INFO:  Search for tuple ('12'): 12
+INFO:  Search for tuple ('13'): 13
+INFO:  Search for tuple ('14'): 14
+INFO:  Search for tuple ('15'): 15
+INFO:  Search for tuple ('16'): 16
+INFO:  Search for tuple ('17'): 17
+INFO:  Search for tuple ('18'): 18
+INFO:  Search for tuple ('19'): 19
+INFO:  Search for tuple ('20'): 20
+INFO:  Search for tuple ('21'): 21
+INFO:  Search for tuple ('22'): 22
+INFO:  Search for tuple ('23'): 23
+INFO:  Search for tuple ('24'): 24
+INFO:  Search for tuple ('25'): 25
+INFO:  Search for tuple ('26'): 26
+INFO:  Search for tuple ('27'): 27
+INFO:  Search for tuple ('28'): 28
+INFO:  Search for tuple ('29'): 29
+INFO:  Search for tuple ('30'): 30
+INFO:  Search for tuple ('31'): 31
+INFO:  Search for tuple ('32'): 32
+INFO:  Search for tuple ('33'): 33
+INFO:  Search for tuple ('34'): 34
+INFO:  Search for tuple ('35'): 35
+INFO:  Search for tuple ('36'): 36
+INFO:  Search for tuple ('37'): 37
+INFO:  Search for tuple ('38'): 37
+INFO:  Search for tuple ('39'): 37
+INFO:  Estimate UPDATE operation ('1') at position 0: 0
+INFO:  Estimate DELETE operation at position 0: -8
+INFO:  Perform UPDATE operation ('100') at position 0
+INFO:  Perform UPDATE operation ('101') at position 1
+INFO:  Perform UPDATE operation ('102') at position 2
+INFO:  Perform UPDATE operation ('103') at position 3
+INFO:  Perform UPDATE operation ('104') at position 4
+INFO:  Perform UPDATE operation ('105') at position 5
+INFO:  Perform UPDATE operation ('106') at position 6
+INFO:  Perform UPDATE operation ('107') at position 7
+INFO:  Perform UPDATE operation ('108') at position 8
+INFO:  Perform UPDATE operation ('109') at position 9
+INFO:  Perform UPDATE operation ('110') at position 10
+INFO:  Perform UPDATE operation ('111') at position 11
+INFO:  Perform UPDATE operation ('112') at position 12
+INFO:  Perform UPDATE operation ('113') at position 13
+INFO:  Perform UPDATE operation ('114') at position 14
+INFO:  Perform UPDATE operation ('115') at position 15
+INFO:  Perform UPDATE operation ('116') at position 16
+INFO:  Perform UPDATE operation ('117') at position 17
+INFO:  Perform UPDATE operation ('118') at position 18
+INFO:  Perform UPDATE operation ('119') at position 19
+INFO:  Perform UPDATE operation ('120') at position 20
+INFO:  Perform UPDATE operation ('121') at position 21
+INFO:  Perform UPDATE operation ('122') at position 22
+INFO:  Perform UPDATE operation ('123') at position 23
+INFO:  Perform UPDATE operation ('124') at position 24
+INFO:  Perform UPDATE operation ('125') at position 25
+INFO:  Perform UPDATE operation ('126') at position 26
+INFO:  Perform UPDATE operation ('127') at position 27
+INFO:  Perform UPDATE operation ('128') at position 28
+INFO:  Perform UPDATE operation ('129') at position 29
+INFO:  Perform UPDATE operation ('130') at position 30
+INFO:  Perform UPDATE operation ('131') at position 31
+INFO:  Perform UPDATE operation ('132') at position 32
+INFO:  Perform UPDATE operation ('133') at position 33
+INFO:  Perform UPDATE operation ('134') at position 34
+INFO:  Perform UPDATE operation ('135') at position 35
+INFO:  Perform UPDATE operation ('136') at position 36
+INFO:  Perform UPDATE operation ('137') at position 37
+INFO:  Read tuple at position 0: ('100')
+INFO:  Read tuple at position 1: ('101')
+INFO:  Read tuple at position 2: ('102')
+INFO:  Read tuple at position 3: ('103')
+INFO:  Read tuple at position 4: ('104')
+INFO:  Read tuple at position 5: ('105')
+INFO:  Read tuple at position 6: ('106')
+INFO:  Read tuple at position 7: ('107')
+INFO:  Read tuple at position 8: ('108')
+INFO:  Read tuple at position 9: ('109')
+INFO:  Read tuple at position 10: ('110')
+INFO:  Read tuple at position 11: ('111')
+INFO:  Read tuple at position 12: ('112')
+INFO:  Read tuple at position 13: ('113')
+INFO:  Read tuple at position 14: ('114')
+INFO:  Read tuple at position 15: ('115')
+INFO:  Read tuple at position 16: ('116')
+INFO:  Read tuple at position 17: ('117')
+INFO:  Read tuple at position 18: ('118')
+INFO:  Read tuple at position 19: ('119')
+INFO:  Read tuple at position 20: ('120')
+INFO:  Read tuple at position 21: ('121')
+INFO:  Read tuple at position 22: ('122')
+INFO:  Read tuple at position 23: ('123')
+INFO:  Read tuple at position 24: ('124')
+INFO:  Read tuple at position 25: ('125')
+INFO:  Read tuple at position 26: ('126')
+INFO:  Read tuple at position 27: ('127')
+INFO:  Read tuple at position 28: ('128')
+INFO:  Read tuple at position 29: ('129')
+INFO:  Read tuple at position 30: ('130')
+INFO:  Read tuple at position 31: ('131')
+INFO:  Read tuple at position 32: ('132')
+INFO:  Read tuple at position 33: ('133')
+INFO:  Read tuple at position 34: ('134')
+INFO:  Read tuple at position 35: ('135')
+INFO:  Read tuple at position 36: ('136')
+INFO:  Read tuple at position 37: ('137')
+INFO:  Compare tuple ('100') at position 0: 0
+INFO:  Search for tuple ('100'): 1
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Perform DELETE operation at position 0
+INFO:  Read tuple at position 0: ('110')
+INFO:  Read tuple at position 1: ('111')
+INFO:  Read tuple at position 2: ('112')
+INFO:  Read tuple at position 3: ('113')
+INFO:  Read tuple at position 4: ('114')
+INFO:  Read tuple at position 5: ('115')
+INFO:  Read tuple at position 6: ('116')
+INFO:  Read tuple at position 7: ('117')
+INFO:  Read tuple at position 8: ('118')
+INFO:  Read tuple at position 9: ('119')
+INFO:  Read tuple at position 10: ('120')
+INFO:  Read tuple at position 11: ('121')
+INFO:  Read tuple at position 12: ('122')
+INFO:  Read tuple at position 13: ('123')
+INFO:  Read tuple at position 14: ('124')
+INFO:  Read tuple at position 15: ('125')
+INFO:  Read tuple at position 16: ('126')
+INFO:  Read tuple at position 17: ('127')
+INFO:  Read tuple at position 18: ('128')
+INFO:  Read tuple at position 19: ('129')
+INFO:  Read tuple at position 20: ('130')
+INFO:  Read tuple at position 21: ('131')
+INFO:  Read tuple at position 22: ('132')
+INFO:  Read tuple at position 23: ('133')
+INFO:  Read tuple at position 24: ('134')
+INFO:  Read tuple at position 25: ('135')
+INFO:  Read tuple at position 26: ('136')
+INFO:  Read tuple at position 27: ('137')
+INFO:  Compare tuple ('100') at position 0: -1
+INFO:  Search for tuple ('100'): 0
+ test_btree_hikey_chunk 
+------------------------
+ 
+(1 row)
+
+SELECT test_btree_hikey_chunk_builder('tuple_chunk_test'::regclass);
+INFO:  Estimate adding tuple ('1') to builder: 8
+INFO:  Perform adding tuple ('1') to builder
+INFO:  Perform adding tuple ('2') to builder
+INFO:  Perform adding tuple ('3') to builder
+INFO:  Perform adding tuple ('4') to builder
+INFO:  Perform adding tuple ('5') to builder
+INFO:  Perform adding tuple ('6') to builder
+INFO:  Perform adding tuple ('7') to builder
+INFO:  Perform adding tuple ('8') to builder
+INFO:  Perform adding tuple ('9') to builder
+INFO:  Perform adding tuple ('10') to builder
+INFO:  Perform adding tuple ('11') to builder
+INFO:  Perform adding tuple ('12') to builder
+INFO:  Perform adding tuple ('13') to builder
+INFO:  Perform adding tuple ('14') to builder
+INFO:  Perform adding tuple ('15') to builder
+INFO:  Perform adding tuple ('16') to builder
+INFO:  Perform adding tuple ('17') to builder
+INFO:  Perform adding tuple ('18') to builder
+INFO:  Perform adding tuple ('19') to builder
+INFO:  Perform adding tuple ('20') to builder
+INFO:  Perform adding tuple ('21') to builder
+INFO:  Perform adding tuple ('22') to builder
+INFO:  Perform adding tuple ('23') to builder
+INFO:  Perform adding tuple ('24') to builder
+INFO:  Perform adding tuple ('25') to builder
+INFO:  Perform adding tuple ('26') to builder
+INFO:  Perform adding tuple ('27') to builder
+INFO:  Perform adding tuple ('28') to builder
+INFO:  Perform adding tuple ('29') to builder
+INFO:  Perform adding tuple ('30') to builder
+INFO:  Perform adding tuple ('31') to builder
+INFO:  Perform adding tuple ('32') to builder
+INFO:  Perform adding tuple ('33') to builder
+INFO:  Perform adding tuple ('34') to builder
+INFO:  Perform adding tuple ('35') to builder
+INFO:  Perform adding tuple ('36') to builder
+INFO:  Perform adding tuple ('37') to builder
+INFO:  Perform adding tuple ('38') to builder
+INFO:  Finished building tuple chunk
+INFO:  Read tuple at position 0: ('1')
+INFO:  Read tuple at position 1: ('2')
+INFO:  Read tuple at position 2: ('3')
+INFO:  Read tuple at position 3: ('4')
+INFO:  Read tuple at position 4: ('5')
+INFO:  Read tuple at position 5: ('6')
+INFO:  Read tuple at position 6: ('7')
+INFO:  Read tuple at position 7: ('8')
+INFO:  Read tuple at position 8: ('9')
+INFO:  Read tuple at position 9: ('10')
+INFO:  Read tuple at position 10: ('11')
+INFO:  Read tuple at position 11: ('12')
+INFO:  Read tuple at position 12: ('13')
+INFO:  Read tuple at position 13: ('14')
+INFO:  Read tuple at position 14: ('15')
+INFO:  Read tuple at position 15: ('16')
+INFO:  Read tuple at position 16: ('17')
+INFO:  Read tuple at position 17: ('18')
+INFO:  Read tuple at position 18: ('19')
+INFO:  Read tuple at position 19: ('20')
+INFO:  Read tuple at position 20: ('21')
+INFO:  Read tuple at position 21: ('22')
+INFO:  Read tuple at position 22: ('23')
+INFO:  Read tuple at position 23: ('24')
+INFO:  Read tuple at position 24: ('25')
+INFO:  Read tuple at position 25: ('26')
+INFO:  Read tuple at position 26: ('27')
+INFO:  Read tuple at position 27: ('28')
+INFO:  Read tuple at position 28: ('29')
+INFO:  Read tuple at position 29: ('30')
+INFO:  Read tuple at position 30: ('31')
+INFO:  Read tuple at position 31: ('32')
+INFO:  Read tuple at position 32: ('33')
+INFO:  Read tuple at position 33: ('34')
+INFO:  Read tuple at position 34: ('35')
+INFO:  Read tuple at position 35: ('36')
+INFO:  Read tuple at position 36: ('37')
+INFO:  Read tuple at position 37: ('38')
+ test_btree_hikey_chunk_builder 
+--------------------------------
+ 
+(1 row)
+
+DROP SCHEMA tuple_chunk CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to extension orioledb
+drop cascades to table tuple_chunk_test
+RESET search_path;
