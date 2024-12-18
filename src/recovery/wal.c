@@ -110,7 +110,7 @@ static inline void
 add_local_modify(uint8 record_type, OTuple record, OffsetNumber length)
 {
 	WALRecModify *wal_rec;
-	Pointer 	 local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer 	 local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -217,7 +217,7 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
 	WALRecFinish *rec;
 	CommitSeqNo csn;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
@@ -239,7 +239,7 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin)
 {
 	WALRecJointCommit *rec;
 	CommitSeqNo csn;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -263,7 +263,7 @@ static void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	Assert(OXidIsValid(oxid));
@@ -293,7 +293,7 @@ add_xid_wal_record_if_needed(void)
 static void
 add_rel_wal_record(ORelOids oids, OIndexType type)
 {
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	Assert(!is_recovery_process());
@@ -315,7 +315,7 @@ void
 add_o_tables_meta_lock_wal_record(void)
 {
 	WALRec	   *rec;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -334,7 +334,7 @@ void
 add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 {
 	WALRecOTablesUnlockMeta *rec;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -359,7 +359,7 @@ add_savepoint_wal_record(SubTransactionId parentSubid,
 {
 	WALRecSavepoint *rec;
 	TransactionId logicalXid = get_current_logical_xid();
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -381,7 +381,7 @@ void
 add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 {
 	WALRecRollbackToSavepoint *rec;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -451,7 +451,7 @@ flush_local_wal_if_needed(int required_length)
 static XLogRecPtr
 log_logical_wal_container(int length)
 {
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 	XLogRecPtr   ret;
 	/*
      * If we can immediately acquire walLock, we flush our WAL buffer
@@ -476,12 +476,12 @@ log_logical_wal_container(int length)
 		Assert(oProcData[MYPROCNUMBER].walClearGroupMember == false);
 
 		oProcData[MYPROCNUMBER].walClearGroupMember = true;
-		nextidx = pg_atomic_read_u32(walGroupClearShmem->walClearGroupFirst);
+		nextidx = pg_atomic_read_u32(&walGroupClearShmem->walClearGroupFirst);
 		while (true)
 		{
 			pg_atomic_write_u32(&(oProcData[MYPROCNUMBER].walClearGroupNext), nextidx);
 
-			if (pg_atomic_compare_exchange_u32(walGroupClearShmem->walClearGroupFirst,
+			if (pg_atomic_compare_exchange_u32(&walGroupClearShmem->walClearGroupFirst,
 											   &nextidx,
 											   MYPROCNUMBER))
 			break;
@@ -523,7 +523,7 @@ log_logical_wal_container(int length)
 		 * group WAL flushing, saving a pointer to the head of the list.  Trying
 		 * to pop elements one at a time could lead to an ABA problem.
 		 */
-		nextidx = pg_atomic_exchange_u32(walGroupClearShmem->walClearGroupFirst,
+		nextidx = pg_atomic_exchange_u32(&walGroupClearShmem->walClearGroupFirst,
 										 INVALID_PGPROCNO);
 
 		/* Remember head of list so we can perform wakeups after dropping lock. */
@@ -531,10 +531,10 @@ log_logical_wal_container(int length)
 		/* Walk the list and clear all XIDs. */
 		while (nextidx != INVALID_PGPROCNO)
 		{
-			oProcData *nextOProc = &oProcData[nextidx];
+			ODBProcData *nextOProc = &oProcData[nextidx];
 
 			XLogBeginInsert();
-			XLogRegisterData(&oProcData[nextidx].wal_buffer, length);
+			XLogRegisterData(&(nextOProc->wal_buffer[0]), length);
 			nextOProc->walClearGroupRecPtr = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 
 			/* Move to next proc in list. */
@@ -552,7 +552,7 @@ log_logical_wal_container(int length)
 		 */
 		while (wakeidx != INVALID_PGPROCNO)
 		{
-			oProcData 	*nextOProc = &oProcData[wakeidx];
+			ODBProcData *nextOProc = &oProcData[wakeidx];
 			PGPROC		*nextPGProc = GetPGProcByNumber(wakeidx);
 
 			wakeidx = pg_atomic_read_u32(&nextOProc->walClearGroupNext);
@@ -636,7 +636,7 @@ void
 add_truncate_wal_record(ORelOids oids)
 {
 	WALRecTruncate *rec;
-	Pointer      local_wal_buffer = &oProcData[MYPROCNUMBER].wal_buffer;
+	Pointer      local_wal_buffer = &(oProcData[MYPROCNUMBER].wal_buffer[0]);
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));

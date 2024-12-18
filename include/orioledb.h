@@ -147,7 +147,7 @@ typedef struct
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 	bool 		walClearGroupMember;
-	XLogRecPtr	walClearGroupRecptr;
+	XLogRecPtr	walClearGroupRecPtr;
 	pg_atomic_uint32	walClearGroupNext;
 	char 		wal_buffer[LOCAL_WAL_BUFFER_SIZE];
 } ODBProcData;
@@ -194,8 +194,6 @@ typedef RelFileLocator RelFileNode;
 #define ORelOidsSetInvalid(oids) \
 	((oids).datoid = (oids).reloid = (oids).relnode = InvalidOid)
 
-//#define INVALID_PROC_NUMBER INVALID_PGPROCNO
-
 #if PG_VERSION_NUM >= 170000
 
 #define LXID vxid.lxid
@@ -206,6 +204,9 @@ typedef RelFileLocator RelFileNode;
 #define vacuum_is_relation_owner vacuum_is_permitted_for_relation
 #define ResourceOwnerEnlargeCatCacheRefs ResourceOwnerEnlarge
 #define ResourceOwnerEnlargeCatCacheListRefs ResourceOwnerEnlarge
+#include "storage/procnumber.h"
+#define INVALID_PGPROCNO INVALID_PROC_NUMBER
+
 /* Join BackendId and ProcNumber */
 #define BACKENDID procNumber
 #define PROCBACKENDID vxid.procNumber
