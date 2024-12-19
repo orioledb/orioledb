@@ -349,7 +349,6 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 					TBMIterator *tbmiterator;
 					TBMIterateResult *tbmres;
 					OIndexDescr *bridge = bitmap_state->scan->tbl_desc->bridge;
-					OSnapshot	oSnapshot;
 					CommitSeqNo tupleCsn;
 					ItemPointerData iptr;
 
@@ -376,7 +375,7 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 
 							bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
 																   (Pointer) &bridge_bound, BTreeKeyBound,
-																   &oSnapshot, &tupleCsn,
+																   &o_in_progress_snapshot, &tupleCsn,
 																   CurrentMemoryContext, NULL);
 							Assert(!O_TUPLE_IS_NULL(bridge_tup));
 
