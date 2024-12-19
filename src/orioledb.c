@@ -1622,6 +1622,20 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					OIndexDescr *index_descr = NULL;
 					OInMemoryBlkno rootPageBlkno;
 					Page		root_page;
+					Relation	index;
+					OBTOptions *options;
+
+					index = index_open(info->indexoid, AccessShareLock);
+
+					options = (OBTOptions *) index->rd_options;
+
+					if ((options && options->index_bridging) || index->rd_rel->relam != BTREE_AM_OID)
+					{
+						index_close(index, AccessShareLock);
+						continue;
+					}
+
+					index_close(index, AccessShareLock);
 
 					/*
 					 * TODO: Remove when parallel index scan will be
