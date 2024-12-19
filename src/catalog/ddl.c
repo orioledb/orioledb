@@ -1723,7 +1723,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel)
 	{
 		o_table->bridge_oids.datoid = MyDatabaseId;
 		o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-														rel->rd_rel->relpersistence);
+														   rel->rd_rel->relpersistence);
 		o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
 	}
 
@@ -2076,9 +2076,13 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 			if ((options && options->index_bridging) || ind->rd_rel->relam != BTREE_AM_OID)
 			{
 				ReindexParams reindex_params = {0};
+
 				relation_close(ind, AccessShareLock);
-				reindex_index(NULL, indexOid, 0,
-							  ind->rd_rel->relpersistence, &reindex_params);
+				reindex_index(
+#if PG_VERSION_NUM >= 170000
+							  NULL,
+#endif
+							  indexOid, 0, ind->rd_rel->relpersistence, &reindex_params);
 				closed = true;
 			}
 			else
@@ -2448,7 +2452,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 							else
 								ereport(ERROR, errmsg("'%s' access method is not supported",
-													get_am_name(rel->rd_rel->relam)),
+													  get_am_name(rel->rd_rel->relam)),
 										errhint("For other index access methods use 'index_bridging' option."));
 						}
 						else if (rel->rd_rel->relam == BTREE_AM_OID)

@@ -1019,7 +1019,7 @@ static void
 o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 {
 	OIndexNumber cur_ix,
-				 ctid_off = 0;
+				ctid_off = 0;
 
 	descr->nIndices = table->nindices;
 	if (!table->has_primary)

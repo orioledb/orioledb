@@ -518,8 +518,8 @@ make_bridge_o_index(OTable *table)
 
 	nadded = 0;
 	make_builtin_field(&result->leafTableFields[0], &result->leafFields[0],
-					TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
-					table->tid_btree_ops_oid);
+					   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
+					   table->tid_btree_ops_oid);
 	nadded++;
 	add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded == result->nLeafFields);
@@ -693,7 +693,7 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 	else
 	{
 		OTableIndex *tableIndex;
-		int ctid_off = 0;
+		int			ctid_off = 0;
 
 		if (primaryIsCtid)
 			ctid_off++;
