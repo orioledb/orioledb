@@ -508,8 +508,13 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 {
 	OIndexDescr *id = o_get_tree_def(desc);
 	int			i;
-	int			pk_from = id->nFields - id->nPrimaryFields;
+	int			pk_from;
 	bool		isnull;
+
+	if (desc->type == oIndexBridge)
+		pk_from = 1;
+	else
+		pk_from = id->nFields - id->nPrimaryFields;
 
 	bound->nkeys = id->nPrimaryFields;
 	for (i = 0; i < id->nPrimaryFields; i++)
