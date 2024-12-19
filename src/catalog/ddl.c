@@ -1640,7 +1640,7 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 }
 
 static void
-set_toast_oids_and_compress(Relation rel, Relation toast_rel)
+set_toast_oids_and_options(Relation rel, Relation toast_rel)
 {
 	ORelOids	oids,
 				toastOids,
@@ -1651,6 +1651,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	OCompress	compress = default_compress,
 				primary_compress = default_primary_compress,
 				toast_compress = default_toast_compress;
+	bool		index_bridging = false;
 	OXid		oxid = InvalidOXid;
 	OSnapshot	oSnapshot;
 
@@ -1690,6 +1691,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 			if (str)
 				toast_compress = o_parse_compress(str);
 		}
+		index_bridging = options->index_bridging;
 	}
 
 	if (rel->rd_rel->relpersistence !=
@@ -1715,6 +1717,15 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	o_table->default_compress = compress;
 	o_table->toast_compress = toast_compress;
 	o_table->primary_compress = primary_compress;
+	o_table->index_bridging = index_bridging;
+
+	if (index_bridging)
+	{
+		o_table->bridge_oids.datoid = MyDatabaseId;
+		o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+														   rel->rd_rel->relpersistence);
+		o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+	}
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
@@ -2060,10 +2071,27 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 
 		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
 		{
-			o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
-			relation_close(ind, AccessShareLock);
-			o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
-			closed = true;
+			OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+			if ((options && options->index_bridging) || ind->rd_rel->relam != BTREE_AM_OID)
+			{
+				ReindexParams reindex_params = {0};
+
+				relation_close(ind, AccessShareLock);
+				reindex_index(
+#if PG_VERSION_NUM >= 170000
+							  NULL,
+#endif
+							  indexOid, 0, ind->rd_rel->relpersistence, &reindex_params);
+				closed = true;
+			}
+			else
+			{
+				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+				relation_close(ind, AccessShareLock);
+				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
+				closed = true;
+			}
 		}
 		if (!closed)
 			relation_close(ind, AccessShareLock);
@@ -2369,7 +2397,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					set_toast_oids_and_compress(tbl, rel);
+					set_toast_oids_and_options(tbl, rel);
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);
@@ -2399,6 +2427,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						int			ix_num = InvalidIndexNumber;
 						int			i;
+						bool		define = false;
 
 						for (i = 0; i < o_table->nindices; i++)
 						{
@@ -2411,20 +2440,35 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
 
-						if (rel->rd_rel->relam != BTREE_AM_OID)
+						if (!o_table->index_bridging)
 						{
-							ereport(ERROR, errmsg("'%s' access method is not supported",
-												  get_am_name(rel->rd_rel->relam)),
-									errhint("Only 'btree' access method supported now "
-											"for indices on orioledb tables."));
+							if (rel->rd_rel->relam == BTREE_AM_OID)
+							{
+								OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+								if (options && options->index_bridging)
+									ereport(ERROR, errmsg("Cannot use 'index_bridging' on table without 'index_bridging' option"));
+								define = true;
+							}
+							else
+								ereport(ERROR, errmsg("'%s' access method is not supported",
+													  get_am_name(rel->rd_rel->relam)),
+										errhint("For other index access methods use 'index_bridging' option."));
+						}
+						else if (rel->rd_rel->relam == BTREE_AM_OID)
+						{
+							define = true;
 						}
 
-						if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
-							o_define_index_validate(table_oids, rel, NULL, NULL);
-						relation_close(rel, AccessShareLock);
-						closed = true;
-						if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-							o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
+						if (define)
+						{
+							if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
+								o_define_index_validate(table_oids, rel, NULL, NULL);
+							relation_close(rel, AccessShareLock);
+							closed = true;
+							if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
+								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
+						}
 
 						o_table_free(o_table);
 					}
@@ -2684,7 +2728,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					create_o_table_for_rel(tbl);
 
-					set_toast_oids_and_compress(tbl, rel);
+					set_toast_oids_and_options(tbl, rel);
 
 					ORelOidsSetFromRel(new_oids, tbl);
 					new_o_table = o_tables_get(new_oids);

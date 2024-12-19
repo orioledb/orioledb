@@ -24,6 +24,7 @@ SELECT orioledb_tbl_indices('o_indices0'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices0_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -57,6 +58,7 @@ SELECT orioledb_tbl_indices('o_indices0'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices0_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -3392,6 +3394,7 @@ SELECT orioledb_tbl_indices('o_indices0'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices0_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -4672,6 +4675,7 @@ SELECT orioledb_tbl_indices('o_indices1'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  Index o_indices1_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -4698,6 +4702,7 @@ SELECT orioledb_tbl_indices('o_indices1'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  Index o_indices1_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -4719,6 +4724,7 @@ SELECT orioledb_tbl_indices('o_indices1'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  Index o_indices1_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -4743,6 +4749,7 @@ SELECT orioledb_tbl_indices('o_indices2'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices2_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -4771,6 +4778,7 @@ SELECT orioledb_tbl_indices('o_indices2'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices2_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -4850,6 +4858,7 @@ SELECT orioledb_tbl_indices('o_indices3'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices3_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -19528,6 +19537,7 @@ SELECT orioledb_tbl_indices('o_indices6'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices6_idx2                         +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -21198,6 +21208,7 @@ SELECT orioledb_tbl_indices('o_indices6_ctid'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  Index o_indices6_ctid_idx2                    +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22366,6 +22377,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  
 (1 row)
 
@@ -22379,6 +22391,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  
 (1 row)
 
@@ -22405,6 +22418,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22436,6 +22450,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22467,6 +22482,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  
 (1 row)
 
@@ -22490,6 +22506,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  
 (1 row)
 
@@ -22504,6 +22521,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22537,6 +22555,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22553,6 +22572,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22605,6 +22625,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: key                +
+     Leaf tuple fields: key, val, val2         +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -22621,6 +22642,7 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  Index o_indices7_idx1                         +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -23497,6 +23519,7 @@ SELECT orioledb_tbl_indices('o_indices10'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  Index o_indices10_idx1                        +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -23513,6 +23536,7 @@ SELECT orioledb_tbl_indices('o_indices10'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, key, val, val2   +
  
 (1 row)
 
@@ -23687,12 +23711,13 @@ CREATE TABLE o_test_pkey_mixed_build
  pk4    | integer |           |          |         | plain   |              | 
 
 SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
-              orioledb_tbl_indices               
--------------------------------------------------
- Index ctid_primary                             +
-     Index type: primary, unique, ctid          +
-     Leaf tuple size: 10, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid                +
+                        orioledb_tbl_indices                         
+---------------------------------------------------------------------
+ Index ctid_primary                                                 +
+     Index type: primary, unique, ctid                              +
+     Leaf tuple size: 10, non-leaf tuple size: 1                    +
+     Non-leaf tuple fields: ctid                                    +
+     Leaf tuple fields: ctid, f1, f2, f3, i1, i2, pk1, pk2, pk3, pk4+
  
 (1 row)
 
@@ -23744,6 +23769,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
      Index type: primary, unique                                  +
      Leaf tuple size: 9, non-leaf tuple size: 4                   +
      Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+     Leaf tuple fields: f1, f2, f3, i1, i2, pk1, pk2, pk3, pk4    +
  Index o_test_pkey_mixed_build_ix1                                +
      Index type: secondary                                        +
      Leaf tuple size: 9, non-leaf tuple size: 9                   +
@@ -23781,6 +23807,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
      Index type: primary, unique                                  +
      Leaf tuple size: 9, non-leaf tuple size: 4                   +
      Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+     Leaf tuple fields: f1, f2, f3, i1, i2, pk1, pk2, pk3, pk4    +
  Index o_test_pkey_mixed_build_ix1                                +
      Index type: secondary                                        +
      Leaf tuple size: 9, non-leaf tuple size: 9                   +
@@ -23825,6 +23852,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
      Index type: primary, unique                                  +
      Leaf tuple size: 9, non-leaf tuple size: 4                   +
      Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+     Leaf tuple fields: f1, f2, f3, i1, i2, pk1, pk2, pk3, pk4    +
  Index o_test_pkey_mixed_build_ix1                                +
      Index type: secondary                                        +
      Leaf tuple size: 9, non-leaf tuple size: 9                   +
@@ -23876,6 +23904,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_mixed_build'::regclass);
      Index type: primary, unique                                  +
      Leaf tuple size: 9, non-leaf tuple size: 4                   +
      Non-leaf tuple fields: pk1, pk2, pk3, pk4                    +
+     Leaf tuple fields: f1, f2, f3, i1, i2, pk1, pk2, pk3, pk4    +
  Index o_test_pkey_mixed_build_ix1                                +
      Index type: secondary                                        +
      Leaf tuple size: 9, non-leaf tuple size: 9                   +
@@ -24054,6 +24083,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_include_box_build'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 4, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, pk1, pk2, f2     +
  
 (1 row)
 
@@ -24154,6 +24184,7 @@ SELECT orioledb_tbl_indices('o_test_include_box_build'::regclass);
      Index type: primary, unique, ctid         +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, val_1, val_4     +
  Index o_test_include_box_build_ix1            +
      Index type: secondary, unique             +
      Leaf tuple size: 3, non-leaf tuple size: 3+
@@ -24221,12 +24252,13 @@ CREATE TABLE o_test_include_box_with_pkey_build (
  val_4  | box     |           |          |         | plain   |              | 
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                  orioledb_tbl_indices                   
+---------------------------------------------------------
+ Index ctid_primary                                     +
+     Index type: primary, unique, ctid                  +
+     Leaf tuple size: 5, non-leaf tuple size: 1         +
+     Non-leaf tuple fields: ctid                        +
+     Leaf tuple fields: ctid, val_1, val_2, val_3, val_4+
  
 (1 row)
 
@@ -24270,17 +24302,18 @@ Indexes:
     "o_test_include_box_with_pkey_build_ix2" UNIQUE, btree (val_3)
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index o_test_include_box_with_pkey_build_pkey +
-     Index type: primary, unique               +
-     Leaf tuple size: 4, non-leaf tuple size: 1+
-     Non-leaf tuple fields: val_1              +
- Index o_test_include_box_with_pkey_build_ix2  +
-     Index type: secondary, unique             +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: val_3, val_1       +
-     Leaf tuple fields: val_3, val_1           +
+               orioledb_tbl_indices                
+---------------------------------------------------
+ Index o_test_include_box_with_pkey_build_pkey    +
+     Index type: primary, unique                  +
+     Leaf tuple size: 4, non-leaf tuple size: 1   +
+     Non-leaf tuple fields: val_1                 +
+     Leaf tuple fields: val_1, val_2, val_3, val_4+
+ Index o_test_include_box_with_pkey_build_ix2     +
+     Index type: secondary, unique                +
+     Leaf tuple size: 2, non-leaf tuple size: 2   +
+     Non-leaf tuple fields: val_3, val_1          +
+     Leaf tuple fields: val_3, val_1              +
  
 (1 row)
 
@@ -24389,6 +24422,7 @@ SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
      Index type: primary, unique, ctid                      +
      Leaf tuple size: 5, non-leaf tuple size: 1             +
      Non-leaf tuple fields: ctid                            +
+     Leaf tuple fields: ctid, id, project_id, ts, filler    +
  Index o_rebuild_unique_with_new_pkey_fields_ix1            +
      Index type: secondary, unique                          +
      Leaf tuple size: 5, non-leaf tuple size: 5             +
@@ -24411,6 +24445,7 @@ SELECT orioledb_tbl_indices('o_rebuild_unique_with_new_pkey_fields'::regclass);
      Index type: primary, unique                      +
      Leaf tuple size: 4, non-leaf tuple size: 3       +
      Non-leaf tuple fields: project_id, id, ts        +
+     Leaf tuple fields: id, project_id, ts, filler    +
  Index o_rebuild_unique_with_new_pkey_fields_ix1      +
      Index type: secondary, unique                    +
      Leaf tuple size: 4, non-leaf tuple size: 4       +

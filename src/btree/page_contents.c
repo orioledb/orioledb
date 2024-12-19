@@ -377,6 +377,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	pg_atomic_init_u64(&metaPageBlkno->datafileLength[0], 0);
 	pg_atomic_init_u64(&metaPageBlkno->datafileLength[1], 0);
 	pg_atomic_init_u64(&metaPageBlkno->ctid, 0);
+	pg_atomic_init_u64(&metaPageBlkno->bridge_ctid, 0);
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
 		pg_atomic_init_u32(&metaPageBlkno->numSeqScans[i], 0);
 

@@ -131,6 +131,7 @@ struct OIndexDescr
 	 * on ctid (no primary key is explicitly defined).
 	 */
 	bool		primaryIsCtid;
+	bool		bridging;
 
 	/* Description of the index fields */
 	int			nFields;
@@ -197,6 +198,7 @@ struct OTableDescr
 	 * the primary key, reset of indeces array point to the secondary indices.
 	 */
 	OIndexDescr **indices;
+	OIndexDescr *bridge;
 	OIndexDescr *toast;
 
 	/* list of TOASTable values */
