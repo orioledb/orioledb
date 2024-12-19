@@ -195,7 +195,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 		bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
 											   (Pointer) &bridge_bound, BTreeKeyBound,
-											   &oSnapshot, &tupleCsn,
+											   &o_in_progress_snapshot, &tupleCsn,
 											   slot->tts_mcxt, NULL);
 		Assert(!O_TUPLE_IS_NULL(bridge_tup));
 
