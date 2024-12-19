@@ -9,7 +9,7 @@ cd orioledb
 if [ "$COMPILER" = "clang" ]; then
 	scan-build-$LLVM_VER --status-bugs \
 		-disable-checker deadcode.DeadStores \
-		make USE_PGXS=1 USE_ASSERT_CHECKING=1 || status=$?
+		make USE_PGXS=1 IS_DEV=1 USE_ASSERT_CHECKING=1 || status=$?
 
 elif [ "$COMPILER" = "gcc" ]; then
 	cppcheck \

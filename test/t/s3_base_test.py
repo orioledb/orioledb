@@ -243,7 +243,7 @@ class OrioledbS3Loader:
 	def download(self, path, verbose=False):
 		dir_path = os.path.dirname(os.path.realpath(__file__))
 		old_argv = sys.argv
-		sys.argv = [f"{dir_path}/../orioledb_s3_loader.py"]
+		sys.argv = [f"{dir_path}/../../orioledb_s3_loader.py"]
 		sys.argv += ["--endpoint", self._endpoint_url]
 		if self._prefix:
 			sys.argv += ["--prefix", self._prefix]

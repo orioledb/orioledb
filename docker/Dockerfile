@@ -195,8 +195,8 @@ RUN set -eux; \
 	make -C contrib install; \
 	# install orioledb extension
 	cd /usr/src/postgresql/contrib/orioledb; \
-	make USE_PGXS=1 -j "$(nproc)"; \
-	make USE_PGXS=1 install; \
+	make USE_PGXS=1 IS_DEV=1 -j "$(nproc)"; \
+	make USE_PGXS=1 IS_DEV=1 install; \
 	\
 	# Clean up only if not in debug mode
 	if [ "$DEBUG_MODE" != "true" ]; then \
@@ -240,10 +240,10 @@ RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PG
 VOLUME /var/lib/postgresql/data
 
 RUN mkdir -p /etc/postgresql && chown -R postgres:postgres /etc/postgresql && chmod 700 /etc/postgresql
-COPY --chown=postgres:postgres postgresql.docker.conf /etc/postgresql/postgresql.conf
+COPY --chown=postgres:postgres docker/postgresql.docker.conf /etc/postgresql/postgresql.conf
 ENV PG_CONF=/etc/postgresql/postgresql.conf
 
-COPY docker-entrypoint.sh /usr/local/bin/
+COPY docker/docker-entrypoint.sh /usr/local/bin/
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL
