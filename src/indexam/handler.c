@@ -99,19 +99,20 @@ static void orioledb_amparallelrescan(IndexScanDesc scan);
 
 static IndexBuildResult *bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
 static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
-							  Datum tupleid, Relation heapRel,
-							  IndexUniqueCheck checkUnique,
-							  bool indexUnchanged,
-							  IndexInfo *indexInfo);
+							 Datum tupleid, Relation heapRel,
+							 IndexUniqueCheck checkUnique,
+							 bool indexUnchanged,
+							 IndexInfo *indexInfo);
 static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
 
-typedef struct BrigedIndexAmRoutine {
+typedef struct BrigedIndexAmRoutine
+{
 	IndexAmRoutine *original_routine;
 	IndexAmRoutine routine;
-	Oid amhandler;
+	Oid			amhandler;
 } BrigedIndexAmRoutine;
 
-List *bridged_ams = NIL;
+List	   *bridged_ams = NIL;
 
 static IndexAmRoutine *
 orioledb_btree_handler(void)
@@ -193,7 +194,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 		else
 		{
 			IndexAmRoutine *amroutine = NULL;
-			ListCell *lc;
+			ListCell   *lc;
 
 			foreach(lc, bridged_ams)
 			{
@@ -210,8 +211,8 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 			if (amroutine == NULL)
 			{
 				BrigedIndexAmRoutine *bridged;
-				MemoryContext		 old_mcxt;
-				Datum				 datum;
+				MemoryContext old_mcxt;
+				Datum		datum;
 
 				old_mcxt = MemoryContextSwitchTo(TopMemoryContext);
 				bridged = palloc0(sizeof(BrigedIndexAmRoutine));
@@ -248,13 +249,15 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	if (options && options->index_bridging)
 	{
-		OTableDescr		   *descr;
+		OTableDescr *descr;
 
 		descr = relation_get_descr(heap);
-		/* During rewrite we are ignoring first ambuild,
-		 * because we need descr to exist in orioledb_index_build_range_scan,
-		 * but descr for table created later.
-		 * So we performing new reindex_index in redefine_indices after descr created.
+
+		/*
+		 * During rewrite we are ignoring first ambuild, because we need descr
+		 * to exist in orioledb_index_build_range_scan, but descr for table
+		 * created later. So we performing new reindex_index in
+		 * redefine_indices after descr created.
 		 */
 		if (descr == NULL)
 		{
@@ -408,6 +411,7 @@ append_rowid_values(OIndexDescr *id,
 		if (id->bridging)
 		{
 			AttrNumber	attnum = id->nFields - 1;
+
 			values[attnum] = PointerGetDatum(p);
 			isnull[attnum] = false;
 			*version = O_TABLE_INVALID_VERSION;
@@ -1293,10 +1297,10 @@ orioledb_amoptions(Datum reloptions, bool validate)
 								   NULL, validate_index_compress, NULL,
 								   offsetof(OBTOptions, compress_offset));
 		add_local_bool_reloption(&relopts, "index_bridging",
-								   "Enable index bridging and using of postgresql btree indices via index bridging "
-								   "instead of orioledb btree indices. Works only if index_bridging option enabled for table",
-								   false,
-								   offsetof(OBTOptions, index_bridging));
+								 "Enable index bridging and using of postgresql btree indices via index bridging "
+								 "instead of orioledb btree indices. Works only if index_bridging option enabled for table",
+								 false,
+								 offsetof(OBTOptions, index_bridging));
 		MemoryContextSwitchTo(oldcxt);
 		relopts_set = true;
 	}
@@ -1356,7 +1360,7 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 }
 
 /* TODO: Remove this hack; probably patch table_index_fetch_begin to accept indexRelation */
-Relation o_current_index = NULL;
+Relation	o_current_index = NULL;
 
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
@@ -1491,7 +1495,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	TupleDesc	pk_tupdesc;
 	OTupleFixedFormatSpec *pk_spec;
 	int			result_size,
-				tuple_size;
+				tuple_size = 0;
 	Pointer		ptr;
 
 	slot = index_descr->index_slot;
@@ -1804,13 +1808,15 @@ static IndexBuildResult *
 bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
 	IndexBuildResult *result;
-	OTableDescr		   *descr;
+	OTableDescr *descr;
 
 	descr = relation_get_descr(heap);
-	/* During rewrite we are ignoring first ambuild,
-	 * because we need descr to exist in orioledb_index_build_range_scan,
-	 * but descr for table created later.
-	 * So we performing new reindex_index in redefine_indices after descr created.
+
+	/*
+	 * During rewrite we are ignoring first ambuild, because we need descr to
+	 * exist in orioledb_index_build_range_scan, but descr for table created
+	 * later. So we performing new reindex_index in redefine_indices after
+	 * descr created.
 	 */
 	if (descr == NULL)
 	{
@@ -1824,7 +1830,7 @@ bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	else
 	{
 		IndexAmRoutine *amroutine = NULL;
-		ListCell *lc;
+		ListCell   *lc;
 
 		foreach(lc, bridged_ams)
 		{
@@ -1854,7 +1860,7 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	bytea	   *rowid;
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
-	ListCell *lc;
+	ListCell   *lc;
 
 	ORelOidsSetFromRel(oids, heapRel);
 
@@ -1897,7 +1903,7 @@ IndexScanDesc
 bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	IndexAmRoutine *amroutine = NULL;
-	ListCell *lc;
+	ListCell   *lc;
 
 	o_current_index = rel;
 

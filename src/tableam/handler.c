@@ -108,7 +108,7 @@ orioledb_slot_callbacks(Relation relation)
 typedef struct OrioledbIndexFetchData
 {
 	IndexFetchTableData xs_base;	/* AM independent part of the descriptor */
-	bool				bridged_tuple;
+	bool		bridged_tuple;
 } OrioledbIndexFetchData;
 
 /*
@@ -119,6 +119,7 @@ static IndexFetchTableData *
 orioledb_index_fetch_begin(Relation rel)
 {
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
+
 	/* TODO: Remove this hack */
 	extern Relation o_current_index;
 
@@ -127,7 +128,7 @@ orioledb_index_fetch_begin(Relation rel)
 		OBTOptions *options = (OBTOptions *) o_current_index->rd_options;
 
 		o_scan->bridged_tuple = (options && options->index_bridging) ||
-								(o_current_index->rd_rel->relam != BTREE_AM_OID);
+			(o_current_index->rd_rel->relam != BTREE_AM_OID);
 		o_current_index = NULL;
 	}
 
@@ -181,8 +182,8 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 	if (o_scan->bridged_tuple)
 	{
-		OBTreeKeyBound	bridge_bound;
-		OTuple			bridge_tup;
+		OBTreeKeyBound bridge_bound;
+		OTuple		bridge_tup;
 
 		bridge_bound.keys[0].value = tupleid;
 		bridge_bound.keys[0].type = TIDOID;
@@ -934,34 +935,23 @@ orioledb_index_build_range_scan(Relation heapRelation,
 
 	if ((options && options->index_bridging) || indexRelation->rd_rel->relam != BTREE_AM_OID)
 	{
-		OTableDescr		   *descr;
-		BTreeSeqScan	   *seq_scan;
-		TupleTableSlot	   *primarySlot;
-		double				heap_tuples;
-		OTuple				tup;
-		BTreeLocationHint	hint;
-		CommitSeqNo			tupleCsn;
-		bool				checking_uniqueness;
-		ExprState		   *predicate;
-		EState			   *estate;
-		ExprContext		   *econtext;
-		Datum				values[INDEX_MAX_KEYS];
-		bool				isnull[INDEX_MAX_KEYS];
-
-		/* See whether we're verifying uniqueness/exclusion properties */
-		checking_uniqueness = (indexInfo->ii_Unique ||
-							indexInfo->ii_ExclusionOps != NULL);
+		OTableDescr *descr;
+		BTreeSeqScan *seq_scan;
+		TupleTableSlot *primarySlot;
+		double		heap_tuples;
+		OTuple		tup;
+		BTreeLocationHint hint;
+		CommitSeqNo tupleCsn;
+		ExprState  *predicate;
+		EState	   *estate;
+		ExprContext *econtext;
+		Datum		values[INDEX_MAX_KEYS];
+		bool		isnull[INDEX_MAX_KEYS];
 
 		/*
-		* "Any visible" mode is not compatible with uniqueness checks; make sure
-		* only one of those is requested.
-		*/
-		Assert(!(anyvisible && checking_uniqueness));
-
-		/*
-		* Need an EState for evaluation of index expressions and partial-index
-		* predicates.  Also a slot to hold the current tuple.
-		*/
+		 * Need an EState for evaluation of index expressions and
+		 * partial-index predicates.  Also a slot to hold the current tuple.
+		 */
 		estate = CreateExecutorState();
 		econtext = GetPerTupleExprContext(estate);
 
@@ -981,6 +971,7 @@ orioledb_index_build_range_scan(Relation heapRelation,
 		while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(seq_scan, primarySlot->tts_mcxt, &tupleCsn, &hint)))
 		{
 			OTableSlot *oslot = (OTableSlot *) primarySlot;
+
 			tts_orioledb_store_tuple(primarySlot, tup, descr, tupleCsn, PrimaryIndexNumber, true, &hint);
 			slot_getallattrs(primarySlot);
 
@@ -989,9 +980,9 @@ orioledb_index_build_range_scan(Relation heapRelation,
 			MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
 			/*
-			* In a partial index, discard tuples that don't satisfy the
-			* predicate.
-			*/
+			 * In a partial index, discard tuples that don't satisfy the
+			 * predicate.
+			 */
 			if (predicate != NULL)
 			{
 				if (!ExecQual(predicate, econtext))
@@ -999,10 +990,10 @@ orioledb_index_build_range_scan(Relation heapRelation,
 			}
 
 			/*
-			* For the current heap tuple, extract all the attributes we use in
-			* this index, and note which are null.  This also performs evaluation
-			* of any expressions needed.
-			*/
+			 * For the current heap tuple, extract all the attributes we use
+			 * in this index, and note which are null.  This also performs
+			 * evaluation of any expressions needed.
+			 */
 			FormIndexDatum(indexInfo,
 						   primarySlot,
 						   estate,

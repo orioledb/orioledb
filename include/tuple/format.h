@@ -46,11 +46,12 @@ typedef struct
 typedef OTupleHeaderData *OTupleHeader;
 #define SizeOfOTupleHeader MAXALIGN(sizeof(OTupleHeaderData))
 
-typedef struct BrigeData {
-	bool	is_pkey;
+typedef struct BrigeData
+{
+	bool		is_pkey;
 	ItemPointer bridge_iptr;
-	// compared with InvalidAttrNumber, so should be greater than 0
-	AttrNumber attnum;
+	/* compared with InvalidAttrNumber, so should be greater than 0 */
+	AttrNumber	attnum;
 } BrigeData;
 
 /*

@@ -457,8 +457,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		 */
 		if (ostate->ixNum != PrimaryIndexNumber)
 		{
-			OBTreeKeyBound	bound;
-			OTuple			ptup;
+			OBTreeKeyBound bound;
+			OTuple		ptup;
 			OIndexDescr *primary = GET_PRIMARY(descr);
 
 			/* fetch primary index key from tuple and search raw tuple */

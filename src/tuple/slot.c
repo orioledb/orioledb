@@ -217,8 +217,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	/* Declaration of variables used throughout the function. */
 	int			natts,
 				attnum,
-				ctid_off = 0,
-				res_ctid_off = 0;
+				ctid_off = 0;
 	OTableDescr *descr = oslot->descr;	/* Descriptor for the table. */
 	Datum	   *values = slot->tts_values;	/* Array to store attribute
 											 * values. */
@@ -242,7 +241,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	if (oslot->ixnum == BridgeIndexNumber)
 		idx = descr->bridge;
 	else
-	idx = descr->indices[oslot->ixnum];
+		idx = descr->indices[oslot->ixnum];
 
 	/* Determine if the attributes should be fetched in index order. */
 	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
@@ -343,10 +342,11 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		Assert(res_attnum >= -2);
 		if (res_attnum >= 0)
 		{
-		 	if (oslot->ixnum == BridgeIndexNumber && attnum == 0)
+			if (oslot->ixnum == BridgeIndexNumber && attnum == 0)
 			{
 				/*
-				 * first bridge_ctid attribute was already read in tts_orioledb_init_reader
+				 * first bridge_ctid attribute was already read in
+				 * tts_orioledb_init_reader
 				 */
 				values[res_attnum] = PointerGetDatum(&oslot->bridge_ctid);
 				isnull[res_attnum] = false;
@@ -386,17 +386,17 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		{
 			if (!idx->bridging)
 			{
-			/* Special handling for ctid attribute. */
-			Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
-			bool		iptr_null;
+				/* Special handling for ctid attribute. */
+				Datum		iptr_value PG_USED_FOR_ASSERTS_ONLY;
+				bool		iptr_null;
 
-			iptr_value = o_tuple_read_next_field(&oslot->state,
-												 &iptr_null);
+				iptr_value = o_tuple_read_next_field(&oslot->state,
+													 &iptr_null);
 
-			Assert(iptr_null == false);
-			Assert(memcmp(&slot->tts_tid,
-						  (ItemPointer) iptr_value, sizeof(ItemPointerData)) == 0);
-		}
+				Assert(iptr_null == false);
+				Assert(memcmp(&slot->tts_tid,
+							  (ItemPointer) iptr_value, sizeof(ItemPointerData)) == 0);
+			}
 		}
 		else if (res_attnum == -2)
 		{

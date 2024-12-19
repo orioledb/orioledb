@@ -196,7 +196,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlo
 	}
 
 	tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
-							values, isnull, NULL);
+						 values, isnull, NULL);
 	bridge_slot = descr->bridge->old_leaf_slot;
 	tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
 	callbackInfo.arg = bridge_slot;
@@ -204,7 +204,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlo
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 	success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+								  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
 
 	if (!success)
 	{
@@ -782,7 +782,10 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 
 		if (typid == TIDOID)
 		{
-			// TODO: Do more complex check here, because it ignores ctid when bridging enabled
+			/*
+			 * TODO: Do more complex check here, because it ignores ctid when
+			 * bridging enabled
+			 */
 			if (idx->bridging)
 			{
 				isnull = false;

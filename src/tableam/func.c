@@ -1394,7 +1394,7 @@ index_description(StringInfo buf, OIndexDescr *ct, bool primary, bool oids)
 	if (ct->predicate)
 		appendStringInfo(buf, "    Predicate: %s\n", ct->predicate_str);
 	appendStringInfo(buf, "    Leaf tuple size: %d, non-leaf tuple size: %d\n",
-						leafSize, nonLeafSize);
+					 leafSize, nonLeafSize);
 	appendStringInfo(buf, "    Non-leaf tuple fields: ");
 	for (j = 0; j < nonLeafSize; j++)
 	{

@@ -1645,7 +1645,8 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 
 		if (descr->bridge)
 		{
-			OTuple	newTup = tts_orioledb_make_secondary_tuple(primarySlot, descr->bridge, true);
+			OTuple		newTup = tts_orioledb_make_secondary_tuple(primarySlot, descr->bridge, true);
+
 			tuplesort_putotuple(sortstates[descr->nIndices + 1], newTup);
 		}
 
@@ -1674,7 +1675,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	oIdxSpool  *btspool = NULL;
 	SortCoordinate *coordinate = NULL;
 	S3TaskLocation maxLocation = 0,
-				location;
+				location = 0;
 	BTreeDescr *old_td;
 	BTreeMetaPage *meta;
 	int			nallindices = descr->nIndices + 1;
@@ -1772,12 +1773,12 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 								   (i == PrimaryIndexNumber) ? bridge_ctid : 0,
 								   &fileHeaders[i]);
 		}
-		else if (i == descr->nIndices)					/* TOAST sort state */
+		else if (i == descr->nIndices)	/* TOAST sort state */
 		{
 			btree_write_index_data(&descr->toast->desc, descr->toast->leafTupdesc,
 								   sortstates[descr->nIndices], 0, 0, &fileHeaders[i]);
 		}
-		else if (i == descr->nIndices + 1)					/* bridge_index sort state */
+		else if (i == descr->nIndices + 1)	/* bridge_index sort state */
 		{
 			btree_write_index_data(&descr->bridge->desc, descr->bridge->leafTupdesc,
 								   sortstates[descr->nIndices + 1], 0, 0, &fileHeaders[i]);
@@ -1811,13 +1812,13 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			o_drop_shared_root_info(descr->indices[i]->desc.oids.datoid,
 									descr->indices[i]->desc.oids.relnode);
 		}
-		else if (i == descr->nIndices)					/* TOAST sort state */
+		else if (i == descr->nIndices)	/* TOAST sort state */
 		{
 			location = btree_write_file_header(&descr->toast->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->toast->desc.oids.datoid,
 									descr->toast->desc.oids.relnode);
 		}
-		else if (i == descr->nIndices + 1)					/* index_bridge sort state */
+		else if (i == descr->nIndices + 1)	/* index_bridge sort state */
 		{
 			location = btree_write_file_header(&descr->bridge->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->bridge->desc.oids.datoid,
