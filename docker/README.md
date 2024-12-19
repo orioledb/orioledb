@@ -20,7 +20,7 @@ git clone "$OFFIMG_REPO_URL" "$OFFIMG_LOCAL_CLONE"
 
 "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
     -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
-    -c "test/orioledb-config.sh" \
+    -c "docker/orioledb-config.sh" \
     "orioletest:17-gcc-ubuntu-22.04"
 ```
 

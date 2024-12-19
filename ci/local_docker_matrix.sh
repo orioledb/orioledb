@@ -62,9 +62,9 @@ for pg_major in "${pg_major_list[@]}" ; do
 
       # Determine the Dockerfile based on base OS
       if [ "$base_os" = "alpine" ]; then
-        dockerfile="Dockerfile"
+        dockerfile="docker/Dockerfile"
       elif [ "$base_os" = "ubuntu" ]; then
-        dockerfile="Dockerfile.ubuntu"
+        dockerfile="docker/Dockerfile.ubuntu"
       fi
 
       docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}"
@@ -82,7 +82,7 @@ for pg_major in "${pg_major_list[@]}" ; do
       # Run docker test : oriole + postgres official test scripts
       "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
           -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
-          -c "test/orioledb-config.sh" \
+          -c "docker/orioledb-config.sh" \
           "orioletest:${docker_tag}" 2>&1 | tee ${logpath}/"${docker_tag}".test.log
 
     done
