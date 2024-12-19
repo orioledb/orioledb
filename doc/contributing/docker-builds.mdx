@@ -21,7 +21,7 @@ Open a terminal and navigate to the OrioleDB project directory, if you are not a
 
 Build (Alpine) PostgreSQL 17 + OrioleDB extension:
 
-- `docker build -t orioletest:17 --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .`
+- `docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .`
 
 Start server:
 
@@ -176,13 +176,13 @@ To build a Docker image, use one of the following commands:
 #### To build PostgreSQL 17 + OrieleDB extension
 
 ```
-docker build -t orioletest:17 --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .
+docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .
 ```
 
 #### To build PostgreSQL 16 + OrieleDB extension
 
 ```
-docker build -t orioletest:16 --pull --network=host --progress=plain --build-arg PG_MAJOR="16" .
+docker build -t orioletest:16 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="16" .
 ```
 
 ## Supported environment variables
@@ -204,10 +204,10 @@ Read more: https://github.com/docker-library/docs/blob/master/postgres/README.md
 Please check the Dockerfiles for the full list of build args!
 - Alpine Linux: `./Dockerfile`
   - supported [ `edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14` ]
-  - example: `--build-arg ALPINE_VERSION="3.20" -f Dockerfile `
+  - example: `--build-arg ALPINE_VERSION="3.20" -f docker/Dockerfile `
 - Ubuntu Linux: `./Dockerfile.ubuntu`
   - supported [ `devel 24.10 24.04 22.04 20.04 oracular noble jammy focal` ]
-  - example: `--build-arg UBUNTU_VERSION="24.04" -f Dockerfile.ubuntu `
+  - example: `--build-arg UBUNTU_VERSION="24.04" -f docker/Dockerfile.ubuntu `
 
 Other important build args:
 - `--build-arg PG_MAJOR="17"`
@@ -224,7 +224,7 @@ docker build --pull --network=host --progress=plain \
     --build-arg ALPINE_VERSION="3.20" \
     --build-arg BUILD_CC_COMPILER="gcc" \
     --build-arg PG_MAJOR="16" \
-    -f Dockerfile \
+    -f docker/Dockerfile \
     -t orioletest:16-gcc-alpine3.20 .
 ```
 
@@ -235,7 +235,7 @@ docker build --pull --network=host --progress=plain \
     --build-arg UBUNTU_VERSION="devel" \
     --build-arg BUILD_CC_COMPILER="clang" \
     --build-arg PG_MAJOR="17" \
-    -f Dockerfile.ubuntu \
+    -f docker/Dockerfile.ubuntu \
     -t orioletest:17-clang-ubuntu-devel .
 ```
 The "devel" version is the latest development Ubuntu version, so it might not be stable.
@@ -252,6 +252,7 @@ docker build --pull --network=host --progress=plain \
     --build-arg ALPINE_VERSION="3.20" \
     --build-arg BUILD_CC_COMPILER="gcc" \
     --build-arg PG_MAJOR="17" \
+    -f docker/Dockerfile \
     -t orioletest:17-gcc-alpine3.20 .
 ```
 

@@ -63,8 +63,8 @@ Options:
   --help              Display this help message
 
 For the details: check the "--dry-run" and the Dockerfiles in the root directory
-  - alpine Dockerfile : ./Dockerfile
-  - ubuntu Dockerfile : ./Dockerfile.ubuntu
+  - alpine Dockerfile : ./docker/Dockerfile
+  - ubuntu Dockerfile : ./docker/Dockerfile.ubuntu
 
 The Docker build logs generated in the ./log_docker_build directory,
 and you can check the build logs with:
@@ -195,8 +195,8 @@ main() {
                         local base_os="${base%%:*}"
                         local base_tag="${base##*:}"
                         local base_os_upper="${base_os^^}"
-                        local dockerfile="Dockerfile"
-                        [[ $base_os == "ubuntu" ]] && dockerfile="Dockerfile.ubuntu"
+                        local dockerfile="./docker/Dockerfile"
+                        [[ $base_os == "ubuntu" ]] && dockerfile="./docker/Dockerfile.ubuntu"
                         local docker_tag="${pg_major}-${compiler}-${base_os}-${base_tag}-debug-${debug}"
 
                         echo "#------------ $docker_tag ------------------"

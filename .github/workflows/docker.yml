@@ -57,7 +57,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
+          file: ${{ matrix.distr == 'ubuntu' && './docker/Dockerfile.ubuntu' || './docker/Dockerfile' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
