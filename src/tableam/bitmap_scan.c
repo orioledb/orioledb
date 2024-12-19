@@ -124,7 +124,8 @@ seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
 	/*
-	 * Currently bitmap scan works only for first field with int4, int8 or ctid type
+	 * Currently bitmap scan works only for first field with int4, int8 or
+	 * ctid type
 	 */
 	attnum = ix_descr->primaryFieldsAttnums[0];
 	attr = &ix_descr->leafTupdesc->attrs[attnum - 1];
@@ -344,7 +345,7 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				if ((options && options->index_bridging) ||
 					node->biss_RelationDesc->rd_rel->relam != BTREE_AM_OID)
 				{
-					TIDBitmap *bridged_bitmap = tbm_create(work_mem * 1024L, NULL);
+					TIDBitmap  *bridged_bitmap = tbm_create(work_mem * 1024L, NULL);
 					TBMIterator *tbmiterator;
 					TBMIterateResult *tbmres;
 					OIndexDescr *bridge = bitmap_state->scan->tbl_desc->bridge;
@@ -360,9 +361,9 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 					{
 						for (int i = 0; i < tbmres->ntuples; i++)
 						{
-							OBTreeKeyBound	bridge_bound;
-							OTuple			bridge_tup;
-							uint64			data;
+							OBTreeKeyBound bridge_bound;
+							OTuple		bridge_tup;
+							uint64		data;
 
 							ItemPointerSet(&iptr, tbmres->blockno, tbmres->offsets[i]);
 
