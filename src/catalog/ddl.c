@@ -1172,7 +1172,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		{
 			bool		is_matview = (into->viewQuery != NULL);
 
-			if (is_matview && strcmp(into->accessMethod, "orioledb") == 0)
+			if (is_matview && into->accessMethod && strcmp(into->accessMethod, "orioledb") == 0)
 			{
 				Query	   *query = castNode(Query, stmt->query);
 				ObjectAddress address;
