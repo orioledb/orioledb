@@ -11,3 +11,9 @@ CREATE FUNCTION orioledb_tree_stat(relid regclass,
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+DROP FUNCTION orioledb_tbl_indices(relid oid);
+CREATE FUNCTION orioledb_tbl_indices(relid oid, internal bool default false, oids bool default false)
+RETURNS text
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
