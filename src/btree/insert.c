@@ -492,7 +492,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 									 insert_item->replace,
 									 pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo));
 
-		if (insert_item->level > 0 && page_is_under_checkpoint(desc, blkno))
+		if (insert_item->level > 0 &&
+			page_is_under_checkpoint(desc, blkno, false))
 		{
 			/*
 			 * We change a node that is under checkpoint and must mark it as
@@ -659,16 +660,16 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 			START_CRIT_SECTION();
 
+			if (blkno == desc->rootInfo.rootPageBlkno)
+				root_split_left_blkno = ppool_get_page(desc->ppool, reserve_kind);
+			right_blkno = ppool_get_page(desc->ppool, reserve_kind);
+
 			/*
 			 * Move hikeyBlkno of split.  This change is atomic, no need to
 			 * bother about change count.
 			 */
 			if (checkpoint_state->stack[insert_item->level].hikeyBlkno == blkno)
 				checkpoint_state->stack[insert_item->level].hikeyBlkno = right_blkno;
-
-			if (blkno == desc->rootInfo.rootPageBlkno)
-				root_split_left_blkno = ppool_get_page(desc->ppool, reserve_kind);
-			right_blkno = ppool_get_page(desc->ppool, reserve_kind);
 
 			perform_page_split(desc, blkno, right_blkno,
 							   left_count, split_key, split_key_len,
