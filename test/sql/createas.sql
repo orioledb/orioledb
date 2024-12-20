@@ -1,5 +1,9 @@
 CREATE SCHEMA createas;
 SET SESSION search_path = 'createas';
+
+CREATE MATERIALIZED VIEW test_matview AS SELECT 1;
+DROP MATERIALIZED VIEW test_matview;
+
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
