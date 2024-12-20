@@ -181,7 +181,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py
 
-PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test
+PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
+PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
 
 ifdef IS_DEV
 sql/%.sql:
@@ -215,7 +216,7 @@ regresscheck: | install
 isolationcheck: | install
 	$(pg_isolation_regress_check) \
 		--temp-config test/orioledb_isolation.conf \
-		$(PG_REGRESS_ARGS) \
+		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
 $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
@@ -241,7 +242,7 @@ regresscheck: | submake-regress submake-orioledb temp-install
 isolationcheck: | submake-isolation submake-orioledb temp-install
 	$(pg_isolation_regress_check) \
 		--temp-config $(top_srcdir)/contrib/orioledb/test/orioledb_isolation.conf \
-		$(PG_REGRESS_ARGS) \
+		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
 $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | submake-orioledb temp-install
