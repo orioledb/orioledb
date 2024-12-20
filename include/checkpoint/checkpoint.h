@@ -227,7 +227,8 @@ extern void o_perform_checkpoint(XLogRecPtr redo_pos, int flags);
 extern void o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo,
 											int flags);
 
-extern bool page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno);
+extern bool page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno,
+									 bool includingHikeyBlkno);
 extern bool tree_is_under_checkpoint(BTreeDescr *desc);
 extern bool get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 *checkpoint_number, bool *copy_blkno);
 extern uint32 get_cur_checkpoint_number(ORelOids *oids, OIndexType type, bool *checkpoint_concurrent);

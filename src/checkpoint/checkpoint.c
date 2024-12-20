@@ -1926,7 +1926,8 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
  * checkpointing.
  */
 bool
-page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno)
+page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno,
+						 bool includingHikeyBlkno)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	Oid			datoid,
@@ -1970,7 +1971,7 @@ page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno)
 			result = false;
 		}
 		else if (blkno_on_checkpoint == blkno ||
-				 hikey_blkno_on_checkpoint == blkno)
+				 (includingHikeyBlkno && hikey_blkno_on_checkpoint == blkno))
 		{
 			/* page is under checkpoint */
 			result = true;

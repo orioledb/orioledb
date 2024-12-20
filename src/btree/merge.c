@@ -67,6 +67,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	uint32		checkpoint_number;
 	bool		copy_blkno;
 	bool		needsUndo;
+	int			level = PAGE_GET_LEVEL(right);
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)))
 	{
@@ -165,6 +166,10 @@ btree_try_merge_pages(BTreeDescr *desc,
 	 */
 	pg_write_barrier();
 	left_header->csn = csn;
+
+	Assert(checkpoint_state->stack[level].hikeyBlkno != left_blkno);
+	if (checkpoint_state->stack[level].hikeyBlkno == right_blkno)
+		checkpoint_state->stack[level].hikeyBlkno = left_blkno;
 	unlock_page(left_blkno);
 	left_blkno = OInvalidInMemoryBlkno;
 
@@ -323,8 +328,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 			break;
 		}
 
-		if (page_is_under_checkpoint(desc, parent_blkno)
-			|| (level > 0 && page_is_under_checkpoint(desc, target_blkno)))
+		if (page_is_under_checkpoint(desc, parent_blkno, true)
+			|| (level > 0 && page_is_under_checkpoint(desc, target_blkno, true)))
 		{
 			/* pages merge is concurrent to in progress checkpoint */
 			unlock_page(parent_blkno);
@@ -377,7 +382,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 				if (!O_PAGE_IS(right, PRE_CLEANUP) &&
 					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)) &&
-					!page_is_under_checkpoint(desc, right_blkno) &&
+					!page_is_under_checkpoint(desc, right_blkno, true) &&
 					io_num < 0)
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno, &key,
@@ -437,7 +442,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 				if (!O_PAGE_IS(left, PRE_CLEANUP) &&
 					!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(left)) &&
-					!page_is_under_checkpoint(desc, left_blkno) &&
+					!page_is_under_checkpoint(desc, left_blkno, true) &&
 					io_num < 0)
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno,
