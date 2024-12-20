@@ -99,7 +99,8 @@ Typical installation procedure may look like this:
  $ cd orioledb
  # Make sure that postgres bin directory is in PATH before running
  $ make USE_PGXS=1
- $ make USE_PGXS=1 install
+ # IS_DEV=1 needed for tests to success
+ $ make USE_PGXS=1 install IS_DEV=1
  $ make USE_PGXS=1 installcheck
 ```
 
