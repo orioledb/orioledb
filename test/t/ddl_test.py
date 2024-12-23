@@ -141,3 +141,48 @@ class DDLTest(BaseTest):
 
 		con1.begin()
 		con1.commit()
+
+	def test_shared_root_info_not_using_undo(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE test (
+				id integer
+			) USING orioledb;
+		""")
+
+		con1 = node.connect()
+
+		con1.begin()
+
+		con1.execute("""
+			INSERT INTO test(id) VALUES (1);
+		""")
+
+		relfilenode = con1.execute("""
+			SELECT relfilenode from pg_class WHERE oid = 'test'::regclass::oid;
+		""")[0][0]
+
+		self.assertEqual(con1.execute(f"""
+			SELECT r->'tupHdr'->'deleted'
+				FROM orioledb_sys_tree_rows(1) r
+					WHERE (r->'key'->'relnode')::int = {relfilenode};
+		""")[0][0], False)
+
+		con1.execute("""
+			DROP TABLE test;
+		""")
+
+		self.assertEqual(con1.execute(f"""
+			SELECT r->'tupHdr'->'deleted'
+				FROM orioledb_sys_tree_rows(1) r
+					WHERE (r->'key'->'relnode')::int = {relfilenode};
+		""")[0][0], False)
+
+		con1.commit()
+
+		self.assertEqual(con1.execute(f"""
+			SELECT COUNT(*) FROM orioledb_sys_tree_rows(1) r;
+		""")[0][0], 0)
