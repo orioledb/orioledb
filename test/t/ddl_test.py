@@ -165,7 +165,8 @@ class DDLTest(BaseTest):
 			SELECT relfilenode from pg_class WHERE oid = 'test'::regclass::oid;
 		""")[0][0]
 
-		self.assertEqual(con1.execute(f"""
+		self.assertEqual(
+		    con1.execute(f"""
 			SELECT r->'tupHdr'->'deleted'
 				FROM orioledb_sys_tree_rows(1) r
 					WHERE (r->'key'->'relnode')::int = {relfilenode};
@@ -175,7 +176,8 @@ class DDLTest(BaseTest):
 			DROP TABLE test;
 		""")
 
-		self.assertEqual(con1.execute(f"""
+		self.assertEqual(
+		    con1.execute(f"""
 			SELECT r->'tupHdr'->'deleted'
 				FROM orioledb_sys_tree_rows(1) r
 					WHERE (r->'key'->'relnode')::int = {relfilenode};
@@ -183,6 +185,7 @@ class DDLTest(BaseTest):
 
 		con1.commit()
 
-		self.assertEqual(con1.execute(f"""
+		self.assertEqual(
+		    con1.execute(f"""
 			SELECT COUNT(*) FROM orioledb_sys_tree_rows(1) r;
 		""")[0][0], 0)
