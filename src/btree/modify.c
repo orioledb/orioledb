@@ -155,7 +155,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 
 retry:
 
-	context.needsUndo = true;
+	context.needsUndo = desc->undoType != UndoLogNone;
 	if (!(callbackInfo && callbackInfo->needsUndoForSelfCreated) &&
 		OXidIsValid(desc->createOxid) &&
 		desc->createOxid == opOxid &&
@@ -179,7 +179,13 @@ retry:
 	Assert(tuphdr != NULL);
 	context.cmp = o_btree_cmp(desc, key, keyType, &curTuple, BTreeKeyLeafTuple);
 
-	if (context.cmp == 0)
+	/* Trees without undo cannot have row locks */
+	if (desc->undoType == UndoLogNone)
+	{
+		context.conflictTupHdr = *tuphdr;
+		context.conflictUndoLocation = InvalidUndoLocation;
+	}
+	else if (context.cmp == 0)
 	{
 		ConflictResolution resolution;
 

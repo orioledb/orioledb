@@ -127,7 +127,7 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 	BTreePrintData printData = {0};
 	int			i;
 
-	if (options->undoLogLocationPrintType != BTreeNotPrint)
+	if (options->undoLogLocationPrintType != BTreeNotPrint && desc->undoType != UndoLogNone)
 		update_min_undo_locations(desc->undoType, false, true);
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno) &&
 		   OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno));
@@ -693,7 +693,7 @@ btree_print_undo_location(UndoLogType undoType, UndoLocation undoLocation,
 	UndoLocation printedUndoLoc = undoLocation;
 	BTreePrintOption printType = printData->options->undoLogLocationPrintType;
 
-	if (printType != BTreeNotPrint)
+	if (printType != BTreeNotPrint && undoType != UndoLogNone)
 	{
 		/* print undo location only if it is valid */
 		if (UndoLocationIsValid(undoLocation) &&
