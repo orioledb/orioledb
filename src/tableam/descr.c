@@ -1349,6 +1349,7 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 		SortSupportData ssup;
 
 		memset(&ssup, 0, sizeof(ssup));
+		ASAN_UNPOISON_MEMORY_REGION(&ssup, sizeof(ssup));
 		ssup.ssup_cxt = comparator->ssup_cxt;
 		ssup.ssup_collation = comparator->key.collation;
 		ssup.ssup_extra = comparator->ssup_extra;

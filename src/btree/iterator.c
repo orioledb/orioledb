@@ -404,6 +404,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
+	ASAN_UNPOISON_MEMORY_REGION(&it, sizeof(it));
 	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
 	it->scanDir = scanDir;

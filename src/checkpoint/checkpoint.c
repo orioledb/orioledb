@@ -798,6 +798,7 @@ finish_write_xids(uint32 chkpnum)
 				k;
 
 	memset(&xidRec, 0, sizeof(xidRec));
+	ASAN_UNPOISON_MEMORY_REGION(&xidRec, sizeof(xidRec));
 
 	for (i = 0; i < max_procs; i++)
 	{

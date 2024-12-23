@@ -319,9 +319,16 @@ extern int no_such_variable
 	o_##cache_name##_search(Oid datoid, O_SYS_CACHE_ARGS(nkeys),			\
 							XLogRecPtr search_lsn, int nkeys_arg)			\
 	{																		\
-		OSysCacheKey##nkeys key = {.common = {.datoid = datoid,				\
-											  .lsn = search_lsn},			\
-								   .keys = {OSC_REP_ARGS(nkeys)}};			\
+		OSysCacheKeyCommon	common = { 0 };									\
+		OSysCacheKey##nkeys	key;											\
+		Datum	keys[nkeys] = {OSC_REP_ARGS(nkeys)};						\
+		ASAN_UNPOISON_MEMORY_REGION(&key, sizeof(key));						\
+		ASAN_UNPOISON_MEMORY_REGION(&key.keys, sizeof(key.keys));			\
+		memset(&key, 0, sizeof(key));										\
+		memcpy(&key.keys, &keys, sizeof(keys));								\
+		common.datoid = datoid;												\
+		common.lsn = search_lsn;											\
+		key.common = common;												\
 		return (elem_type *)												\
 			o_sys_cache_search(cache_name, nkeys_arg,						\
 							   (OSysCacheKey *) &key);						\
@@ -348,7 +355,12 @@ extern int no_such_variable
 								   Pointer arg)								\
 	{																		\
 		OSysCacheKeyCommon	common = { 0 };									\
-		OSysCacheKey##nkeys	key = {.keys = {OSC_REP_ARGS(nkeys)}};			\
+		OSysCacheKey##nkeys	key;											\
+		Datum	keys[nkeys] = {OSC_REP_ARGS(nkeys)};						\
+		ASAN_UNPOISON_MEMORY_REGION(&key, sizeof(key));						\
+		ASAN_UNPOISON_MEMORY_REGION(&key.keys, sizeof(key.keys));			\
+		memset(&key, 0, sizeof(key));										\
+		memcpy(&key.keys, &keys, sizeof(keys));								\
 		common.datoid = datoid;												\
 		common.lsn = insert_lsn;											\
 		key.common = common;												\

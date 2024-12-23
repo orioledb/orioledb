@@ -474,6 +474,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	}
 	else
 	{
+		ASAN_UNPOISON_MEMORY_REGION(&tmfd->ctid, sizeof(tmfd->ctid));
 		ItemPointerSet(&tmfd->ctid, 0, FirstOffsetNumber);
 	}
 
@@ -576,6 +577,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	}
 	else
 	{
+		ASAN_UNPOISON_MEMORY_REGION(&tmfd->ctid, sizeof(tmfd->ctid));
 		ItemPointerSet(&tmfd->ctid, 0, FirstOffsetNumber);
 	}
 
@@ -658,6 +660,7 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	}
 	else
 	{
+		ASAN_UNPOISON_MEMORY_REGION(&tmfd->ctid, sizeof(tmfd->ctid));
 		ItemPointerSet(&tmfd->ctid, 0, FirstOffsetNumber);
 	}
 
