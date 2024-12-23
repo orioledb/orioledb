@@ -2121,6 +2121,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	{
 		ObjectAccessDrop *drop_arg = (ObjectAccessDrop *) arg;
 
+		ASAN_UNPOISON_MEMORY_REGION(drop_arg, sizeof(*drop_arg));
+
 #ifdef USE_ASSERT_CHECKING
 		{
 			LOCKTAG		locktag;

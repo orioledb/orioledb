@@ -1509,6 +1509,8 @@ jsonb_push_key(JsonbParseState **state, char *key)
 {
 	JsonbValue	jval;
 
+	memset(&jval, 0, sizeof(jval));
+	ASAN_UNPOISON_MEMORY_REGION(&jval, sizeof(jval));
 	jval.type = jbvString;
 	jval.val.string.len = strlen(key);
 	jval.val.string.val = key;
@@ -1519,6 +1521,8 @@ void
 jsonb_push_int8_key(JsonbParseState **state, char *key, int64 value)
 {
 	JsonbValue	jval;
+
+	ASAN_UNPOISON_MEMORY_REGION(&jval, sizeof(jval));
 
 	jsonb_push_key(state, key);
 
@@ -1561,6 +1565,7 @@ jsonb_push_string_key(JsonbParseState **state, const char *key,
 
 	jsonb_push_key(state, (char *) key);
 
+	ASAN_UNPOISON_MEMORY_REGION(&jval, sizeof(jval));
 	jval.type = jbvString;
 	jval.val.string.len = strlen(value);
 	jval.val.string.val = (char *) value;

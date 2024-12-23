@@ -540,6 +540,7 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 {
 	LocationIndex itemSize;
 
+	ASAN_UNPOISON_MEMORY_REGION(buf->data, buf->length);
 	undo_read(undoType, location, sizeof(UndoStackItem), buf->data);
 
 	itemSize = ((UndoStackItem *) buf->data)->itemSize;
@@ -1180,6 +1181,7 @@ get_subxact_undo_location(UndoLogType undoType)
 void
 read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *from)
 {
+	ASAN_UNPOISON_MEMORY_REGION(to, sizeof(*to));
 	to->location = pg_atomic_read_u64(&from->location);
 	to->branchLocation = pg_atomic_read_u64(&from->branchLocation);
 	to->subxactLocation = pg_atomic_read_u64(&from->subxactLocation);
@@ -1189,6 +1191,7 @@ read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *fro
 void
 write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from)
 {
+	ASAN_UNPOISON_MEMORY_REGION(from, sizeof(*from));
 	pg_atomic_write_u64(&to->location, from->location);
 	pg_atomic_write_u64(&to->branchLocation, from->branchLocation);
 	pg_atomic_write_u64(&to->subxactLocation, from->subxactLocation);

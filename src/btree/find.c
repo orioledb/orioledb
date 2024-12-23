@@ -53,6 +53,7 @@ void
 init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 					   CommitSeqNo csn, uint16 flags)
 {
+	ASAN_UNPOISON_MEMORY_REGION(context, sizeof(*context));
 	context->partial.isPartial = false;
 	context->desc = desc;
 	context->csn = csn;
@@ -106,6 +107,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	Jsonb	   *params = NULL;
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 
+	memset(&intCxt, 0, sizeof(intCxt));
+	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
 	intCxt.context = context;
 	intCxt.key = key;
 	intCxt.keyType = keyType;

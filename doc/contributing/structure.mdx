@@ -110,8 +110,8 @@ clang) and each of the supported PostgreSQL major versions (13, 14, and 15).
 
 - `normal` -- run tests without asserts and without debug symbols.
 - `debug` -- run test with asserts and with debug symbols.
-- `alignment` -- run test with asserts, with debug symbols, and with alignment
-  sanitizers. This replaces running tests on strict alignment
+- `sanitize` -- run test with asserts, with debug symbols, with alignment
+  and other sanitizers. This replaces running tests on strict alignment
   architectures providing even somewhat stricter checks
   (for instance, it traps you on accessing a properly-aligned
   member of an unproperly aligned structure, which real hardware

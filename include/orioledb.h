@@ -32,6 +32,17 @@
 #include "utils/rel.h"
 #include "utils/relcache.h"
 
+#if defined __has_include
+#if __has_include ("sanitizer/asan_interface.h")
+#include "sanitizer/asan_interface.h"
+#endif
+#endif
+
+#ifndef ASAN_UNPOISON_MEMORY_REGION
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
+  ((void)(addr), (void)(size))
+#endif
+
 #define ORIOLEDB_VERSION "OrioleDB public beta 9"
 #define ORIOLEDB_BINARY_VERSION 5
 #define ORIOLEDB_DATA_DIR "orioledb_data"
