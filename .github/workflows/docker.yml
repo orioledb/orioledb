@@ -67,7 +67,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.distr == 'ubuntu' && 'Dockerfile.ubuntu' || 'Dockerfile' }}
+          file: ${{ matrix.distr == 'ubuntu' && './docker/Dockerfile.ubuntu' || './docker/Dockerfile' }}
           platforms: linux/amd64
           push: false
           pull: true

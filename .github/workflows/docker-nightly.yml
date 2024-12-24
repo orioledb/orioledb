@@ -149,7 +149,7 @@ jobs:
         # https://github.com/docker/build-push-action
         with:
           context: .
-          file: ${{ (matrix.os.distr == 'ubuntu' || matrix.os.distr == 'debian') && 'Dockerfile.ubuntu' || 'Dockerfile' }}
+          file: ${{ (matrix.os.distr == 'ubuntu' || matrix.os.distr == 'debian') && './docker/Dockerfile.ubuntu' || './docker/Dockerfile' }}
           platforms: linux/amd64
           push: false
           pull: true
