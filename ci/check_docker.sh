@@ -85,7 +85,7 @@ pip3 install --no-cache-dir --upgrade pip
 rm -Rf /temp_orioledb
 mkdir -p /temp_orioledb
 cd /github/workspace/orioledb
-cp -r ./sql ./t ./test ./src ./include ./expected ./specs ./ci /temp_orioledb/
+cp -r ./test ./src ./sql ./include ./ci /temp_orioledb/
 find . -maxdepth 1 -type f -exec cp {} /temp_orioledb/ \;
 chown -R postgres:postgres /temp_orioledb
 chown -R postgres:postgres /tmp/env

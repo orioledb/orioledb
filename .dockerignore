@@ -74,8 +74,8 @@ sql/orioledb--1.0.sql
 .style.yapf
 
 # Exclude Dockerfiles
-Dockerfile
-Dockerfile.ubuntu
+docker/Dockerfile
+docker/Dockerfile.ubuntu
 
 # Exclude OrioleDB Docker test definitions and code
 # as they are not needed inside the Docker image.
@@ -84,16 +84,11 @@ Dockerfile.ubuntu
 ci/check_docker.sh
 ci/docker_matrix.sh
 ci/local_docker_matrix.sh
-expected/
-specs/
-sql/
-t/
 test/
 
 # Documentation files, which are not needed inside the Docker image.
 doc/
 **/*.md
-
 
 # Exclude some files that are not needed inside the Docker image.
 # but sometimes left in the directory

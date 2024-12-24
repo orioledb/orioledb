@@ -71,12 +71,11 @@ Options:
   --help              Display this help message
 
 For the details: check the "--dry-run" and the Dockerfiles in the root directory
-  - alpine Dockerfile : ./docker/Dockerfile
-  - ubuntu Dockerfile : ./docker/Dockerfile.ubuntu
-  - debian Dockerfile : ./docker/Dockerfile.ubuntu
+  - alpine Dockerfile        : ./docker/Dockerfile
+  - ubuntu+debian Dockerfile : ./docker/Dockerfile.ubuntu
 
 Known issues:
-  (ubuntu:20.04, alpine:3.13, debian:bullseye) && testgrescheck not working properly
+  (ubuntu:20.04, alpine:3.13, debian:bullseye with < python3.10 ) && testgrescheck not working properly
 
 The Docker build logs generated in the ./log_docker_build directory,
 and you can check the build logs with:
@@ -86,10 +85,10 @@ And you can clean the orioletest test images with:
 
 Examples:
   ./ci/docker_matrix.sh --base all-dev --pg-major all --compiler clang
-  ./ci/docker_matrix.sh --base alpine:3.20 --compiler gcc --debug true
+  ./ci/docker_matrix.sh --base alpine:3.21 --compiler gcc --debug true
   ./ci/docker_matrix.sh --base ubuntu:oracular --pg-major 16 --compiler all --debug false
   ./ci/docker_matrix.sh --base debian:bookworm --pg-major 17
-  ./ci/docker_matrix.sh --base alpine:devel --compiler gcc --test_targets 'testgrescheck'
+  ./ci/docker_matrix.sh --base alpine:edge --compiler gcc --test_targets 'testgrescheck'
   ./ci/docker_matrix.sh --base all-oldest --test_targets 'regresscheck isolationcheck'
   ./ci/docker_matrix.sh --base all-latest --test_targets 'regresscheck isolationcheck testgrescheck'
 
