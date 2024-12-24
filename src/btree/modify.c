@@ -322,7 +322,11 @@ retry:
 		 */
 		if (action == BTreeOperationInsert)
 		{
-			if (!context.needsUndo)
+			/*
+			 * There is no anything to undo for UndoLogNone trees so just
+			 * proceed with replacing while page still locked
+			 */
+			if (!context.needsUndo && desc->undoType != UndoLogNone)
 			{
 				/*
 				 * If we don't need undo, just revert the deletion and then
