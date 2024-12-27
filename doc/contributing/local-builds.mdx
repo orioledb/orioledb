@@ -16,11 +16,11 @@ sudo apt-get update
 sudo apt install git build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev valgrind
 ```
 
-### Download and install PostgreSQL 15 with patches
+### Download and install PostgreSQL 17 with patches
 
 ```bash
-git clone https://github.com/orioledb/postgres.git --branch patches15 --single-branch postgres-patches15
-cd postgres-patches15/
+git clone https://github.com/orioledb/postgres.git --branch patches17 --single-branch postgres-patches17
+cd postgres-patches17/
 ```
 
 ### Checkout to required patch tag:
@@ -28,7 +28,7 @@ cd postgres-patches15/
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
 ```bash
-git checkout patches15_22
+git checkout patches17_5
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -40,7 +40,7 @@ sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include
 ### Configure and build
 
 ```bash
-PG_PREFIX=$HOME/pg15
+PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
@@ -123,11 +123,11 @@ echo "export LDFLAGS=\"$LDFLAGS -L/usr/local/lib\"" >> ~/.zshrc
 exec zsh -l
 ```
 
-### Download and install PostgreSQL 15 with patches
+### Download and install PostgreSQL 17 with patches
 
 ```bash
-git clone https://github.com/orioledb/postgres.git --branch patches15 --single-branch postgres-patches15
-cd postgres-patches15/
+git clone https://github.com/orioledb/postgres.git --branch patches17 --single-branch postgres-patches17
+cd postgres-patches17/
 ```
 
 ### Checkout to required patch tag:
@@ -135,13 +135,13 @@ cd postgres-patches15/
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
 ```bash
-git checkout patches15_22
+git checkout patches17_5
 ```
 
 ### Configure and build
 
 ```bash
-PG_PREFIX=$HOME/pg15
+PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
@@ -224,11 +224,11 @@ sudo apt-get update
 sudo apt install git build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev valgrind
 ```
 
-### Download and install PostgreSQL 15 with patches
+### Download and install PostgreSQL 17 with patches
 
 ```bash
-git clone https://github.com/orioledb/postgres.git --branch patches15 --single-branch postgres-patches15
-cd postgres-patches15/
+git clone https://github.com/orioledb/postgres.git --branch patches17 --single-branch postgres-patches17
+cd postgres-patches17/
 ```
 
 ### Checkout to required patch tag:
@@ -236,7 +236,7 @@ cd postgres-patches15/
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
 ```bash
-git checkout patches15_22
+git checkout patches17_5
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -248,7 +248,7 @@ sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include
 ### Configure and build
 
 ```bash
-PG_PREFIX=$HOME/pg15
+PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
