@@ -59,4 +59,16 @@ fi
 
 rm -rf /tmp/cores-$GITHUB_SHA-$TIMESTAMP
 
+for f in ` find . -name 'ubsan.log.*' ` ; do
+	echo "========= Contents of $f"
+	cat $f
+	status=1
+done
+
+for f in ` find . -name 'asan.log.*' ` ; do
+	echo "========= Contents of $f"
+	cat $f
+	status=1
+done
+
 exit $status
