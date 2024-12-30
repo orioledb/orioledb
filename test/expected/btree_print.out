@@ -3535,6 +3535,14 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
  
 (1 row)
 
+DELETE FROM o_test1 WHERE id BETWEEN 11 AND 15;
+SELECT level, count, ROUND(avgoccupied), ROUND(avgvacated) FROM orioledb_tree_stat('o_test1'::regclass);
+ level | count | round | round 
+-------+-------+-------+-------
+     0 |    20 |  7780 |    12
+     1 |     1 |   864 |     0
+(2 rows)
+
 CREATE TABLE o_test_is_null_assert (
 	key int not null,
 	val int,

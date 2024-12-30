@@ -27,6 +27,8 @@ INSERT INTO o_test1 (SELECT id, id || 'val' FROM generate_series(-1000, 0, 1) id
 INSERT INTO o_test1 (SELECT id, id || 'val' FROM generate_series(1001, 2000, 1) id);
 INSERT INTO o_test1 (SELECT id, id || 'val' FROM generate_series(11, 1000, 1) id);
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
+DELETE FROM o_test1 WHERE id BETWEEN 11 AND 15;
+SELECT level, count, ROUND(avgoccupied), ROUND(avgvacated) FROM orioledb_tree_stat('o_test1'::regclass);
 
 CREATE TABLE o_test_is_null_assert (
 	key int not null,
