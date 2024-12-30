@@ -22,18 +22,20 @@
 #include "btree/page_chunks.h"
 #include "catalog/indices.h"
 #include "tableam/descr.h"
+#include "tableam/handler.h"
 #include "tableam/toast.h"
 #include "tuple/format.h"
 #include "tuple/toast.h"
 #include "utils/compress.h"
 
-#include "pgstat.h"
 #include "access/genam.h"
 #include "access/relation.h"
 #include "access/table.h"
 #include "access/tupmacs.h"
 #include "catalog/pg_type_d.h"
+#include "funcapi.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
@@ -50,6 +52,7 @@ PG_FUNCTION_INFO_V1(orioledb_tbl_indices);
 PG_FUNCTION_INFO_V1(orioledb_relation_size);
 PG_FUNCTION_INFO_V1(orioledb_tbl_are_indices_equal);
 PG_FUNCTION_INFO_V1(orioledb_table_pages);
+PG_FUNCTION_INFO_V1(orioledb_tree_stat);
 
 extern void log_btree(BTreeDescr *desc);
 
@@ -1457,4 +1460,183 @@ orioledb_relation_size(PG_FUNCTION_ARGS)
 
 	relation_close(rel, AccessShareLock);
 	PG_RETURN_INT64(result);
+}
+
+typedef struct
+{
+	struct
+	{
+		uint64		count;
+		uint64		occupied;
+		uint64		vacated;
+		OFixedKey	hikey;
+	}			levels[ORIOLEDB_MAX_DEPTH];
+} ORelationStat;
+
+static OIndexDescr *
+fetch_index_descr_by_oid(Oid relid)
+{
+	Relation	rel;
+	ORelOids	tblOids;
+	ORelOids	idxOids;
+	OTableDescr *descr;
+	OIndexNumber ixnum;
+	bool		index = false;
+
+	rel = relation_open(relid, AccessShareLock);
+	if (rel->rd_rel->relkind == RELKIND_INDEX)
+	{
+		Relation	tbl;
+
+		idxOids.datoid = MyDatabaseId;
+		idxOids.reloid = rel->rd_rel->oid;
+		idxOids.relnode = rel->rd_rel->relfilenode;
+
+		tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
+		relation_close(rel, AccessShareLock);
+		rel = tbl;
+		index = true;
+	}
+
+	tblOids.datoid = MyDatabaseId;
+	tblOids.reloid = rel->rd_rel->oid;
+	tblOids.relnode = rel->rd_rel->relfilenode;
+
+	descr = o_fetch_table_descr(tblOids);
+
+	if (index)
+		ixnum = find_tree_in_descr(descr, idxOids);
+	else
+		ixnum = PrimaryIndexNumber;
+
+	relation_close(rel, AccessShareLock);
+
+	return descr->indices[ixnum];
+}
+
+
+static void
+add_page_stat(BTreeDescr *desc, Page p, ORelationStat *stat)
+{
+	int			level = PAGE_GET_LEVEL(p);
+
+	if (!O_PAGE_IS(p, RIGHTMOST))
+		copy_fixed_hikey(desc, &stat->levels[level].hikey, p);
+	else
+		clear_fixed_key(&stat->levels[level].hikey);
+
+	stat->levels[level].count++;
+	stat->levels[level].occupied += ((BTreePageHeader *) (p))->dataSize;
+
+	if (O_PAGE_IS(p, LEAF))
+		stat->levels[level].vacated += PAGE_GET_N_VACATED(p);
+}
+
+static void
+tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
+{
+	OBTreeFindPageContext context;
+	int			level,
+				maxLevel;
+
+	init_page_find_context(&context, desc,
+						   COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_IMAGE);
+
+	for (level = 0; level < ORIOLEDB_MAX_DEPTH; level++)
+	{
+		(void) find_page(&context, NULL, BTreeKeyNone, level);
+		if (PAGE_GET_LEVEL(context.img) != level)
+			break;
+
+		add_page_stat(desc, context.img, stat);
+	}
+	maxLevel = level;
+
+	if (maxLevel == 0)
+		return;
+
+	while (true)
+	{
+		OFixedKey	key;
+
+		copy_fixed_key(desc, &key, stat->levels[0].hikey.tuple);
+
+		if (O_TUPLE_IS_NULL((key.tuple)))
+			break;
+
+		for (level = 0; level < maxLevel; level++)
+		{
+			if (O_TUPLE_IS_NULL(stat->levels[level].hikey.tuple))
+				break;
+
+			if (level == 0 ||
+				o_btree_cmp(desc,
+							&key.tuple, BTreeKeyNonLeafKey,
+							&stat->levels[level].hikey.tuple, BTreeKeyNonLeafKey) >= 0)
+			{
+				if (find_page(&context, &key.tuple, BTreeKeyNonLeafKey, level))
+					add_page_stat(desc, context.img, stat);
+				else
+					break;
+			}
+		}
+	}
+}
+
+Datum
+orioledb_tree_stat(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	OIndexDescr *descr;
+	ORelationStat *stat;
+	int			i;
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	orioledb_check_shmem();
+
+	descr = fetch_index_descr_by_oid(relid);
+
+	stat = (ORelationStat *) palloc(sizeof(ORelationStat));
+	memset(stat, 0, sizeof(*stat));
+
+	o_btree_load_shmem(&descr->desc);
+	tree_stat_walker(&descr->desc, stat);
+
+	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)
+	{
+		Datum		values[4];
+		bool		nulls[4] = {false};
+
+		if (stat->levels[i].count == 0)
+			continue;
+
+		values[0] = Int32GetDatum(i);
+		values[1] = Int64GetDatum(stat->levels[i].count);
+		values[2] = Float8GetDatum((float8) stat->levels[i].occupied / (float8) stat->levels[i].count);
+		values[3] = Float8GetDatum((float8) stat->levels[i].vacated / (float8) stat->levels[i].count);
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+	}
+
+	pfree(stat);
+
+	return (Datum) 0;
 }
