@@ -1804,6 +1804,26 @@ orioledb_amparallelrescan(IndexScanDesc scan)
 {
 }
 
+static IndexAmRoutine *
+find_bridged_am(Relation index)
+{
+	IndexAmRoutine *amroutine = NULL;
+	ListCell   *lc;
+
+	foreach(lc, bridged_ams)
+	{
+		BrigedIndexAmRoutine *bridged = lfirst(lc);
+
+		if (bridged->amhandler == index->rd_amhandler)
+		{
+			amroutine = bridged->original_routine;
+			break;
+		}
+	}
+
+	return amroutine;
+}
+
 static IndexBuildResult *
 bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
@@ -1829,21 +1849,10 @@ bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	}
 	else
 	{
-		IndexAmRoutine *amroutine = NULL;
-		ListCell   *lc;
-
-		foreach(lc, bridged_ams)
-		{
-			BrigedIndexAmRoutine *bridged = lfirst(lc);
-
-			if (bridged->amhandler == index->rd_amhandler)
-			{
-				amroutine = bridged->original_routine;
-				break;
-			}
-		}
+		IndexAmRoutine *amroutine = find_bridged_am(index);
 
 		Assert(amroutine != NULL);
+
 		return amroutine->ambuild(heap, index, indexInfo);
 	}
 }
@@ -1860,7 +1869,6 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	bytea	   *rowid;
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
-	ListCell   *lc;
 
 	ORelOidsSetFromRel(oids, heapRel);
 
@@ -1883,18 +1891,10 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 		tupleid = PointerGetDatum(p);
 	}
 
-	foreach(lc, bridged_ams)
-	{
-		BrigedIndexAmRoutine *bridged = lfirst(lc);
-
-		if (bridged->amhandler == rel->rd_amhandler)
-		{
-			amroutine = bridged->original_routine;
-			break;
-		}
-	}
+	amroutine = find_bridged_am(rel);
 
 	Assert(amroutine != NULL);
+
 	return amroutine->aminsertextended(rel, values, isnull, tupleid, heapRel,
 									   checkUnique, indexUnchanged, indexInfo);
 }
@@ -1902,22 +1902,11 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 IndexScanDesc
 bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
-	IndexAmRoutine *amroutine = NULL;
-	ListCell   *lc;
+	IndexAmRoutine *amroutine = find_bridged_am(rel);
 
 	o_current_index = rel;
 
-	foreach(lc, bridged_ams)
-	{
-		BrigedIndexAmRoutine *bridged = lfirst(lc);
-
-		if (bridged->amhandler == rel->rd_amhandler)
-		{
-			amroutine = bridged->original_routine;
-			break;
-		}
-	}
-
 	Assert(amroutine != NULL);
+
 	return amroutine->ambeginscan(rel, nkeys, norderbys);
 }
