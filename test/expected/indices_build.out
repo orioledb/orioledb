@@ -24203,10 +24203,11 @@ SELECT orioledb_tbl_structure('o_test_pkey_include_box_build'::regclass, 'nue');
 ALTER TABLE o_test_pkey_include_box_build ADD PRIMARY KEY (pk1) INCLUDE (pk2);
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
- Index Scan using o_test_pkey_include_box_build_pkey on o_test_pkey_include_box_build
-(1 row)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_include_box_build
+   Forward index scan of: o_test_pkey_include_box_build_pkey
+(2 rows)
 
 SELECT * FROM o_test_pkey_include_box_build ORDER BY pk1;
  pk1 |         pk2         | f2  
@@ -24410,10 +24411,11 @@ SELECT orioledb_tbl_indices('o_test_include_box_with_pkey_build'::regclass);
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
- Index Scan using o_test_include_box_with_pkey_build_pkey on o_test_include_box_with_pkey_build
-(1 row)
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey_build
+   Forward index scan of: o_test_include_box_with_pkey_build_pkey
+(2 rows)
 
 SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_1;
  val_1 | val_2 | val_3 |        val_4        

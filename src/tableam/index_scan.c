@@ -16,6 +16,7 @@
 
 #include "btree/io.h"
 #include "btree/iterator.h"
+#include "tableam/bitmap_scan.h"
 #include "tableam/index_scan.h"
 #include "tableam/descr.h"
 #include "tableam/key_range.h"
@@ -28,41 +29,23 @@
 #include "parser/parse_coerce.h"
 
 void
-init_index_scan_state(OScanState *ostate, Relation index,
-					  ExprContext *econtext)
+init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation index,
+					  ExprContext *econtext, IndexRuntimeKeyInfo **runtimeKeys,
+					  int *numRuntimeKeys, ScanKeyData **scanKeys, int *numScanKeys)
 {
-	ScanKey		scanKeys = NULL;
-	int			numScanKeys = 0;
-	IndexRuntimeKeyInfo *runtimeKeys = NULL;
-	int			numRuntimeKeys = 0;
-	BTScanOpaque so;
 	IndexScanDesc scan;
 
-	ExecIndexBuildScanKeys(NULL, index, ostate->indexQuals, false, &scanKeys,
-						   &numScanKeys, &runtimeKeys, &numRuntimeKeys, NULL,
+	ExecIndexBuildScanKeys(NULL, index, ostate->indexQuals, false, scanKeys,
+						   numScanKeys, runtimeKeys, numRuntimeKeys, NULL,
 						   NULL);
 
-	scan = btbeginscan(index, numScanKeys, 0);
+	scan = btbeginscan(index, *numScanKeys, 0);
 	ostate->scandesc = *scan;
 	pfree(scan);
 	scan = &ostate->scandesc;
-	so = (BTScanOpaque) scan->opaque;
 
 	scan->parallel_scan = NULL;
 	scan->xs_temp_snap = false;
-
-	if (numRuntimeKeys != 0)
-		ExecIndexEvalRuntimeKeys(econtext, runtimeKeys, numRuntimeKeys);
-	btrescan(scan, scanKeys, numScanKeys, NULL, 0);
-	if (so->numArrayKeys && !BTScanPosIsValid(so->currPos))
-	{
-		/* punt if we have any unsatisfiable array keys */
-		if (so->numArrayKeys > 0)
-		{
-			_bt_start_array_keys(scan, ForwardScanDirection);
-		}
-	}
-	_bt_preprocess_keys(scan);
 }
 
 static bool
@@ -348,7 +331,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 				 ? &ostate->curKeyRange.low
 				 : &ostate->curKeyRange.high);
 		ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
-												   BTreeKeyBound, &ostate->o_snapshot,
+												   BTreeKeyBound, &ostate->oSnapshot,
 												   ostate->scanDir);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
 	}
@@ -389,7 +372,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 
 			tup = o_btree_find_tuple_by_key(&indexDescr->desc,
 											&ostate->curKeyRange.low,
-											BTreeKeyBound, &ostate->o_snapshot,
+											BTreeKeyBound, &ostate->oSnapshot,
 											tupleCsn, tupleCxt, hint);
 			if (!O_TUPLE_IS_NULL(tup))
 				tup_fetched = true;
@@ -442,6 +425,25 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	OIndexDescr *id = descr->indices[ostate->ixNum];
 	OTuple		tup;
 
+	if (!ostate->curKeyRangeIsLoaded)
+	{
+		BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
+
+		if (so->numArrayKeys)
+		{
+			/* punt if we have any unsatisfiable array keys */
+			if (so->numArrayKeys < 0)
+			{
+				O_TUPLE_SET_NULL(tup);
+				return tup;
+			}
+
+			_bt_start_array_keys(&ostate->scandesc, ForwardScanDirection);
+		}
+		_bt_preprocess_keys(&ostate->scandesc);
+		ostate->curKeyRange.empty = true;
+	}
+
 	o_btree_load_shmem(&id->desc);
 	while (true)
 	{
@@ -473,7 +475,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 			o_btree_load_shmem(&primary->desc);
 			ptup = o_btree_find_tuple_by_key(&primary->desc,
 											 (Pointer) &bound, BTreeKeyBound,
-											 &ostate->o_snapshot, tupleCsn,
+											 &ostate->oSnapshot, tupleCsn,
 											 tupleCxt, hint);
 			pfree(tup.data);
 			tup = ptup;
@@ -488,6 +490,46 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		break;
 	}
 	return tup;
+}
+
+/* fetches next tuple for oIterateDirectModify */
+TupleTableSlot *
+o_exec_fetch(OScanState *ostate, ScanState *ss)
+{
+	OTableDescr *descr = relation_get_descr(ss->ss_currentRelation);
+	TupleTableSlot *slot;
+	OTuple		tuple;
+	bool		scan_primary = ostate->ixNum == PrimaryIndexNumber ||
+		!ostate->onlyCurIx;
+	MemoryContext tupleCxt = ss->ss_ScanTupleSlot->tts_mcxt;
+
+	do
+	{
+		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+		CommitSeqNo tupleCsn;
+
+		if (!ostate->curKeyRangeIsLoaded)
+			ostate->curKeyRange.empty = true;
+
+		tuple = o_index_scan_getnext(descr, ostate, &tupleCsn, scan_primary, tupleCxt, &hint);
+
+		if (O_TUPLE_IS_NULL(tuple))
+		{
+			slot = ExecClearTuple(ss->ss_ScanTupleSlot);
+		}
+		else
+		{
+			tts_orioledb_store_tuple(ss->ss_ScanTupleSlot, tuple,
+									 descr, tupleCsn,
+									 scan_primary ? PrimaryIndexNumber : ostate->ixNum,
+									 true, &hint);
+			slot = ss->ss_ScanTupleSlot;
+		}
+	} while (!TupIsNull(slot) &&
+			 !o_exec_qual(ss->ps.ps_ExprContext,
+						  ss->ps.qual, slot));
+
+	return slot;
 }
 
 /* checks quals for a tuple slot */

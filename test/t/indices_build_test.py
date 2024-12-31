@@ -8,6 +8,7 @@ from .base_test import wait_stopevent, wait_checkpointer_stopevent
 from itertools import groupby
 import os
 import re
+import json
 
 
 class IndicesBuildTest(BaseTest):
@@ -265,14 +266,18 @@ class IndicesBuildTest(BaseTest):
 		node.stop()
 
 	def check_used_index(self, node, query, expected_index):
-		explain = node.safe_psql("SET enable_seqscan = off; EXPLAIN %s;" %
-		                         query).decode('utf-8')
-		groups = re.search(r'Index (?:Only )?Scan using (\w+).*', explain)
-		if groups:
-			used_index = groups.group(1)
+		explain = node.safe_psql(
+		    "SET enable_seqscan = off; EXPLAIN (FORMAT JSON) %s;" %
+		    query).decode('utf-8')
+		explain = json.loads(explain)[0]["Plan"]
+		if (explain["Node Type"] == "Custom Scan"
+		    or explain["Node Type"] == "Index Scan"
+		    or explain["Node Type"] == "Index Only Scan"):
+			used_index = explain["Index Name"]
+		elif explain["Node Type"] == "Seq Scan":
+			used_index = explain["Relation Name"]
 		else:
-			groups = re.search(r'Seq Scan on (\w+).*', explain)
-			used_index = groups.group(1)
+			assert False
 		self.assertEqual(expected_index, used_index)
 		self.assertEqual(
 		    node.execute("""

@@ -36,14 +36,30 @@ typedef struct OScanState
 	List	   *indexQuals;
 	/* used only by direct modify functions */
 	CmdType		cmd;
-	OSnapshot	o_snapshot;
+	OSnapshot	oSnapshot;
 } OScanState;
+
+typedef struct OIndexPlanState
+{
+	OPlanState	o_plan_state;
+	OScanState	ostate;
+	/* Used only in o_explain_custom_scan */
+	List	   *stripped_indexquals;
+	bool		onlyCurIx;
+	struct ScanKeyData *iss_ScanKeys;
+	int			iss_NumScanKeys;
+	IndexRuntimeKeyInfo *iss_RuntimeKeys;
+	int			iss_NumRuntimeKeys;
+	bool		iss_RuntimeKeysReady;
+	ExprContext *iss_RuntimeContext;
+} OIndexPlanState;
 
 /*
  * iteration code.
  */
-extern void init_index_scan_state(OScanState *ostate, Relation index,
-								  ExprContext *econtext);
+extern void init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation index,
+								  ExprContext *econtext, IndexRuntimeKeyInfo **runtimeKeys,
+								  int *numRuntimeKeys, ScanKeyData **scanKeys, int *numScanKeys);
 extern OTuple o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 							  CommitSeqNo *tupleCsn, MemoryContext tupleCxt,
 							  BTreeLocationHint *hint);
@@ -51,6 +67,7 @@ extern OTuple o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 								   CommitSeqNo *tupleCsn,
 								   bool scan_primary, MemoryContext tupleCxt,
 								   BTreeLocationHint *hint);
+extern TupleTableSlot *o_exec_fetch(OScanState *ostate, ScanState *ss);
 extern bool o_exec_qual(ExprContext *econtext, ExprState *qual,
 						TupleTableSlot *slot);
 extern TupleTableSlot *o_exec_project(ProjectionInfo *projInfo,
@@ -65,5 +82,7 @@ extern void eanalyze_counter_explain(OEACallsCounter *counter, char *label,
 extern void eanalyze_counters_explain(OTableDescr *descr,
 									  OEACallsCounters *counters,
 									  ExplainState *es);
+
+extern int	o_get_num_prefix_exact_keys(ScanKey scankey, int nscankeys);
 
 #endif							/* __TABLEAM_INDEX_SCAN_H__ */

@@ -134,11 +134,12 @@ RESET enable_bitmapscan;
 -- Test primary index scan with null array clause
 EXPLAIN (COSTS off) select id from o_test_null_clauses
 	WHERE id = ANY(NULL::int4[]);
-                              QUERY PLAN                               
------------------------------------------------------------------------
- Index Only Scan using o_test_null_clauses_pkey on o_test_null_clauses
-   Index Cond: (id = ANY (NULL::integer[]))
-(2 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Custom Scan (o_scan) on o_test_null_clauses
+   Forward index only scan of: o_test_null_clauses_pkey
+   Conds: (id = ANY (NULL::integer[]))
+(3 rows)
 
 select id from o_test_null_clauses WHERE id = ANY(NULL::int4[]);
  id 
@@ -147,13 +148,14 @@ select id from o_test_null_clauses WHERE id = ANY(NULL::int4[]);
 
 -- Test nested primary index scan with not null clause
 EXPLAIN (COSTS off) select max(id) from o_test_null_clauses;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Result
    InitPlan 1
      ->  Limit
-           ->  Index Only Scan Backward using o_test_null_clauses_pkey on o_test_null_clauses
-(4 rows)
+           ->  Custom Scan (o_scan) on o_test_null_clauses
+                 Backward index only scan of: o_test_null_clauses_pkey
+(5 rows)
 
 select max(id) from o_test_null_clauses;
  max 

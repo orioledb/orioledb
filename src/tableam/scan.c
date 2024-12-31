@@ -30,8 +30,9 @@
 #include "access/relation.h"
 #include "access/table.h"
 #include "common/hashfn.h"
-#include "executor/nodeModifyTable.h"
 #include "executor/executor.h"
+#include "executor/nodeIndexscan.h"
+#include "executor/nodeModifyTable.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -51,6 +52,7 @@
 
 typedef enum OPathTag
 {
+	O_IndexPath,
 	O_BitmapHeapPath,
 } OPathTag;
 
@@ -64,21 +66,12 @@ typedef struct OIndexPath
 	OPath		o_path;
 	ScanDirection scandir;
 	OIndexNumber ix_num;
-}			OIndexPath;
+} OIndexPath;
 
 typedef struct OBitmapHeapPath
 {
 	OPath		o_path;
 } OBitmapHeapPath;
-
-typedef struct OIndexPlanState
-{
-	OPlanState	o_plan_state;
-	OScanState	ostate;
-	/* Used only in o_explain_custom_scan */
-	List	   *stripped_indexquals;
-	bool		onlyCurIx;
-}			OIndexPlanState;
 
 typedef struct OCustomScanState
 {
@@ -149,7 +142,8 @@ transform_path(Path *src_path, OTableDescr *descr)
 {
 	CustomPath *result;
 
-	Assert(IsA(src_path, BitmapHeapPath));
+	Assert(IsA(src_path, IndexPath) || IsA(src_path, Path) ||
+		   IsA(src_path, BitmapHeapPath));
 
 	result = makeNode(CustomPath);
 	result->path.pathtype = T_CustomScan;
@@ -166,7 +160,36 @@ transform_path(Path *src_path, OTableDescr *descr)
 	result->methods = &o_path_methods;
 	result->custom_paths = list_make1(src_path);
 
-	if (IsA(src_path, BitmapHeapPath))
+	if (IsA(src_path, Path))
+	{
+		OIndexPath *new_path = palloc0(sizeof(OIndexPath));
+
+		new_path->o_path.type = O_IndexPath;
+		new_path->ix_num = PrimaryIndexNumber;
+		new_path->scandir = ForwardScanDirection;
+		result->custom_private = list_make1(new_path);
+	}
+	else if (IsA(src_path, IndexPath))
+	{
+		IndexPath  *ix_path = (IndexPath *) src_path;
+		OIndexNumber ix_num;
+		OIndexDescr *index_descr;
+		OIndexPath *new_path = palloc0(sizeof(OIndexPath));
+
+		/* Find ix_num */
+		for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+		{
+			index_descr = descr->indices[ix_num];
+			if (index_descr->oids.reloid == ix_path->indexinfo->indexoid)
+				break;
+		}
+		Assert(ix_num < descr->nIndices);
+		new_path->o_path.type = O_IndexPath;
+		new_path->ix_num = ix_num;
+		new_path->scandir = ix_path->indexscandir;
+		result->custom_private = list_make1(new_path);
+	}
+	else if (IsA(src_path, BitmapHeapPath))
 	{
 		OBitmapHeapPath *new_path = palloc0(sizeof(OBitmapHeapPath));
 
@@ -317,8 +340,11 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 				Path	   *path = list_nth(rel->pathlist, i);
 
 				if (IsA(path, Path) ||
+					IsA(path, IndexPath) ||
 					IsA(path, BitmapHeapPath))
 				{
+					bool		replace = !IsA(path, Path);
+
 					if (IsA(path, Path) && path->pathtype == T_SampleScan)
 					{
 						ereport(ERROR,
@@ -331,7 +357,15 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 										  "bug report."));
 					}
 
-					if (!IsA(path, Path))
+					if (IsA(path, IndexPath))
+					{
+						IndexPath  *ix_path = (IndexPath *) path;
+						OIndexDescr *primary = GET_PRIMARY(descr);
+
+						replace = primary->oids.reloid == ix_path->indexinfo->indexoid;
+					}
+
+					if (replace)
 					{
 						Path	   *custom_path = transform_path(path, descr);
 
@@ -340,12 +374,8 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 						rel->pathlist = list_insert_nth(rel->pathlist, i,
 														custom_path);
 					}
-					i++;
 				}
-				else
-				{
-					i++;
-				}
+				i++;
 			}
 
 			i = 0;
@@ -420,7 +450,36 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 	if (IsA(custom_plan, Result))
 		custom_plan = outerPlan(custom_plan);
 
-	if (o_path->type == O_BitmapHeapPath)
+	if (o_path->type == O_IndexPath)
+	{
+		OIndexPath *ix_path = (OIndexPath *) o_path;
+		bool		onlyCurIx = IsA(custom_plan, IndexOnlyScan);
+
+		if (custom_plans && IsA(custom_plan, IndexScan))
+		{
+			IndexScan  *ix_scan = (IndexScan *) custom_plan;
+
+			plan->targetlist = ix_scan->scan.plan.targetlist;
+			custom_scan->custom_scan_tlist = NIL;
+			qpqual = ix_scan->scan.plan.qual;
+		}
+		else if (custom_plans && IsA(custom_plan, IndexOnlyScan))
+		{
+			IndexOnlyScan *ixo_scan = (IndexOnlyScan *) custom_plan;
+
+			plan->targetlist = ixo_scan->scan.plan.targetlist;
+			custom_scan->custom_scan_tlist = ixo_scan->indextlist;
+			qpqual = ixo_scan->scan.plan.qual;
+		}
+
+		custom_scan->custom_exprs = NIL;
+		custom_scan->custom_private =
+			list_make4(makeInteger(O_IndexPlan),
+					   makeInteger(ix_path->ix_num),
+					   makeInteger(ix_path->scandir),
+					   makeInteger(onlyCurIx));
+	}
+	else
 	{
 		BitmapHeapScan *bh_scan = (BitmapHeapScan *) custom_plan;
 		OIndexDescr *primary = GET_PRIMARY(descr);
@@ -464,7 +523,45 @@ o_create_custom_scan_state(CustomScan *cscan)
 	if (IsA(custom_plan, Result))
 		custom_plan = outerPlan(custom_plan);
 
-	if (plan_tag == O_BitmapHeapPlan)
+	if (plan_tag == O_IndexPlan)
+	{
+		OIndexPlanState *ix_plan_state =
+			(OIndexPlanState *) palloc0(sizeof(OIndexPlanState));
+
+		ix_plan_state->ostate.ixNum = intVal(lsecond(cscan->custom_private));
+		ix_plan_state->ostate.scanDir = intVal(lthird(cscan->custom_private));
+		ix_plan_state->ostate.iterator = NULL;
+		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
+		ix_plan_state->ostate.curKeyRange.empty = true;
+		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
+		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
+
+		if (IsA(custom_plan, IndexScan))
+		{
+			IndexScan  *ix_scan = (IndexScan *) custom_plan;
+
+			ix_plan_state->stripped_indexquals =
+				copyObject(ix_scan->indexqualorig);
+			ix_plan_state->ostate.indexQuals = copyObject(ix_scan->indexqual);
+		}
+		else if (IsA(custom_plan, IndexOnlyScan))
+		{
+			IndexOnlyScan *ixo_scan = (IndexOnlyScan *) custom_plan;
+
+			ix_plan_state->stripped_indexquals =
+				copyObject(ixo_scan->indexqual);
+			ix_plan_state->ostate.indexQuals = copyObject(ixo_scan->indexqual);
+		}
+		else
+		{
+			Assert(false);
+		}
+		ix_plan_state->ostate.onlyCurIx =
+			intVal(lfourth(cscan->custom_private));
+
+		ocstate->o_plan_state = (OPlanState *) ix_plan_state;
+	}
+	else if (plan_tag == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
 			(OBitmapHeapPlanState *) palloc0(sizeof(OBitmapHeapPlanState));
@@ -490,19 +587,48 @@ o_create_custom_scan_state(CustomScan *cscan)
 void
 o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 {
+	Relation	rel = node->ss.ss_currentRelation;
+	OTableDescr *descr = relation_get_descr(rel);
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 
 	ocstate->useEaCounters = is_explain_analyze(&node->ss.ps);
 
 	if (ocstate->useEaCounters)
-	{
-		OTableDescr *descr;
-
-		descr = relation_get_descr(node->ss.ss_currentRelation);
 		eanalyze_counters_init(&ocstate->eaCounters, descr);
-	}
 
-	if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
+	if (ocstate->o_plan_state->type == O_IndexPlan)
+	{
+		OIndexPlanState *ix_plan_state =
+			(OIndexPlanState *) ocstate->o_plan_state;
+		OScanState *scan_state = &ix_plan_state->ostate;
+		OIndexNumber ix_num = ix_plan_state->ostate.ixNum;
+		OIndexDescr *ix_descr = descr->indices[ix_num];
+		Relation	index;
+
+		O_LOAD_SNAPSHOT(&scan_state->oSnapshot, estate->es_snapshot);
+		ix_plan_state->ostate.cxt = AllocSetContextCreate(estate->es_query_cxt,
+														  "orioledb_cs plan data",
+														  ALLOCSET_DEFAULT_SIZES);
+		index = index_open(ix_descr->oids.reloid, AccessShareLock);
+
+		init_index_scan_state(&ix_plan_state->o_plan_state, &ix_plan_state->ostate,
+							  index, node->ss.ps.ps_ExprContext,
+							  &ix_plan_state->iss_RuntimeKeys,
+							  &ix_plan_state->iss_NumRuntimeKeys,
+							  &ix_plan_state->iss_ScanKeys,
+							  &ix_plan_state->iss_NumScanKeys);
+		index_close(index, AccessShareLock);
+
+		ix_plan_state->iss_RuntimeContext = CreateExprContext(estate);
+
+		/*
+		 * If no run-time keys to calculate or they are ready, go ahead and
+		 * pass the scankeys to the index AM.
+		 */
+		if (ix_plan_state->iss_NumRuntimeKeys == 0 || ix_plan_state->iss_RuntimeKeysReady)
+			o_rescan_custom_scan(node);
+	}
+	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
 			(OBitmapHeapPlanState *) ocstate->o_plan_state;
@@ -513,9 +639,7 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 		if (ocstate->useEaCounters)
 		{
 			int			i;
-			OTableDescr *descr;
 
-			descr = relation_get_descr(node->ss.ss_currentRelation);
 			bitmap_state->eaCounters = palloc0(sizeof(OEACallsCounters) *
 											   descr->nIndices);
 			for (i = 0; i < descr->nIndices; i++)
@@ -538,6 +662,7 @@ TupleTableSlot *
 o_exec_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
+	EPQState   *epqstate;
 	TupleTableSlot *slot = NULL;
 
 	if (ocstate->useEaCounters)
@@ -545,7 +670,66 @@ o_exec_custom_scan(CustomScanState *node)
 	else
 		ea_counters = NULL;
 
-	if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
+	if (ocstate->o_plan_state->type == O_IndexPlan)
+	{
+		OIndexPlanState *ix_plan_state =
+			(OIndexPlanState *) ocstate->o_plan_state;
+
+		/*
+		 * If we have runtime keys and they've not already been set up, do it
+		 * now.
+		 */
+		if (!ix_plan_state->iss_RuntimeKeysReady)
+			o_rescan_custom_scan(node);
+
+		epqstate = node->ss.ps.state->es_epq_active;
+		if (epqstate)
+		{
+			Index		scanrelid = ((Scan *) node->ss.ps.plan)->scanrelid;
+
+			if (epqstate->relsubs_done[scanrelid - 1])
+			{
+				/*
+				 * Return empty slot, as we already performed an EPQ
+				 * substitution for this relation.
+				 */
+
+				slot = node->ss.ss_ScanTupleSlot;
+
+				/* Return empty slot, as we already returned a tuple */
+				return ExecClearTuple(slot);
+			}
+			else if (epqstate->relsubs_slot[scanrelid - 1] != NULL)
+			{
+				/*
+				 * Return replacement tuple provided by the EPQ caller.
+				 */
+
+				slot = epqstate->relsubs_slot[scanrelid - 1];
+
+				Assert(epqstate->relsubs_rowmark[scanrelid - 1] == NULL);
+
+				/* Mark to remember that we shouldn't return more */
+				epqstate->relsubs_done[scanrelid - 1] = true;
+
+				/* Return empty slot if we haven't got a test tuple */
+				if (TupIsNull(slot))
+					return NULL;
+
+				if (!o_exec_qual(node->ss.ps.ps_ExprContext,
+								 node->ss.ps.qual, slot))
+					return NULL;
+
+				slot = o_exec_project(node->ss.ps.ps_ProjInfo,
+									  node->ss.ps.ps_ExprContext, slot, NULL);
+
+				return slot;
+			}
+		}
+
+		slot = o_exec_fetch(&ix_plan_state->ostate, &node->ss);
+	}
+	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
 			(OBitmapHeapPlanState *) ocstate->o_plan_state;
@@ -581,7 +765,42 @@ o_rescan_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 
-	if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
+	if (ocstate->o_plan_state->type == O_IndexPlan)
+	{
+		OIndexPlanState *ix_plan_state =
+			(OIndexPlanState *) ocstate->o_plan_state;
+
+		if (ix_plan_state->iss_NumRuntimeKeys != 0)
+		{
+			ExprContext *econtext = ix_plan_state->iss_RuntimeContext;
+
+			ResetExprContext(econtext);
+			ExecIndexEvalRuntimeKeys(econtext,
+									 ix_plan_state->iss_RuntimeKeys,
+									 ix_plan_state->iss_NumRuntimeKeys);
+		}
+		ix_plan_state->iss_RuntimeKeysReady = true;
+
+		btrescan(&ix_plan_state->ostate.scandesc, ix_plan_state->iss_ScanKeys,
+				 ix_plan_state->iss_NumScanKeys, NULL, 0);
+
+		if (node->ss.ps.chgParam != NULL)
+		{
+			MemoryContextReset(ix_plan_state->ostate.cxt);
+		}
+		else if (ix_plan_state->ostate.iterator != NULL)
+		{
+			btree_iterator_free(ix_plan_state->ostate.iterator);
+		}
+
+		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
+		ix_plan_state->ostate.numPrefixExactKeys = o_get_num_prefix_exact_keys(ix_plan_state->iss_ScanKeys, ix_plan_state->iss_NumScanKeys);
+		ix_plan_state->ostate.curKeyRange.empty = true;
+		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
+		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
+		ix_plan_state->ostate.iterator = NULL;
+	}
+	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state;
 
@@ -606,7 +825,18 @@ o_end_custom_scan(CustomScanState *node)
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
-	if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
+	if (ocstate->o_plan_state->type == O_IndexPlan)
+	{
+		OIndexPlanState *ix_plan_state;
+
+		ix_plan_state = (OIndexPlanState *) ocstate->o_plan_state;
+
+		if (ix_plan_state->ostate.iterator != NULL)
+			btree_iterator_free(ix_plan_state->ostate.iterator);
+		MemoryContextDelete(ix_plan_state->ostate.cxt);
+		ix_plan_state->ostate.cxt = NULL;
+	}
+	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
 			(OBitmapHeapPlanState *) ocstate->o_plan_state;
@@ -774,10 +1004,55 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 	OTableDescr *descr;
+	char	   *indexName;
+	StringInfoData title;
 
 	descr = relation_get_descr(node->ss.ss_currentRelation);
 
-	if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
+	if (ocstate->o_plan_state->type == O_IndexPlan)
+	{
+		OIndexPlanState *ix_plan_state =
+			(OIndexPlanState *) ocstate->o_plan_state;
+		bool		backward = (ix_plan_state->ostate.scanDir ==
+								BackwardScanDirection);
+		char	   *direction = !backward ? "Forward" : "Backward";
+
+		initStringInfo(&title);
+		indexName = descr->indices[ix_plan_state->ostate.ixNum]->name.data;
+
+		switch (es->format)
+		{
+			case EXPLAIN_FORMAT_TEXT:
+				appendStringInfo(&title, "%s index %sscan of", direction,
+								 ix_plan_state->ostate.onlyCurIx ? "only " : "");
+				ExplainPropertyText(title.data, indexName, es);
+				show_scan_qual(ix_plan_state->stripped_indexquals, "Conds",
+							   &node->ss.ps, ancestors, es);
+				break;
+
+			case EXPLAIN_FORMAT_XML:
+			case EXPLAIN_FORMAT_YAML:
+			case EXPLAIN_FORMAT_JSON:
+				ExplainPropertyText("Scan Direction", direction, es);
+				ExplainPropertyText("Index Name", indexName, es);
+				if (ix_plan_state->ostate.onlyCurIx)
+					ExplainPropertyText("Custom Scan Subtype", "Index Only Scan",
+										es);
+				else
+					ExplainPropertyText("Custom Scan Subtype", "Index Scan", es);
+				show_scan_qual(ix_plan_state->stripped_indexquals, "Index Cond",
+							   &node->ss.ps, ancestors, es);
+				break;
+		}
+
+		if (ix_plan_state->stripped_indexquals)
+			show_instrumentation_count("Rows Removed by Index Recheck", 2,
+									   &node->ss.ps, es);
+		if (node->ss.ps.qual)
+			show_instrumentation_count("Rows Removed by Filter", 1,
+									   &node->ss.ps, es);
+	}
+	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
 		OBitmapHeapPlanState *bitmap_state =
 			(OBitmapHeapPlanState *) ocstate->o_plan_state;

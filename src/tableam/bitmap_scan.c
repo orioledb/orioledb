@@ -23,6 +23,7 @@
 #include "access/relation.h"
 #include "access/table.h"
 #include "catalog/pg_type.h"
+#include "executor/nodeIndexscan.h"
 #include "lib/rbtree.h"
 #include "nodes/execnodes.h"
 #include "utils/memutils.h"
@@ -183,8 +184,27 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	ostate.scanDir = ForwardScanDirection;
 	ostate.indexQuals = bitmap_ix_scan->indexqual;
 	ResetExprContext(econtext);
-	init_index_scan_state(&ostate, index, econtext);
+	init_index_scan_state(&bitmap_state->o_plan_state, &ostate, index, econtext,
+						  &node->biss_RuntimeKeys,
+						  &node->biss_NumRuntimeKeys,
+						  &node->biss_ScanKeys,
+						  &node->biss_NumScanKeys);
 	relation_close(index, AccessShareLock);
+
+	if (node->biss_NumRuntimeKeys != 0)
+	{
+		ResetExprContext(node->biss_RuntimeContext);
+		ExecIndexEvalRuntimeKeys(node->biss_RuntimeContext,
+								 node->biss_RuntimeKeys,
+								 node->biss_NumRuntimeKeys);
+		node->biss_RuntimeKeysReady = true;
+	}
+
+	if ((node->biss_NumRuntimeKeys == 0 && node->biss_NumArrayKeys == 0) ||
+		(node->biss_RuntimeKeysReady))
+		btrescan(&ostate.scandesc, node->biss_ScanKeys,
+				 node->biss_NumScanKeys, NULL, 0);
+
 
 	if (is_explain_analyze(&node->ss.ps))
 	{
@@ -193,7 +213,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	else
 		ea_counters = NULL;
 
-	ostate.o_snapshot = bitmap_state->oSnapshot;
+	ostate.oSnapshot = bitmap_state->oSnapshot;
 	ostate.onlyCurIx = true;
 	ostate.cxt = bitmap_state->cxt;
 
@@ -201,6 +221,16 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	ostate.curKeyRange.empty = true;
 	ostate.curKeyRange.low.n_row_keys = 0;
 	ostate.curKeyRange.high.n_row_keys = 0;
+
+	if (!ostate.curKeyRangeIsLoaded)
+	{
+		BTScanOpaque so = (BTScanOpaque) ostate.scandesc.opaque;
+
+		_bt_preprocess_keys(&ostate.scandesc);
+		if (so->numArrayKeys)
+			_bt_start_array_keys(&ostate.scandesc, ForwardScanDirection);
+		ostate.curKeyRange.empty = true;
+	}
 
 	o_btree_load_shmem(&indexDescr->desc);
 	do

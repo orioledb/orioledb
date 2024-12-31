@@ -677,6 +677,7 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	bool		item_found = true;
 	Pointer		p;
 
+	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
 	intCxt.context = context;
 	intCxt.key = key;
 	intCxt.keyType = keyType;

@@ -681,10 +681,11 @@ SELECT * FROM o_test_add_column;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_add_column ORDER BY id;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Index Scan using o_test_add_column_pkey on o_test_add_column
-(1 row)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Custom Scan (o_scan) on o_test_add_column
+   Forward index scan of: o_test_add_column_pkey
+(2 rows)
 
 SELECT * FROM o_test_add_column ORDER BY id;
  id |   i   | v  | y | z |   j   
@@ -729,16 +730,17 @@ select count(1) from o_test_multiple_analyzes;
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('explain (analyze, buffers)
 	select * from o_test_multiple_analyzes ORDER BY aid DESC LIMIT 10;') as t;
-                                                                     regexp_replace                                                                     
---------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                 regexp_replace                                                 
+----------------------------------------------------------------------------------------------------------------
  Limit  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   ->  Index Only Scan Backward using o_test_multiple_analyzes_pkey on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-         Heap Fetches: x
+   ->  Custom Scan (o_scan) on o_test_multiple_analyzes  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Backward index only scan of: o_test_multiple_analyzes_pkey
+         Primary pages: read=x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(7 rows)
+(8 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('explain (analyze, buffers)
@@ -1104,10 +1106,11 @@ SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Scan using o_test_pkey_fields_same_as_index_pkey on o_test_pkey_fields_same_as_index
-(1 row)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_fields_same_as_index
+   Forward index scan of: o_test_pkey_fields_same_as_index_pkey
+(2 rows)
 
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
  val_1 | val_2 | val_3 
