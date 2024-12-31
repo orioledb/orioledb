@@ -12,11 +12,12 @@ INSERT INTO o_test_0
 	SELECT repeat('x', a % 3) || repeat ('y', a % 2), a
 		FROM generate_series(1, 5) as a;
 EXPLAIN (COSTS off) SELECT * FROM o_test_0 ORDER BY id2, id1 LIMIT 5;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Limit
-   ->  Index Only Scan using o_test_0_pkey on o_test_0
-(2 rows)
+   ->  Custom Scan (o_scan) on o_test_0
+         Forward index only scan of: o_test_0_pkey
+(3 rows)
 
 SELECT * FROM o_test_0 ORDER BY id2, id1 LIMIT 5;
  id1 | id2 
@@ -29,11 +30,13 @@ SELECT * FROM o_test_0 ORDER BY id2, id1 LIMIT 5;
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT id2, id1, id2 FROM o_test_0 ORDER BY id2, id1 LIMIT 5;
-                      QUERY PLAN                       
--------------------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Limit
-   ->  Index Only Scan using o_test_0_pkey on o_test_0
-(2 rows)
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_0
+               Forward index only scan of: o_test_0_pkey
+(4 rows)
 
 SELECT id2, id1, id2 FROM o_test_0 ORDER BY id2, id1 LIMIT 5;
  id2 | id1 | id2 
@@ -71,11 +74,12 @@ INSERT INTO o_test_1
 	SELECT a, repeat('x', a % 3) || repeat ('y', a % 2)
 		FROM generate_series(1, 5) as a;
 EXPLAIN (COSTS off) SELECT * FROM o_test_1 ORDER BY id1, id2 LIMIT 5;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Limit
-   ->  Index Only Scan using o_test_1_pkey on o_test_1
-(2 rows)
+   ->  Custom Scan (o_scan) on o_test_1
+         Forward index only scan of: o_test_1_pkey
+(3 rows)
 
 SELECT * FROM o_test_1 ORDER BY id1, id2 LIMIT 5;
  id1 | id2 
@@ -96,10 +100,11 @@ CREATE TABLE o_test_2 (
 ALTER TABLE o_test_2 DROP COLUMN val_1;
 INSERT INTO o_test_2 VALUES (1, 2), (3, 4);
 EXPLAIN (COSTS off) SELECT * FROM o_test_2 ORDER BY val_3, val_2;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test_2_pkey on o_test_2
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_2
+   Forward index only scan of: o_test_2_pkey
+(2 rows)
 
 SELECT * FROM o_test_2 ORDER BY val_3, val_2;
  val_2 | val_3 
@@ -115,10 +120,11 @@ CREATE TABLE o_test_3 (
 ) USING orioledb;
 INSERT INTO o_test_3 VALUES (1, 2), (3, 4);
 EXPLAIN (COSTS off) SELECT * FROM o_test_3 ORDER BY val_2;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test_3_pkey on o_test_3
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_3
+   Forward index only scan of: o_test_3_pkey
+(2 rows)
 
 SELECT * FROM o_test_3 ORDER BY val_2;
  val_1 | val_2 
@@ -600,11 +606,12 @@ SET LOCAL enable_seqscan = off;
 SET LOCAL enable_bitmapscan = off;
 EXPLAIN (COSTS off)
 	SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_getsomeattrs_pkey_ix_order_pkey on o_test_getsomeattrs_pkey_ix_order
-   Index Cond: (id > 0)
-(2 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_getsomeattrs_pkey_ix_order
+   Forward index only scan of: o_test_getsomeattrs_pkey_ix_order_pkey
+   Conds: (id > 0)
+(3 rows)
 
 SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
  id 
@@ -617,10 +624,11 @@ SELECT id FROM o_test_getsomeattrs_pkey_ix_order WHERE id > 0;
 EXPLAIN (COSTS off)
 	SELECT id FROM o_test_getsomeattrs_pkey_ix_order
 		WHERE id IS NOT NULL ORDER BY id;
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_getsomeattrs_pkey_ix_order_pkey on o_test_getsomeattrs_pkey_ix_order
-(1 row)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_getsomeattrs_pkey_ix_order
+   Forward index only scan of: o_test_getsomeattrs_pkey_ix_order_pkey
+(2 rows)
 
 SELECT id FROM o_test_getsomeattrs_pkey_ix_order
 	WHERE id IS NOT NULL ORDER BY id;
@@ -644,12 +652,13 @@ SET LOCAL enable_bitmapscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 		GROUP BY val_1;
-                                                            QUERY PLAN                                                            
-----------------------------------------------------------------------------------------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Group
    Group Key: val_1
-   ->  Index Scan using o_test_getsomeattrs_pkey_nkeys_not_equal_nfields_pkey on o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
+         Forward index scan of: o_test_getsomeattrs_pkey_nkeys_not_equal_nfields_pkey
+(4 rows)
 
 SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 	GROUP BY val_1;
@@ -722,15 +731,16 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_include_same_field;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
- Index Only Scan using o_test_pkey_include_same_field_pkey on o_test_pkey_include_same_field
-(1 row)
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_include_same_field
+   Forward index only scan of: o_test_pkey_include_same_field_pkey
+(2 rows)
 
 SELECT * FROM o_test_pkey_include_same_field;
  val_1 
 -------
-      
+     1
 (1 row)
 
 COMMIT;

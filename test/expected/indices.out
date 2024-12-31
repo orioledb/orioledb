@@ -127,11 +127,12 @@ SELECT * FROM o_test51 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Scan using o_test51_pkey on o_test51
-   Index Cond: ((value >= 200) AND (value <= 210))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test51
+   Forward index scan of: o_test51_pkey
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -180,11 +181,12 @@ SELECT orioledb_tbl_indices('o_test52'::regclass);
 
 INSERT INTO o_test52 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test52_pkey on o_test52
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test52
+   Forward index only scan of: o_test52_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -202,11 +204,12 @@ SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test52_pkey on o_test52
-   Index Cond: ((value >= 200) AND (value <= 210))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test52
+   Forward index only scan of: o_test52_pkey
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -255,11 +258,12 @@ SELECT orioledb_tbl_indices('o_test53'::regclass);
 
 INSERT INTO o_test53 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_test53_pkey on o_test53
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test53
+   Forward index scan of: o_test53_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -338,11 +342,12 @@ INSERT INTO o_test54 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test54;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_test54_pkey on o_test54
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test54
+   Forward index scan of: o_test54_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -498,11 +503,12 @@ SELECT orioledb_tbl_indices('o_test56'::regclass);
 INSERT INTO o_test56 VALUES (1, 1);
 INSERT INTO o_test56 VALUES (3, 3);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test56 WHERE key = 1;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test56_pkey on o_test56
-   Index Cond: (key = 1)
-(2 rows)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on o_test56
+   Forward index scan of: o_test56_pkey
+   Conds: (key = 1)
+(3 rows)
 
 SELECT * FROM o_test56 WHERE key = 1;
  key | value 
@@ -723,11 +729,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100 and pri1 = 200;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE pri1 = 100;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_pkey on o_test59
-   Index Cond: (pri1 = 100)
-(2 rows)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on o_test59
+   Forward index scan of: o_test59_pkey
+   Conds: (pri1 = 100)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec2 = 200;
                  QUERY PLAN                 
@@ -7576,10 +7583,11 @@ SELECT orioledb_tbl_structure('o_test_pkey_include_box'::regclass, 'nue');
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_include_box ORDER BY pk1;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Scan using o_test_pkey_include_box_pkey on o_test_pkey_include_box
-(1 row)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_include_box
+   Forward index scan of: o_test_pkey_include_box_pkey
+(2 rows)
 
 SELECT * FROM o_test_pkey_include_box ORDER BY pk1;
  pk1 |         pk2         | f2  
@@ -7748,10 +7756,11 @@ SELECT orioledb_tbl_structure('o_test_include_box_with_pkey'::regclass, 'nue');
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box_with_pkey ORDER BY val_1;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
- Index Scan using o_test_include_box_with_pkey_pkey on o_test_include_box_with_pkey
-(1 row)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey
+   Forward index scan of: o_test_include_box_with_pkey_pkey
+(2 rows)
 
 SELECT * FROM o_test_include_box_with_pkey ORDER BY val_1;
  val_1 | val_2 | val_3 |        val_4        
@@ -7859,11 +7868,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
-   Index Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-(2 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
@@ -7883,12 +7893,13 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
 			  val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
-   Index Cond: ((val_1 > 0) AND (val_2 > 0))
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
    Filter: ((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3)))
-(3 rows)
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((val_1 > 0) AND (val_2 > 0))
+(4 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
@@ -7908,11 +7919,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
-   Index Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-(2 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
@@ -7935,10 +7947,11 @@ EXPLAIN (COSTS OFF)
 			ORDER BY val_1, val_2;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
-   Index Cond: ((val_1 > 0) AND (val_2 > 0))
+ Custom Scan (o_scan) on o_test_row_searchkey
    Filter: ((val_1 < 2) OR ((val_1 = 2) AND ((val_2 < 3) OR (val_2 = 3))))
-(3 rows)
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((val_1 > 0) AND (val_2 > 0))
+(4 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
@@ -7959,11 +7972,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
 			ORDER BY val_1, val_2;
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
-   Index Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
-(2 rows)
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
@@ -7984,9 +7998,10 @@ EXPLAIN (COSTS OFF)
 			ORDER BY val_1, val_2;
                                                   QUERY PLAN                                                   
 ---------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
+ Custom Scan (o_scan) on o_test_row_searchkey
    Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2))))
-(2 rows)
+   Forward index only scan of: o_test_row_searchkey_pkey
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
@@ -8005,11 +8020,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
 			ORDER BY val_1, val_2;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
-   Index Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
-(2 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
@@ -8032,9 +8048,10 @@ EXPLAIN (COSTS OFF)
 			ORDER BY val_1, val_2;
                                                    QUERY PLAN                                                    
 -----------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey on o_test_row_searchkey
+ Custom Scan (o_scan) on o_test_row_searchkey
    Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 <= 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2))))
-(2 rows)
+   Forward index only scan of: o_test_row_searchkey_pkey
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
@@ -8081,11 +8098,12 @@ SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey_pkey_include
 		WHERE (val_1) < (2);
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_row_searchkey_pkey_include_pkey on o_test_row_searchkey_pkey_include
-   Index Cond: (val_1 < 2)
-(2 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey_pkey_include
+   Forward index only scan of: o_test_row_searchkey_pkey_include_pkey
+   Conds: (val_1 < 2)
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey_pkey_include
 	WHERE (val_1) < (2);
@@ -8444,10 +8462,11 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
- Index Only Scan using o_test_saop_pkey on o_test_saop
-   Index Cond: (i < ANY ('{3,4,5}'::integer[]))
+ Custom Scan (o_scan) on o_test_saop
    Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
-(3 rows)
+   Forward index only scan of: o_test_saop_pkey
+   Conds: (i < ANY ('{3,4,5}'::integer[]))
+(4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
  i | j | k 
@@ -8471,13 +8490,14 @@ SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Sort
    Sort Key: i, j, k
-   ->  Index Only Scan using o_test_saop_pkey on o_test_saop
-         Index Cond: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test_saop
+         Forward index only scan of: o_test_saop_pkey
+         Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
+(5 rows)
 
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
  i | j | k 
@@ -8566,13 +8586,14 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Sort
    Sort Key: i, j, k
-   ->  Index Only Scan using o_test_saop_pkey on o_test_saop
-         Index Cond: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test_saop
+         Forward index only scan of: o_test_saop_pkey
+         Conds: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
+(5 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 
