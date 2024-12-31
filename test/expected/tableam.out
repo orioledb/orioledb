@@ -2205,12 +2205,13 @@ SELECT * FROM db_o_indices;
 (3 rows)
 
 EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE id > 5;
-                             QUERY PLAN                             
---------------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Delete on o_tableam_delete1
-   ->  Index Scan using o_tableam_delete1_pkey on o_tableam_delete1
-         Index Cond: (id > 5)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_tableam_delete1
+         Forward index scan of: o_tableam_delete1_pkey
+         Conds: (id > 5)
+(4 rows)
 
 EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE val = '1text' RETURNING *;
                             QUERY PLAN                            
@@ -2264,12 +2265,13 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off)
 		UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
 $$);
-                           smart_explain                            
---------------------------------------------------------------------
+                     smart_explain                     
+-------------------------------------------------------
  Update on o_tableam_update1
-   ->  Index Scan using o_tableam_update1_pkey on o_tableam_update1
-         Index Cond: (id > 5)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_tableam_update1
+         Forward index scan of: o_tableam_update1_pkey
+         Conds: (id > 5)
+(4 rows)
 
 SELECT smart_explain($$
 	EXPLAIN (COSTS off)
@@ -3369,15 +3371,16 @@ SELECT * FROM heap_table JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_
 EXPLAIN (COSTS off) SELECT * FROM heap_table
                              JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids)
 			     WHERE o_tableam_join1.id < 20;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                         QUERY PLAN                         
+------------------------------------------------------------
  Nested Loop
    Join Filter: (o_tableam_join1.id = ANY (heap_table.ids))
    ->  Seq Scan on heap_table
    ->  Materialize
-         ->  Index Scan using o_tableam_join1_pkey on o_tableam_join1
-               Index Cond: (id < 20)
-(6 rows)
+         ->  Custom Scan (o_scan) on o_tableam_join1
+               Forward index scan of: o_tableam_join1_pkey
+               Conds: (id < 20)
+(7 rows)
 
 SELECT * FROM heap_table
 	 JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids)

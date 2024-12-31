@@ -2203,11 +2203,12 @@ INSERT INTO pkey_bitmap_test (i)
 	SELECT pseudo_random(5, v) * 20000 FROM generate_series(1,5000) v
 		ON CONFLICT DO NOTHING;
 EXPLAIN (COSTS OFF) SELECT * FROM pkey_bitmap_test WHERE i < 100;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Index Only Scan using pkey_bitmap_test_pkey on pkey_bitmap_test
-   Index Cond: (i < 100)
-(2 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Custom Scan (o_scan) on pkey_bitmap_test
+   Forward index only scan of: pkey_bitmap_test_pkey
+   Conds: (i < 100)
+(3 rows)
 
 -- Test ctid bitmap
 CREATE TABLE bitmap_test_ctid

@@ -554,10 +554,11 @@ ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
 CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Index Scan using o_test_pkey_alter_type_pkey on o_test_pkey_alter_type
-(1 row)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_alter_type
+   Forward index scan of: o_test_pkey_alter_type_pkey
+(2 rows)
 
 SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
  val_1 | val_2 

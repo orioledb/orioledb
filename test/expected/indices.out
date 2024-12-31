@@ -127,11 +127,12 @@ SELECT * FROM o_test51 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Scan using o_test51_pkey on o_test51
-   Index Cond: ((value >= 200) AND (value <= 210))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test51
+   Forward index scan of: o_test51_pkey
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -180,11 +181,12 @@ SELECT orioledb_tbl_indices('o_test52'::regclass);
 
 INSERT INTO o_test52 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test52_pkey on o_test52
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test52
+   Forward index only scan of: o_test52_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -202,11 +204,12 @@ SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test52_pkey on o_test52
-   Index Cond: ((value >= 200) AND (value <= 210))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test52
+   Forward index only scan of: o_test52_pkey
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -255,11 +258,12 @@ SELECT orioledb_tbl_indices('o_test53'::regclass);
 
 INSERT INTO o_test53 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_test53_pkey on o_test53
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test53
+   Forward index scan of: o_test53_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -338,11 +342,12 @@ INSERT INTO o_test54 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test54;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_test54_pkey on o_test54
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test54
+   Forward index scan of: o_test54_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -498,11 +503,12 @@ SELECT orioledb_tbl_indices('o_test56'::regclass);
 INSERT INTO o_test56 VALUES (1, 1);
 INSERT INTO o_test56 VALUES (3, 3);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test56 WHERE key = 1;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test56_pkey on o_test56
-   Index Cond: (key = 1)
-(2 rows)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on o_test56
+   Forward index scan of: o_test56_pkey
+   Conds: (key = 1)
+(3 rows)
 
 SELECT * FROM o_test56 WHERE key = 1;
  key | value 
@@ -723,11 +729,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100 and pri1 = 200;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE pri1 = 100;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_pkey on o_test59
-   Index Cond: (pri1 = 100)
-(2 rows)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on o_test59
+   Forward index scan of: o_test59_pkey
+   Conds: (pri1 = 100)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec2 = 200;
                  QUERY PLAN                 
