@@ -3,7 +3,7 @@
  * wal.c
  *		Routines dealing with WAL for orioledb.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/recovery/wal.c

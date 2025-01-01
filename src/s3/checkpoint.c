@@ -3,7 +3,7 @@
  * checkpoint.c
  *		Implementation for checkpointing to S3.
  *
- * Copyright (c) 2024, Oriole DB Inc.
+ * Copyright (c) 2025-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/checkpoint.c

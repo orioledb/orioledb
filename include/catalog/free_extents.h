@@ -3,7 +3,7 @@
  * free_extents.h
  * 		Routines for an orioledb free file extents list.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/catalog/free_extents.h

@@ -3,7 +3,7 @@
  * key_range.h
  *		Declarations of range of keys.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/key_range.h

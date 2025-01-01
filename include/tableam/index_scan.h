@@ -3,7 +3,7 @@
  * index_scan.h
  *		Declarations for index scan of OrioleDB table.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/index_scan.h

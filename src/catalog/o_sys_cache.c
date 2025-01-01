@@ -3,7 +3,7 @@
  * o_sys_cache.c
  *		Generic interface for sys cache duplicate trees.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_sys_cache.c

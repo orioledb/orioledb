@@ -3,7 +3,7 @@
  * internal.h
  *		Internal declarations for orioledb engine recovery.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/recovery/internal.h

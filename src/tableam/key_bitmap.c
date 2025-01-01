@@ -3,7 +3,7 @@
  * key_bitmap.c
  *		Routines for bitmap scan of orioledb table
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/tableam/key_bitmap.c

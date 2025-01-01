@@ -3,7 +3,7 @@
  * btree.h
  * 		General declarations for OrioleDB B-tree implementation
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/btree.h

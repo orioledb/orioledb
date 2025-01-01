@@ -3,7 +3,7 @@
  * bgwriter.c
  *		Routines for background writer process.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/workers/bgwriter.c

@@ -6,7 +6,7 @@
  * Operator class B-tree stores data used by comparator and field initialization
  * for orioledb engine tables.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_opclass.c

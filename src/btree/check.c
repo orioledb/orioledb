@@ -3,7 +3,7 @@
  * check.c
  *		Routines for checking OrioleDB B-tree.
  *
- * Copyright (c) 2021-2024 Oriole DB Inc.
+ * Copyright (c) 2021-2025 Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/check.c

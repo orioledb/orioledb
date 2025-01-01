@@ -3,7 +3,7 @@
  * checksum.h
  * 		Declarations for calculating checksums of S3-specific data.
  *
- * Copyright (c) 2024, Oriole DB Inc.
+ * Copyright (c) 2025-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/utils/checksum.h

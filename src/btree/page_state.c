@@ -3,7 +3,7 @@
  * page_state.c
  *		OrioleDB B-tree page locking, waiting, reading etc.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/page_state.c

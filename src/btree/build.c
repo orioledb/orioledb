@@ -3,7 +3,7 @@
  * build.c
  *		Routines for sort-based B-tree index building.
  *
- * Copyright (c) 2021-2024, Oriole DB Inc.
+ * Copyright (c) 2021-2025, Oriole DB Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/build.c
