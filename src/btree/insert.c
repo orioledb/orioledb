@@ -401,22 +401,29 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 		else
 			kind = BTreeKeyLeafTuple;
 
-		blkno = curContext->items[curContext->index].blkno;
-
 		if (insert_item->level == 0)
 		{
+#ifdef USE_ASSERT_CHECKING
+			Page		page;
+			BTreePageHeader *header;
+#endif
+
+			Assert(curContext->index >= 0 && curContext->index < ORIOLEDB_MAX_DEPTH);
+			blkno = curContext->items[curContext->index].blkno;
+
 			/*
 			 * it can be called only from o_btree_insert_tuple_to_leaf()
 			 * o_btree_insert_tuple_to_leaf() can be called only from
 			 * o_btree_normal_modify()
 			 */
+
 			/*
 			 * we already make incomplete split checks in (re)find_page()
 			 * inside o_btree_normal_modify().
 			 */
 #ifdef USE_ASSERT_CHECKING
-			Page		page = O_GET_IN_MEMORY_PAGE(blkno);
-			BTreePageHeader *header = (BTreePageHeader *) page;
+			page = O_GET_IN_MEMORY_PAGE(blkno);
+			header = (BTreePageHeader *) page;
 
 			Assert(!RightLinkIsValid(header->rightLink));
 			Assert(insert_item->refind == false);
@@ -446,6 +453,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				insert_item->refind = false;
 			}
 
+			Assert(curContext->index >= 0 && curContext->index < ORIOLEDB_MAX_DEPTH);
 			blkno = curContext->items[curContext->index].blkno;
 
 			if (o_btree_split_is_incomplete(blkno, &relocked))
@@ -464,6 +472,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			}
 		}
 
+		Assert(OInMemoryBlknoIsValid(blkno));
 		p = O_GET_IN_MEMORY_PAGE(blkno);
 
 		if (insert_item->level > 0)

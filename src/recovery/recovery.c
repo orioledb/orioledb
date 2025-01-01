@@ -1133,6 +1133,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 				cur_state->retain_locs[i] = InvalidUndoLocation;
 			cur_state->csn = COMMITSEQNO_INPROGRESS;
 			cur_state->ptr = InvalidXLogRecPtr;
+			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
 			cur_state->in_retain_regular_heap = false;
 			cur_state->in_retain_system_heap = false;

@@ -1157,11 +1157,10 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 				BTreePageHeader *page_header;
 
 				memset(img, 0, skipped);
-				img += skipped;
 				read_size = ORIOLEDB_BLCKSZ - skipped;
-				err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
+				err = btree_smgr_read(desc, img + skipped, chkpNum, read_size, byte_offset) != read_size;
 
-				page_header = (BTreePageHeader *) &img;
+				page_header = (BTreePageHeader *) img;
 				page_header->checkpointNum = header.chkpNum;
 			}
 		}
