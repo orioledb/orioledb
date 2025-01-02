@@ -27,6 +27,7 @@ typedef struct
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
+	bool		bridging;
 	OCompress	compress;
 	bool		nulls_not_distinct;
 	/* number of fields added using INCLUDE command explicitly */
@@ -49,8 +50,8 @@ typedef struct
 	uint16		nPrimaryFields;
 	/* where primary key fields located in index tuple */
 	AttrNumber	primaryFieldsAttnums[INDEX_MAX_KEYS];
-	OTableField *leafFields;
-	OTableIndexField *nonLeafFields;
+	OTableField *leafTableFields;
+	OTableIndexField *leafFields;
 	List	   *predicate;		/* list of Expr */
 	char	   *predicate_str;
 	List	   *expressions;	/* list of Expr */
