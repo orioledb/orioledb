@@ -616,8 +616,8 @@ SELECT regexp_replace(regexp_replace(
  state = free, datoid equal, relnode equal, ix_type = primary, clean+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: deleted, offset = 264, tuple = ((16384, 16505), 0, 0)  +
-     Item 1: deleted, offset = 296, tuple = ((16384, 16508), 0, 0)  +
+     Item 0: deleted, offset = 264, tuple = ((16384, 16511), 0, 0)  +
+     Item 1: deleted, offset = 296, tuple = ((16384, 16514), 0, 0)  +
                                                                     +
  
 (1 row)

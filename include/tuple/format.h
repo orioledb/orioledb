@@ -195,6 +195,8 @@ extern void o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						 Datum *values, bool *isnull, char *to_toast);
 extern OTuple o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						   uint32 version, Datum *values, bool *isnull);
+extern void o_deform_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
+						   OTuple tuple, Datum *values, bool *isnull);
 extern uint32 o_tuple_get_version(OTuple tuple);
 extern void o_tuple_set_version(OTupleFixedFormatSpec *spec, OTuple *tuple,
 								uint32 version);

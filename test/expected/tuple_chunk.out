@@ -1,0 +1,163 @@
+CREATE SCHEMA tuple_chunk;
+SET SESSION search_path = 'tuple_chunk';
+CREATE EXTENSION orioledb;
+CREATE TABLE tuple_chunk_test
+(
+    id int PRIMARY KEY,
+    value text
+) USING orioledb;
+SELECT test_tuple_chunk_initialize('tuple_chunk_test'::regclass, 2::smallint);
+ test_tuple_chunk_initialize 
+-----------------------------
+ 
+(1 row)
+
+-- Estimate INSERT operation
+SELECT test_tuple_chunk_estimate_change(0::smallint, 0::smallint, row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_estimate_change 
+----------------------------------
+                               48
+(1 row)
+
+-- Perform INSERT operation
+SELECT test_tuple_chunk_perform_change(0::smallint, 0::smallint, row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_perform_change 
+---------------------------------
+ 
+(1 row)
+
+SELECT test_tuple_chunk_perform_change(1::smallint, 0::smallint, row(2, 'value 2')::tuple_chunk_test);
+ test_tuple_chunk_perform_change 
+---------------------------------
+ 
+(1 row)
+
+SELECT * FROM test_tuple_chunk_read_tuple(0::smallint) AS (id int, value text);
+ id |  value  
+----+---------
+  1 | value 1
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(0, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                   -1
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                    0
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(2, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                    1
+(1 row)
+
+SELECT * FROM test_tuple_chunk_search(row(0, 'value 0')::tuple_chunk_test);
+ test_tuple_chunk_search 
+-------------------------
+                       0
+(1 row)
+
+SELECT * FROM test_tuple_chunk_search(row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_search 
+-------------------------
+                       0
+(1 row)
+
+SELECT * FROM test_tuple_chunk_search(row(2, 'value 2')::tuple_chunk_test);
+ test_tuple_chunk_search 
+-------------------------
+                       1
+(1 row)
+
+-- Estimate UPDATE operation
+SELECT test_tuple_chunk_estimate_change(0::smallint, 1::smallint, row(1, 'value 2')::tuple_chunk_test);
+ test_tuple_chunk_estimate_change 
+----------------------------------
+                                0
+(1 row)
+
+-- Estimate DELETE operation
+SELECT test_tuple_chunk_estimate_change(0::smallint, 2::smallint, NULL);
+ test_tuple_chunk_estimate_change 
+----------------------------------
+                              -40
+(1 row)
+
+-- Perform UPDATE operation
+SELECT test_tuple_chunk_perform_change(0::smallint, 1::smallint, row(1, 'value 2')::tuple_chunk_test);
+ test_tuple_chunk_perform_change 
+---------------------------------
+ 
+(1 row)
+
+SELECT * FROM test_tuple_chunk_read_tuple(0::smallint) AS (id int, value text);
+ id |  value  
+----+---------
+  1 | value 2
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(0, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                   -1
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                    0
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(2, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                    1
+(1 row)
+
+SELECT * FROM test_tuple_chunk_search(row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_search 
+-------------------------
+                       0
+(1 row)
+
+-- Perform DELETE operation
+SELECT test_tuple_chunk_perform_change(0::smallint, 2::smallint, NULL);
+ test_tuple_chunk_perform_change 
+---------------------------------
+ 
+(1 row)
+
+SELECT * FROM test_tuple_chunk_read_tuple(0::smallint) AS (id int, value text);
+ id |  value  
+----+---------
+  2 | value 2
+(1 row)
+
+SELECT * FROM test_tuple_chunk_cmp(0::smallint, row(2, 'value 2')::tuple_chunk_test);
+ test_tuple_chunk_cmp 
+----------------------
+                    0
+(1 row)
+
+SELECT * FROM test_tuple_chunk_search(row(1, 'value 1')::tuple_chunk_test);
+ test_tuple_chunk_search 
+-------------------------
+                       0
+(1 row)
+
+SELECT test_tuple_chunk_free();
+ test_tuple_chunk_free 
+-----------------------
+ 
+(1 row)
+
+DROP SCHEMA tuple_chunk CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to extension orioledb
+drop cascades to table tuple_chunk_test
+RESET search_path;
