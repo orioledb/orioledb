@@ -17,7 +17,7 @@
 #include "tableam/descr.h"
 #include "tableam/key_range.h"
 
-extern void index_btree_desc_init(BTreeDescr *desc, OCompress compress,
+extern void index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 								  ORelOids oids, OIndexType type,
 								  char persistence, OXid createOxid,
 								  void *arg);

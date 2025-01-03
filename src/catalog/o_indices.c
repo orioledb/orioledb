@@ -188,6 +188,7 @@ make_ctid_o_index(OTable *table)
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
+	result->fillfactor = table->fillfactor;
 	result->nLeafFields = table->nfields + 1;
 	result->nNonLeafFields = 1;
 	result->nPrimaryFields = 0;
@@ -247,6 +248,7 @@ make_primary_o_index(OTable *table)
 		result->compress = tableIndex->compress;
 	else
 		result->compress = table->primary_compress;
+	result->fillfactor = table->fillfactor;
 	result->nLeafFields = table->nfields;
 	result->nNonLeafFields = tableIndex->nfields;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
@@ -366,6 +368,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = tableIndex->compress;
+	result->fillfactor = tableIndex->fillfactor;
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
@@ -425,6 +428,7 @@ make_toast_o_index(OTable *table)
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
+	result->fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	if (table->has_primary)
 	{
 		result->nLeafFields = primary->nfields;
@@ -918,6 +922,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		   oIndex->primaryFieldsAttnums,
 		   descr->nPrimaryFields * sizeof(descr->primaryFieldsAttnums[0]));
 	descr->compress = oIndex->compress;
+	descr->fillfactor = oIndex->fillfactor;
 
 	fillFixedFormatSpec(descr->leafTupdesc, &descr->leafSpec,
 						(oIndex->indexType == oIndexPrimary),

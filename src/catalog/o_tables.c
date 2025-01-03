@@ -650,6 +650,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence)
 	o_table->default_compress = InvalidOCompress;
 	o_table->primary_compress = InvalidOCompress;
 	o_table->toast_compress = InvalidOCompress;
+	o_table->fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	o_table->persistence = relpersistence;
 
 	for (i = 0; i < tupdesc->natts; i++)

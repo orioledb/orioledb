@@ -280,6 +280,9 @@ btree_page_split_location(BTreeDescr *desc, Page page, OffsetNumber offset,
 	return minLeftPageItemsCount;
 }
 
+#include "catalog/sys_trees.h"
+#include "tableam/descr.h"
+
 OffsetNumber
 btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 						   OTuple tuple, LocationIndex tuplesize,
@@ -296,7 +299,7 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	/* The default target is to split the page 50%/50% */
 	targetCount = 0;
-	spaceRatio = 0.5;
+	spaceRatio = ((float4) desc->fillfactor) / 100.0;
 
 	/*
 	 * Try to autodetect ordered inserts and split near the insertion point.
