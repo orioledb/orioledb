@@ -150,7 +150,8 @@ typedef struct
 } SysTreesLockUndoStackItem;
 
 CheckpointState *checkpoint_state = NULL;
-MemoryContext chkp_mem_context = NULL;
+MemoryContext chkp_main_context = NULL;
+MemoryContext chkp_tree_context = NULL;
 
 static char *xidFilename = NULL;
 static uint32 xidFileCheckpointnum = 0;
@@ -1069,6 +1070,20 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	orioledb_check_shmem();
 
+	if (chkp_main_context == NULL)
+	{
+		chkp_main_context = AllocSetContextCreate(TopMemoryContext,
+												  "OrioleDB checkpoint context",
+												  ALLOCSET_DEFAULT_SIZES);
+		chkp_tree_context = AllocSetContextCreate(chkp_main_context,
+												  "OrioleDB single tree context",
+												  ALLOCSET_DEFAULT_SIZES);
+	}
+	Assert(chkp_main_context != NULL);
+	Assert(chkp_tree_context != NULL);
+
+	prev_context = MemoryContextSwitchTo(chkp_main_context);
+
 	for (i = 1; i <= SYS_TREES_NUM; i++)
 		(void) get_sys_tree(i);
 
@@ -1098,21 +1113,12 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_state->pagesWritten = 0;
 	checkpoint_state->toastConsistentPtr = InvalidXLogRecPtr;
 
-	if (chkp_mem_context == NULL)
-	{
-		chkp_mem_context = AllocSetContextCreate(TopMemoryContext,
-												 "checkpoint temporary context",
-												 ALLOCSET_DEFAULT_SIZES);
-	}
-
 	old_enable_stopevents = enable_stopevents;
 
 	/*
 	 * does not count debug events from o_tables and o_opclass checkpoint
 	 */
 	enable_stopevents = false;
-
-	prev_context = MemoryContextSwitchTo(chkp_mem_context);
 
 	checkpoint_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	pg_atomic_write_u64(&my_proc_info->xmin, checkpoint_xmin);
@@ -1150,8 +1156,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
-	MemoryContextSwitchTo(prev_context);
-	MemoryContextResetOnly(chkp_mem_context);
+	MemoryContextResetOnly(chkp_main_context);
 
 	enable_stopevents = old_enable_stopevents;
 
@@ -1348,6 +1353,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	if (orioledb_s3_mode)
 		s3_perform_backup(flags, maxLocation);
+
+	MemoryContextResetOnly(chkp_main_context);
+	MemoryContextSwitchTo(prev_context);
 
 	if (next_CheckPoint_hook)
 		next_CheckPoint_hook(redo_pos, flags);
@@ -4626,12 +4634,12 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	int			cur_chkp_index = chkpNum % 2;
 	MemoryContext prev_context;
 
-	prev_context = MemoryContextSwitchTo(chkp_mem_context);
+	prev_context = MemoryContextSwitchTo(chkp_tree_context);
 
 	if (!check_tree_needs_checkpointing(type, treeOids))
 	{
 		MemoryContextSwitchTo(prev_context);
-		MemoryContextResetOnly(chkp_mem_context);
+		MemoryContextResetOnly(chkp_tree_context);
 		return;
 	}
 
@@ -4737,7 +4745,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	}
 
 	MemoryContextSwitchTo(prev_context);
-	MemoryContextResetOnly(chkp_mem_context);
+	MemoryContextResetOnly(chkp_tree_context);
 }
 
 /*
