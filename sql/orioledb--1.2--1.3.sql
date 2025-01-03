@@ -11,3 +11,9 @@ CREATE FUNCTION orioledb_tree_stat(relid regclass,
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+DROP FUNCTION orioledb_table_pages(relid oid, OUT blkno int8, OUT level int4, OUT rightlink int8, OUT hikey jsonb);
+CREATE FUNCTION orioledb_table_pages(relid oid, OUT index name, OUT blkno int8, OUT level int4, OUT rightlink int8, OUT hikey jsonb, OUT real_fillfactor int4)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;

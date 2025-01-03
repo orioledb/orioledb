@@ -1651,6 +1651,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	OCompress	compress = default_compress,
 				primary_compress = default_primary_compress,
 				toast_compress = default_toast_compress;
+	int			fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OXid		oxid = InvalidOXid;
 	OSnapshot	oSnapshot;
 
@@ -1690,6 +1691,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 			if (str)
 				toast_compress = o_parse_compress(str);
 		}
+		fillfactor = options->std_options.fillfactor;
 	}
 
 	if (rel->rd_rel->relpersistence !=
@@ -1715,6 +1717,9 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	o_table->default_compress = compress;
 	o_table->toast_compress = toast_compress;
 	o_table->primary_compress = primary_compress;
+	if (fillfactor == HEAP_DEFAULT_FILLFACTOR)
+		fillfactor = BTREE_DEFAULT_FILLFACTOR; /* Because of assert in btree_page_split_location */
+	o_table->fillfactor = fillfactor;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 

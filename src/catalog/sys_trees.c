@@ -736,6 +736,7 @@ sys_tree_init(int i, bool init_shmem)
 	ops->hash = sys_tree_hash;
 
 	descr->compress = InvalidOCompress;
+	descr->fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	descr->ppool = pool;
 	descr->undoType = meta->undoLogType;
 	descr->storageType = meta->storageType;

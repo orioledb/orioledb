@@ -150,6 +150,8 @@ struct OIndexDescr
 	/* Compression rate used in this index */
 	OCompress	compress;
 
+	int			fillfactor;
+
 	/* The maximal value of tableAttnum among the fields[] */
 	int			maxTableAttnum;
 

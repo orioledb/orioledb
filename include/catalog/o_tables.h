@@ -65,6 +65,7 @@ typedef struct
 	ORelOids	oids;
 	OIndexType	type;
 	OCompress	compress;
+	int			fillfactor;
 	bool		nulls_not_distinct;
 	uint8		nfields;
 	/* number of index fields */
@@ -88,6 +89,7 @@ typedef struct
 	OCompress	default_compress;
 	OCompress	primary_compress;
 	OCompress	toast_compress;
+	int			fillfactor;
 	uint16		nfields;
 	uint16		primary_init_nfields;
 	uint16		nindices;
