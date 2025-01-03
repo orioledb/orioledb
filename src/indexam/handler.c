@@ -666,9 +666,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
+	if (rel->rd_index->indisunique)
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
