@@ -664,7 +664,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		index = make_o_index(o_table, cur_ix);
 		indexDescr = palloc0(sizeof(OIndexDescr));
 		o_index_fill_descr(indexDescr, index, o_table);
-		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+		index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
 							  indexDescr->oids, index->indexType, index->table_persistence, index->createOxid,
 							  indexDescr);
 		free_o_index(index);
@@ -674,7 +674,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	index = make_o_index(o_table, TOASTIndexNumber);
 	indexDescr = palloc0(sizeof(OIndexDescr));
 	o_index_fill_descr(indexDescr, index, o_table);
-	index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+	index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
 						  indexDescr->oids, index->indexType,
 						  index->table_persistence, index->createOxid, indexDescr);
 	free_o_index(index);
@@ -972,7 +972,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok)
 	mcxt = MemoryContextSwitchTo(descrCxt);
 	o_index_fill_descr(result, oIndex, NULL);
 	MemoryContextSwitchTo(mcxt);
-	index_btree_desc_init(&result->desc, result->compress, result->oids,
+	index_btree_desc_init(&result->desc, result->compress, result->fillfactor, result->oids,
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, result);
 	free_o_index(oIndex);
 
@@ -997,7 +997,7 @@ recreate_index_descr(OIndexDescr *descr)
 	mcxt = MemoryContextSwitchTo(descrCxt);
 	o_index_fill_descr(descr, oIndex, NULL);
 	MemoryContextSwitchTo(mcxt);
-	index_btree_desc_init(&descr->desc, descr->compress, descr->oids,
+	index_btree_desc_init(&descr->desc, descr->compress, descr->fillfactor, descr->oids,
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);

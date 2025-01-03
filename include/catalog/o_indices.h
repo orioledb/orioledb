@@ -24,6 +24,7 @@ typedef struct
 	OIndexType	indexType;
 	ORelOids	tableOids;
 	char		table_persistence;
+	uint8		fillfactor;
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;

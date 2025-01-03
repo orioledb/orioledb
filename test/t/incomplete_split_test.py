@@ -29,7 +29,7 @@ class SplitTest(BaseTest):
 							CREATE TABLE IF NOT EXISTS o_split (
 							     id text NOT NULL,
 							     PRIMARY KEY (id)
-							) USING orioledb;
+							) USING orioledb WITH (fillfactor = 90);
 							TRUNCATE o_split;
 							""")
 		self.connections = []

@@ -1640,7 +1640,7 @@ orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
 }
 
 static void
-set_toast_oids_and_compress(Relation rel, Relation toast_rel)
+set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfactor)
 {
 	ORelOids	oids,
 				toastOids,
@@ -1651,6 +1651,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	OCompress	compress = default_compress,
 				primary_compress = default_primary_compress,
 				toast_compress = default_toast_compress;
+	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OXid		oxid = InvalidOXid;
 	OSnapshot	oSnapshot;
 
@@ -1659,62 +1660,74 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	ORelOidsSetFromRel(toastOids, toast_rel);
 
 	o_table = o_tables_get(oids);
-	o_table->toast_oids = toastOids;
+
+	if (!only_fillfactor)
+	{
+		o_table->toast_oids = toastOids;
+	}
 
 	if (options)
 	{
-		if (options->compress_offset > 0)
+		if (!only_fillfactor)
 		{
-			char	   *str;
+			if (options->compress_offset > 0)
+			{
+				char	   *str;
 
-			str = (char *) (((Pointer) options) +
-							options->compress_offset);
-			if (str)
-				compress = o_parse_compress(str);
-		}
-		if (options->primary_compress_offset > 0)
-		{
-			char	   *str;
+				str = (char *) (((Pointer) options) +
+								options->compress_offset);
+				if (str)
+					compress = o_parse_compress(str);
+			}
+			if (options->primary_compress_offset > 0)
+			{
+				char	   *str;
 
-			str = (char *) (((Pointer) options) +
-							options->primary_compress_offset);
-			if (str)
-				primary_compress = o_parse_compress(str);
-		}
-		if (options->toast_compress_offset > 0)
-		{
-			char	   *str;
+				str = (char *) (((Pointer) options) +
+								options->primary_compress_offset);
+				if (str)
+					primary_compress = o_parse_compress(str);
+			}
+			if (options->toast_compress_offset > 0)
+			{
+				char	   *str;
 
-			str = (char *) (((Pointer) options) +
-							options->toast_compress_offset);
-			if (str)
-				toast_compress = o_parse_compress(str);
+				str = (char *) (((Pointer) options) +
+								options->toast_compress_offset);
+				if (str)
+					toast_compress = o_parse_compress(str);
+			}
 		}
+		fillfactor = options->std_options.fillfactor;
 	}
 
-	if (rel->rd_rel->relpersistence !=
-		RELPERSISTENCE_PERMANENT &&
-		(OCompressIsValid(compress) ||
-		 OCompressIsValid(primary_compress) ||
-		 OCompressIsValid(toast_compress)))
+	if (!only_fillfactor)
 	{
-		o_table_free(o_table);
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("temp and unlogged orioledb tables does not "
-						"support compression options")));
-	}
+		if (rel->rd_rel->relpersistence !=
+			RELPERSISTENCE_PERMANENT &&
+			(OCompressIsValid(compress) ||
+			 OCompressIsValid(primary_compress) ||
+			 OCompressIsValid(toast_compress)))
+		{
+			o_table_free(o_table);
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("temp and unlogged orioledb tables does not "
+							"support compression options")));
+		}
 
-	if (OCompressIsValid(compress))
-	{
-		if (!OCompressIsValid(primary_compress))
-			primary_compress = compress;
-		if (!OCompressIsValid(toast_compress))
-			toast_compress = compress;
+		if (OCompressIsValid(compress))
+		{
+			if (!OCompressIsValid(primary_compress))
+				primary_compress = compress;
+			if (!OCompressIsValid(toast_compress))
+				toast_compress = compress;
+		}
+		o_table->default_compress = compress;
+		o_table->toast_compress = toast_compress;
+		o_table->primary_compress = primary_compress;
 	}
-	o_table->default_compress = compress;
-	o_table->toast_compress = toast_compress;
-	o_table->primary_compress = primary_compress;
+	o_table->fillfactor = fillfactor;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
@@ -1748,7 +1761,8 @@ create_o_table_for_rel(Relation rel)
 
 	o_tables_rel_meta_lock(rel);
 	o_table = o_table_tableam_create(oids, tupdesc,
-									 rel->rd_rel->relpersistence);
+									 rel->rd_rel->relpersistence,
+									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR));
 	o_opclass_cache_add_table(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
@@ -2369,7 +2383,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl = table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
-					set_toast_oids_and_compress(tbl, rel);
+					set_toast_oids_and_options(tbl, rel, false);
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);
@@ -2629,6 +2643,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						OSnapshot	oSnapshot;
 						OXid		oxid;
 						ORelOids	idx_oids;
+						OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 						ORelOidsSetFromRel(idx_oids, rel);
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
@@ -2640,6 +2655,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								CommandCounterIncrement();
 								namestrcpy(&index->name,
 										   rel->rd_rel->relname.data);
+								if (options)
+									index->fillfactor = options->bt_options.fillfactor;
 								break;
 							}
 						}
@@ -2684,7 +2701,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					create_o_table_for_rel(tbl);
 
-					set_toast_oids_and_compress(tbl, rel);
+					set_toast_oids_and_options(tbl, rel, false);
 
 					ORelOidsSetFromRel(new_oids, tbl);
 					new_o_table = o_tables_get(new_oids);
@@ -2722,6 +2739,41 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_saved_relrewrite = InvalidOid;
 				}
 				table_close(tbl, AccessShareLock);
+			}
+			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
+					 (subId == 0))
+			{
+				Oid			tbl_oid;
+				Relation	tbl = NULL;
+
+				CommandCounterIncrement();
+
+				/* This is faster than dependency scan */
+				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
+												'_') + 1);
+
+				tbl = table_open(tbl_oid, AccessShareLock);
+				if (tbl && is_orioledb_rel(tbl))
+				{
+					ORelOids	oids;
+					OTableDescr *descr;
+					ORelOptions *options = (ORelOptions *) tbl->rd_options;
+					uint8		new_fillfactor;
+
+					ORelOidsSetFromRel(oids, tbl);
+					descr = o_fetch_table_descr(oids);
+					Assert(descr);
+
+					if (options)
+						new_fillfactor = options->std_options.fillfactor;
+					else
+						new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
+
+					if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
+						set_toast_oids_and_options(tbl, rel, true);
+				}
+				if (tbl)
+					table_close(tbl, AccessShareLock);
 			}
 			relation_close(rel, AccessShareLock);
 		}

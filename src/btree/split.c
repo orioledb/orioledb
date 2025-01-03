@@ -195,7 +195,7 @@ btree_page_split_location(BTreeDescr *desc, Page page, OffsetNumber offset,
 				right_it;
 	LocationIndex keyLen;
 
-	Assert(spaceRatio > 0.0f && spaceRatio < 1.0f);
+	Assert(spaceRatio >= 0.0f && spaceRatio <= 1.0f);
 
 	if (O_PAGE_IS(page, LEAF))
 		newitem_size = BTreeLeafTuphdrSize + MAXALIGN(tuplesize);
@@ -292,11 +292,12 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 	OffsetNumber targetCount;
 	OffsetNumber result;
 	float4		spaceRatio;
+	float4		fillfactorRatio = ((float4) desc->fillfactor) / 100.0f;
 	OTuple		split_item;
 
 	/* The default target is to split the page 50%/50% */
 	targetCount = 0;
-	spaceRatio = 0.5;
+	spaceRatio = 0.5f;
 
 	/*
 	 * Try to autodetect ordered inserts and split near the insertion point.
@@ -308,7 +309,9 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 */
 	if (offset == header->prevInsertOffset + 1)
 	{
-		if ((float) offset / (float) header->itemsCount >= 0.9)
+		if ((float) offset / (float) header->itemsCount > fillfactorRatio)
+			spaceRatio = fillfactorRatio;
+		else if ((float) offset / (float) header->itemsCount >= 0.9f)
 			targetCount = offset;
 		else
 			targetCount = offset + 1;
@@ -316,7 +319,9 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 	else if ((!replace && offset == header->prevInsertOffset) ||
 			 (replace && offset == header->prevInsertOffset - 1))
 	{
-		if ((float) offset / (float) header->itemsCount <= 0.1)
+		if ((float) offset / (float) header->itemsCount < 1.0f - fillfactorRatio)
+			spaceRatio = 1.0f - fillfactorRatio;
+		else if ((float) offset / (float) header->itemsCount <= 0.1f)
 			targetCount = offset + 1;
 		else
 			targetCount = offset;
@@ -327,7 +332,7 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * rightmost inserts are always assumed to be ordered ascendingly.
 	 */
 	else if ((desc->type == oIndexToast && O_PAGE_IS(page, LEAF)) || O_PAGE_IS(page, RIGHTMOST))
-		spaceRatio = 0.9;
+		spaceRatio = fillfactorRatio;
 
 	result = btree_page_split_location(desc, page, offset, tuplesize, tuple, replace,
 									   targetCount, spaceRatio, &split_item, csn);

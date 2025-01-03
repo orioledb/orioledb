@@ -95,6 +95,7 @@ REGRESSCHECKS = btree_sys_check \
 				createas \
 				ddl \
 				explain \
+				fillfactor \
 				foreign_keys \
 				generated \
 				getsomeattrs \

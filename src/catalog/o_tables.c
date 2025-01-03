@@ -636,7 +636,8 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 }
 
 OTable *
-o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence)
+o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
+					   uint8 fillfactor)
 {
 	OTable	   *o_table;
 	int			i;
@@ -650,6 +651,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence)
 	o_table->default_compress = InvalidOCompress;
 	o_table->primary_compress = InvalidOCompress;
 	o_table->toast_compress = InvalidOCompress;
+	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
 
 	for (i = 0; i < tupdesc->natts; i++)

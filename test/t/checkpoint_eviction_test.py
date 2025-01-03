@@ -127,7 +127,7 @@ class CheckpointEvictionTest(BaseTest):
 		node.stop()
 
 	def test_concurrent_eviction_10(self):
-		self.concurrent_eviction_base(False, 900)
+		self.concurrent_eviction_base(False, 800)
 
 	def test_concurrent_eviction_9(self):
 		self.concurrent_eviction_base(False, 600)
@@ -136,7 +136,7 @@ class CheckpointEvictionTest(BaseTest):
 		self.concurrent_eviction_base(False, random.randint(1, 8) * 100)
 
 	def test_concurrent_compress_eviction_10(self):
-		self.concurrent_eviction_base(True, 900)
+		self.concurrent_eviction_base(True, 800)
 
 	def test_concurrent_compress_eviction_9(self):
 		self.concurrent_eviction_base(True, 600)

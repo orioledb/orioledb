@@ -185,12 +185,16 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 
 	Assert(level < ORIOLEDB_MAX_DEPTH);
 
-	fit = page_locator_fits_item(desc,
-								 stack[level].img,
-								 &stack[level].loc,
-								 MAXALIGN(tuplesize) + header_size,
-								 false,
-								 COMMITSEQNO_INPROGRESS);
+	if (BTREE_PAGE_FREE_SPACE(stack[level].img) - MAXALIGN(tuplesize) - header_size >=
+		ORIOLEDB_BLCKSZ * (100 - desc->fillfactor) / 100)
+		fit = page_locator_fits_item(desc,
+									 stack[level].img,
+									 &stack[level].loc,
+									 MAXALIGN(tuplesize) + header_size,
+									 false,
+									 COMMITSEQNO_INPROGRESS);
+	else
+		fit = BTreeItemPageFitSplitRequired;
 
 	if (fit == BTreeItemPageFitAsIs)
 	{

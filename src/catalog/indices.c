@@ -384,6 +384,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	int16		indnatts;
 	int16		indnkeyatts;
 	OCompress	compress = InvalidOCompress;
+	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
 
 	if (OidIsValid(indoid))
@@ -403,6 +404,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			if (str)
 				compress = o_parse_compress(str);
 		}
+		fillfactor = options->bt_options.fillfactor;
 	}
 
 	if (index->rd_index->indisprimary)
@@ -512,6 +514,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 				table_index->compress = o_table->primary_compress;
 			else
 				table_index->compress = o_table->default_compress;
+
+			table_index->fillfactor = fillfactor;
 		}
 	}
 	else

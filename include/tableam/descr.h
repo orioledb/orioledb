@@ -132,6 +132,8 @@ struct OIndexDescr
 	 */
 	bool		primaryIsCtid;
 
+	uint8		fillfactor;
+
 	/* Description of the index fields */
 	int			nFields;
 	int			nKeyFields;

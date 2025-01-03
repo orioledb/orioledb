@@ -176,6 +176,7 @@ struct BTreeDescr
 	OIndexType	type;
 	OPagePool  *ppool;
 	OCompress	compress;
+	uint8		fillfactor;
 	UndoLogType undoType;
 	BTreeStorageType storageType;
 	SeqBufDescPrivate freeBuf;

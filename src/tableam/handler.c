@@ -32,6 +32,7 @@
 #include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
+#include "utils/rel.h"
 #include "utils/stopevent.h"
 
 #include "access/heapam.h"
@@ -719,7 +720,8 @@ orioledb_relation_set_new_filenode(Relation rel,
 		new_oids.relnode = RelFileNodeGetNode(newrnode);
 
 		new_o_table = o_table_tableam_create(new_oids, tupdesc,
-											 rel->rd_rel->relpersistence);
+											 rel->rd_rel->relpersistence,
+											 old_o_table->fillfactor);
 		o_opclass_cache_add_table(new_o_table);
 		o_table_fill_oids(new_o_table, rel, newrnode);
 
@@ -1569,7 +1571,7 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 		/* Options from default_reloptions */
 		add_local_int_reloption(&relopts, "fillfactor",
 								"Packs table pages only to this percentage",
-								HEAP_DEFAULT_FILLFACTOR, HEAP_MIN_FILLFACTOR,
+								BTREE_DEFAULT_FILLFACTOR, BTREE_MIN_FILLFACTOR,
 								100,
 								offsetof(ORelOptions, std_options) +
 								offsetof(StdRdOptions, fillfactor));

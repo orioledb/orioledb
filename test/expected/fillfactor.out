@@ -1,0 +1,242 @@
+CREATE SCHEMA fillfactor;
+SET SESSION search_path = 'fillfactor';
+CREATE EXTENSION orioledb;
+CREATE TABLE o_test_fillfactor
+(
+	f1 text,
+	f2 varchar,
+	f3 integer,
+	f4 integer,
+	f5 integer,
+	f6 integer,
+	PRIMARY KEY(f1)
+) USING orioledb WITH (fillfactor = 60);
+INSERT INTO o_test_fillfactor SELECT (10000-v+7)%3000, 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1, 1000) v;
+CREATE INDEX o_test_fillfactor_ix1 ON o_test_fillfactor(f3) WITH (fillfactor = 10);
+CREATE INDEX o_test_fillfactor_ix2 ON o_test_fillfactor(f4) WITH (fillfactor = 40);
+CREATE INDEX o_test_fillfactor_ix3 ON o_test_fillfactor(f5) WITH (fillfactor = 100);
+CREATE INDEX o_test_fillfactor_ix4 ON o_test_fillfactor(f6);
+\d+ o_test_fillfactor
+                                Table "fillfactor.o_test_fillfactor"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ f1     | text              |           | not null |         | extended |              | 
+ f2     | character varying |           |          |         | extended |              | 
+ f3     | integer           |           |          |         | plain    |              | 
+ f4     | integer           |           |          |         | plain    |              | 
+ f5     | integer           |           |          |         | plain    |              | 
+ f6     | integer           |           |          |         | plain    |              | 
+Indexes:
+    "o_test_fillfactor_pkey" PRIMARY KEY, btree (f1)
+    "o_test_fillfactor_ix1" btree (f3) WITH (fillfactor='10')
+    "o_test_fillfactor_ix2" btree (f4) WITH (fillfactor='40')
+    "o_test_fillfactor_ix3" btree (f5) WITH (fillfactor='100')
+    "o_test_fillfactor_ix4" btree (f6)
+Options: fillfactor=60
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    11 |    66
+     1 |     1 |    10
+(2 rows)
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    63 |    10
+     1 |     6 |    10
+     2 |     1 |     8
+(3 rows)
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+FROM orioledb_tree_stat('o_test_fillfactor_ix2'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    12 |    38
+     1 |     1 |    11
+(2 rows)
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+FROM orioledb_tree_stat('o_test_fillfactor_ix3'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |     5 |    86
+     1 |     1 |     8
+(2 rows)
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+FROM orioledb_tree_stat('o_test_fillfactor_ix4'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |     5 |    86
+     1 |     1 |     8
+(2 rows)
+
+DROP INDEX o_test_fillfactor_ix1;
+DROP INDEX o_test_fillfactor_ix2;
+DROP INDEX o_test_fillfactor_ix3;
+DROP INDEX o_test_fillfactor_ix4;
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1, 1000001, 1000) v;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(500002, 501000, 1) v;
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    27 |    63
+     1 |     1 |    17
+(2 rows)
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1000001, 1, -1000) v;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(501000, 500002, -1) v;
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    27 |    63
+     1 |     1 |    17
+(2 rows)
+
+ALTER TABLE o_test_fillfactor SET (fillfactor = 20);
+\d+ o_test_fillfactor
+                                Table "fillfactor.o_test_fillfactor"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ f1     | text              |           | not null |         | extended |              | 
+ f2     | character varying |           |          |         | extended |              | 
+ f3     | integer           |           |          |         | plain    |              | 
+ f4     | integer           |           |          |         | plain    |              | 
+ f5     | integer           |           |          |         | plain    |              | 
+ f6     | integer           |           |          |         | plain    |              | 
+Indexes:
+    "o_test_fillfactor_pkey" PRIMARY KEY, btree (f1)
+Options: fillfactor=20
+
+-- fillfactor option change doesn't rewrite table
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    27 |    63
+     1 |     1 |    17
+(2 rows)
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(501000, 500002, -1) v;
+-- Now it looks like it should
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    38 |    24
+     1 |     1 |    22
+(2 rows)
+
+CREATE INDEX o_test_fillfactor_ix1 ON o_test_fillfactor(f1) WITH (fillfactor = 100);
+\d+ o_test_fillfactor
+                                Table "fillfactor.o_test_fillfactor"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ f1     | text              |           | not null |         | extended |              | 
+ f2     | character varying |           |          |         | extended |              | 
+ f3     | integer           |           |          |         | plain    |              | 
+ f4     | integer           |           |          |         | plain    |              | 
+ f5     | integer           |           |          |         | plain    |              | 
+ f6     | integer           |           |          |         | plain    |              | 
+Indexes:
+    "o_test_fillfactor_pkey" PRIMARY KEY, btree (f1)
+    "o_test_fillfactor_ix1" btree (f1) WITH (fillfactor='100')
+Options: fillfactor=20
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |     6 |    89
+     1 |     1 |     9
+(2 rows)
+
+ALTER INDEX o_test_fillfactor_ix1 SET (fillfactor = 50);
+\d+ o_test_fillfactor
+                                Table "fillfactor.o_test_fillfactor"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ f1     | text              |           | not null |         | extended |              | 
+ f2     | character varying |           |          |         | extended |              | 
+ f3     | integer           |           |          |         | plain    |              | 
+ f4     | integer           |           |          |         | plain    |              | 
+ f5     | integer           |           |          |         | plain    |              | 
+ f6     | integer           |           |          |         | plain    |              | 
+Indexes:
+    "o_test_fillfactor_pkey" PRIMARY KEY, btree (f1)
+    "o_test_fillfactor_ix1" btree (f1) WITH (fillfactor='50')
+Options: fillfactor=20
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |     6 |    89
+     1 |     1 |     9
+(2 rows)
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1000001, 1, -800) v;
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    13 |    53
+     1 |     1 |    11
+(2 rows)
+
+ALTER INDEX o_test_fillfactor_ix1 SET (fillfactor = 20);
+\d+ o_test_fillfactor
+                                Table "fillfactor.o_test_fillfactor"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ f1     | text              |           | not null |         | extended |              | 
+ f2     | character varying |           |          |         | extended |              | 
+ f3     | integer           |           |          |         | plain    |              | 
+ f4     | integer           |           |          |         | plain    |              | 
+ f5     | integer           |           |          |         | plain    |              | 
+ f6     | integer           |           |          |         | plain    |              | 
+Indexes:
+    "o_test_fillfactor_pkey" PRIMARY KEY, btree (f1)
+    "o_test_fillfactor_ix1" btree (f1) WITH (fillfactor='20')
+Options: fillfactor=20
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    13 |    53
+     1 |     1 |    11
+(2 rows)
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1000001, 1, -800) v;
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+ level | count | round 
+-------+-------+-------
+     0 |    29 |    25
+     1 |     1 |    18
+(2 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to table o_test_fillfactor
+DROP SCHEMA fillfactor CASCADE;
+RESET search_path;

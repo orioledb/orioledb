@@ -69,6 +69,7 @@ typedef struct
 	uint8		nfields;
 	/* number of index fields */
 	uint8		nkeyfields;
+	uint8		fillfactor;
 	OTableIndexField fields[INDEX_MAX_KEYS];
 	uint8		nexprfields;
 	OTableField *exprfields;
@@ -94,6 +95,7 @@ typedef struct
 	Oid			tid_btree_ops_oid;	/* have to store it here */
 	bool		has_primary;
 	char		persistence;
+	uint8		fillfactor;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
@@ -113,7 +115,7 @@ extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 
 /* Creates and fills OTable. */
 extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
-									  char relpersistence);
+									  char relpersistence, uint8 fillfactor);
 
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,
