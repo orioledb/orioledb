@@ -23,6 +23,12 @@
 
 #include "access/transam.h"
 
+#if defined __has_include
+#if __has_include ("sanitizer/asan_interface.h")
+#include "sanitizer/asan_interface.h"
+#endif
+#endif
+
 typedef struct
 {
 	OBTreeFindPageContext *context;
@@ -53,6 +59,9 @@ void
 init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 					   CommitSeqNo csn, uint16 flags)
 {
+#ifdef ASAN_UNPOISON_MEMORY_REGION
+	ASAN_UNPOISON_MEMORY_REGION(context, sizeof(*context));
+#endif
 	context->partial.isPartial = false;
 	context->desc = desc;
 	context->csn = csn;

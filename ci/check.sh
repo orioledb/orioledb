@@ -27,7 +27,8 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 	ASAN_OPTIONS=$(cat <<-END
 		verify_asan_link_order=0:
 		detect_stack_use_after_return=0:
-		detect_leaks=0:abort_on_error=1:
+		detect_leaks=0:
+		abort_on_error=1:
 		disable_coredump=0:
 		strict_string_checks=1:
 		check_initialization_order=1:
