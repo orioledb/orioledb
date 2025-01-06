@@ -1718,7 +1718,8 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	o_table->toast_compress = toast_compress;
 	o_table->primary_compress = primary_compress;
 	if (fillfactor == HEAP_DEFAULT_FILLFACTOR)
-		fillfactor = BTREE_DEFAULT_FILLFACTOR; /* Because of assert in btree_page_split_location */
+		fillfactor = BTREE_DEFAULT_FILLFACTOR;	/* Because of assert in
+												 * btree_page_split_location */
 	o_table->fillfactor = fillfactor;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);

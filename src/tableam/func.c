@@ -1073,7 +1073,7 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 
 	for (treen = 0; treen < descr->nIndices + 1; treen++)
 	{
-		Name	   name;
+		Name		name;
 		BTreeDescr *td;
 		SharedRootInfoKey key = {0};
 		SharedRootInfo *sharedRootInfo = NULL;
