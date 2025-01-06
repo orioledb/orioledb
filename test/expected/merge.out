@@ -10,9 +10,9 @@ state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('306')
-    Item 2: offset = 544, downlink = 3, key = ('611')
-    Item 3: offset = 560, downlink = 4, key = ('916')
+    Item 1: offset = 528, downlink = 2, key = ('276')
+    Item 2: offset = 544, downlink = 3, key = ('551')
+    Item 3: offset = 560, downlink = 4, key = ('826')
 
 
 (1 row)
@@ -39,8 +39,8 @@ state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('611')
-    Item 2: offset = 544, downlink = 3, key = ('916')
+    Item 1: offset = 528, downlink = 2, key = ('551')
+    Item 2: offset = 544, downlink = 3, key = ('826')
 
 
 (1 row)
@@ -82,9 +82,9 @@ state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('306')
-    Item 2: offset = 544, downlink = 3, key = ('611')
-    Item 3: offset = 560, downlink = 4, key = ('916')
+    Item 1: offset = 528, downlink = 2, key = ('276')
+    Item 2: offset = 544, downlink = 3, key = ('551')
+    Item 3: offset = 560, downlink = 4, key = ('826')
 
 
 (1 row)
@@ -111,7 +111,7 @@ state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('611')
+    Item 1: offset = 528, downlink = 2, key = ('551')
 
 
 (1 row)
@@ -420,7 +420,7 @@ state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('611')
+    Item 1: offset = 528, downlink = 2, key = ('551')
 
 
 (1 row)
@@ -517,7 +517,7 @@ state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('611')
+    Item 1: offset = 528, downlink = 2, key = ('551')
 
 Index toast: not loaded
 
@@ -614,7 +614,7 @@ state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('611')
+    Item 1: offset = 528, downlink = 2, key = ('551')
 
 
 (1 row)
@@ -711,7 +711,7 @@ state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('611')
+    Item 1: offset = 528, downlink = 2, key = ('551')
 
 Index toast: not loaded
 

@@ -1651,7 +1651,7 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	OCompress	compress = default_compress,
 				primary_compress = default_primary_compress,
 				toast_compress = default_toast_compress;
-	int			fillfactor = BTREE_DEFAULT_FILLFACTOR;
+	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OXid		oxid = InvalidOXid;
 	OSnapshot	oSnapshot;
 
@@ -1717,9 +1717,6 @@ set_toast_oids_and_compress(Relation rel, Relation toast_rel)
 	o_table->default_compress = compress;
 	o_table->toast_compress = toast_compress;
 	o_table->primary_compress = primary_compress;
-	if (fillfactor == HEAP_DEFAULT_FILLFACTOR)
-		fillfactor = BTREE_DEFAULT_FILLFACTOR;	/* Because of assert in
-												 * btree_page_split_location */
 	o_table->fillfactor = fillfactor;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -1754,7 +1751,8 @@ create_o_table_for_rel(Relation rel)
 
 	o_tables_rel_meta_lock(rel);
 	o_table = o_table_tableam_create(oids, tupdesc,
-									 rel->rd_rel->relpersistence);
+									 rel->rd_rel->relpersistence,
+									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR));
 	o_opclass_cache_add_table(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);

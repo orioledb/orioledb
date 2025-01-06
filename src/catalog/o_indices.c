@@ -36,6 +36,7 @@
 #include "optimizer/optimizer.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/rel.h"
 
 PG_FUNCTION_INFO_V1(orioledb_index_oids);
 PG_FUNCTION_INFO_V1(orioledb_index_description);
@@ -428,7 +429,7 @@ make_toast_o_index(OTable *table)
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
-	result->fillfactor = BTREE_DEFAULT_FILLFACTOR;
+	result->fillfactor = HEAP_DEFAULT_FILLFACTOR;
 	if (table->has_primary)
 	{
 		result->nLeafFields = primary->nfields;
@@ -922,7 +923,12 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		   oIndex->primaryFieldsAttnums,
 		   descr->nPrimaryFields * sizeof(descr->primaryFieldsAttnums[0]));
 	descr->compress = oIndex->compress;
-	descr->fillfactor = oIndex->fillfactor;
+	if (oIndex->fillfactor > 0 && oIndex->fillfactor < 100)
+		descr->fillfactor = oIndex->fillfactor;
+	else if (oIndex->indexType == oIndexToast)
+		descr->fillfactor = HEAP_DEFAULT_FILLFACTOR;
+	else
+		descr->fillfactor = BTREE_DEFAULT_FILLFACTOR;
 
 	fillFixedFormatSpec(descr->leafTupdesc, &descr->leafSpec,
 						(oIndex->indexType == oIndexPrimary),

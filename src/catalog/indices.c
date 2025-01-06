@@ -384,7 +384,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	int16		indnatts;
 	int16		indnkeyatts;
 	OCompress	compress = InvalidOCompress;
-	int			fillfactor = BTREE_DEFAULT_FILLFACTOR;
+	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
 
 	if (OidIsValid(indoid))

@@ -50,8 +50,8 @@ class EvictionFullMemoryTest(BaseTest):
 		    "	PRIMARY KEY (key, val)\n"
 		    ") USING orioledb;\n")
 
-		before_root_split = 255000
-		n = 256000
+		before_root_split = 233000
+		n = 234000
 		step = 1000
 		con1 = node.connect()
 		con2 = node.connect()
@@ -77,7 +77,7 @@ class EvictionFullMemoryTest(BaseTest):
 		t1 = ThreadQueryExecutor(
 		    con1,
 		    "INSERT INTO o_test (SELECT id, %s - id, repeat('x', 2000) FROM generate_series(%s, %s, 1) id);"
-		    % (str(200000), str(before_root_split + 1),
+		    % (str(n), str(before_root_split + 1),
 		       str(before_root_split + step)))
 
 		t1.start()
