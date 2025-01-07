@@ -58,6 +58,55 @@ INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15
 SELECT level, count, ROUND(avgoccupied * 100 / 8192)
     FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
 
+ALTER TABLE o_test_fillfactor SET (fillfactor = 20);
+\d+ o_test_fillfactor
+
+-- fillfactor option change doesn't rewrite table
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(501000, 500002, -1) v;
+
+-- Now it looks like it should
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor'::regclass);
+
+CREATE INDEX o_test_fillfactor_ix1 ON o_test_fillfactor(f1) WITH (fillfactor = 100);
+\d+ o_test_fillfactor
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+
+ALTER INDEX o_test_fillfactor_ix1 SET (fillfactor = 50);
+\d+ o_test_fillfactor
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1000001, 1, -800) v;
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+
+ALTER INDEX o_test_fillfactor_ix1 SET (fillfactor = 20);
+\d+ o_test_fillfactor
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+
+TRUNCATE o_test_fillfactor;
+INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15)%7, (v+77)%7, (v-177)%7
+    FROM generate_series(1000001, 1, -800) v;
+
+SELECT level, count, ROUND(avgoccupied * 100 / 8192)
+    FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA fillfactor CASCADE;
 RESET search_path;

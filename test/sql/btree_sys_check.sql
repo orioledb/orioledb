@@ -234,13 +234,10 @@ SELECT regexp_replace(regexp_replace(
 		'g');
 
 -- SYS_TREES_CHKP_NUM
-SELECT regexp_replace(regexp_replace(
-			orioledb_sys_tree_structure(21, 'ne'),
-			'\d+, \(\d+\), [A-F0-9]+/[A-F0-9]+, ',
-			'NNN, (NNN), X/X, ',
-			'g'),
-		': \d+',
-		': NNN',
+SELECT regexp_replace(
+		orioledb_sys_tree_structure(21, 'ne'),
+		'\(\d+, \d+\), ',
+		'(NNN, NNN), ',
 		'g');
 
 -- SYS_TREES_MULTIRANGE_CACHE

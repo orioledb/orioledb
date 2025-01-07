@@ -948,18 +948,15 @@ log_btree(BTreeDescr *desc)
 
 static void
 table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
-					  TupleDesc tupdesc, Tuplestorestate *tupstore, Name name)
+					  TupleDesc tupdesc, Tuplestorestate *tupstore)
 {
-	Datum		values[6];
-	bool		nulls[6];
+	Datum		values[4];
+	bool		nulls[4];
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *pageHdr = (BTreePageHeader *) p;
 	int			j = 0;
 	BTreePageItemLocator loc;
 
-	values[j] = NameGetDatum(name);
-	nulls[j] = false;
-	j++;
 	values[j] = Int64GetDatum(blkno);
 	nulls[j] = false;
 	j++;
@@ -992,9 +989,6 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 		nulls[j] = true;
 	}
 	j++;
-	values[j] = Int32GetDatum((ORIOLEDB_BLCKSZ - BTREE_PAGE_FREE_SPACE(p)) * 100 / ORIOLEDB_BLCKSZ);
-	nulls[j] = false;
-	j++;
 	tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
 	if (O_PAGE_IS(p, LEAF))
@@ -1007,7 +1001,7 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 		hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
 		if (DOWNLINK_IS_IN_MEMORY(hdr->downlink))
 			table_pages_walk_page(desc, DOWNLINK_GET_IN_MEMORY_BLKNO(hdr->downlink),
-								  tupdesc, tupstore, name);
+								  tupdesc, tupstore);
 	}
 
 }
@@ -1025,7 +1019,6 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 	OTableDescr *descr;
 	int			treen;
 	AttrNumber	attnum;
-	NameData	toast_name = {"toast"};
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -1040,10 +1033,8 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 	/* The tupdesc and tuplestore must be created in ecxt_per_query_memory */
 	oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-	tupdesc = CreateTemplateTupleDesc(6);
+	tupdesc = CreateTemplateTupleDesc(4);
 	attnum = (AttrNumber) 1;
-	TupleDescInitEntry(tupdesc, attnum, "index", NAMEOID, -1, 0);
-	attnum++;
 	TupleDescInitEntry(tupdesc, attnum, "blkno", INT8OID, -1, 0);
 	attnum++;
 	TupleDescInitEntry(tupdesc, attnum, "level", INT4OID, -1, 0);
@@ -1051,8 +1042,6 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 	TupleDescInitEntry(tupdesc, attnum, "rightlink", INT8OID, -1, 0);
 	attnum++;
 	TupleDescInitEntry(tupdesc, attnum, "hikey", JSONBOID, -1, 0);
-	attnum++;
-	TupleDescInitEntry(tupdesc, attnum, "real_fillfactor", INT4OID, -1, 0);
 	attnum++;
 
 	randomAccess = (rsinfo->allowedModes & SFRM_Materialize_Random) != 0;
@@ -1073,21 +1062,14 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 
 	for (treen = 0; treen < descr->nIndices + 1; treen++)
 	{
-		Name		name;
 		BTreeDescr *td;
 		SharedRootInfoKey key = {0};
 		SharedRootInfo *sharedRootInfo = NULL;
 
 		if (treen < descr->nIndices)
-		{
-			name = &descr->indices[treen]->name;
 			td = &descr->indices[treen]->desc;
-		}
 		else
-		{
-			name = &toast_name;
 			td = &descr->toast->desc;
-		}
 
 		key.datoid = td->oids.datoid;
 		key.relnode = td->oids.relnode;
@@ -1097,7 +1079,7 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 			continue;
 		o_btree_load_shmem(td);
 
-		table_pages_walk_page(td, td->rootInfo.rootPageBlkno, tupdesc, tupstore, name);
+		table_pages_walk_page(td, td->rootInfo.rootPageBlkno, tupdesc, tupstore);
 	}
 
 	relation_close(rel, AccessShareLock);
