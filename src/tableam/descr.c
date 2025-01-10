@@ -686,6 +686,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		indexDescr = palloc0(sizeof(OIndexDescr));
 		o_index_fill_descr(indexDescr, index, o_table);
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							  indexDescr->fillfactor,
 							  indexDescr->oids, index->indexType,
 							  index->table_persistence, index->createOxid, indexDescr);
 		free_o_index(index);
