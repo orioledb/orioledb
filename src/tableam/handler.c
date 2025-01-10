@@ -29,6 +29,7 @@
 #include "tableam/handler.h"
 #include "tableam/operations.h"
 #include "tableam/tree.h"
+#include "tableam/vacuum.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
@@ -197,7 +198,8 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 											   (Pointer) &bridge_bound, BTreeKeyBound,
 											   &o_in_progress_snapshot, &tupleCsn,
 											   slot->tts_mcxt, NULL);
-		Assert(!O_TUPLE_IS_NULL(bridge_tup));
+		if (O_TUPLE_IS_NULL(bridge_tup))
+			return false;
 
 		o_fill_pindex_tuple_key_bound(&descr->bridge->desc, bridge_tup, &pkey);
 	}
@@ -482,7 +484,8 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL);
 
-	mres = o_tbl_delete(descr, &pkey, oxid, oSnapshot.csn, &hint, &marg);
+	mres = o_tbl_delete(relation, descr, &pkey, oxid,
+						oSnapshot.csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
@@ -1460,7 +1463,17 @@ static void
 orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 					BufferAccessStrategy bstrategy)
 {
-	/* nothing to do */
+	OTableDescr *descr;
+
+	descr = relation_get_descr(onerel);
+
+	/*
+	 * We do VACUUM only to cleanup bridged indexes.
+	 */
+	if (!descr->bridge || params->index_cleanup == VACOPTVALUE_DISABLED)
+		return;
+
+	orioledb_vacuum_bridged_indexes(onerel, descr, params, bstrategy);
 }
 
 static TransactionId

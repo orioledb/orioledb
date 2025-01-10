@@ -1734,7 +1734,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 		{
 			o_table->bridge_oids.datoid = MyDatabaseId;
 			o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-															rel->rd_rel->relpersistence);
+															   rel->rd_rel->relpersistence);
 			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
 		}
 	}

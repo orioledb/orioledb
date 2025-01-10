@@ -19,6 +19,7 @@
 #include "btree/modify.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "storage/itemptr.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/operations.h"
@@ -152,7 +153,8 @@ update_arg_get_slot(OModifyCallbackArg *arg)
 }
 
 static void
-apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlot *slot, CommitSeqNo csn)
+apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
+							TupleTableSlot *slot, CommitSeqNo csn)
 {
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	OTableSlot *oslot = (OTableSlot *) slot;
@@ -169,8 +171,8 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlo
 	TupleTableSlot *bridge_slot;
 	uint32		version = 0;
 	OTuple		tuple;
-	Datum		values[INDEX_MAX_KEYS];
-	bool		isnull[INDEX_MAX_KEYS];
+	Datum		values[INDEX_MAX_KEYS + 1];
+	bool		isnull[INDEX_MAX_KEYS + 1];
 
 	o_btree_load_shmem(&primary->desc);
 	oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc);
@@ -197,7 +199,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlo
 
 	tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
 						 values, isnull, NULL);
-	bridge_slot = descr->bridge->old_leaf_slot;
+	bridge_slot = descr->bridge->new_leaf_slot;
 	tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
 	callbackInfo.arg = bridge_slot;
 
@@ -213,6 +215,29 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlo
 
 	if (tuple.data)
 		pfree(tuple.data);
+}
+
+static void
+delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
+							 ItemPointer iptr, CommitSeqNo csn)
+{
+	OSnapshot	o_snapshot;
+	OXid		oxid;
+	TupleTableSlot *bridge_slot;
+	OTableSlot *bridge_oslot;
+	OTableModifyResult result;
+
+	bridge_slot = descr->bridge->new_leaf_slot;
+	bridge_oslot = (OTableSlot *) bridge_slot;
+	ItemPointerCopy(iptr, &bridge_oslot->bridge_ctid);
+
+	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+
+	result = o_tbl_index_delete(descr->bridge, BridgeIndexNumber, bridge_slot,
+								oxid, o_snapshot.csn);
+
+	/* FIXME */
+	Assert(result.success);
 }
 
 TupleTableSlot *
@@ -683,7 +708,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 }
 
 OTableModifyResult
-o_tbl_delete(OTableDescr *descr, OBTreeKeyBound *primary_key,
+o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			 OXid oxid, CommitSeqNo csn, BTreeLocationHint *hint,
 			 OModifyCallbackArg *arg)
 {
@@ -720,8 +745,13 @@ o_tbl_delete(OTableDescr *descr, OBTreeKeyBound *primary_key,
 		{
 			OIndexDescr *primary = GET_PRIMARY(descr);
 			OTuple		primary_tuple;
+			OTableSlot *oslot = (OTableSlot *) result.oldTuple;
 
 			csn = arg->csn;
+
+			if (descr->bridge)
+				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
+
 			/* if tuple has been deleted from index trees, remove TOAST values */
 			if (!tts_orioledb_remove_toast_values(result.oldTuple, descr, oxid, csn))
 			{
