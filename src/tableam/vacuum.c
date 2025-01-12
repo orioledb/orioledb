@@ -1031,15 +1031,19 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	char	  **indnames = NULL;
 	bool		verbose;
 	bool		instrument;
+#ifdef NOT_USED
 	PGRUsage	ru0;
 	TimestampTz starttime = 0;
 	PgStat_Counter startreadtime = 0,
 				startwritetime = 0;
+#endif
+
 	ErrorContextCallback errcallback;
 
 	verbose = (params->options & VACOPT_VERBOSE) != 0;
 	instrument = (verbose || (AmAutoVacuumWorkerProcess() &&
 							  params->log_min_duration >= 0));
+#ifdef NOT_USED
 	if (instrument)
 	{
 		pg_rusage_init(&ru0);
@@ -1050,6 +1054,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 			startwritetime = pgStatBlockWriteTime;
 		}
 	}
+#endif
 
 	pgstat_progress_start_command(PROGRESS_COMMAND_VACUUM,
 								  RelationGetRelid(rel));
