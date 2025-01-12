@@ -41,7 +41,7 @@ cd orioledb
 if [ $CHECK_TYPE = "alignment" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize=alignment -fno-sanitize-recover=alignment" LDFLAGS_SL="-lubsan"
 elif [ $CHECK_TYPE = "check_page" ]; then
-	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT"
+	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT -DCHECK_PAGE_STATS"
 elif [ $CHECK_TYPE != "static" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
 fi
