@@ -1098,34 +1098,35 @@ SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 (4 rows)
 
 COMMIT;
+CREATE EXTENSION pageinspect;
 CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb WITH (index_bridging);
-INSERT INTO o_briging_vacuum_test (p) (SELECT point(random(), random()) FROM generate_series(1,5));
+INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
 SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass);
-                                       orioledb_tbl_structure                                       
-----------------------------------------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                                                         +
- Page 2058: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                            +
- state = free, datoid = 16384, relnode = 18730, ix_type = primary, dirty                           +
-     Leftmost, Rightmost                                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                        +
-     Item 0: offset = 272, tuple = ('1', null, '(0.5247300973522959,0.37060662768951635)', '(0,1)')+
-     Item 1: offset = 336, tuple = ('2', null, '(0.8943597386259221,0.16267498920826684)', '(0,2)')+
-     Item 2: offset = 400, tuple = ('3', null, '(0.4433631516623342,0.7307447067883066)', '(0,3)') +
-     Item 3: offset = 464, tuple = ('4', null, '(0.7466955122421324,0.130921326507214)', '(0,4)')  +
-     Item 4: offset = 528, tuple = ('5', null, '(0.8921522944107867,0.6279502046034708)', '(0,5)') +
-                                                                                                   +
- Index index_bridge contents                                                                       +
- Page 2066: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                            +
- state = free, datoid = 16384, relnode = 18729, ix_type = bridge, dirty                            +
-     Leftmost, Rightmost                                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                        +
-     Item 0: offset = 272, tuple = ('(0,1)', '1')                                                  +
-     Item 1: offset = 304, tuple = ('(0,2)', '2')                                                  +
-     Item 2: offset = 336, tuple = ('(0,3)', '3')                                                  +
-     Item 3: offset = 368, tuple = ('(0,4)', '4')                                                  +
-     Item 4: offset = 400, tuple = ('(0,5)', '5')                                                  +
-                                                                                                   +
- Index toast: not loaded                                                                           +
+                         orioledb_tbl_structure                          
+-------------------------------------------------------------------------
+ Index o_briging_vacuum_test_pkey contents                              +
+ Page 2058: level = 0, maxKeyLen = 8, nVacatedBytes = 0                 +
+ state = free, datoid = 16384, relnode = 18775, ix_type = primary, dirty+
+     Leftmost, Rightmost                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64             +
+     Item 0: offset = 272, tuple = ('1', null, '(0.01,0.02)', '(0,1)')  +
+     Item 1: offset = 336, tuple = ('2', null, '(0.02,0.04)', '(0,2)')  +
+     Item 2: offset = 400, tuple = ('3', null, '(0.03,0.06)', '(0,3)')  +
+     Item 3: offset = 464, tuple = ('4', null, '(0.04,0.08)', '(0,4)')  +
+     Item 4: offset = 528, tuple = ('5', null, '(0.05,0.1)', '(0,5)')   +
+                                                                        +
+ Index index_bridge contents                                            +
+ Page 2066: level = 0, maxKeyLen = 8, nVacatedBytes = 0                 +
+ state = free, datoid = 16384, relnode = 18774, ix_type = bridge, dirty +
+     Leftmost, Rightmost                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64             +
+     Item 0: offset = 272, tuple = ('(0,1)', '1')                       +
+     Item 1: offset = 304, tuple = ('(0,2)', '2')                       +
+     Item 2: offset = 336, tuple = ('(0,3)', '3')                       +
+     Item 3: offset = 368, tuple = ('(0,4)', '4')                       +
+     Item 4: offset = 400, tuple = ('(0,5)', '5')                       +
+                                                                        +
+ Index toast: not loaded                                                +
  
 (1 row)
 
@@ -1138,35 +1139,41 @@ SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
 -----------------------------------------------------------------------------
  Seq Scan on o_briging_vacuum_test (actual time=0.002..0.002 rows=0 loops=1)
    Filter: (p <@ '(1,1),(0,0)'::box)
- Planning Time: 0.078 ms
+ Planning Time: 0.081 ms
  Execution Time: 0.008 ms
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass);
-                                           orioledb_tbl_structure                                            
--------------------------------------------------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                                                                  +
- Page 2058: level = 0, maxKeyLen = 8, nVacatedBytes = 320                                                   +
- state = free, datoid = 16384, relnode = 18730, ix_type = primary, dirty                                    +
-     Leftmost, Rightmost                                                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
-     Item 0: deleted, offset = 272, tuple = ('1', null, '(0.5247300973522959,0.37060662768951635)', '(0,1)')+
-     Item 1: deleted, offset = 336, tuple = ('2', null, '(0.8943597386259221,0.16267498920826684)', '(0,2)')+
-     Item 2: deleted, offset = 400, tuple = ('3', null, '(0.4433631516623342,0.7307447067883066)', '(0,3)') +
-     Item 3: deleted, offset = 464, tuple = ('4', null, '(0.7466955122421324,0.130921326507214)', '(0,4)')  +
-     Item 4: deleted, offset = 528, tuple = ('5', null, '(0.8921522944107867,0.6279502046034708)', '(0,5)') +
-                                                                                                            +
- Index index_bridge contents                                                                                +
- Page 2066: level = 0, maxKeyLen = 8, nVacatedBytes = 160                                                   +
- state = free, datoid = 16384, relnode = 18729, ix_type = bridge, dirty                                     +
-     Leftmost, Rightmost                                                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
-                                                                                                            +
- Index toast: not loaded                                                                                    +
+                             orioledb_tbl_structure                             
+--------------------------------------------------------------------------------
+ Index o_briging_vacuum_test_pkey contents                                     +
+ Page 2058: level = 0, maxKeyLen = 8, nVacatedBytes = 320                      +
+ state = free, datoid = 16384, relnode = 18775, ix_type = primary, dirty       +
+     Leftmost, Rightmost                                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                    +
+     Item 0: deleted, offset = 272, tuple = ('1', null, '(0.01,0.02)', '(0,1)')+
+     Item 1: deleted, offset = 336, tuple = ('2', null, '(0.02,0.04)', '(0,2)')+
+     Item 2: deleted, offset = 400, tuple = ('3', null, '(0.03,0.06)', '(0,3)')+
+     Item 3: deleted, offset = 464, tuple = ('4', null, '(0.04,0.08)', '(0,4)')+
+     Item 4: deleted, offset = 528, tuple = ('5', null, '(0.05,0.1)', '(0,5)') +
+                                                                               +
+ Index index_bridge contents                                                   +
+ Page 2066: level = 0, maxKeyLen = 8, nVacatedBytes = 160                      +
+ state = free, datoid = 16384, relnode = 18774, ix_type = bridge, dirty        +
+     Leftmost, Rightmost                                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                    +
+                                                                               +
+ Index toast: not loaded                                                       +
  
 (1 row)
 
+SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum_test_p_idx', 0), 'o_briging_vacuum_test_p_idx');
+ itemoffset | ctid | itemlen | dead | keys 
+------------+------+---------+------+------
+(0 rows)
+
 DROP TABLE o_briging_vacuum_test;
+DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table o_test_ix_ams
 DROP SCHEMA index_bridging CASCADE;
