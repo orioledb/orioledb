@@ -461,6 +461,17 @@ get_sys_tree(int tree_num)
 	return &sysTreesDescrs[tree_num - 1].descr;
 }
 
+BTreeDescr *
+get_sys_tree_no_init(int tree_num)
+{
+	Assert(tree_num >= 1 && tree_num <= SYS_TREES_NUM);
+
+	if (!sysTreesDescrs[tree_num - 1].initialized)
+		return NULL;
+
+	return &sysTreesDescrs[tree_num - 1].descr;
+}
+
 PrintFunc
 sys_tree_key_print(BTreeDescr *desc)
 {

@@ -128,6 +128,7 @@ typedef struct
 extern Size sys_trees_shmem_needs(void);
 extern void sys_trees_shmem_init(Pointer ptr, bool found);
 extern BTreeDescr *get_sys_tree(int tree_num);
+extern BTreeDescr *get_sys_tree_no_init(int tree_num);
 extern BTreeStorageType sys_tree_get_storage_type(int tree_num);
 extern bool sys_tree_is_temporary(int tree_num);
 extern bool sys_tree_supports_transactions(int tree_num);

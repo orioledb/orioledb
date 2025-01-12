@@ -607,16 +607,14 @@ unlock_page(OInMemoryBlkno blkno)
 	if (O_PAGE_IS(p, LEAF) && page_desc->type != oIndexInvalid)
 	{
 		ORelOids	oids = page_desc->oids;
+		BTreeDescr *desc;
 
 		if (!IS_SYS_TREE_OIDS(oids))
-		{
-			BTreeDescr *desc;
-
 			desc = index_oids_get_btree_descr(oids, page_desc->type);
-
-			if (desc)
-				o_check_btree_page_statistics(desc, p);
-		}
+		else
+			desc = get_sys_tree_no_init(oids.reloid);
+		if (desc)
+			o_check_btree_page_statistics(desc, p);
 	}
 #endif
 
