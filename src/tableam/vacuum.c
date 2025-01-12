@@ -36,6 +36,15 @@
 #include "utils/lsyscache.h"
 #include "utils/pg_rusage.h"
 
+#if PG_VERSION_NUM >= 170000
+#define NUM_ITEMS(vacrel) ((vacrel)->dead_items_info->num_items)
+#else
+#define AmAutoVacuumWorkerProcess() IsAutoVacuumWorkerProcess()
+#define NUM_ITEMS(vacrel) ((vacrel)->dead_items->num_items)
+#define MAXDEADITEMS(avail_mem) \
+	(((avail_mem) - offsetof(VacDeadItems, items)) / sizeof(ItemPointerData))
+#endif
+
 /* Phases of vacuum during which we report error context. */
 typedef enum
 {
@@ -98,8 +107,12 @@ typedef struct LVRelState
 	 * Both dead_items and dead_items_info are allocated in shared memory in
 	 * parallel vacuum cases.
 	 */
+#if PG_VERSION_NUM >= 170000
 	TidStore   *dead_items;		/* TIDs whose index tuples we'll delete */
 	VacDeadItemsInfo *dead_items_info;
+#else
+	VacDeadItems *dead_items;	/* TIDs whose index tuples we'll delete */
+#endif
 
 	BlockNumber rel_pages;		/* total number of pages */
 	BlockNumber scanned_pages;	/* # pages examined (not skipped via VM) */
@@ -124,10 +137,12 @@ typedef struct LVRelState
 	int64		recently_dead_tuples;	/* # dead, but not yet removable */
 	int64		missed_dead_tuples; /* # removable, but not removed */
 
+#if PG_VERSION_NUM >= 170000
 	/* State maintained by lazy_scan_heap() */
 	BlockNumber current_block;
 	int			offsets_count;
 	OffsetNumber current_offsets[BTREE_PAGE_MAX_CHUNK_ITEMS];
+#endif
 } LVRelState;
 
 /* Struct for saving and restoring vacuum error information. */
@@ -277,10 +292,39 @@ vac_open_bridged_indexes(Relation relation, LOCKMODE lockmode,
 static void
 dead_items_alloc(LVRelState *vacrel, int nworkers)
 {
+#if PG_VERSION_NUM >= 170000
 	VacDeadItemsInfo *dead_items_info;
 	int			vac_work_mem = AmAutoVacuumWorkerProcess() &&
 		autovacuum_work_mem != -1 ?
 		autovacuum_work_mem : maintenance_work_mem;
+#else
+	VacDeadItems *dead_items;
+	int64		max_items;
+	int			vac_work_mem = IsAutoVacuumWorkerProcess() &&
+		autovacuum_work_mem != -1 ?
+		autovacuum_work_mem : maintenance_work_mem;
+
+	if (vacrel->nindexes > 0)
+	{
+		BlockNumber rel_pages = vacrel->rel_pages;
+
+		max_items = MAXDEADITEMS(vac_work_mem * 1024L);
+		max_items = Min(max_items, INT_MAX);
+		max_items = Min(max_items, MAXDEADITEMS(MaxAllocSize));
+
+		/* curious coding here to ensure the multiplication can't overflow */
+		if ((BlockNumber) (max_items / MaxHeapTuplesPerPage) > rel_pages)
+			max_items = rel_pages * MaxHeapTuplesPerPage;
+
+		/* stay sane if small maintenance_work_mem */
+		max_items = Max(max_items, MaxHeapTuplesPerPage);
+	}
+	else
+	{
+		/* One-pass case only stores a single heap page's TIDs at a time */
+		max_items = MaxHeapTuplesPerPage;
+	}
+#endif
 
 	/*
 	 * Initialize state for a parallel vacuum.  As of now, only one worker can
@@ -317,25 +361,39 @@ dead_items_alloc(LVRelState *vacrel, int nworkers)
 		 */
 		if (ParallelVacuumIsActive(vacrel))
 		{
+#if PG_VERSION_NUM >= 170000
 			vacrel->dead_items = parallel_vacuum_get_dead_items(vacrel->pvs,
 																&vacrel->dead_items_info);
+#else
+			vacrel->dead_items = parallel_vacuum_get_dead_items(vacrel->pvs);
+#endif
 			return;
 		}
 	}
+
+#if PG_VERSION_NUM >= 170000
 
 	/*
 	 * Serial VACUUM case. Allocate both dead_items and dead_items_info
 	 * locally.
 	 */
-
 	dead_items_info = (VacDeadItemsInfo *) palloc(sizeof(VacDeadItemsInfo));
 	dead_items_info->max_bytes = vac_work_mem * 1024L;
 	dead_items_info->num_items = 0;
 	vacrel->dead_items_info = dead_items_info;
 
 	vacrel->dead_items = TidStoreCreateLocal(dead_items_info->max_bytes, true);
+#else
+	/* Serial VACUUM case */
+	dead_items = (VacDeadItems *) palloc(vac_max_items_to_alloc_size(max_items));
+	dead_items->max_items = max_items;
+	dead_items->num_items = 0;
+
+	vacrel->dead_items = dead_items;
+#endif
 }
 
+#if PG_VERSION_NUM >= 170000
 static void
 finish_dead_items(LVRelState *vacrel)
 {
@@ -373,6 +431,15 @@ add_dead_item(LVRelState *vacrel, ItemPointer item)
 
 	vacrel->current_offsets[vacrel->offsets_count++] = ItemPointerGetOffsetNumber(item);
 }
+#else
+static void
+add_dead_item(LVRelState *vacrel, ItemPointer item)
+{
+	VacDeadItems *dead_items = vacrel->dead_items;
+
+	dead_items->items[dead_items->num_items++] = *item;
+}
+#endif
 
 /*
  *	lazy_cleanup_one_index() -- do post-vacuum cleanup for index relation.
@@ -431,6 +498,7 @@ lazy_cleanup_all_indexes(LVRelState *vacrel)
 {
 	double		reltuples = vacrel->new_rel_tuples;
 	bool		estimated_count = vacrel->scanned_pages < vacrel->rel_pages;
+#if PG_VERSION_NUM >= 170000
 	const int	progress_start_index[] = {
 		PROGRESS_VACUUM_PHASE,
 		PROGRESS_VACUUM_INDEXES_TOTAL
@@ -441,9 +509,12 @@ lazy_cleanup_all_indexes(LVRelState *vacrel)
 	};
 	int64		progress_start_val[2];
 	int64		progress_end_val[2] = {0, 0};
+#endif
 
 	Assert(vacrel->do_index_cleanup);
 	Assert(vacrel->nindexes > 0);
+
+#if PG_VERSION_NUM >= 170000
 
 	/*
 	 * Report that we are now cleaning up indexes and the number of indexes to
@@ -452,6 +523,11 @@ lazy_cleanup_all_indexes(LVRelState *vacrel)
 	progress_start_val[0] = PROGRESS_VACUUM_PHASE_INDEX_CLEANUP;
 	progress_start_val[1] = vacrel->nindexes;
 	pgstat_progress_update_multi_param(2, progress_start_index, progress_start_val);
+#else
+	/* Report that we are now cleaning up indexes */
+	pgstat_progress_update_param(PROGRESS_VACUUM_PHASE,
+								 PROGRESS_VACUUM_PHASE_INDEX_CLEANUP);
+#endif
 
 	if (!ParallelVacuumIsActive(vacrel))
 	{
@@ -464,9 +540,11 @@ lazy_cleanup_all_indexes(LVRelState *vacrel)
 				lazy_cleanup_one_index(indrel, istat, reltuples,
 									   estimated_count, vacrel);
 
+#if PG_VERSION_NUM >= 170000
 			/* Report the number of indexes cleaned up */
 			pgstat_progress_update_param(PROGRESS_VACUUM_INDEXES_PROCESSED,
 										 idx + 1);
+#endif
 		}
 	}
 	else
@@ -477,8 +555,10 @@ lazy_cleanup_all_indexes(LVRelState *vacrel)
 											estimated_count);
 	}
 
+#if PG_VERSION_NUM >= 170000
 	/* Reset the progress counters */
 	pgstat_progress_update_multi_param(2, progress_end_index, progress_end_val);
+#endif
 }
 
 /*
@@ -523,8 +603,12 @@ lazy_vacuum_one_index(Relation indrel, IndexBulkDeleteResult *istat,
 							 InvalidBlockNumber, InvalidOffsetNumber);
 
 	/* Do bulk deletion */
+#if PG_VERSION_NUM >= 170000
 	istat = vac_bulkdel_one_index(&ivinfo, istat, vacrel->dead_items,
 								  vacrel->dead_items_info);
+#else
+	istat = vac_bulkdel_one_index(&ivinfo, istat, vacrel->dead_items);
+#endif
 
 	/* Revert to the previous phase information for error traceback */
 	restore_vacuum_error_info(vacrel, &saved_err_info);
@@ -546,6 +630,7 @@ static void
 lazy_vacuum_all_indexes(LVRelState *vacrel)
 {
 	double		old_live_tuples = vacrel->rel->rd_rel->reltuples;
+#if PG_VERSION_NUM >= 170000
 	const int	progress_start_index[] = {
 		PROGRESS_VACUUM_PHASE,
 		PROGRESS_VACUUM_INDEXES_TOTAL
@@ -557,10 +642,13 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
 	};
 	int64		progress_start_val[2];
 	int64		progress_end_val[3];
+#endif
 
 	Assert(vacrel->nindexes > 0);
 	Assert(vacrel->do_index_vacuuming);
 	Assert(vacrel->do_index_cleanup);
+
+#if PG_VERSION_NUM >= 170000
 
 	/*
 	 * Report that we are now vacuuming indexes and the number of indexes to
@@ -569,6 +657,11 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
 	progress_start_val[0] = PROGRESS_VACUUM_PHASE_VACUUM_INDEX;
 	progress_start_val[1] = vacrel->nindexes;
 	pgstat_progress_update_multi_param(2, progress_start_index, progress_start_val);
+#else
+	/* Report that we are now vacuuming indexes */
+	pgstat_progress_update_param(PROGRESS_VACUUM_PHASE,
+								 PROGRESS_VACUUM_PHASE_VACUUM_INDEX);
+#endif
 
 	if (!ParallelVacuumIsActive(vacrel))
 	{
@@ -580,10 +673,11 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
 			vacrel->indstats[idx] = lazy_vacuum_one_index(indrel, istat,
 														  old_live_tuples,
 														  vacrel);
-
+#if PG_VERSION_NUM >= 170000
 			/* Report the number of indexes vacuumed */
 			pgstat_progress_update_param(PROGRESS_VACUUM_INDEXES_PROCESSED,
 										 idx + 1);
+#endif
 		}
 	}
 	else
@@ -601,7 +695,7 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
 	 * place).
 	 */
 	Assert(vacrel->num_index_scans > 0 ||
-		   vacrel->dead_items_info->num_items == vacrel->lpdead_items);
+		   NUM_ITEMS(vacrel) == vacrel->lpdead_items);
 
 	/*
 	 * Increase and report the number of index scans.  Also, we reset
@@ -611,10 +705,15 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
 	 * deletes that we weren't able to finish due to the failsafe triggering.
 	 */
 	vacrel->num_index_scans++;
+#if PG_VERSION_NUM >= 170000
 	progress_end_val[0] = 0;
 	progress_end_val[1] = 0;
 	progress_end_val[2] = vacrel->num_index_scans;
 	pgstat_progress_update_multi_param(3, progress_end_index, progress_end_val);
+#else
+	pgstat_progress_update_param(PROGRESS_VACUUM_NUM_INDEX_VACUUMS,
+								 vacrel->num_index_scans);
+#endif
 }
 
 /*
@@ -642,10 +741,13 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 	OIndexDescr *bridge = descr->bridge;
 	BlockNumber vacuumed_pages = 0;
 	LVSavedErrInfo saved_err_info;
+#if PG_VERSION_NUM >= 170000
 	TidStoreIter *iter;
 	TidStoreIterResult *iter_result;
+#endif
 	OBTreeKeyBound bound;
 	bool		have_page = false;
+	int			i;
 
 	init_page_find_context(&context, &bridge->desc,
 						   COMMITSEQNO_INPROGRESS,
@@ -670,14 +772,13 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 							 VACUUM_ERRCB_PHASE_VACUUM_HEAP,
 							 InvalidBlockNumber, InvalidOffsetNumber);
 
+#if PG_VERSION_NUM >= 170000
 	iter = TidStoreBeginIterate(vacrel->dead_items);
 	while ((iter_result = TidStoreIterateNext(iter)) != NULL)
 	{
 		ItemPointerData iptr;
 		BlockNumber blkno;
-
 		OTuple		tuple;
-		int			i;
 
 		vacuum_delay_point();
 
@@ -692,6 +793,26 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 			ItemPointerSetOffsetNumber(&iptr, iter_result->offsets[i]);
 			bound.keys[0].value = ItemPointerGetDatum(&iptr);
+#else
+	for (i = 0; i < vacrel->dead_items->num_items; i++)
+	{
+		ItemPointerData iptr = vacrel->dead_items->items[i];
+		BlockNumber blkno;
+		OTuple		tuple;
+
+		blkno = ItemPointerGetBlockNumber(&iptr);
+		if (blkno != vacrel->blkno)
+		{
+			vacuumed_pages++;
+			vacrel->blkno = blkno;
+		}
+
+		bound.keys[0].value = ItemPointerGetDatum(&iptr);
+
+		{
+			OBtreePageFindItem *item;
+			Page		p;
+#endif
 
 			if (!have_page)
 			{
@@ -753,9 +874,13 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 			END_CRIT_SECTION();
 		}
 
+#if PG_VERSION_NUM >= 170000
 		vacuumed_pages++;
 	}
 	TidStoreEndIterate(iter);
+#else
+	}
+#endif
 
 	if (have_page)
 	{
@@ -767,12 +892,12 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 	 * the second heap pass.  No more, no less.
 	 */
 	Assert(vacrel->num_index_scans > 1 ||
-		   (vacrel->dead_items_info->num_items == vacrel->lpdead_items &&
+		   (NUM_ITEMS(vacrel) == vacrel->lpdead_items &&
 			vacuumed_pages == vacrel->lpdead_item_pages));
 
 	ereport(DEBUG2,
 			(errmsg("table \"%s\": removed %lld dead item identifiers in %u pages",
-					vacrel->relname, (long long) vacrel->dead_items_info->num_items,
+					vacrel->relname, (long long) NUM_ITEMS(vacrel),
 					vacuumed_pages)));
 
 	/* Revert to the previous phase information for error traceback */
@@ -822,7 +947,7 @@ lazy_vacuum(LVRelState *vacrel)
 		BlockNumber threshold;
 
 		Assert(vacrel->num_index_scans == 0);
-		Assert(vacrel->lpdead_items == vacrel->dead_items_info->num_items);
+		Assert(vacrel->lpdead_items == NUM_ITEMS(vacrel));
 		Assert(vacrel->do_index_vacuuming);
 		Assert(vacrel->do_index_cleanup);
 
@@ -849,8 +974,13 @@ lazy_vacuum(LVRelState *vacrel)
 		 * cases then this may need to be reconsidered.
 		 */
 		threshold = (double) vacrel->rel_pages * BYPASS_THRESHOLD_PAGES;
+#if PG_VERSION_NUM >= 170000
 		bypass = (vacrel->lpdead_item_pages < threshold &&
 				  (TidStoreMemoryUsage(vacrel->dead_items) < (32L * 1024L * 1024L)));
+#else
+		bypass = (vacrel->lpdead_item_pages < threshold &&
+				  vacrel->lpdead_items < MAXDEADITEMS(32L * 1024L * 1024L));
+#endif
 	}
 
 	if (bypass)
@@ -894,8 +1024,10 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	Assert(bridge != NULL);
 
 	vacrel->rel_pages = pg_atomic_read_u32(&BTREE_GET_META(&bridge->desc)->leafPagesNum);
+#if PG_VERSION_NUM >= 170000
 	vacrel->current_block = InvalidBlockNumber;
 	vacrel->offsets_count = 0;
+#endif
 
 	init_page_find_context(&context, &bridge->desc,
 						   COMMITSEQNO_INPROGRESS,
@@ -937,7 +1069,11 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 				add_dead_item(vacrel, iptr);
 				vacrel->lpdead_items++;
 
+#if PG_VERSION_NUM >= 170000
 				if (TidStoreMemoryUsage(vacrel->dead_items) > vacrel->dead_items_info->max_bytes)
+#else
+				if (vacrel->dead_items->num_items >= vacrel->dead_items->max_items)
+#endif
 				{
 					/* Perform a round of index and heap vacuuming */
 					vacrel->consider_bypass_optimization = false;
@@ -962,7 +1098,9 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 		blocksScanned++;
 	} while (find_right_page(&context, &hikey));
 
+#if PG_VERSION_NUM >= 170000
 	finish_dead_items(vacrel);
+#endif
 
 	/* report that everything is now scanned */
 	pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_SCANNED, blocksScanned);
@@ -979,7 +1117,7 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	 * Do index vacuuming (call each index's ambulkdelete routine), then do
 	 * related heap vacuuming
 	 */
-	if (vacrel->dead_items_info->num_items > 0)
+	if (NUM_ITEMS(vacrel) > 0)
 		lazy_vacuum(vacrel);
 
 	/* report all blocks vacuumed */
@@ -1206,6 +1344,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 static void
 dead_items_reset(LVRelState *vacrel)
 {
+#if PG_VERSION_NUM >= 170000
 	if (ParallelVacuumIsActive(vacrel))
 	{
 		parallel_vacuum_reset_dead_items(vacrel->pvs);
@@ -1218,6 +1357,9 @@ dead_items_reset(LVRelState *vacrel)
 
 	/* Reset the counter */
 	vacrel->dead_items_info->num_items = 0;
+#else
+	vacrel->dead_items->num_items = 0;
+#endif
 }
 
 /*
