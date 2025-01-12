@@ -597,24 +597,25 @@ unlock_page(OInMemoryBlkno blkno)
 #endif
 
 #ifdef CHECK_PAGE_STATS
-
-	/*
-	 * XXX: index_oids_get_btree_descr() might expand a hash table under
-	 * critical section.
-	 */
-	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
-
-	if (O_PAGE_IS(p, LEAF) && page_desc->type != oIndexInvalid)
 	{
-		ORelOids	oids = page_desc->oids;
-		BTreeDescr *desc;
+		/*
+		 * XXX: index_oids_get_btree_descr() might expand a hash table under
+		 * critical section.
+		 */
+		OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 
-		if (!IS_SYS_TREE_OIDS(oids))
-			desc = index_oids_get_btree_descr(oids, page_desc->type);
-		else
-			desc = get_sys_tree_no_init(oids.reloid);
-		if (desc)
-			o_check_btree_page_statistics(desc, p);
+		if (O_PAGE_IS(p, LEAF) && page_desc->type != oIndexInvalid)
+		{
+			ORelOids	oids = page_desc->oids;
+			BTreeDescr *desc;
+
+			if (!IS_SYS_TREE_OIDS(oids))
+				desc = index_oids_get_btree_descr(oids, page_desc->type);
+			else
+				desc = get_sys_tree_no_init(oids.reloid);
+			if (desc)
+				o_check_btree_page_statistics(desc, p);
+		}
 	}
 #endif
 
