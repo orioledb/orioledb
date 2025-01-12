@@ -225,7 +225,7 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	OXid		oxid;
 	TupleTableSlot *bridge_slot;
 	OTableSlot *bridge_oslot;
-	OTableModifyResult result;
+	OTableModifyResult result PG_USED_FOR_ASSERTS_ONLY;
 
 	bridge_slot = descr->bridge->new_leaf_slot;
 	bridge_oslot = (OTableSlot *) bridge_slot;

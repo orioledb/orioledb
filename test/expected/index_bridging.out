@@ -1153,7 +1153,7 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
      Item 4: deleted, offset = 528, tuple = ('5', null, '(0.05,0.1)', '(0,5)') +
                                                                                +
  Index index_bridge contents                                                   +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 160                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                           +
  state = free, datoid equal, relnode equal, ix_type = bridge, dirty            +
      Leftmost, Rightmost                                                       +
    Chunk 0: offset = 0, location = 256, hikey location = 64                    +
