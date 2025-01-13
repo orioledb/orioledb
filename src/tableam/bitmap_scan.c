@@ -407,12 +407,13 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 																   (Pointer) &bridge_bound, BTreeKeyBound,
 																   &o_in_progress_snapshot, &tupleCsn,
 																   CurrentMemoryContext, NULL);
-							Assert(!O_TUPLE_IS_NULL(bridge_tup));
+							if (!O_TUPLE_IS_NULL(bridge_tup))
+							{
+								data = seconary_tuple_get_pk_data(bridge_tup, bridge);
+								o_keybitmap_insert(result, data);
 
-							data = seconary_tuple_get_pk_data(bridge_tup, bridge);
-							o_keybitmap_insert(result, data);
-
-							pfree(bridge_tup.data);
+								pfree(bridge_tup.data);
+							}
 						}
 					}
 

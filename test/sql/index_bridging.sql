@@ -128,9 +128,34 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams ORDER BY j;
 COMMIT;
 
-UPDATE o_test_ix_ams SET k = j/2 + 1000;
+\d+ o_test_ix_ams
+-- Don't update bridge_index when updated column not indexed by any bridged index
+UPDATE o_test_ix_ams SET p = point(i * 40 + 1, i * 5);
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
+-- Now it should update bridging_ctid-s
+UPDATE o_test_ix_ams SET j = j/2 + 1000;
+
+SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+
+-- Rows with new bridging_ctid now not stored in o_test_ix_ams_ix1
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_ix_ams ORDER BY j;
+SELECT * FROM o_test_ix_ams ORDER BY j;
+COMMIT;
+
+-- After reindex new rows should be visible
+REINDEX INDEX o_test_ix_ams_ix1;
 
 BEGIN;
 SET LOCAL enable_seqscan = off;
