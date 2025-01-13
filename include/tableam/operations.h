@@ -109,7 +109,8 @@ extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 									   Relation rel, OXid oxid,
 									   CommitSeqNo csn,
 									   BTreeLocationHint *hint,
-									   OModifyCallbackArg *arg);
+									   OModifyCallbackArg *arg,
+									   ItemPointer bridge_ctid);
 extern OTableModifyResult o_update_secondary_index(OIndexDescr *id,
 												   OIndexNumber ix_num,
 												   bool new_valid,

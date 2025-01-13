@@ -37,6 +37,7 @@
 #include "nodes/execnodes.h"
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
@@ -587,13 +588,14 @@ OTableModifyResult
 o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			 OBTreeKeyBound *oldPkey, Relation rel, OXid oxid,
 			 CommitSeqNo csn, BTreeLocationHint *hint,
-			 OModifyCallbackArg *arg)
+			 OModifyCallbackArg *arg, ItemPointer bridge_ctid)
 {
 	TupleTableSlot *oldSlot;
 	OTableModifyResult mres;
 	OBTreeKeyBound newPkey;
 	OTuple		newTup;
 	OIndexDescr *primary = GET_PRIMARY(descr);
+	bool touched_indices = false;
 
 	if (slot->tts_ops != descr->newTuple->tts_ops)
 	{
@@ -608,16 +610,105 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		slot->tts_tid = *((ItemPointerData *) DatumGetPointer(oldPkey->keys[0].value));
 	}
 
+	if (bridge_ctid)
+	{
+		OTableSlot *oslot = (OTableSlot *) slot;
+		oslot->bridge_ctid = *bridge_ctid;
+	}
+
 	if (descr->bridge)
-		apply_new_bridge_index_ctid(descr, rel, slot, csn);
+	{
+		List	   *indexIds;
+		ListCell   *indexId;
+		int 		attnum;
+		TupleTableSlot *newSlot;
+		Bitmapset   *changed_attrs = NULL;
+
+		/* not using simple reindex_relation here anymore, */
+		/* because we hold a lock on relation already */
+		indexIds = RelationGetIndexList(rel);
+
+		oldSlot = arg->scanSlot;
+		newSlot = &arg->newSlot->base;
+		Assert(oldSlot->tts_tupleDescriptor->natts == newSlot->tts_tupleDescriptor->natts);
+		for (attnum = 0; attnum < oldSlot->tts_tupleDescriptor->natts; attnum++)
+		{
+			Form_pg_attribute attr = &oldSlot->tts_tupleDescriptor->attrs[attnum];
+
+			if ((oldSlot->tts_isnull[attnum] != newSlot->tts_isnull[attnum]) ||
+				(!oldSlot->tts_isnull[attnum] &&
+				 !datumIsEqual(oldSlot->tts_values[attnum], newSlot->tts_values[attnum],
+				 			   attr->attbyval, attr->attlen)))
+			{
+				changed_attrs = bms_add_member(changed_attrs, attnum);
+			}
+		}
+
+		foreach(indexId, indexIds)
+		{
+			Oid			indexOid = lfirst_oid(indexId);
+			Relation	index_rel = index_open(indexOid, AccessExclusiveLock);
+			bool		intresting = index_rel->rd_rel->relam != BTREE_AM_OID;
+
+			if (!intresting)
+			{
+				OBTOptions *options = (OBTOptions *) index_rel->rd_options;
+				intresting = options && options->index_bridging;
+			}
+			if (intresting)
+			{
+				for (attnum = 0; attnum < index_rel->rd_index->indnatts; attnum++)
+				{
+					AttrNumber	tbl_attnum = index_rel->rd_index->indkey.values[attnum];
+
+					if (index_rel->rd_indpred != NIL)
+					{
+						ExprState  *predicate;
+						EState	   *estate;
+						ExprContext *econtext;
+
+						estate = CreateExecutorState();
+						predicate = ExecPrepareQual(index_rel->rd_indpred, estate);
+
+						econtext = GetPerTupleExprContext(estate);
+						econtext->ecxt_scantuple = newSlot;
+
+						/* Skip this index-update if the predicate isn't satisfied */
+						if (!ExecQual(predicate, econtext))
+						{
+							FreeExecutorState(estate);
+							continue;
+						}
+						FreeExecutorState(estate);
+					}
+
+					if (AttributeNumberIsValid(tbl_attnum))
+					{
+						if (bms_is_member(tbl_attnum - 1, changed_attrs))
+							touched_indices = true;
+					}
+					else
+					{
+						Assert(false); /* Expression indices not implemented yet. */
+					}
+
+					if (touched_indices)
+						break;
+				}
+			}
+			index_close(index_rel, AccessExclusiveLock);
+		}
+	}
 
 	tts_orioledb_toast(slot, descr);
+	tts_orioledb_fill_key_bound(slot, GET_PRIMARY(descr), &newPkey);
+	if (touched_indices)
+		apply_new_bridge_index_ctid(descr, rel, slot, csn);
+
 	newTup = tts_orioledb_form_tuple(slot, descr);
 	o_btree_check_size_of_tuple(o_tuple_size(newTup, &primary->leafSpec),
 								RelationGetRelationName(rel),
 								false);
-
-	tts_orioledb_fill_key_bound(slot, GET_PRIMARY(descr), &newPkey);
 
 	if (is_keys_eq(&GET_PRIMARY(descr)->desc, oldPkey, &newPkey))
 	{
@@ -658,6 +749,12 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		if (mres.action == BTreeOperationUpdate)
 		{
 			oldSlot = mres.oldTuple;
+			if (touched_indices)
+			{
+				OTableSlot *oslot = (OTableSlot *) oldSlot;
+
+				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
+			}
 			mres.failedIxNum = TOASTIndexNumber;
 			mres.success = tts_orioledb_update_toast_values(oldSlot, slot, descr,
 															oxid, csn);
@@ -673,6 +770,12 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		else if (mres.action == BTreeOperationDelete)
 		{
 			oldSlot = mres.oldTuple;
+			if (descr->bridge)
+			{
+				OTableSlot *oslot = (OTableSlot *) oldSlot;
+
+				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
+			}
 			/* reinsert TOAST value */
 			mres.failedIxNum = TOASTIndexNumber;
 			/* insert new value in TOAST table */
@@ -1075,7 +1178,14 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 {
 	OTableModifyResult result;
 	OBTreeModifyResult res;
-	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
+	OModifyCallbackArg marg = {0};
+	BTreeModifyCallbackInfo callbackInfo = {
+		.waitCallback = NULL,
+		.modifyDeletedCallback = o_delete_deleted_callback,
+		.modifyCallback = o_delete_callback,
+		.needsUndoForSelfCreated = false,
+		.arg = &marg
+	};
 	OBTreeKeyBound bound;
 	OTuple		nullTup;
 
@@ -1089,7 +1199,7 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 						 oxid, csn, RowLockUpdate,
 						 NULL, &callbackInfo);
 
-	result.success = (res == OBTreeModifyResultDeleted);
+	result.success = (res == OBTreeModifyResultDeleted) || marg.deleted;
 	if (!result.success)
 	{
 		result.success = false;
