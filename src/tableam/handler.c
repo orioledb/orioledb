@@ -82,7 +82,7 @@ typedef OScanDescData *OScanDesc;
  */
 static void get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 								BTreeLocationHint *hint, CommitSeqNo *csn,
-								uint32 *version);
+								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
 
 
@@ -205,7 +205,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	}
 	else
 		get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
-							&csn, &version);
+							&csn, &version, NULL);
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
 
 	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
@@ -281,7 +281,7 @@ orioledb_fetch_row_version(Relation relation,
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
-						&csn, &version);
+						&csn, &version, NULL);
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
 
 	tuple = o_btree_find_tuple_by_key_cb(&GET_PRIMARY(descr)->desc,
@@ -482,7 +482,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL, NULL);
 
 	mres = o_tbl_delete(relation, descr, &pkey, oxid,
 						oSnapshot.csn, &hint, &marg);
@@ -550,6 +550,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OXid		oxid;
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
+	ItemPointer	bridge_ctid = NULL;
 
 	if (snapshot)
 		O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
@@ -570,7 +571,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	oxid = get_current_oxid();
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
-						&marg.csn, NULL);
+						&marg.csn, NULL, descr->bridge ? &bridge_ctid : NULL);
 	if (slot->tts_ops != descr->newTuple->tts_ops)
 	{
 		ExecCopySlot(descr->newTuple, slot);
@@ -589,7 +590,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 											   INDEX_ATTR_BITMAP_KEY);
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid,
-						oSnapshot.csn, &hint, &marg);
+						oSnapshot.csn, &hint, &marg, bridge_ctid);
 
 	if (mres.self_modified)
 	{
@@ -664,7 +665,7 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	larg.selfModified = false;
 	larg.deleted = false;
 
-	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL, NULL);
 
 	res = o_tbl_lock(descr, &pkey, mode, oxid, &larg, &hint);
 
@@ -2047,7 +2048,8 @@ relation_get_descr(Relation rel)
 
 static void
 get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
-					BTreeLocationHint *hint, CommitSeqNo *csn, uint32 *version)
+					BTreeLocationHint *hint, CommitSeqNo *csn, uint32 *version,
+					ItemPointer *bridge_ctid)
 {
 	bytea	   *rowid;
 	Pointer		p;
@@ -2068,7 +2070,11 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 			*csn = add->csn;
 
 		if (id->bridging)
+		{
+			if (bridge_ctid)
+				*bridge_ctid = (ItemPointer) p;
 			p += MAXALIGN(sizeof(ItemPointerData));
+		}
 
 		tuple.data = p;
 		tuple.formatFlags = add->flags;
@@ -2094,6 +2100,13 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		key->keys[0].type = TIDOID;
 		key->keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		key->keys[0].comparator = NULL;
+
+		if (id->bridging)
+		{
+			p += MAXALIGN(sizeof(ItemPointerData));
+			if (bridge_ctid)
+				*bridge_ctid = (ItemPointer) p;
+		}
 	}
 }
 

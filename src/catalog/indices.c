@@ -415,12 +415,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 				compress = o_parse_compress(str);
 		}
 
-		if (options->index_bridging)
-		{
-			ereport(WARNING, errmsg("Using bridged btree index for orioledb"),
-					errdetail("this feature is only for debugging"));
-			return;
-		}
 		fillfactor = options->bt_options.fillfactor;
 		Assert(!options->index_bridging);
 	}

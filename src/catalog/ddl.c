@@ -2472,6 +2472,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						else if (rel->rd_rel->relam == BTREE_AM_OID)
 						{
 							define = true;
+
+							if (!in_rewrite && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
+								ereport(WARNING, errmsg("Using bridged btree index for orioledb"),
+										errdetail("this feature is only for testing"));
 						}
 
 						if (define)
