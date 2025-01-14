@@ -42,7 +42,7 @@ jobs:
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
       - name: Check
-        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 120 || 20 }}
+        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || 20 }}
         run: bash ./orioledb/ci/check.sh
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
