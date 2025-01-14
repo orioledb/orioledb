@@ -1167,19 +1167,6 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	checkpoint_chkp_nums(flags, cur_chkp_num, &chkp_tbl_arg);
 
-	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
-
-	chkp_inc_changecount_before(checkpoint_state);
-	checkpoint_state->lastCheckpointNumber++;
-	checkpoint_state->treeType = oIndexInvalid;
-	checkpoint_state->datoid = InvalidOid;
-	checkpoint_state->reloid = InvalidOid;
-	checkpoint_state->relnode = InvalidOid;
-	checkpoint_state->completed = false;
-	chkp_inc_changecount_after(checkpoint_state);
-
-	LWLockRelease(&checkpoint_state->oTablesMetaLock);
-
 	/*
 	 * It might happen there is no secondary indices, but we still need to set
 	 * toastConsistentPtr.
@@ -1230,6 +1217,68 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 					   checkpoint_xmax,
 					   WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);
 
+	if (checkpoint_state->controlIdentifier == 0)
+	{
+		struct timeval tv;
+		uint64		controlIdentifier = 0;
+
+		gettimeofday(&tv, NULL);
+		controlIdentifier = ((uint64) tv.tv_sec) << 32;
+		controlIdentifier |= ((uint64) tv.tv_usec) << 12;
+		controlIdentifier |= getpid() & 0xFFF;
+
+		checkpoint_state->controlIdentifier = controlIdentifier;
+	}
+
+	control.controlIdentifier = checkpoint_state->controlIdentifier;
+	control.lastCheckpointNumber = checkpoint_state->lastCheckpointNumber + 1;
+	control.lastCSN = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+	control.lastXid = pg_atomic_read_u64(&xid_meta->nextXid);
+	control.sysTreesStartPtr = checkpoint_state->sysTreesStartPtr;
+	control.replayStartPtr = checkpoint_state->replayStartPtr;
+	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
+	control.mmapDataLength = pg_atomic_read_u64(&checkpoint_state->mmapDataLength);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+		CheckpointUndoInfo *undo_info = &control.undoInfo[i];
+
+		undo_info->lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
+		undo_info->checkpointRetainStartLocation = checkpoint_start_loc[i];
+		undo_info->checkpointRetainEndLocation = checkpoint_end_loc[i];
+	}
+	control.checkpointRetainXmin = checkpoint_xmin;
+	control.checkpointRetainXmax = checkpoint_xmax;
+	control.binaryVersion = ORIOLEDB_BINARY_VERSION;
+	control.s3Mode = orioledb_s3_mode;
+
+	write_checkpoint_control(&control);
+
+	/*
+	 * Once we've written a new control file, we know that we will start
+	 * recovery from a new checkpoint.  Then we can start releasing the
+	 * resources.
+	 */
+
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+
+	/*
+	 * This will let processes reuse data pages of previous checkpoint.
+	 */
+	chkp_inc_changecount_before(checkpoint_state);
+	checkpoint_state->lastCheckpointNumber++;
+	checkpoint_state->treeType = oIndexInvalid;
+	checkpoint_state->datoid = InvalidOid;
+	checkpoint_state->reloid = InvalidOid;
+	checkpoint_state->relnode = InvalidOid;
+	checkpoint_state->completed = false;
+	chkp_inc_changecount_after(checkpoint_state);
+
+	LWLockRelease(&checkpoint_state->oTablesMetaLock);
+
+	/*
+	 * Also release xidmap and undo ranges retained for previous checkpoint.
+	 */
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
 		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
@@ -1252,42 +1301,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
 
-	if (checkpoint_state->controlIdentifier == 0)
-	{
-		struct timeval tv;
-		uint64		controlIdentifier = 0;
-
-		gettimeofday(&tv, NULL);
-		controlIdentifier = ((uint64) tv.tv_sec) << 32;
-		controlIdentifier |= ((uint64) tv.tv_usec) << 12;
-		controlIdentifier |= getpid() & 0xFFF;
-
-		checkpoint_state->controlIdentifier = controlIdentifier;
-	}
-
-	control.controlIdentifier = checkpoint_state->controlIdentifier;
-	control.lastCheckpointNumber = checkpoint_state->lastCheckpointNumber;
-	control.lastCSN = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
-	control.lastXid = pg_atomic_read_u64(&xid_meta->nextXid);
-	control.sysTreesStartPtr = checkpoint_state->sysTreesStartPtr;
-	control.replayStartPtr = checkpoint_state->replayStartPtr;
-	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
-	control.mmapDataLength = pg_atomic_read_u64(&checkpoint_state->mmapDataLength);
-	for (i = 0; i < (int) UndoLogsCount; i++)
-	{
-		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
-		CheckpointUndoInfo *undo_info = &control.undoInfo[i];
-
-		undo_info->lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
-		undo_info->checkpointRetainStartLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainStartLocation);
-		undo_info->checkpointRetainEndLocation = pg_atomic_read_u64(&undo_meta->checkpointRetainEndLocation);
-	}
-	control.checkpointRetainXmin = pg_atomic_read_u64(&xid_meta->checkpointRetainXmin);
-	control.checkpointRetainXmax = pg_atomic_read_u64(&xid_meta->checkpointRetainXmax);
-	control.binaryVersion = ORIOLEDB_BINARY_VERSION;
-	control.s3Mode = orioledb_s3_mode;
-
-	write_checkpoint_control(&control);
+	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
 	/*
 	 * Now we can free extents for compressed indices
@@ -1343,8 +1357,6 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	}
 
 	CheckPointProgress = o_checkpoint_completion_ratio;
-
-	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
 	o_unset_syscache_hooks();
 
