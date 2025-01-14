@@ -5,6 +5,7 @@ from itertools import chain, groupby
 import re
 import os
 import glob
+import unittest
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
@@ -547,3 +548,42 @@ class FilesTest(BaseTest):
 		    [0][0], 0)
 		con1.close()
 		node.stop()
+
+	@unittest.skipIf(not BaseTest.sparse_files_supported(),
+	                 'sparse files are not supported by file system')
+	def test_sparse_files(self):
+		BaseTest.sparse_files_supported()
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.enable_stopevents = true\n"
+		    "checkpoint_timeout = 1d\n"
+		    "orioledb.use_sparse_files = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id int NOT NULL,\n"
+		    "	val text NOT NULL,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n"
+		    "INSERT INTO o_test\n"
+		    "	(SELECT id, repeat('x', 250) FROM generate_series(1, 1000, 1) id);\n"
+		    "CHECKPOINT;\n")
+
+		con = node.connect()
+		datoid = con.execute(
+		    "SELECT oid FROM pg_database WHERE datname = 'postgres';")[0][0]
+		relnode = con.execute(
+		    "SELECT relfilenode FROM pg_class WHERE relname = 'o_test_pkey';"
+		)[0][0]
+		con.close()
+
+		fname = f"{node.data_dir}/orioledb_data/{datoid}/{relnode}"
+		stat1 = os.stat(fname)
+
+		node.safe_psql("UPDATE o_test SET val = repeat('y', 250);\n"
+		               "CHECKPOINT;\n")
+		stat2 = os.stat(fname)
+
+		self.assertEqual(2 * stat1.st_size, stat2.st_size)
+		self.assertEqual(stat1.st_blocks, stat2.st_blocks)

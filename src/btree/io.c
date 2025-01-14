@@ -12,6 +12,7 @@
  */
 #include "postgres.h"
 
+#include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -780,6 +781,64 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 }
 
 void
+btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
+					  off_t offset, int length)
+{
+	Assert(!orioledb_s3_mode && !use_mmap && !use_device);
+
+	while (length > 0)
+	{
+		File		file;
+		int			fd;
+		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		off_t		segoffset;
+		int			seglength;
+		int			ret;
+
+		file = btree_open_smgr_file(desc, segno, chkpNum, 0);
+		fd = FileGetRawDesc(file);
+
+		segoffset = offset % ORIOLEDB_SEGMENT_SIZE;
+		if ((offset + length) / ORIOLEDB_SEGMENT_SIZE == segno)
+		{
+			seglength = length;
+			length = 0;
+		}
+		else
+		{
+			seglength = ORIOLEDB_SEGMENT_SIZE - segoffset;
+			Assert(length >= seglength);
+
+			offset += seglength;
+			length -= seglength;
+		}
+#ifdef __APPLE__
+		{
+			fpunchhole_t hole;
+
+			memset(&hole, 0, sizeof(hole));
+			hole.fp_offset = segoffset;
+			hole.fp_length = seglength;
+			ret = fcntl(fd, F_PUNCHHOLE, &hole);
+		}
+#else
+		ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+						segoffset, seglength);
+#endif
+		if (ret < 0)
+		{
+			int			save_errno = errno;
+
+			ereport(WARNING,
+					(errcode_for_file_access(),
+					 errmsg("fail to punch sparse file hole datoid=%u relnode=%u offset=%llu length=%d (%d %s)",
+							desc->oids.datoid, desc->oids.relnode,
+							(unsigned long long) offset, length, save_errno, strerror(save_errno))));
+		}
+	}
+}
+
+void
 btree_io_error_cleanup(void)
 {
 	if (io_in_progress)
@@ -900,7 +959,9 @@ get_free_disk_offset(BTreeDescr *desc)
 			else
 			{
 				Assert(old_tag.type == 't');
-				seq_buf_remove_file(&old_tag);
+				if (!orioledb_use_sparse_files ||
+					old_tag.num <= metaPage->punchHolesChkpNum)
+					seq_buf_remove_file(&old_tag);
 			}
 		}
 		LWLockRelease(metaLock);
@@ -913,6 +974,9 @@ get_free_disk_offset(BTreeDescr *desc)
 		numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
 		free_buf_num = metaPage->freeBuf.tag.num;
 	}
+
+	if (orioledb_use_sparse_files)
+		try_to_punch_holes(desc);
 
 	/*
 	 * Try to get free block number from the buffer.  If not success, then
@@ -2216,6 +2280,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	evicted_tree_data.maxLocation[1] = metaPage->partsInfo[1].writeMaxLocation;
 	evicted_tree_data.dirtyFlag1 = metaPage->dirtyFlag1;
 	evicted_tree_data.dirtyFlag2 = metaPage->dirtyFlag2;
+	evicted_tree_data.punchHolesChkpNum = metaPage->punchHolesChkpNum;
 
 	notModified = (!metaPage->dirtyFlag1 && !metaPage->dirtyFlag2);
 
@@ -2980,4 +3045,95 @@ bool
 fsync_btree_files(Oid datoid, Oid relnode)
 {
 	return iterate_relnode_files(datoid, relnode, fsync_callback, NULL);
+}
+
+void
+try_to_punch_holes(BTreeDescr *desc)
+{
+	BTreeMetaPage *metaPage;
+	File		file;
+	uint64		file_size;
+	char	   *filename,
+				buf[ORIOLEDB_BLCKSZ];
+	uint64		len = 0,
+				i,
+				buf_len;
+	uint32		chkp_num;
+	LWLock	   *metaLock;
+
+	Assert(orioledb_use_sparse_files);
+	Assert(!OCompressIsValid(desc->compress));
+
+	o_btree_load_shmem(desc);
+	metaPage = BTREE_GET_META(desc);
+	metaLock = &metaPage->metaLock;
+
+	chkp_num = metaPage->punchHolesChkpNum + 1;
+	while (can_use_checkpoint_extents(desc, chkp_num))
+	{
+		SeqBufTag	tag;
+		bool		removeFile = false;
+
+		LWLockAcquire(metaLock, LW_EXCLUSIVE);
+		if (chkp_num == metaPage->punchHolesChkpNum + 1)
+		{
+			metaPage->punchHolesChkpNum = chkp_num;
+			if (chkp_num < metaPage->freeBuf.tag.num)
+				removeFile = true;
+		}
+		else
+		{
+			LWLockRelease(metaLock);
+			return;
+		}
+		LWLockRelease(metaLock);
+
+		tag.datoid = desc->oids.datoid;
+		tag.relnode = desc->oids.relnode;
+		tag.type = 't';
+		tag.num = chkp_num;
+		if (!seq_buf_file_exist(&tag))
+		{
+			/* table may be deleted or *.tmp file not created */
+			chkp_num++;
+			continue;
+		}
+
+		/* free extents from *.tmp file */
+		filename = get_seq_buf_filename(&tag);
+		file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+		if (file < 0)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not open file %s", filename)));
+		file_size = FileSize(file);
+
+		while (true)
+		{
+			BlockNumber *cur_off;
+
+			buf_len = OFileRead(file, buf, ORIOLEDB_BLCKSZ, len, WAIT_EVENT_DATA_FILE_READ);
+			if (buf_len <= 0)
+				break;
+
+			cur_off = (BlockNumber *) buf;
+			for (i = 0; i < buf_len; i += sizeof(BlockNumber))
+			{
+				btree_smgr_punch_hole(desc, chkp_num,
+									  (off_t) (*cur_off) * (off_t) ORIOLEDB_BLCKSZ,
+									  ORIOLEDB_BLCKSZ);
+				cur_off++;
+			}
+			len += buf_len;
+		}
+		if (file_size != len)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read data from checkpoint tmp file: %s %lu %lu",
+								   filename, len, file_size)));
+
+		pfree(filename);
+		FileClose(file);
+
+		if (removeFile)
+			seq_buf_remove_file(&tag);
+	}
 }

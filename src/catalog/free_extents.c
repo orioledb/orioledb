@@ -549,6 +549,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 {
 	BTreeMetaPage *metaPage;
 	File		file;
+	uint64		file_size;
 	char	   *filename,
 				buf[ORIOLEDB_BLCKSZ];
 	uint64		len = 0,
@@ -562,7 +563,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 	metaLock = &metaPage->metaLock;
 
 	chkp_num = metaPage->freeBuf.tag.num + 1;
-	if (!can_use_checkpoint_extents(desc, metaPage->freeBuf.tag.num + 1))
+	if (!can_use_checkpoint_extents(desc, chkp_num))
 		return;
 
 	LWLockAcquire(metaLock, LW_EXCLUSIVE);
@@ -584,23 +585,39 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		if (file < 0)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not open file %s", filename)));
+		file_size = FileSize(file);
 
-		do
+		while (true)
 		{
 			FileExtent *cur_off;
 
 			buf_len = OFileRead(file, buf, ORIOLEDB_BLCKSZ, len, WAIT_EVENT_DATA_FILE_READ);
+
+			if (buf_len <= 0)
+				break;
+
 			cur_off = (FileExtent *) buf;
 			for (i = 0; i < buf_len; i += sizeof(FileExtent))
 			{
 				pg_atomic_fetch_add_u64(&metaPage->numFreeBlocks,
 										(uint64) cur_off->len);
+
+				/* Punch holes if needed */
+				if (orioledb_use_sparse_files)
+				{
+					btree_smgr_punch_hole(desc, chkp_num,
+										  (off_t) cur_off->off * (off_t) ORIOLEDB_COMP_BLCKSZ,
+										  (off_t) cur_off->len * (off_t) ORIOLEDB_COMP_BLCKSZ);
+				}
 				free_extent(desc, *cur_off);
 				cur_off++;
 			}
 			len += buf_len;
 		}
-		while (buf_len == ORIOLEDB_BLCKSZ);
+		if (file_size != len)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read data from checkpoint tmp file: %s %lu %lu",
+								   filename, len, file_size)));
 
 		pfree(filename);
 		FileClose(file);
