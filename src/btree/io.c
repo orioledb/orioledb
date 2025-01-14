@@ -12,6 +12,7 @@
  */
 #include "postgres.h"
 
+#include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -777,6 +778,55 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 		file = btree_open_smgr_file(desc, num, chkpNum, loadId);
 		FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
 	}
+}
+
+bool
+btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
+					  off_t offset, int length)
+{
+	Assert(!orioledb_s3_mode && !use_mmap && !use_device);
+
+	while (length > 0)
+	{
+		File		file;
+		int			fd;
+		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+		off_t		segoffset;
+		int			seglength;
+		int			ret;
+
+		file = btree_open_smgr_file(desc, segno, chkpNum, 0);
+		fd = FileGetRawDesc(file);
+
+		segoffset = offset % ORIOLEDB_SEGMENT_SIZE;
+		if ((offset + length) / ORIOLEDB_SEGMENT_SIZE == segno)
+		{
+			seglength = length;
+			length = 0;
+		}
+		else
+		{
+			seglength = ORIOLEDB_SEGMENT_SIZE - segoffset;
+			Assert(length >= seglength);
+
+			offset += seglength;
+			length -= seglength;
+		}
+#ifdef __APPLE__
+		{
+			fpunchhole_t	hole;
+
+			hole.fp_offset = segoffset;
+			hole.fp_length = seglength;
+			ret = fcntl(fd, F_PUNCHHOLE, &hole);
+		}
+#else
+		ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE, segoffset, seglength);
+#endif
+		if (ret < 0)
+			return false;
+	}
+	return true;
 }
 
 void
