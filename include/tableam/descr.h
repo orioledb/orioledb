@@ -169,7 +169,7 @@ struct OIndexDescr
 
 #define OIndexKeyAttnumToTupleAttnum(keyType, idx, attnum) \
 	((keyType) == BTreeKeyLeafTuple && (idx)->desc.type == oIndexPrimary ? \
-	 idx->fields[(attnum) - 1].tableAttnum : \
+	 idx->fields[(attnum) - 1].tableAttnum + (idx->bridging && !idx->primaryIsCtid ? 1 : 0) : \
 	 (attnum))
 
 #define OGetIndexContext(index) \

@@ -191,7 +191,8 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum : i + 1;
+		int			ctid_off = id->bridging ? 1 : 0;
+		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum + ctid_off : i + 1;
 
 		Assert(attnum > 0);
 		key[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
@@ -824,7 +825,6 @@ o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 	return 0;
 #endif
 }
-
 
 int
 o_idx_cmp(BTreeDescr *desc,

@@ -308,7 +308,8 @@ Datum
 o_toast_nocachegetattr(OTuple tuple,
 					   int attnum,
 					   TupleDesc tupleDesc,
-					   OTupleFixedFormatSpec *spec)
+					   OTupleFixedFormatSpec *spec,
+					   bool *is_null)
 {
 	OTupleHeader tup = (OTupleHeader) tuple.data;
 	char	   *tp;				/* ptr to data part of tuple */
@@ -316,7 +317,8 @@ o_toast_nocachegetattr(OTuple tuple,
 	int			i;
 	OTupleReaderState reader;
 	Datum		result = (Datum) 0;
-	bool		is_null = false;
+
+	*is_null = false;
 
 	/* ----------------
 	 *	 Three cases:
@@ -381,9 +383,19 @@ o_toast_nocachegetattr(OTuple tuple,
 
 	o_tuple_init_reader(&reader, tuple, tupleDesc, spec);
 	for (i = 0; i <= attnum; i++)
-		result = o_tuple_read_next_field(&reader, &is_null);
+		result = o_tuple_read_next_field(&reader, is_null);
 
-	Assert(!is_null);
+	if (*is_null && !tup->hasnulls && tup->natts < tupleDesc->natts)
+	{
+		/*
+		 * This possible when reading tuple without nulls after adding null
+		 * column
+		 */
+		*is_null = true;
+		return 0;
+	}
+
+	Assert(!(*is_null));
 
 	return result;
 }
@@ -425,6 +437,8 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, BrigeData *brid
 				ctid_off = 0;
 
 	if (iptr)
+		ctid_off++;
+	if (has_bridge_ctid)
 		ctid_off++;
 
 	for (i = 0; i < natts; i++)
@@ -496,11 +510,14 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	int			i,
 				natts,
 				ctid_off = 0;
+	bool		has_bridge_ctid = bridge_data && bridge_data->attnum != InvalidAttrNumber;
 	Size		result;
 
 	natts = tupleDesc->natts;
 
 	if (iptr)
+		ctid_off++;
+	if (has_bridge_ctid)
 		ctid_off++;
 
 	/*
@@ -561,6 +578,8 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	bool		has_bridge_ctid = bridge_data && bridge_data->attnum != InvalidAttrNumber;
 
 	if (iptr)
+		ctid_off++;
+	if (bridge_data && bridge_data->is_pkey)
 		ctid_off++;
 
 	/*
