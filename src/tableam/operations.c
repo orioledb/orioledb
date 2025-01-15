@@ -595,7 +595,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	OBTreeKeyBound newPkey;
 	OTuple		newTup;
 	OIndexDescr *primary = GET_PRIMARY(descr);
-	bool touched_indices = false;
+	bool		touched_indices = false;
 
 	if (slot->tts_ops != descr->newTuple->tts_ops)
 	{
@@ -613,6 +613,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	if (bridge_ctid)
 	{
 		OTableSlot *oslot = (OTableSlot *) slot;
+
 		oslot->bridge_ctid = *bridge_ctid;
 	}
 
@@ -620,9 +621,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	{
 		List	   *indexIds;
 		ListCell   *indexId;
-		int 		attnum;
+		int			attnum;
 		TupleTableSlot *newSlot;
-		Bitmapset   *changed_attrs = NULL;
+		Bitmapset  *changed_attrs = NULL;
 
 		/* not using simple reindex_relation here anymore, */
 		/* because we hold a lock on relation already */
@@ -631,15 +632,30 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		oldSlot = arg->scanSlot;
 		newSlot = &arg->newSlot->base;
 		Assert(oldSlot->tts_tupleDescriptor->natts == newSlot->tts_tupleDescriptor->natts);
-		for (attnum = 0; attnum < oldSlot->tts_tupleDescriptor->natts; attnum++)
+		for (attnum = 0; attnum < oldSlot->tts_nvalid; attnum++)
 		{
 			Form_pg_attribute attr = &oldSlot->tts_tupleDescriptor->attrs[attnum];
 
 			if ((oldSlot->tts_isnull[attnum] != newSlot->tts_isnull[attnum]) ||
 				(!oldSlot->tts_isnull[attnum] &&
 				 !datumIsEqual(oldSlot->tts_values[attnum], newSlot->tts_values[attnum],
-				 			   attr->attbyval, attr->attlen)))
+							   attr->attbyval, attr->attlen)))
 			{
+				changed_attrs = bms_add_member(changed_attrs, attnum);
+			}
+		}
+
+		if (oldSlot->tts_nvalid < newSlot->tts_nvalid)
+		{
+			/*
+			 * This possible during update of rows that have nulls at the end.
+			 * And during ExecModifyTable in ExecGetUpdateNewTuple it calls
+			 * getsomeattrs with natts excluding last null values
+			 */
+			for (attnum = oldSlot->tts_nvalid; attnum < oldSlot->tts_tupleDescriptor->natts; attnum++)
+			{
+				 /* Assuming that tts_isnull big enough */ ;
+				oldSlot->tts_isnull[attnum] = true;
 				changed_attrs = bms_add_member(changed_attrs, attnum);
 			}
 		}
@@ -653,6 +669,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			if (!intresting)
 			{
 				OBTOptions *options = (OBTOptions *) index_rel->rd_options;
+
 				intresting = options && options->index_bridging;
 			}
 			if (intresting)
@@ -673,7 +690,10 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 						econtext = GetPerTupleExprContext(estate);
 						econtext->ecxt_scantuple = newSlot;
 
-						/* Skip this index-update if the predicate isn't satisfied */
+						/*
+						 * Skip this index-update if the predicate isn't
+						 * satisfied
+						 */
 						if (!ExecQual(predicate, econtext))
 						{
 							FreeExecutorState(estate);
@@ -689,7 +709,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 					}
 					else
 					{
-						Assert(false); /* Expression indices not implemented yet. */
+						Assert(false);	/* Expression indices not implemented
+										 * yet. */
 					}
 
 					if (touched_indices)

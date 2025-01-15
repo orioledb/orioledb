@@ -73,7 +73,7 @@ typedef struct BrigeData
 					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
-				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec)) \
+				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
 		)															\
 		:															\
 		(															\
@@ -92,7 +92,7 @@ typedef struct BrigeData
 					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
-				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec)) \
+				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
 		)															\
 		:															\
 		(															\
@@ -103,7 +103,7 @@ typedef struct BrigeData
 			)														\
 			:														\
 			(														\
-				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec)) \
+				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
 			)														\
 		)															\
 	)																\
@@ -189,7 +189,8 @@ extern ItemPointer o_tuple_get_last_iptr(TupleDesc desc,
 										 OTuple tuple, bool *isnull);
 extern Datum o_toast_nocachegetattr(OTuple tuple, int attnum,
 									TupleDesc tupleDesc,
-									OTupleFixedFormatSpec *spec);
+									OTupleFixedFormatSpec *spec,
+									bool *is_null);
 extern Pointer o_toast_nocachegetattr_ptr(OTuple tuple, int attnum,
 										  TupleDesc tupleDesc,
 										  OTupleFixedFormatSpec *spec);

@@ -206,9 +206,6 @@ make_ctid_o_index(OTable *table)
 					   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 					   table->tid_btree_ops_oid);
 
-	for (i = 0; i < table->nfields; i++)
-		result->leafTableFields[nadded++] = table->fields[i];
-
 	if (table->index_bridging)
 	{
 		result->bridging = true;
@@ -216,6 +213,9 @@ make_ctid_o_index(OTable *table)
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
 	}
+
+	for (i = 0; i < table->nfields; i++)
+		result->leafTableFields[nadded++] = table->fields[i];
 
 	return result;
 }
@@ -273,8 +273,6 @@ make_primary_o_index(OTable *table)
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
-	for (i = 0; i < saved_nLeafFields; i++)
-		result->leafTableFields[nadded++] = table->fields[i];
 	if (table->index_bridging)
 	{
 		result->bridging = true;
@@ -282,6 +280,9 @@ make_primary_o_index(OTable *table)
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
 	}
+
+	for (i = 0; i < saved_nLeafFields; i++)
+		result->leafTableFields[nadded++] = table->fields[i];
 
 	j = 0;
 	for (i = 0; i < result->nNonLeafFields; i++)
@@ -868,7 +869,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		{
 			for (i = 0; i < oIndex->nNonLeafFields; i++)
 			{
-				int			attnum = oIndex->leafFields[i].attnum;
+				int			ctid_off = oIndex->bridging ? 1 : 0;
+				int			attnum = oIndex->leafFields[i].attnum + ctid_off;
 
 				Assert(attnum >= 0 && attnum < oIndex->nLeafFields);
 				TupleDescCopyEntry(descr->nonLeafTupdesc,

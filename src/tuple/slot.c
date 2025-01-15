@@ -148,7 +148,8 @@ tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr)
 	}
 
 	result = o_form_tuple(id->nonLeafTupdesc, &id->nonLeafSpec,
-						  ((OTableSlot *) slot)->version, key, isnull, NULL);
+						  ((OTableSlot *) slot)->version, key, isnull,
+						  NULL);
 	return result;
 }
 
@@ -845,25 +846,13 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 
 	if (idx->bridging)
 	{
-		if (oslot->ixnum == BridgeIndexNumber)
-		{
-			Datum		value;
-			bool		isnull;
+		Datum		value;
+		bool		isnull;
 
-			value = o_tuple_read_next_field(&oslot->state, &isnull);
-			oslot->bridge_ctid = *((ItemPointer) value);
-		}
-		else
-		{
-			ItemPointer bridge_iptr;
-			bool		isnull;
+		Assert(oslot->ixnum == BridgeIndexNumber || oslot->ixnum == PrimaryIndexNumber);
 
-			/* pkey and also secondary tuples have bridge_ctid at the end */
-			bridge_iptr = o_tuple_get_last_iptr(idx->leafTupdesc, &idx->leafSpec,
-												oslot->tuple, &isnull);
-			Assert(!isnull && bridge_iptr);
-			oslot->bridge_ctid = *bridge_iptr;
-		}
+		value = o_tuple_read_next_field(&oslot->state, &isnull);
+		oslot->bridge_ctid = *((ItemPointer) value);
 	}
 
 	slot->tts_tableOid = oslot->descr->oids.reloid;
@@ -1068,7 +1057,7 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 	{
 		bridge_data.bridge_iptr = &oslot->bridge_ctid;
 		bridge_data.is_pkey = idx->desc.type == oIndexPrimary;
-		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->leafTupdesc->natts;
+		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : ctid_off + 1;
 	}
 
 	return o_form_tuple(tupleDesc, spec, 0, values, isnull,
@@ -1196,7 +1185,7 @@ expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 	{
 		bridge_data.bridge_iptr = &oslot->bridge_ctid;
 		bridge_data.is_pkey = idx->desc.type == oIndexPrimary;
-		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->leafTupdesc->natts;
+		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->primaryIsCtid ? 2 : 1;
 	}
 	tup_size = o_new_tuple_size(idx->leafTupdesc,
 								&idx->leafSpec,
@@ -1423,7 +1412,7 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 	{
 		bridge_data.bridge_iptr = &oslot->bridge_ctid;
 		bridge_data.is_pkey = idx->desc.type == oIndexPrimary;
-		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->leafTupdesc->natts;
+		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->primaryIsCtid ? 2 : 1;
 	}
 
 	len = o_new_tuple_size(tupleDescriptor, spec, iptr,
@@ -1494,7 +1483,7 @@ tts_orioledb_form_orphan_tuple(TupleTableSlot *slot,
 	{
 		bridge_data.bridge_iptr = &oslot->bridge_ctid;
 		bridge_data.is_pkey = idx->desc.type == oIndexPrimary;
-		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->leafTupdesc->natts;
+		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : idx->primaryIsCtid ? 2 : 1;
 	}
 
 	len = o_new_tuple_size(tupleDescriptor, spec, iptr,
@@ -1650,6 +1639,9 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 	bool		result = true;
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	int			ctid_off = primary->primaryIsCtid ? 1 : 0;
+
+	if (descr->bridge)
+		ctid_off++;
 
 	slot_getallattrs(oldSlot);
 

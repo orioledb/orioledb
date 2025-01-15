@@ -119,6 +119,7 @@ seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 	AttrNumber	attnum;
 	FormData_pg_attribute *attr;
 	Datum		val;
+	bool		is_null;
 
 	Assert(ix_descr->nPrimaryFields == 1);
 	Assert(!O_TUPLE_IS_NULL(tuple));
@@ -130,7 +131,7 @@ seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 	attnum = ix_descr->primaryFieldsAttnums[0];
 	attr = &ix_descr->leafTupdesc->attrs[attnum - 1];
 	val = o_toast_nocachegetattr(tuple, attnum, ix_descr->leafTupdesc,
-								 &ix_descr->leafSpec);
+								 &ix_descr->leafSpec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
 }
 
@@ -140,6 +141,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	AttrNumber	attnum;
 	FormData_pg_attribute *attr;
 	Datum		val;
+	bool		is_null;
 
 	Assert(primary->nFields == 1);
 
@@ -150,7 +152,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	if (onlyPkey)
 		attnum = 1;
 	val = o_toast_nocachegetattr(tuple, attnum, primary->leafTupdesc,
-								 &primary->leafSpec);
+								 &primary->leafSpec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
 }
 
