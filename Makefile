@@ -112,6 +112,7 @@ REGRESSCHECKS = btree_sys_check \
 				primary_key \
 				row_level_locks \
 				row_security \
+				sanitizers \
 				subquery \
 				subtransactions \
 				tableam \
