@@ -507,6 +507,8 @@ index_descr_free(OIndexDescr *tree)
 		FreeTupleDesc(tree->itupdesc);
 	if (tree->econtext)
 		FreeExprContext(tree->econtext, false);
+	if (tree->tbl_attnums)
+		pfree(tree->tbl_attnums);
 	if (tree->index_mctx)
 	{
 		MemoryContextDelete(tree->index_mctx);
