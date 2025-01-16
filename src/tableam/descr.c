@@ -547,7 +547,10 @@ table_descr_free(OTableDescr *descr)
 	{
 		descr->toast->refcnt--;
 		if (!descr->toast->valid)
+		{
 			index_descr_delete_from_hash(descr->toast);
+			pfree(descr->toast);
+		}
 	}
 
 	if (descr->indices)
@@ -557,7 +560,10 @@ table_descr_free(OTableDescr *descr)
 			{
 				descr->indices[i]->refcnt--;
 				if (!descr->indices[i]->valid)
+				{
 					index_descr_delete_from_hash(descr->indices[i]);
+					pfree(descr->indices[i]);
+				}
 			}
 		pfree(descr->indices);
 	}
