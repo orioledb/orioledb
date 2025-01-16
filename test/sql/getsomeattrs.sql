@@ -318,6 +318,17 @@ SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 
 COMMIT;
 
+CREATE TABLE o_test_unique_same_layout_as_pkey
+(
+	val1 int,
+	val2 text,
+	PRIMARY KEY (val1, val2)
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_unique_same_layout_as_pkey_idx1 ON o_test_unique_same_layout_as_pkey (val1, val1);
+SELECT orioledb_table_description('o_test_unique_same_layout_as_pkey'::regclass);
+SELECT orioledb_tbl_indices('o_test_unique_same_layout_as_pkey'::regclass);
+INSERT INTO o_test_unique_same_layout_as_pkey VALUES (0, 0);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA getsomeattrs CASCADE;
 RESET search_path;

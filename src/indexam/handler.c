@@ -324,7 +324,7 @@ append_rowid_values(OIndexDescr *id,
 		*csn = add->csn;
 		*version = o_tuple_get_version(tuple);
 
-		if (id->nPrimaryFields < id->nFields)
+		if (id->nPrimaryFields <= id->nFields)
 		{
 			int			i;
 			int			pk_from;
@@ -409,7 +409,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	TupleTableSlot *slot;
 	uint32		version;
 	OTuple		tuple;
-	int			skipped = 0;
 	CommitSeqNo csn;
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
@@ -440,25 +439,29 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	/* TODO: Run this only when fields amount differs */
-	/* Remove duplicates like we do in orioledb tables */
-	for (int copy_from = 0; copy_from < rel->rd_att->natts; copy_from++)
+	if (index_descr->leafTupdesc->natts != rel->rd_att->natts)
 	{
-		Form_pg_attribute orig_attr = &rel->rd_att->attrs[copy_from];
-		Form_pg_attribute idx_attr;
+		/* Remove duplicates like we do in orioledb tables */
+		int			skipped = 0;
 
-		if (copy_from - skipped >= index_descr->leafTupdesc->natts)
-			break;
-
-		idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
-
-		if (strncmp(orig_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+		for (int copy_from = 0; copy_from < rel->rd_att->natts; copy_from++)
 		{
-			if (skipped > 0)
-				values[copy_from - skipped] = values[copy_from];
+			Form_pg_attribute orig_attr = &rel->rd_att->attrs[copy_from];
+			Form_pg_attribute idx_attr;
+
+			if (copy_from - skipped >= index_descr->leafTupdesc->natts)
+				break;
+
+			idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
+
+			if (strncmp(orig_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+			{
+				if (skipped > 0)
+					values[copy_from - skipped] = values[copy_from];
+			}
+			else
+				skipped++;
 		}
-		else
-			skipped++;
 	}
 	append_rowid_values(index_descr,
 						GET_PRIMARY(descr)->nonLeafTupdesc,
