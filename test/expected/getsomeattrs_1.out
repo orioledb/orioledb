@@ -660,8 +660,41 @@ SELECT * FROM o_test_getsomeattrs_pkey_nkeys_not_equal_nFields
 (2 rows)
 
 COMMIT;
+CREATE TABLE o_test_unique_same_layout_as_pkey
+(
+	val1 int,
+	val2 text,
+	PRIMARY KEY (val1, val2)
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_unique_same_layout_as_pkey_idx1 ON o_test_unique_same_layout_as_pkey (val1, val1);
+SELECT orioledb_table_description('o_test_unique_same_layout_as_pkey'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+    val1 | integer |    (null) |    false |  false        +
+    val2 |    text |   default |    false |  false        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_unique_same_layout_as_pkey'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_unique_same_layout_as_pkey_pkey  +
+     Index type: primary, unique               +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val1, val2         +
+ Index o_test_unique_same_layout_as_pkey_idx1  +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: val1, val2         +
+     Leaf tuple fields: val1, val2             +
+ 
+(1 row)
+
+INSERT INTO o_test_unique_same_layout_as_pkey VALUES (0, 0);
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 21 other objects
+NOTICE:  drop cascades to 22 other objects
 DETAIL:  drop cascades to table o_test_0
 drop cascades to table o_test_1
 drop cascades to table o_test_2
@@ -683,6 +716,7 @@ drop cascades to table o_test_16
 drop cascades to table o_test_17
 drop cascades to table o_test_getsomeattrs_pkey_ix_order
 drop cascades to table o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
+drop cascades to table o_test_unique_same_layout_as_pkey
 DROP SCHEMA getsomeattrs CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
