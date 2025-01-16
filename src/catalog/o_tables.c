@@ -334,7 +334,11 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	oidvector  *indclass;
 	bool		isnull;
 
-	index->index_mctx = NULL;
+	if (index->index_mctx)
+	{
+		MemoryContextDelete(index->index_mctx);
+		index->index_mctx = NULL;
+	}
 	mcxt = OGetIndexContext(index);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	RelationGetIndexExpressions(index_rel);

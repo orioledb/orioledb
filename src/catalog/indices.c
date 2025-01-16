@@ -1168,6 +1168,13 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 
 	o_free_tmp_table_descr(btspool->descr);
 	pfree(btspool->descr);
+
+	if (btspool->old_descr)
+	{
+		o_free_tmp_table_descr(btspool->old_descr);
+		pfree(btspool->old_descr);
+	}
+
 	pfree(btspool);
 
 	if (!is_recovery_in_progress())
