@@ -131,6 +131,7 @@ struct OIndexDescr
 	 * on ctid (no primary key is explicitly defined).
 	 */
 	bool		primaryIsCtid;
+	bool		bridging;
 
 	uint8		fillfactor;
 
@@ -166,7 +167,7 @@ struct OIndexDescr
 
 #define OIndexKeyAttnumToTupleAttnum(keyType, idx, attnum) \
 	((keyType) == BTreeKeyLeafTuple && (idx)->desc.type == oIndexPrimary ? \
-	 idx->fields[(attnum) - 1].tableAttnum : \
+	 idx->fields[(attnum) - 1].tableAttnum + (idx->bridging && !idx->primaryIsCtid ? 1 : 0) : \
 	 (attnum))
 
 #define OGetIndexContext(index) \
@@ -199,6 +200,7 @@ struct OTableDescr
 	 * the primary key, reset of indeces array point to the secondary indices.
 	 */
 	OIndexDescr **indices;
+	OIndexDescr *bridge;
 	OIndexDescr *toast;
 
 	/* list of TOASTable values */

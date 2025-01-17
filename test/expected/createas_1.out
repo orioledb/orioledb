@@ -6,12 +6,13 @@ CREATE EXTENSION orioledb;
 CREATE TABLE o_test_create_as (order_id, item_id, quantity, price)
 	USING orioledb AS (VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
 SELECT orioledb_tbl_indices('o_test_create_as'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
  
 (1 row)
 
@@ -59,12 +60,13 @@ CREATE TABLE o_test_create_as_with_compress (order_id, item_id, quantity, price)
 	USING orioledb WITH (compress = 1) AS
 		(VALUES (100, 1, 4, 100.00), (100, 3, 1, 200.00));
 SELECT orioledb_tbl_indices('o_test_create_as_with_compress'::regclass);
-                  orioledb_tbl_indices                  
---------------------------------------------------------
- Index ctid_primary                                    +
-     Index type: primary, unique, compression = 1, ctid+
-     Leaf tuple size: 5, non-leaf tuple size: 1        +
-     Non-leaf tuple fields: ctid                       +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, compression = 1, ctid         +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
  
 (1 row)
 
@@ -253,12 +255,13 @@ CREATE MATERIALIZED VIEW o_test_matview (order_id, item_id, quantity, price)
 							  (100, 3, 'b',
 							   nextval('o_matview_seq'::regclass)));
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
  
 (1 row)
 
@@ -278,12 +281,13 @@ SELECT * FROM o_test_matview;
 
 REFRESH MATERIALIZED VIEW o_test_matview;
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
  
 (1 row)
 
@@ -318,17 +322,18 @@ SELECT * FROM o_test_matview;
 
 CREATE INDEX o_test_matview_ix1 ON o_test_matview (item_id DESC);
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
- Index o_test_matview_ix1                      +
-     Index type: secondary                     +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: item_id, ctid      +
-     Leaf tuple fields: item_id, ctid          +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
+ Index o_test_matview_ix1                                       +
+     Index type: secondary                                      +
+     Leaf tuple size: 2, non-leaf tuple size: 2                 +
+     Non-leaf tuple fields: item_id, ctid                       +
+     Leaf tuple fields: item_id, ctid                           +
  
 (1 row)
 
@@ -362,43 +367,45 @@ SELECT * FROM o_test_matview ORDER BY item_id DESC;
 
 CREATE INDEX o_test_matview_ix2 ON o_test_matview (quantity);
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
- Index o_test_matview_ix1                      +
-     Index type: secondary                     +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: item_id, ctid      +
-     Leaf tuple fields: item_id, ctid          +
- Index o_test_matview_ix2                      +
-     Index type: secondary                     +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: quantity, ctid     +
-     Leaf tuple fields: quantity, ctid         +
+                      orioledb_tbl_indices                       
+-----------------------------------------------------------------
+ Index ctid_primary                                             +
+     Index type: primary, unique, ctid                          +
+     Leaf tuple size: 5, non-leaf tuple size: 1                 +
+     Non-leaf tuple fields: ctid                                +
+     Leaf tuple fields: ctid, order_id, item_id, quantity, price+
+ Index o_test_matview_ix1                                       +
+     Index type: secondary                                      +
+     Leaf tuple size: 2, non-leaf tuple size: 2                 +
+     Non-leaf tuple fields: item_id, ctid                       +
+     Leaf tuple fields: item_id, ctid                           +
+ Index o_test_matview_ix2                                       +
+     Index type: secondary                                      +
+     Leaf tuple size: 2, non-leaf tuple size: 2                 +
+     Non-leaf tuple fields: quantity, ctid                      +
+     Leaf tuple fields: quantity, ctid                          +
  
 (1 row)
 
 ALTER MATERIALIZED VIEW o_test_matview RENAME quantity TO quantity2;
 SELECT orioledb_tbl_indices('o_test_matview'::regclass);
-              orioledb_tbl_indices              
-------------------------------------------------
- Index ctid_primary                            +
-     Index type: primary, unique, ctid         +
-     Leaf tuple size: 5, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid               +
- Index o_test_matview_ix1                      +
-     Index type: secondary                     +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: item_id, ctid      +
-     Leaf tuple fields: item_id, ctid          +
- Index o_test_matview_ix2                      +
-     Index type: secondary                     +
-     Leaf tuple size: 2, non-leaf tuple size: 2+
-     Non-leaf tuple fields: quantity2, ctid    +
-     Leaf tuple fields: quantity2, ctid        +
+                       orioledb_tbl_indices                       
+------------------------------------------------------------------
+ Index ctid_primary                                              +
+     Index type: primary, unique, ctid                           +
+     Leaf tuple size: 5, non-leaf tuple size: 1                  +
+     Non-leaf tuple fields: ctid                                 +
+     Leaf tuple fields: ctid, order_id, item_id, quantity2, price+
+ Index o_test_matview_ix1                                        +
+     Index type: secondary                                       +
+     Leaf tuple size: 2, non-leaf tuple size: 2                  +
+     Non-leaf tuple fields: item_id, ctid                        +
+     Leaf tuple fields: item_id, ctid                            +
+ Index o_test_matview_ix2                                        +
+     Index type: secondary                                       +
+     Leaf tuple size: 2, non-leaf tuple size: 2                  +
+     Non-leaf tuple fields: quantity2, ctid                      +
+     Leaf tuple fields: quantity2, ctid                          +
  
 (1 row)
 
