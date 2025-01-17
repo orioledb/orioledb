@@ -1210,7 +1210,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 												  RangeVarCallbackOwnsTable, NULL);
 #endif
 			matviewRel = table_open(matviewOid, AccessShareLock);
-			savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
+
+			if (matviewRel->rd_rel->relkind == RELKIND_MATVIEW &&
+				is_orioledb_rel(matviewRel))
+				savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
 			table_close(matviewRel, AccessShareLock);
 		}
 		stmt->skipData = true;
