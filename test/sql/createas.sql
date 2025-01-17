@@ -182,6 +182,9 @@ DROP MATERIALIZED VIEW o_test_matview_no_data;
 SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
 	WHERE relname = 'o_test_matview_no_data';
 
+CREATE TABLE pg_test_refresh_tbl_instead_of_matview AS SELECT 1;
+REFRESH MATERIALIZED VIEW pg_test_refresh_tbl_instead_of_matview;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA createas CASCADE;
 RESET search_path;
