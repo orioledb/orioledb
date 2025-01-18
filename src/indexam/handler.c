@@ -1387,7 +1387,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		result_size = MAXALIGN(VARHDRSZ) +
 			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
 			sizeof(ItemPointerData);
-		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+		rowid = (bytea *) palloc(result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
@@ -1432,7 +1432,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, 0, rowid_values, rowid_isnull, NULL);
 		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		result_size += tuple_size;
-		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+		rowid = (bytea *) palloc(result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));

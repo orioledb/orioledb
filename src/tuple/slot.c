@@ -67,12 +67,10 @@ tts_orioledb_clear(TupleTableSlot *slot)
 
 	if (unlikely(TTS_SHOULDFREE(slot)))
 	{
-		if (oslot->data)
-			pfree(oslot->data);
 		if (!O_TUPLE_IS_NULL(oslot->tuple))
 			pfree(oslot->tuple.data);
-		if (oslot->rowid)
-			pfree(oslot->rowid);
+		if (oslot->data)
+			pfree(oslot->data);
 		slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
 	}
 
@@ -98,7 +96,11 @@ tts_orioledb_clear(TupleTableSlot *slot)
 
 	oslot->data = NULL;
 	O_TUPLE_SET_NULL(oslot->tuple);
-	oslot->rowid = NULL;
+	if (oslot->rowid)
+	{
+		pfree(oslot->rowid);
+		oslot->rowid = NULL;
+	}
 	oslot->descr = NULL;
 	oslot->hint.blkno = OInvalidInMemoryBlkno;
 	oslot->hint.pageChangeCount = 0;
@@ -461,7 +463,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		if (oslot->rowid)
 		{
 			*isnull = false;
-			return PointerGetDatum(oslot->rowid);
+			return datumCopy(PointerGetDatum(oslot->rowid), false, -1);
 		}
 
 		if (!descr)
@@ -493,7 +495,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 			memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
 			*isnull = false;
 			oslot->rowid = result;
-			return PointerGetDatum(result);
+			return datumCopy(PointerGetDatum(result), false, -1);
 		}
 
 		/*
@@ -523,7 +525,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 
 		*isnull = false;
 		oslot->rowid = result;
-		return PointerGetDatum(result);
+		return datumCopy(PointerGetDatum(result), false, -1);
 	}
 
 	att = SystemAttributeDefinition(attnum);
