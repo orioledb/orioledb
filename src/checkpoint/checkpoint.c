@@ -10,6 +10,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "c.h"
 #include "postgres.h"
 
 #include <sys/file.h>
@@ -116,13 +117,16 @@ typedef struct
 {
 	ORelOids	oids;
 	OIndexType	type;
+	bool		freeExtents;
+	bool		cleanupMap;
+	bool		punchHoles;
+	uint32		lastMapChkpNum;
 	uint32		chkpNum;
 } IndexIdItem;
 
 typedef struct
 {
-	List	   *cleanupMap;
-	List	   *freeExtents;
+	List	   *postProcessList;
 	int			flags;
 } CheckpointTablesArg;
 
@@ -513,50 +517,46 @@ free_writeback(CheckpointWriteBack *writeback)
 }
 
 static inline List *
-add_index_id_item(List *list, BTreeDescr *desc, uint32 chkpNum)
+add_index_id_item(List *list, BTreeDescr *desc)
 {
 	IndexIdItem *item;
 	MemoryContext old_context;
 
-	old_context = MemoryContextSwitchTo(TopMemoryContext);
+	Assert(!orioledb_s3_mode);
+	Assert(desc->storageType == BTreeStoragePersistence ||
+		   desc->storageType == BTreeStorageUnlogged);
+	old_context = MemoryContextSwitchTo(chkp_main_context);
 	item = palloc(sizeof(IndexIdItem));
 	item->oids = desc->oids;
 	item->type = desc->type;
-	list = lappend(list, item);
+	item->chkpNum = checkpoint_state->lastCheckpointNumber;
+	item->freeExtents = OCompressIsValid(desc->compress);
+	item->cleanupMap = false;
+	item->punchHoles = orioledb_use_sparse_files;
+	if (remove_old_checkpoint_files)
+	{
+		item->lastMapChkpNum = o_get_latest_chkp_num(desc->oids.datoid, desc->oids.relnode,
+													 checkpoint_state->lastCheckpointNumber,
+													 NULL);
+		if (!OCompressIsValid(desc->compress) &&
+			desc->freeBuf.tag.type == 'm' &&
+			desc->freeBuf.tag.num == item->lastMapChkpNum)
+		{
+			item->cleanupMap = false;
+		}
+		else
+		{
+			item->cleanupMap = true;
+		}
+	}
+
+	if (item->cleanupMap || item->freeExtents || item->punchHoles)
+		list = lappend(list, item);
+	else
+		pfree(item);
 	MemoryContextSwitchTo(old_context);
 
 	return list;
-}
-
-static inline List *
-add_free_extents_item(List *free, BTreeDescr *desc)
-{
-	return add_index_id_item(free, desc,
-							 checkpoint_state->lastCheckpointNumber);
-}
-
-static inline List *
-add_map_cleanup_item(List *cleanup, BTreeDescr *desc)
-{
-	uint32		chkpNum;
-
-	if (!remove_old_checkpoint_files)
-		return cleanup;
-
-	chkpNum = o_get_latest_chkp_num(desc->oids.datoid, desc->oids.relnode,
-									checkpoint_state->lastCheckpointNumber,
-									NULL);
-
-	if (!OCompressIsValid(desc->compress) &&
-		desc->freeBuf.tag.type == 'm' &&
-		desc->freeBuf.tag.num == chkpNum)
-	{
-		return cleanup;
-	}
-	else
-	{
-		return add_index_id_item(cleanup, desc, chkpNum);
-	}
 }
 
 /*
@@ -875,8 +875,8 @@ checkpoint_sys_trees(int flags, uint32 cur_chkp_num,
 			{
 				sort_checkpoint_map_file(desc, cur_chkp_num % 2);
 				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
-				chkp_tbl_arg->cleanupMap = add_map_cleanup_item(chkp_tbl_arg->cleanupMap,
-																desc);
+				chkp_tbl_arg->postProcessList = add_index_id_item(chkp_tbl_arg->postProcessList,
+																  desc);
 			}
 		}
 		else
@@ -908,8 +908,8 @@ checkpoint_chkp_nums(int flags, uint32 cur_chkp_num,
 	{
 		sort_checkpoint_map_file(desc, cur_chkp_num % 2);
 		sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
-		chkp_tbl_arg->cleanupMap = add_map_cleanup_item(chkp_tbl_arg->cleanupMap,
-														desc);
+		chkp_tbl_arg->postProcessList = add_index_id_item(chkp_tbl_arg->postProcessList,
+														  desc);
 	}
 }
 
@@ -1104,8 +1104,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	memset(&control, 0, sizeof(control));
 
-	chkp_tbl_arg.cleanupMap = NULL;
-	chkp_tbl_arg.freeExtents = NULL;
+	chkp_tbl_arg.postProcessList = NIL;
 	chkp_tbl_arg.flags = flags;
 
 	checkpoint_state->dirtyPagesEstimate = get_dirty_pages_count_sum();
@@ -1156,8 +1155,6 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_state->sysTreesStartPtr = GetXLogInsertRecPtr();
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
-
-	MemoryContextResetOnly(chkp_main_context);
 
 	enable_stopevents = old_enable_stopevents;
 
@@ -1307,55 +1304,49 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	/*
 	 * Now we can free extents for compressed indices
 	 */
-	if (!(flags & CHECKPOINT_IS_SHUTDOWN) && chkp_tbl_arg.freeExtents != NIL)
+	if ((!(flags & CHECKPOINT_IS_SHUTDOWN) || remove_old_checkpoint_files) &&
+		chkp_tbl_arg.postProcessList != NIL)
 	{
 		IndexIdItem *item;
 		ListCell   *lc;
 		OIndexDescr *descr;
 
-		foreach(lc, chkp_tbl_arg.freeExtents)
+		foreach(lc, chkp_tbl_arg.postProcessList)
 		{
 			item = (IndexIdItem *) lfirst(lc);
 
-			descr = o_fetch_index_descr(item->oids, item->type,
-										true, NULL);
-			if (descr == NULL)
+			if (item->freeExtents)
 			{
-				/* table might be deleted */
-				continue;
+				descr = o_fetch_index_descr(item->oids, item->type,
+											true, NULL);
+				if (descr == NULL)
+				{
+					/* table might be deleted */
+					continue;
+				}
+
+				add_free_extents_from_tmp(&descr->desc,
+										  remove_old_checkpoint_files);
+				o_tables_rel_unlock_extended(&item->oids, AccessShareLock, true);
 			}
 
-			add_free_extents_from_tmp(&descr->desc,
-									  remove_old_checkpoint_files);
-			o_tables_rel_unlock_extended(&item->oids, AccessShareLock, true);
-		}
-		list_free_deep(chkp_tbl_arg.freeExtents);
-	}
+			if (item->cleanupMap)
+			{
+				SeqBufTag	cleanup_tag;
 
-	/*
-	 * Remove old files if needed
-	 */
+				cleanup_tag.type = 'm';
+				cleanup_tag.num = item->lastMapChkpNum;
+				cleanup_tag.datoid = item->oids.datoid;
+				cleanup_tag.relnode = item->oids.relnode;
+				seq_buf_remove_file(&cleanup_tag);
+
+			}
+		}
+	}
+	list_free_deep(chkp_tbl_arg.postProcessList);
+
 	if (remove_old_checkpoint_files)
-	{
-		IndexIdItem *item;
-		SeqBufTag	cleanup_tag;
-		ListCell   *lc;
-
 		unlink_xids_file(prev_chkp_num);
-
-		cleanup_tag.type = 'm';
-		cleanup_tag.num = prev_chkp_num;
-
-		foreach(lc, chkp_tbl_arg.cleanupMap)
-		{
-			item = (IndexIdItem *) lfirst(lc);
-			cleanup_tag.datoid = item->oids.datoid;
-			cleanup_tag.relnode = item->oids.relnode;
-			seq_buf_remove_file(&cleanup_tag);
-		}
-
-		list_free_deep(chkp_tbl_arg.cleanupMap);
-	}
 
 	CheckPointProgress = o_checkpoint_completion_ratio;
 
@@ -4738,9 +4729,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 				{
 					sort_checkpoint_map_file(td, cur_chkp_index);
 					sort_checkpoint_tmp_file(td, cur_chkp_index);
-					if (OCompressIsValid(td->compress))
-						tbl_arg->freeExtents = add_free_extents_item(tbl_arg->freeExtents, td);
-					tbl_arg->cleanupMap = add_map_cleanup_item(tbl_arg->cleanupMap, td);
+					tbl_arg->postProcessList = add_index_id_item(tbl_arg->postProcessList, td);
 				}
 				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			}
