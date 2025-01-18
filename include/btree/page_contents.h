@@ -47,6 +47,8 @@ typedef struct
 	bool		dirtyFlag2;
 
 	BTreeS3PartsInfo partsInfo[2];
+
+	uint32		punchHolesChkpNum;
 } BTreeMetaPage;
 
 StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,

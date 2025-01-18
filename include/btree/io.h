@@ -62,5 +62,6 @@ extern uint64 perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum,
 extern uint64 perform_page_io_build(BTreeDescr *desc, Page img,
 									FileExtent *extent, BTreeMetaPage *metaPageBlkno);
 extern BTreeDescr *index_oids_get_btree_descr(ORelOids oids, OIndexType type);
+extern void try_to_punch_holes(BTreeDescr *desc);
 
 #endif							/* __BTREE_IO_H__ */
