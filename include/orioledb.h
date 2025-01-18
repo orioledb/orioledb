@@ -309,6 +309,7 @@ extern double o_checkpoint_completion_ratio;
 extern int	max_io_concurrency;
 extern bool use_mmap;
 extern bool use_device;
+extern bool orioledb_use_sparse_files;
 extern int	device_fd;
 extern char *device_filename;
 extern Pointer mmap_data;

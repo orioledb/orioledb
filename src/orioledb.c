@@ -109,6 +109,7 @@ bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
 bool		use_mmap = false;
 bool		use_device = false;
+bool		orioledb_use_sparse_files = false;
 char	   *device_filename = NULL;
 Pointer		mmap_data = NULL;
 int			device_fd;
@@ -610,6 +611,17 @@ _PG_init(void)
 							 &orioledb_table_description_compress,
 							 false,
 							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.use_sparse_files",
+							 "Punch sparse file holes for free blocks",
+							 NULL,
+							 &orioledb_use_sparse_files,
+							 false,
+							 PGC_POSTMASTER,
 							 0,
 							 NULL,
 							 NULL,
