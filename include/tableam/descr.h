@@ -47,6 +47,8 @@ typedef struct
 
 	bool		dirtyFlag1;
 	bool		dirtyFlag2;
+
+	uint32		punchHolesChkpNum;
 } EvictedTreeData;
 
 

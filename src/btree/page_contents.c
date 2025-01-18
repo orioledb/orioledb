@@ -367,22 +367,22 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
-	BTreeMetaPage *metaPageBlkno = (BTreeMetaPage *) p;
+	BTreeMetaPage *metaPage = (BTreeMetaPage *) p;
 	int			i,
 				j;
 
 	memset(p + O_PAGE_HEADER_SIZE, 0, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
-	pg_atomic_init_u32(&metaPageBlkno->leafPagesNum, leafPagesNum);
-	pg_atomic_init_u64(&metaPageBlkno->numFreeBlocks, 0);
-	pg_atomic_init_u64(&metaPageBlkno->datafileLength[0], 0);
-	pg_atomic_init_u64(&metaPageBlkno->datafileLength[1], 0);
-	pg_atomic_init_u64(&metaPageBlkno->ctid, 0);
+	pg_atomic_init_u32(&metaPage->leafPagesNum, leafPagesNum);
+	pg_atomic_init_u64(&metaPage->numFreeBlocks, 0);
+	pg_atomic_init_u64(&metaPage->datafileLength[0], 0);
+	pg_atomic_init_u64(&metaPage->datafileLength[1], 0);
+	pg_atomic_init_u64(&metaPage->ctid, 0);
 	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
-		pg_atomic_init_u32(&metaPageBlkno->numSeqScans[i], 0);
+		pg_atomic_init_u32(&metaPage->numSeqScans[i], 0);
 
-	LWLockInitialize(&metaPageBlkno->copyBlknoLock,
+	LWLockInitialize(&metaPage->copyBlknoLock,
 					 checkpoint_state->copyBlknoTrancheId);
-	LWLockInitialize(&metaPageBlkno->metaLock,
+	LWLockInitialize(&metaPage->metaLock,
 					 checkpoint_state->oMetaTrancheId);
 
 	page_desc->type = oIndexInvalid;
@@ -394,20 +394,21 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 
 	for (i = 0; i < 2; i++)
 	{
-		metaPageBlkno->freeBuf.pages[i] = OInvalidInMemoryBlkno;
+		metaPage->freeBuf.pages[i] = OInvalidInMemoryBlkno;
 		for (j = 0; j < 2; j++)
 		{
-			metaPageBlkno->nextChkp[j].pages[i] = OInvalidInMemoryBlkno;
-			metaPageBlkno->tmpBuf[j].pages[i] = OInvalidInMemoryBlkno;
+			metaPage->nextChkp[j].pages[i] = OInvalidInMemoryBlkno;
+			metaPage->tmpBuf[j].pages[i] = OInvalidInMemoryBlkno;
 		}
 
-		metaPageBlkno->partsInfo[i].writeMaxLocation = 0;
+		metaPage->partsInfo[i].writeMaxLocation = 0;
 		for (j = 0; j < MAX_NUM_DIRTY_PARTS; j++)
 		{
-			metaPageBlkno->partsInfo[i].dirtyParts[j].segNum = -1;
-			metaPageBlkno->partsInfo[i].dirtyParts[j].partNum = -1;
+			metaPage->partsInfo[i].dirtyParts[j].segNum = -1;
+			metaPage->partsInfo[i].dirtyParts[j].partNum = -1;
 		}
 	}
+	metaPage->punchHolesChkpNum = checkpoint_state->lastCheckpointNumber;
 }
 
 /*

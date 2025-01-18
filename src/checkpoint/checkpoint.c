@@ -532,7 +532,7 @@ add_index_id_item(List *list, BTreeDescr *desc)
 	item->chkpNum = checkpoint_state->lastCheckpointNumber;
 	item->freeExtents = OCompressIsValid(desc->compress);
 	item->cleanupMap = false;
-	item->punchHoles = orioledb_use_sparse_files;
+	item->punchHoles = orioledb_use_sparse_files && !OCompressIsValid(desc->compress);
 	if (remove_old_checkpoint_files)
 	{
 		item->lastMapChkpNum = o_get_latest_chkp_num(desc->oids.datoid, desc->oids.relnode,
@@ -1339,7 +1339,29 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 				cleanup_tag.datoid = item->oids.datoid;
 				cleanup_tag.relnode = item->oids.relnode;
 				seq_buf_remove_file(&cleanup_tag);
+			}
 
+			if (item->punchHoles)
+			{
+				BTreeDescr *desc;
+
+				if (IS_SYS_TREE_OIDS(item->oids))
+				{
+					desc = get_sys_tree(item->oids.reloid);
+				}
+				else
+				{
+					OIndexDescr *id;
+
+					id = o_fetch_index_descr(item->oids, item->type,
+											 true, NULL);
+					desc = &id->desc;
+				}
+
+				try_to_punch_holes(desc);
+
+				if (!IS_SYS_TREE_OIDS(item->oids))
+					o_tables_rel_unlock_extended(&item->oids, AccessShareLock, true);
 			}
 		}
 	}
@@ -5072,6 +5094,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		meta_page->dirtyFlag2 = (*evicted_data)->dirtyFlag2;
 		meta_page->partsInfo[0].writeMaxLocation = (*evicted_data)->maxLocation[0];
 		meta_page->partsInfo[1].writeMaxLocation = (*evicted_data)->maxLocation[1];
+		meta_page->punchHolesChkpNum = (*evicted_data)->punchHolesChkpNum;
 	}
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(meta_page, ORIOLEDB_BLCKSZ);

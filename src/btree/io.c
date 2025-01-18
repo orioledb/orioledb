@@ -950,7 +950,9 @@ get_free_disk_offset(BTreeDescr *desc)
 			else
 			{
 				Assert(old_tag.type == 't');
-				seq_buf_remove_file(&old_tag);
+				if (!orioledb_use_sparse_files ||
+					old_tag.num <= metaPage->punchHolesChkpNum)
+					seq_buf_remove_file(&old_tag);
 			}
 		}
 		LWLockRelease(metaLock);
@@ -963,6 +965,9 @@ get_free_disk_offset(BTreeDescr *desc)
 		numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
 		free_buf_num = metaPage->freeBuf.tag.num;
 	}
+
+	if (orioledb_use_sparse_files)
+		try_to_punch_holes(desc);
 
 	/*
 	 * Try to get free block number from the buffer.  If not success, then
@@ -2266,6 +2271,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	evicted_tree_data.maxLocation[1] = metaPage->partsInfo[1].writeMaxLocation;
 	evicted_tree_data.dirtyFlag1 = metaPage->dirtyFlag1;
 	evicted_tree_data.dirtyFlag2 = metaPage->dirtyFlag2;
+	evicted_tree_data.punchHolesChkpNum = metaPage->punchHolesChkpNum;
 
 	notModified = (!metaPage->dirtyFlag1 && !metaPage->dirtyFlag2);
 
@@ -3030,4 +3036,87 @@ bool
 fsync_btree_files(Oid datoid, Oid relnode)
 {
 	return iterate_relnode_files(datoid, relnode, fsync_callback, NULL);
+}
+
+void
+try_to_punch_holes(BTreeDescr *desc)
+{
+	BTreeMetaPage *metaPage;
+	File		file;
+	char	   *filename,
+				buf[ORIOLEDB_BLCKSZ];
+	uint64		len = 0,
+				i,
+				buf_len;
+	uint32		chkp_num;
+	LWLock	   *metaLock;
+
+	Assert(orioledb_use_sparse_files);
+	Assert(!OCompressIsValid(desc->compress));
+
+	o_btree_load_shmem(desc);
+	metaPage = BTREE_GET_META(desc);
+	metaLock = &metaPage->metaLock;
+
+	chkp_num = metaPage->punchHolesChkpNum + 1;
+	while (can_use_checkpoint_extents(desc, chkp_num))
+	{
+		SeqBufTag	tag;
+		bool		removeFile = false;
+
+		LWLockAcquire(metaLock, LW_EXCLUSIVE);
+		if (chkp_num == metaPage->punchHolesChkpNum + 1)
+		{
+			metaPage->punchHolesChkpNum = chkp_num;
+			if (chkp_num < metaPage->freeBuf.tag.num)
+				removeFile = true;
+		}
+		else
+		{
+			LWLockRelease(metaLock);
+			return;
+		}
+		LWLockRelease(metaLock);
+
+		tag.datoid = desc->oids.datoid;
+		tag.relnode = desc->oids.relnode;
+		tag.type = 't';
+		tag.num = chkp_num;
+		if (!seq_buf_file_exist(&tag))
+		{
+			/* table may be deleted or *.tmp file not created */
+			chkp_num++;
+			continue;
+		}
+
+		/* free extents from *.tmp file */
+		filename = get_seq_buf_filename(&tag);
+		file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+		if (file < 0)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not open file %s", filename)));
+
+		do
+		{
+			BlockNumber *cur_off;
+
+			buf_len = OFileRead(file, buf, ORIOLEDB_BLCKSZ, len, WAIT_EVENT_DATA_FILE_READ);
+			cur_off = (BlockNumber *) buf;
+			for (i = 0; i < buf_len; i += sizeof(BlockNumber))
+			{
+				btree_smgr_punch_hole(desc, chkp_num,
+									  (off_t) (*cur_off) * (off_t) ORIOLEDB_BLCKSZ,
+									  ORIOLEDB_BLCKSZ);
+				cur_off++;
+			}
+			len += buf_len;
+		}
+		while (buf_len == ORIOLEDB_BLCKSZ);
+
+		pfree(filename);
+		FileClose(file);
+
+		if (removeFile)
+			seq_buf_remove_file(&tag);
+	}
 }

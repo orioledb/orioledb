@@ -109,7 +109,7 @@ bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
 bool		use_mmap = false;
 bool		use_device = false;
-bool		orioledb_use_sparse_files = false;
+bool		orioledb_use_sparse_files = true;
 char	   *device_filename = NULL;
 Pointer		mmap_data = NULL;
 int			device_fd;
@@ -620,7 +620,7 @@ _PG_init(void)
 							 "Punch sparse file holes for free blocks",
 							 NULL,
 							 &orioledb_use_sparse_files,
-							 false,
+							 true,
 							 PGC_POSTMASTER,
 							 0,
 							 NULL,
