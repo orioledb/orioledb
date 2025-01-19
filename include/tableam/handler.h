@@ -216,4 +216,7 @@ typedef struct ParallelOScanDescData
 } ParallelOScanDescData;
 
 typedef ParallelOScanDescData *ParallelOScanDesc;
+
+extern bool in_nontransactional_truncate;
+
 #endif

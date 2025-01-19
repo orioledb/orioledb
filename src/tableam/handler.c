@@ -66,6 +66,8 @@
 #include "utils/sampling.h"
 #include "utils/syscache.h"
 
+bool		in_nontransactional_truncate = false;
+
 typedef struct OScanDescData
 {
 	TableScanDescData rs_base;	/* AM independent part of the descriptor */
@@ -790,6 +792,9 @@ static void
 orioledb_relation_nontransactional_truncate(Relation rel)
 {
 	ORelOids	oids;
+
+	if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+		in_nontransactional_truncate = true;
 
 	ORelOidsSetFromRel(oids, rel);
 	if (!OidIsValid(rel->rd_rel->oid) || rel->rd_rel->relkind == RELKIND_TOASTVALUE)

@@ -153,6 +153,18 @@ SELECT * FROM (SELECT val_1 || val_2 AS val_3 FROM o_test_temp_inherit
 			   SELECT val_3 FROM o_test_temp_inherit2) t
 	ORDER BY 1 LIMIT 8;
 
+BEGIN;
+CREATE TEMP TABLE o_test_on_commit_not_delete_index (
+	val int2 PRIMARY KEY,
+	val2 int2 UNIQUE
+) USING orioledb ON COMMIT DELETE ROWS;
+TRUNCATE o_test_on_commit_not_delete_index;
+COMMIT;
+TRUNCATE o_test_on_commit_not_delete_index;
+TABLE o_test_on_commit_not_delete_index;
+REINDEX TABLE o_test_on_commit_not_delete_index;
+TABLE o_test_on_commit_not_delete_index;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA temp_schema CASCADE;
 RESET search_path;
