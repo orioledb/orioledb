@@ -693,8 +693,49 @@ SELECT orioledb_tbl_indices('o_test_unique_same_layout_as_pkey'::regclass);
 (1 row)
 
 INSERT INTO o_test_unique_same_layout_as_pkey VALUES (0, 0);
+CREATE TABLE o_test_pkey_include_same_field
+(
+	val_1 int,
+	PRIMARY KEY (val_1) INCLUDE (val_1)
+) USING orioledb;
+SELECT orioledb_table_description('o_test_pkey_include_same_field'::regclass);
+                orioledb_table_description                 
+-----------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1+
+  Column |    Type | Collation | Nullable | Droped        +
+   val_1 | integer |    (null) |    false |  false        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('o_test_pkey_include_same_field'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index o_test_pkey_include_same_field_pkey     +
+     Index type: primary, unique               +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: val_1              +
+ 
+(1 row)
+
+INSERT INTO o_test_pkey_include_same_field VALUES (1);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_pkey_include_same_field;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_pkey_include_same_field_pkey on o_test_pkey_include_same_field
+(1 row)
+
+SELECT * FROM o_test_pkey_include_same_field;
+ val_1 
+-------
+      
+(1 row)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 22 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to table o_test_0
 drop cascades to table o_test_1
 drop cascades to table o_test_2
@@ -717,6 +758,7 @@ drop cascades to table o_test_17
 drop cascades to table o_test_getsomeattrs_pkey_ix_order
 drop cascades to table o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
 drop cascades to table o_test_unique_same_layout_as_pkey
+drop cascades to table o_test_pkey_include_same_field
 DROP SCHEMA getsomeattrs CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
