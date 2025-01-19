@@ -814,7 +814,7 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 		}
 #ifdef __APPLE__
 		{
-			fpunchhole_t	hole;
+			fpunchhole_t hole;
 
 			hole.fp_offset = segoffset;
 			hole.fp_length = seglength;
