@@ -780,7 +780,7 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 	}
 }
 
-bool
+void
 btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 					  off_t offset, int length)
 {
@@ -816,6 +816,7 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 		{
 			fpunchhole_t hole;
 
+			memset(&hole, 0, sizeof(hole));
 			hole.fp_offset = segoffset;
 			hole.fp_length = seglength;
 			ret = fcntl(fd, F_PUNCHHOLE, &hole);
@@ -824,9 +825,12 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 		ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE, segoffset, seglength);
 #endif
 		if (ret < 0)
-			return false;
+		{
+			elog(WARNING, "fail to punch sparse file hole datoid=%u relnode=%u offset=%llu length=%d",
+					desc->oids.datoid, desc->oids.relnode,
+					(unsigned long long) offset, length);
+		}
 	}
-	return true;
 }
 
 void
