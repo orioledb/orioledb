@@ -45,7 +45,8 @@ class BaseTest(unittest.TestCase):
 		if self.replica is None:
 			(test_path, t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 			baseDir = os.path.join(test_path, 'tmp_check_t', self.myName + '_tgsb')
-			shutil.rmtree(baseDir)
+			if os.path.exists(baseDir):
+				shutil.rmtree(baseDir)
 			replica = self.node.backup(
 			    base_dir=baseDir).spawn_replica('replica')
 			replica.port = self.getBasePort() + 1
@@ -56,7 +57,8 @@ class BaseTest(unittest.TestCase):
 	def initNode(self, port) -> testgres.PostgresNode:
 		(test_path, t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 		baseDir = os.path.join(test_path, 'tmp_check_t', self.myName + '_tgsn')
-		shutil.rmtree(baseDir)
+		if os.path.exists(baseDir):
+			shutil.rmtree(baseDir)
 		node = testgres.get_new_node('test', port=port, base_dir=baseDir)
 		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		node.append_conf('postgresql.conf',

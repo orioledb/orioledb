@@ -574,7 +574,6 @@ class FilesTest(BaseTest):
 
 		fname = f"{node.data_dir}/orioledb_data/{datoid}/{relnode}"
 		stat1 = os.stat(fname)
-		print(os.stat(fname).st_blocks)
 
 		node.safe_psql(
 			"UPDATE o_test SET val = repeat('y', 250);\n"
