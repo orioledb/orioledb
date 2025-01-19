@@ -43,6 +43,7 @@ lib*.pc
 /test/results/
 /test/tmp_check/
 /test/tmp_check_iso/
+/test/tmp_check_t/
 /test/output_iso/
 /include/utils/stopevents_defs.h
 /include/utils/stopevents_data.h
