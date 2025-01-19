@@ -890,6 +890,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	in_rewrite = false;
 	o_saved_relrewrite = InvalidOid;
 	savedDataQuery = NULL;
+	in_nontransactional_truncate = false;
 
 	/*
 	 * reindex_list is expected to be allocated in PortalContext so it isn't
@@ -1231,7 +1232,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	}
 
 
-	if (IsA(pstmt->utilityStmt, TruncateStmt))
+	if (IsA(pstmt->utilityStmt, TruncateStmt) && !in_nontransactional_truncate)
 	{
 		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
 		List	   *relids = NIL;

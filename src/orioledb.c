@@ -1589,6 +1589,7 @@ orioledb_error_cleanup_hook(void)
 	o_rewrite_cleanup();
 	if (orioledb_s3_mode)
 		s3_headers_error_cleanup();
+	in_nontransactional_truncate = false;
 }
 
 static void
