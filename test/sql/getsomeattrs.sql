@@ -329,6 +329,21 @@ SELECT orioledb_table_description('o_test_unique_same_layout_as_pkey'::regclass)
 SELECT orioledb_tbl_indices('o_test_unique_same_layout_as_pkey'::regclass);
 INSERT INTO o_test_unique_same_layout_as_pkey VALUES (0, 0);
 
+CREATE TABLE o_test_pkey_include_same_field
+(
+	val_1 int,
+	PRIMARY KEY (val_1) INCLUDE (val_1)
+) USING orioledb;
+SELECT orioledb_table_description('o_test_pkey_include_same_field'::regclass);
+SELECT orioledb_tbl_indices('o_test_pkey_include_same_field'::regclass);
+INSERT INTO o_test_pkey_include_same_field VALUES (1);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_pkey_include_same_field;
+SELECT * FROM o_test_pkey_include_same_field;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA getsomeattrs CASCADE;
 RESET search_path;

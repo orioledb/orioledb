@@ -234,7 +234,9 @@ make_primary_o_index(OTable *table)
 	OTableIndex *tableIndex;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i,
-				j;
+				nadded = 0;
+	MemoryContext mcxt;
+	MemoryContext old_mcxt;
 
 	Assert(table->has_primary && table->nindices >= 1);
 	tableIndex = &table->indices[0];
@@ -261,26 +263,42 @@ make_primary_o_index(OTable *table)
 	result->nonLeafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) *
 														 result->nNonLeafFields);
 
+	/*
+	 * TODO: We should probably use add_index_fields to not duplicate code,
+	 * but now it should be rewritten
+	 */
 	for (i = 0; i < result->nLeafFields; i++)
 		result->leafFields[i] = table->fields[i];
 
-	j = 0;
+	/* Switching context to store duplicates */
+	mcxt = OGetIndexContext(result);
+	old_mcxt = MemoryContextSwitchTo(mcxt);
 	for (i = 0; i < result->nNonLeafFields; i++)
 	{
-		if (find_existing_field(result, j, &tableIndex->fields[i]) >= 0)
+		int			found_attnum;
+
+		found_attnum = find_existing_field(result, nadded, &tableIndex->fields[i]);
+		if (found_attnum >= 0)
 		{
+			List	   *duplicate;
+
 			if (i < result->nKeyFields)
 				result->nKeyFields--;
 			else
 				result->nIncludedFields--;
+
+			/* (fieldnum, original fieldnum) */
+			duplicate = list_make2_int(nadded, found_attnum);
+			result->duplicates = lappend(result->duplicates, duplicate);
 			continue;
 		}
 
-		result->nonLeafFields[j++] = tableIndex->fields[i];
+		result->nonLeafFields[nadded++] = tableIndex->fields[i];
 	}
-	Assert(j <= result->nNonLeafFields);
+	MemoryContextSwitchTo(old_mcxt);
+	Assert(nadded <= result->nNonLeafFields);
 	result->nUniqueFields = result->nKeyFields;
-	result->nNonLeafFields = j;
+	result->nNonLeafFields = nadded;
 
 	return result;
 }
@@ -318,7 +336,6 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 					Assert(CurrentMemoryContext == OGetIndexContext(index));
 					/* (fieldnum, original fieldnum) */
 					duplicate = list_make2_int(*nadded, found_attnum);
-					elog(DEBUG4, "field duplicated: %d %d", *nadded, found_attnum);
 					index->duplicates = lappend(index->duplicates, duplicate);
 				}
 
@@ -385,6 +402,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->nKeyFields = tableIndex->nkeyfields;
 
 	nadded = 0;
+	/* Switching context to store duplicates */
 	mcxt = OGetIndexContext(result);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	result->predicate = list_copy_deep(tableIndex->predicate);
