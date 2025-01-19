@@ -1357,7 +1357,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	buildstate.btleader = NULL;
 
 	/* Attempt to launch parallel worker scan when required */
-	if (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0)
+	if (ActiveSnapshotSet() && (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0))
 	{
 		btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
 		btspool->o_table = o_table;
@@ -1652,7 +1652,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	buildstate.btleader = NULL;
 
 	/* Attempt to launch parallel worker scan when required */
-	if ((in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0) && !descr->indices[PrimaryIndexNumber]->primaryIsCtid)
+	if (ActiveSnapshotSet() && (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0) && !descr->indices[PrimaryIndexNumber]->primaryIsCtid)
 	{
 		btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
 		btspool->o_table = o_table;
