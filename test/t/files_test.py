@@ -573,15 +573,14 @@ class FilesTest(BaseTest):
 		con.close()
 
 		fname = f"{node.data_dir}/orioledb_data/{datoid}/{relnode}"
-		print(os.stat(fname).st_size)
+		stat1 = os.stat(fname)
 		print(os.stat(fname).st_blocks)
 
 		node.safe_psql(
 			"UPDATE o_test SET val = repeat('y', 250);\n"
 			"CHECKPOINT;\n"
 		)
+		stat2 = os.stat(fname)
 
-		fname = f"{node.data_dir}/orioledb_data/{datoid}/{relnode}"
-		print(os.stat(fname).st_size)
-		print(os.stat(fname).st_blocks)
-		self.assertTrue(False)
+		self.assertEqual(2 * stat1.st_size, stat2.st_size)
+		self.assertEqual(stat1.st_blocks, stat2.st_blocks)
