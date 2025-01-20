@@ -56,10 +56,10 @@ class BaseTest(unittest.TestCase):
 			self.replica = replica
 		return self.replica
 
-	def initNode(self, port) -> testgres.PostgresNode:
+	def initNode(self, port, suffix='tgsn') -> testgres.PostgresNode:
 		(test_path,
 		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
-		baseDir = os.path.join(test_path, 'tmp_check_t', self.myName + '_tgsn')
+		baseDir = os.path.join(test_path, 'tmp_check_t', self.myName + '_' + suffix)
 		if os.path.exists(baseDir):
 			shutil.rmtree(baseDir)
 		node = testgres.get_new_node('test', port=port, base_dir=baseDir)
