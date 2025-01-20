@@ -43,8 +43,10 @@ class BaseTest(unittest.TestCase):
 
 	def getReplica(self) -> testgres.PostgresNode:
 		if self.replica is None:
-			(test_path, t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
-			baseDir = os.path.join(test_path, 'tmp_check_t', self.myName + '_tgsb')
+			(test_path, t) = os.path.split(
+			    os.path.dirname(inspect.getfile(self.__class__)))
+			baseDir = os.path.join(test_path, 'tmp_check_t',
+			                       self.myName + '_tgsb')
 			if os.path.exists(baseDir):
 				shutil.rmtree(baseDir)
 			replica = self.node.backup(
@@ -55,7 +57,8 @@ class BaseTest(unittest.TestCase):
 		return self.replica
 
 	def initNode(self, port) -> testgres.PostgresNode:
-		(test_path, t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
+		(test_path,
+		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 		baseDir = os.path.join(test_path, 'tmp_check_t', self.myName + '_tgsn')
 		if os.path.exists(baseDir):
 			shutil.rmtree(baseDir)
@@ -173,6 +176,16 @@ class BaseTest(unittest.TestCase):
 		replica.catchup()
 		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
 		                         expected=True)
+
+	@staticmethod
+	def sparse_files_supported():
+		(test_path, t) = os.path.split(os.path.dirname(__file__))
+		fname = os.path.join(test_path, 'tmp_check_t', 'sparse_file_test')
+		fp = open(fname, 'wb')
+		fp.truncate(1024 * 16)
+		fp.close()
+		stat = os.stat(fname)
+		return (stat.st_blocks == 0)
 
 
 # execute SQL query Thread for PostgreSql node's connection
