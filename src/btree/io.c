@@ -827,8 +827,8 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 		if (ret < 0)
 		{
 			elog(WARNING, "fail to punch sparse file hole datoid=%u relnode=%u offset=%llu length=%d",
-					desc->oids.datoid, desc->oids.relnode,
-					(unsigned long long) offset, length);
+				 desc->oids.datoid, desc->oids.relnode,
+				 (unsigned long long) offset, length);
 		}
 	}
 }
