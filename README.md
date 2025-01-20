@@ -1,5 +1,5 @@
-# OrioleDB – building a modern cloud-native storage engine
-(... and solving some PostgreSQL wicked problems)
+# OrioleDB – a cloud-native storage engine for PostgreSQL
+(A solution to PostgreSQL’s wicked problems)
 
 [![build status](https://github.com/orioledb/orioledb/actions/workflows/build.yml/badge.svg)](https://github.com/orioledb/orioledb/actions)
 [![codecov](https://codecov.io/gh/orioledb/orioledb/branch/main/graph/badge.svg?token=shh4jn0DUK)](https://codecov.io/gh/orioledb/orioledb) [![dockerhub](https://github.com/orioledb/orioledb/actions/workflows/docker.yml/badge.svg)](https://hub.docker.com/r/orioledb/orioledb/tags)
