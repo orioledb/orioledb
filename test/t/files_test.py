@@ -585,12 +585,5 @@ class FilesTest(BaseTest):
 		               "CHECKPOINT;\n")
 		stat2 = os.stat(fname)
 
-		with open(node.pg_log_file) as f:
-			failedAttempts = 'fail to punch sparse file hole' in f.read()
-
 		self.assertEqual(2 * stat1.st_size, stat2.st_size)
-
-		if failedAttempts:
-			self.assertEqual(stat1.st_blocks * 2, stat2.st_blocks)
-		else:
-			self.assertEqual(stat1.st_blocks, stat2.st_blocks)
+		self.assertEqual(stat1.st_blocks, stat2.st_blocks)

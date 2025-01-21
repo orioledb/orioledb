@@ -181,7 +181,10 @@ class BaseTest(unittest.TestCase):
 	@staticmethod
 	def sparse_files_supported():
 		(test_path, t) = os.path.split(os.path.dirname(__file__))
-		fname = os.path.join(test_path, 'tmp_check_t', 'sparse_file_test')
+		tmp_check_path = os.path.join(test_path, 'tmp_check_t')
+		if not os.path.exists(tmp_check_path):
+			os.makedirs(tmp_check_path)
+		fname = os.path.join(tmp_check_path, 'sparse_file_test')
 		fp = open(fname, 'wb')
 		fp.truncate(1024 * 16)
 		fp.close()
