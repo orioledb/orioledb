@@ -4840,7 +4840,7 @@ can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num)
 	 */
 	pg_read_barrier();
 
-	if (pg_atomic_read_u32(&metaPageBlkno->numSeqScans[chkp_num - 1]) != 0)
+	if (pg_atomic_read_u32(&metaPageBlkno->numSeqScans[(chkp_num - 1) % NUM_SEQ_SCANS_ARRAY_SIZE]) != 0)
 		return false;
 	return true;
 }
