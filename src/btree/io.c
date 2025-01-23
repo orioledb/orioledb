@@ -3052,6 +3052,7 @@ try_to_punch_holes(BTreeDescr *desc)
 {
 	BTreeMetaPage *metaPage;
 	File		file;
+	uint64		file_size;
 	char	   *filename,
 				buf[ORIOLEDB_BLCKSZ];
 	uint64		len = 0,
@@ -3104,12 +3105,16 @@ try_to_punch_holes(BTreeDescr *desc)
 		if (file < 0)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not open file %s", filename)));
+		file_size = FileSize(file);
 
-		do
+		while (true)
 		{
 			BlockNumber *cur_off;
 
 			buf_len = OFileRead(file, buf, ORIOLEDB_BLCKSZ, len, WAIT_EVENT_DATA_FILE_READ);
+			if (buf_len <= 0)
+				break;
+
 			cur_off = (BlockNumber *) buf;
 			for (i = 0; i < buf_len; i += sizeof(BlockNumber))
 			{
@@ -3120,7 +3125,10 @@ try_to_punch_holes(BTreeDescr *desc)
 			}
 			len += buf_len;
 		}
-		while (buf_len == ORIOLEDB_BLCKSZ);
+		if (file_size != len)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read data from checkpoint tmp file: %s %lu %lu",
+								   filename, len, file_size)));
 
 		pfree(filename);
 		FileClose(file);

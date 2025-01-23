@@ -549,6 +549,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 {
 	BTreeMetaPage *metaPage;
 	File		file;
+	uint64		file_size;
 	char	   *filename,
 				buf[ORIOLEDB_BLCKSZ];
 	uint64		len = 0,
@@ -584,12 +585,17 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		if (file < 0)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not open file %s", filename)));
+		file_size = FileSize(file);
 
-		do
+		while (true)
 		{
 			FileExtent *cur_off;
 
 			buf_len = OFileRead(file, buf, ORIOLEDB_BLCKSZ, len, WAIT_EVENT_DATA_FILE_READ);
+
+			if (buf_len <= 0)
+				break;
+
 			cur_off = (FileExtent *) buf;
 			for (i = 0; i < buf_len; i += sizeof(FileExtent))
 			{
@@ -608,7 +614,10 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 			}
 			len += buf_len;
 		}
-		while (buf_len == ORIOLEDB_BLCKSZ);
+		if (file_size != len)
+			ereport(FATAL, (errcode_for_file_access(),
+							errmsg("could not read data from checkpoint tmp file: %s %lu %lu",
+								   filename, len, file_size)));
 
 		pfree(filename);
 		FileClose(file);

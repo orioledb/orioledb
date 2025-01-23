@@ -4840,7 +4840,7 @@ get_cur_checkpoint_number(ORelOids *oids, OIndexType type,
 bool
 can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);;
+	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 
 	if (chkp_num > checkpoint_state->lastCheckpointNumber)
 		return false;
