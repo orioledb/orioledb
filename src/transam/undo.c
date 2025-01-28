@@ -1232,6 +1232,7 @@ orioledb_reset_xmin_hook(void)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	RetainUndoLocationPHNode *location;
+	OXid		xmin = InvalidOXid;
 
 	if (ActiveSnapshotSet())
 		return;
@@ -1239,7 +1240,6 @@ orioledb_reset_xmin_hook(void)
 	if (pairingheap_is_empty(&retainUndoLocRegularHeap))
 	{
 		pg_atomic_write_u64(&curProcData->undoRetainLocations[UndoLogRegular].snapshotRetainUndoLocation, InvalidUndoLocation);
-		pg_atomic_write_u64(&curProcData->xmin, InvalidOXid);
 	}
 	else
 	{
@@ -1248,14 +1248,14 @@ orioledb_reset_xmin_hook(void)
 		if (location->undoLocation > pg_atomic_read_u64(&curProcData->undoRetainLocations[UndoLogRegular].snapshotRetainUndoLocation))
 		{
 			pg_atomic_write_u64(&curProcData->undoRetainLocations[UndoLogRegular].snapshotRetainUndoLocation, location->undoLocation);
-			pg_atomic_write_u64(&curProcData->xmin, location->xmin);
+			if (!OXidIsValid(xmin) || location->xmin < xmin)
+				xmin = location->xmin;
 		}
 	}
 
 	if (pairingheap_is_empty(&retainUndoLocSystemHeap))
 	{
 		pg_atomic_write_u64(&curProcData->undoRetainLocations[UndoLogSystem].snapshotRetainUndoLocation, InvalidUndoLocation);
-		pg_atomic_write_u64(&curProcData->xmin, InvalidOXid);
 	}
 	else
 	{
@@ -1264,9 +1264,11 @@ orioledb_reset_xmin_hook(void)
 		if (location->undoLocation > pg_atomic_read_u64(&curProcData->undoRetainLocations[UndoLogSystem].snapshotRetainUndoLocation))
 		{
 			pg_atomic_write_u64(&curProcData->undoRetainLocations[UndoLogSystem].snapshotRetainUndoLocation, location->undoLocation);
-			pg_atomic_write_u64(&curProcData->xmin, location->xmin);
+			if (!OXidIsValid(xmin) || location->xmin < xmin)
+				xmin = location->xmin;
 		}
 	}
+	pg_atomic_write_u64(&curProcData->xmin, xmin);
 }
 
 void
@@ -1925,7 +1927,7 @@ orioledb_snapshot_hook(Snapshot snapshot)
 
 	snapshot->undoRegularLocationPhNode.undoLocation = set_my_retain_location(UndoLogRegular);
 	snapshot->undoSystemLocationPhNode.undoLocation = set_my_retain_location(UndoLogSystem);
-	snapshot->undoRegularLocationPhNode.xmin = snapshot->undoSystemLocationPhNode.undoLocation = pg_atomic_read_u64(&xid_meta->runXmin);
+	snapshot->undoRegularLocationPhNode.xmin = snapshot->undoSystemLocationPhNode.xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	curXmin = pg_atomic_read_u64(&curProcData->xmin);
 	if (!OXidIsValid(curXmin))
 		pg_atomic_write_u64(&curProcData->xmin, snapshot->undoRegularLocationPhNode.xmin);
