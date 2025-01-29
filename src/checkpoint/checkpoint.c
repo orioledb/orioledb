@@ -4646,6 +4646,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	uint32		chkpNum = (checkpoint_state->lastCheckpointNumber + 1);
 	int			cur_chkp_index = chkpNum % 2;
 	MemoryContext prev_context;
+	bool		loaded = false;
 
 	prev_context = MemoryContextSwitchTo(chkp_tree_context);
 
@@ -4664,7 +4665,9 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 	}
 
 	descr = o_fetch_index_descr(treeOids, type, true, NULL);
-	if (descr != NULL && o_btree_load_shmem_checkpoint(&descr->desc))
+	if (descr != NULL)
+		loaded = o_btree_load_shmem_checkpoint(&descr->desc);
+	if (loaded)
 	{
 		BTreeDescr *td = &descr->desc;
 		BTreeMetaPage *meta = BTREE_GET_META(td);
@@ -4755,6 +4758,10 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 
 		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+	}
+	else if (descr != NULL)
+	{
+		o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 	}
 
 	MemoryContextSwitchTo(prev_context);
