@@ -612,8 +612,8 @@ o_sys_cache_lock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 	key_hash = compute_hash_value(sys_cache->cc_hashfunc, sys_cache->nkeys,
 								  key);
 
-	o_sys_cache_fill_locktag(&locktag, key->common.datoid, key_hash,
-							 sys_cache->cc_indexoid, lockmode);
+	o_sys_cache_fill_locktag(&locktag, key->common.datoid, sys_cache->cc_indexoid,
+							 key_hash, lockmode);
 
 	LockAcquire(&locktag, lockmode, false, false);
 }
@@ -627,8 +627,8 @@ o_sys_cache_unlock(OSysCache *sys_cache, OSysCacheKey *key, int lockmode)
 	key_hash = compute_hash_value(sys_cache->cc_hashfunc, sys_cache->nkeys,
 								  key);
 
-	o_sys_cache_fill_locktag(&locktag, key->common.datoid, key_hash,
-							 sys_cache->cc_indexoid, lockmode);
+	o_sys_cache_fill_locktag(&locktag, key->common.datoid, sys_cache->cc_indexoid,
+							 key_hash, lockmode);
 
 	if (!LockRelease(&locktag, lockmode, false))
 	{
