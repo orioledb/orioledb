@@ -1198,26 +1198,25 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
 	{
 		RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) pstmt->utilityStmt;
-
-		if (!stmt->skipData)
-		{
-			Oid			matviewOid;
-			Relation	matviewRel;
+		Oid			matviewOid;
+		Relation	matviewRel;
 #if PG_VERSION_NUM >= 170000
-			matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
-												  RangeVarCallbackMaintainsTable, NULL);
+		matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
+											  RangeVarCallbackMaintainsTable, NULL);
 #else
-			matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
-												  RangeVarCallbackOwnsTable, NULL);
+		matviewOid = RangeVarGetRelidExtended(stmt->relation, NoLock, 0,
+											  RangeVarCallbackOwnsTable, NULL);
 #endif
-			matviewRel = table_open(matviewOid, AccessShareLock);
+		matviewRel = table_open(matviewOid, AccessShareLock);
 
-			if (matviewRel->rd_rel->relkind == RELKIND_MATVIEW &&
-				is_orioledb_rel(matviewRel))
+		if (matviewRel->rd_rel->relkind == RELKIND_MATVIEW &&
+			is_orioledb_rel(matviewRel))
+		{
+			if (!stmt->skipData)
 				savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
-			table_close(matviewRel, AccessShareLock);
+			stmt->skipData = true;
 		}
-		stmt->skipData = true;
+		table_close(matviewRel, AccessShareLock);
 	}
 
 	if (call_next)
