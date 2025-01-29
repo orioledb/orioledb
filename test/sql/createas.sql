@@ -184,6 +184,16 @@ SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
 
 CREATE TABLE pg_test_refresh_tbl_instead_of_matview AS SELECT 1;
 REFRESH MATERIALIZED VIEW pg_test_refresh_tbl_instead_of_matview;
+TABLE pg_test_refresh_tbl_instead_of_matview;
+
+CREATE MATERIALIZED VIEW pg_test_refresh_matview_no_data AS SELECT 1;
+TABLE pg_test_refresh_matview_no_data;
+REFRESH MATERIALIZED VIEW pg_test_refresh_matview_no_data;
+TABLE pg_test_refresh_matview_no_data;
+REFRESH MATERIALIZED VIEW pg_test_refresh_matview_no_data WITH NO DATA;
+TABLE pg_test_refresh_matview_no_data;
+REFRESH MATERIALIZED VIEW pg_test_refresh_matview_no_data;
+TABLE pg_test_refresh_matview_no_data;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA createas CASCADE;

@@ -490,6 +490,37 @@ SELECT relname FROM orioledb_table_oids() JOIN pg_class ON reloid = oid
 CREATE TABLE pg_test_refresh_tbl_instead_of_matview AS SELECT 1;
 REFRESH MATERIALIZED VIEW pg_test_refresh_tbl_instead_of_matview;
 ERROR:  "pg_test_refresh_tbl_instead_of_matview" is not a materialized view
+TABLE pg_test_refresh_tbl_instead_of_matview;
+ ?column? 
+----------
+        1
+(1 row)
+
+CREATE MATERIALIZED VIEW pg_test_refresh_matview_no_data AS SELECT 1;
+TABLE pg_test_refresh_matview_no_data;
+ ?column? 
+----------
+        1
+(1 row)
+
+REFRESH MATERIALIZED VIEW pg_test_refresh_matview_no_data;
+TABLE pg_test_refresh_matview_no_data;
+ ?column? 
+----------
+        1
+(1 row)
+
+REFRESH MATERIALIZED VIEW pg_test_refresh_matview_no_data WITH NO DATA;
+TABLE pg_test_refresh_matview_no_data;
+ERROR:  materialized view "pg_test_refresh_matview_no_data" has not been populated
+HINT:  Use the REFRESH MATERIALIZED VIEW command.
+REFRESH MATERIALIZED VIEW pg_test_refresh_matview_no_data;
+TABLE pg_test_refresh_matview_no_data;
+ ?column? 
+----------
+        1
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table o_test_create_as
@@ -502,8 +533,9 @@ drop cascades to table tbl_as_nodata
 drop cascades to table tbl_as_data
 drop cascades to materialized view o_test_matview
 DROP SCHEMA createas CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function query_to_text(text)
 drop cascades to sequence o_matview_seq
 drop cascades to table pg_test_refresh_tbl_instead_of_matview
+drop cascades to materialized view pg_test_refresh_matview_no_data
 RESET search_path;
