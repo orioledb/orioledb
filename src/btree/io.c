@@ -935,6 +935,12 @@ get_free_disk_offset(BTreeDescr *desc)
 					old_tag = desc->freeBuf.shared->tag;
 		SeqBufReplaceResult replaceResult;
 
+		if (orioledb_use_sparse_files)
+		{
+			try_to_punch_holes(desc);
+			Assert(free_buf_num + 1 <= metaPage->punchHolesChkpNum);
+		}
+
 		tag.datoid = desc->oids.datoid;
 		tag.relnode = desc->oids.relnode;
 		tag.num = free_buf_num + 1;
@@ -975,9 +981,6 @@ get_free_disk_offset(BTreeDescr *desc)
 		numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
 		free_buf_num = metaPage->freeBuf.tag.num;
 	}
-
-	if (orioledb_use_sparse_files)
-		try_to_punch_holes(desc);
 
 	/*
 	 * Try to get free block number from the buffer.  If not success, then
@@ -3094,6 +3097,7 @@ try_to_punch_holes(BTreeDescr *desc)
 				buf_len;
 	uint32		chkp_num;
 	LWLock	   *metaLock;
+	LWLock	   *punchHolesLock;
 
 	Assert(orioledb_use_sparse_files);
 	Assert(!OCompressIsValid(desc->compress));
@@ -3101,6 +3105,7 @@ try_to_punch_holes(BTreeDescr *desc)
 	o_btree_load_shmem(desc);
 	metaPage = BTREE_GET_META(desc);
 	metaLock = &metaPage->metaLock;
+	punchHolesLock = &metaPage->punchHolesLock;
 
 	chkp_num = metaPage->punchHolesChkpNum + 1;
 	while (can_use_checkpoint_extents(desc, chkp_num))
@@ -3108,19 +3113,20 @@ try_to_punch_holes(BTreeDescr *desc)
 		SeqBufTag	tag;
 		bool		removeFile = false;
 
-		LWLockAcquire(metaLock, LW_EXCLUSIVE);
+		LWLockAcquire(punchHolesLock, LW_EXCLUSIVE);
+
 		if (chkp_num == metaPage->punchHolesChkpNum + 1)
 		{
-			metaPage->punchHolesChkpNum = chkp_num;
 			if (chkp_num < metaPage->freeBuf.tag.num)
 				removeFile = true;
 		}
 		else
 		{
-			LWLockRelease(metaLock);
-			return;
+			chkp_num = metaPage->punchHolesChkpNum + 1;
+			/* Try for next checkpoint number */
+			LWLockRelease(punchHolesLock);
+			continue;
 		}
-		LWLockRelease(metaLock);
 
 		tag.datoid = desc->oids.datoid;
 		tag.relnode = desc->oids.relnode;
@@ -3129,6 +3135,11 @@ try_to_punch_holes(BTreeDescr *desc)
 		if (!seq_buf_file_exist(&tag))
 		{
 			/* table may be deleted or *.tmp file not created */
+			LWLockAcquire(metaLock, LW_EXCLUSIVE);
+			Assert(chkp_num == metaPage->punchHolesChkpNum + 1);
+			metaPage->punchHolesChkpNum = chkp_num;
+			LWLockRelease(metaLock);
+			LWLockRelease(punchHolesLock);
 			chkp_num++;
 			continue;
 		}
@@ -3169,5 +3180,15 @@ try_to_punch_holes(BTreeDescr *desc)
 
 		if (removeFile)
 			seq_buf_remove_file(&tag);
+
+		LWLockAcquire(metaLock, LW_EXCLUSIVE);
+		Assert(chkp_num == metaPage->punchHolesChkpNum + 1);
+		metaPage->punchHolesChkpNum = chkp_num;
+		LWLockRelease(metaLock);
+
+		LWLockRelease(punchHolesLock);
+
+		/* Try for next checkpoint number */
+		chkp_num++;
 	}
 }

@@ -48,6 +48,7 @@ typedef struct
 
 	BTreeS3PartsInfo partsInfo[2];
 
+	LWLock		punchHolesLock;
 	uint32		punchHolesChkpNum;
 } BTreeMetaPage;
 

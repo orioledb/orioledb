@@ -182,6 +182,7 @@ typedef struct
 	LWLock		oXidQueueFlushLock;
 	int			copyBlknoTrancheId;
 	int			oMetaTrancheId;
+	int			punchHolesTrancheId;
 	pg_atomic_uint64 xidRecLastPos;
 	pg_atomic_uint64 xidRecFlushPos;
 	XidFileRec	xidRecQueue[FLEXIBLE_ARRAY_MEMBER];
