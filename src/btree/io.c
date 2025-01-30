@@ -33,6 +33,7 @@
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "utils/compress.h"
+#include "utils/elog.h"
 #include "utils/page_pool.h"
 #include "utils/seq_buf.h"
 #include "utils/stopevent.h"
@@ -1343,6 +1344,8 @@ load_page(OBTreeFindPageContext *context)
 	uint32		parent_change_count;
 	BTreeNonLeafTuphdr *int_hdr;
 	OInMemoryBlkno blkno;
+	OFixedKey	target_hikey;
+	int			target_level;
 	Page		page;
 	char		buf[ORIOLEDB_BLCKSZ];
 	bool		was_modify;
@@ -1370,6 +1373,16 @@ load_page(OBTreeFindPageContext *context)
 	int_hdr->downlink = MAKE_IO_DOWNLINK(ionum);
 	Assert(PAGE_GET_N_ONDISK(parent_page) > 0);
 	PAGE_DEC_N_ONDISK(parent_page);
+
+	BTREE_PAGE_LOCATOR_NEXT(parent_page, parent_loc);
+	if (BTREE_PAGE_LOCATOR_IS_VALID(parent_page, parent_loc))
+		copy_fixed_page_key(desc, &target_hikey, parent_page, parent_loc);
+	else if (!O_PAGE_IS(parent_page, RIGHTMOST))
+		copy_fixed_hikey(desc, &target_hikey, parent_page);
+	else
+		clear_fixed_key(&target_hikey);
+	target_level = PAGE_GET_LEVEL(parent_page) - 1;
+
 	unlock_page(parent_blkno);
 
 	/* Prepare new page metaPage-data */
@@ -1458,9 +1471,22 @@ load_page(OBTreeFindPageContext *context)
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
 	context->csn = COMMITSEQNO_INPROGRESS;
+	if (PAGE_GET_LEVEL(page) != target_level)
+		ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("error reading downlink %X/%X in relfile (%u, %u)",
+							   (uint32) (downlink >> 32), (uint32) (downlink),
+							   desc->oids.datoid, desc->oids.relnode),
+						errdetail("Level mismatch, expected: %d, found: %d",
+								  PAGE_GET_LEVEL(page), target_level)));
 
 	if (O_PAGE_IS(page, RIGHTMOST))
 	{
+		if (!O_TUPLE_IS_NULL(target_hikey.tuple))
+			ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							errmsg("error reading downlink %X/%X in relfile (%u, %u)",
+								   (uint32) (downlink >> 32), (uint32) (downlink),
+								   desc->oids.datoid, desc->oids.relnode),
+							errdetail("Hikeys don't match.")));
 		refind_page(context, NULL, BTreeKeyRightmost, PAGE_GET_LEVEL(page) + 1,
 					parent_blkno, parent_change_count);
 	}
@@ -1469,6 +1495,14 @@ load_page(OBTreeFindPageContext *context)
 		OTuple		hikey;
 
 		BTREE_PAGE_GET_HIKEY(hikey, page);
+
+		if (O_TUPLE_IS_NULL(target_hikey.tuple) ||
+			o_btree_cmp(desc, &hikey, BTreeKeyNonLeafKey, &target_hikey, BTreeKeyNonLeafKey) != 0)
+			ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							errmsg("error reading downlink %X/%X in relfile (%u, %u)",
+								   (uint32) (downlink >> 32), (uint32) (downlink),
+								   desc->oids.datoid, desc->oids.relnode),
+							errdetail("Hikeys don't match.")));
 		refind_page(context, &hikey, BTreeKeyPageHiKey,
 					PAGE_GET_LEVEL(page) + 1, parent_blkno, parent_change_count);
 	}
