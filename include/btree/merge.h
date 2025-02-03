@@ -13,7 +13,8 @@
 #ifndef __BTREE_MERGE_H__
 #define __BTREE_MERGE_H__
 
-#include "btree.h"
+#include "btree/btree.h"
+#include "btree/page_contents.h"
 
 extern bool btree_try_merge_pages(BTreeDescr *desc,
 								  OInMemoryBlkno parent_blkno,
