@@ -7,7 +7,7 @@ from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
-from .base_test import wait_bgwriter_stopevent
+from .base_test import wait_bgwriter_stopevent, tbl_structure_to_json
 
 
 class CheckpointConcurrentTest(BaseTest):
@@ -715,3 +715,97 @@ class CheckpointConcurrentTest(BaseTest):
 		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
 		    [0][0])
 		node.stop()
+
+	def test_checkpoint_autonomous_page_hikey(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_checkpoint (\n"
+		    "	id text NOT NULL,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb\n")
+		node.safe_psql(
+		    'postgres', "INSERT INTO o_checkpoint\n"
+		    "	(SELECT to_char(id, 'fm0000') || repeat('x', 1000) FROM generate_series(0, 3000, 20) id);\n"
+		)
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con3 = node.connect()
+
+		con3.execute("SELECT pg_stopevent_set('checkpoint_step',\n"
+		             "'$.action == \"walkDownwards\" && "
+		             "$.treeName == \"o_checkpoint_pkey\" && "
+		             "$.lokey.id > \"0960\" &&"
+		             "$.level == 1');")
+
+		t1 = ThreadQueryExecutor(con1, "CHECKPOINT;")
+		t1.start()
+
+		wait_checkpointer_stopevent(node)
+
+		node.safe_psql(
+		    "INSERT INTO o_checkpoint\n"
+		    "(SELECT to_char(id, 'fm0000') || repeat('x', 1000) FROM generate_series(1555, 1441, -1) id WHERE id % 20 != 0);"
+		)
+		node.safe_psql(
+		    "INSERT INTO o_checkpoint\n"
+		    "(SELECT to_char(id, 'fm0000') || repeat('x', 1000) FROM generate_series(1780, 1810, 1) id WHERE id % 20 != 0);"
+		)
+
+		node.safe_psql(
+		    "DELETE FROM o_checkpoint WHERE id > '1441' and id < '2116';")
+
+		con3.execute("SELECT pg_stopevent_reset('checkpoint_step')")
+
+		t1.join()
+
+		tbl_structure_json = tbl_structure_to_json(
+		    con3.execute(
+		        "SELECT orioledb_tbl_structure('o_checkpoint'::regclass, 'nue', 4);"
+		    )[0][0].replace('x' * 1000, 'xxx'))
+
+		# The node with '1680xxx' hikey and its left neighbor should be sparse.
+		# OrioleDB couldn't merge it due to an autonomous page.
+		level1 = tbl_structure_json["o_checkpoint_pkey"][1]
+		key1551_issparse = False
+		key1680_issparse = False
+		for key, value in level1.items():
+			if "hikey" in value and value["hikey"] == "('1680xxx')":
+				if "is_sparse" in value:
+					key1680_issparse = value["is_sparse"]
+
+				for key_left in reversed(range(key)):
+					if key_left in level1:
+						value_left = level1[key_left]
+
+						if "is_sparse" in value_left:
+							key1551_issparse = level1[key_left]["is_sparse"]
+						self.assertEqual(value_left["hikey"], "('1551xxx')")
+
+						break
+
+				break
+
+		self.assertTrue(key1551_issparse)
+		self.assertTrue(key1680_issparse)
+
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 118)
+
+		node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)"
+		             )  # no errors, can be true or false
+		node.safe_psql("CHECKPOINT;")
+
+		# no incomplete split
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
+		    [0][0])
+
+		con1.close()
+		con2.close()
+		con3.close()
