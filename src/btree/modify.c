@@ -380,7 +380,11 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 	if (unlock)
 		unlock_page(blkno);
 	if (context->undoIsReserved)
+	{
 		release_undo_size(desc->undoType);
+		if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+	}
 	if (context->pagesAreReserved)
 		ppool_release_reserved(desc->ppool,
 							   PPOOL_KIND_GET_MASK(context->pageReserveKind));
@@ -946,6 +950,23 @@ prepare_modify_start_params(BTreeDescr *desc)
 	return res;
 }
 
+static void
+reserve_undo_for_modification(UndoLogType undoType)
+{
+	if (undoType == UndoLogNone)
+		return;
+
+	if (GET_PAGE_LEVEL_UNDO_TYPE(undoType) == undoType)
+	{
+		(void) reserve_undo_size(undoType, O_MODIFY_UNDO_RESERVE_SIZE);
+	}
+	else
+	{
+		(void) reserve_undo_size(undoType, 2 * O_UPDATE_MAX_UNDO_SIZE);
+		(void) reserve_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(undoType), 2 * O_MAX_SPLIT_UNDO_IMAGE_SIZE);
+	}
+}
+
 static OBTreeModifyResult
 o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 					  OTuple tuple, BTreeKeyType tupleType,
@@ -970,8 +991,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		keyType = tupleType;
 	}
 
-	if (desc->undoType != UndoLogNone)
-		(void) reserve_undo_size(desc->undoType, O_MODIFY_UNDO_RESSERVE_SIZE);
+	reserve_undo_for_modification(desc->undoType);
 
 	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
 		pageReserveKind = PPOOL_RESERVE_SHARED_INFO_INSERT;
@@ -1100,8 +1120,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 
 	Assert(key != NULL && keyType == BTreeKeyBound);
 
-	if (desc->undoType != UndoLogNone)
-		(void) reserve_undo_size(desc->undoType, O_MODIFY_UNDO_RESSERVE_SIZE);
+	reserve_undo_for_modification(desc->undoType);
 
 	if (OIDS_EQ_SYS_TREE(desc->oids, SYS_TREES_SHARED_ROOT_INFO))
 		pageReserveKind = PPOOL_RESERVE_SHARED_INFO_INSERT;

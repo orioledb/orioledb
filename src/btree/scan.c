@@ -193,7 +193,8 @@ load_first_historical_page(BTreeSeqScan *scan)
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->oSnapshot.csn)
 	{
-		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
+		if (!UNDO_REC_EXISTS(GET_PAGE_LEVEL_UNDO_TYPE(scan->desc->undoType),
+							 header->undoLocation))
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
@@ -248,7 +249,8 @@ load_next_historical_page(BTreeSeqScan *scan)
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->oSnapshot.csn)
 	{
-		if (!UNDO_REC_EXISTS(scan->desc->undoType, header->undoLocation))
+		if (!UNDO_REC_EXISTS(GET_PAGE_LEVEL_UNDO_TYPE(scan->desc->undoType),
+							 header->undoLocation))
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),

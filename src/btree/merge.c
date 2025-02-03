@@ -225,7 +225,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * Reserve the required undo size.  We are holding the page lock, so we
 	 * can only do this with 'wait == false'.
 	 */
-	if (needsUndo && !reserve_undo_size_extended(desc->undoType,
+	if (needsUndo && !reserve_undo_size_extended(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
 												 2 * O_MERGE_UNDO_IMAGE_SIZE,
 												 false, false))
 	{
@@ -259,7 +259,11 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * Step 2: refind the parent.  We did release the target lock first: locks
 	 * shouldn't go bottom-up.
 	 */
-	init_page_find_context(&find_context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_DOWNLINK_LOCATION);
+	init_page_find_context(&find_context, desc,
+						   COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY |
+						   BTREE_PAGE_FIND_NO_FIX_SPLIT |
+						   BTREE_PAGE_FIND_DOWNLINK_LOCATION);
 
 	/* get a full find context for parent page and lock it */
 	if (!O_TUPLE_IS_NULL(key.tuple))
@@ -488,7 +492,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	}
 
 	if (needsUndo)
-		release_undo_size(desc->undoType);
+		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 
 	Assert(!have_locked_pages());
 	return success;

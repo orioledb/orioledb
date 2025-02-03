@@ -468,10 +468,19 @@ s3process_task(uint64 taskLocation)
 
 		if (task->typeSpecific.writeUndoFile.undoType == UndoLogRegular)
 		{
-			filename = psprintf(ORIOLEDB_UNDO_DATA_FILENAME_TEMPLATE,
+			filename = psprintf(ORIOLEDB_UNDO_DATA_ROW_FILENAME_TEMPLATE,
 								(uint32) (fileNum >> 32),
 								(uint32) fileNum);
-			objectname = psprintf("orioledb_undo/%02X%08Xdata",
+			objectname = psprintf("orioledb_undo/%02X%08Xrow",
+								  (uint32) (fileNum >> 32),
+								  (uint32) fileNum);
+		}
+		else if (task->typeSpecific.writeUndoFile.undoType == UndoLogRegularPageLevel)
+		{
+			filename = psprintf(ORIOLEDB_UNDO_DATA_PAGE_FILENAME_TEMPLATE,
+								(uint32) (fileNum >> 32),
+								(uint32) fileNum);
+			objectname = psprintf("orioledb_undo/%02X%08Xpage",
 								  (uint32) (fileNum >> 32),
 								  (uint32) fileNum);
 		}

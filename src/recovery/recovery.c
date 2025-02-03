@@ -97,13 +97,11 @@ typedef struct
 	XLogRecPtr	ptr;
 
 	bool		in_finished_list;
-	bool		in_retain_regular_heap;
-	bool		in_retain_system_heap;
+	bool		in_retain_undo_heaps[(int) UndoLogsCount];
 
 	dlist_node	joint_commit_list_node;
 	dlist_node	finished_list_node;
-	pairingheap_node retain_regular_ph_node;
-	pairingheap_node retain_system_ph_node;
+	pairingheap_node retain_undo_ph_nodes[(int) UndoLogsCount];
 	pairingheap_node xmin_ph_node;
 
 	/* is any system tree modified by oxid */
@@ -118,6 +116,11 @@ typedef struct
 	bool	   *used_by;
 } RecoveryXidState;
 
+#define RetainUndoNodeGetRecoveryXidState(node, undoType) \
+	((RecoveryXidState *) ((Pointer) (node) - \
+		offsetof(RecoveryXidState, retain_undo_ph_nodes) - \
+		sizeof(pairingheap_node) * (int) (undoType)))
+
 typedef struct
 {
 	UndoLogType undoType;
@@ -129,42 +132,22 @@ typedef struct
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
 /*
- * Comparator for regular retain min-heap.
+ * Comparator for undo retain min-heap.
  *
  * See pairingheap.c/pairingheap_comparator description.
  */
 static int
-retain_regular_pairingheap_cmp(const pairingheap_node *a,
-							   const pairingheap_node *b,
-							   void *arg)
+retain_undo_pairingheap_cmp(const pairingheap_node *a,
+							const pairingheap_node *b,
+							void *arg)
 {
-	const RecoveryXidState *l = pairingheap_const_container(RecoveryXidState, retain_regular_ph_node, a);
-	const RecoveryXidState *r = pairingheap_const_container(RecoveryXidState, retain_regular_ph_node, b);
+	int			num = *((int *) arg);
+	const RecoveryXidState *l = RetainUndoNodeGetRecoveryXidState(a, num);
+	const RecoveryXidState *r = RetainUndoNodeGetRecoveryXidState(b, num);;
 
 	if (l->retain_locs[UndoLogRegular] < r->retain_locs[UndoLogRegular])
 		return 1;
 	else if (l->retain_locs[UndoLogRegular] > r->retain_locs[UndoLogRegular])
-		return -1;
-	else
-		return 0;
-}
-
-/*
- * Comparator for system retain min-heap.
- *
- * See pairingheap.c/pairingheap_comparator description.
- */
-static int
-retain_system_pairingheap_cmp(const pairingheap_node *a,
-							  const pairingheap_node *b,
-							  void *arg)
-{
-	const RecoveryXidState *l = pairingheap_const_container(RecoveryXidState, retain_system_ph_node, a);
-	const RecoveryXidState *r = pairingheap_const_container(RecoveryXidState, retain_system_ph_node, b);
-
-	if (l->retain_locs[UndoLogSystem] < r->retain_locs[UndoLogSystem])
-		return 1;
-	else if (l->retain_locs[UndoLogSystem] > r->retain_locs[UndoLogSystem])
 		return -1;
 	else
 		return 0;
@@ -200,8 +183,11 @@ static HTAB *recovery_xid_state_hash = NULL;
 static HTAB *idxbuild_oids_hash = NULL;
 
 /* Queues of undo retain locations */
-static pairingheap *retain_regular_queue = NULL;
-static pairingheap *retain_system_queue = NULL;
+static pairingheap *retain_undo_queues[(int) UndoLogsCount] =
+{
+	NULL
+};
+static int	retain_undo_queue_numbers[(int) UndoLogsCount];
 
 /* Queue of xmin's */
 static pairingheap *xmin_queue = NULL;
@@ -490,8 +476,8 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->csn = COMMITSEQNO_INPROGRESS;
 			state->ptr = InvalidXLogRecPtr;
 			state->in_finished_list = false;
-			state->in_retain_regular_heap = false;
-			state->in_retain_system_heap = false;
+			for (j = 0; j < (int) UndoLogsCount; j++)
+				state->in_retain_undo_heaps[j] = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				undo_stack_locations_set_invalid(&state->undo_stacks[j]);
 			dlist_init(&state->checkpoint_undo_stacks);
@@ -864,8 +850,12 @@ recovery_init(int worker_id)
 										  16, &ctl,
 										  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 	iam_recovery = true;
-	retain_regular_queue = pairingheap_allocate(retain_regular_pairingheap_cmp, NULL);
-	retain_system_queue = pairingheap_allocate(retain_system_pairingheap_cmp, NULL);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		retain_undo_queue_numbers[i] = i;
+		retain_undo_queues[i] = pairingheap_allocate(retain_undo_pairingheap_cmp,
+													 &retain_undo_queue_numbers[i]);
+	}
 	xmin_queue = pairingheap_allocate(xmin_pairingheap_cmp, NULL);
 	dlist_init(&finished_list);
 	dlist_init(&joint_commit_list);
@@ -1046,11 +1036,11 @@ recovery_finish(int worker_id)
 		idxbuild_oids_hash = NULL;
 	}
 	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
 		release_undo_size((UndoLogType) i);
-	for (i = 0; i < (int) UndoLogsCount; i++)
 		free_retained_undo_location((UndoLogType) i);
-	pairingheap_free(retain_regular_queue);
-	pairingheap_free(retain_system_queue);
+		pairingheap_free(retain_undo_queues[i]);
+	}
 	if (worker_id < 0)
 	{
 		pairingheap_free(xmin_queue);
@@ -1091,22 +1081,16 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 		{
 			cur_state->needs_wal_flush = oxid_needs_wal_flush;
 			for (i = 0; i < (int) UndoLogsCount; i++)
+			{
 				cur_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
 
-			if (!UndoLocationIsValid(cur_state->retain_locs[UndoLogRegular]) &&
-				UndoLocationIsValid(curRetainUndoLocations[UndoLogRegular]))
-			{
-				cur_state->retain_locs[UndoLogRegular] = curRetainUndoLocations[UndoLogRegular];
-				cur_state->in_retain_regular_heap = true;
-				pairingheap_add(retain_regular_queue, &cur_state->retain_regular_ph_node);
-			}
-
-			if (!UndoLocationIsValid(cur_state->retain_locs[UndoLogSystem]) &&
-				UndoLocationIsValid(curRetainUndoLocations[UndoLogRegular]))
-			{
-				cur_state->retain_locs[UndoLogSystem] = curRetainUndoLocations[UndoLogRegular];
-				cur_state->in_retain_system_heap = true;
-				pairingheap_add(retain_regular_queue, &cur_state->retain_system_ph_node);
+				if (!UndoLocationIsValid(cur_state->retain_locs[i]) &&
+					UndoLocationIsValid(curRetainUndoLocations[i]))
+				{
+					cur_state->retain_locs[i] = curRetainUndoLocations[i];
+					cur_state->in_retain_undo_heaps[i] = true;
+					pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
+				}
 			}
 		}
 
@@ -1130,13 +1114,14 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 		{
 			cur_state->xid = InvalidTransactionId;
 			for (i = 0; i < (int) UndoLogsCount; i++)
+			{
 				cur_state->retain_locs[i] = InvalidUndoLocation;
+				cur_state->in_retain_undo_heaps[i] = false;
+			}
 			cur_state->csn = COMMITSEQNO_INPROGRESS;
 			cur_state->ptr = InvalidXLogRecPtr;
 			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
-			cur_state->in_retain_regular_heap = false;
-			cur_state->in_retain_system_heap = false;
 			dlist_init(&cur_state->checkpoint_undo_stacks);
 			oxid_needs_wal_flush = false;
 			reset_cur_undo_locations();
@@ -1164,8 +1149,14 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 static void
 check_delete_xid_state(RecoveryXidState *state, int worker_id)
 {
-	if (!state->in_retain_regular_heap &&
-		!state->in_retain_system_heap &&
+	int			i;
+	bool		in_retain_heaps = false;
+
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		if (state->in_retain_undo_heaps[i])
+			in_retain_heaps = true;
+
+	if (!in_retain_heaps &&
 		!state->in_finished_list)
 	{
 		OXid		oxid = state->oxid;
@@ -1289,23 +1280,17 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	reset_cur_undo_locations();
 	recovery_oxid = InvalidOXid;
 
-	if (!UndoLocationIsValid(cur_state->retain_locs[UndoLogRegular]) &&
-		UndoLocationIsValid(curRetainUndoLocations[UndoLogRegular]))
+	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		cur_state->retain_locs[UndoLogRegular] = curRetainUndoLocations[UndoLogRegular];
-		pairingheap_add(retain_regular_queue, &cur_state->retain_regular_ph_node);
-		cur_state->in_retain_regular_heap = true;
+		if (!UndoLocationIsValid(cur_state->retain_locs[i]) &&
+			UndoLocationIsValid(curRetainUndoLocations[i]))
+		{
+			cur_state->retain_locs[i] = curRetainUndoLocations[i];
+			pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
+			cur_state->in_retain_undo_heaps[i] = true;
+		}
+		curRetainUndoLocations[i] = InvalidUndoLocation;
 	}
-	curRetainUndoLocations[UndoLogRegular] = InvalidUndoLocation;
-
-	if (!UndoLocationIsValid(cur_state->retain_locs[UndoLogSystem]) &&
-		UndoLocationIsValid(curRetainUndoLocations[UndoLogSystem]))
-	{
-		cur_state->retain_locs[UndoLogSystem] = curRetainUndoLocations[UndoLogSystem];
-		pairingheap_add(retain_system_queue, &cur_state->retain_system_ph_node);
-		cur_state->in_retain_system_heap = true;
-	}
-	curRetainUndoLocations[UndoLogSystem] = InvalidUndoLocation;
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		release_undo_size((UndoLogType) i);
@@ -1667,36 +1652,18 @@ update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	RecoveryXidState *state;
 
-	if (undoType == UndoLogRegular)
-	{
-		if (pairingheap_is_empty(retain_regular_queue))
-			return false;
-		state = pairingheap_container(RecoveryXidState, retain_regular_ph_node,
-									  pairingheap_first(retain_regular_queue));
-	}
-	else
-	{
-		if (pairingheap_is_empty(retain_system_queue))
-			return false;
-		state = pairingheap_container(RecoveryXidState, retain_system_ph_node,
-									  pairingheap_first(retain_system_queue));
-	}
+	if (pairingheap_is_empty(retain_undo_queues[undoType]))
+		return false;
+
+	state = RetainUndoNodeGetRecoveryXidState(pairingheap_first(retain_undo_queues[undoType]), undoType);
 
 	if (state->retain_locs[undoType] > pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation))
 		pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, state->retain_locs[undoType]);
 	if (state->csn == COMMITSEQNO_ABORTED ||
 		(COMMITSEQNO_IS_NORMAL(state->csn) && !state->in_finished_list && state->ptr <= recoveryPtr))
 	{
-		if (undoType == UndoLogRegular)
-		{
-			pairingheap_remove(retain_regular_queue, &state->retain_regular_ph_node);
-			state->in_retain_regular_heap = false;
-		}
-		else
-		{
-			pairingheap_remove(retain_system_queue, &state->retain_system_ph_node);
-			state->in_retain_system_heap = false;
-		}
+		pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
+		state->in_retain_undo_heaps[undoType] = false;
 		check_delete_xid_state(state, worker_id);
 		return true;
 	}
@@ -1717,23 +1684,19 @@ update_proc_retain_undo_location(int worker_id)
 				listPtr;
 	RecoveryXidState *state;
 	dlist_mutable_iter miter;
+	int			i;
+	bool		allRetainQueuesEmpty = true;
 
-	if (cur_state &&
-		!UndoLocationIsValid(cur_state->retain_locs[UndoLogRegular]) &&
-		UndoLocationIsValid(curRetainUndoLocations[UndoLogRegular]))
+	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		cur_state->retain_locs[UndoLogRegular] = curRetainUndoLocations[UndoLogRegular];
-		cur_state->in_retain_regular_heap = true;
-		pairingheap_add(retain_regular_queue, &cur_state->retain_regular_ph_node);
-	}
-
-	if (cur_state &&
-		!UndoLocationIsValid(cur_state->retain_locs[UndoLogSystem]) &&
-		UndoLocationIsValid(curRetainUndoLocations[UndoLogSystem]))
-	{
-		cur_state->retain_locs[UndoLogSystem] = curRetainUndoLocations[UndoLogSystem];
-		cur_state->in_retain_system_heap = true;
-		pairingheap_add(retain_system_queue, &cur_state->retain_system_ph_node);
+		if (cur_state &&
+			!UndoLocationIsValid(cur_state->retain_locs[i]) &&
+			UndoLocationIsValid(curRetainUndoLocations[i]))
+		{
+			cur_state->retain_locs[i] = curRetainUndoLocations[i];
+			cur_state->in_retain_undo_heaps[i] = true;
+			pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
+		}
 	}
 
 	if (worker_id < 0)
@@ -1772,13 +1735,15 @@ update_proc_retain_undo_location(int worker_id)
 	/*
 	 * Remove transactions, visible for all, from the retain queue.
 	 */
-	if (pairingheap_is_empty(retain_regular_queue))
-		free_retained_undo_location(UndoLogRegular);
-	if (pairingheap_is_empty(retain_system_queue))
-		free_retained_undo_location(UndoLogSystem);
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		if (pairingheap_is_empty(retain_undo_queues[i]))
+			free_retained_undo_location(i);
+		else
+			allRetainQueuesEmpty = false;
+	}
 
-	if (pairingheap_is_empty(retain_regular_queue) &&
-		pairingheap_is_empty(retain_system_queue))
+	if (allRetainQueuesEmpty)
 	{
 		if (worker_id >= 0)
 			pg_atomic_write_u64(&worker_ptrs[worker_id].retainPtr,
@@ -1794,13 +1759,18 @@ update_proc_retain_undo_location(int worker_id)
 
 	while (true)
 	{
-		if (pairingheap_is_empty(retain_regular_queue))
-			free_retained_undo_location(UndoLogRegular);
-		if (pairingheap_is_empty(retain_system_queue))
-			free_retained_undo_location(UndoLogSystem);
+		bool		removed = false;
 
-		if (pairingheap_is_empty(retain_regular_queue) &&
-			pairingheap_is_empty(retain_system_queue))
+		allRetainQueuesEmpty = true;
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			if (pairingheap_is_empty(retain_undo_queues[i]))
+				free_retained_undo_location(i);
+			else
+				allRetainQueuesEmpty = false;
+		}
+
+		if (allRetainQueuesEmpty)
 		{
 			if (worker_id >= 0)
 				pg_atomic_write_u64(&worker_ptrs[worker_id].retainPtr,
@@ -1811,8 +1781,15 @@ update_proc_retain_undo_location(int worker_id)
 			return;
 		}
 
-		if (!update_retain_location_with_heap(UndoLogRegular, worker_id, recoveryPtr) &&
-			!update_retain_location_with_heap(UndoLogSystem, worker_id, recoveryPtr))
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			bool		result;
+
+			result = update_retain_location_with_heap(i, worker_id, recoveryPtr);
+			removed = removed || result;
+		}
+
+		if (!removed)
 			break;
 
 	}

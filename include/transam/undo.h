@@ -144,7 +144,8 @@ extern bool oxid_needs_wal_flush;
 extern UndoLocation curRetainUndoLocations[(int) UndoLogsCount];
 extern PendingTruncatesMeta *pending_truncates_meta;
 
-#define ORIOLEDB_UNDO_DATA_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xdata")
+#define ORIOLEDB_UNDO_DATA_ROW_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xrow")
+#define ORIOLEDB_UNDO_DATA_PAGE_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xpage")
 #define ORIOLEDB_UNDO_SYSTEM_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xsystem")
 #define UNDO_FILE_SIZE (0x4000000)
 
@@ -215,6 +216,7 @@ extern void rollback_to_savepoint(UndoLogType undoType,
 								  UndoStackKind kind,
 								  SubTransactionId parentSubid,
 								  bool changeCountsValid);
+extern bool undo_type_has_retained_location(UndoLogType undoType);
 extern bool have_retained_undo_location(void);
 extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
 extern void orioledb_reset_xmin_hook(void);

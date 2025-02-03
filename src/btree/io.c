@@ -2520,7 +2520,7 @@ retry:
 		init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY
 							   | BTREE_PAGE_FIND_TRY_LOCK
 							   | BTREE_PAGE_FIND_DOWNLINK_LOCATION
-							   | (evict ? BTREE_PAGE_FIND_NO_FIX_SPLIT : 0));
+							   | BTREE_PAGE_FIND_NO_FIX_SPLIT);
 		if (O_PAGE_IS(p, RIGHTMOST))
 		{
 			found = find_page(&context, NULL, BTreeKeyRightmost, PAGE_GET_LEVEL(p) + 1);
@@ -2697,11 +2697,12 @@ write_tree_pages_recursive(UndoLogType undoType,
 	{
 		while (true)
 		{
-			reserve_undo_size(undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+			reserve_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(undoType),
+							  2 * O_MERGE_UNDO_IMAGE_SIZE);
 			if (walk_page(blkno, evict) != OWalkPageMerged)
 				break;
 		}
-		release_undo_size(undoType);
+		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(undoType));
 	}
 
 	return true;

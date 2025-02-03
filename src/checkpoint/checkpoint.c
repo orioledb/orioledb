@@ -1129,6 +1129,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	{
 		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
 
+		if ((UndoLogType) i == UndoLogRegularPageLevel)
+			continue;
+
 		checkpoint_start_loc[i] = pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation);
 		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation,
 							checkpoint_start_loc[i]);
@@ -1192,6 +1195,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
+		if ((UndoLogType) i == UndoLogRegularPageLevel)
+			continue;
+
 		fsync_undo_range((UndoLogType) i,
 						 checkpoint_start_loc[i],
 						 checkpoint_end_loc[i],
@@ -1231,6 +1237,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		checkpoint_state->controlIdentifier = controlIdentifier;
 	}
 
+	ASAN_UNPOISON_MEMORY_REGION(&control, sizeof(control));
+
 	control.controlIdentifier = checkpoint_state->controlIdentifier;
 	control.lastCheckpointNumber = checkpoint_state->lastCheckpointNumber + 1;
 	control.lastCSN = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
@@ -1245,8 +1253,16 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		CheckpointUndoInfo *undo_info = &control.undoInfo[i];
 
 		undo_info->lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
-		undo_info->checkpointRetainStartLocation = checkpoint_start_loc[i];
-		undo_info->checkpointRetainEndLocation = checkpoint_end_loc[i];
+		if ((UndoLogType) i != UndoLogRegularPageLevel)
+		{
+			undo_info->checkpointRetainStartLocation = checkpoint_start_loc[i];
+			undo_info->checkpointRetainEndLocation = checkpoint_end_loc[i];
+		}
+		else
+		{
+			undo_info->checkpointRetainStartLocation = 0;
+			undo_info->checkpointRetainEndLocation = 0;
+		}
 	}
 	control.checkpointRetainXmin = checkpoint_xmin;
 	control.checkpointRetainXmax = checkpoint_xmax;
@@ -1283,6 +1299,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
 		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+
+		if ((UndoLogType) i == UndoLogRegularPageLevel)
+			continue;
 
 		SpinLockAcquire(&undo_meta->minUndoLocationsMutex);
 		pg_atomic_write_u64(&undo_meta->checkpointRetainStartLocation,
@@ -2923,6 +2942,38 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 }
 
+static void
+checkpoint_reserve_undo(UndoLogType undoType, bool release)
+{
+	UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(undoType);
+
+	if (undoType == UndoLogNone)
+		return;
+
+	if (undoType == pageUndoType)
+	{
+		if (release)
+		{
+			release_undo_size(undoType);
+			free_retained_undo_location(undoType);
+		}
+		reserve_undo_size(undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+	}
+	else
+	{
+
+		if (release)
+		{
+			release_undo_size(undoType);
+			free_retained_undo_location(undoType);
+			release_undo_size(pageUndoType);
+			free_retained_undo_location(pageUndoType);
+		}
+		reserve_undo_size(pageUndoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+		reserve_undo_size(undoType, 2 * O_UPDATE_MAX_UNDO_SIZE);
+	}
+}
+
 static bool
 checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 						  OInMemoryBlkno blkno, int level)
@@ -2995,12 +3046,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
 							  blkno, loc, rightBlkno, true))
 	{
-		if (descr->undoType != UndoLogNone)
-		{
-			release_undo_size(descr->undoType);
-			free_retained_undo_location(descr->undoType);
-			reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
-		}
+		checkpoint_reserve_undo(descr->undoType, true);
 		return true;
 	}
 	else
@@ -3020,8 +3066,7 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 {
 	OInMemoryBlkno old_blkno;
 
-	if (descr->undoType != UndoLogNone)
-		reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+	checkpoint_reserve_undo(descr->undoType, false);
 
 	while (true)
 	{
@@ -3038,7 +3083,7 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 		if (o_btree_split_is_incomplete(*blkno, &relocked))
 		{
 			o_btree_split_fix_and_unlock(descr, *blkno);
-			reserve_undo_size(descr->undoType, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+			checkpoint_reserve_undo(descr->undoType, false);
 		}
 		else if (!(level > 0 && *blkno == state->stack[level].hikeyBlkno) &&
 				 is_page_too_sparse(descr, O_GET_IN_MEMORY_PAGE(*blkno)))
@@ -3059,8 +3104,15 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 	if (descr->undoType != UndoLogNone)
 	{
+		UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(descr->undoType);
+
 		release_undo_size(descr->undoType);
 		free_retained_undo_location(descr->undoType);
+		if (pageUndoType != descr->undoType)
+		{
+			release_undo_size(pageUndoType);
+			free_retained_undo_location(pageUndoType);
+		}
 	}
 }
 

@@ -59,7 +59,7 @@ typedef enum
 /* max size of update undo record */
 #define O_UPDATE_MAX_UNDO_SIZE (BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE)
 /* on modification we should reserve size for split and update undo records */
-#define O_MODIFY_UNDO_RESSERVE_SIZE (2 * (O_MAX_SPLIT_UNDO_IMAGE_SIZE + O_UPDATE_MAX_UNDO_SIZE))
+#define O_MODIFY_UNDO_RESERVE_SIZE (2 * (O_MAX_SPLIT_UNDO_IMAGE_SIZE + O_UPDATE_MAX_UNDO_SIZE))
 /* size of image in undo log produced by pages merge */
 #define O_MERGE_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ * 2)
 /* undo location of a page image */
@@ -77,9 +77,9 @@ extern void get_page_from_undo(BTreeDescr *desc, UndoLocation undo_loc, Pointer 
 							   BTreeKeyType kind, Pointer dest,
 							   bool *is_left, bool *is_right, OFixedKey *lokey,
 							   OFixedKey *page_lokey, OTuple *page_hikey);
-extern UndoLocation page_add_item_to_undo(BTreeDescr *desc, Pointer p,
-										  CommitSeqNo imageCsn,
-										  OTuple *splitKey, LocationIndex splitKeyLen);
+extern UndoLocation page_add_image_to_undo(BTreeDescr *desc, Pointer p,
+										   CommitSeqNo imageCsn,
+										   OTuple *splitKey, LocationIndex splitKeyLen);
 extern UndoLocation make_merge_undo_image(BTreeDescr *desc, Pointer left,
 										  Pointer right, CommitSeqNo imageCsn);
 extern bool row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
