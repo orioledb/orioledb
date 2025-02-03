@@ -14,6 +14,7 @@ import base64
 import inspect
 import shutil
 from tempfile import mkdtemp
+from typing import Any
 
 from threading import Thread
 from testgres.enums import NodeStatus
@@ -280,6 +281,72 @@ def new_execute(self, query, *args):
 		return res
 	except Exception as e:
 		return None
+
+
+# Convert output of orioledb_tbl_structure/orioledb_idx_structure to json
+def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
+	res = dict()
+	cur_index = None
+	cur_page = None
+
+	# TODO Currently limited information is parsed from the ouput of the
+	# orioledb_tbl_structure() function. Add more information to the output
+	# JSON object.
+
+	index_pattern_str = r"Index (.+) contents"
+	index_pattern = re.compile(index_pattern_str)
+
+	page_pattern_str = r"Page (?P<page>\d+?): level = (?P<level>\d+?)(?:, \S+ = \d+)*(?P<sparse>, sparse)?"
+	page_pattern = re.compile(page_pattern_str)
+
+	hikey_pattern_str = r"\s+Hikey: offset = \d+, key = (.+)"
+	hikey_pattern = re.compile(hikey_pattern_str)
+
+	for line in structure.splitlines():
+		line = line.rstrip()
+
+		# Match an index
+		m = index_pattern.search(line)
+		if m is not None:
+			if m.group(1) not in res:
+				cur_index = dict()
+				res[m.group(1)] = cur_index
+			else:
+				raise Exception(f"Duplicate index entry {m.group(1)}")
+
+			continue
+
+		if cur_index is None:
+			raise Exception("Invalid table structure")
+
+		# Match a page
+		m = page_pattern.search(line)
+		if m is not None:
+			line_dict = m.groupdict()
+
+			level = int(line_dict["level"])
+			if level not in cur_index:
+				cur_index[level] = dict()
+
+			cur_level = cur_index[level]
+
+			pagenum = int(line_dict["page"])
+			if pagenum not in cur_level:
+				cur_level[pagenum] = dict()
+
+			cur_page = cur_level[pagenum]
+			cur_page["is_sparse"] = line_dict["sparse"] is not None
+
+			continue
+
+		if cur_page is None:
+			raise Exception("Invalid table structure")
+
+		m = hikey_pattern.search(line)
+		if m is not None:
+			cur_page["hikey"] = m.group(1)
+
+	return res
 
 
 testgres.NodeConnection.execute = new_execute
