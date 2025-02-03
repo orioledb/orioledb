@@ -660,8 +660,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 			/* Make page-level undo item if needed */
 			if (needsUndo)
-				undoLocation = page_add_item_to_undo(desc, p, csn,
-													 &split_key, split_key_len);
+				undoLocation = page_add_image_to_undo(desc, p, csn,
+													  &split_key, split_key_len);
 			else
 				undoLocation = InvalidUndoLocation;
 

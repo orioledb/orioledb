@@ -129,7 +129,11 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 	int			i;
 
 	if (options->undoLogLocationPrintType != BTreeNotPrint && desc->undoType != UndoLogNone)
+	{
 		update_min_undo_locations(desc->undoType, false, true);
+		if (desc->undoType != GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType))
+			update_min_undo_locations(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType), false, true);
+	}
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno) &&
 		   OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno));
 
@@ -206,7 +210,8 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (UndoLocationIsValid(header->undoLocation))
 	{
-		btree_print_undo_location(desc->undoType, header->undoLocation,
+		btree_print_undo_location(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
+								  header->undoLocation,
 								  outbuf, printData, true);
 	}
 
@@ -532,6 +537,7 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 	BackendIdHashEntry *backendIdHashEntry;
 	BTreePageItemLocator loc;
 	bool		found;
+	UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(undoType);
 
 
 	/* if page number is not in hash, then add new value to hash */
@@ -545,9 +551,9 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 
 	printData->minCheckpointNum = Min(printData->minCheckpointNum,
 									  header->checkpointNum);
-	printData->undosList[(int) undoType] = ladd_unique_undo(printData->undosList[(int) undoType],
-															undoType,
-															header->undoLocation);
+	printData->undosList[(int) pageUndoType] = ladd_unique_undo(printData->undosList[(int) pageUndoType],
+																pageUndoType,
+																header->undoLocation);
 
 	/* Iterate over the child nodes */
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)

@@ -29,6 +29,7 @@
 #include "utils/snapmgr.h"
 
 #define XID_FILE_SIZE (0x1000000)
+#define OXID_BUFFERS_TAG (0)
 
 #define	COMMITSEQNO_SPECIAL_BIT (UINT64CONST(1) << 63)
 #define COMMITSEQNO_STATUS_IN_PROGRESS (0x0)
@@ -76,7 +77,7 @@ OSnapshot	o_non_deleted_snapshot = {COMMITSEQNO_NON_DELETED, InvalidXLogRecPtr, 
 
 static OBuffersDesc buffersDesc = {
 	.singleFileSize = XID_FILE_SIZE,
-	.filenameTemplate = ORIOLEDB_DATA_DIR "/%02X%08X.xidmap",
+	.filenameTemplate = {ORIOLEDB_DATA_DIR "/%02X%08X.xidmap"},
 	.groupCtlTrancheName = "xidBuffersGroupCtlTranche",
 	.bufferCtlTrancheName = "xidBuffersCtlTranche"
 };
@@ -371,7 +372,7 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	}
 
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
-	o_buffers_write(&buffersDesc, (Pointer) &csn,
+	o_buffers_write(&buffersDesc, (Pointer) &csn, OXID_BUFFERS_TAG,
 					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, csn),
 					sizeof(CommitSeqNo));
 }
@@ -415,7 +416,7 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 	}
 
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
-	o_buffers_write(&buffersDesc, (Pointer) &ptr,
+	o_buffers_write(&buffersDesc, (Pointer) &ptr, OXID_BUFFERS_TAG,
 					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, commitPtr),
 					sizeof(XLogRecPtr));
 }
@@ -471,7 +472,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 	}
 
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
-	o_buffers_read(&buffersDesc, (Pointer) &mapItem,
+	o_buffers_read(&buffersDesc, (Pointer) &mapItem, OXID_BUFFERS_TAG,
 				   oxid * sizeof(OXidMapItem),
 				   sizeof(OXidMapItem));
 
@@ -539,6 +540,7 @@ write_xidsmap(OXid targetXmax)
 		{
 			o_buffers_write(&buffersDesc,
 							(Pointer) &buffer[lastWrittenXmin % bufferLength],
+							OXID_BUFFERS_TAG,
 							lastWrittenXmin * sizeof(OXidMapItem),
 							(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
 			lastWrittenXmin = oxid;
@@ -555,6 +557,7 @@ write_xidsmap(OXid targetXmax)
 	if (oxid > lastWrittenXmin)
 		o_buffers_write(&buffersDesc,
 						(Pointer) &buffer[lastWrittenXmin % bufferLength],
+						OXID_BUFFERS_TAG,
 						lastWrittenXmin * sizeof(OXidMapItem),
 						(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
 
@@ -582,6 +585,7 @@ fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info)
 	}
 
 	o_buffers_sync(&buffersDesc,
+				   OXID_BUFFERS_TAG,
 				   xmin * sizeof(CommitSeqNo),
 				   xmax * sizeof(CommitSeqNo),
 				   wait_event_info);
@@ -927,23 +931,27 @@ advance_global_xmin(OXid newXid)
 			newCheckpointXmaxNum--;
 
 		o_buffers_unlink_files_range(&buffersDesc,
+									 OXID_BUFFERS_TAG,
 									 oldCheckpointXminNum,
 									 Min(oldCheckpointXmaxNum,
 										 Min(newCheckpointXminNum - 1,
 											 newCleanedNum - 1)));
 
 		o_buffers_unlink_files_range(&buffersDesc,
+									 OXID_BUFFERS_TAG,
 									 Max(oldCheckpointXminNum,
 										 newCheckpointXmaxNum + 1),
 									 Min(oldCheckpointXmaxNum,
 										 newCleanedNum - 1));
 
 		o_buffers_unlink_files_range(&buffersDesc,
+									 OXID_BUFFERS_TAG,
 									 oldCleanedNum,
 									 Min(newCheckpointXminNum - 1,
 										 newCleanedNum - 1));
 
 		o_buffers_unlink_files_range(&buffersDesc,
+									 OXID_BUFFERS_TAG,
 									 Max(oldCleanedNum,
 										 newCheckpointXmaxNum + 1),
 									 newCleanedNum - 1);

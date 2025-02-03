@@ -16,11 +16,15 @@
 typedef struct OBuffersMeta OBuffersMeta;
 typedef struct OBuffersGroup OBuffersGroup;
 
+#define	OBuffersMaxTags	(4)
+#define OBuffersMaxTagIsValid(tag) \
+	((tag) >= 0 && (tag) < OBuffersMaxTags)
+
 typedef struct
 {
 	/* these fields are initilized by user */
 	uint64		singleFileSize;
-	const char *filenameTemplate;
+	const char *filenameTemplate[OBuffersMaxTags];
 	const char *groupCtlTrancheName;
 	const char *bufferCtlTrancheName;
 	uint32		buffersCount;
@@ -31,18 +35,20 @@ typedef struct
 	OBuffersGroup *groups;
 	File		curFile;
 	char		curFileName[MAXPGPATH];
+	uint32		curFileTag;
 	uint64		curFileNum;
 } OBuffersDesc;
 
 extern Size o_buffers_shmem_needs(OBuffersDesc *desc);
 extern void o_buffers_shmem_init(OBuffersDesc *desc, void *buf, bool found);
 extern void o_buffers_read(OBuffersDesc *desc, Pointer buf,
-						   int64 offset, int64 size);
+						   uint32 tag, int64 offset, int64 size);
 extern void o_buffers_write(OBuffersDesc *desc, Pointer buf,
-							int64 offset, int64 size);
-extern void o_buffers_sync(OBuffersDesc *desc, int64 fromOffset,
+							uint32 tag, int64 offset, int64 size);
+extern void o_buffers_sync(OBuffersDesc *desc, uint32 tag, int64 fromOffset,
 						   int64 toOffset, uint32 wait_event_info);
 extern void o_buffers_unlink_files_range(OBuffersDesc *desc,
+										 uint32 tag,
 										 int64 firstFileNumber,
 										 int64 lastFileNumber);
 

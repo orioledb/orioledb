@@ -178,7 +178,7 @@ perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (desc->undoType != UndoLogNone)
 	{
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-		undoLocation = page_add_item_to_undo(desc, p, csn, NULL, 0);
+		undoLocation = page_add_image_to_undo(desc, p, csn, NULL, 0);
 
 		/*
 		 * Start page modification.  It contains the required memory barrier

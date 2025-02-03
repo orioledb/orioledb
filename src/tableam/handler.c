@@ -424,6 +424,8 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
 
+	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
+
 	if (snapshot)
 		O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
 	else
@@ -515,6 +517,8 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OXid		oxid;
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
+
+	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 
 	if (snapshot)
 		O_LOAD_SNAPSHOT(&oSnapshot, snapshot);

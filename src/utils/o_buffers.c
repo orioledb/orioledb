@@ -35,6 +35,8 @@ typedef struct
 	LWLock		bufferCtlLock;
 	int64		blockNum;
 	int64		shadowBlockNum;
+	uint32		tag;
+	uint32		shadowTag;
 	uint32		usageCount;
 	bool		dirty;
 	char		data[ORIOLEDB_BLCKSZ];
@@ -92,6 +94,7 @@ o_buffers_shmem_init(OBuffersDesc *desc, void *buf, bool found)
 				buffer->blockNum = -1;
 				buffer->usageCount = 0;
 				buffer->dirty = false;
+				buffer->tag = 0;
 			}
 		}
 	}
@@ -102,33 +105,40 @@ o_buffers_shmem_init(OBuffersDesc *desc, void *buf, bool found)
 }
 
 static void
-open_file(OBuffersDesc *desc, uint64 fileNum)
+open_file(OBuffersDesc *desc, uint32 tag, uint64 fileNum)
 {
-	if (desc->curFile >= 0 && desc->curFileNum == fileNum)
+	Assert(OBuffersMaxTagIsValid(tag));
+
+	if (desc->curFile >= 0 &&
+		desc->curFileNum == fileNum &&
+		desc->curFileTag == tag)
 		return;
 
 	if (desc->curFile >= 0)
 		FileClose(desc->curFile);
 
 	pg_snprintf(desc->curFileName, MAXPGPATH,
-				desc->filenameTemplate,
+				desc->filenameTemplate[tag],
 				(uint32) (fileNum >> 32),
 				(uint32) fileNum);
 	desc->curFile = PathNameOpenFile(desc->curFileName,
 									 O_RDWR | O_CREAT | PG_BINARY);
 	desc->curFileNum = fileNum;
+	desc->curFileTag = tag;
 	if (desc->curFile < 0)
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not open undo log file %s: %m", desc->curFileName)));
 }
 
 static void
-unlink_file(OBuffersDesc *desc, uint64 fileNum)
+unlink_file(OBuffersDesc *desc, uint32 tag, uint64 fileNum)
 {
 	static char fileNameToUnlink[MAXPGPATH];
 
+	Assert(OBuffersMaxTagIsValid(tag));
+
 	pg_snprintf(fileNameToUnlink, MAXPGPATH,
-				desc->filenameTemplate,
+				desc->filenameTemplate[tag],
 				(uint32) (fileNum >> 32),
 				(uint32) fileNum);
 
@@ -136,11 +146,13 @@ unlink_file(OBuffersDesc *desc, uint64 fileNum)
 }
 
 static void
-write_buffer_data(OBuffersDesc *desc, char *data, uint64 blockNum)
+write_buffer_data(OBuffersDesc *desc, char *data, uint32 tag, uint64 blockNum)
 {
 	int			result;
 
-	open_file(desc, blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
+	Assert(OBuffersMaxTagIsValid(tag));
+
+	open_file(desc, tag, blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
 	result = OFileWrite(desc->curFile, data, ORIOLEDB_BLCKSZ,
 						(blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize,
 						WAIT_EVENT_SLRU_WRITE);
@@ -152,7 +164,7 @@ write_buffer_data(OBuffersDesc *desc, char *data, uint64 blockNum)
 static void
 write_buffer(OBuffersDesc *desc, OBuffer *buffer)
 {
-	write_buffer_data(desc, buffer->data, buffer->blockNum);
+	write_buffer_data(desc, buffer->data, buffer->tag, buffer->blockNum);
 }
 
 static void
@@ -160,7 +172,8 @@ read_buffer(OBuffersDesc *desc, OBuffer *buffer)
 {
 	int			result;
 
-	open_file(desc, buffer->blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
+	open_file(desc, buffer->tag,
+			  buffer->blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
 	result = OFileRead(desc->curFile, buffer->data, ORIOLEDB_BLCKSZ,
 					   (buffer->blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize,
 					   WAIT_EVENT_SLRU_READ);
@@ -175,7 +188,7 @@ read_buffer(OBuffersDesc *desc, OBuffer *buffer)
 }
 
 static OBuffer *
-get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
+get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write)
 {
 	OBuffersGroup *group = &desc->groups[blockNum % desc->groupsCount];
 	OBuffer    *buffer = NULL;
@@ -183,14 +196,16 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 				victim = 0;
 	uint32		victimUsageCount = 0;
 	bool		prevDirty;
-	uint32		prevBlockNum;
+	int64		prevBlockNum;
+	uint32		prevTag;
 
 	/* First check if required buffer is already loaded */
 	LWLockAcquire(&group->groupCtlLock, LW_SHARED);
 	for (i = 0; i < O_BUFFERS_PER_GROUP; i++)
 	{
 		buffer = &group->buffers[i];
-		if (buffer->blockNum == blockNum)
+		if (buffer->blockNum == blockNum &&
+			buffer->tag == tag)
 		{
 			LWLockAcquire(&buffer->bufferCtlLock, write ? LW_EXCLUSIVE : LW_SHARED);
 			buffer->usageCount++;
@@ -210,7 +225,8 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 		buffer = &group->buffers[i];
 
 		/* Need to recheck after relock */
-		if (buffer->blockNum == blockNum)
+		if (buffer->blockNum == blockNum &&
+			buffer->tag == tag)
 		{
 			LWLockAcquire(&buffer->bufferCtlLock, write ? LW_EXCLUSIVE : LW_SHARED);
 			buffer->usageCount++;
@@ -219,7 +235,8 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 			return buffer;
 		}
 
-		if (buffer->shadowBlockNum == blockNum)
+		if (buffer->shadowBlockNum == blockNum &&
+			buffer->shadowTag == tag)
 		{
 			/*
 			 * There is an in-progress operation with required tag.  We must
@@ -241,16 +258,19 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 
 	prevDirty = buffer->dirty;
 	prevBlockNum = buffer->blockNum;
+	prevTag = buffer->tag;
 
 	buffer->usageCount = 1;
 	buffer->dirty = false;
 	buffer->blockNum = blockNum;
+	buffer->tag = tag;
 	buffer->shadowBlockNum = prevBlockNum;
+	buffer->shadowTag = prevTag;
 
 	LWLockRelease(&group->groupCtlLock);
 
 	if (prevDirty)
-		write_buffer_data(desc, buffer->data, prevBlockNum);
+		write_buffer_data(desc, buffer->data, prevTag, prevBlockNum);
 
 	read_buffer(desc, buffer);
 
@@ -261,7 +281,7 @@ get_buffer(OBuffersDesc *desc, int64 blockNum, bool write)
 
 static void
 o_buffers_rw(OBuffersDesc *desc, Pointer buf,
-			 int64 offset, int64 size,
+			 uint32 tag, int64 offset, int64 size,
 			 bool write)
 {
 	int64		firstBlockNum = offset / ORIOLEDB_BLCKSZ,
@@ -271,7 +291,7 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 
 	for (blockNum = firstBlockNum; blockNum <= lastBlockNum; blockNum++)
 	{
-		OBuffer    *buffer = get_buffer(desc, blockNum, write);
+		OBuffer    *buffer = get_buffer(desc, tag, blockNum, write);
 		uint32		copySize,
 					copyOffset;
 
@@ -311,21 +331,22 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 }
 
 void
-o_buffers_read(OBuffersDesc *desc, Pointer buf, int64 offset, int64 size)
+o_buffers_read(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
 {
-	Assert(offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, offset, size, false);
+	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
+	o_buffers_rw(desc, buf, tag, offset, size, false);
 }
 
 void
-o_buffers_write(OBuffersDesc *desc, Pointer buf, int64 offset, int64 size)
+o_buffers_write(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
 {
-	Assert(offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, offset, size, true);
+	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
+	o_buffers_rw(desc, buf, tag, offset, size, true);
 }
 
 static void
 o_buffers_flush(OBuffersDesc *desc,
+				uint32 tag,
 				int64 firstBufferNumber,
 				int64 lastBufferNumber)
 {
@@ -342,6 +363,7 @@ o_buffers_flush(OBuffersDesc *desc,
 
 			LWLockAcquire(&buffer->bufferCtlLock, LW_SHARED);
 			if (buffer->dirty &&
+				buffer->tag == tag &&
 				buffer->blockNum >= firstBufferNumber &&
 				buffer->blockNum <= lastBufferNumber)
 			{
@@ -355,6 +377,7 @@ o_buffers_flush(OBuffersDesc *desc,
 
 static void
 o_buffers_wipe(OBuffersDesc *desc,
+			   uint32 tag,
 			   int64 firstBufferNumber,
 			   int64 lastBufferNumber)
 {
@@ -371,11 +394,13 @@ o_buffers_wipe(OBuffersDesc *desc,
 
 			LWLockAcquire(&buffer->bufferCtlLock, LW_EXCLUSIVE);
 			if (buffer->dirty &&
+				buffer->tag == tag &&
 				buffer->blockNum >= firstBufferNumber &&
 				buffer->blockNum <= lastBufferNumber)
 			{
 				buffer->blockNum = -1;
 				buffer->dirty = false;
+				buffer->tag = 0;
 			}
 			LWLockRelease(&buffer->bufferCtlLock);
 		}
@@ -383,7 +408,7 @@ o_buffers_wipe(OBuffersDesc *desc,
 }
 
 void
-o_buffers_sync(OBuffersDesc *desc,
+o_buffers_sync(OBuffersDesc *desc, uint32 tag,
 			   int64 fromOffset, int64 toOffset,
 			   uint32 wait_event_info)
 {
@@ -393,12 +418,14 @@ o_buffers_sync(OBuffersDesc *desc,
 				lastFileNumber,
 				fileNumber;
 
+	Assert(OBuffersMaxTagIsValid(tag));
+
 	firstPageNumber = fromOffset / ORIOLEDB_BLCKSZ;
 	lastPageNumber = toOffset / ORIOLEDB_BLCKSZ;
 	if (toOffset % ORIOLEDB_BLCKSZ == 0)
 		lastPageNumber--;
 
-	o_buffers_flush(desc, firstPageNumber, lastPageNumber);
+	o_buffers_flush(desc, tag, firstPageNumber, lastPageNumber);
 
 	firstFileNumber = fromOffset / desc->singleFileSize;
 	lastFileNumber = toOffset / desc->singleFileSize;
@@ -407,23 +434,25 @@ o_buffers_sync(OBuffersDesc *desc,
 
 	for (fileNumber = firstFileNumber; fileNumber <= lastFileNumber; fileNumber++)
 	{
-		open_file(desc, fileNumber);
+		open_file(desc, tag, fileNumber);
 		FileSync(desc->curFile, wait_event_info);
 	}
 }
 
 void
-o_buffers_unlink_files_range(OBuffersDesc *desc,
+o_buffers_unlink_files_range(OBuffersDesc *desc, uint32 tag,
 							 int64 firstFileNumber, int64 lastFileNumber)
 {
 	int64		fileNumber;
 
-	o_buffers_wipe(desc,
+	Assert(OBuffersMaxTagIsValid(tag));
+
+	o_buffers_wipe(desc, tag,
 				   firstFileNumber * (desc->singleFileSize / ORIOLEDB_BLCKSZ),
 				   (lastFileNumber + 1) * (desc->singleFileSize / ORIOLEDB_BLCKSZ) - 1);
 
 	for (fileNumber = firstFileNumber;
 		 fileNumber <= lastFileNumber;
 		 fileNumber++)
-		unlink_file(desc, fileNumber);
+		unlink_file(desc, tag, fileNumber);
 }

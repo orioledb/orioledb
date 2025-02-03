@@ -244,9 +244,10 @@ ppool_run_clock(OPagePool *pool, bool evict,
 				volatile sig_atomic_t *shutdown_requested)
 {
 	uint64		blkno;
-	Size		undoRegularSize = get_reserved_undo_size(UndoLogRegular);
+	Size		undoRegularSize = get_reserved_undo_size(UndoLogRegularPageLevel);
 	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
-	bool		haveRetainLoc = have_retained_undo_location();
+	bool		haveRetainRegularLoc = undo_type_has_retained_location(UndoLogRegularPageLevel);
+	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
 
 	blkno = pg_prng_uint64_range(&pool->prngSeed,
 								 pool->offset,
@@ -259,7 +260,7 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Assert(!have_locked_pages());
 
 	/* We might need to merge pages */
-	reserve_undo_size(UndoLogRegular, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+	reserve_undo_size(UndoLogRegularPageLevel, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 	reserve_undo_size(UndoLogSystem, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
 	Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
@@ -291,21 +292,28 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	 * The caller might have the undo location reserved.  We need to carefully
 	 * put the undo location back.
 	 */
-	if (haveRetainLoc)
+	if (haveRetainRegularLoc)
 	{
 		if (undoRegularSize > 0)
-			reserve_undo_size(UndoLogRegular, undoRegularSize);
+			reserve_undo_size(UndoLogRegularPageLevel, undoRegularSize);
+	}
+	else
+	{
+		release_undo_size(UndoLogRegularPageLevel);
+		free_retained_undo_location(UndoLogRegularPageLevel);
+		if (undoRegularSize > 0)
+			reserve_undo_size(UndoLogRegularPageLevel, undoRegularSize);
+	}
+
+	if (haveRetainSystemLoc)
+	{
 		if (undoSystemSize > 0)
 			reserve_undo_size(UndoLogSystem, undoSystemSize);
 	}
 	else
 	{
-		release_undo_size(UndoLogRegular);
 		release_undo_size(UndoLogSystem);
-		free_retained_undo_location(UndoLogRegular);
 		free_retained_undo_location(UndoLogSystem);
-		if (undoRegularSize > 0)
-			reserve_undo_size(UndoLogRegular, undoRegularSize);
 		if (undoSystemSize > 0)
 			reserve_undo_size(UndoLogSystem, undoSystemSize);
 	}

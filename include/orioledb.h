@@ -112,17 +112,25 @@ typedef enum
 	UndoLogNone = -1,
 
 	/*
-	 * Undo log for modification of user data.
+	 * Undo log for row-level record of modifications of user data.
 	 */
 	UndoLogRegular = 0,
 
 	/*
+	 * Undo log for page-level record of modifications of user data.
+	 */
+	UndoLogRegularPageLevel = 1,
+
+	/*
 	 * Undo log for modification of system trees.
 	 */
-	UndoLogSystem = 1,
+	UndoLogSystem = 2,
 
-	UndoLogsCount = 2
+	UndoLogsCount = 3
 } UndoLogType;
+
+#define GET_PAGE_LEVEL_UNDO_TYPE(undoType) \
+	(((undoType) == UndoLogRegular) ? UndoLogRegularPageLevel : (undoType))
 
 typedef struct
 {
@@ -292,9 +300,9 @@ extern Size orioledb_buffers_size;
 extern Size orioledb_buffers_count;
 extern Size undo_circular_buffer_size;
 extern uint32 undo_buffers_count;
-extern Size undo_system_circular_buffer_size;
-extern uint32 undo_system_buffers_count;
 extern Size xid_circular_buffer_size;
+extern double regular_block_undo_circular_buffer_fraction;
+extern double system_undo_circular_buffer_fraction;
 extern uint32 xid_buffers_count;
 extern Pointer o_shared_buffers;
 extern ODBProcData *oProcData;
