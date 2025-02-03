@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/merge.h"
 #include "btree/page_chunks.h"
 #include "btree/print.h"
 #include "btree/undo.h"
@@ -211,6 +212,9 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (O_PAGE_IS(p, LEAF))
 		appendStringInfo(outbuf, ", nVacatedBytes = %u", PAGE_GET_N_VACATED(p));
+
+	if (is_page_too_sparse(desc, p))
+		appendStringInfo(outbuf, ", sparse");
 
 	appendStringInfo(outbuf, "\n");
 

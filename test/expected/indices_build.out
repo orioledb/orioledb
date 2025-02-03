@@ -6047,7 +6047,7 @@ SELECT regexp_replace
      Item 10: offset = 6128, tuple = ('1699keyXXXX', '1699', '1699')                        +
      Item 11: offset = 6680, tuple = ('1700keyXXXX', '1700', '1700')                        +
                                                                                             +
- Page 59: level = 1, maxKeyLen = 520                                                        +
+ Page 59: level = 1, maxKeyLen = 520, sparse                                                +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                        +
      Rightlink is invalid                                                                   +
      Hikey: offset = 64, key = ('214keyXXXX')                                               +
@@ -9624,7 +9624,7 @@ SELECT regexp_replace
      Item 11: offset = 6608, tuple = ('1655', '1655keyXXXX')                                +
      Item 12: offset = 7152, tuple = ('1656', '1656keyXXXX')                                +
                                                                                             +
- Page 121: level = 1, maxKeyLen = 528                                                       +
+ Page 121: level = 1, maxKeyLen = 528, sparse                                               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty                        +
      Rightmost                                                                              +
    Chunk 0: offset = 0, location = 512, hikey location = 64                                 +
@@ -10843,7 +10843,7 @@ SELECT regexp_replace
      Item 10: offset = 6128, tuple = ('1699keyXXXX', '1699', '1699')                        +
      Item 11: offset = 6680, tuple = ('1700keyXXXX', '1700', '1700')                        +
                                                                                             +
- Page 59: level = 1, maxKeyLen = 520                                                        +
+ Page 59: level = 1, maxKeyLen = 520, sparse                                                +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                        +
      Rightlink is invalid                                                                   +
      Hikey: offset = 64, key = ('214keyXXXX')                                               +
@@ -14420,7 +14420,7 @@ SELECT regexp_replace
      Item 11: offset = 6608, tuple = ('1655', '1655keyXXXX')                                +
      Item 12: offset = 7152, tuple = ('1656', '1656keyXXXX')                                +
                                                                                             +
- Page 121: level = 1, maxKeyLen = 528                                                       +
+ Page 121: level = 1, maxKeyLen = 528, sparse                                               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty                        +
      Rightmost                                                                              +
    Chunk 0: offset = 0, location = 512, hikey location = 64                                 +
