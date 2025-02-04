@@ -425,7 +425,7 @@ permutation "s1_begin" "s2_begin" "s1_deadlock_timeout" "s2_deadlock_timeout"
 "s1_savepoint"
 "s2_select_key_share"
 "s1_update"
-"s2_select_update"
+"s2_select_update" ("s1_delete")
 "s1_delete"
 "s1_rollbak_to_savepoint"
 "s1_commit" "s2_commit"
