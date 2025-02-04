@@ -205,7 +205,7 @@ seq_buf_check_open_file(SeqBufDescPrivate *seqBufPrivate)
 		{
 			SpinLockRelease(&shared->lock);
 			ereport(PANIC, (errcode_for_file_access(),
-							errmsg("could not open seq buf file %s for %s",
+							errmsg("could not open seq buf file %s for %s: %m",
 								   get_seq_buf_filename(&shared->tag),
 								   (seqBufPrivate->write ? "write" : "read"))));
 			seqBufPrivate->tag = old_tag;
@@ -261,7 +261,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 		{
 			SpinLockRelease(&shared->lock);
 			ereport(PANIC, (errcode_for_file_access(),
-							errmsg("Error write seq buf %s at offset %u",
+							errmsg("Error write seq buf %s at offset %u: %m",
 								   FilePathName(seqBufPrivate->file),
 								   (uint32) offset)));
 			return false;
@@ -287,7 +287,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 			{
 				SpinLockRelease(&shared->lock);
 				ereport(PANIC, (errcode_for_file_access(),
-								errmsg("Error read seq buf %s at offset %u",
+								errmsg("Error read seq buf %s at offset %u: %m",
 									   FilePathName(seqBufPrivate->file),
 									   (uint32) offset)));
 				return false;
@@ -484,7 +484,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 		{
 			SpinLockRelease(&shared->lock);
 			ereport(PANIC, (errcode_for_file_access(),
-							errmsg("could not finalize previous sequence buffer page to file %s",
+							errmsg("could not finalize previous sequence buffer page to file %s: %m",
 								   get_seq_buf_filename(&seqBufPrivate->tag))));
 		}
 		shared->prevPageState = SeqBufPrevPageDone;
@@ -496,7 +496,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 		{
 			SpinLockRelease(&shared->lock);
 			ereport(PANIC, (errcode_for_file_access(),
-							errmsg("could not open sequence buffer file %s",
+							errmsg("could not open sequence buffer file %s: %m",
 								   get_seq_buf_filename(&seqBufPrivate->tag))));
 		}
 
@@ -509,7 +509,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 			{
 				SpinLockRelease(&shared->lock);
 				ereport(PANIC, (errcode_for_file_access(),
-								errmsg("could not finalize sequence buffer into file %s",
+								errmsg("could not finalize sequence buffer into file %s: %m",
 									   FilePathName(seqBufPrivate->file))));
 			}
 		}
@@ -590,7 +590,7 @@ seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate, SeqBufTag *tag,
 			shared->tag = old_tag;
 			SpinLockRelease(&shared->lock);
 			ereport(PANIC, (errcode_for_file_access(),
-							errmsg("could not seek to the end of file %s",
+							errmsg("could not seek to the end of file %s: %m",
 								   FilePathName(seqBufPrivate->file))));
 			return SeqBufReplaceError;
 		}
@@ -634,7 +634,7 @@ seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 	{
 		SpinLockRelease(&shared->lock);
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("length %d of file %s is less than header %d",
+						errmsg("length %d of file %s is less than header %d: %m",
 							   len, FilePathName(seqBufPrivate->file), header_off)));
 		return false;
 	}
@@ -659,7 +659,7 @@ seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 	{
 		SpinLockRelease(&shared->lock);
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not to read first page from file %s, read = %d, expected = %d",
+						errmsg("could not to read first page from file %s, read = %d, expected = %d: %m",
 							   FilePathName(seqBufPrivate->file), nbytes, should_read)));
 		return false;
 	}
@@ -676,7 +676,7 @@ seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 		{
 			SpinLockRelease(&shared->lock);
 			ereport(PANIC, (errcode_for_file_access(),
-							errmsg("could not to read second page from file %s, read = %d, expected = %d",
+							errmsg("could not to read second page from file %s, read = %d, expected = %d: %m",
 								   FilePathName(seqBufPrivate->file), nbytes, should_read)));
 			return false;
 		}

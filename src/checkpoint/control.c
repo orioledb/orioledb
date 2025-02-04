@@ -48,7 +48,7 @@ get_checkpoint_control_data(CheckpointControl *control)
 			 sizeof(CheckpointControl)) != sizeof(CheckpointControl))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not read data from control file \"%s\"",
+				 errmsg("could not read data from control file \"%s\": %m",
 						CONTROL_FILENAME)));
 
 	close(controlFile);
@@ -111,13 +111,13 @@ write_checkpoint_control(CheckpointControl *control)
 	controlFile = PathNameOpenFile(CONTROL_FILENAME, O_RDWR | O_CREAT | PG_BINARY);
 	if (controlFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not open checkpoint control file %s", CONTROL_FILENAME)));
+						errmsg("could not open checkpoint control file %s: %m", CONTROL_FILENAME)));
 
 	if (OFileWrite(controlFile, buffer, CHECKPOINT_CONTROL_FILE_SIZE, 0,
 				   WAIT_EVENT_SLRU_WRITE) != CHECKPOINT_CONTROL_FILE_SIZE ||
 		FileSync(controlFile, WAIT_EVENT_SLRU_SYNC) != 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write checkpoint control to file %s", CONTROL_FILENAME)));
+						errmsg("could not write checkpoint control to file %s: %m", CONTROL_FILENAME)));
 
 	FileClose(controlFile);
 }

@@ -119,7 +119,7 @@ open_file(OBuffersDesc *desc, uint64 fileNum)
 	desc->curFileNum = fileNum;
 	if (desc->curFile < 0)
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not open undo log file %s", desc->curFileName)));
+						errmsg("could not open undo log file %s: %m", desc->curFileName)));
 }
 
 static void
@@ -146,7 +146,7 @@ write_buffer_data(OBuffersDesc *desc, char *data, uint64 blockNum)
 						WAIT_EVENT_SLRU_WRITE);
 	if (result != ORIOLEDB_BLCKSZ)
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not write buffer to file %s", desc->curFileName)));
+						errmsg("could not write buffer to file %s: %m", desc->curFileName)));
 }
 
 static void
@@ -168,7 +168,7 @@ read_buffer(OBuffersDesc *desc, OBuffer *buffer)
 	/* we may not read all the bytes due to read past EOF */
 	if (result < 0)
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not read buffer from file %s", desc->curFileName)));
+						errmsg("could not read buffer from file %s: %m", desc->curFileName)));
 
 	if (result < ORIOLEDB_BLCKSZ)
 		memset(&buffer->data[result], 0, ORIOLEDB_BLCKSZ - result);

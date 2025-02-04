@@ -307,7 +307,7 @@ get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 	{
 		if (should_exists)
 			ereport(NOTICE, (errcode_for_file_access(),
-							 errmsg("could not open map file %s.", filename)));
+							 errmsg("could not open map file %s: %m", filename)));
 		pfree(filename);
 		return;
 	}

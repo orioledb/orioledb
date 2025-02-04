@@ -156,7 +156,7 @@ s3_put_lock_file(void)
 				 sizeof(lock_identifier)) != sizeof(lock_identifier))
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("could not read data from lock file \"%s\"",
+					 errmsg("could not read data from lock file \"%s\": %m",
 							LOCK_FILENAME)));
 
 		close(lock_file);

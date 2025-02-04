@@ -244,7 +244,7 @@ read_from_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES],
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not open data file %s", filename)));
+				 errmsg("could not open data file %s: %m", filename)));
 
 	pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_READ);
 	rc = pg_pread(fd, (char *) values, headerSize, 0);
@@ -269,7 +269,7 @@ read_from_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES],
 	else if (rc != headerSize)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not read header from data file %s", filename)));
+				 errmsg("could not read header from data file %s: %m", filename)));
 
 	close(fd);
 }
@@ -289,7 +289,7 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not open data file %s", filename)));
+				 errmsg("could not open data file %s: %m", filename)));
 
 	pgstat_report_wait_start(WAIT_EVENT_DATA_FILE_WRITE);
 	if (pg_pwrite(fd, (char *) values, headerSize, 0) != headerSize)
@@ -1032,7 +1032,7 @@ iterate_files(IterateFilesCallback callback)
 	dir = opendir(ORIOLEDB_DATA_DIR);
 	if (dir == NULL)
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not open the orioledb data directory")));
+						errmsg("could not open the orioledb data directory: %m")));
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
@@ -1106,7 +1106,7 @@ initial_parts_counting_callback(S3HeaderTag tag)
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not open data file %s", filename)));
+				 errmsg("could not open data file %s: %m", filename)));
 	pfree(filename);
 
 	fileSize = lseek(fd, 0, SEEK_END);

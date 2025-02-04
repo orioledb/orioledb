@@ -584,7 +584,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 		if (file < 0)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not open file %s", filename)));
+							errmsg("could not open file %s: %m", filename)));
 		file_size = FileSize(file);
 
 		while (true)
@@ -616,7 +616,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		}
 		if (file_size != len)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read data from checkpoint tmp file: %s %lu %lu",
+							errmsg("could not read data from checkpoint tmp file: %s %lu %lu: %m",
 								   filename, len, file_size)));
 
 		pfree(filename);

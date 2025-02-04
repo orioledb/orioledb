@@ -286,7 +286,7 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 		if (hashElem->file <= 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("could not open data file %s", filename)));
+					 errmsg("could not open data file %s: %m", filename)));
 		pfree(filename);
 		return hashElem->file;
 	}
@@ -317,7 +317,7 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 		if (desc->smgr.array.files[num] <= 0)
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("could not open data file %s", filename)));
+					 errmsg("could not open data file %s: %m", filename)));
 		pfree(filename);
 		return desc->smgr.array.files[num];
 	}
@@ -1412,7 +1412,7 @@ load_page(OBTreeFindPageContext *context)
 
 		ereport(ERROR, (errcode_for_file_access(),
 		/* cppcheck-suppress unknownMacro */
-						errmsg("could not read page with file offset " UINT64_FORMAT " from %s",
+						errmsg("could not read page with file offset " UINT64_FORMAT " from %s: %m",
 							   DOWNLINK_GET_DISK_OFF(downlink),
 							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
@@ -1776,7 +1776,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (err)
 	{
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not (re) allocate file blocks for page %d to file %s",
+						errmsg("could not (re) allocate file blocks for page %d to file %s: %m",
 							   blkno, btree_smgr_filename(desc, 0, checkpoint_number))));
 	}
 
@@ -1785,7 +1785,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (!write_page_to_disk(desc, &page_desc->fileExtent, checkpoint_number, write_img, write_size))
 	{
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not write page %d to file %s with offset %lu",
+						errmsg("could not write page %d to file %s with offset %lu: %m",
 							   blkno,
 							   btree_smgr_filename(desc, page_desc->fileExtent.off, checkpoint_number),
 							   (unsigned long) page_desc->fileExtent.off)));
@@ -1816,7 +1816,7 @@ perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExten
 	if (!get_free_disk_extent(desc, chkpNum, write_size, extent))
 	{
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not get free file offset for write page to file %s",
+						errmsg("could not get free file offset for write page to file %s: %m",
 							   btree_smgr_filename(desc, 0, 0))));
 
 		return InvalidDiskDownlink;
@@ -1840,7 +1840,7 @@ perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExten
 		}
 
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not write autonomous page to file %s with offset %lu",
+						errmsg("could not write autonomous page to file %s with offset %lu: %m",
 							   btree_smgr_filename(desc, offset, chkpNum),
 							   (unsigned long) offset)));
 
@@ -1927,7 +1927,7 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 	if (!write_page_to_disk(desc, extent, 0, write_img, write_size))
 	{
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not write autonomous page to file %s with offset %lu",
+						errmsg("could not write autonomous page to file %s with offset %lu: %m",
 							   btree_smgr_filename(desc, extent[0].off, chkpNum),
 							   (unsigned long) extent[0].off)));
 
@@ -2104,7 +2104,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 				page_desc->ionum = -1;
 				unlock_io(ionum);
 				ereport(ERROR, (errcode_for_file_access(),
-								errmsg("could not evict page %d to disk", blkno)));
+								errmsg("could not evict page %d to disk: %m", blkno)));
 			}
 			else if (!dirty_parent)
 			{
@@ -2154,7 +2154,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 				unlock_io(ionum);
 				unlock_page(parent_blkno);
 				ereport(ERROR, (errcode_for_file_access(),
-								errmsg("could not evict page %d to disk", blkno)));
+								errmsg("could not evict page %d to disk: %m", blkno)));
 			}
 			else
 			{
@@ -3149,7 +3149,7 @@ try_to_punch_holes(BTreeDescr *desc)
 		file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 		if (file < 0)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not open file %s", filename)));
+							errmsg("could not open file %s: %m", filename)));
 		file_size = FileSize(file);
 
 		while (true)
@@ -3172,7 +3172,7 @@ try_to_punch_holes(BTreeDescr *desc)
 		}
 		if (file_size != len)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read data from checkpoint tmp file: %s %lu %lu",
+							errmsg("could not read data from checkpoint tmp file: %s %lu %lu: %m",
 								   filename, len, file_size)));
 
 		pfree(filename);
