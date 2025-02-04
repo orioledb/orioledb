@@ -646,7 +646,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 											O_RDWR | O_CREAT | PG_BINARY);
 	if (pendingTruncatesFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not open pending truncates file %s",
+						errmsg("could not open pending truncates file %s: %m",
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset = pending_truncates_meta->pendingTruncatesLocation;
@@ -655,7 +655,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 	if (FileWrite(pendingTruncatesFile, (Pointer) &relOids, length, offset,
 				  WAIT_EVENT_BUFFILE_WRITE) != length)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write pending truncates file %s",
+						errmsg("could not write pending truncates file %s: %m",
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset += length;
@@ -664,7 +664,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 	if (FileWrite(pendingTruncatesFile, (Pointer) &numTrees, length, 0,
 				  WAIT_EVENT_BUFFILE_WRITE) != length)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write pending truncates file %s",
+						errmsg("could not write pending truncates file %s: %m",
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset += length;
@@ -673,7 +673,7 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 	if (FileWrite(pendingTruncatesFile, (Pointer) &treeOids, length, 0,
 				  WAIT_EVENT_BUFFILE_WRITE) != length)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write pending truncates file %s",
+						errmsg("could not write pending truncates file %s: %m",
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset += length;
@@ -715,7 +715,7 @@ check_pending_truncates(void)
 											O_RDONLY | PG_BINARY);
 	if (pendingTruncatesFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not open pending truncates file %s",
+						errmsg("could not open pending truncates file %s: %m",
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset = 0;
@@ -728,7 +728,7 @@ check_pending_truncates(void)
 		if (FileRead(pendingTruncatesFile, (Pointer) &relOids, length, offset,
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read pending truncates file %s",
+							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
 		offset += length;
@@ -737,7 +737,7 @@ check_pending_truncates(void)
 		if (FileRead(pendingTruncatesFile, (Pointer) &numTrees, length, offset,
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read pending truncates file %s",
+							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
 		if (numTrees > relNodesAllocated)
@@ -755,7 +755,7 @@ check_pending_truncates(void)
 		if (FileRead(pendingTruncatesFile, (Pointer) relNodes, length, offset,
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read pending truncates file %s",
+							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
 		for (i = 0; i < numTrees; i++)

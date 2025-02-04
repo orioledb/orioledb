@@ -610,7 +610,7 @@ open_xids_file(void)
 		xidFile = PathNameOpenFile(xidFilename, O_WRONLY | O_CREAT | PG_BINARY);
 		if (xidFile < 0)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not open xid file %s", xidFilename)));
+							errmsg("could not open xid file %s: %m", xidFilename)));
 		xidFileCheckpointnum = checkpointnum;
 	}
 }
@@ -643,7 +643,7 @@ flush_xids_queue(void)
 					   sizeof(uint32) + sizeof(XidFileRec) * startPos,
 					   WAIT_EVENT_SLRU_WRITE) != sizeof(XidFileRec) * (endPos - startPos))
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not write xid record to file %s", xidFilename)));
+							errmsg("could not write xid record to file %s: %m", xidFilename)));
 	}
 	else
 	{
@@ -660,7 +660,7 @@ flush_xids_queue(void)
 					   sizeof(uint32) + sizeof(XidFileRec) * startPos,
 					   WAIT_EVENT_SLRU_WRITE) != sizeof(XidFileRec) * len1)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not write xid record to file %s", xidFilename)));
+							errmsg("could not write xid record to file %s: %m", xidFilename)));
 
 		if (OFileWrite(xidFile,
 					   (Pointer) &checkpoint_state->xidRecQueue[0],
@@ -668,7 +668,7 @@ flush_xids_queue(void)
 					   sizeof(uint32) + sizeof(XidFileRec) * (startPos + len1),
 					   WAIT_EVENT_SLRU_WRITE) != sizeof(XidFileRec) * len2)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not write xid record to file %s", xidFilename)));
+							errmsg("could not write xid record to file %s: %m", xidFilename)));
 	}
 
 	for (location = startPos; location < endPos; location++)
@@ -758,11 +758,11 @@ close_xids_file(void)
 	if (OFileWrite(xidFile, (Pointer) &count,
 				   sizeof(count), 0, WAIT_EVENT_SLRU_WRITE) != sizeof(count))
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write xid record to file %s", xidFilename)));
+						errmsg("could not write xid record to file %s: %m", xidFilename)));
 
 	if (FileSync(xidFile, WAIT_EVENT_SLRU_SYNC) < 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not sync xid file %s", xidFilename)));
+						errmsg("could not sync xid file %s: %m", xidFilename)));
 
 	FileClose(xidFile);
 	pfree(xidFilename);
@@ -1423,7 +1423,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 	if (!success)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not init a new sequence buffer file %s",
+				 errmsg("could not init a new sequence buffer file %s: %m",
 						get_seq_buf_filename(&next_tmp_tag))));
 
 	if (descr->storageType != BTreeStoragePersistence)
@@ -1443,7 +1443,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 	if (!success)
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not create a new sequence buffer file %s",
+				 errmsg("could not create a new sequence buffer file %s: %m",
 						get_seq_buf_filename(&next_chkp_tag))));
 }
 
@@ -1629,7 +1629,7 @@ append_file_contents(File target, char *source_filename, uint64 offset)
 	source = PathNameOpenFile(source_filename, O_RDONLY | PG_BINARY);
 	if (source < 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not open file for finalize checkpoint map: %s",
+						errmsg("could not open file for finalize checkpoint map %s: %m",
 							   source_filename)));
 
 	do
@@ -1638,7 +1638,7 @@ append_file_contents(File target, char *source_filename, uint64 offset)
 		if (OFileWrite(target, buf, block_len, target_offset, WAIT_EVENT_DATA_FILE_WRITE) != block_len)
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("could not copy data for finalize checkpoint map: %s", source_filename)));
+					 errmsg("could not copy data for finalize checkpoint map %s: %m", source_filename)));
 		target_offset += block_len;
 		offset += block_len;
 		len += block_len;
@@ -1657,7 +1657,7 @@ finalize_chkp_map(File chkp_file, uint64 len, char *input_filename,
 
 	if (FileSize(chkp_file) != len)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not move to offset %lu for making finalize checkpoint map: %s",
+						errmsg("could not move to offset %lu for making finalize checkpoint map %s: %m",
 							   len, FilePathName(chkp_file))));
 
 	if (input_filename != NULL)
@@ -1774,7 +1774,7 @@ sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index)
 	if (file < 0)
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not open checkpoint map file: %s",
+						errmsg("Could not open checkpoint map file %s: %m",
 							   filename)));
 	}
 
@@ -1784,7 +1784,7 @@ sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index)
 	if (ferror)
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not read data from checkpoint map file: %s",
+						errmsg("Could not read data from checkpoint map file %s: %m",
 							   filename)));
 	}
 
@@ -1806,7 +1806,7 @@ sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index)
 		if (read_size != free_blocks_size)
 		{
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("Could not read data from checkpoint map file: %s",
+							errmsg("Could not read data from checkpoint map file %s: %m",
 								   filename)));
 		}
 	}
@@ -1823,7 +1823,7 @@ sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index)
 		FileSync(file, WAIT_EVENT_SLRU_SYNC) != 0)
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not write sorted data to checkpoint map file: %s",
+						errmsg("Could not write sorted data to checkpoint map file %s: %m",
 							   filename)));
 	}
 	FileClose(file);
@@ -1864,7 +1864,7 @@ sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index)
 		if (read_size != free_blocks_size)
 		{
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("Could not read data from checkpoint tmp file: %s %d %lu",
+							errmsg("Could not read data from checkpoint tmp file: %s %d %lu: %m",
 								   filename, read_size, free_blocks_size)));
 		}
 	}
@@ -1887,7 +1887,7 @@ sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index)
 		FileSync(file, WAIT_EVENT_SLRU_SYNC) != 0)
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("Could not write sorted data to checkpoint tmp file: %s",
+						errmsg("Could not write sorted data to checkpoint tmp file %s: %m",
 							   filename)));
 	}
 
@@ -1949,7 +1949,7 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
 		if (!success)
 		{
 			ereport(ERROR, (errcode_for_file_access(),
-							errmsg("could not write offset %lu to file %s",
+							errmsg("could not write offset %lu to file %s: %m",
 								   (unsigned long) extent->off,
 								   get_seq_buf_filename(&bufs[i]->shared->tag))));
 		}
@@ -2488,7 +2488,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	{
 		ereport(FATAL,
 				(errcode_for_file_access(),
-				 errmsg("could not open checkpoint file %s", filename)));
+				 errmsg("could not open checkpoint file %s: %m", filename)));
 	}
 
 	if (is_compressed && free_extents->size != 0 && !orioledb_s3_mode)
@@ -2518,7 +2518,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 						  WAIT_EVENT_DATA_FILE_READ) != map_extents_bytes)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to read extents from file %s",
+								errmsg("could not to read extents from file %s: %m",
 									   filename)));
 			}
 
@@ -2531,7 +2531,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 							 WAIT_EVENT_DATA_FILE_TRUNCATE) < 0)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to truncate file %s",
+								errmsg("could not to truncate file %s: %m",
 									   filename)));
 			}
 		}
@@ -2546,7 +2546,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 						   write_bytes, write_offset, WAIT_EVENT_SLRU_WRITE) != write_bytes)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to write extents to file %s",
+								errmsg("could not to write extents to file %s: %m",
 									   filename)));
 			}
 			header.numFreeBlocks = free_extents->size;
@@ -2593,7 +2593,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 								   WAIT_EVENT_SLRU_WRITE) != write_buf_len)
 					{
 						ereport(FATAL, (errcode_for_file_access(),
-										errmsg("could not to write extents to file %s",
+										errmsg("could not to write extents to file %s: %m",
 											   filename)));
 					}
 					write_offset += write_buf_len;
@@ -2611,7 +2611,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 							   WAIT_EVENT_SLRU_WRITE) != write_buf_len)
 				{
 					ereport(FATAL, (errcode_for_file_access(),
-									errmsg("could not to write extents to file %s",
+									errmsg("could not to write extents to file %s: %m",
 										   filename)));
 				}
 			}
@@ -2650,7 +2650,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		FileSync(file, WAIT_EVENT_SLRU_SYNC) != 0)
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not write checkpoint header to file %s", filename)));
+						errmsg("could not write checkpoint header to file %s: %m", filename)));
 	}
 
 	FileClose(file);
@@ -5079,7 +5079,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			if (ferror)
 			{
 				ereport(FATAL, (errcode_for_file_access(),
-								errmsg("could not to read header of map file %s",
+								errmsg("could not to read header of map file %s: %m",
 									   prev_chkp_fname)));
 			}
 			FileClose(prev_chkp_file);
@@ -5125,7 +5125,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		{
 			unlock_page(desc->rootInfo.rootPageBlkno);
 			ereport(ERROR, (errcode_for_file_access(),
-							errmsg("could not read rootPageBlkno page from %s",
+							errmsg("could not read rootPageBlkno page from %s: %m",
 								   btree_smgr_filename(desc, chkp_num,
 													   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink)))));
 		}
@@ -5240,7 +5240,7 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 						  &tmp_tag, false, init_shmem, 0, NULL))
 		{
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not fill sequence buffers.")));
+							errmsg("could not fill sequence buffers: %m")));
 		}
 	}
 
@@ -5249,7 +5249,7 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 					  &tmp_tag, true, init_shmem, 0, NULL))
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not fill sequence buffers.")));
+						errmsg("could not fill sequence buffers: %m")));
 	}
 
 	if (!init_seq_buf(&desc->tmpBuf[1 - chkp_index],
@@ -5257,7 +5257,7 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 					  NULL, true, false, 0, NULL))
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not fill sequence buffers.")));
+						errmsg("could not fill sequence buffers: %m")));
 	}
 
 	if (init_shmem && was_evicted)
@@ -5303,7 +5303,7 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 											  map_file_exists))
 	{
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not fill sequence buffers.")));
+						errmsg("could not fill sequence buffers: %m")));
 	}
 
 	if (init_shmem && was_evicted)

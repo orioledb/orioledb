@@ -480,7 +480,7 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 			pfree(filename);
 			ereport(FATAL,
 					(errcode_for_file_access(),
-					 errmsg("Could not write checkpoint header to file: %s",
+					 errmsg("Could not write checkpoint header to file %s: %m",
 							filename)));
 		}
 		FileClose(file);

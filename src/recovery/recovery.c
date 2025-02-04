@@ -451,13 +451,13 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 	xidFile = PathNameOpenFile(xidFilename, O_RDONLY | PG_BINARY);
 	if (xidFile < 0)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not open xid file %s", xidFilename)));
+						errmsg("could not open xid file %s: %m", xidFilename)));
 
 	if (OFileRead(xidFile, (Pointer) &count,
 				  sizeof(count), offset,
 				  WAIT_EVENT_SLRU_READ) != sizeof(count))
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not read xid record from file %s", xidFilename)));
+						errmsg("could not read xid record from file %s: %m", xidFilename)));
 	offset += sizeof(count);
 
 	for (i = 0; i < count; i++)
@@ -470,7 +470,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 					  sizeof(xidRec), offset,
 					  WAIT_EVENT_SLRU_READ) != sizeof(xidRec))
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read xid record from file %s", xidFilename)));
+							errmsg("could not read xid record from file %s: %m", xidFilename)));
 
 		advance_oxids(xidRec.oxid);
 		state = (RecoveryXidState *) hash_search(recovery_xid_state_hash,
@@ -2185,7 +2185,7 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 	if (errno != 0)
 	{
 		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("unable to clean up temporary files")));
+						errmsg("unable to clean up temporary files: %m")));
 	}
 
 	closedir(dir);
