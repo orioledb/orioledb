@@ -31,10 +31,15 @@ bool
 get_checkpoint_control_data(CheckpointControl *control)
 {
 	int			controlFile;
+	Size		readBytes;
 
 	controlFile = BasicOpenFile(CONTROL_FILENAME, O_RDONLY | PG_BINARY);
 	if (controlFile < 0)
 	{
+		/*
+		 * If we couldn't find the control file the we consider this case as
+		 * if there wasn't any checkpoint before.
+		 */
 		if (errno == ENOENT)
 			return false;
 
@@ -44,8 +49,16 @@ get_checkpoint_control_data(CheckpointControl *control)
 						CONTROL_FILENAME)));
 	}
 
-	if (read(controlFile, (Pointer) control,
-			 sizeof(CheckpointControl)) != sizeof(CheckpointControl))
+	readBytes = read(controlFile, (Pointer) control, sizeof(CheckpointControl));
+
+	/*
+	 * Handle special case when the control file is empty.  We consider this
+	 * case as if there wasn't created the control file and checkpoint never
+	 * finished successfully.
+	 */
+	if (readBytes == 0)
+		return false;
+	else if (readBytes != sizeof(CheckpointControl))
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not read data from control file \"%s\": %m",
