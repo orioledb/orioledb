@@ -339,9 +339,10 @@ class TriggerTest(BaseTest):
 		    for x in list(re.finditer(r'.*\n', e.exception.message))[0:3]
 		]
 		self.assertEqual(
-		    "".join(m), "ERROR:  stack depth limit exceeded\n" +
+		    self.stripErrorMsg("".join(m)).rstrip("\r\n"),
+		    "ERROR:  stack depth limit exceeded\n"
 		    "HINT:  Increase the configuration parameter \"max_stack_depth\" (currently 2048kB), after ensuring the platform's stack depth limit is adequate.\n"
-		    + "CONTEXT:  SQL statement \"INSERT INTO o_test_1(val_1)\n")
+		    "CONTEXT:  SQL statement \"INSERT INTO o_test_1(val_1)")
 
 		node.stop(['-m', 'immediate'])
 

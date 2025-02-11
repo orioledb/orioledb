@@ -34,7 +34,7 @@ class FileOperationsTest(BaseTest):
 		except Exception as e:
 			message = re.sub('[0-9]+', 'x', e.message)
 			self.assertTrue(
-			    "ERROR:  could not access directory \"orioledb_data/x\": Permission denied\n"
+			    "ERROR:  could not access directory \"orioledb_data/x\": Permission denied"
 			    in message)
 
 		# checks that all pages has been released

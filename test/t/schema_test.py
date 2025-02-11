@@ -127,11 +127,10 @@ class SchemaTest(BaseTest):
 				DROP SCHEMA test_schema_1 RESTRICT;
 			""")
 		self.assertEqual(
-		    e.exception.message,
+		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"),
 		    "ERROR:  cannot drop schema test_schema_1 because other objects depend on it\n"
-		    +
 		    "DETAIL:  table test_schema_1.o_test_1 depends on schema test_schema_1\n"
-		    "HINT:  Use DROP ... CASCADE to drop the dependent objects too.\n")
+		    "HINT:  Use DROP ... CASCADE to drop the dependent objects too.")
 
 		node.stop(['-m', 'immediate'])
 

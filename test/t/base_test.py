@@ -135,6 +135,14 @@ class BaseTest(unittest.TestCase):
 			i = i + 1
 		return result[0:length].decode('ascii')
 
+	def stripErrorMsg(self, msg):
+		prefix = "Utility exited with non-zero code. Error: `"
+		if msg.startswith(prefix):
+			msg = msg[len(prefix):]
+		if msg.endswith('`'):
+			msg = msg[:-1]
+		return msg
+
 	def assertErrorMessageEquals(self,
 	                             e: Exception,
 	                             err_msg: str,
@@ -159,6 +167,11 @@ class BaseTest(unittest.TestCase):
 		else:
 			exp_msg = err_msg
 			msg = e.args[0]['M']
+
+		msg = self.stripErrorMsg(msg)
+		msg = msg.rstrip("\r\n")
+		exp_msg = exp_msg.rstrip("\r\n")
+
 		self.assertEqual(msg, exp_msg)
 
 	@staticmethod

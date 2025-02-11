@@ -270,7 +270,7 @@ class S3Test(S3BaseTest):
 
 		assert e.exception.message is not None
 		self.assertTrue(
-		    e.exception.message.startswith(
+		    self.stripErrorMsg(e.exception.message).startswith(
 		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
@@ -301,7 +301,7 @@ class S3Test(S3BaseTest):
 
 		assert e.exception.message is not None
 		self.assertTrue(
-		    e.exception.message.startswith(
+		    self.stripErrorMsg(e.exception.message).startswith(
 		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
@@ -322,7 +322,7 @@ class S3Test(S3BaseTest):
 
 		assert e.exception.message is not None
 		self.assertTrue(
-		    e.exception.message.startswith(
+		    self.stripErrorMsg(e.exception.message).startswith(
 		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
@@ -345,7 +345,7 @@ class S3Test(S3BaseTest):
 
 		assert e.exception.message is not None
 		self.assertTrue(
-		    e.exception.message.startswith(
+		    self.stripErrorMsg(e.exception.message).startswith(
 		        "ERROR:  checkpoint request failed"))
 
 		with open(node.pg_log_file) as f:
