@@ -1672,6 +1672,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
 					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);
 					info->tree_height = PAGE_GET_LEVEL(root_page);
+					info->pages = TREE_NUM_LEAF_PAGES(&index_descr->desc);
 				}
 			}
 		}
