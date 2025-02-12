@@ -2051,6 +2051,7 @@ class RecoveryTest(BaseTest):
 
 	def test_recovery_row_expresion_index(self):
 		node = self.node
+		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\n")
 		node.start()
 		node.execute("""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
