@@ -1377,6 +1377,30 @@ orioledb_free_rd_amcache(Relation rel)
 	rel->rd_amcache = NULL;
 }
 
+/*
+ * Comparator for sorting rows[] array
+ */
+static int
+compare_rows(const void *a, const void *b, void *arg)
+{
+	HeapTuple	ha = *(const HeapTuple *) a;
+	HeapTuple	hb = *(const HeapTuple *) b;
+	BlockNumber ba = ItemPointerGetBlockNumber(&ha->t_self);
+	OffsetNumber oa = ItemPointerGetOffsetNumber(&ha->t_self);
+	BlockNumber bb = ItemPointerGetBlockNumber(&hb->t_self);
+	OffsetNumber ob = ItemPointerGetOffsetNumber(&hb->t_self);
+
+	if (ba < bb)
+		return -1;
+	if (ba > bb)
+		return 1;
+	if (oa < ob)
+		return -1;
+	if (oa > ob)
+		return 1;
+	return 0;
+}
+
 static int
 orioledb_acquire_sample_rows(Relation relation, int elevel,
 							 HeapTuple *rows, int targrows,
@@ -1398,6 +1422,10 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	double		rowstoskip = -1;	/* -1 means not set yet */
 	BlockSamplerData bs;
 	BlockNumber totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
+	ItemPointerData fake_iptr = {0};
+
+	ItemPointerSetBlockNumber(&fake_iptr, 0);
+	ItemPointerSetOffsetNumber(&fake_iptr, 1);
 
 	nblocks = BlockSampler_Init(&bs, totalblocks,
 								targrows, random());
@@ -1422,6 +1450,15 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 		{
 			tts_orioledb_store_tuple(slot, tuple, descr, COMMITSEQNO_INPROGRESS,
 									 PrimaryIndexNumber, false, NULL);
+			ItemPointerSetBlockNumber(&slot->tts_tid, ItemPointerGetBlockNumber(&fake_iptr));
+			ItemPointerSetOffsetNumber(&slot->tts_tid, ItemPointerGetOffsetNumber(&fake_iptr));
+			if ((OffsetNumber) (ItemPointerGetOffsetNumber(&fake_iptr) + 1) == InvalidOffsetNumber)
+			{
+				ItemPointerSetBlockNumber(&fake_iptr, ItemPointerGetBlockNumber(&fake_iptr) + 1);
+				ItemPointerSetOffsetNumber(&fake_iptr, 1);
+			}
+			else
+				ItemPointerSetOffsetNumber(&fake_iptr, ItemPointerGetOffsetNumber(&fake_iptr) + 1);
 
 			liverows += 1;
 
@@ -1460,6 +1497,19 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 		}
 	}
 	free_btree_seq_scan(scan);
+
+
+	/*
+	 * If we didn't find as many tuples as we wanted then we're done. No sort
+	 * is needed, since they're already in order.
+	 *
+	 * Otherwise we need to sort the collected tuples by position
+	 * (itempointer). It's not worth worrying about corner cases where the
+	 * tuples are already sorted.
+	 */
+	if (numrows == targrows)
+		qsort_interruptible(rows, numrows, sizeof(HeapTuple),
+							compare_rows, NULL);
 
 	/*
 	 * Estimate total numbers of live and dead rows in relation, extrapolating

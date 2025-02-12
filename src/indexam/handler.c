@@ -950,6 +950,31 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 												  NULL);
 		numIndexTuples = btreeSelectivity * index->rel->tuples;
 
+#if PG_VERSION_NUM >= 170000
+		/*
+		 * btree automatically combines individual ScalarArrayOpExpr primitive
+		 * index scans whenever the tuples covered by the next set of array
+		 * keys are close to tuples covered by the current set.  That puts a
+		 * natural ceiling on the worst case number of descents -- there
+		 * cannot possibly be more than one descent per leaf page scanned.
+		 *
+		 * Clamp the number of descents to at most 1/3 the number of index
+		 * pages.  This avoids implausibly high estimates with low selectivity
+		 * paths, where scans usually require only one or two descents.  This
+		 * is most likely to help when there are several SAOP clauses, where
+		 * naively accepting the total number of distinct combinations of
+		 * array elements as the number of descents would frequently lead to
+		 * wild overestimates.
+		 *
+		 * We somewhat arbitrarily don't just make the cutoff the total number
+		 * of leaf pages (we make it 1/3 the total number of pages instead) to
+		 * give the btree code credit for its ability to continue on the leaf
+		 * level with low selectivity scans.
+		 */
+		num_sa_scans = Min(num_sa_scans, ceil(index->pages * 0.3333333));
+		num_sa_scans = Max(num_sa_scans, 1);
+#endif
+
 		/*
 		 * As in genericcostestimate(), we have to adjust for any
 		 * ScalarArrayOpExpr quals included in indexBoundQuals, and then round
@@ -962,6 +987,9 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	 * Now do generic index cost estimation.
 	 */
 	costs.numIndexTuples = numIndexTuples;
+#if PG_VERSION_NUM >= 170000
+	costs.num_sa_scans = num_sa_scans;
+#endif
 
 	genericcostestimate(root, path, loop_count, &costs);
 
