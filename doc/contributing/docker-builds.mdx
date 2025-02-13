@@ -3,6 +3,13 @@ id: docker-builds
 sidebar_label: Docker Builds
 ---
 
+<!-- 
+WARNING: Code blocks marked with the ```bash language are automatically tested by GitHub CI 
+(as defined in .github/workflows/markdown-bash-check.yml). 
+If you want to display command examples that should not be tested, 
+please use the ```sh language marker instead.
+-->
+
 # Building Docker images
 
 This document provides instructions on how to build Docker images for OrioleDB, and how to test them.
@@ -21,15 +28,44 @@ Open a terminal and navigate to the OrioleDB project directory, if you are not a
 
 Build (Alpine) PostgreSQL 17 + OrioleDB extension:
 
-- `docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .`
+```bash
+docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .
+```
 
 Start server:
 
-- `docker run --name orioletest17 -v orioletest17data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=oriole123 -d orioletest:17`
+```bash
+docker run --name orioletest17 -v orioletest17data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=oriole123 -d orioletest:17
+```
+
+Enable orioledb extension via psql:
+
+```bash
+# Wait for the server to start
+docker exec orioletest17 bash -c "while ! pg_isready --host 127.0.0.1; do sleep 1; done ;"
+
+# Enable orioledb extension
+docker exec orioletest17 psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS orioledb;" -c "\dx"
+
+```
+
+You should expect a similar psql message:
+
+```sql
+CREATE EXTENSION
+                              List of installed extensions
+   Name   | Version |   Schema   |                     Description
+----------+---------+------------+------------------------------------------------------
+ orioledb | 1.3     | public     | OrioleDB -- the next generation transactional engine
+ plpgsql  | 1.0     | pg_catalog | PL/pgSQL procedural language
+(2 rows)
+```
 
 Connect to the server via psql:
 
-- `docker exec -ti orioletest17 psql -U postgres`
+```sh
+docker exec -ti orioletest17 psql -U postgres
+```
 
 You should expect a similar psql message:
 
@@ -39,13 +75,9 @@ Type "help" for help.
 postgres=#
 ```
 
-Enable orioledb extension:
-
-- `create extension if not exists orioledb;`
-
 Test some commands:
 
-```
+```sql
 postgres=# select orioledb_version();
     orioledb_version
 ------------------------
@@ -84,14 +116,6 @@ postgres=# \d+
  public | orioledb_table       | view  | postgres | permanent   |               | 0 bytes    |
  public | orioledb_table_descr | view  | postgres | permanent   |               | 0 bytes    |
 (5 rows)
-
-postgres=# \dx
-                              List of installed extensions
-   Name   | Version |   Schema   |                     Description
-----------+---------+------------+------------------------------------------------------
- orioledb | 1.2     | public     | OrioleDB -- the next generation transactional engine
- plpgsql  | 1.0     | pg_catalog | PL/pgSQL procedural language
-(2 rows)
 
 postgres=# \dx+ orioledb
                      Objects in extension "orioledb"
@@ -153,21 +177,22 @@ postgres=# \dx+ orioledb
 
 Quit from the database: `\q`
 
-Stop the server:
 
-- `docker stop orioletest17`
+Stop the server and clean up:
 
-Remove container:
+```bash
+# Stop the server
+docker stop orioletest17
 
-- `docker container rm orioletest17`
+# Remove container:
+docker container rm orioletest17
 
-Remove docker image:
+# Remove docker image:
+docker rmi orioletest:17
 
-- `docker rmi orioletest:17`
-
-Remove the data volume:
-
-- `docker volume rm orioletest17data`
+# Remove the data volume:
+docker volume rm orioletest17data
+```
 
 ## Building Docker Images
 
@@ -175,13 +200,13 @@ To build a Docker image, use one of the following commands:
 
 #### To build PostgreSQL 17 + OrieleDB extension
 
-```
+```bash
 docker build -t orioletest:17 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="17" .
 ```
 
 #### To build PostgreSQL 16 + OrieleDB extension
 
-```
+```bash
 docker build -t orioletest:16 -f docker/Dockerfile --pull --network=host --progress=plain --build-arg PG_MAJOR="16" .
 ```
 
@@ -228,17 +253,16 @@ docker build --pull --network=host --progress=plain \
     -t orioletest:16-gcc-alpine3.20 .
 ```
 
-To build an image using Ubuntu version `devel`, the `clang` compiler and PostgreSQL version `17`, use the following command:
+To build an image using Ubuntu version `24.10`, the `clang` compiler and PostgreSQL version `17`, use the following command:
 
 ```bash
 docker build --pull --network=host --progress=plain \
-    --build-arg UBUNTU_VERSION="devel" \
+    --build-arg UBUNTU_VERSION="24.10" \
     --build-arg BUILD_CC_COMPILER="clang" \
     --build-arg PG_MAJOR="17" \
     -f docker/Dockerfile.ubuntu \
-    -t orioletest:17-clang-ubuntu-devel .
+    -t orioletest:17-clang-ubuntu-24.10 .
 ```
-The "devel" version is the latest development Ubuntu version, so it might not be stable.
 
 ## Experimental OrioleDB + PostGIS Extension build
 
@@ -261,6 +285,7 @@ docker build --pull --network=host --progress=plain \
 in a new directory, run this commands:
 
 ```bash
+rm -rf docker-postgis 2>/dev/null || true
 git clone --depth=1 https://github.com/postgis/docker-postgis.git
 cd ./docker-postgis/17-3.5/alpine
 docker build --network=host --progress=plain \
@@ -289,19 +314,19 @@ To build all Docker image variations on a local machine, run the following comma
 #### macOS
 On macOS you might need to install `bash` and `gnu-getopt` from Homebrew. To install them run the command:
 
-```bash
+```sh
 brew install bash gnu-getopt
 ```
 
 Update your `/etc/shells`:
 
-```bash
+```sh
 echo /opt/homebrew/bin/bash >> /etc/shells
 ```
 
 You may need to update your `PATH` variable in the `.bashrc` or `.zshrc` file:
 
-```
+```sh
 PATH=/opt/homebrew/bin:/opt/homebrew/opt/gnu-getopt/bin:$PATH
 ```
 

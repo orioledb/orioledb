@@ -1,0 +1,72 @@
+name: markdown-bash-check
+
+# This workflow checks markdown documentation for embedded bash scripts
+# by extracting and executing them in a controlled environment.
+#
+
+on:
+  push:
+    tags:
+      - '*'
+  release:
+    types: [published]
+  schedule:
+    # Runs every Monday at 6:00 AM UTC.
+    # Running the check weekly helps detect changes in external dependencies
+    # (such as Docker, PostGIS-Docker, Python, and Ubuntu) early,
+    # before they affect users.
+    - cron: '0 6 * * 1'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - 'doc/contributing/docker-builds.mdx'
+      - 'doc/contributing/local-builds.mdx'
+      - '.github/workflows/markdown-bash-check.yml'
+      - '.pgtags'
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  check-markdown-bash:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'local-builds.mdx'
+            type: 'local'
+            markdown_file: './doc/contributing/local-builds.mdx'
+            docker_image: 'orioledb.test.local-builds'
+            dockerfile: './docker/Dockerfile.test.local-builds'
+            output_script: '_local-builds.sh'
+          - name: 'docker-builds.mdx'
+            type: 'docker'
+            markdown_file: './doc/contributing/docker-builds.mdx'
+
+    name: "${{ matrix.name }} check"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check markdown file
+        run: ./ci/markdown-bash-checker.sh --dry-run ${{ matrix.markdown_file }}
+
+      - name: Run markdown bash check for local builds
+        if: ${{ matrix.type == 'local' }}
+        # if ./doc/contributing/local-builds.mdx
+        run: |
+          echo "Building a minimal Ubuntu Docker image for local builds with default 'yes' settings..."
+          docker build --pull -t ${{ matrix.docker_image }} -f ${{ matrix.dockerfile }} .
+
+          echo "Extracting and generating an output script from the markdown file: ${{ matrix.markdown_file }}..."
+          ./ci/markdown-bash-checker.sh --output ${{ matrix.output_script }} ${{ matrix.markdown_file }}
+
+          echo "Executing the generated script inside the Ubuntu Docker container to emulate a user's environment..."
+          docker run \
+            -v "$(pwd)/${{ matrix.output_script }}:/home/orioleuser/${{ matrix.output_script }}" \
+            ${{ matrix.docker_image }} \
+            /bin/bash -c "bash /home/orioleuser/${{ matrix.output_script }}"
+
+      - name: Run markdown bash check for docker builds
+        if: ${{ matrix.type == 'docker' }}
+        # if ./doc/contributing/docker-builds.mdx
+        run: ./ci/markdown-bash-checker.sh --run ${{ matrix.markdown_file }}

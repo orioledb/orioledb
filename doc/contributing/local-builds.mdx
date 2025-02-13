@@ -3,17 +3,56 @@ id: local-builds
 sidebar_label: Building from source
 ---
 
+<!--
+WARNING:
+Code blocks marked with the ```bash language are automatically tested by GitHub CI
+(as defined in .github/workflows/markdown-bash-check.yml).
+If you want to display command examples that should not be tested,
+please use the ```sh language marker instead.
+
+NOTE:
+In this markdown file, use the `bash` marker exclusively
+for Linux-related examples. ( Run in docker/Dockerfile.test.local-builds )
+For Windows and macOS examples, use the `sh` marker, as these sections are not currently tested.
+-->
+
 # OrioleDB development quickstart
 
 This guide will help you to build and run OrioleDB on your local machine from the source code.
 
 ## Linux
 
+**Prerequisites Checklist**
+
+Please ensure all requirements are met before proceeding:
+
+**Directory Creation**
+- The following directories, files will be created in your home folder (`$HOME`):
+  - `orioledb/` - Main OrioleDB source code repository (~200MB)
+  - `pg17/` - PostgreSQL 17 installation directory (~200MB)
+  - `pgdata/` - PostgreSQL data directory (~100MB initial size)
+  - `postgres-patches17/` - PostgreSQL 17 source with OrioleDB patches (~800MB)
+  - `log` - PostgreSQL log file
+
+**System Requirements**
+- None of the above directory names are currently in use
+- At least 2GB of free disk space in your home directory
+- 1-2 GB of additional disk space will be for the extra packages needed for building PostgreSQL
+- Sufficient memory (minimum 4GB RAM recommended)
+- 64bit Linux
+
+**User Requirements**
+- You are logged in as a non-root user
+- Your user has sudo privileges
+- Your user has write permissions in the home directory
+
+**Note**: Running this tutorial as root is not recommended and may cause security and permission issues.
+
 ### Install prerequisites
 
 ```bash
 sudo apt-get update
-sudo apt install git build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev valgrind
+sudo apt install git build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev valgrind libssl-dev libcurl4-openssl-dev wget
 ```
 
 ### Download and install PostgreSQL 17 with patches
@@ -44,14 +83,25 @@ PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
+cd contrib
+make -j$(nproc)
+make -j$(nproc) install
+cd ..
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
 source ~/.bashrc
+# Fallback: Manually update PATH in case sourcing ~/.bashrc doesn't work as expected
+export PATH="$PG_PREFIX/bin:$PATH"
 ```
 
 ### Install python requirements
 
+Before proceeding, it is recommended to create a dedicated Python 3 virtual environment.
+This helps avoid conflicts with system packages and ensures a clean installation of the required modules.
+You can use tools like **conda**, **virtualenv**, or any other Python package manager you prefer.
+Please note that the steps for setting up a virtual environment are not covered in this tutorial.
+
 ```bash
-pip3 install psycopg2 six testgres
+pip3 install psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL
 sudo pip3 install compiledb
 ```
 
@@ -61,13 +111,18 @@ sudo pip3 install compiledb
 cd ..
 git clone https://github.com/orioledb/orioledb.git
 cd orioledb
+# Check the required PostgreSQL patch version
+cat .pgtags
+# Verify the patch version in the .pgtags file.
+# If the patch version differs, go back to the previous steps and update the PostgreSQL patch version!
+grep -qFx '17: patches17_5' .pgtags || { echo "The .pgtags patch version is different; please update the tutorial accordingly!"; 1=2; }
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
 compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
 echo "compile_commands.json" >> .git/info/exclude
 ```
 
-### Download and install Visual Studio Code
+### Download and install Visual Studio Code ( optional )
 
 ```bash
 cd ..
@@ -91,12 +146,14 @@ make USE_PGXS=1 IS_DEV=1 installcheck
 #### Manual installation and running
 
 ```bash
+cd ..
 cd orioledb
 make USE_PGXS=1 IS_DEV=1 install
 initdb --no-locale -D $HOME/pgdata
 sed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf
 pg_ctl -D $HOME/pgdata/ start -l $HOME/log
 psql -c "CREATE EXTENSION IF NOT EXISTS orioledb; SELECT orioledb_commit_hash();" -d postgres
+psql -c "\dx" -d postgres
 ```
 
 # MacOS
@@ -107,13 +164,13 @@ Follow [the instruction to disable System Integrity Protection](http://osxdaily.
 
 ### Install Homebrew
 
-```
+```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
 ### Install prerequisites
 
-```bash
+```sh
 brew install python zstd pkg-config icu4c openssl wget gnu-sed
 sudo cpan IPC::Run
 echo "export PKG_CONFIG_PATH=\"\$PKG_CONFIG_PATH:/usr/local/opt/icu4c/lib/pkgconfig\"" >> ~/.zshrc
@@ -125,7 +182,7 @@ exec zsh -l
 
 ### Download and install PostgreSQL 17 with patches
 
-```bash
+```sh
 git clone https://github.com/orioledb/postgres.git --branch patches17 --single-branch postgres-patches17
 cd postgres-patches17/
 ```
@@ -134,34 +191,40 @@ cd postgres-patches17/
 
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
-```bash
+```sh
 git checkout patches17_5
 ```
 
 ### Configure and build
 
-```bash
+```sh
 PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
+cd contrib
+make -j$(nproc)
+make -j$(nproc) install
+cd ..
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.zshrc
 exec zsh -l
 ```
 
 ### Install python requirements
 
-```bash
-pip3 install psycopg2 six testgres
+```sh
+pip3 install psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL
 sudo pip3 install compiledb
 ```
 
 ### Download and build the OrioleDB extension
 
-```bash
+```sh
 cd ..
 git clone https://github.com/orioledb/orioledb.git
 cd orioledb
+# Check the required PostgreSQL patch version
+cat .pgtags
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
 compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
@@ -170,7 +233,7 @@ echo "compile_commands.json" >> .git/info/exclude
 
 ### Download and install Visual Studio Code
 
-```bash
+```sh
 cd ..
 brew install --cask visual-studio-code
 exec zsh -l
@@ -184,14 +247,14 @@ code orioledb
 
 #### Run automated tests
 
-```bash
+```sh
 cd orioledb
 make USE_PGXS=1 IS_DEV=1 installcheck
 ```
 
 #### Manual installation and running
 
-```bash
+```sh
 cd orioledb
 make USE_PGXS=1 IS_DEV=1 install
 initdb --no-locale -D $HOME/pgdata
@@ -218,15 +281,15 @@ Start Ubuntu from start menu again.
 
 ### Install prerequisites
 
-```bash
+```sh
 sudo hwclock --hctosys
 sudo apt-get update
-sudo apt install git build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev valgrind
+sudo apt install git build-essential flex bison pkg-config libreadline-dev make gdb libipc-run-perl libicu-dev python3 python3-dev python3-pip python3-setuptools python3-testresources libzstd1 libzstd-dev valgrind libssl-dev libcurl4-openssl-dev wget
 ```
 
 ### Download and install PostgreSQL 17 with patches
 
-```bash
+```sh
 git clone https://github.com/orioledb/postgres.git --branch patches17 --single-branch postgres-patches17
 cd postgres-patches17/
 ```
@@ -235,40 +298,46 @@ cd postgres-patches17/
 
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
-```bash
+```sh
 git checkout patches17_5
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
 
-```bash
+```sh
 sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" src/include/pg_config_manual.h
 ```
 
 ### Configure and build
 
-```bash
+```sh
 PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
+cd contrib
+make -j$(nproc)
+make -j$(nproc) install
+cd ..
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
 source ~/.bashrc
 ```
 
 ### Install python requirements
 
-```bash
-pip3 install psycopg2 six testgres
+```sh
+pip3 install psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL
 sudo pip3 install compiledb
 ```
 
 ### Download and build the OrioleDB extension
 
-```bash
+```sh
 cd ..
 git clone https://github.com/orioledb/orioledb.git
 cd orioledb
+# Check the required PostgreSQL patch version
+cat .pgtags
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
 compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
@@ -288,7 +357,7 @@ code --remote wsl+ubuntu /home/USERNAME/orioledb
 
 In VSCode terminal:
 
-```bash
+```sh
 code --install-extension ms-python.python
 code --install-extension ms-vscode.cpptools
 ```
@@ -297,13 +366,13 @@ code --install-extension ms-vscode.cpptools
 
 #### Run automated tests
 
-```bash
+```sh
 make USE_PGXS=1 IS_DEV=1 installcheck
 ```
 
 #### Manual installation and running
 
-```bash
+```sh
 make USE_PGXS=1 IS_DEV=1 install
 initdb --no-locale -D $HOME/pgdata
 sed -i 's/#shared_preload_libraries = '\'''\''/shared_preload_libraries = '\''orioledb'\''/' $HOME/pgdata/postgresql.conf

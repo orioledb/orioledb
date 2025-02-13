@@ -1,0 +1,49 @@
+FROM ubuntu:24.04
+
+# ----------------------------
+# Dockerfile.test.local-builds
+#
+# This Dockerfile builds a minimal Ubuntu image configured for local builds.
+# It sets a non-interactive environment with default "yes" settings for package
+# installations, applies system defaults for secure and unattended operations,
+# and creates a non-root user with sudo privileges.
+#
+# This image is essential for running bash scripts extracted from markdown
+# files in a controlled, reproducible environment before the scripts are used
+# by end users.
+#
+# Build command (from the root of the repository):
+#   docker build --pull -t orioledb.test.local-builds -f ./docker/Dockerfile.test.local-builds .
+#
+# Run command (from the root of the repository):
+#   ./ci/markdown-bash-checker.sh  --output _local-builds.sh ./doc/contributing/local-builds.mdx
+#   docker run -it -v $(pwd)/_local-builds.sh:/home/orioleuser/_local-builds.sh orioledb.test.local-builds /bin/bash -c "bash /home/orioleuser/_local-builds.sh"
+#
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV TZ=Etc/UTC
+
+# Install minimal system packages - expected in a user environment
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      sudo \
+      tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# System-wide configurations - for defaults and security
+RUN echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90assumeyes && \
+    echo 'Dpkg::Options::="--force-confdef";' >> /etc/apt/apt.conf.d/90assumeyes && \
+    echo 'Dpkg::Options::="--force-confold";' >> /etc/apt/apt.conf.d/90assumeyes && \
+    echo 'Defaults env_keep += "PIP_BREAK_SYSTEM_PACKAGES"' >> /etc/sudoers && \
+    echo 'Defaults env_keep += "DEBIAN_FRONTEND"' >> /etc/sudoers
+
+# Create orioleuser, add to sudo group, and set up home directory
+RUN useradd -m -s /bin/bash orioleuser && \
+    usermod -aG sudo orioleuser && \
+    echo "orioleuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Set the default user
+USER orioleuser
+
+# Set working directory to orioleuser's home
+WORKDIR /home/orioleuser
