@@ -145,6 +145,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  table_lock_test \
 				  uniq
 TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
+						test/t/correlation_test.py \
 						test/t/eviction_bgwriter_test.py \
 						test/t/eviction_compression_test.py \
 						test/t/eviction_test.py \

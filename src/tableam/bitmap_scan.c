@@ -202,8 +202,11 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 
 	if ((node->biss_NumRuntimeKeys == 0 && node->biss_NumArrayKeys == 0) ||
 		(node->biss_RuntimeKeysReady))
+	{
 		btrescan(&ostate.scandesc, node->biss_ScanKeys,
 				 node->biss_NumScanKeys, NULL, 0);
+		ostate.numPrefixExactKeys = o_get_num_prefix_exact_keys(node->biss_ScanKeys, node->biss_NumScanKeys);
+	}
 
 
 	if (is_explain_analyze(&node->ss.ps))
