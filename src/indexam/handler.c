@@ -951,6 +951,7 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 		numIndexTuples = btreeSelectivity * index->rel->tuples;
 
 #if PG_VERSION_NUM >= 170000
+
 		/*
 		 * btree automatically combines individual ScalarArrayOpExpr primitive
 		 * index scans whenever the tuples covered by the next set of array
