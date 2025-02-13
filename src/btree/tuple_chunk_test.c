@@ -14,9 +14,9 @@
 
 #include "orioledb.h"
 
+#include "btree/chunk_ops.h"
 #include "btree/page_chunks.h"
 #include "btree/print.h"
-#include "btree/tuple_chunk.h"
 #include "tableam/descr.h"
 
 #include "access/relation.h"
@@ -29,7 +29,8 @@ typedef struct TupleChunkTestDesc
 	OIndexDescr *indexDesc;
 
 	BTreeChunkDesc chunk;
-	BTreeChunkBuilderData chunkBuilder;
+	BTreeChunkBuilder chunkBuilder;
+	bool		isLeaf;
 
 	TuplePrintOpaque printOpaque;
 	StringInfoData buf;
@@ -42,9 +43,9 @@ PG_FUNCTION_INFO_V1(test_tuple_chunk_builder);
 
 static void init_test_desc(TupleChunkTestDesc *testDesc, Oid relid);
 static void init_chunk_desc(TupleChunkTestDesc *testDesc,
-							BTreeChunkType chunkType);
+							BTreeChunkType chunkType, bool isLeaf);
 static void init_chunk_builder(TupleChunkTestDesc *testDesc,
-							   BTreeChunkType chunkType);
+							   BTreeChunkType chunkType, bool isLeaf);
 static void free_test_desc(TupleChunkTestDesc *testDesc);
 
 static void init_print_opaque(TupleChunkTestDesc *testDesc);
@@ -72,11 +73,8 @@ static void test_builder_estimate(TupleChunkTestDesc *testDesc,
 static void test_builder_add(TupleChunkTestDesc *testDesc,
 							 Datum *values, bool *nulls, uint64 downlink);
 
-static OTuple make_otuple(TupleChunkTestDesc *testDesc,
-						  BTreeChunkType chunkType,
-						  Datum *values, bool *nulls);
-static void print_otuple(TupleChunkTestDesc *testDesc,
-						 BTreeChunkType chunkType, OTuple tuple);
+static OTuple make_otuple(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls);
+static void print_otuple(TupleChunkTestDesc *testDesc, OTuple tuple);
 
 Datum
 test_tuple_chunk_changes(PG_FUNCTION_ARGS)
@@ -85,7 +83,7 @@ test_tuple_chunk_changes(PG_FUNCTION_ARGS)
 	TupleChunkTestDesc testDesc;
 
 	init_test_desc(&testDesc, relid);
-	init_chunk_desc(&testDesc, BTreeChunkLeaf);
+	init_chunk_desc(&testDesc, BTreeChunkLeaf, true);
 	init_print_opaque(&testDesc);
 	initStringInfo(&testDesc.buf);
 
@@ -356,7 +354,7 @@ test_tuple_chunk_builder(PG_FUNCTION_ARGS)
 	TupleChunkTestDesc testDesc;
 
 	init_test_desc(&testDesc, relid);
-	init_chunk_builder(&testDesc, BTreeChunkLeaf);
+	init_chunk_builder(&testDesc, BTreeChunkLeaf, true);
 	init_print_opaque(&testDesc);
 	initStringInfo(&testDesc.buf);
 
@@ -431,24 +429,28 @@ init_test_desc(TupleChunkTestDesc *testDesc, Oid relid)
 }
 
 static void
-init_chunk_desc(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType)
+init_chunk_desc(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType,
+				bool isLeaf)
 {
 	testDesc->chunk.treeDesc = &testDesc->indexDesc->desc;
 
 	init_page_first_chunk(testDesc->chunk.treeDesc, testDesc->page, 0);
-	init_tuple_chunk(&testDesc->chunk, testDesc->page, 0);
+	tuple_chunk_init(&testDesc->chunk, testDesc->page, 0);
 
-	testDesc->chunk.chunkType = chunkType;
+	testDesc->isLeaf = isLeaf;
 }
 
 static void
-init_chunk_builder(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType)
+init_chunk_builder(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType,
+				   bool isLeaf)
 {
 	tuple_chunk_builder_init(&testDesc->chunkBuilder,
 							 &testDesc->indexDesc->desc, chunkType);
 
 	testDesc->chunkBuilder.chunkData = (Pointer) testDesc->page;
 	testDesc->chunkBuilder.chunkDataMaxSize = ORIOLEDB_BLCKSZ;
+
+	testDesc->isLeaf = isLeaf;
 }
 
 static void
@@ -500,8 +502,7 @@ test_estimate_change(TupleChunkTestDesc *testDesc, OffsetNumber itemOffset,
 	int32		estimate;
 
 	if (operation != BTreeChunkOperationDelete)
-		tuple = make_otuple(testDesc, testDesc->chunk.chunkType,
-							values, nulls);
+		tuple = make_otuple(testDesc, values, nulls);
 
 	estimate = tuple_chunk_estimate_change(&testDesc->chunk, itemOffset,
 										   operation, tuple);
@@ -509,7 +510,7 @@ test_estimate_change(TupleChunkTestDesc *testDesc, OffsetNumber itemOffset,
 	if (operation != BTreeChunkOperationDelete)
 	{
 		resetStringInfo(&testDesc->buf);
-		print_otuple(testDesc, testDesc->chunk.chunkType, tuple);
+		print_otuple(testDesc, tuple);
 	}
 
 	if (operation == BTreeChunkOperationInsert)
@@ -537,10 +538,9 @@ test_perform_change(TupleChunkTestDesc *testDesc, OffsetNumber itemOffset,
 	OTuple		tuple = {0};
 
 	if (operation != BTreeChunkOperationDelete)
-		tuple = make_otuple(testDesc, testDesc->chunk.chunkType,
-							values, nulls);
+		tuple = make_otuple(testDesc, values, nulls);
 
-	if (testDesc->chunk.chunkType == BTreeChunkLeaf)
+	if (testDesc->isLeaf)
 	{
 		BTreeLeafTuphdr header = {0};
 
@@ -559,7 +559,7 @@ test_perform_change(TupleChunkTestDesc *testDesc, OffsetNumber itemOffset,
 	if (operation != BTreeChunkOperationDelete)
 	{
 		resetStringInfo(&testDesc->buf);
-		print_otuple(testDesc, testDesc->chunk.chunkType, tuple);
+		print_otuple(testDesc, tuple);
 	}
 
 	if (operation == BTreeChunkOperationInsert)
@@ -603,9 +603,9 @@ test_read_tuple(TupleChunkTestDesc *testDesc, OffsetNumber itemOffset)
 						   &header, &tuple, &needsFree);
 
 	resetStringInfo(&testDesc->buf);
-	print_otuple(testDesc, testDesc->chunk.chunkType, tuple);
+	print_otuple(testDesc, tuple);
 
-	if (testDesc->chunk.chunkType == BTreeChunkLeaf)
+	if (testDesc->isLeaf)
 	{
 		BTreeLeafTuphdr *leaf_header = (BTreeLeafTuphdr *) header;
 
@@ -630,16 +630,14 @@ test_cmp_tuple(TupleChunkTestDesc *testDesc, OffsetNumber itemOffset,
 	OTuple		tuple = {0};
 	int			cmp = 0;
 
-	tuple = make_otuple(testDesc, testDesc->chunk.chunkType,
-						values, nulls);
+	tuple = make_otuple(testDesc, values, nulls);
 
 	tuple_chunk_cmp(&testDesc->chunk, NULL, NULL, itemOffset, &tuple,
-					testDesc->chunk.chunkType == BTreeChunkLeaf ?
-					BTreeKeyLeafTuple : BTreeKeyNonLeafKey,
+					testDesc->isLeaf ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey,
 					&cmp);
 
 	resetStringInfo(&testDesc->buf);
-	print_otuple(testDesc, testDesc->chunk.chunkType, tuple);
+	print_otuple(testDesc, tuple);
 
 	elog(INFO, "Compare tuple %s at position %d: %d", testDesc->buf.data,
 		 itemOffset, cmp);
@@ -653,16 +651,14 @@ test_search_tuple(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls)
 	OTuple		tuple = {0};
 	OffsetNumber itemOffset;
 
-	tuple = make_otuple(testDesc, testDesc->chunk.chunkType,
-						values, nulls);
+	tuple = make_otuple(testDesc, values, nulls);
 
 	tuple_chunk_search(&testDesc->chunk, NULL, NULL, &tuple,
-					   testDesc->chunk.chunkType == BTreeChunkLeaf ?
-					   BTreeKeyLeafTuple : BTreeKeyNonLeafKey,
+					   testDesc->isLeaf ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey,
 					   &itemOffset);
 
 	resetStringInfo(&testDesc->buf);
-	print_otuple(testDesc, testDesc->chunk.chunkType, tuple);
+	print_otuple(testDesc, tuple);
 
 	elog(INFO, "Search for tuple %s: %d", testDesc->buf.data, itemOffset);
 
@@ -675,13 +671,12 @@ test_builder_estimate(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls)
 	OTuple		tuple = {0};
 	int32		estimate;
 
-	tuple = make_otuple(testDesc, testDesc->chunkBuilder.chunkType,
-						values, nulls);
+	tuple = make_otuple(testDesc, values, nulls);
 
 	estimate = tuple_chunk_builder_estimate(&testDesc->chunkBuilder, tuple);
 
 	resetStringInfo(&testDesc->buf);
-	print_otuple(testDesc, testDesc->chunkBuilder.chunkType, tuple);
+	print_otuple(testDesc, tuple);
 
 	elog(INFO, "Estimate adding tuple %s to builder: %d", testDesc->buf.data,
 		 estimate);
@@ -695,13 +690,12 @@ test_builder_add(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls,
 {
 	OTuple		tuple = {0};
 
-	tuple = make_otuple(testDesc, testDesc->chunkBuilder.chunkType,
-						values, nulls);
+	tuple = make_otuple(testDesc, values, nulls);
 
 	tuple_chunk_builder_add(&testDesc->chunkBuilder, tuple, downlink);
 
 	resetStringInfo(&testDesc->buf);
-	print_otuple(testDesc, testDesc->chunkBuilder.chunkType, tuple);
+	print_otuple(testDesc, tuple);
 
 	elog(INFO, "Perform adding tuple %s to builder", testDesc->buf.data);
 
@@ -709,13 +703,12 @@ test_builder_add(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls,
 }
 
 static OTuple
-make_otuple(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType,
-			Datum *values, bool *nulls)
+make_otuple(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls)
 {
 	TupleDesc	tupleDesc;
 	OTupleFixedFormatSpec *spec;
 
-	if (chunkType == BTreeChunkLeaf)
+	if (testDesc->isLeaf)
 	{
 		tupleDesc = testDesc->indexDesc->leafTupdesc;
 		spec = &testDesc->indexDesc->leafSpec;
@@ -731,15 +724,14 @@ make_otuple(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType,
 }
 
 static void
-print_otuple(TupleChunkTestDesc *testDesc, BTreeChunkType chunkType,
-			 OTuple tuple)
+print_otuple(TupleChunkTestDesc *testDesc, OTuple tuple)
 {
 	TuplePrintOpaque *printOpaque = &testDesc->printOpaque;
 	TupleDesc	tupleDesc;
 	OTupleFixedFormatSpec *spec;
 	FmgrInfo   *outputFns;
 
-	if (chunkType == BTreeChunkLeaf)
+	if (testDesc->isLeaf)
 	{
 		tupleDesc = printOpaque->desc;
 		spec = printOpaque->spec;

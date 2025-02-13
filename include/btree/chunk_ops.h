@@ -23,34 +23,61 @@ typedef enum BTreeChunkOperationType
 	BTreeChunkOperationDelete
 } BTreeChunkOperationType;
 
-typedef enum BTreeChunkType
-{
-	BTreeChunkHiKeys,
-	BTreeChunkNonLeaf,
-	BTreeChunkLeaf
-} BTreeChunkType;
-
-typedef struct BTreeChunkBuilderData
-{
-	BTreeDescr *treeDesc;
-	BTreeChunkType chunkType;
-
-	Pointer		chunkData;
-	Size		chunkDataMaxSize;
-	Size		chunkDataSize;
-
-	/* Array of offsets of chunk items */
-	BTreePageChunk chunkItems[BTREE_PAGE_MAX_CHUNK_ITEMS];
-	/* Number of chunk items */
-	uint16		chunkItemsCount;
-} BTreeChunkBuilderData;
-
 typedef struct PartialPageState PartialPageState;
 
-typedef struct BTreeChunkDesc BTreeChunkDesc;
+typedef struct BTreeChunkOps BTreeChunkOps;
+
+typedef struct BTreeChunkBuilderItem
+{
+	Pointer		data;
+	uint16		size;
+	uint8		flags;
+} BTreeChunkBuilderItem;
+
+typedef struct BTreeChunkBuilder
+{
+	BTreeDescr *treeDesc;
+	const BTreeChunkOps *const ops;
+
+	/* Array of offsets of chunk items */
+	BTreeChunkBuilderItem chunkItems[BTREE_PAGE_MAX_CHUNK_ITEMS];
+	/* Number of chunk items */
+	uint16		chunkItemsCount;
+} BTreeChunkBuilder;
+
+typedef struct BTreeChunkItem
+{
+	LocationIndex items[1];
+} BTreeChunkItem;
+
+typedef struct BTreeChunkDesc
+{
+	BTreeDescr *treeDesc;
+	const BTreeChunkOps *const ops;
+
+	Pointer		chunkData;
+	/* Size of the chunkData in bytes */
+	uint16		chunkDataSize;
+} BTreeChunkDesc;
 
 typedef struct BTreeChunkOps
 {
+	Size		chunkDescSize;
+	uint16		itemHeaderSize;
+	BTreeKeyType itemKeyType;
+
+	/*
+	 * Main API functions.
+	 */
+
+	/*
+	 * Initialize the chunk using the given page and optional chunk offset.
+	 */
+	void		(*init) (BTreeChunkDesc *chunk,
+						 Pointer chunkData, uint16 chunkDataSize,
+						 BTreeChunkItem *chunkItems, uint16 chunkItemsCount,
+						 OffsetNumber chunkOffset);
+
 	/*
 	 * Estimate the new chunk size after the operation.
 	 */
@@ -101,45 +128,98 @@ typedef struct BTreeChunkOps
 							   bool *needsFree);
 
 	/*
+	 * Chunk builder functions.
+	 */
+
+	/*
 	 * Initialize the chunk builder.
 	 */
-	void		(*builder_init) (BTreeChunkBuilderData *chunkBuilder,
-								 BTreeDescr *treeDesc, BTreeChunkType chunkType);
+	void		(*builder_init) (BTreeChunkBuilder *chunkBuilder);
 
 	/*
 	 * Estimate the chunk size after adding the tuple to the builder.
 	 */
-	int32		(*builder_estimate) (BTreeChunkBuilderData *chunkBuilder, OTuple tuple);
+	int32		(*builder_estimate) (BTreeChunkBuilder *chunkBuilder, OTuple tuple);
 
 	/*
 	 * Add the tuple to the builder.
 	 */
-	void		(*builder_add) (BTreeChunkBuilderData *chunkBuilder, OTuple tuple,
-								uint64 downlink);
+	void		(*builder_add) (BTreeChunkBuilder *chunkBuilder,
+								BTreeChunkBuilderItem *chunkItem);
 
 	/*
 	 * Finish building the chunk.
 	 */
-	void		(*builder_finish) (BTreeChunkBuilderData *chunkBuilder,
+	void		(*builder_finish) (BTreeChunkBuilder *chunkBuilder,
 								   BTreeChunkDesc *chunk);
+
+	/*
+	 * Utility functions.
+	 */
+
+	/*
+	 * Get size of the tuple.
+	 */
+	uint16		(*get_tuple_size) (BTreeDescr *treeDesc, OTuple tuple);
 } BTreeChunkOps;
 
-typedef struct BTreeChunkDesc
+typedef struct BTreeTupleChunkDesc
 {
-	BTreeDescr *treeDesc;
-	BTreeChunkOps *ops;
-	BTreeChunkType chunkType;
+	BTreeChunkDesc base;
 
-	Pointer		chunkData;
-	/* Size of the chunkData in bytes */
-	uint16		chunkDataSize;
-	/* Offset number of the chunk within BTreePageHeader->chunkDesc */
+	/* Offset of the chunk within the page */
 	OffsetNumber chunkOffset;
-
 	/* Array of offsets of chunk items */
-	BTreePageChunk *chunkItems;
+	BTreeChunkItem *chunkItems;
 	/* Number of chunk items */
 	uint16		chunkItemsCount;
-} BTreeChunkDesc;
+} BTreeTupleChunkDesc;
+
+typedef struct BTreeHiKeyChunkDesc
+{
+	BTreeChunkDesc base;
+
+	/* Array of offsets of chunk items */
+	BTreeChunkItem chunkItems[BTREE_PAGE_MAX_CHUNKS];
+	/* Number of chunk items */
+	uint16		chunkItemsCount;
+} BTreeHiKeyChunkDesc;
+
+extern const BTreeChunkOps LeafTupleChunkOps;
+extern const BTreeChunkOps InternalTupleChunkOps;
+extern const BTreeChunkOps HiKeyChunkOps;
+
+static inline BTreeChunkDesc *
+make_chunk_desc(BTreeDescr *treeDesc, const BTreeChunkOps *ops,
+				Pointer chunkData, uint16 chunkDataSize,
+				BTreeChunkItem *chunkItems, uint16 chunkItemsCount,
+				OffsetNumber chunkOffset)
+{
+	BTreeChunkDesc *res;
+
+	res = palloc0(ops->chunkDescSize);
+
+	res->treeDesc = treeDesc;
+	*((const BTreeChunkOps **) &res->ops) = ops;
+	ops->init(res, chunkData, chunkDataSize, chunkItems, chunkItemsCount,
+			  chunkOffset);
+
+	return res;
+}
+
+static inline BTreeChunkBuilder *
+make_chunk_builder(BTreeDescr *treeDesc, const BTreeChunkOps *ops,
+				   Pointer chunkData, Size chunkDataMaxSize)
+{
+	BTreeChunkBuilder *res;
+
+	res = palloc0(sizeof(BTreeChunkBuilder));
+
+	res->treeDesc = treeDesc;
+	*((const BTreeChunkOps **) &res->ops) = ops;
+	ops->builder_init(res);
+
+	return res;
+}
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */
