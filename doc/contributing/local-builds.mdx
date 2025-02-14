@@ -67,7 +67,7 @@ cd postgres-patches17/
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
 ```bash
-git checkout patches17_5
+git checkout patches17_6
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -83,10 +83,8 @@ PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
-cd contrib
-make -j$(nproc)
-make -j$(nproc) install
-cd ..
+make -C contrib -j$(nproc)
+make -C contrib -j$(nproc) install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
 source ~/.bashrc
 # Fallback: Manually update PATH in case sourcing ~/.bashrc doesn't work as expected
@@ -115,7 +113,7 @@ cd orioledb
 cat .pgtags
 # Verify the patch version in the .pgtags file.
 # If the patch version differs, go back to the previous steps and update the PostgreSQL patch version!
-grep -qFx '17: patches17_5' .pgtags || { echo "The .pgtags patch version is different; please update the tutorial accordingly!"; 1=2; }
+grep -qFx '17: patches17_6' .pgtags || { echo "The .pgtags patch version is different; please update the tutorial accordingly!"; 1=2; }
 # Build with compiledb, because it creates compile_commands.json needed for VSCode C/C++ extension
 compiledb make USE_PGXS=1 IS_DEV=1
 # Exclude compile_commands.json from the Git tracking
@@ -192,7 +190,7 @@ cd postgres-patches17/
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
 ```sh
-git checkout patches17_5
+git checkout patches17_6
 ```
 
 ### Configure and build
@@ -202,10 +200,8 @@ PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
-cd contrib
-make -j$(nproc)
-make -j$(nproc) install
-cd ..
+make -C contrib -j$(nproc)
+make -C contrib -j$(nproc) install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.zshrc
 exec zsh -l
 ```
@@ -299,7 +295,7 @@ cd postgres-patches17/
 Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
 
 ```sh
-git checkout patches17_5
+git checkout patches17_6
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -315,10 +311,8 @@ PG_PREFIX=$HOME/pg17
 ./configure --enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$PG_PREFIX
 make -j$(nproc)
 make -j$(nproc) install
-cd contrib
-make -j$(nproc)
-make -j$(nproc) install
-cd ..
+make -C contrib -j$(nproc)
+make -C contrib -j$(nproc) install
 echo "export PATH=\"$PG_PREFIX/bin:\$PATH\"" >> ~/.bashrc
 source ~/.bashrc
 ```
