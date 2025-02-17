@@ -186,12 +186,12 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 				len;
 	OTuple		result;
 	uint32		version = keep_version ? o_tuple_get_version(tuple) : 0;
+	int			ctid_off = id->bridging ? 1 : 0;
 
 	Assert(type == oIndexPrimary || type == oIndexRegular);
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			ctid_off = id->bridging ? 1 : 0;
 		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum + ctid_off : i + 1;
 
 		Assert(attnum > 0);
@@ -280,10 +280,12 @@ hash_combine_mix_field(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 	if (att->attlen > 0)
 	{
 		hash = hash_combine_mix(val_ptr, att->attlen, hash);
+		elog(LOG, "hash_combine_mix_field(%d, %X)", att->attlen, *(uint32 *) val_ptr);
 	}
 	else if (att->attlen == -1)
 	{
 		hash = hash_combine_mix(val_ptr, VARSIZE_ANY(val_ptr), hash);
+		elog(LOG, "hash_combine_mix_field(%d, %X)", (int) VARSIZE_ANY(val_ptr), *(uint32 *) val_ptr);
 	}
 	else
 	{
@@ -306,6 +308,8 @@ o_hash_key(OIndexDescr *idx, OTuple key)
 	hash = hash_combine_mix(data, size, hash);
 	hash = hash_final(hash);
 
+	elog(LOG, "o_hash_key(%d, %X)", size, *(uint32 *) data);
+
 	return hash;
 }
 
@@ -316,13 +320,14 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 	TupleDesc	tupdesc = idx->leafTupdesc;
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	int			i = 0;
+	int			ctid_off = idx->bridging ? 1 : 0;
 
 	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)
 	{
 		int			attnum;
 
 		if (idx->desc.type == oIndexPrimary)
-			attnum = idx->fields[i].tableAttnum;
+			attnum = idx->fields[i].tableAttnum + ctid_off;
 		else
 			attnum = i + 1;
 

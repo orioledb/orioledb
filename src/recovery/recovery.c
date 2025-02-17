@@ -2505,6 +2505,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			Assert(oxid != InvalidOXid);
 
+			elog(LOG, "Finish %llu %d %d", cur_state->oxid, cur_state->systree_modified, cur_state->checkpoint_xid);
+
 			if (!single)
 			{
 				Assert(cur_state != NULL);
@@ -2573,7 +2575,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else
 			{
-				Assert(ix_type == oIndexToast);
+				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 				descr = NULL;
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
 												 false, NULL);
@@ -2889,7 +2891,7 @@ worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
 		}
 		else
 		{
-			Assert(desc->type == oIndexToast);
+			Assert(desc->type == oIndexToast || desc->type == oIndexBridge);
 			oids = desc->oids;
 			type = oIndexToast;
 		}

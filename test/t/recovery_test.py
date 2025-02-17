@@ -2165,9 +2165,9 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
-	def test_recovery_checkpoint_ddl_xid(self):
+	def test_recovery_bridged_indexes(self):
 		node = self.node
-		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\n")
+		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\norioledb.recovery_pool_size = 1\n")
 		node.start()
 
 		node.safe_psql("""
@@ -2176,8 +2176,9 @@ class RecoveryTest(BaseTest):
 			CREATE TABLE o_test (
 				id int primary key,
 				p point
-			) USING orioledb;
+			) USING orioledb WITH (index_bridging);
 
+			CREATE INDEX o_test_o_idx ON o_test USING gist (p);
 			CHECKPOINT;
 		""")
 
@@ -2189,12 +2190,16 @@ class RecoveryTest(BaseTest):
 			UPDATE o_test SET p = '(1.0, 1.0)' WHERE id = 2;
 		""")
 
+		result = node.execute("SET enable_indexonlyscan = off; SELECT id FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;")
+		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
+		print(result)
+
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 
-		result = node.execute("SELECT * FROM o_test;")
-		self.assertEqual(", ".join(str(x) for x in result),
-		                 "(1, '(0,0)'), (2, '(1,1)')")
+		result = node.execute("SET enable_indexonlyscan = off; SELECT id FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;")
+		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
+		print(result)
 
 		node.stop()

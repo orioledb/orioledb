@@ -370,6 +370,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			 * Check for TOASTed attributes and adjust the number of
 			 * attributes if necessary.
 			 */
+			Assert(*((uint8 *)&isnull[res_attnum]) <= 1);
+			Assert(*((uint8 *)&thisatt->attbyval) <= 1);
 			if (!isnull[res_attnum] && !thisatt->attbyval && thisatt->attlen < 0)
 			{
 				Pointer		p = DatumGetPointer(values[res_attnum]);

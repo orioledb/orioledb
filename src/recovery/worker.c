@@ -313,6 +313,11 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					if (ix_type == oIndexInvalid)
 					{
 						descr = o_fetch_table_descr(oids);
+						/*if (descr == NULL)
+						{
+							elog(LOG, "descr == NULL pid = %u", MyProcPid);
+							pg_usleep(1000000000UL);
+						}*/
 						table_descr_inc_refcnt(descr);
 						indexDescr = GET_PRIMARY(descr);
 					}

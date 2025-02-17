@@ -210,8 +210,12 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 								  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
 
 	if (!success)
-	{
 		o_report_duplicate(relation, descr->bridge, bridge_slot);
+
+	if (primary->desc.storageType == BTreeStoragePersistence)
+	{
+		o_wal_insert(&descr->bridge->desc, tuple);
+		flush_local_wal(false);
 	}
 
 	if (tuple.data)
@@ -222,6 +226,7 @@ static void
 delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 							 ItemPointer iptr, CommitSeqNo csn)
 {
+	OIndexDescr *primary = GET_PRIMARY(descr);
 	OSnapshot	o_snapshot;
 	OXid		oxid;
 	TupleTableSlot *bridge_slot;
@@ -236,6 +241,16 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 
 	result = o_tbl_index_delete(descr->bridge, BridgeIndexNumber, bridge_slot,
 								oxid, o_snapshot.csn);
+
+	if (primary->desc.storageType == BTreeStoragePersistence)
+	{
+		OTuple		keyTuple;
+
+		keyTuple.formatFlags = O_TUPLE_FLAGS_FIXED_FORMAT;
+		keyTuple.data = (Pointer) &bridge_oslot->bridge_ctid;
+		o_wal_delete_key(&descr->bridge->desc, keyTuple);
+		flush_local_wal(false);
+	}
 
 	/* FIXME */
 	Assert(result.success);
