@@ -336,6 +336,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				memcpy(&tuple.formatFlags, data + data_pos, 1);
 				data_pos++;
 				data_pos = MAXALIGN(data_pos);
+
 				if (indexDescr != NULL)
 				{
 					Assert(ORelOidsIsValid(oids));

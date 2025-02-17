@@ -1490,6 +1490,7 @@ apply_btree_modify_record(BTreeDescr *tree, RecoveryMsgType type,
 	bool		result;
 
 	callbackInfo.arg = &ptr;
+
 	if (IS_SYS_TREE_OIDS(tree->oids))
 	{
 		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
@@ -1498,7 +1499,7 @@ apply_btree_modify_record(BTreeDescr *tree, RecoveryMsgType type,
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_systree_callback;
 		}
 	}
-	else if (tree->type == oIndexPrimary || tree->type == oIndexToast)
+	else if (tree->type == oIndexPrimary || tree->type == oIndexToast || tree->type == oIndexBridge)
 	{
 		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
 		{
@@ -2575,7 +2576,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else
 			{
-				Assert(ix_type == oIndexToast);
+				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 				descr = NULL;
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
 												 false, NULL);
@@ -2719,6 +2720,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				/* nothing to do here */
 				ptr += length;
 				continue;
+			}
+
+			if (indexDescr->desc.type == oIndexBridge)
+			{
+				elog(LOG, "WAL change for bridge index");
 			}
 
 			if (single)
@@ -2892,9 +2898,9 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 		}
 		else
 		{
-			Assert(desc->type == oIndexToast);
+			Assert(desc->type == oIndexToast || desc->type == oIndexBridge);
 			oids = desc->oids;
-			type = oIndexToast;
+			type = desc->type;
 		}
 	}
 	else
