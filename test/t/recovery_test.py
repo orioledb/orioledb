@@ -2164,3 +2164,37 @@ class RecoveryTest(BaseTest):
 		node.start()
 
 		node.stop()
+
+	def test_recovery_checkpoint_ddl_xid(self):
+		node = self.node
+		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\n")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test (
+				id int primary key,
+				p point
+			) USING orioledb;
+
+			CHECKPOINT;
+		""")
+
+		node.safe_psql("""
+			INSERT INTO o_test VALUES (1, '(0, 0)');
+			INSERT INTO o_test VALUES (2, '(0.5, 0.5)');
+			INSERT INTO o_test VALUES (3, '(1.0, 1.0)');
+			DELETE FROM o_test WHERE id = 3;
+			UPDATE o_test SET p = '(1.0, 1.0)' WHERE id = 2;
+		""")
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		result = node.execute("SELECT * FROM o_test;")
+		self.assertEqual(", ".join(str(x) for x in result),
+		                 "(1, '(0,0)'), (2, '(1,1)')")
+
+		node.stop()

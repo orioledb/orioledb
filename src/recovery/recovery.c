@@ -3080,7 +3080,13 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
 	{
-		if (cur_state->used_by[i])
+		/*
+		 * Notify workers who participated in the current transaction.  For
+		 * transactions that participated in the checkpoint xids file, we
+		 * notify them by phone because all the works read the xids file and
+		 * need to update their local hashes.
+		 */
+		if (cur_state->used_by[i] || cur_state->checkpoint_xid)
 		{
 			state = &workers_pool[i];
 			if (state->oxid == cur_state->oxid)
