@@ -361,6 +361,50 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 	return res;
 }
 
+static void
+fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+
+	slot_getsomeattrs(slot, idx->leafTupdesc->natts);
+
+	if (idx->primaryIsCtid)
+	{
+		Datum		value;
+
+		pkey->nkeys = 1;
+		if (idx->bridging)
+			value = PointerGetDatum(&oslot->bridge_ctid);
+		else
+			value = PointerGetDatum(&slot->tts_tid);
+
+		pkey->keys[0].value = value;
+		pkey->keys[0].type = TIDOID;
+		pkey->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+		pkey->keys[0].comparator = idx->fields[0].comparator;
+	}
+	else
+	{
+		int			i;
+		int			pk_from;
+
+		pk_from = idx->nFields - idx->nPrimaryFields;
+
+		pkey->nkeys = idx->nPrimaryFields;
+		for (i = 0; i < idx->nPrimaryFields; i++)
+		{
+			AttrNumber	attnum = idx->primaryFieldsAttnums[i];
+
+			pkey->keys[i].value = slot->tts_values[attnum - 1];
+			pkey->keys[i].type = idx->leafTupdesc->attrs[pk_from + i].atttypid;
+			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
+			if (slot->tts_isnull[attnum - 1])
+				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
+			pkey->keys[i].comparator = idx->fields[pk_from + i].comparator;
+		}
+	}
+}
+
 TupleTableSlot *
 o_tbl_insert_with_arbiter(Relation rel,
 						  OTableDescr *descr,
@@ -435,7 +479,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				list_member_oid(arbiterIndexes, descr->indices[i]->oids.reloid))
 				continue;
 
-			ioc_arg.conflictIxNum = -1;
+			ioc_arg.conflictIxNum = InvalidIndexNumber;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo);
 			if (result != OBTreeModifyResultInserted)
@@ -517,15 +561,22 @@ o_tbl_insert_with_arbiter(Relation rel,
 			BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
 			OLockCallbackArg larg;
 			OBTreeModifyResult lockResult;
+			TupleDesc	saved_td;
 
 			Assert(failedIndexNumber >= 0);
 			Assert(!TTS_EMPTY(lockedSlot));
 
 			STOPEVENT(STOPEVENT_IOC_BEFORE_UPDATE, NULL);
 
-			tts_orioledb_fill_key_bound(lockedSlot,
-										primary_td,
-										&key);
+			/*
+			 * HACK: we save index tuple to slot during
+			 * o_insert_with_arbiter_modify_callback, but lockedSlot is for
+			 * table tuple here
+			 */
+			saved_td = lockedSlot->tts_tupleDescriptor;
+			lockedSlot->tts_tupleDescriptor = conflict_td->leafTupdesc;
+			fill_pkey_bound(lockedSlot, conflict_td, &key);
+			lockedSlot->tts_tupleDescriptor = saved_td;
 			o_btree_load_shmem(&primary_td->desc);
 
 			larg.rel = rel;
@@ -1564,7 +1615,7 @@ o_insert_with_arbiter_modify_callback(BTreeDescr *descr,
 {
 	InsertOnConflictCallbackArg *ioc_arg = (InsertOnConflictCallbackArg *) arg;
 
-	if (ioc_arg->scanSlot && ioc_arg->conflictIxNum >= 0)
+	if (ioc_arg->scanSlot && ioc_arg->conflictIxNum != InvalidIndexNumber)
 	{
 		bool		modified;
 
