@@ -253,7 +253,7 @@ main() {
                             execute_command "docker run --rm --network=host \
                                 --volume $(pwd):/local_workspace \
                                 \"orioletest:${docker_tag}\" \
-                                bash -c 'bash +x /github/workspace/orioledb/ci/check_docker.sh --running all \"${TEST_TARGETS}\"' \
+                                bash -c 'bash +x /local_workspace/ci/check_docker.sh --running all \"${TEST_TARGETS}\"' \
                                 2>&1 | \
                                 tee \"${logpath}/${docker_tag}.check.log\""
 

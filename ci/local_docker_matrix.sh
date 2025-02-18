@@ -125,7 +125,7 @@ for pg_major in "${pg_major_list[@]}" ; do
       time docker run --rm \
           --volume $(pwd):/local_workspace \
           "orioletest:${docker_tag}" \
-          bash -c "bash +x /github/workspace/orioledb/ci/check_docker.sh --running all \"${test_targets}\"" 2>&1 \
+          bash -c "bash +x /local_workspace/ci/check_docker.sh --running all \"${test_targets}\"" 2>&1 \
            | tee ${logpath}/"${docker_tag}".check.log
 
     done

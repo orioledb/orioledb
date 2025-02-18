@@ -107,7 +107,7 @@ jobs:
           docker run --rm \
             --volume $(pwd):/local_workspace \
             orioledb-amd64:latest \
-            bash -c 'bash +x /github/workspace/orioledb/ci/check_docker.sh --running all "${{ matrix.test_targets }}"'
+            bash -c 'bash +x /local_workspace/ci/check_docker.sh --running all "${{ matrix.test_targets }}"'
 
 # ----------------------
 # final build and push

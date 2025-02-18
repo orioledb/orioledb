@@ -187,7 +187,7 @@ jobs:
           docker run --rm \
             --volume $(pwd):/local_workspace \
             ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} \
-            bash -c 'bash +x /github/workspace/orioledb/ci/check_docker.sh --running all "${{ matrix.os.test_targets }}"'
+            bash -c 'bash +x /local_workspace/ci/check_docker.sh --running all "${{ matrix.os.test_targets }}"'
 
       - name: Login to docker.io
         uses: docker/login-action@v3
