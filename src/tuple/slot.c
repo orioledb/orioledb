@@ -304,7 +304,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	for (attnum = slot->tts_nvalid; attnum < natts; attnum++)
 	{
 		Form_pg_attribute thisatt;
-		int			res_attnum;
+		int			res_attnum = 0;
 
 		/*
 		 * Determine the result attribute number based on the index type and
@@ -335,10 +335,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		}
 		else
 		{
-			if (idx->fields[attnum].tableAttnum == EXPR_ATTNUM)
-				res_attnum = attnum;
-			else
-				res_attnum = idx->fields[attnum].tableAttnum - 1;
+			Assert(false);
 		}
 
 		/* Ensure the result attribute number is valid. */
