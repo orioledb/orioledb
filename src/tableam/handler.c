@@ -792,6 +792,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		pfree(newTreeOids);
 	}
 
+	ASAN_UNPOISON_MEMORY_REGION(freezeXid, sizeof(*freezeXid));
 	*freezeXid = InvalidTransactionId;
 	*minmulti = InvalidMultiXactId;
 
