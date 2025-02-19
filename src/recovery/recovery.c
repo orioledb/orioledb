@@ -283,7 +283,8 @@ static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_p
 static void replay_container(Pointer ptr, Pointer endPtr,
 							 bool single, XLogRecPtr xlogRecPtr);
 
-static void worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
+static void worker_send_modify(int worker_id, BTreeDescr *desc,
+							   RecoveryMsgType recType,
 							   OTuple tuple, int tuple_len);
 static void workers_send_oxid_finish(XLogRecPtr ptr, bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
@@ -296,10 +297,11 @@ static void worker_wait_shutdown(RecoveryWorkerState *worker);
 static inline bool apply_sys_tree_modify_record(int sys_tree_num, uint16 type,
 												OTuple tup,
 												OXid oxid, CommitSeqNo csn);
-static inline void spread_idx_modify(BTreeDescr *desc, uint16 recType,
+static inline void spread_idx_modify(BTreeDescr *desc,
+									 RecoveryMsgType recType,
 									 OTuple rec);
 
-static inline uint16 recovery_msg_from_wal_record(uint8 wal_record);
+static inline RecoveryMsgType recovery_msg_from_wal_record(uint8 wal_record);
 static void recovery_send_init(int worker_num);
 
 /*
@@ -1480,8 +1482,8 @@ recovery_insert_deleted_systree_callback(BTreeDescr *descr,
  * Applies modify recovery record to the BTree.
  */
 bool
-apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
-						  OXid oxid, CommitSeqNo csn)
+apply_btree_modify_record(BTreeDescr *tree, RecoveryMsgType type,
+						  OTuple ptr, OXid oxid, CommitSeqNo csn)
 {
 	OBTreeModifyResult modifyResult;
 	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
@@ -1490,7 +1492,7 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 	callbackInfo.arg = &ptr;
 	if (IS_SYS_TREE_OIDS(tree->oids))
 	{
-		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
+		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
 		{
 			callbackInfo.modifyCallback = recovery_insert_systree_callback;
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_systree_callback;
@@ -1498,12 +1500,12 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 	}
 	else if (tree->type == oIndexPrimary || tree->type == oIndexToast)
 	{
-		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
+		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
 		{
 			callbackInfo.modifyCallback = recovery_insert_primary_callback;
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_primary_callback;
 		}
-		else if (type == RECOVERY_DELETE)
+		else if (type == RecoveryMsgTypeDelete)
 		{
 			callbackInfo.modifyCallback = recovery_delete_primary_callback;
 			callbackInfo.modifyDeletedCallback = recovery_delete_deleted_primary_callback;
@@ -1511,12 +1513,12 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 	}
 	else
 	{
-		if (type == RECOVERY_INSERT || type == RECOVERY_UPDATE)
+		if (type == RecoveryMsgTypeInsert || type == RecoveryMsgTypeUpdate)
 		{
 			callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 		}
-		else if (type == RECOVERY_DELETE)
+		else if (type == RecoveryMsgTypeDelete)
 		{
 			callbackInfo.modifyCallback = recovery_delete_overwrite_callback;
 			callbackInfo.modifyDeletedCallback = recovery_delete_deleted_overwrite_callback;
@@ -1525,7 +1527,7 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 
 	switch (type)
 	{
-		case RECOVERY_INSERT:
+		case RecoveryMsgTypeInsert:
 			modifyResult = o_btree_modify(tree, BTreeOperationInsert,
 										  ptr, BTreeKeyLeafTuple,
 										  NULL, BTreeKeyNone,
@@ -1533,14 +1535,14 @@ apply_btree_modify_record(BTreeDescr *tree, uint16 type, OTuple ptr,
 										  NULL, &callbackInfo);
 			result = modifyResult == OBTreeModifyResultInserted || modifyResult == OBTreeModifyResultUpdated;
 			break;
-		case RECOVERY_UPDATE:
+		case RecoveryMsgTypeUpdate:
 			result = o_btree_modify(tree, BTreeOperationInsert,
 									ptr, BTreeKeyLeafTuple,
 									NULL, BTreeKeyNone,
 									oxid, csn, RowLockNoKeyUpdate,
 									NULL, &callbackInfo) == OBTreeModifyResultUpdated;
 			break;
-		case RECOVERY_DELETE:
+		case RecoveryMsgTypeDelete:
 			result = o_btree_modify(tree, BTreeOperationDelete,
 									ptr, BTreeKeyNonLeafKey,
 									NULL, BTreeKeyNone, oxid, csn, RowLockUpdate,
@@ -2215,7 +2217,7 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 	Assert(!(*recovery_single_process));
 	Assert(ORelOidsIsValid(oids));
 	msg = palloc0(sizeof(RecoveryOidsMsgIdxBuild));
-	msg->header.type = send_to_leader ? RECOVERY_LEADER_PARALLEL_INDEX_BUILD : RECOVERY_WORKER_PARALLEL_INDEX_BUILD;
+	msg->header.type = send_to_leader ? RecoveryMsgTypeLeaderParallelIndexBuild : RecoveryMsgTypeWorkerParallelIndexBuild;
 	msg->oids = oids;
 	msg->old_oids = old_oids;
 	msg->ix_num = ix_num;
@@ -2261,7 +2263,7 @@ recovery_send_init(int worker_num)
 
 	Assert(!(*recovery_single_process));
 
-	msg.header.type = RECOVERY_INIT;
+	msg.header.type = ReocveryMsgTypeInit;
 
 	worker_send_msg(worker_num, (Pointer) &msg, sizeof(msg));
 	worker_queue_flush(worker_num);
@@ -2697,13 +2699,13 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				{
 					ORelOids	tmp_oids;
 
-					if (type == RECOVERY_DELETE)
+					if (type == RecoveryMsgTypeDelete)
 					{
 						treeOids = o_indices_get_oids(ptr, &tmp_oids);
 						if (treeOids)
 							add_undo_drop_relnode(tmp_oids, treeOids, 1);
 					}
-					else if (type == RECOVERY_INSERT)
+					else if (type == RecoveryMsgTypeInsert)
 					{
 						treeOids = o_indices_get_oids(ptr, &tmp_oids);
 						if (treeOids)
@@ -2868,7 +2870,8 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
  * Sends modify message to a worker.
  */
 static void
-worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
+worker_send_modify(int worker_id, BTreeDescr *desc,
+				   RecoveryMsgType recType,
 				   OTuple tuple, int tuple_len)
 {
 	RecoveryMsgHeader *header;
@@ -2907,7 +2910,9 @@ worker_send_modify(int worker_id, BTreeDescr *desc, uint16 recType,
 							+ sizeof(ORelOids) + 1
 							+ sizeof(int) + 1) + tuple_len;
 
-	Assert(recType & RECOVERY_MODIFY);
+	Assert(recType == RecoveryMsgTypeInsert ||
+		   recType == RecoveryMsgTypeUpdate ||
+		   recType == RecoveryMsgTypeDelete);
 
 	if (RECOVERY_QUEUE_BUF_SIZE - state->queue_buf_len < max_msg_size)
 		worker_queue_flush(worker_id);
@@ -2981,7 +2986,7 @@ workers_send_finish(bool send_to_idx_pool)
 	{
 		state = &workers_pool[i];
 
-		finish_msg.header.type = RECOVERY_FINISHED;
+		finish_msg.header.type = RecoveryMsgTypeFinished;
 		if (RECOVERY_QUEUE_BUF_SIZE - state->queue_buf_len < sizeof(RecoveryMsgEmpty))
 			worker_queue_flush(i);
 
@@ -3003,7 +3008,7 @@ workers_send_savepoint(SubTransactionId parentSubId)
 
 	Assert(cur_state);
 
-	msg.header.type = RECOVERY_SAVEPOINT;
+	msg.header.type = RecoveryMsgTypeSavepoint;
 	msg.oxid = cur_state->oxid;
 	msg.parentSubId = parentSubId;
 
@@ -3039,7 +3044,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 
 	Assert(cur_state);
 
-	msg.header.type = RECOVERY_ROLLBACK_TO_SAVEPOINT;
+	msg.header.type = RecoveryMsgTypeRollbackToSavepointt;
 	msg.oxid = cur_state->oxid;
 	msg.ptr = ptr;
 	msg.parentSubId = parentSubId;
@@ -3074,7 +3079,7 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 	RecoveryMsgOXidPtr oxid_ptr_record;
 	int			i;
 
-	oxid_ptr_record.header.type = commit ? RECOVERY_COMMIT : RECOVERY_ROLLBACK;
+	oxid_ptr_record.header.type = commit ? RecoveryMsgTypeCommit : RecoveryMsgTypeRollback;
 	oxid_ptr_record.oxid = cur_state->oxid;
 	oxid_ptr_record.ptr = ptr;
 
@@ -3120,7 +3125,7 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 	{
 		RecoveryMsgPtr sync_msg;
 
-		sync_msg.header.type = RECOVERY_SYNCHRONIZE;
+		sync_msg.header.type = RecoveryMsgTypeSynchronize;
 		sync_msg.ptr = ptr;
 		for (i = 0; i < recovery_pool_size_guc; i++)
 		{
@@ -3166,7 +3171,7 @@ workers_notify_toast_consistent(void)
 	RecoveryMsgEmpty msg;
 	int			i;
 
-	msg.header.type = RECOVERY_TOAST_CONSISTENT;
+	msg.header.type = RecoveryMsgTypeToastConsistent;
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
 	{
@@ -3222,7 +3227,7 @@ apply_sys_tree_modify_record(int sys_tree_num, uint16 type, OTuple tup,
  * helps to apply recovery records for tuples in the right order.
  */
 static inline void
-spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec)
+spread_idx_modify(BTreeDescr *desc, RecoveryMsgType recType, OTuple rec)
 {
 	OTuple		key PG_USED_FOR_ASSERTS_ONLY;
 	uint32		hash;
@@ -3232,8 +3237,8 @@ spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec)
 
 	switch (recType)
 	{
-		case RECOVERY_INSERT:
-		case RECOVERY_UPDATE:
+		case RecoveryMsgTypeInsert:
+		case RecoveryMsgTypeUpdate:
 			tup_len = o_btree_len(desc, rec, OTupleLength);
 			hash = o_btree_hash(desc, rec, BTreeKeyLeafTuple);
 #ifdef USE_ASSERT_CHECKING
@@ -3245,7 +3250,7 @@ spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec)
 			worker_send_modify(GET_WORKER_ID(hash), desc,
 							   recType, rec, tup_len);
 			break;
-		case RECOVERY_DELETE:
+		case RecoveryMsgTypeDelete:
 			key_len = o_btree_len(desc, rec, OKeyLength);
 			hash = o_btree_hash(desc, rec, BTreeKeyNonLeafKey);
 			worker_send_modify(GET_WORKER_ID(hash), desc, recType,
@@ -3259,17 +3264,17 @@ spread_idx_modify(BTreeDescr *desc, uint16 recType, OTuple rec)
 /*
  * Converts wal record type to recovery message type.
  */
-static inline uint16
+static inline RecoveryMsgType
 recovery_msg_from_wal_record(uint8 wal_record)
 {
 	switch (wal_record)
 	{
 		case WAL_REC_INSERT:
-			return RECOVERY_INSERT;
+			return RecoveryMsgTypeInsert;
 		case WAL_REC_DELETE:
-			return RECOVERY_DELETE;
+			return RecoveryMsgTypeDelete;
 		case WAL_REC_UPDATE:
-			return RECOVERY_UPDATE;
+			return RecoveryMsgTypeUpdate;
 		default:
 			Assert(false);
 			elog(ERROR, "Wrong WAL record modify type %d", wal_record);

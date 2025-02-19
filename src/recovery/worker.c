@@ -49,7 +49,8 @@ static bool recovery_initialized = false;
 
 static void recovery_queue_process(shm_mq_handle *queue, int id);
 static inline Pointer recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id);
-static void apply_tbl_modify_record(OTableDescr *descr, uint16 type,
+static void apply_tbl_modify_record(OTableDescr *descr,
+									RecoveryMsgType type,
 									OTuple p, OXid oxid, CommitSeqNo csn);
 static void apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 							 OXid oxid, CommitSeqNo csn);
@@ -285,8 +286,14 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 		data_pos = 0;
 		while (data_pos < data_size)
 		{
+			RecoveryMsgType type;
+
 			recovery_header = (RecoveryMsgHeader *) (data + data_pos);
-			if (recovery_header->type & RECOVERY_MODIFY)
+			type = (recovery_header->type & RECOVERY_MSG_OPERATION_MASK);
+
+			if (type == RecoveryMsgTypeInsert ||
+				type == RecoveryMsgTypeUpdate ||
+				type == RecoveryMsgTypeDelete)
 			{
 				OTuple		tuple;
 
@@ -335,12 +342,13 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 					tuple.data = data + data_pos;
 					apply_modify_record(descr, indexDescr,
-										(recovery_header->type & RECOVERY_MODIFY),
+										type,
 										tuple);
 				}
 				data_pos += tuple_len;
 			}
-			else if (recovery_header->type & (RECOVERY_LEADER_PARALLEL_INDEX_BUILD | RECOVERY_WORKER_PARALLEL_INDEX_BUILD))
+			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild ||
+					 type == RecoveryMsgTypeWorkerParallelIndexBuild)
 			{
 				RecoveryOidsMsgIdxBuild *msg = (RecoveryOidsMsgIdxBuild *) (data + data_pos);
 				OTable	   *o_table,
@@ -359,7 +367,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					Assert(old_o_table->version == msg->old_o_table_version);
 				}
 
-				if (recovery_header->type & RECOVERY_LEADER_PARALLEL_INDEX_BUILD)
+				if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
 				{
 					OTableDescr *o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
 					OTableDescr *old_o_descr = NULL;
@@ -396,7 +404,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						pfree(old_o_descr);
 					}
 				}
-				else if (recovery_header->type & RECOVERY_WORKER_PARALLEL_INDEX_BUILD)
+				else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
 				{
 					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
 					/* participate as a worker in parallel index build */
@@ -410,7 +418,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					pfree(old_o_table);
 				}
 			}
-			else if (recovery_header->type & RECOVERY_COMMIT)
+			else if (type == RecoveryMsgTypeCommit)
 			{
 				oxid_csn_record = (RecoveryMsgOXidPtr *) (data + data_pos);
 				recovery_switch_to_oxid(oxid_csn_record->oxid, id);
@@ -421,7 +429,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				update_worker_ptr(id, oxid_csn_record->ptr);
 				data_pos += sizeof(RecoveryMsgOXidPtr);
 			}
-			else if (recovery_header->type & RECOVERY_ROLLBACK)
+			else if (type == RecoveryMsgTypeRollback)
 			{
 				oxid_csn_record = (RecoveryMsgOXidPtr *) (data + data_pos);
 				recovery_switch_to_oxid(oxid_csn_record->oxid, id);
@@ -432,25 +440,25 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				update_worker_ptr(id, oxid_csn_record->ptr);
 				data_pos += sizeof(RecoveryMsgOXidPtr);
 			}
-			else if (recovery_header->type & RECOVERY_SYNCHRONIZE)
+			else if (type == RecoveryMsgTypeSynchronize)
 			{
 				csn_record = (RecoveryMsgPtr *) (data + data_pos);
 				update_worker_ptr(id, csn_record->ptr);
 				data_pos += sizeof(RecoveryMsgPtr);
 			}
-			else if (recovery_header->type & RECOVERY_FINISHED)
+			else if (type == RecoveryMsgTypeFinished)
 			{
 				if (id == index_build_leader)
 					idx_workers_shutdown();
 				finished = true;
 				break;
 			}
-			else if (recovery_header->type & RECOVERY_TOAST_CONSISTENT)
+			else if (type == RecoveryMsgTypeToastConsistent)
 			{
 				toast_consistent = true;
 				data_pos += sizeof(RecoveryMsgEmpty);
 			}
-			else if (recovery_header->type & RECOVERY_SAVEPOINT)
+			else if (type == RecoveryMsgTypeSavepoint)
 			{
 				RecoveryMsgSavepoint *msg;
 
@@ -459,7 +467,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				recovery_savepoint(msg->parentSubId, id);
 				data_pos += sizeof(RecoveryMsgSavepoint);
 			}
-			else if (recovery_header->type & RECOVERY_ROLLBACK_TO_SAVEPOINT)
+			else if (type == RecoveryMsgTypeRollbackToSavepointt)
 			{
 				RecoveryMsgRollbackToSavepoint *msg;
 
@@ -469,7 +477,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				update_worker_ptr(id, msg->ptr);
 				data_pos += sizeof(RecoveryMsgRollbackToSavepoint);
 			}
-			else if (recovery_header->type & RECOVERY_INIT)
+			else if (type == ReocveryMsgTypeInit)
 			{
 				Assert(!recovery_initialized);
 				before_shmem_exit(recovery_on_proc_exit, Int32GetDatum(id));
@@ -595,19 +603,19 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
  * distributes it separately.
  */
 static void
-apply_tbl_modify_record(OTableDescr *descr, uint16 type,
+apply_tbl_modify_record(OTableDescr *descr, RecoveryMsgType type,
 						OTuple p, OXid oxid, CommitSeqNo csn)
 {
 	o_set_syscache_hooks();
 	switch (type)
 	{
-		case RECOVERY_INSERT:
+		case RecoveryMsgTypeInsert:
 			apply_tbl_insert(descr, p, oxid, csn);
 			return;
-		case RECOVERY_DELETE:
+		case RecoveryMsgTypeDelete:
 			apply_tbl_delete(descr, p, oxid, csn);
 			return;
-		case RECOVERY_UPDATE:
+		case RecoveryMsgTypeUpdate:
 			apply_tbl_update(descr, p, oxid, csn);
 			return;
 		default:

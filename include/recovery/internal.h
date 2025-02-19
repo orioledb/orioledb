@@ -42,22 +42,28 @@ extern uint64 recovery_queue_data_size;
 /*
  * Recovery from master to workers messages format.
  */
-#define RECOVERY_INSERT ((uint16) 1 << 0)
-#define RECOVERY_DELETE ((uint16) 1 << 1)
-#define RECOVERY_UPDATE ((uint16) 1 << 2)
-#define RECOVERY_COMMIT ((uint16) 1 << 4)
-#define RECOVERY_ROLLBACK ((uint16) 1 << 5)
-#define RECOVERY_FINISHED ((uint16) 1 << 6)
-#define RECOVERY_SYNCHRONIZE ((uint16) 1 << 7)
-#define RECOVERY_MODIFY_OXID ((uint16) 1 << 8)
-#define RECOVERY_MODIFY_OIDS ((uint16) 1 << 9)
-#define RECOVERY_TOAST_CONSISTENT ((uint16) 1 << 10)
-#define RECOVERY_SAVEPOINT ((uint16) 1 << 11)
-#define RECOVERY_ROLLBACK_TO_SAVEPOINT ((uint16) 1 << 12)
-#define RECOVERY_WORKER_PARALLEL_INDEX_BUILD ((uint16) 1 << 13)
-#define RECOVERY_LEADER_PARALLEL_INDEX_BUILD ((uint16) 1 << 14)
-#define RECOVERY_INIT ((uint16) 1 << 15)
-#define RECOVERY_MODIFY (RECOVERY_INSERT | RECOVERY_DELETE | RECOVERY_UPDATE)
+#define RECOVERY_MSG_OPERATION_MASK (0xFF)
+
+typedef enum
+{
+	RecoveryMsgTypeInsert,
+	RecoveryMsgTypeUpdate,
+	RecoveryMsgTypeDelete,
+	RecoveryMsgTypeCommit,
+	RecoveryMsgTypeRollback,
+	RecoveryMsgTypeFinished,
+	RecoveryMsgTypeSynchronize,
+	RecoveryMsgTypeToastConsistent,
+	RecoveryMsgTypeSavepoint,
+	RecoveryMsgTypeRollbackToSavepointt,
+	RecoveryMsgTypeLeaderParallelIndexBuild,
+	RecoveryMsgTypeWorkerParallelIndexBuild,
+	ReocveryMsgTypeInit,
+} RecoveryMsgType;
+
+#define RECOVERY_MODIFY_OXID (0x0100)
+#define RECOVERY_MODIFY_OIDS (0x0200)
+
 #define RECOVERY_QUEUE_BUF_SIZE (8 * 1024)
 
 
@@ -157,7 +163,8 @@ PGDLLEXPORT void recovery_worker_main(Datum main_arg);
  */
 extern void apply_modify_record(OTableDescr *descr, OIndexDescr *id,
 								uint16 type, OTuple p);
-extern bool apply_btree_modify_record(BTreeDescr *tree, uint16 type,
+extern bool apply_btree_modify_record(BTreeDescr *tree,
+									  RecoveryMsgType type,
 									  OTuple ptr, OXid oxid, CommitSeqNo csn);
 
 extern OBTreeModifyCallbackAction recovery_insert_primary_callback(BTreeDescr *descr,
