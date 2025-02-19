@@ -209,21 +209,32 @@ ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
   ISOLATIONCHECKS += isol_merge
 endif
 
-regresscheck: | install
+# Control installation dependency and temporary install wrapper based on SKIP_INSTALL.
+# In environments like Docker, we skip the installation of the extension.
+# This mechanism is also useful for verifying orioledb extensions installed through
+# package managers (apt, yum, etc.) or for running regression tests against production installations.
+ifdef SKIP_INSTALL
+INSTALL_DEP =
+TEMP_INSTALL_WRAPPER =
+else
+INSTALL_DEP = | install
+TEMP_INSTALL_WRAPPER = $(with_temp_install)
+endif
+
+regresscheck: $(INSTALL_DEP)
 	$(pg_regress_check) \
 		--temp-config test/orioledb_regression.conf \
 		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
-isolationcheck: | install
+isolationcheck: $(INSTALL_DEP)
 	$(pg_isolation_regress_check) \
 		--temp-config test/orioledb_isolation.conf \
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
-	$(with_temp_install) \
-	python3 -W ignore::DeprecationWarning -m unittest -v $@
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): $(INSTALL_DEP)
+	$(TEMP_INSTALL_WRAPPER) python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 installcheck: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
