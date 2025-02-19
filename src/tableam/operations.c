@@ -214,6 +214,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{
+		elog(LOG, "o_wal_insert() (%u,%u)", ItemPointerGetBlockNumber(&oslot->bridge_ctid), ItemPointerGetOffsetNumber(&oslot->bridge_ctid));
 		o_wal_insert(&descr->bridge->desc, tuple);
 		flush_local_wal(false);
 	}

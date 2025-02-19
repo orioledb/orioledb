@@ -286,6 +286,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 		while (data_pos < data_size)
 		{
 			recovery_header = (RecoveryMsgHeader *) (data + data_pos);
+			elog(LOG, "recovery_header %X", recovery_header->type);
 			if (recovery_header->type & RECOVERY_MODIFY)
 			{
 				OTuple		tuple;
@@ -310,14 +311,10 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						descr = NULL;
 					}
 					AcceptInvalidationMessages();
+					elog(LOG, "%d (%u, %u, %u)", ix_type, oids.datoid, oids.reloid, oids.relnode);
 					if (ix_type == oIndexInvalid)
 					{
 						descr = o_fetch_table_descr(oids);
-						/*if (descr == NULL)
-						{
-							elog(LOG, "descr == NULL pid = %u", MyProcPid);
-							pg_usleep(1000000000UL);
-						}*/
 						table_descr_inc_refcnt(descr);
 						indexDescr = GET_PRIMARY(descr);
 					}
@@ -334,6 +331,9 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				memcpy(&tuple.formatFlags, data + data_pos, 1);
 				data_pos++;
 				data_pos = MAXALIGN(data_pos);
+
+				elog(LOG, "modify record %p", indexDescr);
+
 				if (indexDescr != NULL)
 				{
 					Assert(ORelOidsIsValid(oids));

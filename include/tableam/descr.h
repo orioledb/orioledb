@@ -180,7 +180,8 @@ struct OIndexDescr
 													 ALLOCSET_DEFAULT_SIZES)))
 
 #define OIgnoreColumn(descr, attnum) \
-	((descr->desc.type != oIndexToast) && (attnum >= descr->nKeyFields) && \
+	((descr->desc.type != oIndexToast && descr->desc.type != oIndexBridge) && \
+		(attnum >= descr->nKeyFields) && \
 	 (attnum < (descr->nKeyFields + descr->nIncludedFields)))
 
 struct OTableDescr

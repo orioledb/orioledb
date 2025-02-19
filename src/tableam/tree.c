@@ -21,6 +21,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
+#include "storage/itemptr.h"
 #include "tableam/toast.h"
 #include "tableam/tree.h"
 #include "tuple/toast.h"
@@ -32,6 +33,7 @@
 #include "parser/parse_coerce.h"
 #include "utils/builtins.h"
 #include "utils/syscache.h"
+#include <unistd.h>
 
 static uint32 o_idx_hash(BTreeDescr *desc, OTuple tuple, BTreeKeyType kind);
 static uint32 o_toast_hash(BTreeDescr *desc, OTuple tuple, BTreeKeyType kind);
@@ -659,6 +661,20 @@ o_idx_cmp_tuples(OIndexDescr *id,
 				cmp = field->nullfirst ? -1 : 1;
 			else if (isnull2)
 				cmp = field->nullfirst ? 1 : -1;
+
+			if (id->desc.type == oIndexBridge)
+			{
+				ItemPointer p1 = DatumGetItemPointer(value1);
+				ItemPointer p2 = DatumGetItemPointer(value2);
+
+				elog(LOG, "cmp (%u,%u) (%u,%u) %d",
+					ItemPointerGetBlockNumber(p1),
+					ItemPointerGetOffsetNumber(p1),
+					ItemPointerGetBlockNumber(p2),
+					ItemPointerGetOffsetNumber(p2),
+					cmp
+				);
+			}
 
 			if (cmp != 0)
 				return cmp;
