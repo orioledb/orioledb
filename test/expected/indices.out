@@ -8586,99 +8586,58 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
- Sort
-   Sort Key: i, j, k
-   ->  Custom Scan (o_scan) on o_test_saop
-         Forward index only scan of: o_test_saop_pkey
-         Conds: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
-(5 rows)
+                   QUERY PLAN                   
+------------------------------------------------
+ Custom Scan (o_scan) on o_test_saop
+   Filter: (j = ANY ('{1,3}'::integer[]))
+   Forward index only scan of: o_test_saop_pkey
+   Conds: (i < ANY ('{1,2}'::integer[]))
+(4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 
 ---+---+---
  0 | 1 | 0
- 0 | 1 | 0
- 0 | 1 | 1
  0 | 1 | 1
  0 | 1 | 2
- 0 | 1 | 2
- 0 | 1 | 3
  0 | 1 | 3
  0 | 1 | 4
- 0 | 1 | 4
- 0 | 1 | 5
  0 | 1 | 5
  0 | 1 | 6
- 0 | 1 | 6
- 0 | 1 | 7
  0 | 1 | 7
  0 | 1 | 8
- 0 | 1 | 8
- 0 | 1 | 9
  0 | 1 | 9
  0 | 3 | 0
- 0 | 3 | 0
- 0 | 3 | 1
  0 | 3 | 1
  0 | 3 | 2
- 0 | 3 | 2
- 0 | 3 | 3
  0 | 3 | 3
  0 | 3 | 4
- 0 | 3 | 4
- 0 | 3 | 5
  0 | 3 | 5
  0 | 3 | 6
- 0 | 3 | 6
- 0 | 3 | 7
  0 | 3 | 7
  0 | 3 | 8
- 0 | 3 | 8
- 0 | 3 | 9
  0 | 3 | 9
  1 | 1 | 0
- 1 | 1 | 0
- 1 | 1 | 1
  1 | 1 | 1
  1 | 1 | 2
- 1 | 1 | 2
- 1 | 1 | 3
  1 | 1 | 3
  1 | 1 | 4
- 1 | 1 | 4
- 1 | 1 | 5
  1 | 1 | 5
  1 | 1 | 6
- 1 | 1 | 6
- 1 | 1 | 7
  1 | 1 | 7
  1 | 1 | 8
- 1 | 1 | 8
- 1 | 1 | 9
  1 | 1 | 9
  1 | 3 | 0
- 1 | 3 | 0
- 1 | 3 | 1
  1 | 3 | 1
  1 | 3 | 2
- 1 | 3 | 2
- 1 | 3 | 3
  1 | 3 | 3
  1 | 3 | 4
- 1 | 3 | 4
- 1 | 3 | 5
  1 | 3 | 5
  1 | 3 | 6
- 1 | 3 | 6
- 1 | 3 | 7
  1 | 3 | 7
  1 | 3 | 8
- 1 | 3 | 8
  1 | 3 | 9
- 1 | 3 | 9
-(80 rows)
+(40 rows)
 
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 

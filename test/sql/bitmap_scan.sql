@@ -25,39 +25,29 @@ ANALYZE bitmap_test;
 
 CREATE INDEX bitmap_test_ix1 ON bitmap_test (i);
 
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 100;
 SELECT count(*) FROM bitmap_test WHERE i < 100;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test WHERE i < 100 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test WHERE i < 1000;
 SELECT count(*) FROM bitmap_test WHERE i < 1000;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test WHERE i < 1000 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
 SELECT count(*) FROM bitmap_test WHERE i < 1000 OR i > 13000;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test WHERE i < 1000 OR i > 13000 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 ALTER TABLE bitmap_test ADD COLUMN j int4;
 ALTER TABLE bitmap_test ADD COLUMN h int4;
@@ -608,13 +598,9 @@ DROP TABLE bitmap_test_seq;
 DROP TABLE bti;
 DROP TABLE btj;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test WHERE i < 1000 AND j < 1000 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test WHERE i < 1000 AND j < 1000 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM bitmap_test
@@ -633,15 +619,11 @@ EXPLAIN (COSTS OFF)
 SELECT count(*) FROM bitmap_test
 		WHERE i < 1000 OR j < 1000 OR h > 19000;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test WHERE i < 1000 OR j < 1000 OR h > 19000
 	ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test WHERE i < 1000 OR j < 1000 OR h > 19000
 	ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM bitmap_test
@@ -649,8 +631,6 @@ EXPLAIN (COSTS OFF)
 SELECT count(*) FROM bitmap_test
 		WHERE i < 1000 OR j < 1000 OR h > 19000 AND ABS(h) > 10;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test
 		WHERE i < 1000 OR j < 1000 OR h > 19000 AND ABS(h) > 10
@@ -658,8 +638,6 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM bitmap_test
 	WHERE i < 1000 OR j < 1000 OR h > 19000 AND ABS(h) > 10
 	ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 -- Test int8 indices
 CREATE TABLE bitmap_test_int8
@@ -679,13 +657,9 @@ CREATE INDEX bitmap_test_int8_ix1 ON bitmap_test_int8 (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_int8 WHERE i < 100;
 SELECT count(*) FROM bitmap_test_int8 WHERE i < 100;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_int8 WHERE i < 100 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test_int8 WHERE i < 100 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 
 -- Test bitmap with another order of fields
@@ -1230,13 +1204,9 @@ DROP TABLE btj;
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_ctid WHERE i < 100;
 SELECT count(*) FROM bitmap_test_ctid WHERE i < 100;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_ctid WHERE i < 100 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test_ctid WHERE i < 100 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 -- Test multi column all valid bitmap
 CREATE TABLE bitmap_test_multi
@@ -1259,13 +1229,9 @@ CREATE INDEX bitmap_test_multi_ix1 ON bitmap_test_multi (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
 SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
-SET enable_indexscan = ON;
-SET enable_seqscan = ON;
 
 CREATE SEQUENCE bitmap_test_multi_inval_id2_seq AS integer;
 
@@ -1289,8 +1255,6 @@ CREATE INDEX bitmap_test_multi_inval_ix1 ON bitmap_test_multi_inval (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
 SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
 
-SET enable_seqscan = OFF;
-SET enable_indexscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi_inval WHERE i < 100 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test_multi_inval WHERE i < 100 ORDER BY i LIMIT 20;
