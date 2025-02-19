@@ -86,9 +86,11 @@ typedef struct
 {
 	ORelOids	oids;
 	ORelOids	toast_oids;
+	ORelOids	bridge_oids;
 	OCompress	default_compress;
 	OCompress	primary_compress;
 	OCompress	toast_compress;
+	bool		index_bridging;
 	uint16		nfields;
 	uint16		primary_init_nfields;
 	uint16		nindices;
@@ -143,8 +145,6 @@ extern void o_tables_drop_all_temporary(void);
 
 /* Adds a new table to o_tables list */
 extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
-extern bool o_tables_add_version(OTable *table, OXid oxid, CommitSeqNo csn,
-								 uint32 version);
 
 /* Returns OTable by its oids */
 extern OTable *o_tables_get(ORelOids oids);
@@ -230,7 +230,6 @@ o_tables_rel_unlock(ORelOids *oids, int lockmode)
 
 extern void o_table_fill_oids(OTable *oTable, Relation rel,
 							  const RelFileNode *newrnode);
-extern void o_tables_swap_relnodes(OTable *old_o_table, OTable *new_o_table);
 extern Datum o_eval_default(OTable *o_table, Relation rel,
 							Node *expr, TupleTableSlot *scantuple,
 							bool byval, int16 typlen, bool *isNull);

@@ -99,9 +99,10 @@ typedef enum
 {
 	oIndexInvalid = 0,
 	oIndexToast = 1,
-	oIndexPrimary = 2,
-	oIndexUnique = 3,
-	oIndexRegular = 4
+	oIndexBridge = 2,
+	oIndexPrimary = 3,
+	oIndexUnique = 4,
+	oIndexRegular = 5,
 } OIndexType;
 
 #define PROC_XID_ARRAY_SIZE	32
@@ -378,6 +379,7 @@ typedef struct ORelOptions
 	int			compress_offset;
 	int			primary_compress_offset;
 	int			toast_compress_offset;
+	bool		index_bridging;
 } ORelOptions;
 
 typedef struct OBTOptions
@@ -385,6 +387,7 @@ typedef struct OBTOptions
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	BTOptions	bt_options;
 	int			compress_offset;
+	bool		index_bridging;
 } OBTOptions;
 
 extern int16 o_parse_compress(const char *value);

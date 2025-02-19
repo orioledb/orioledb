@@ -246,6 +246,16 @@ retry:
 		 */
 		Assert(!UndoLocationIsValid(nonLockUndoLocation));
 
+		if (desc->type == oIndexBridge)
+		{
+			/*
+			 * A special case for bridge index: we must keep entries for
+			 * VACUUM purposes.  Just mark tuple as deleted.
+			 */
+			tuphdr->deleted = BTreeLeafTupleDeleted;
+			return true;
+		}
+
 		BTREE_PAGE_READ_TUPLE(prev_tuple, p, locator);
 		PAGE_SUB_N_VACATED(p, BTREE_PAGE_GET_ITEM_SIZE(p, locator) -
 						   (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, prev_tuple, OTupleLength))));

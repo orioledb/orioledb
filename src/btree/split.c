@@ -427,10 +427,10 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 
 		/*
 		 * In leaf pages, get rid of tuples deleted by finished transactions.
-		 * Also, resize tuples to minimal size.  In non-leaf pages, copy
-		 * tuples as-is.
+		 * Also, resize tuples to minimal size.  In non-leaf pages and bridge
+		 * indexes, copy tuples as-is.
 		 */
-		if (leaf)
+		if (leaf && desc->type != oIndexBridge)
 		{
 			BTreeLeafTuphdr *tupHdr;
 			OTuple		tup;

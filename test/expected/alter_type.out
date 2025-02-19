@@ -48,6 +48,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -79,6 +80,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -110,6 +112,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -141,6 +144,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -172,6 +176,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -203,6 +208,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -234,6 +240,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -271,6 +278,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -303,6 +311,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -335,6 +344,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -365,6 +375,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  
 (1 row)
 
@@ -385,6 +396,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  Index o_ddl_check_ix1                         +
      Index type: secondary                     +
      Leaf tuple size: 3, non-leaf tuple size: 3+
@@ -420,6 +432,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  Index o_ddl_check_ix1                         +
      Index type: secondary                     +
      Leaf tuple size: 3, non-leaf tuple size: 3+
@@ -456,6 +469,7 @@ SELECT orioledb_tbl_indices('o_ddl_check'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: f1                 +
+     Leaf tuple fields: f1, f2, f3             +
  Index o_ddl_check_ix1                         +
      Index type: secondary                     +
      Leaf tuple size: 3, non-leaf tuple size: 3+
@@ -867,12 +881,13 @@ SELECT orioledb_table_description('o_test_alter_coercible'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_indices('o_test_alter_coercible'::regclass);
-              orioledb_tbl_indices               
--------------------------------------------------
- Index ctid_primary                             +
-     Index type: primary, unique, ctid          +
-     Leaf tuple size: 14, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid                +
+                                                                                                   orioledb_tbl_indices                                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index ctid_primary                                                                                                                                                                                                       +
+     Index type: primary, unique, ctid                                                                                                                                                                                    +
+     Leaf tuple size: 14, non-leaf tuple size: 1                                                                                                                                                                          +
+     Non-leaf tuple fields: ctid                                                                                                                                                                                          +
+     Leaf tuple fields: ctid, val_int4, val_oid, val_regconfig, val_regproc, val_regoper, val_regoperator, val_regrole, val_regprocedure, val_regcollation, val_regnamespace, val_regclass, val_regdictionary, val_regtype+
  
 (1 row)
 
@@ -924,12 +939,13 @@ SELECT orioledb_table_description('o_test_alter_coercible'::regclass);
 (1 row)
 
 SELECT orioledb_tbl_indices('o_test_alter_coercible'::regclass);
-              orioledb_tbl_indices               
--------------------------------------------------
- Index ctid_primary                             +
-     Index type: primary, unique, ctid          +
-     Leaf tuple size: 14, non-leaf tuple size: 1+
-     Non-leaf tuple fields: ctid                +
+                                                                                                   orioledb_tbl_indices                                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index ctid_primary                                                                                                                                                                                                       +
+     Index type: primary, unique, ctid                                                                                                                                                                                    +
+     Leaf tuple size: 14, non-leaf tuple size: 1                                                                                                                                                                          +
+     Non-leaf tuple fields: ctid                                                                                                                                                                                          +
+     Leaf tuple fields: ctid, val_int4, val_oid, val_regconfig, val_regproc, val_regoper, val_regoperator, val_regrole, val_regprocedure, val_regcollation, val_regnamespace, val_regclass, val_regdictionary, val_regtype+
  
 (1 row)
 
