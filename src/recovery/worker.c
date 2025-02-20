@@ -477,7 +477,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				update_worker_ptr(id, msg->ptr);
 				data_pos += sizeof(RecoveryMsgRollbackToSavepoint);
 			}
-			else if (type == ReocveryMsgTypeInit)
+			else if (type == RecoveryMsgTypeInit)
 			{
 				Assert(!recovery_initialized);
 				before_shmem_exit(recovery_on_proc_exit, Int32GetDatum(id));

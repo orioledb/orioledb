@@ -2263,7 +2263,7 @@ recovery_send_init(int worker_num)
 
 	Assert(!(*recovery_single_process));
 
-	msg.header.type = ReocveryMsgTypeInit;
+	msg.header.type = RecoveryMsgTypeInit;
 
 	worker_send_msg(worker_num, (Pointer) &msg, sizeof(msg));
 	worker_queue_flush(worker_num);

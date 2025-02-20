@@ -58,7 +58,7 @@ typedef enum
 	RecoveryMsgTypeRollbackToSavepointt,
 	RecoveryMsgTypeLeaderParallelIndexBuild,
 	RecoveryMsgTypeWorkerParallelIndexBuild,
-	ReocveryMsgTypeInit,
+	RecoveryMsgTypeInit,
 } RecoveryMsgType;
 
 #define RECOVERY_MODIFY_OXID (0x0100)
