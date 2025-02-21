@@ -96,7 +96,7 @@ if [[ "$RUNNING_MODE" == "init" || "$RUNNING_MODE" == "all" ]]; then
         export DEBIAN_FRONTEND=noninteractive
         apt update
         apt-get -y install --no-install-recommends \
-            python3 python3-pip python3-dev python3-virtualenv \
+            python3 python3-pip python3-dev python3-venv \
             build-essential ${DOCKER_PG_LLVM_DEPS} make sudo wget
     elif grep -q '^ID=alpine' /etc/os-release; then
         echo "Running on Alpine - install some stuff for testing"
