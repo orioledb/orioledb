@@ -21,13 +21,13 @@ git clone "$OFFIMG_REPO_URL" "$OFFIMG_LOCAL_CLONE"
 "${OFFIMG_LOCAL_CLONE}/test/run.sh" \
     -c "${OFFIMG_LOCAL_CLONE}/test/config.sh" \
     -c "docker/orioledb-config.sh" \
-    "orioletest:17-gcc-ubuntu-22.04"
+    "orioledb-nightly:17-gcc-ubuntu-22.04"
 ```
 
 If the test is ok, you can see:
 
 ```bash
-testing orioletest:17-gcc-ubuntu-22.04
+testing orioledb-nightly:17-gcc-ubuntu-22.04
 	'utc' [1/6]...passed
 	'no-hard-coded-passwords' [2/6]...passed
 	'override-cmd' [3/6]...passed
