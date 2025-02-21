@@ -860,6 +860,9 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 				}
 			}
 
+			if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
+				continue;
+
 			BTREE_PAGE_READ_TUPLE(tuple, p, &item->locator);
 
 			if (o_btree_cmp(&bridge->desc,

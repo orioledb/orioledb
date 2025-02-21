@@ -77,6 +77,12 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 	add_local_modify(rec_type, tuple, length);
 }
 
+void
+add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr)
+{
+
+}
+
 /*
  * Adds the record to the local_wal_buffer.
  */
