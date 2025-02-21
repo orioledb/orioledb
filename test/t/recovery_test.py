@@ -2193,7 +2193,7 @@ class RecoveryTest(BaseTest):
 
 		node.start()
 
-		result = node.execute("SELECT * FROM o_test;")
+		result = node.execute("SELECT id, p::text FROM o_test;")
 		self.assertEqual(", ".join(str(x) for x in result),
 		                 "(1, '(0,0)'), (2, '(1,1)')")
 
