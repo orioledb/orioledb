@@ -24,6 +24,8 @@ typedef struct
 	UndoLocation checkpointRetainEndLocation;
 } CheckpointUndoInfo;
 
+#define NUM_CHECKPOINTABLE_UNDO_LOGS	2
+
 typedef struct
 {
 	uint64		controlIdentifier;
@@ -35,7 +37,7 @@ typedef struct
 	XLogRecPtr	replayStartPtr;
 	XLogRecPtr	sysTreesStartPtr;
 	uint64		mmapDataLength;
-	CheckpointUndoInfo undoInfo[(int) UndoLogsCount];
+	CheckpointUndoInfo undoInfo[NUM_CHECKPOINTABLE_UNDO_LOGS];
 	UndoLocation checkpointRetainStartLocation;
 	UndoLocation checkpointRetainEndLocation;
 	OXid		checkpointRetainXmin;
@@ -46,6 +48,10 @@ typedef struct
 } CheckpointControl;
 
 #define CONTROL_FILENAME    ORIOLEDB_DATA_DIR"/control"
+
+#define GetCheckpointableUndoLog(i) \
+	(AssertMacro((i) >= 0 && (i) < 2), \
+		(i) == 0 ? UndoLogRegular : UndoLogSystem)
 
 /*
  * Physical size of the orioledb_data/control file.  Note that this is considerably

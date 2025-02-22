@@ -329,9 +329,10 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->controlSysTreesStartPtr = control.sysTreesStartPtr;
 		pg_atomic_write_u64(&checkpoint_state->mmapDataLength, control.mmapDataLength);
 
-		for (i = 0; i < (int) UndoLogsCount; i++)
+		for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 		{
-			UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+			UndoLogType undoType = GetCheckpointableUndoLog(i);
+			UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 			CheckpointUndoInfo *undo_info = &control.undoInfo[i];
 
 			pg_atomic_write_u64(&undo_meta->lastUsedLocation, undo_info->lastUndoLocation);
@@ -808,18 +809,20 @@ finish_write_xids(uint32 chkpnum)
 		LWLockAcquire(&oProcData[i].undoStackLocationsFlushLock, LW_EXCLUSIVE);
 		for (j = 0; j < PROC_XID_ARRAY_SIZE; j++)
 		{
-			for (k = 0; k < (int) UndoLogsCount; k++)
+			for (k = 0; k < NUM_CHECKPOINTABLE_UNDO_LOGS; k++)
 			{
 				while (true)
 				{
+					UndoLogType undoType = GetCheckpointableUndoLog(k);
+
 					xidRec.oxid = oProcData[i].vxids[j].oxid;
-					xidRec.undoType = (UndoLogType) k;
+					xidRec.undoType = undoType;
 					if (OXidIsValid(xidRec.oxid))
 					{
 						pg_read_barrier();
 
 						read_shared_undo_locations(&xidRec.undoLocation,
-												   &oProcData[i].undoStackLocations[j][k]);
+												   &oProcData[i].undoStackLocations[j][undoType]);
 
 						pg_read_barrier();
 
@@ -1066,8 +1069,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 				prev_chkp_num = checkpoint_state->lastCheckpointNumber;
 	MemoryContext prev_context;
 	ODBProcData *my_proc_info = GET_CUR_PROCDATA();
-	UndoLocation checkpoint_start_loc[(int) UndoLogsCount],
-				checkpoint_end_loc[(int) UndoLogsCount];
+	UndoLocation checkpoint_start_loc[NUM_CHECKPOINTABLE_UNDO_LOGS],
+				checkpoint_end_loc[NUM_CHECKPOINTABLE_UNDO_LOGS];
 	OXid		checkpoint_xmin,
 				checkpoint_xmax;
 	int			i;
@@ -1125,15 +1128,13 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	checkpoint_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	pg_atomic_write_u64(&my_proc_info->xmin, checkpoint_xmin);
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
-		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
-
-		if ((UndoLogType) i == UndoLogRegularPageLevel)
-			continue;
+		UndoLogType undoType = GetCheckpointableUndoLog(i);
+		UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 
 		checkpoint_start_loc[i] = pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation);
-		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation,
+		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[undoType].snapshotRetainUndoLocation,
 							checkpoint_start_loc[i]);
 	}
 
@@ -1182,9 +1183,10 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	close_xids_file();
 	LWLockRelease(&checkpoint_state->oXidQueueLock);
 
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
-		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+		UndoLogType undoType = GetCheckpointableUndoLog(i);
+		UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 
 		checkpoint_end_loc[i] = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 	}
@@ -1193,12 +1195,11 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	if (use_mmap)
 		msync(mmap_data, device_length, MS_SYNC);
 
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
-		if ((UndoLogType) i == UndoLogRegularPageLevel)
-			continue;
+		UndoLogType undoType = GetCheckpointableUndoLog(i);
 
-		fsync_undo_range((UndoLogType) i,
+		fsync_undo_range(undoType,
 						 checkpoint_start_loc[i],
 						 checkpoint_end_loc[i],
 						 WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC);
@@ -1213,7 +1214,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 			{
 				S3TaskLocation location;
 
-				location = s3_schedule_undo_file_write((UndoLogType) i,
+				location = s3_schedule_undo_file_write(undoType,
 													   undoFileNum);
 				maxLocation = Max(maxLocation, location);
 			}
@@ -1247,22 +1248,15 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	control.replayStartPtr = checkpoint_state->replayStartPtr;
 	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
 	control.mmapDataLength = pg_atomic_read_u64(&checkpoint_state->mmapDataLength);
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
-		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+		UndoLogType undoType = GetCheckpointableUndoLog(i);
+		UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 		CheckpointUndoInfo *undo_info = &control.undoInfo[i];
 
 		undo_info->lastUndoLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
-		if ((UndoLogType) i != UndoLogRegularPageLevel)
-		{
-			undo_info->checkpointRetainStartLocation = checkpoint_start_loc[i];
-			undo_info->checkpointRetainEndLocation = checkpoint_end_loc[i];
-		}
-		else
-		{
-			undo_info->checkpointRetainStartLocation = 0;
-			undo_info->checkpointRetainEndLocation = 0;
-		}
+		undo_info->checkpointRetainStartLocation = checkpoint_start_loc[i];
+		undo_info->checkpointRetainEndLocation = checkpoint_end_loc[i];
 	}
 	control.checkpointRetainXmin = checkpoint_xmin;
 	control.checkpointRetainXmax = checkpoint_xmax;
@@ -1296,12 +1290,10 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	/*
 	 * Also release xidmap and undo ranges retained for previous checkpoint.
 	 */
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
-		UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) i);
-
-		if ((UndoLogType) i == UndoLogRegularPageLevel)
-			continue;
+		UndoLogType undoType = GetCheckpointableUndoLog(i);
+		UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 
 		SpinLockAcquire(&undo_meta->minUndoLocationsMutex);
 		pg_atomic_write_u64(&undo_meta->checkpointRetainStartLocation,
@@ -1318,8 +1310,12 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	for (i = 0; i < (int) UndoLogsCount; i++)
-		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
+	{
+		UndoLogType undoType = GetCheckpointableUndoLog(i);
+
+		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[undoType].snapshotRetainUndoLocation, InvalidUndoLocation);
+	}
 
 	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
