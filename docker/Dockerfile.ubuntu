@@ -2,8 +2,8 @@
 # https://github.com/docker-library/postgres
 
 # Set BASE_IMAGE = [ ubuntu, debian ]
-#   For Ubuntu, BASE_VERSION = [ devel 24.10    24.04 22.04 20.04 ]
-#                           or [ devel oracular noble jammy focal ]
+#   For Ubuntu, BASE_VERSION = [ devel 25.10  24.10    24.04 22.04 20.04 ]
+#                           or [ devel plucky oracular noble jammy focal ]
 #   For Debian, BASE_VERSION = [ bookworm, bookworm-backports, bookworm-slim
 #                                bullseye, bullseye-backports, bullseye-slim
 #                                testing,  unstable, experimental ]
@@ -131,6 +131,10 @@ RUN set -eux; \
 	LLVM_RUNTIME_DEPS=$(echo "$DOCKER_PG_LLVM_DEPS" | grep -o 'llvm[0-9]*') ; \
 	echo "LLVM_RUNTIME_DEPS=$LLVM_RUNTIME_DEPS" ; \
 	\
+	case "${BUILD_OS}" in ubuntu:25.04 | ubuntu:plucky | ubuntu:devel ) EXTRA_ICU_PACKAGES='libicu76' ;; \
+        * ) EXTRA_ICU_PACKAGES='' ;; \
+	esac ; \
+	\
 	apt-get update; \
 	DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
 		build-essential \
@@ -142,6 +146,7 @@ RUN set -eux; \
 		gdb \
 		git \
 		libcurl4-openssl-dev \
+		${EXTRA_ICU_PACKAGES} \
 		libicu-dev \
 		libipc-run-perl \
 		libkrb5-dev \
