@@ -21,6 +21,7 @@ extern void index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fill
 								  ORelOids oids, OIndexType type,
 								  char persistence, OXid createOxid,
 								  void *arg);
+extern uint32 o_hash_iptr(OIndexDescr *idx, ItemPointer iptr);
 extern void o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 							 BTreeKeyType keyType, OBTreeKeyBound *bound);
 extern void o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound);

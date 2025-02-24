@@ -122,7 +122,7 @@ typedef struct
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);
-extern void add_bridge_erase_wal_record(uint8 rec_type, ItemPointer iptr);
+extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,

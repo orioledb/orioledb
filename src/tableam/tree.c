@@ -21,6 +21,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
+#include "storage/itemptr.h"
 #include "tableam/toast.h"
 #include "tableam/tree.h"
 #include "tuple/toast.h"
@@ -293,6 +294,18 @@ hash_combine_mix_field(TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
 	}
 
 	return hash;
+}
+
+uint32
+o_hash_iptr(OIndexDescr *idx, ItemPointer iptr)
+{
+	register uint32 hash = HASH_INITIAL;
+
+	hash = hash_combine_mix((Pointer) &idx->desc.oids,
+							sizeof(idx->desc.oids), hash);
+	hash = hash_combine_mix((Pointer) iptr,
+							sizeof(*iptr), hash);
+	return hash_final(hash);
 }
 
 static uint32

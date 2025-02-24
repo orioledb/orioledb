@@ -82,6 +82,10 @@ typedef struct
 	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
 		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
 
+#define BTREE_PAGE_MAX_ITEMS \
+	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
+		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
+
 #define BTREE_PAGE_MAX_CHUNKS \
 	((512 - offsetof(BTreePageHeader, chunkDesc)) / \
 		(MAXIMUM_ALIGNOF + sizeof(BTreePageChunkDesc)))

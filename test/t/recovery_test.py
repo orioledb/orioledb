@@ -2190,9 +2190,10 @@ class RecoveryTest(BaseTest):
 			UPDATE o_test SET p = '(1.0, 1.0)' WHERE id = 2;
 		""")
 
+		node.safe_psql("VACUUM o_test;")
+
 		result = node.execute("SET enable_indexonlyscan = off; SELECT id FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;")
 		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
-		print(result)
 
 		node.stop(['-m', 'immediate'])
 
@@ -2200,6 +2201,5 @@ class RecoveryTest(BaseTest):
 
 		result = node.execute("SET enable_indexonlyscan = off; SELECT id, p::text FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;")
 		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
-		print(result)
 
 		node.stop()

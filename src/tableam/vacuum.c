@@ -18,6 +18,7 @@
 #include "btree/find.h"
 #include "btree/page_chunks.h"
 #include "btree/page_contents.h"
+#include "recovery/wal.h"
 #include "storage/block.h"
 #include "storage/itemptr.h"
 #include "storage/off.h"
@@ -746,6 +747,8 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 	TidStoreIterResult *iter_result;
 #endif
 	OBTreeKeyBound bound;
+	ItemPointerData walBuffer[BTREE_PAGE_MAX_ITEMS];
+	int			walBufferIndex = 0;
 	bool		have_page = false;
 	int			i;
 
@@ -854,7 +857,19 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 				}
 				else
 				{
+					if (have_page)
+					{
+						int			j;
+
+						for (j = 0; j < walBufferIndex; j++)
+							add_bridge_erase_wal_record(&bridge->desc,
+														&walBuffer[j]);
+						walBufferIndex = 0;
+						unlock_page(context.items[context.index].blkno);
+					}
+
 					(void) find_page(&context, &bound, BTreeKeyBound, 0);
+					have_page = true;
 					item = &context.items[context.index];
 					p = O_GET_IN_MEMORY_PAGE(item->blkno);
 				}
@@ -872,11 +887,11 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 			START_CRIT_SECTION();
 			page_block_reads(item->blkno);
-			PAGE_SUB_N_VACATED(p,
-							   BTREE_PAGE_GET_ITEM_SIZE(p, &item->locator));
 			page_locator_delete_item(p, &item->locator);
 			MARK_DIRTY(&bridge->desc, item->blkno);
 			END_CRIT_SECTION();
+			Assert(walBufferIndex < BTREE_PAGE_MAX_ITEMS);
+			walBuffer[walBufferIndex++] = iptr;
 		}
 
 #if PG_VERSION_NUM >= 170000
@@ -889,6 +904,12 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 	if (have_page)
 	{
+		int			j;
+
+		for (j = 0; j < walBufferIndex; j++)
+			add_bridge_erase_wal_record(&bridge->desc,
+										&walBuffer[j]);
+		walBufferIndex = 0;
 		unlock_page(context.items[context.index].blkno);
 	}
 
@@ -1028,6 +1049,7 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 
 	Assert(bridge != NULL);
 
+	o_btree_load_shmem(&bridge->desc);
 	vacrel->rel_pages = pg_atomic_read_u32(&BTREE_GET_META(&bridge->desc)->leafPagesNum);
 #if PG_VERSION_NUM >= 170000
 	vacrel->current_block = InvalidBlockNumber;
