@@ -327,6 +327,7 @@ extern int	default_compress;
 extern int	default_primary_compress;
 extern int	default_toast_compress;
 extern bool orioledb_table_description_compress;
+extern BlockNumber max_bridge_ctid_blkno;
 extern bool orioledb_s3_mode;
 extern int	s3_num_workers;
 extern int	s3_desired_size;

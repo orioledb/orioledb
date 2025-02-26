@@ -152,6 +152,7 @@ TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/eviction_test.py \
 						test/t/file_operations_test.py \
 						test/t/files_test.py \
+						test/t/index_bridging_test.py \
 						test/t/incomplete_split_test.py \
 						test/t/merge_test.py \
 						test/t/o_tables_test.py \

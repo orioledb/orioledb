@@ -174,43 +174,47 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	OTuple		tuple;
 	Datum		values[INDEX_MAX_KEYS + 1];
 	bool		isnull[INDEX_MAX_KEYS + 1];
+	bool		overflow = false;
 
-	o_btree_load_shmem(&primary->desc);
-	oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc);
-
-	values[0] = PointerGetDatum(&oslot->bridge_ctid);
-	isnull[0] = false;
-	if (descr->bridge->primaryIsCtid)
+	do
 	{
-		values[1] = PointerGetDatum(&slot->tts_tid);
-		isnull[1] = false;
-	}
-	else
-	{
-		int			i;
+		o_btree_load_shmem(&primary->desc);
+		oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc, &overflow);
 
-		for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
+		values[0] = PointerGetDatum(&oslot->bridge_ctid);
+		isnull[0] = false;
+		if (descr->bridge->primaryIsCtid)
 		{
-			AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
-
-			values[i + 1] = slot->tts_values[attnum];
-			isnull[i + 1] = slot->tts_isnull[attnum];
+			values[1] = PointerGetDatum(&slot->tts_tid);
+			isnull[1] = false;
 		}
-	}
+		else
+		{
+			int			i;
 
-	tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
-						 values, isnull, NULL);
-	bridge_slot = descr->bridge->new_leaf_slot;
-	tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
-	callbackInfo.arg = bridge_slot;
+			for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
+			{
+				AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
 
-	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+				values[i + 1] = slot->tts_values[attnum];
+				isnull[i + 1] = slot->tts_isnull[attnum];
+			}
+		}
 
-	success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-								  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+		tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
+							 values, isnull, NULL);
+		bridge_slot = descr->bridge->new_leaf_slot;
+		tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
+		callbackInfo.arg = bridge_slot;
 
-	if (!success)
-		o_report_duplicate(relation, descr->bridge, bridge_slot);
+		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+
+		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
+									  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+
+		if (!success && !overflow)
+			o_report_duplicate(relation, descr->bridge, bridge_slot);
+	} while (!success);
 
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{

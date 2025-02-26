@@ -288,40 +288,24 @@ btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
 }
 
 ItemPointerData
-btree_bridge_ctid_get_and_inc(BTreeDescr *desc)
+btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 {
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	ItemPointerData result;
 	uint64		ctid = pg_atomic_fetch_add_u64(&metaPageBlkno->bridge_ctid, 1);
+	BlockNumber	max_block_number = MaxBlockNumber;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
-	Assert(ctid / (MaxOffsetNumber - FirstOffsetNumber) < InvalidBlockNumber);
+
+	if (BlockNumberIsValid(max_bridge_ctid_blkno))
+		max_block_number = max_bridge_ctid_blkno;
+
+	*overflow = ctid / (MaxOffsetNumber - FirstOffsetNumber) >= max_block_number;
 
 	ItemPointerSet(&result,
-				   (uint32) (ctid / (MaxOffsetNumber - FirstOffsetNumber)),
+				   (uint32) (ctid / (MaxOffsetNumber - FirstOffsetNumber) % max_block_number),
 				   (OffsetNumber) (ctid % (MaxOffsetNumber - FirstOffsetNumber) + FirstOffsetNumber));
 	return result;
-}
-
-void
-btree_bridge_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid)
-{
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
-	uint64		old_ctid,
-				new_ctid;
-
-	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
-	new_ctid = (uint64) ItemPointerGetBlockNumber(&ctid) * (MaxOffsetNumber - FirstOffsetNumber);
-	new_ctid += ctid.ip_posid - FirstOffsetNumber;
-	Assert(new_ctid < (uint64) (MaxOffsetNumber - FirstOffsetNumber) * (uint64) InvalidBlockNumber);
-
-	new_ctid++;
-	do
-	{
-		old_ctid = pg_atomic_read_u64(&metaPageBlkno->bridge_ctid);
-		if (old_ctid >= new_ctid)
-			break;
-	} while (!pg_atomic_compare_exchange_u64(&metaPageBlkno->bridge_ctid, &old_ctid, new_ctid));
 }
 
 static inline OIndexDescr *
