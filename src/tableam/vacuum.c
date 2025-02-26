@@ -774,6 +774,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 	update_vacuum_error_info(vacrel, &saved_err_info,
 							 VACUUM_ERRCB_PHASE_VACUUM_HEAP,
 							 InvalidBlockNumber, InvalidOffsetNumber);
+	vacrel->blkno = InvalidBlockNumber;
 
 #if PG_VERSION_NUM >= 170000
 	iter = TidStoreBeginIterate(vacrel->dead_items);
@@ -804,11 +805,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 		OTuple		tuple;
 
 		blkno = ItemPointerGetBlockNumber(&iptr);
-		if (blkno != vacrel->blkno)
-		{
-			vacuumed_pages++;
-			vacrel->blkno = blkno;
-		}
+		vacrel->blkno = blkno;
 
 		bound.keys[0].value = ItemPointerGetDatum(&iptr);
 
@@ -839,9 +836,9 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 					OTuple		pageHiKey;
 
 					BTREE_PAGE_GET_HIKEY(pageHiKey, p);
-					pageMatch = o_btree_cmp(&bridge->desc,
-											&bound, BTreeKeyBound,
-											&pageHiKey, BTreeKeyNonLeafKey);
+					pageMatch = (o_btree_cmp(&bridge->desc,
+											 &bound, BTreeKeyBound,
+											 &pageHiKey, BTreeKeyNonLeafKey) < 0);
 				}
 
 				if (pageMatch)
@@ -865,6 +862,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 							add_bridge_erase_wal_record(&bridge->desc,
 														&walBuffer[j]);
 						walBufferIndex = 0;
+						vacuumed_pages++;
 						unlock_page(context.items[context.index].blkno);
 					}
 
@@ -895,7 +893,6 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 		}
 
 #if PG_VERSION_NUM >= 170000
-		vacuumed_pages++;
 	}
 	TidStoreEndIterate(iter);
 #else
@@ -910,6 +907,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 			add_bridge_erase_wal_record(&bridge->desc,
 										&walBuffer[j]);
 		walBufferIndex = 0;
+		vacuumed_pages++;
 		unlock_page(context.items[context.index].blkno);
 	}
 
