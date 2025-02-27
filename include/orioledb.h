@@ -375,7 +375,6 @@ typedef struct OCompressHeader
 } OCompressHeader;
 typedef struct ORelOptions
 {
-	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	StdRdOptions std_options;
 	int			compress_offset;
 	int			primary_compress_offset;
@@ -385,7 +384,6 @@ typedef struct ORelOptions
 
 typedef struct OBTOptions
 {
-	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	BTOptions	bt_options;
 	int			compress_offset;
 	bool		index_bridging;
