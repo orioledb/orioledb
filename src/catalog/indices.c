@@ -118,6 +118,11 @@ typedef struct oIdxBuildState
 	void		(*worker_heap_sort_fn) (oIdxSpool *, void *, Sharedsort **, int sortmem, bool progress);
 	OIndexNumber ix_num;
 	bool		isrebuild;
+
+	/* State of concurrent Oriole index build */
+	int     concurrentStage;	/* 0 - non concurrent, 1 - first scan, 2 - second scan */
+	undoLocation undo1;			/* Before first scan */
+	undoLocation undo2;         /* After attaching index to get updates from heap */
 } oIdxBuildState;
 
 static void _o_index_end_parallel(oIdxLeader *btleader);
@@ -125,7 +130,7 @@ static void _o_index_leader_participate_as_worker(oIdxBuildState *buildstate);
 static void build_secondary_index_worker_sort(oIdxSpool *btspool, void *btshared,
 											  Sharedsort **sharedsort, int sortmem,
 											  bool progress);
-static void build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[]);
+static void build_secondary_index_worker_heap_scan(oIdxBuildState *buildstate, OTableDescr *descr, OIndexDescr *idx, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[]);
 static void rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 										Sharedsort **sharedsort, int sortmem,
 										bool progress);
@@ -1205,7 +1210,7 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
  * expressed in KBs.
  */
 static void
-build_secondary_index_worker_sort(oIdxSpool *btspool, void *bt_shared, Sharedsort **sharedsort,
+build_secondary_index_worker_sort(oIdxBuildState *buildstate, oIdxSpool *btspool, void *bt_shared, Sharedsort **sharedsort,
 								  int sortmem, bool progress)
 {
 	SortCoordinate coordinate;
@@ -1239,7 +1244,7 @@ build_secondary_index_worker_sort(oIdxSpool *btspool, void *bt_shared, Sharedsor
 	btspool->sortstates = palloc0(sizeof(Pointer));
 	btspool->sortstates[0] = tuplesort_begin_orioledb_index(idx, work_mem, false, coordinate);
 
-	build_secondary_index_worker_heap_scan(btspool->descr, idx, poscan, btspool->sortstates, progress, &heaptuples, &indtuples);
+	build_secondary_index_worker_heap_scan(buildstate, btspool->descr, idx, poscan, btspool->sortstates, progress, &heaptuples, &indtuples);
 
 	/* Execute this worker's part of the sort */
 	if (progress)
@@ -1273,14 +1278,18 @@ build_secondary_index_worker_sort(oIdxSpool *btspool, void *bt_shared, Sharedsor
 /* Get next tuple and store all its attributes to a slot */
 static inline
 bool
-scan_getnextslot_allattrs(BTreeSeqScan *scan, OTableDescr *descr,
-						  TupleTableSlot *slot, double *ntuples)
+scan_getnextslot_allattrs(oIdxBuildState *buildstate, BTreeSeqScan *scan, OTableDescr *descr,
+						  TupleTableSlot *slot, double *ntuples, BTreeLeafTuphdr **tupHdr)
 {
 	OTuple		tup;
 	BTreeLocationHint hint;
 	CommitSeqNo tupleCsn;
 
-	tup = btree_seq_scan_getnext(scan, slot->tts_mcxt, &tupleCsn, &hint);
+	if (buildstate->concurrentStage)
+		tup = btree_seq_scan_getnext_raw(scan, slot->tts_mcxt, &hint, tupHdr);
+		tupleCsn = InvalidCSN;
+	else
+		tup = btree_seq_scan_getnext(scan, slot->tts_mcxt, &tupleCsn, &hint);
 
 	if (O_TUPLE_IS_NULL(tup))
 		return false;
@@ -1294,25 +1303,38 @@ scan_getnextslot_allattrs(BTreeSeqScan *scan, OTableDescr *descr,
 
 /*
  * Make a local heapscan in a worker, in a leader, or sequentially
- * for building secomndary index. Put result into provided sortstate
+ * for building secondary index. Put result into provided sortstate
  */
 static void
-build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[])
+build_secondary_index_worker_heap_scan(oIdxBuildState *buildstate, OTableDescr *descr, OIndexDescr *idx, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[])
 {
 	void	   *sscan;
 	TupleTableSlot *primarySlot;
+	BTreeLeafTuphdr *tupHdr;
 
 	sscan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, poscan);
+
 	primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 
 	*heap_tuples = 0;
 	*index_tuples[0] = 0;
-	while (scan_getnextslot_allattrs(sscan, descr, primarySlot, heap_tuples))
+	while (scan_getnextslot_allattrs(buildstate, sscan, descr, primarySlot, heap_tuples, &tupHdr))
 	{
 		OTuple		secondaryTup;
 
 		if (o_is_index_predicate_satisfied(idx, primarySlot, idx->econtext))
 		{
+			if (buildstate->concurrentStage == 1)
+			{
+				Assert(!UndoLocationIsValid(buildstate->undo2));
+				if (!UndoLocationIsValid(buildstate->undo1))
+					buildstate->undo1 = tupHdr->undoLocation;
+			}
+			if (buildstate->concurrentStage == 2)
+			{
+				Assert(UndoLocationIsValid(buildstate->undo1));
+
+			}
 			secondaryTup = tts_orioledb_make_secondary_tuple(primarySlot,
 															 idx, true);
 			(*index_tuples[0])++;
@@ -1356,6 +1378,17 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
 
+	if (concurrent)
+	{
+		buildstate.concurrentStage = 1;
+		buildstate.undo1 = InvalidUndoLocation;
+		buildstate.undo2 = InvalidUndoLocation;
+	}
+	else
+	{
+		buildstate.concurrentStage = 0;
+	}
+
 	/* Attempt to launch parallel worker scan when required */
 	if (ActiveSnapshotSet() && (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0))
 	{
@@ -1392,7 +1425,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	if (!buildstate.btleader)
 	{
 		/* Serial build */
-		build_secondary_index_worker_heap_scan(descr, idx, NULL, sortstates, false, &heap_tuples, &index_tuples);
+		build_secondary_index_worker_heap_scan(&buildstate, descr, idx, NULL, sortstates, false, &heap_tuples, &index_tuples);
 	}
 	else
 	{
@@ -1572,7 +1605,7 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 		(*index_tuples)[i] = 0;
 	}
 
-	while (scan_getnextslot_allattrs(sscan, old_descr, primarySlot, heap_tuples))
+	while (scan_getnextslot_allattrs(sscan, old_descr, primarySlot, heap_tuples, NULL))
 	{
 		tts_orioledb_detoast(primarySlot);
 		tts_orioledb_toast(primarySlot, descr);
