@@ -66,9 +66,22 @@ jobs:
           - postgres: 17
             os: { compiler: "gcc", distr: "ubuntu", distr-version: "noble",
                   test_targets: "regresscheck isolationcheck testgrescheck" }
+          # 17-gcc-ubuntu-devel : allowed to fail ( continue-on-error)
+          - postgres: 17
+            os: { compiler: "gcc", distr: "ubuntu", distr-version: "devel",
+                  test_targets: "regresscheck isolationcheck testgrescheck" }
+          # 17-gcc-ubuntu-plucky (25.04)
+          #- postgres: 17
+          #  os: { compiler: "gcc", distr: "ubuntu", distr-version: "plucky",
+          #        test_targets: "regresscheck isolationcheck testgrescheck" }
+          
           # 17-clang-alpine-edge  : allowed to fail ( continue-on-error)
           - postgres: 17
             os: { compiler: "clang", distr: "alpine", distr-version: "edge",
+                  test_targets: "regresscheck isolationcheck testgrescheck" }
+          # 17-gcc-alpine-edge  : allowed to fail ( continue-on-error)
+          - postgres: 17
+            os: { compiler: "gcc", distr: "alpine", distr-version: "edge",
                   test_targets: "regresscheck isolationcheck testgrescheck" }
 
     name: "docker ${{ matrix.postgres }}-${{ matrix.os.compiler }}-${{ matrix.os.distr }}-${{ matrix.os.distr-version }}"

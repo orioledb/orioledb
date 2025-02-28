@@ -82,6 +82,7 @@ docker/Dockerfile.ubuntu
 # And some files used only during CI runtime;
 # mapped as a runtime volume and unnecessary in the image build.
 ci/docker_matrix.sh
+ci/check_docker.sh
 ci/local_docker_matrix.sh
 test/
 

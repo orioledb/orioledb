@@ -15,14 +15,14 @@ ARG ALPINE_VERSION
 # If ALPINE_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
 ARG BASE_IMAGE=${ALPINE_VERSION:+alpine}
 ARG BASE_VERSION=${ALPINE_VERSION:+${ALPINE_VERSION}}
-ARG BUILD_OS=${BASE_IMAGE:-alpine}:${BASE_VERSION:-3.21}
+ARG BASE_OS=${BASE_IMAGE:-alpine}:${BASE_VERSION:-3.21}
 
-FROM ${BUILD_OS}
+FROM ${BASE_OS}
 
 # Re-declare ARGs after FROM for use in subsequent instructions
-ARG BUILD_OS
+ARG BASE_OS
 # Record build information
-ENV BUILD_OS="${BUILD_OS}"
+ENV BASE_OS="${BASE_OS}"
 
 # Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=17
@@ -201,7 +201,7 @@ RUN set -eux; \
 		--with-zstd \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BUILD_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BASE_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	# install postgresql
