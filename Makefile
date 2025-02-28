@@ -226,8 +226,13 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
 	$(with_temp_install) \
 	python3 -W ignore::DeprecationWarning -m unittest -v $@
 
+ifdef IS_DEV
 installcheck: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
+else
+installcheck: 
+	echo "Checks skipped! Build and run installcheck with IS_DEV=1"	
+endif
 
 else
 subdir = contrib/orioledb
