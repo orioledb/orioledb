@@ -258,8 +258,13 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | submake-orioledb temp-insta
 		$(with_temp_install) \
 		python3 -m unittest -v $@
 
+ifdef IS_DEV
 check: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
+else
+check:
+	echo "Checks skipped! Build and run check with IS_DEV=1"
+endif
 endif
 
 # Retrieve the current commit hash from the Git repository.
