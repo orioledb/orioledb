@@ -2167,7 +2167,9 @@ class RecoveryTest(BaseTest):
 
 	def test_recovery_bridged_indexes(self):
 		node = self.node
-		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\norioledb.recovery_pool_size = 1\n")
+		node.append_conf(
+		    'postgresql.conf',
+		    "checkpoint_timeout = 1d\norioledb.recovery_pool_size = 1\n")
 		node.start()
 
 		node.safe_psql("""
@@ -2192,14 +2194,18 @@ class RecoveryTest(BaseTest):
 
 		node.safe_psql("VACUUM o_test;")
 
-		result = node.execute("SET enable_indexonlyscan = off; SELECT id FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;")
+		result = node.execute(
+		    "SET enable_indexonlyscan = off; SELECT id FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;"
+		)
 		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
 
 		node.stop(['-m', 'immediate'])
 
 		node.start()
 
-		result = node.execute("SET enable_indexonlyscan = off; SELECT id, p::text FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;")
+		result = node.execute(
+		    "SET enable_indexonlyscan = off; SELECT id, p::text FROM o_test WHERE p <@ '((0,0),(1, 1))'::box;"
+		)
 		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
 
 		node.stop()

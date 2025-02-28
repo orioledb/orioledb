@@ -123,7 +123,7 @@ int			default_primary_compress = InvalidOCompress;
 int			default_toast_compress = InvalidOCompress;
 bool		orioledb_table_description_compress = false;
 char	   *max_bridge_ctid_string = NULL;
-BlockNumber	max_bridge_ctid_blkno = 0;
+BlockNumber max_bridge_ctid_blkno = 0;
 bool		orioledb_s3_mode = false;
 int			s3_num_workers = 3;
 int			s3_desired_size = 10000;
@@ -1790,21 +1790,20 @@ check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source)
 							*newval)));
 		blockNumber = (BlockNumber) cvt;
 
-		MaxBlockNumber;
-
 		/*
-		 * Cope with possibility that unsigned long is wider than BlockNumber, in
-		 * which case strtoul will not raise an error for some values that are out
-		 * of the range of BlockNumber.  (See similar code in oidin().)
+		 * Cope with possibility that unsigned long is wider than BlockNumber,
+		 * in which case strtoul will not raise an error for some values that
+		 * are out of the range of BlockNumber.  (See similar code in
+		 * oidin().)
 		 */
-	#if SIZEOF_LONG > 4
+#if SIZEOF_LONG > 4
 		if (cvt != (unsigned long) blockNumber &&
 			cvt != (unsigned long) ((int32) blockNumber))
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
 					 errmsg("invalid input syntax for block number: \"%s\"",
 							*newval)));
-	#endif
+#endif
 
 		myextra = (BlockNumber *) guc_malloc(ERROR, sizeof(BlockNumber));
 		*myextra = blockNumber;

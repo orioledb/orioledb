@@ -8,8 +8,6 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
--- ) USING heap;
--- ) USING orioledb;
 ) USING orioledb WITH (index_bridging);
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
@@ -112,7 +110,7 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  
 (1 row)
 
-CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging);
+CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging, deduplicate_items = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 SELECT ctid, htid, tids FROM
@@ -120,7 +118,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -137,7 +134,7 @@ SELECT ctid, htid, tids FROM
  pk1    | integer   |           |          |         | plain    |              | 
  pk2    | integer   |           |          |         | plain    |              | 
 Indexes:
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true')
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -166,7 +163,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -239,7 +235,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -357,7 +352,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -455,7 +449,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -591,7 +584,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -736,7 +728,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -815,7 +806,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -878,7 +868,7 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  pk2    | integer |           | not null |         | plain   |              | 
  k      | integer |           |          |         | plain   |              | 
 Indexes:
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true')
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
 -- Don't update bridge_index when updated column not indexed by any bridged index
@@ -913,7 +903,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -976,7 +965,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -1007,7 +995,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
  ctid  | htid  | tids 
 -------+-------+------
@@ -1034,7 +1021,7 @@ SELECT * FROM o_test_ix_ams ORDER BY j;
 (3 rows)
 
 COMMIT;
-CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging);
+CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging, deduplicate_items = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1063,16 +1050,13 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
-   ctid   | htid  | tids 
-----------+-------+------
- (0,4)    | (0,4) | 
- (0,5)    | (0,5) | 
- (0,6)    | (0,6) | 
- (0,4097) | (0,4) | 
- (2,4097) | (0,4) | 
-(5 rows)
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,4) | (0,4) | 
+ (0,5) | (0,5) | 
+ (0,6) | (0,6) | 
+(3 rows)
 
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -1156,17 +1140,14 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
-   ctid   | htid  | tids 
-----------+-------+------
- (0,4)    | (0,4) | 
- (0,5)    | (0,5) | 
- (0,6)    | (0,6) | 
- (0,7)    | (0,7) | 
- (0,4097) | (0,4) | 
- (2,4097) | (0,4) | 
-(6 rows)
+ ctid  | htid  | tids 
+-------+-------+------
+ (0,4) | (0,4) | 
+ (0,5) | (0,5) | 
+ (0,6) | (0,6) | 
+ (0,7) | (0,7) | 
+(4 rows)
 
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -1203,7 +1184,7 @@ CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
  k      | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true')
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1395,7 +1376,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  r      | integer[] |           |          |         | extended |              | 
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true')
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT *, r IS NULL FROM o_test_ix_ams;
@@ -1466,7 +1447,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  r      | integer[] |           |          |         | extended |              | 
 Indexes:
     "o_test_ix_ams_hash_ix" hash (k)
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true')
+    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1634,7 +1615,7 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
      Item 4: deleted, offset = 528, tuple = ('(0,5)', '5', null, '(0.05,0.1)') +
                                                                                +
  Index index_bridge contents                                                   +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 160                         +
  state = free, datoid equal, relnode equal, ix_type = bridge, dirty            +
      Leftmost, Rightmost                                                       +
    Chunk 0: offset = 0, location = 256, hikey location = 64                    +

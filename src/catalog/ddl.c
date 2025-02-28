@@ -2479,8 +2479,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							define = true;
 
 							if (!in_rewrite && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
-								ereport(WARNING, errmsg("Using bridged btree index for orioledb"),
-										errdetail("this feature is only for testing"));
+							{
+								OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+								if (options && options->index_bridging)
+									ereport(WARNING, errmsg("Using bridged btree index for orioledb"),
+											errdetail("this feature is only for testing"));
+							}
 						}
 
 						if (define)

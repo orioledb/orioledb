@@ -9,8 +9,6 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
--- ) USING heap;
--- ) USING orioledb;
 ) USING orioledb WITH (index_bridging);
 
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
@@ -26,13 +24,12 @@ SELECT * FROM o_test_ix_ams;
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
-CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging);
+CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging, deduplicate_items = off);
 SELECT ctid, htid, tids FROM
 		 generate_series(1,
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 
 \d+ o_test_ix_ams
@@ -43,7 +40,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -63,7 +59,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -89,7 +84,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -112,7 +106,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -135,7 +128,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -160,7 +152,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -178,7 +169,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -199,7 +189,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -219,7 +208,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -236,7 +224,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -245,7 +232,7 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams ORDER BY j;
 COMMIT;
 
-CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging);
+CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging, deduplicate_items = off);
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 
@@ -254,7 +241,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -274,7 +260,6 @@ SELECT ctid, htid, tids FROM
 						 (SELECT relpages - 1 FROM pg_class
 							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
-	WHERE htid IS NOT NULL
 	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;

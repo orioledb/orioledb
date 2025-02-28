@@ -176,30 +176,31 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	bool		isnull[INDEX_MAX_KEYS + 1];
 	bool		overflow = false;
 
+	o_btree_load_shmem(&primary->desc);
+	if (descr->bridge->primaryIsCtid)
+	{
+		values[1] = PointerGetDatum(&slot->tts_tid);
+		isnull[1] = false;
+	}
+	else
+	{
+		int			i;
+
+		for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
+		{
+			AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
+
+			values[i + 1] = slot->tts_values[attnum];
+			isnull[i + 1] = slot->tts_isnull[attnum];
+		}
+	}
+
 	do
 	{
-		o_btree_load_shmem(&primary->desc);
 		oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc, &overflow);
 
 		values[0] = PointerGetDatum(&oslot->bridge_ctid);
 		isnull[0] = false;
-		if (descr->bridge->primaryIsCtid)
-		{
-			values[1] = PointerGetDatum(&slot->tts_tid);
-			isnull[1] = false;
-		}
-		else
-		{
-			int			i;
-
-			for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
-			{
-				AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
-
-				values[i + 1] = slot->tts_values[attnum];
-				isnull[i + 1] = slot->tts_isnull[attnum];
-			}
-		}
 
 		tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
 							 values, isnull, NULL);

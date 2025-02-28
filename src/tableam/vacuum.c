@@ -1047,8 +1047,6 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 
 	Assert(bridge != NULL);
 
-	o_btree_load_shmem(&bridge->desc);
-	vacrel->rel_pages = pg_atomic_read_u32(&BTREE_GET_META(&bridge->desc)->leafPagesNum);
 #if PG_VERSION_NUM >= 170000
 	vacrel->current_block = InvalidBlockNumber;
 	vacrel->offsets_count = 0;
@@ -1194,19 +1192,20 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	char	  **indnames = NULL;
 	bool		verbose;
 	bool		instrument;
-#ifdef NOT_USED
 	PGRUsage	ru0;
 	TimestampTz starttime = 0;
 	PgStat_Counter startreadtime = 0,
 				startwritetime = 0;
-#endif
-
+	WalUsage	startwalusage = pgWalUsage;
+	BufferUsage startbufferusage = pgBufferUsage;
+	BlockNumber orig_rel_pages,
+				new_rel_pages;
+	OIndexDescr *bridge;
 	ErrorContextCallback errcallback;
 
 	verbose = (params->options & VACOPT_VERBOSE) != 0;
 	instrument = (verbose || (AmAutoVacuumWorkerProcess() &&
 							  params->log_min_duration >= 0));
-#ifdef NOT_USED
 	if (instrument)
 	{
 		pg_rusage_init(&ru0);
@@ -1217,7 +1216,6 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 			startwritetime = pgStatBlockWriteTime;
 		}
 	}
-#endif
 
 	pgstat_progress_start_command(PROGRESS_COMMAND_VACUUM,
 								  RelationGetRelid(rel));
@@ -1300,6 +1298,11 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	vacrel->recently_dead_tuples = 0;
 	vacrel->missed_dead_tuples = 0;
 
+	bridge = vacrel->descr->bridge;
+	Assert(bridge != NULL);
+	o_btree_load_shmem(&bridge->desc);
+	vacrel->rel_pages = orig_rel_pages = pg_atomic_read_u32(&BTREE_GET_META(&bridge->desc)->leafPagesNum);
+
 	if (verbose)
 	{
 		ereport(INFO,
@@ -1347,20 +1350,138 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	pgstat_progress_update_param(PROGRESS_VACUUM_PHASE,
 								 PROGRESS_VACUUM_PHASE_FINAL_CLEANUP);
 
+	new_rel_pages = vacrel->rel_pages;	/* After possible rel truncation */
 
-	/* XXX: Update stats? */
+	/*
+	 * Not calling vac_update_relstats here, because we only analyze bridged
+	 * index;
+	 */
+	/* Reporting to pgstat of this info should not break anything */
+	pgstat_report_vacuum(RelationGetRelid(rel),
+						 rel->rd_rel->relisshared,
+						 vacrel->live_tuples,
+						 vacrel->lpdead_items);
 
 	pgstat_progress_end_command();
+
+	if (instrument)
+	{
+		TimestampTz endtime = GetCurrentTimestamp();
+
+		if (verbose || params->log_min_duration == 0 ||
+			TimestampDifferenceExceeds(starttime, endtime,
+									   params->log_min_duration))
+		{
+			long		secs_dur;
+			int			usecs_dur;
+			WalUsage	walusage;
+			BufferUsage bufferusage;
+			StringInfoData buf;
+			char	   *msgfmt;
+			double		read_rate = 0,
+						write_rate = 0;
+
+			TimestampDifference(starttime, endtime, &secs_dur, &usecs_dur);
+			memset(&walusage, 0, sizeof(WalUsage));
+			WalUsageAccumDiff(&walusage, &pgWalUsage, &startwalusage);
+			memset(&bufferusage, 0, sizeof(BufferUsage));
+			BufferUsageAccumDiff(&bufferusage, &pgBufferUsage, &startbufferusage);
+
+			initStringInfo(&buf);
+			if (verbose)
+			{
+				/*
+				 * Aggressiveness already reported earlier, in dedicated
+				 * VACUUM VERBOSE ereport
+				 */
+				Assert(!params->is_wraparound);
+				msgfmt = _("finished vacuuming bridged indexes \"%s.%s.%s\": index scans: %d\n");
+			}
+			else
+			{
+				msgfmt = _("automatic vacuum of bridged indexes \"%s.%s.%s\": index scans: %d\n");
+			}
+			appendStringInfo(&buf, msgfmt,
+							 vacrel->dbname,
+							 vacrel->relnamespace,
+							 vacrel->relname,
+							 vacrel->num_index_scans);
+			appendStringInfo(&buf, _("pages: %u removed, %u remain, %u scanned (%.2f%% of total)\n"),
+							 vacrel->removed_pages,
+							 new_rel_pages,
+							 vacrel->scanned_pages,
+							 orig_rel_pages == 0 ? 100.0 :
+							 100.0 * vacrel->scanned_pages / orig_rel_pages);
+
+			if (vacrel->nindexes == 0 || vacrel->num_index_scans == 0)
+				appendStringInfoString(&buf, _("index scan not needed: "));
+			else
+				appendStringInfoString(&buf, _("index scan needed: "));
+
+			msgfmt = _("%u pages from table (%.2f%% of total) had %lld dead item identifiers removed\n");
+
+			appendStringInfo(&buf, msgfmt,
+							 vacrel->lpdead_item_pages,
+							 orig_rel_pages == 0 ? 100.0 :
+							 100.0 * vacrel->lpdead_item_pages / orig_rel_pages,
+							 (long long) vacrel->lpdead_items);
+			for (int i = 0; i < vacrel->nindexes; i++)
+			{
+				IndexBulkDeleteResult *istat = vacrel->indstats[i];
+
+				if (!istat)
+					continue;
+
+				appendStringInfo(&buf,
+								 _("index \"%s\": pages: %u in total, %u newly deleted, %u currently deleted, %u reusable\n"),
+								 indnames[i],
+								 istat->num_pages,
+								 istat->pages_newly_deleted,
+								 istat->pages_deleted,
+								 istat->pages_free);
+			}
+			if (track_io_timing)
+			{
+				double		read_ms = (double) (pgStatBlockReadTime - startreadtime) / 1000;
+				double		write_ms = (double) (pgStatBlockWriteTime - startwritetime) / 1000;
+
+				appendStringInfo(&buf, _("I/O timings: read: %.3f ms, write: %.3f ms\n"),
+								 read_ms, write_ms);
+			}
+			if (secs_dur > 0 || usecs_dur > 0)
+			{
+				read_rate = (double) BLCKSZ * (bufferusage.shared_blks_read + bufferusage.local_blks_read) /
+					(1024 * 1024) / (secs_dur + usecs_dur / 1000000.0);
+				write_rate = (double) BLCKSZ * (bufferusage.shared_blks_dirtied + bufferusage.local_blks_dirtied) /
+					(1024 * 1024) / (secs_dur + usecs_dur / 1000000.0);
+			}
+			appendStringInfo(&buf, _("avg read rate: %.3f MB/s, avg write rate: %.3f MB/s\n"),
+							 read_rate, write_rate);
+			appendStringInfo(&buf,
+							 _("buffer usage: %lld hits, %lld misses, %lld dirtied\n"),
+							 (long long) (bufferusage.shared_blks_hit + bufferusage.local_blks_hit),
+							 (long long) (bufferusage.shared_blks_read + bufferusage.local_blks_read),
+							 (long long) (bufferusage.shared_blks_dirtied + bufferusage.local_blks_dirtied));
+			appendStringInfo(&buf,
+							 _("WAL usage: %lld records, %lld full page images, %llu bytes\n"),
+							 (long long) walusage.wal_records,
+							 (long long) walusage.wal_fpi,
+							 (unsigned long long) walusage.wal_bytes);
+			appendStringInfo(&buf, _("system usage: %s"), pg_rusage_show(&ru0));
+
+			ereport(verbose ? INFO : LOG,
+					(errmsg_internal("%s", buf.data)));
+			pfree(buf.data);
+		}
+	}
 
 	/* Cleanup index statistics and index names */
 	for (int i = 0; i < vacrel->nindexes; i++)
 	{
 		if (vacrel->indstats[i])
 			pfree(vacrel->indstats[i]);
-#ifdef NOT_USED
 		if (instrument)
 			pfree(indnames[i]);
-#endif
 	}
 }
 

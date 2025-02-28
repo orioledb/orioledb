@@ -2717,6 +2717,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			memcpy(&iptr, ptr, sizeof(iptr));
 			ptr += sizeof(iptr);
 
+			Assert(indexDescr);
+
 			if (single)
 			{
 				recovery_switch_to_oxid(oxid, -1);
