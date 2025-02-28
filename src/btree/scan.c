@@ -1511,16 +1511,17 @@ btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 static OTuple
 btree_seq_scan_get_tuple_from_iterator_raw(BTreeSeqScan *scan,
 										   bool *end,
-										   BTreeLocationHint *hint)
+										   BTreeLocationHint *hint,
+										   BTreeLeafTuphdr **tupHdr)
 {
 	OTuple		result;
 
 	if (!O_TUPLE_IS_NULL(scan->iterEnd))
 		result = btree_iterate_raw(scan->iter, &scan->iterEnd, BTreeKeyNonLeafKey,
-								   false, end, hint);
+								   false, end, hint, tupHdr);
 	else
 		result = btree_iterate_raw(scan->iter, NULL, BTreeKeyNone,
-								   false, end, hint);
+								   false, end, hint, tupHdr);
 
 	if (*end)
 	{
@@ -1533,16 +1534,19 @@ btree_seq_scan_get_tuple_from_iterator_raw(BTreeSeqScan *scan,
 
 static OTuple
 btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
-									BTreeLocationHint *hint)
+									BTreeLocationHint *hint, BTreeLeafTuphdr **tupHdr)
 {
-	BTreeLeafTuphdr *tupHdr;
+	BTreeLeafTuphdr *localtupHdr;
 	OTuple		tuple;
+
+	if (tupHdr == NULL)
+		tupHdr = &localtupHdr;
 
 	if (scan->iter)
 	{
 		bool		end;
 
-		tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint);
+		tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint, tupHdr);
 		if (!end)
 			return tuple;
 	}
@@ -1558,7 +1562,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 				{
 					bool		end;
 
-					tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint);
+					tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint, tupHdr);
 					if (!end)
 						return tuple;
 				}
@@ -1579,10 +1583,10 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		}
 	}
 
-	BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tuple, scan->leafImg, &scan->leafLoc);
+	BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, tuple, scan->leafImg, &scan->leafLoc);
 	BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
 
-	if (!tupHdr->deleted)
+	if (!(*tupHdr)->deleted)
 	{
 		if (hint)
 			*hint = scan->hint;
@@ -1598,7 +1602,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 OTuple
 btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
-						   bool *end, BTreeLocationHint *hint)
+						   bool *end, BTreeLocationHint *hint, BTreeLeafTuphdr **tupHdr)
 {
 	OTuple		tuple;
 
@@ -1608,7 +1612,7 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 	if (scan->status == BTreeSeqScanInMemory ||
 		scan->status == BTreeSeqScanDisk)
 	{
-		tuple = btree_seq_scan_getnext_raw_internal(scan, mctx, hint);
+		tuple = btree_seq_scan_getnext_raw_internal(scan, mctx, hint, tupHdr);
 		if (scan->status == BTreeSeqScanInMemory ||
 			scan->status == BTreeSeqScanDisk)
 		{

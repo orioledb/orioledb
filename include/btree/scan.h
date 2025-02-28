@@ -50,7 +50,7 @@ extern OTuple btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 									 CommitSeqNo *tupleCsn,
 									 BTreeLocationHint *hint);
 extern OTuple btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
-										 bool *end, BTreeLocationHint *hint);
+										 bool *end, BTreeLocationHint *hint, BTreeLeafTuphdr ** tupHdr);
 extern void free_btree_seq_scan(BTreeSeqScan *scan);
 extern void seq_scans_cleanup(void);
 

@@ -958,7 +958,7 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 		bool		end;
 		BTreeLocationHint hint;
 		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
-											false, &end, &hint);
+											false, &end, &hint, NULL);
 		OSysCacheKey *sys_cache_key;
 		OTuple		key_tup;
 

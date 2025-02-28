@@ -58,7 +58,8 @@ extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
 									 BTreeLocationHint *hint);
 extern OTuple btree_iterate_raw(BTreeIterator *it, void *end,
 								BTreeKeyType endKind, bool endInclude,
-								bool *scanEnd, BTreeLocationHint *hint);
+								bool *scanEnd, BTreeLocationHint *hint,
+								BTreeLeafTuphdr **tupHdr);
 extern OTuple btree_iterate_all(BTreeIterator *it, void *end,
 								BTreeKeyType endKind, bool endInclude,
 								bool *scanEnd, BTreeLocationHint *hint,

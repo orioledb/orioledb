@@ -1384,7 +1384,7 @@ orioledb_index_rows(PG_FUNCTION_ARGS)
 	{
 		bool		end;
 		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
-											false, &end, NULL);
+											false, &end, NULL, NULL);
 
 		if (end)
 			break;

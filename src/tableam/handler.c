@@ -872,7 +872,7 @@ orioledb_scan_analyze_next_tuple(TableScanDesc scan, TransactionId OldestXmin,
 
 	while (true)
 	{
-		tuple = btree_seq_scan_getnext_raw(oscan->scan, slot->tts_mcxt, &end, &hint);
+		tuple = btree_seq_scan_getnext_raw(oscan->scan, slot->tts_mcxt, &end, &hint, NULL);
 
 		if (end || ItemPointerGetOffsetNumber(&oscan->iptr) > NUM_TUPLES_PER_BLOCK)
 			return false;
@@ -1440,11 +1440,11 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	reservoir_init_selection_state(&rstate, targrows);
 
 	tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
-									   &scanEnd, NULL);
+									   &scanEnd, NULL, NULL);
 	while (!scanEnd)
 	{
 		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
-										   &scanEnd, NULL);
+										   &scanEnd, NULL, NULL);
 
 		if (!O_TUPLE_IS_NULL(tuple))
 		{

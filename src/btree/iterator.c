@@ -966,10 +966,11 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
  */
 OTuple
 btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
-				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint)
+				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint,
+				  BTreeLeafTuphdr **tupHdr)
 {
 	return btree_iterate_raw_internal(it, end, endKind, endInclude, scanEnd,
-									  hint, true, NULL);
+									  hint, true, tupHdr);
 }
 
 /*
