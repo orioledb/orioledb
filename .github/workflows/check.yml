@@ -50,7 +50,40 @@ jobs:
       - name: Show stuck processes
         run: bash ./orioledb/ci/list_stuck.sh
         if: ${{ always() }}
-      - name: Codecov
-        run: bash ./orioledb/ci/codecov.sh
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Run lcov
+        if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
+        run: bash ./orioledb/ci/lcov.sh
+      - name: create artifact for coverage.info
+        if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          path: ./orioledb/coverage.info
+          retention-days: 1
+
+  finish:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v4
+        with:
+          path: orioledb
+      - name: Retrieve saved coverage.infos
+        uses: actions/download-artifact@v4
+      - name: Merge coverage files
+        run: bash ./orioledb/ci/lcov_merge.sh
+      - name: coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          files: ./orioledb/coverage.info
+
+  cleanup:
+    needs: finish
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: remove artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+            name: '*coverage.info'

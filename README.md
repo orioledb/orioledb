@@ -2,7 +2,7 @@
 (A solution to PostgreSQL’s wicked problems)
 
 [![check status](https://github.com/orioledb/orioledb/actions/workflows/check.yml/badge.svg)](https://github.com/orioledb/orioledb/actions)
-[![codecov](https://codecov.io/gh/orioledb/orioledb/branch/main/graph/badge.svg?token=shh4jn0DUK)](https://codecov.io/gh/orioledb/orioledb) [![dockerhub](https://github.com/orioledb/orioledb/actions/workflows/docker.yml/badge.svg)](https://hub.docker.com/r/orioledb/orioledb/tags)
+[![Coverage Status](https://coveralls.io/repos/github/orioledb/orioledb/badge.svg?branch=coveralls)](https://coveralls.io/github/orioledb/orioledb?branch=coveralls) [![dockerhub](https://github.com/orioledb/orioledb/actions/workflows/docker.yml/badge.svg)](https://hub.docker.com/r/orioledb/orioledb/tags)
 
 
 OrioleDB is a new storage engine for PostgreSQL, bringing a modern approach to
