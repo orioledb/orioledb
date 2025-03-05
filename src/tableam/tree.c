@@ -189,7 +189,7 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 	uint32		version = keep_version ? o_tuple_get_version(tuple) : 0;
 	int			ctid_off = 0;
 
-	if (id->bridging && id->desc.type == oIndexBridge)
+	if (id->bridging && type == oIndexPrimary && !id->primaryIsCtid)
 		ctid_off = 1;
 
 	Assert(type == oIndexPrimary || type == oIndexRegular);
@@ -334,7 +334,7 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 	int			i = 0;
 	int			ctid_off = 0;
 
-	if (idx->bridging && idx->desc.type == oIndexBridge)
+	if (idx->bridging && idx->desc.type == oIndexPrimary && !idx->primaryIsCtid)
 		ctid_off = 1;
 
 	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)

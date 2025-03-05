@@ -1432,6 +1432,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 				if (!istat)
 					continue;
 
+				Assert(indnames);
 				appendStringInfo(&buf,
 								 _("index \"%s\": pages: %u in total, %u newly deleted, %u currently deleted, %u reusable\n"),
 								 indnames[i],
