@@ -71,6 +71,7 @@ OBJS = src/btree/btree.o \
 	   src/tableam/operations.o \
 	   src/tableam/scan.o \
 	   src/tableam/tree.o \
+	   src/tableam/vacuum.o \
 	   src/transam/undo.o \
 	   src/transam/oxid.o \
 	   src/tuple/format.o \
@@ -99,6 +100,7 @@ REGRESSCHECKS = btree_sys_check \
 				foreign_keys \
 				generated \
 				getsomeattrs \
+				index_bridging \
 				indices \
 				indices_build \
 				inherits \
@@ -151,6 +153,7 @@ TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/eviction_test.py \
 						test/t/file_operations_test.py \
 						test/t/files_test.py \
+						test/t/index_bridging_test.py \
 						test/t/incomplete_split_test.py \
 						test/t/merge_test.py \
 						test/t/o_tables_test.py \

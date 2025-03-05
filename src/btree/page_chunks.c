@@ -113,7 +113,7 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 		/* Already have enough of free space on the page */
 		return BTreeItemPageFitAsIs;
 	}
-	else if (O_PAGE_IS(p, LEAF))
+	else if (O_PAGE_IS(p, LEAF) && desc->type != oIndexBridge)
 	{
 		/* Start with optimistic estimate of free space after compaction */
 		int			compactedFreeSpace = freeSpace + PAGE_GET_N_VACATED(p);

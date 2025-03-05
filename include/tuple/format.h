@@ -46,6 +46,14 @@ typedef struct
 typedef OTupleHeaderData *OTupleHeader;
 #define SizeOfOTupleHeader MAXALIGN(sizeof(OTupleHeaderData))
 
+typedef struct BrigeData
+{
+	bool		is_pkey;
+	ItemPointer bridge_iptr;
+	/* compared with InvalidAttrNumber, so should be greater than 0 */
+	AttrNumber	attnum;
+} BrigeData;
+
 /*
  * Works with orioledb table tuples in primary index. It can fetch
  * TOAST pointers from table tuple.
@@ -65,7 +73,7 @@ typedef OTupleHeaderData *OTupleHeader;
 					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
-				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec)) \
+				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
 		)															\
 		:															\
 		(															\
@@ -84,7 +92,7 @@ typedef OTupleHeaderData *OTupleHeader;
 					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
-				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec)) \
+				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
 		)															\
 		:															\
 		(															\
@@ -95,7 +103,7 @@ typedef OTupleHeaderData *OTupleHeader;
 			)														\
 			:														\
 			(														\
-				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec)) \
+				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
 			)														\
 		)															\
 	)																\
@@ -181,20 +189,22 @@ extern ItemPointer o_tuple_get_last_iptr(TupleDesc desc,
 										 OTuple tuple, bool *isnull);
 extern Datum o_toast_nocachegetattr(OTuple tuple, int attnum,
 									TupleDesc tupleDesc,
-									OTupleFixedFormatSpec *spec);
+									OTupleFixedFormatSpec *spec,
+									bool *is_null);
 extern Pointer o_toast_nocachegetattr_ptr(OTuple tuple, int attnum,
 										  TupleDesc tupleDesc,
 										  OTupleFixedFormatSpec *spec);
 extern Pointer o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec);
 extern Size o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-							 ItemPointer iptr, uint32 version,
+							 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
 							 Datum *values, bool *isnull, char *to_toast);
 extern void o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 						 OTuple *tuple, Size tuple_size,
-						 ItemPointer iptr, uint32 version,
+						 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
 						 Datum *values, bool *isnull, char *to_toast);
 extern OTuple o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-						   uint32 version, Datum *values, bool *isnull);
+						   uint32 version, Datum *values, bool *isnull,
+						   BrigeData *bridge_data);
 extern uint32 o_tuple_get_version(OTuple tuple);
 extern void o_tuple_set_version(OTupleFixedFormatSpec *spec, OTuple *tuple,
 								uint32 version);

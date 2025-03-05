@@ -122,6 +122,8 @@ int			default_compress = InvalidOCompress;
 int			default_primary_compress = InvalidOCompress;
 int			default_toast_compress = InvalidOCompress;
 bool		orioledb_table_description_compress = false;
+char	   *max_bridge_ctid_string = NULL;
+BlockNumber max_bridge_ctid_blkno = 0;
 bool		orioledb_s3_mode = false;
 int			s3_num_workers = 3;
 int			s3_desired_size = 10000;
@@ -203,6 +205,9 @@ static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											bool inhparent,
 											RelOptInfo *rel);
 static bool orioledb_skip_tree_height_hook(Relation indexRelation);
+
+static bool check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source);
+static void assign_debug_max_bridge_ctid(const char *newval, void *extra);
 
 PG_FUNCTION_INFO_V1(orioledb_page_stats);
 PG_FUNCTION_INFO_V1(orioledb_version);
@@ -638,6 +643,16 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+	DefineCustomStringVariable("orioledb.debug_max_bridge_ctid_blkno",
+							   "Sets maximum value for bridge ctid for its overflow testing",
+							   NULL,
+							   &max_bridge_ctid_string,
+							   "",
+							   PGC_POSTMASTER,
+							   0,
+							   check_debug_max_bridge_ctid,
+							   assign_debug_max_bridge_ctid,
+							   NULL);
 
 	DefineCustomBoolVariable("orioledb.s3_mode",
 							 "The OrioleDB function mode on top of S3 storage",
@@ -1649,6 +1664,20 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					OIndexDescr *index_descr = NULL;
 					OInMemoryBlkno rootPageBlkno;
 					Page		root_page;
+					Relation	index;
+					OBTOptions *options;
+
+					index = index_open(info->indexoid, AccessShareLock);
+
+					options = (OBTOptions *) index->rd_options;
+
+					if ((options && options->index_bridging) || index->rd_rel->relam != BTREE_AM_OID)
+					{
+						index_close(index, AccessShareLock);
+						continue;
+					}
+
+					index_close(index, AccessShareLock);
 
 					/*
 					 * TODO: Remove when parallel index scan will be
@@ -1741,4 +1770,54 @@ is_bump_memory_context(MemoryContext mcxt)
 #else
 	return false;
 #endif
+}
+
+bool
+check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source)
+{
+	if (strcmp(*newval, "") != 0)
+	{
+		BlockNumber *myextra;
+		BlockNumber blockNumber;
+		char	   *badp;
+		unsigned long cvt;
+
+		errno = 0;
+		cvt = strtoul(*newval, &badp, 10);
+		if (errno)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+					 errmsg("invalid input syntax for block number: \"%s\"",
+							*newval)));
+		blockNumber = (BlockNumber) cvt;
+
+		/*
+		 * Cope with possibility that unsigned long is wider than BlockNumber,
+		 * in which case strtoul will not raise an error for some values that
+		 * are out of the range of BlockNumber.  (See similar code in
+		 * oidin().)
+		 */
+#if SIZEOF_LONG > 4
+		if (cvt != (unsigned long) blockNumber &&
+			cvt != (unsigned long) ((int32) blockNumber))
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+					 errmsg("invalid input syntax for block number: \"%s\"",
+							*newval)));
+#endif
+
+		myextra = (BlockNumber *) guc_malloc(ERROR, sizeof(BlockNumber));
+		*myextra = blockNumber;
+		*extra = (void *) myextra;
+	}
+	return true;
+}
+
+void
+assign_debug_max_bridge_ctid(const char *newval, void *extra)
+{
+	if (newval && strcmp(newval, "") != 0)
+		max_bridge_ctid_blkno = *((BlockNumber *) extra);
+	else
+		max_bridge_ctid_blkno = InvalidBlockNumber;
 }

@@ -344,6 +344,34 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_pkey_include_same_field;
 COMMIT;
 
+CREATE TABLE o_test_expr_table_order
+(
+	id1 int8 NOT NULL,
+	id2 int8 NOT NULL,
+	id3 int8 NOT NULL,
+	id4 int8 NOT NULL
+) USING orioledb;
+
+CREATE UNIQUE INDEX o_test_expr_table_order_ix1 on o_test_expr_table_order(id2, id4, (id2 * 10));
+INSERT INTO o_test_expr_table_order VALUES (1, 2, 20, 200);
+INSERT INTO o_test_expr_table_order VALUES (2, 2, 20, 200)
+	ON CONFLICT (id2, id4, (id2 * 10)) DO UPDATE SET id1 = 10 RETURNING *;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SELECT * FROM o_test_expr_table_order ORDER BY id2, id4, (id2 * 10);
+COMMIT;
+
+
+INSERT INTO o_test_expr_table_order VALUES (3, 3, 30, 300);
+INSERT INTO o_test_expr_table_order VALUES (4, 3, 30, 300)
+	ON CONFLICT (id2, id4, (id2 * 10)) DO UPDATE SET id1 = 20 RETURNING *;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SELECT * FROM o_test_expr_table_order ORDER BY id2, id4, (id2 * 10);
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA getsomeattrs CASCADE;
 RESET search_path;
