@@ -347,6 +347,54 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
 SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum_test_p_idx', 0), 'o_briging_vacuum_test_p_idx');
 DROP TABLE o_briging_vacuum_test;
 
+
+CREATE TABLE o_test_bridging_with_regular_no_pkey (
+	i int NOT NULL,
+	j int
+) USING orioledb WITH (index_bridging);
+
+CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
+	o_test_bridging_with_regular_no_pkey using btree (j) WITH (index_bridging);
+CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
+	o_test_bridging_with_regular_no_pkey using btree (j);
+
+INSERT INTO o_test_bridging_with_regular_no_pkey
+	SELECT v, v FROM generate_series(1, 10) v;
+ANALYZE o_test_bridging_with_regular_no_pkey;
+
+SELECT orioledb_tbl_indices('o_test_bridging_with_regular_no_pkey'::regclass);
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 'ne');
+
+UPDATE o_test_bridging_with_regular_no_pkey SET j = j * 10 WHERE mod(i, 4) = 0;
+
+DELETE FROM o_test_bridging_with_regular_no_pkey WHERE mod(i, 4) = 0;
+
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 'ne');
+
+CREATE TABLE o_test_bridging_with_regular_pkey (
+	i int NOT NULL PRIMARY KEY,
+	j int,
+	k int
+) USING orioledb WITH (index_bridging);
+
+CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
+	o_test_bridging_with_regular_pkey using btree (j) WITH (index_bridging);
+CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
+	o_test_bridging_with_regular_pkey using btree (k);
+INSERT INTO o_test_bridging_with_regular_pkey
+	SELECT v * 1000 + 673, 1000 - v * 100 + 15, v FROM generate_series(1, 10) v;
+ANALYZE o_test_bridging_with_regular_pkey;
+
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_pkey'::regclass, 'ne');
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
+SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
+SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
+COMMIT;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

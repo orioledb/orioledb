@@ -404,43 +404,34 @@ append_rowid_values(OIndexDescr *id,
 	if (!id->primaryIsCtid)
 	{
 		ORowIdAddendumNonCtid *add;
+		OTuple		tuple;
 
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		*csn = add->csn;
 
+		tuple.data = p;
 		if (id->bridging)
+			tuple.data += MAXALIGN(sizeof(ItemPointerData));
+
+		tuple.formatFlags = add->flags;
+		*version = o_tuple_get_version(tuple);
+
+		if (id->nPrimaryFields <= id->nFields)
 		{
-			AttrNumber	attnum = id->nFields - 1;
+			int			i;
+			int			pk_from;
 
-			values[attnum] = PointerGetDatum(p);
-			isnull[attnum] = false;
-			*version = O_TABLE_INVALID_VERSION;
-		}
-		else
-		{
-			OTuple		tuple;
+			pk_from = id->nFields - id->nPrimaryFields;
 
-			tuple.data = p;
-			tuple.formatFlags = add->flags;
-			*version = o_tuple_get_version(tuple);
-
-			if (id->nPrimaryFields <= id->nFields)
+			/* Amount of index fields checked in o_define_index_validate */
+			for (i = 0; i < id->nPrimaryFields; i++)
 			{
-				int			i;
-				int			pk_from;
+				AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
 
-				pk_from = id->nFields - id->nPrimaryFields;
-
-				/* Amount of index fields checked in o_define_index_validate */
-				for (i = 0; i < id->nPrimaryFields; i++)
+				if (attnum >= pk_from)
 				{
-					AttrNumber	attnum = id->primaryFieldsAttnums[i] - 1;
-
-					if (attnum >= pk_from)
-					{
-						values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
-					}
+					values[attnum] = o_fastgetattr(tuple, i + 1, pk_tupdesc, pk_spec, &isnull[attnum]);
 				}
 			}
 		}

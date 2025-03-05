@@ -1630,8 +1630,270 @@ SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum_test_p_idx', 0), 'o
 (0 rows)
 
 DROP TABLE o_briging_vacuum_test;
+CREATE TABLE o_test_bridging_with_regular_no_pkey (
+	i int NOT NULL,
+	j int
+) USING orioledb WITH (index_bridging);
+CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
+	o_test_bridging_with_regular_no_pkey using btree (j) WITH (index_bridging);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
+	o_test_bridging_with_regular_no_pkey using btree (j);
+INSERT INTO o_test_bridging_with_regular_no_pkey
+	SELECT v, v FROM generate_series(1, 10) v;
+ANALYZE o_test_bridging_with_regular_no_pkey;
+SELECT orioledb_tbl_indices('o_test_bridging_with_regular_no_pkey'::regclass);
+                  orioledb_tbl_indices                  
+--------------------------------------------------------
+ Index ctid_primary                                    +
+     Index type: primary, unique, ctid                 +
+     Leaf tuple size: 4, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: ctid                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, i, j+
+ Index o_test_bridging_with_regular_no_pkey_ix2        +
+     Index type: secondary                             +
+     Leaf tuple size: 2, non-leaf tuple size: 2        +
+     Non-leaf tuple fields: j, ctid                    +
+     Leaf tuple fields: j, ctid                        +
+ 
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index ctid_primary contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)', '1', '1')     +
+     Item 1: offset = 328, tuple = ('(0,2)', '(0,2)', '2', '2')     +
+     Item 2: offset = 376, tuple = ('(0,3)', '(0,3)', '3', '3')     +
+     Item 3: offset = 424, tuple = ('(0,4)', '(0,4)', '4', '4')     +
+     Item 4: offset = 472, tuple = ('(0,5)', '(0,5)', '5', '5')     +
+     Item 5: offset = 520, tuple = ('(0,6)', '(0,6)', '6', '6')     +
+     Item 6: offset = 568, tuple = ('(0,7)', '(0,7)', '7', '7')     +
+     Item 7: offset = 616, tuple = ('(0,8)', '(0,8)', '8', '8')     +
+     Item 8: offset = 664, tuple = ('(0,9)', '(0,9)', '9', '9')     +
+     Item 9: offset = 712, tuple = ('(0,10)', '(0,10)', '10', '10') +
+                                                                    +
+ Index o_test_bridging_with_regular_no_pkey_ix2 contents            +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '(0,1)')                   +
+     Item 1: offset = 312, tuple = ('2', '(0,2)')                   +
+     Item 2: offset = 344, tuple = ('3', '(0,3)')                   +
+     Item 3: offset = 376, tuple = ('4', '(0,4)')                   +
+     Item 4: offset = 408, tuple = ('5', '(0,5)')                   +
+     Item 5: offset = 440, tuple = ('6', '(0,6)')                   +
+     Item 6: offset = 472, tuple = ('7', '(0,7)')                   +
+     Item 7: offset = 504, tuple = ('8', '(0,8)')                   +
+     Item 8: offset = 536, tuple = ('9', '(0,9)')                   +
+     Item 9: offset = 568, tuple = ('10', '(0,10)')                 +
+                                                                    +
+ Index index_bridge contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty +
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)')               +
+     Item 1: offset = 312, tuple = ('(0,2)', '(0,2)')               +
+     Item 2: offset = 344, tuple = ('(0,3)', '(0,3)')               +
+     Item 3: offset = 376, tuple = ('(0,4)', '(0,4)')               +
+     Item 4: offset = 408, tuple = ('(0,5)', '(0,5)')               +
+     Item 5: offset = 440, tuple = ('(0,6)', '(0,6)')               +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,7)')               +
+     Item 7: offset = 504, tuple = ('(0,8)', '(0,8)')               +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,9)')               +
+     Item 9: offset = 568, tuple = ('(0,10)', '(0,10)')             +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+UPDATE o_test_bridging_with_regular_no_pkey SET j = j * 10 WHERE mod(i, 4) = 0;
+DELETE FROM o_test_bridging_with_regular_no_pkey WHERE mod(i, 4) = 0;
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_no_pkey'::regclass, 'ne');
+                          orioledb_tbl_structure                           
+---------------------------------------------------------------------------
+ Index ctid_primary contents                                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 96                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)', '1', '1')           +
+     Item 1: offset = 328, tuple = ('(0,2)', '(0,2)', '2', '2')           +
+     Item 2: offset = 376, tuple = ('(0,3)', '(0,3)', '3', '3')           +
+     Item 3: deleted, offset = 424, tuple = ('(0,4)', '(0,11)', '4', '40')+
+     Item 4: offset = 472, tuple = ('(0,5)', '(0,5)', '5', '5')           +
+     Item 5: offset = 520, tuple = ('(0,6)', '(0,6)', '6', '6')           +
+     Item 6: offset = 568, tuple = ('(0,7)', '(0,7)', '7', '7')           +
+     Item 7: deleted, offset = 616, tuple = ('(0,8)', '(0,12)', '8', '80')+
+     Item 8: offset = 664, tuple = ('(0,9)', '(0,9)', '9', '9')           +
+     Item 9: offset = 712, tuple = ('(0,10)', '(0,10)', '10', '10')       +
+                                                                          +
+ Index o_test_bridging_with_regular_no_pkey_ix2 contents                  +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 128                   +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('1', '(0,1)')                         +
+     Item 1: offset = 312, tuple = ('2', '(0,2)')                         +
+     Item 2: offset = 344, tuple = ('3', '(0,3)')                         +
+     Item 3: deleted, offset = 376, tuple = ('4', '(0,4)')                +
+     Item 4: offset = 408, tuple = ('5', '(0,5)')                         +
+     Item 5: offset = 440, tuple = ('6', '(0,6)')                         +
+     Item 6: offset = 472, tuple = ('7', '(0,7)')                         +
+     Item 7: deleted, offset = 504, tuple = ('8', '(0,8)')                +
+     Item 8: offset = 536, tuple = ('9', '(0,9)')                         +
+     Item 9: offset = 568, tuple = ('10', '(0,10)')                       +
+     Item 10: deleted, offset = 600, tuple = ('40', '(0,4)')              +
+     Item 11: deleted, offset = 632, tuple = ('80', '(0,8)')              +
+                                                                          +
+ Index index_bridge contents                                              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 128                    +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty       +
+     Leftmost, Rightmost                                                  +
+   Chunk 0: offset = 0, location = 256, hikey location = 64               +
+     Item 0: offset = 280, tuple = ('(0,1)', '(0,1)')                     +
+     Item 1: offset = 312, tuple = ('(0,2)', '(0,2)')                     +
+     Item 2: offset = 344, tuple = ('(0,3)', '(0,3)')                     +
+     Item 3: deleted, offset = 376, tuple = ('(0,4)', '(0,4)')            +
+     Item 4: offset = 408, tuple = ('(0,5)', '(0,5)')                     +
+     Item 5: offset = 440, tuple = ('(0,6)', '(0,6)')                     +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,7)')                     +
+     Item 7: deleted, offset = 504, tuple = ('(0,8)', '(0,8)')            +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,9)')                     +
+     Item 9: offset = 568, tuple = ('(0,10)', '(0,10)')                   +
+     Item 10: deleted, offset = 600, tuple = ('(0,11)', '(0,4)')          +
+     Item 11: deleted, offset = 632, tuple = ('(0,12)', '(0,8)')          +
+                                                                          +
+ Index toast: not loaded                                                  +
+ 
+(1 row)
+
+CREATE TABLE o_test_bridging_with_regular_pkey (
+	i int NOT NULL PRIMARY KEY,
+	j int,
+	k int
+) USING orioledb WITH (index_bridging);
+CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
+	o_test_bridging_with_regular_pkey using btree (j) WITH (index_bridging);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
+	o_test_bridging_with_regular_pkey using btree (k);
+INSERT INTO o_test_bridging_with_regular_pkey
+	SELECT v * 1000 + 673, 1000 - v * 100 + 15, v FROM generate_series(1, 10) v;
+ANALYZE o_test_bridging_with_regular_pkey;
+SELECT orioledb_tbl_structure('o_test_bridging_with_regular_pkey'::regclass, 'ne');
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_bridging_with_regular_pkey_pkey contents              +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1673', '915', '1')    +
+     Item 1: offset = 328, tuple = ('(0,2)', '2673', '815', '2')    +
+     Item 2: offset = 376, tuple = ('(0,3)', '3673', '715', '3')    +
+     Item 3: offset = 424, tuple = ('(0,4)', '4673', '615', '4')    +
+     Item 4: offset = 472, tuple = ('(0,5)', '5673', '515', '5')    +
+     Item 5: offset = 520, tuple = ('(0,6)', '6673', '415', '6')    +
+     Item 6: offset = 568, tuple = ('(0,7)', '7673', '315', '7')    +
+     Item 7: offset = 616, tuple = ('(0,8)', '8673', '215', '8')    +
+     Item 8: offset = 664, tuple = ('(0,9)', '9673', '115', '9')    +
+     Item 9: offset = 712, tuple = ('(0,10)', '10673', '15', '10')  +
+                                                                    +
+ Index o_test_bridging_with_regular_pkey_ix2 contents               +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('1', '1673')                    +
+     Item 1: offset = 304, tuple = ('2', '2673')                    +
+     Item 2: offset = 328, tuple = ('3', '3673')                    +
+     Item 3: offset = 352, tuple = ('4', '4673')                    +
+     Item 4: offset = 376, tuple = ('5', '5673')                    +
+     Item 5: offset = 400, tuple = ('6', '6673')                    +
+     Item 6: offset = 424, tuple = ('7', '7673')                    +
+     Item 7: offset = 448, tuple = ('8', '8673')                    +
+     Item 8: offset = 472, tuple = ('9', '9673')                    +
+     Item 9: offset = 496, tuple = ('10', '10673')                  +
+                                                                    +
+ Index index_bridge contents                                        +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty +
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 280, tuple = ('(0,1)', '1673')                +
+     Item 1: offset = 312, tuple = ('(0,2)', '2673')                +
+     Item 2: offset = 344, tuple = ('(0,3)', '3673')                +
+     Item 3: offset = 376, tuple = ('(0,4)', '4673')                +
+     Item 4: offset = 408, tuple = ('(0,5)', '5673')                +
+     Item 5: offset = 440, tuple = ('(0,6)', '6673')                +
+     Item 6: offset = 472, tuple = ('(0,7)', '7673')                +
+     Item 7: offset = 504, tuple = ('(0,8)', '8673')                +
+     Item 8: offset = 536, tuple = ('(0,9)', '9673')                +
+     Item 9: offset = 568, tuple = ('(0,10)', '10673')              +
+                                                                    +
+ Index toast: not loaded                                            +
+ 
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Scan using o_test_bridging_with_regular_pkey_ix2 on o_test_bridging_with_regular_pkey
+(1 row)
+
+SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
+   i   |  j  | k  
+-------+-----+----
+  1673 | 915 |  1
+  2673 | 815 |  2
+  3673 | 715 |  3
+  4673 | 615 |  4
+  5673 | 515 |  5
+  6673 | 415 |  6
+  7673 | 315 |  7
+  8673 | 215 |  8
+  9673 | 115 |  9
+ 10673 |  15 | 10
+(10 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Scan using o_test_bridging_with_regular_pkey_ix1 on o_test_bridging_with_regular_pkey
+(1 row)
+
+SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
+   i   |  j  | k  
+-------+-----+----
+ 10673 |  15 | 10
+  9673 | 115 |  9
+  8673 | 215 |  8
+  7673 | 315 |  7
+  6673 | 415 |  6
+  5673 | 515 |  5
+  4673 | 615 |  4
+  3673 | 715 |  3
+  2673 | 815 |  2
+  1673 | 915 |  1
+(10 rows)
+
+COMMIT;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to table o_test_ix_ams
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table o_test_ix_ams
+drop cascades to table o_test_bridging_with_regular_no_pkey
+drop cascades to table o_test_bridging_with_regular_pkey
 DROP SCHEMA index_bridging CASCADE;
 RESET search_path;

@@ -1011,7 +1011,8 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 			 * TODO: Do more complex check here, because it ignores ctid when
 			 * bridging enabled
 			 */
-			if (idx->bridging)
+			if (idx->bridging &&
+				(idx->desc.type == oIndexPrimary || idx->desc.type == oIndexBridge))
 			{
 				isnull = false;
 				value = PointerGetDatum(&oslot->bridge_ctid);

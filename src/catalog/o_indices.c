@@ -206,13 +206,11 @@ make_ctid_o_index(OTable *table)
 					   TIDOID, "ctid", SelfItemPointerAttributeNumber,
 					   table->tid_btree_ops_oid);
 
+	result->bridging = table->index_bridging;
 	if (table->index_bridging)
-	{
-		result->bridging = true;
 		make_builtin_field(&result->leafTableFields[nadded++], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
-	}
 
 	for (i = 0; i < table->nfields; i++)
 		result->leafTableFields[nadded++] = table->fields[i];
@@ -274,13 +272,11 @@ make_primary_o_index(OTable *table)
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
+	result->bridging = table->index_bridging;
 	if (table->index_bridging)
-	{
-		result->bridging = true;
 		make_builtin_field(&result->leafTableFields[nadded++], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 						   table->tid_btree_ops_oid);
-	}
 
 	/*
 	 * TODO: We should probably use add_index_fields to not duplicate code,
@@ -406,6 +402,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->tableOids = table->oids;
 	result->table_persistence = table->persistence;
 	result->primaryIsCtid = !table->has_primary;
+	result->bridging = table->index_bridging;
 	result->compress = tableIndex->compress;
 	result->fillfactor = tableIndex->fillfactor;
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
