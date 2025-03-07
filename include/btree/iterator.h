@@ -45,7 +45,7 @@ extern OTuple o_btree_find_tuple_by_key(BTreeDescr *desc, void *key,
 extern BTreeIterator *o_btree_iterator_create(BTreeDescr *desc, void *key,
 											  BTreeKeyType kind,
 											  OSnapshot *o_snapshot,
-											  ScanDirection scan);
+											  ScanDirection scanDir);
 extern void o_btree_iterator_set_tuple_ctx(BTreeIterator *it,
 										   MemoryContext tupleCxt);
 extern void o_btree_iterator_set_callback(BTreeIterator *it,
