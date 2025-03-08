@@ -210,21 +210,35 @@ ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
   ISOLATIONCHECKS += isol_merge
 endif
 
-regresscheck: | install
+# When SKIP_INSTALL is enabled, the installation step is skipped.
+# This allows tests to run as a non-root user, even if the installation was performed as root.
+# It is especially useful in CI environments where the extension is preinstalled,
+# focusing solely on functionality testing; e.g., using:
+#   make SKIP_INSTALL=1 USE_PGXS=1 installcheck
+# Additionally, using SKIP_INSTALL helps avoid unnecessary reinstallation when the extension
+# is installed via package managers in the future (such as apt, apk, yum).
+ifdef SKIP_INSTALL
+INSTALL_DEP =
+TEMP_INSTALL_WRAPPER =
+else
+INSTALL_DEP = | install
+TEMP_INSTALL_WRAPPER = $(with_temp_install)
+endif
+
+regresscheck: $(INSTALL_DEP)
 	$(pg_regress_check) \
 		--temp-config test/orioledb_regression.conf \
 		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
-isolationcheck: | install
+isolationcheck: $(INSTALL_DEP)
 	$(pg_isolation_regress_check) \
 		--temp-config test/orioledb_isolation.conf \
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | install
-	$(with_temp_install) \
-	python3 -W ignore::DeprecationWarning -m unittest -v $@
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): $(INSTALL_DEP)
+	$(TEMP_INSTALL_WRAPPER) python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 ifdef IS_DEV
 installcheck: regresscheck isolationcheck testgrescheck
