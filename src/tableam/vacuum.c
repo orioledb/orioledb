@@ -885,6 +885,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 			START_CRIT_SECTION();
 			page_block_reads(item->blkno);
+			PAGE_SUB_N_VACATED(p, BTREE_PAGE_GET_ITEM_SIZE(p, &item->locator));
 			page_locator_delete_item(p, &item->locator);
 			MARK_DIRTY(&bridge->desc, item->blkno);
 			END_CRIT_SECTION();
