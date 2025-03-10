@@ -420,17 +420,26 @@ finish_dead_items(LVRelState *vacrel)
 static void
 add_dead_item(LVRelState *vacrel, ItemPointer item)
 {
-	BlockNumber blkno = ItemPointerGetBlockNumber(item);
+	static BlockNumber prev_block = InvalidBlockNumber;
+	static int prev_offsets_count = 0;
 
-	if (vacrel->current_block != blkno)
+	if (vacrel->current_block != prev_block)
 	{
-		finish_dead_items(vacrel);
+		BlockNumber saved_blkno = vacrel->current_block;
+		BlockNumber saved_offsets_count = vacrel->offsets_count;
 
-		vacrel->current_block = blkno;
-		vacrel->offsets_count = 0;
+		vacrel->current_block = prev_block;
+		vacrel->offsets_count = prev_offsets_count;
+		finish_dead_items(vacrel);
+		vacrel->current_block = saved_blkno;
+		vacrel->offsets_count = saved_offsets_count;
+		prev_block = vacrel->current_block;
+		prev_offsets_count = vacrel->offsets_count;
 	}
 
+	Assert(vacrel->offsets_count + 1 < BTREE_PAGE_MAX_CHUNK_ITEMS);
 	vacrel->current_offsets[vacrel->offsets_count++] = ItemPointerGetOffsetNumber(item);
+	prev_offsets_count = vacrel->offsets_count;
 }
 #else
 static void
@@ -1073,7 +1082,10 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 		 *
 		 * vacuum_delay_point();
 		 */
-
+#if PG_VERSION_NUM >= 170000
+		vacrel->current_block = context.items[context.index].blkno;
+		vacrel->offsets_count = 0;
+#endif
 		for (loc = context.items[context.index].locator;
 			 BTREE_PAGE_LOCATOR_IS_VALID(p, &loc);
 			 BTREE_PAGE_LOCATOR_NEXT(p, &loc))

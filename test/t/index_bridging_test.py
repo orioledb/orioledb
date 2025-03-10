@@ -107,17 +107,18 @@ class IndexBridgingTest(BaseTest):
 		node.safe_psql("""
 			CREATE TABLE o_test (
 				i int NOT NULL,
-				j int
+				j int,
+				k int
 			) USING orioledb WITH (index_bridging);
 
 			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
-			-- CREATE INDEX o_test_ix2 on o_test using btree (j);
+			CREATE INDEX o_test_ix2 on o_test using btree (k);
 		""")
 
 		all_rows = 0
 		nrows = 2047  # max offset of ctid to overflow
 		node.safe_psql("""
-			INSERT INTO o_test SELECT v, 10000 + v FROM generate_series(1, %d) v;
+			INSERT INTO o_test SELECT v, 10000 + v, v FROM generate_series(1, %d) v;
 			ANALYZE o_test;
 		""" % nrows)
 		all_rows += nrows
@@ -145,7 +146,7 @@ class IndexBridgingTest(BaseTest):
 
 		nrows = 10
 		node.safe_psql("""
-			INSERT INTO o_test SELECT v * 4, %d + v FROM generate_series(1, %d) v;
+			INSERT INTO o_test SELECT v * 4, %d + v, v FROM generate_series(1, %d) v;
 		""" % (10000 + all_rows, nrows))
 		all_rows += nrows
 		expected_ctids.extend([(f'(0,{x*4})', ) for x in range(1, nrows + 1)])
@@ -155,7 +156,7 @@ class IndexBridgingTest(BaseTest):
 
 		nrows = 2047 - len(expected_ctids)
 		node.safe_psql("""
-			INSERT INTO o_test SELECT v * 4, %d + v FROM generate_series(1, %d) v;
+			INSERT INTO o_test SELECT v * 4, %d + v, v FROM generate_series(1, %d) v;
 			ANALYZE o_test;
 		""" % (10000 + all_rows, nrows))
 		all_rows += nrows
@@ -179,7 +180,7 @@ class IndexBridgingTest(BaseTest):
 
 		nrows = 10
 		node.safe_psql("""
-			INSERT INTO o_test SELECT %d + v, %d + v FROM generate_series(1, %d) v;
+			INSERT INTO o_test SELECT %d + v, %d + v, v FROM generate_series(1, %d) v;
 			ANALYZE o_test;
 		""" % (all_rows, 10000 + all_rows, nrows))
 		all_rows += nrows
@@ -187,3 +188,74 @@ class IndexBridgingTest(BaseTest):
 		expected_ctids = sorted(
 		    expected_ctids, key=lambda ctid: int(ctid[0][1:-1].split(',')[1]))
 		check(expected_ctids)
+
+	def test_bridge_recovery(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE EXTENSION pageinspect;
+		""")
+
+		node.safe_psql("""
+			CREATE TABLE o_test (
+				i int NOT NULL,
+				j int,
+				k int
+			) USING orioledb WITH (index_bridging);
+
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix2 on o_test using btree (k);
+		""")
+
+		node.safe_psql("""
+			INSERT INTO o_test SELECT v, 10000 + v, v FROM generate_series(1, 2000) v;
+			ANALYZE o_test;
+		""")
+
+		node.safe_psql("""
+			DELETE FROM o_test WHERE mod(i, 2) = 0;
+		""")
+
+		con1 = node.connect(autocommit=True)
+		con1.execute("""
+			SET log_error_verbosity = 'terse';
+		""")
+		con1.execute("""
+			VACUUM;
+		""")
+		con1.execute("""
+			RESET log_error_verbosity;
+		""")
+
+		plan = node.execute("""
+			SET LOCAL enable_seqscan = off;
+			EXPLAIN (COSTS OFF, FORMAT JSON)
+				SELECT * FROM o_test ORDER BY j;
+		""")[0][0][0]["Plan"]
+		self.assertEqual('Index Scan', plan["Node Type"])
+		self.assertEqual('o_test_ix1', plan['Index Name'])
+		tuples = node.execute("SELECT * FROM o_test ORDER BY j;")
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		plan = node.execute("""
+			SET LOCAL enable_seqscan = off;
+			EXPLAIN (COSTS OFF, FORMAT JSON)
+				SELECT * FROM o_test ORDER BY j;
+		""")[0][0][0]["Plan"]
+		self.assertEqual('Index Scan', plan["Node Type"])
+		self.assertEqual('o_test_ix1', plan['Index Name'])
+		print(
+		    node.execute("""
+					SET LOCAL enable_seqscan = off;
+					SELECT * FROM o_test ORDER BY j;
+			  """))
+		self.assertEqual(
+		    tuples,
+		    node.execute("""
+							SET LOCAL enable_seqscan = off;
+							SELECT * FROM o_test ORDER BY j;
+						 """))
