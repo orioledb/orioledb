@@ -99,9 +99,10 @@ typedef enum
 {
 	oIndexInvalid = 0,
 	oIndexToast = 1,
-	oIndexPrimary = 2,
-	oIndexUnique = 3,
-	oIndexRegular = 4
+	oIndexBridge = 2,
+	oIndexPrimary = 3,
+	oIndexUnique = 4,
+	oIndexRegular = 5,
 } OIndexType;
 
 #define PROC_XID_ARRAY_SIZE	32
@@ -326,6 +327,7 @@ extern int	default_compress;
 extern int	default_primary_compress;
 extern int	default_toast_compress;
 extern bool orioledb_table_description_compress;
+extern BlockNumber max_bridge_ctid_blkno;
 extern bool orioledb_s3_mode;
 extern int	s3_num_workers;
 extern int	s3_desired_size;
@@ -373,18 +375,18 @@ typedef struct OCompressHeader
 } OCompressHeader;
 typedef struct ORelOptions
 {
-	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	StdRdOptions std_options;
 	int			compress_offset;
 	int			primary_compress_offset;
 	int			toast_compress_offset;
+	bool		index_bridging;
 } ORelOptions;
 
 typedef struct OBTOptions
 {
-	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	BTOptions	bt_options;
 	int			compress_offset;
+	bool		index_bridging;
 } OBTOptions;
 
 extern int16 o_parse_compress(const char *value);

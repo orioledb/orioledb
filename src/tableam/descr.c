@@ -680,6 +680,19 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	free_o_index(index);
 	descr->toast = indexDescr;
 
+	if (ORelOidsIsValid(o_table->bridge_oids))
+	{
+		index = make_o_index(o_table, BridgeIndexNumber);
+		indexDescr = palloc0(sizeof(OIndexDescr));
+		o_index_fill_descr(indexDescr, index, o_table);
+		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							  indexDescr->fillfactor,
+							  indexDescr->oids, index->indexType,
+							  index->table_persistence, index->createOxid, indexDescr);
+		free_o_index(index);
+		descr->bridge = indexDescr;
+	}
+
 	o_find_toastable_attrs(descr);
 	MemoryContextSwitchTo(old_context);
 }
@@ -1007,13 +1020,13 @@ static void
 o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 {
 	OIndexNumber cur_ix,
-				ix_off = 0;
+				ctid_off = 0;
 
 	descr->nIndices = table->nindices;
 	if (!table->has_primary)
 	{
 		descr->nIndices++;
-		ix_off = 1;
+		ctid_off = 1;
 	}
 
 	descr->indices = (OIndexDescr **) palloc0(sizeof(OIndexDescr *) * descr->nIndices);
@@ -1029,13 +1042,21 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 		}
 		else
 		{
-			ixOids = table->indices[cur_ix - ix_off].oids;
-			ixType = table->indices[cur_ix - ix_off].type;
+			ixOids = table->indices[cur_ix - ctid_off].oids;
+			ixType = table->indices[cur_ix - ctid_off].type;
 		}
 
 		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false);
 		descr->indices[cur_ix]->refcnt++;
 	}
+
+	if (ORelOidsIsValid(table->bridge_oids))
+	{
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false);
+		descr->bridge->refcnt++;
+	}
+	else
+		descr->bridge = NULL;
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
@@ -1111,6 +1132,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid)
 
 	o_set_sys_cache_search_datoid(datoid);
 	opclass = o_opclass_get(opclassoid);
+	Assert(opclass);
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
 	field->opfamily = opclass->opfamily;
@@ -1409,6 +1431,7 @@ comparison_shim(Datum x, Datum y, SortSupport ssup)
 void
 o_finish_sort_support_function(OComparator *comparator, SortSupport ssup)
 {
+	Assert(comparator);
 	if (comparator->haveSortSupport)
 	{
 		ssup->comparator = comparator->ssup_comparator;

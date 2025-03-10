@@ -20,6 +20,7 @@
 #include "catalog/o_tables.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
+#include "storage/itemptr.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
 #include "tableam/tree.h"
@@ -293,7 +294,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 			if (type == RecoveryMsgTypeInsert ||
 				type == RecoveryMsgTypeUpdate ||
-				type == RecoveryMsgTypeDelete)
+				type == RecoveryMsgTypeDelete ||
+				type == RecoveryMsgTypeBridgeErase)
 			{
 				OTuple		tuple;
 
@@ -331,21 +333,34 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					}
 				}
 
-				memcpy(&tuple_len, data + data_pos, sizeof(int));
-				data_pos += sizeof(int);
-				memcpy(&tuple.formatFlags, data + data_pos, 1);
-				data_pos++;
-				data_pos = MAXALIGN(data_pos);
-				if (indexDescr != NULL)
+				if (type == RecoveryMsgTypeBridgeErase)
 				{
-					Assert(ORelOidsIsValid(oids));
+					ItemPointerData iptr;
 
-					tuple.data = data + data_pos;
-					apply_modify_record(descr, indexDescr,
-										type,
-										tuple);
+					memcpy(&iptr, data + data_pos, sizeof(iptr));
+					data_pos += sizeof(iptr);
+
+					replay_erase_bridge_item(indexDescr, &iptr);
 				}
-				data_pos += tuple_len;
+				else
+				{
+					memcpy(&tuple_len, data + data_pos, sizeof(int));
+					data_pos += sizeof(int);
+					memcpy(&tuple.formatFlags, data + data_pos, 1);
+					data_pos++;
+					data_pos = MAXALIGN(data_pos);
+
+					if (indexDescr != NULL)
+					{
+						Assert(ORelOidsIsValid(oids));
+
+						tuple.data = data + data_pos;
+						apply_modify_record(descr, indexDescr,
+											type,
+											tuple);
+					}
+					data_pos += tuple_len;
+				}
 			}
 			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild ||
 					 type == RecoveryMsgTypeWorkerParallelIndexBuild)
@@ -648,6 +663,15 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
 									slot->tts_tid);
+	}
+
+	if (descr->bridge)
+	{
+		OTableSlot *oslot = (OTableSlot *) slot;
+
+		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
+									oslot->bridge_ctid);
 	}
 
 	for (i = 0; i < descr->nIndices; i++)

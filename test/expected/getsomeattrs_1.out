@@ -693,6 +693,7 @@ SELECT orioledb_tbl_indices('o_test_unique_same_layout_as_pkey'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 2, non-leaf tuple size: 2+
      Non-leaf tuple fields: val1, val2         +
+     Leaf tuple fields: val1, val2             +
  Index o_test_unique_same_layout_as_pkey_idx1  +
      Index type: secondary, unique             +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -723,6 +724,7 @@ SELECT orioledb_tbl_indices('o_test_pkey_include_same_field'::regclass);
      Index type: primary, unique               +
      Leaf tuple size: 1, non-leaf tuple size: 1+
      Non-leaf tuple fields: val_1              +
+     Leaf tuple fields: val_1                  +
  
 (1 row)
 
@@ -744,8 +746,51 @@ SELECT * FROM o_test_pkey_include_same_field;
 (1 row)
 
 COMMIT;
+CREATE TABLE o_test_expr_table_order
+(
+	id1 int8 NOT NULL,
+	id2 int8 NOT NULL,
+	id3 int8 NOT NULL,
+	id4 int8 NOT NULL
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_expr_table_order_ix1 on o_test_expr_table_order(id2, id4, (id2 * 10));
+INSERT INTO o_test_expr_table_order VALUES (1, 2, 20, 200);
+INSERT INTO o_test_expr_table_order VALUES (2, 2, 20, 200)
+	ON CONFLICT (id2, id4, (id2 * 10)) DO UPDATE SET id1 = 10 RETURNING *;
+ id1 | id2 | id3 | id4 
+-----+-----+-----+-----
+  10 |   2 |  20 | 200
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SELECT * FROM o_test_expr_table_order ORDER BY id2, id4, (id2 * 10);
+ id1 | id2 | id3 | id4 
+-----+-----+-----+-----
+  10 |   2 |  20 | 200
+(1 row)
+
+COMMIT;
+INSERT INTO o_test_expr_table_order VALUES (3, 3, 30, 300);
+INSERT INTO o_test_expr_table_order VALUES (4, 3, 30, 300)
+	ON CONFLICT (id2, id4, (id2 * 10)) DO UPDATE SET id1 = 20 RETURNING *;
+ id1 | id2 | id3 | id4 
+-----+-----+-----+-----
+  20 |   3 |  30 | 300
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SELECT * FROM o_test_expr_table_order ORDER BY id2, id4, (id2 * 10);
+ id1 | id2 | id3 | id4 
+-----+-----+-----+-----
+  10 |   2 |  20 | 200
+  20 |   3 |  30 | 300
+(2 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 23 other objects
+NOTICE:  drop cascades to 24 other objects
 DETAIL:  drop cascades to table o_test_0
 drop cascades to table o_test_1
 drop cascades to table o_test_2
@@ -769,6 +814,7 @@ drop cascades to table o_test_getsomeattrs_pkey_ix_order
 drop cascades to table o_test_getsomeattrs_pkey_nkeys_not_equal_nfields
 drop cascades to table o_test_unique_same_layout_as_pkey
 drop cascades to table o_test_pkey_include_same_field
+drop cascades to table o_test_expr_table_order
 DROP SCHEMA getsomeattrs CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
