@@ -74,12 +74,12 @@ If you are interested in OrioleDB's benefits in production, please
 We provide docker images for `amd64` and `arm64v8` architectures under Alpine Linux.
 
 ```
-docker pull orioledb/orioledb:latest-pg16
+docker pull orioledb/orioledb:latest-pg17
 ```
 For example it can be started same as postgres server:
 ```bash
 # !Don't forget to set default locale to C, POSIX or use icu-locale
-docker run --name some-postgres -e POSTGRES_PASSWORD=... -e POSTGRES_INITDB_ARGS="--locale=C" -d -p5432:5432 orioledb/orioledb:latest-pg16
+docker run --name some-postgres -e POSTGRES_PASSWORD=... -e POSTGRES_INITDB_ARGS="--locale=C" -d -p5432:5432 orioledb/orioledb:latest-pg17
 ```
 
 See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details on our docker container usage.  See [the docker build guide](doc/contributing/docker-builds.mdx) for information on how to build the docker images locally.
@@ -88,7 +88,7 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details on o
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [16 (tag: patches16_33)](https://github.com/orioledb/postgres/tree/patches16_33) or [17 (tag: patches17_5)](https://github.com/orioledb/postgres/tree/patches17_5);
+ * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [16 (tag: patches16_34)](https://github.com/orioledb/postgres/tree/patches16_34) or [17 (tag: patches17_6)](https://github.com/orioledb/postgres/tree/patches17_6);
  * Development package of libzstd;
  * python 3.5+ with testgres package.
 
