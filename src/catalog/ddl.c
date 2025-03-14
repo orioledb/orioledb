@@ -1218,6 +1218,36 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		}
 		table_close(matviewRel, AccessShareLock);
 	}
+	else if (IsA(pstmt->utilityStmt, IndexStmt))
+	{
+		IndexStmt  *stmt = (IndexStmt *) pstmt->utilityStmt;
+
+		if (stmt->concurrent)
+		{
+			Oid			relid;
+			Relation	rel;
+			LOCKMODE	lockmode;
+
+			PreventInTransactionBlock(context == PROCESS_UTILITY_TOPLEVEL,
+									  "CREATE INDEX CONCURRENTLY");
+
+			lockmode = ShareUpdateExclusiveLock;
+			relid =
+				RangeVarGetRelidExtended(stmt->relation, lockmode,
+										 0,
+										 RangeVarCallbackOwnsRelation,
+										 NULL);
+			rel = table_open(relid, lockmode);
+
+			if (is_orioledb_rel(rel))
+			{
+				table_close(rel, lockmode);
+				elog(ERROR, "concurrent index creation not supported for orioledb tables yet");
+			}
+			table_close(rel, lockmode);
+		}
+
+	}
 
 	if (call_next)
 	{
