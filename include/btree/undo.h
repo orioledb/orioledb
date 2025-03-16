@@ -50,6 +50,30 @@ typedef enum
 	BTreeModifySameOrStrongerLock = 3
 } BTreeModifyLockStatus;
 
+/* Undo records */
+typedef struct
+{
+	UndoStackItem header;
+	BTreeOperationType action;
+	ORelOids	oids;
+	OInMemoryBlkno blkno;
+	uint32		pageChangeCount;
+	BTreeLeafTuphdr tuphdr;
+} BTreeModifyUndoStackItem;
+
+typedef struct
+{
+	OnCommitUndoStackItem header;
+	Oid			datoid;
+	Oid			relid;
+	Oid			oldRelnode;
+	int			oldNumTreeOids;
+	Oid			newRelnode;
+	int			newNumTreeOids;
+	bool		fsync;
+	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
+} RelnodeUndoStackItem;
+
 /* size of image in undo log produced by page compaction  */
 #define O_COMPACT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ)
 /* max size of image in undo log produced by page split */
@@ -57,7 +81,7 @@ typedef enum
 /* size of image in undo log produced by page split */
 #define O_SPLIT_UNDO_IMAGE_SIZE(splitKeySize) (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ + MAXALIGN(splitKeySize))
 /* max size of update undo record */
-#define O_UPDATE_MAX_UNDO_SIZE (BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE)
+#define O_UPDATE_MAX_UNDO_SIZE (sizeof(BTreeModifyUndoStackItem) + O_BTREE_MAX_TUPLE_SIZE)
 /* on modification we should reserve size for split and update undo records */
 #define O_MODIFY_UNDO_RESERVE_SIZE (2 * (O_MAX_SPLIT_UNDO_IMAGE_SIZE + O_UPDATE_MAX_UNDO_SIZE))
 /* size of image in undo log produced by pages merge */

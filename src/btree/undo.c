@@ -32,30 +32,6 @@
 #include "utils/inval.h"
 #include "utils/wait_event.h"
 
-/* Undo records */
-typedef struct
-{
-	UndoStackItem header;
-	BTreeOperationType action;
-	ORelOids	oids;
-	OInMemoryBlkno blkno;
-	uint32		pageChangeCount;
-	BTreeLeafTuphdr tuphdr;
-} BTreeModifyUndoStackItem;
-
-typedef struct
-{
-	OnCommitUndoStackItem header;
-	Oid			datoid;
-	Oid			relid;
-	Oid			oldRelnode;
-	int			oldNumTreeOids;
-	Oid			newRelnode;
-	int			newNumTreeOids;
-	bool		fsync;
-	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
-} RelnodeUndoStackItem;
-
 static void clean_chain_has_locks_flag(UndoLogType undoType,
 									   UndoLocation location,
 									   BTreeLeafTuphdr *pageTuphdr,
