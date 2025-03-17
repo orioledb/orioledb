@@ -1,7 +1,9 @@
 CREATE SCHEMA index_bridging;
 SET SESSION search_path = 'index_bridging';
 CREATE EXTENSION orioledb;
+\set VERBOSITY terse
 CREATE EXTENSION pageinspect;
+\set VERBOSITY default
 
 CREATE TABLE o_test_ix_ams (
 	i int NOT NULL,

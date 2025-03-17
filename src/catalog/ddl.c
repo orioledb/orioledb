@@ -703,9 +703,14 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			{
 				Oid			indexOid = lfirst_oid(index);
 				Relation	ind = relation_open(indexOid, AccessShareLock);
-				String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+				OBTOptions *options = (OBTOptions *) ind->rd_options;
 
-				reindex_list = list_append_unique(reindex_list, ix_name);
+				if (ind->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging))
+				{
+					String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+
+					reindex_list = list_append_unique(reindex_list, ix_name);
+				}
 				relation_close(ind, AccessShareLock);
 			}
 
@@ -891,12 +896,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	o_saved_relrewrite = InvalidOid;
 	savedDataQuery = NULL;
 	in_nontransactional_truncate = false;
-
-	/*
-	 * reindex_list is expected to be allocated in PortalContext so it isn't
-	 * freed by us and pointer may be invalid there
-	 */
-	reindex_list = NIL;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -1088,11 +1087,15 @@ orioledb_utility_command(PlannedStmt *pstmt,
 														  false);
 					Relation	iRel,
 								tbl;
+					OBTOptions *options;
 
 					iRel = index_open(indOid, AccessShareLock);
 					tbl = relation_open(iRel->rd_index->indrelid,
 										AccessShareLock);
-					if (is_orioledb_rel(tbl))
+					options = (OBTOptions *) iRel->rd_options;
+					if (is_orioledb_rel(tbl) &&
+						iRel->rd_rel->relam == BTREE_AM_OID &&
+						!(options && options->index_bridging))
 					{
 						String	   *ix_name;
 
@@ -1121,9 +1124,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						{
 							Oid			indexOid = lfirst_oid(index);
 							Relation	ind = relation_open(indexOid, AccessShareLock);
-							String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+							OBTOptions *options = (OBTOptions *) ind->rd_options;
 
-							reindex_list = list_append_unique(reindex_list, ix_name);
+							if (ind->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging))
+							{
+								String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+
+								reindex_list = list_append_unique(reindex_list, ix_name);
+							}
 							relation_close(ind, AccessShareLock);
 						}
 						if (concurrently)
@@ -1233,7 +1241,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									dest, qc);
 	}
 
-
 	if (IsA(pstmt->utilityStmt, TruncateStmt) && !in_nontransactional_truncate)
 	{
 		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
@@ -1292,6 +1299,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				}
 			}
 			table_close(rel, NoLock);
+		}
+	}
+	else if (IsA(pstmt->utilityStmt, ReindexStmt))
+	{
+		if (reindex_list)
+		{
+			list_free_deep(reindex_list);
+			reindex_list = NIL;
 		}
 	}
 }
@@ -3003,7 +3018,7 @@ o_parse_compress(const char *value)
 }
 
 void
-o_rewrite_cleanup(void)
+o_ddl_cleanup(void)
 {
 	if (drop_index_list)
 	{

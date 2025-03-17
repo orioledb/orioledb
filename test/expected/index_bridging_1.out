@@ -3,6 +3,7 @@ SET SESSION search_path = 'index_bridging';
 CREATE EXTENSION orioledb;
 \set VERBOSITY terse
 CREATE EXTENSION pageinspect;
+ERROR:  extension "pageinspect" is not available
 \set VERBOSITY default
 CREATE TABLE o_test_ix_ams (
 	i int NOT NULL,
@@ -121,11 +122,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
-(1 row)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 \d+ o_test_ix_ams
                             Table "index_bridging.o_test_ix_ams"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -166,11 +166,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
-(1 row)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -238,12 +237,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
-(2 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -355,12 +352,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
-(2 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -452,13 +447,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
- (0,3) | (0,3) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -587,13 +579,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
- (0,3) | (0,3) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -731,13 +720,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
- (0,3) | (0,3) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -809,13 +795,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
- (0,3) | (0,3) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -906,13 +889,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
- (0,3) | (0,3) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -968,13 +948,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,1) | (0,1) | 
- (0,2) | (0,2) | 
- (0,3) | (0,3) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -998,13 +975,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,4) | (0,4) | 
- (0,5) | (0,5) | 
- (0,6) | (0,6) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix1', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -1053,13 +1027,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,4) | (0,4) | 
- (0,5) | (0,5) | 
- (0,6) | (0,6) | 
-(3 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix2', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -1143,14 +1114,10 @@ SELECT ctid, htid, tids FROM
 							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
 		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
 	ORDER BY ctid;
- ctid  | htid  | tids 
--------+-------+------
- (0,4) | (0,4) | 
- (0,5) | (0,5) | 
- (0,6) | (0,6) | 
- (0,7) | (0,7) | 
-(4 rows)
-
+ERROR:  function bt_page_items(unknown, integer) does not exist
+LINE 5:    LATERAL bt_page_items('o_test_ix_ams_ix2', p)
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -1211,12 +1178,10 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 (1 row)
 
 SELECT * FROM hash_page_items(get_raw_page('o_test_ix_ams_hash_ix', 1));
- itemoffset | ctid  |    data    
-------------+-------+------------
-          1 | (0,6) | 3454247188
-          2 | (0,4) | 4159514150
-(2 rows)
-
+ERROR:  function get_raw_page(unknown, integer) does not exist
+LINE 1: SELECT * FROM hash_page_items(get_raw_page('o_test_ix_ams_ha...
+                                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -1536,14 +1501,10 @@ SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
 COMMIT;
 CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 SELECT * FROM gist_page_items(get_raw_page('o_test_ix_ams_ix4', 0), 'o_test_ix_ams_ix4');
- itemoffset | ctid  | itemlen | dead |              keys               
-------------+-------+---------+------+---------------------------------
-          1 | (0,4) |      40 | f    | (p)=("(41,5),(41,5)")
-          2 | (0,5) |      40 | f    | (p)=("(401,50),(401,50)")
-          3 | (0,6) |      40 | f    | (p)=("(4001,500),(4001,500)")
-          4 | (0,7) |      40 | f    | (p)=("(4000,5000),(4000,5000)")
-(4 rows)
-
+ERROR:  function get_raw_page(unknown, integer) does not exist
+LINE 1: SELECT * FROM gist_page_items(get_raw_page('o_test_ix_ams_ix...
+                                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -1627,10 +1588,10 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
 (1 row)
 
 SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum_test_p_idx', 0), 'o_briging_vacuum_test_p_idx');
- itemoffset | ctid | itemlen | dead | keys 
-------------+------+---------+------+------
-(0 rows)
-
+ERROR:  function get_raw_page(unknown, integer) does not exist
+LINE 1: SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum...
+                                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 DROP TABLE o_briging_vacuum_test;
 CREATE TABLE o_test_bridging_with_regular_no_pkey (
 	i int NOT NULL,
@@ -1892,6 +1853,7 @@ SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
 
 COMMIT;
 DROP EXTENSION pageinspect;
+ERROR:  extension "pageinspect" does not exist
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
