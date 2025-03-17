@@ -810,11 +810,14 @@ drop_indices_for_rel(Relation rel, bool primary)
 	{
 		Relation	ind;
 		bool		closed = false;
+		OBTOptions *options;
 
 		indexOid = lfirst_oid(index);
 		ind = relation_open(indexOid, AccessShareLock);
+		options = (OBTOptions *) ind->rd_options;
 
-		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
+		if (ind->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging) &&
+			((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary)))
 		{
 			OIndexNumber ix_num;
 			OTableDescr *descr = relation_get_descr(rel);

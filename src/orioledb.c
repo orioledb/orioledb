@@ -1622,7 +1622,7 @@ orioledb_error_cleanup_hook(void)
 	unset_skip_ucm();
 	btree_io_error_cleanup();
 	o_reset_syscache_hooks();
-	o_rewrite_cleanup();
+	o_ddl_cleanup();
 	if (orioledb_s3_mode)
 		s3_headers_error_cleanup();
 	in_nontransactional_truncate = false;
