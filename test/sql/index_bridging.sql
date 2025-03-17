@@ -397,6 +397,45 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
 SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
 COMMIT;
 
+CREATE TABLE o_test_bitmap_scans (
+	i int NOT NULL,
+	j int4[],
+	j2 int4[],
+	p point
+) USING orioledb WITH (index_bridging);
+
+INSERT INTO o_test_bitmap_scans
+	SELECT v, ARRAY[v+17,v+33], ARRAY[v+66,v+95], point(v + 5, v + 5) FROM generate_series(1, 10) v;
+
+CREATE INDEX o_test_bitmap_scans_ix1 on o_test_bitmap_scans using hash (j);
+CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
+CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
+CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
+CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (index_bridging);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[22,38] OR j = ARRAY[24, 40] OR j > ARRAY[25, 25];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[22,38] OR j = ARRAY[24, 40] OR j > ARRAY[25, 25];
+COMMIT;
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans
+		WHERE  (j > ARRAY[25, 41] OR j2 < ARRAY[68,97]) OR p <@ box(point(8,8), point(10, 10));
+SELECT * FROM o_test_bitmap_scans
+	WHERE (j > ARRAY[25, 41] OR j2 < ARRAY[68,97]) OR p <@ box(point(8,8), point(10, 10));
+
+COMMIT;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
