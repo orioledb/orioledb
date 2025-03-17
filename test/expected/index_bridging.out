@@ -1891,11 +1891,114 @@ SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY j;
 (10 rows)
 
 COMMIT;
+CREATE TABLE o_test_bitmap_scans (
+	i int NOT NULL,
+	j int4[],
+	j2 int4[],
+	p point
+) USING orioledb WITH (index_bridging);
+INSERT INTO o_test_bitmap_scans
+	SELECT v, ARRAY[v+17,v+33], ARRAY[v+66,v+95], point(v + 5, v + 5) FROM generate_series(1, 10) v;
+CREATE INDEX o_test_bitmap_scans_ix1 on o_test_bitmap_scans using hash (j);
+CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
+CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
+CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
+CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (index_bridging);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[22,38] OR j = ARRAY[24, 40] OR j > ARRAY[25, 25];
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: ((j = '{22,38}'::integer[]) OR (j = '{24,40}'::integer[]) OR (j > '{25,25}'::integer[]))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
+               Index Cond: (j = '{22,38}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
+               Index Cond: (j = '{24,40}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
+               Index Cond: (j > '{25,25}'::integer[])
+(10 rows)
+
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[22,38] OR j = ARRAY[24, 40] OR j > ARRAY[25, 25];
+ i  |    j    |    j2    |    p    
+----+---------+----------+---------
+  5 | {22,38} | {71,100} | (10,10)
+  7 | {24,40} | {73,102} | (12,12)
+  8 | {25,41} | {74,103} | (13,13)
+  9 | {26,42} | {75,104} | (14,14)
+ 10 | {27,43} | {76,105} | (15,15)
+(5 rows)
+
+COMMIT;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j > '{26,42}'::integer[]) OR (j <@ '{20,20}'::integer[]))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
+               Index Cond: (j = '{19,35}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
+               Index Cond: (j > '{26,42}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
+               Index Cond: (j <@ '{20,20}'::integer[])
+(10 rows)
+
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+ i  |    j    |    j2    |    p    
+----+---------+----------+---------
+  2 | {19,35} | {68,97}  | (7,7)
+  3 | {20,36} | {69,98}  | (8,8)
+ 10 | {27,43} | {76,105} | (15,15)
+(3 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans
+		WHERE  (j > ARRAY[25, 41] OR j2 < ARRAY[68,97]) OR p <@ box(point(8,8), point(10, 10));
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: ((p <@ '(10,10),(8,8)'::box) OR (j2 < '{68,97}'::integer[]) OR (j > '{25,41}'::integer[]))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix4
+               Index Cond: (p <@ '(10,10),(8,8)'::box)
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix5
+               Index Cond: (j2 < '{68,97}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
+               Index Cond: (j > '{25,41}'::integer[])
+(10 rows)
+
+SELECT * FROM o_test_bitmap_scans
+	WHERE (j > ARRAY[25, 41] OR j2 < ARRAY[68,97]) OR p <@ box(point(8,8), point(10, 10));
+ i  |    j    |    j2    |    p    
+----+---------+----------+---------
+  1 | {18,34} | {67,96}  | (6,6)
+  3 | {20,36} | {69,98}  | (8,8)
+  4 | {21,37} | {70,99}  | (9,9)
+  5 | {22,38} | {71,100} | (10,10)
+  9 | {26,42} | {75,104} | (14,14)
+ 10 | {27,43} | {76,105} | (15,15)
+(6 rows)
+
+COMMIT;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
+drop cascades to table o_test_bitmap_scans
 DROP SCHEMA index_bridging CASCADE;
 RESET search_path;
