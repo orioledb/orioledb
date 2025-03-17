@@ -8,6 +8,9 @@ SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
 DATA_built = $(patsubst %_prod.sql,%.sql,$(wildcard sql/*_prod.sql))
 DATA = $(filter-out $(wildcard sql/*_*.sql) $(DATA_built), $(wildcard sql/*sql))
 
+# Requires for toast test
+EXTRA_INSTALL=contrib/test_decoding
+
 EXTRA_CLEAN = include/utils/stopevents_defs.h \
 			  include/utils/stopevents_data.h
 OBJS = src/btree/btree.o \
@@ -238,21 +241,21 @@ installcheck:
 endif
 
 else
-subdir = contrib/orioledb
-top_builddir = ../..
-override PG_CPPFLAGS += -I$(top_srcdir)/$(subdir)/include
+subdir = $(ORIOLEDB_SUBDIR)
+top_builddir = $(PG_BUILDDIR)
+override PG_CPPFLAGS += -I$(CURDIR)/include
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 
 regresscheck: | submake-regress submake-orioledb temp-install
 	$(pg_regress_check) \
-		--temp-config $(top_srcdir)/contrib/orioledb/test/orioledb_regression.conf \
+		--temp-config $(CURDIR)/test/orioledb_regression.conf \
 		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
 isolationcheck: | submake-isolation submake-orioledb temp-install
 	$(pg_isolation_regress_check) \
-		--temp-config $(top_srcdir)/contrib/orioledb/test/orioledb_isolation.conf \
+		--temp-config $(CURDIR)/test/orioledb_isolation.conf \
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
@@ -319,7 +322,7 @@ submake-isolation:
 	$(MAKE) -C $(top_builddir)/src/test/isolation all
 
 submake-orioledb:
-	$(MAKE) -C $(top_builddir)/contrib/orioledb
+	$(MAKE) -C $(CURDIR)
 
 testgrescheck: $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2)
 
