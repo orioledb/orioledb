@@ -1151,7 +1151,7 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 	BTreePageHeader *header;
 	CommitSeqNo rec_csn;
 	BTreeDescr *desc = undoIt->it->context.desc;
-	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
+	UndoLogType undoType PG_USED_FOR_ASSERTS_ONLY = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 	UndoLocation rec_undo_loc,
 				undoLocation;
 	bool		left,
