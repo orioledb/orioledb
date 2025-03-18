@@ -150,7 +150,7 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 1.  `pg_rewind` copies OrioleDB tables completely. Shortly OrioleDB will implement incremental copying of OrioleDB tables using `pg_rewind`.
 2.  OrioleDB supports parallel sequential scan, but not other types of scan.
 3.  OrioleDB doesn't support prepared transactions.
-4.  OrioleDB supports just B-tree indexes. OrioleDB roadmap contains the implementation of analogs of GiST, GIN, and BRIN.
+4.  OrioleDB support of non-btree indexes is experimental yet.
 5.  OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
 6.  Row-level concurrency in OrioleDB has some [differences](../architecture/row-level-concurrency.mdx).
 7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
@@ -180,6 +180,32 @@ The current implementation of block devices support contains memory leaks, resul
 We plan to fix memory leaks soon and develop tools for monitoring free block device space.
 
 In order to activate block device mode, one should specify `orioledb.device_filename` and `orioledb.device_length` GUC parameters. When the `orioledb.use_mmap` GUC parameter is enabled, the block device is connected using `mmap`. This mode is optimal for NVRAM, which directly connects to the data bus. `mmap` mode is not recommended for regular devices because the current `mmap` implementation in Linux has very bug concurrency.
+
+## Experimental support of indexes other than btree
+
+OrioleDB has experimental support for indexes other than btree. For this additional "bridge index" between non-btree
+index and OrioleDB table is automatically added. To use of this feature use ``` WITH (index_bridge) ``` option for
+table creation:
+
+```sql
+-- Create a table
+CREATE TABLE blog_post
+(
+    id int8 NOT NULL,
+    title text NOT NULL,
+    body text NOT NULL,
+    author text NOT NULL,
+    published_at timestamptz  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    views bigint NOT NULL,
+    PRIMARY KEY(id)
+) USING orioledb WITH (index_bridge); -- Define the storage engine and enable using non-btree indexes for a table
+
+-- Create an index
+CREATE INDEX blog_post_title_idx ON blog_post USING GIN (title);
+```
+
+Note: ```index_bridge``` option for indexes is inherited from the parent table with the exception for ```btree``` indexes where
+it is ```off``` by default. Turning on ```index_bridge``` option for ```btree``` indexes is not recommended.
 
 ## Links
 
