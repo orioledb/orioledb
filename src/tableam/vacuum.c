@@ -420,14 +420,12 @@ finish_dead_items(LVRelState *vacrel)
 static void
 add_dead_item(LVRelState *vacrel, ItemPointer item)
 {
-#if PG_VERSION_NUM >= 170000
 	if (vacrel->current_block != ItemPointerGetBlockNumber(item))
 	{
 		finish_dead_items(vacrel);
 		vacrel->current_block = ItemPointerGetBlockNumber(item);
 		vacrel->offsets_count = 0;
 	}
-#endif
 	vacrel->current_offsets[vacrel->offsets_count++] = ItemPointerGetOffsetNumber(item);
 }
 #else
