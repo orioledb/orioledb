@@ -150,7 +150,7 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 1.  `pg_rewind` copies OrioleDB tables completely. Shortly OrioleDB will implement incremental copying of OrioleDB tables using `pg_rewind`.
 2.  OrioleDB supports parallel sequential scan, but not other types of scan.
 3.  OrioleDB doesn't support prepared transactions.
-4.  OrioleDB supports just B-tree indexes. OrioleDB roadmap contains the implementation of analogs of GiST, GIN, and BRIN.
+4.  OrioleDB support of non-btree indexes is experimental yet.
 5.  OrioleDB supports bitmap scan only for int4, int8 and ctid primary keys.
 6.  Row-level concurrency in OrioleDB has some [differences](../architecture/row-level-concurrency.mdx).
 7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
@@ -180,6 +180,29 @@ The current implementation of block devices support contains memory leaks, resul
 We plan to fix memory leaks soon and develop tools for monitoring free block device space.
 
 In order to activate block device mode, one should specify `orioledb.device_filename` and `orioledb.device_length` GUC parameters. When the `orioledb.use_mmap` GUC parameter is enabled, the block device is connected using `mmap`. This mode is optimal for NVRAM, which directly connects to the data bus. `mmap` mode is not recommended for regular devices because the current `mmap` implementation in Linux has very bug concurrency.
+
+## Experimental support of indexes other than btree
+
+OrioleDB has experimental support for indexes other than btree. It is implemented by an internal "bridge index" between non-btree index and OrioleDB table. Bridge index is automatically added when the first non-btree index is built. 
+
+```
+CREATE INDEX blog_post_title_gin_idx ON blog_post USING GIN (title);
+```
+
+Manual build of a bridge index for a table is not necessary but possible:
+```
+ALTER TABLE blog_post SET (index_bridging);
+```
+
+If all existing bridged indexes for a table were removed, the "bridge index" would not be removed automatically. If you don't plan to add non-btree indexes anymore you can delete unnecessary "bridge index" for this table:
+```
+ALTER TABLE blog_post RESET (index_bridging);
+```
+
+Note: btree index could also be built as a bridged index (use only for testing purposes, not recommended) 
+```
+CREATE INDEX blog_post_title_idx ON blog_post USING btree(title) with (orioledb_index = off);
+```
 
 ## Links
 
