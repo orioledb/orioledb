@@ -225,20 +225,32 @@ ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
   ISOLATIONCHECKS += isol_merge
 endif
 
-regresscheck: | install
+# NO_INSTALL=1 skips installation steps before running tests.
+# Useful for CI environments, non-root testing, and package-managed installations.
+# Example: make NO_INSTALL=1 USE_PGXS=1 installcheck
+# See: https://www.postgresql.org/docs/17/extend-pgxs.html#EXTEND-PGXS-NO-INSTALL
+ifdef NO_INSTALL
+INSTALL_REQUIREMENT =
+TEMP_INSTALL_COMMAND =
+else
+INSTALL_REQUIREMENT = | install
+TEMP_INSTALL_COMMAND = $(with_temp_install)
+endif
+
+regresscheck: $(INSTALL_REQUIREMENT)
 	$(pg_regress_check) \
 		--temp-config test/orioledb_regression.conf \
 		$(PG_REGRESS_ARGS) \
 		$(REGRESSCHECKS)
 
-isolationcheck: | install
+isolationcheck: $(INSTALL_REQUIREMENT)
 	$(pg_isolation_regress_check) \
 		--temp-config test/orioledb_isolation.conf \
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4) : | install
-	$(with_temp_install) \
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4): $(INSTALL_REQUIREMENT)
+	$(TEMP_INSTALL_COMMAND) \
 	python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 ifdef IS_DEV
