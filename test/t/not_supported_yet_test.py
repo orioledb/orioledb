@@ -344,7 +344,7 @@ class NotSupportedYetTest(BaseTest):
 			""")
 
 		self.assertErrorMessageEquals(
-		    e, "concurrent index creation not supported "
+		    e, "concurrent index creation is not supported "
 		    "for orioledb tables yet")
 
 		node.safe_psql("""

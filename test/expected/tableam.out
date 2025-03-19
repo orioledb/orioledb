@@ -31,7 +31,7 @@ CREATE TABLE o_tableam1
 ) USING orioledb;
 -- not supported
 CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
-ERROR:  concurrent index creation not supported for orioledb tables yet
+ERROR:  concurrent index creation is not supported for orioledb tables yet
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
 ERROR:  unrecognized parameter "compression"
 ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
