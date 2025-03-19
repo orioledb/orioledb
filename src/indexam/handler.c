@@ -29,7 +29,12 @@
 #include "utils/stopevent.h"
 
 #include "access/amapi.h"
+#include "access/brin.h"
+#include "access/gin_private.h"
+#include "access/gist_private.h"
+#include "access/hash.h"
 #include "access/relation.h"
+#include "access/spgist_private.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
 #include "nodes/pathnodes.h"
@@ -104,6 +109,12 @@ static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 							 bool indexUnchanged,
 							 IndexInfo *indexInfo);
 static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
+
+static bytea *bridged_hashoptions(Datum reloptions, bool validate);
+static bytea *bridged_gistoptions(Datum reloptions, bool validate);
+static bytea *bridged_ginoptions(Datum reloptions, bool validate);
+static bytea *bridged_spgoptions(Datum reloptions, bool validate);
+static bytea *bridged_brinoptions(Datum reloptions, bool validate);
 
 typedef struct BrigedIndexAmRoutine
 {
@@ -224,6 +235,26 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged->routine.ambuild = bridged_ambuild;
 				bridged->routine.aminsertextended = bridged_aminsert;
 				bridged->routine.ambeginscan = bridged_ambeginscan;
+				switch (amhandler)
+				{
+					case F_HASHHANDLER:
+						bridged->routine.amoptions = bridged_hashoptions;
+						break;
+					case F_GISTHANDLER:
+						bridged->routine.amoptions = bridged_gistoptions;
+						break;
+					case F_GINHANDLER:
+						bridged->routine.amoptions = bridged_ginoptions;
+						break;
+					case F_SPGHANDLER:
+						bridged->routine.amoptions = bridged_spgoptions;
+						break;
+					case F_BRINHANDLER:
+						bridged->routine.amoptions = bridged_brinoptions;
+						break;
+					default:
+						break;
+				}
 				MemoryContextSwitchTo(old_mcxt);
 				amroutine = palloc0(sizeof(IndexAmRoutine));
 				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
@@ -1294,7 +1325,6 @@ orioledb_amoptions(Datum reloptions, bool validate)
 		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 		init_local_reloptions(&relopts, sizeof(OBTOptions));
 
-		/* Options from default_reloptions */
 		add_local_int_reloption(&relopts, "fillfactor",
 								"Packs btree index pages only to "
 								"this percentage",
@@ -1321,8 +1351,8 @@ orioledb_amoptions(Datum reloptions, bool validate)
 								   NULL, validate_index_compress, NULL,
 								   offsetof(OBTOptions, compress_offset));
 		add_local_bool_reloption(&relopts, "index_bridging",
-								 "Enable index bridging and using of postgresql btree indices via index bridging "
-								 "instead of orioledb btree indices. Works only if index_bridging option enabled for table",
+								 "Use postgresql index via index bridging. "
+								 "Set automatically if index_bridging enabled for table",
 								 false,
 								 offsetof(OBTOptions, index_bridging));
 		MemoryContextSwitchTo(oldcxt);
@@ -1913,4 +1943,176 @@ bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 	Assert(amroutine != NULL);
 
 	return amroutine->ambeginscan(rel, nkeys, norderbys);
+}
+
+/* Should be kept in sync with hashoptions */
+bytea *
+bridged_hashoptions(Datum reloptions, bool validate)
+{
+	static bool relopts_set = false;
+	static local_relopts relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(HashOptions) + sizeof(bool));
+
+		add_local_int_reloption(&relopts, "fillfactor",
+								"Packs hash index pages only to this percentage",
+								HASH_DEFAULT_FILLFACTOR, HASH_MIN_FILLFACTOR, 100,
+								offsetof(HashOptions, fillfactor));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Use postgresql index via index bridging. "
+								 "Set automatically if index_bridging enabled for table",
+								 false,
+								 sizeof(HashOptions));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
+}
+
+/* values from GistOptBufferingMode */
+static relopt_enum_elt_def gistBufferingOptValues[] =
+{
+	{"auto", GIST_OPTION_BUFFERING_AUTO},
+	{"on", GIST_OPTION_BUFFERING_ON},
+	{"off", GIST_OPTION_BUFFERING_OFF},
+	{(const char *) NULL}		/* list terminator */
+};
+
+/* Should be kept in sync with gistoptions */
+bytea *
+bridged_gistoptions(Datum reloptions, bool validate)
+{
+	static bool relopts_set = false;
+	static local_relopts relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(GiSTOptions) + sizeof(bool));
+
+		add_local_int_reloption(&relopts, "fillfactor",
+								"Packs gist index pages only to this percentage",
+								GIST_DEFAULT_FILLFACTOR, GIST_MIN_FILLFACTOR, 100,
+								offsetof(GiSTOptions, fillfactor));
+		add_local_enum_reloption(&relopts, "buffering",
+								 "Enables buffering build for this GiST index",
+								 gistBufferingOptValues, GIST_OPTION_BUFFERING_AUTO,
+								 gettext_noop("Valid values are \"on\", \"off\", and \"auto\"."),
+								 offsetof(GiSTOptions, buffering_mode));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Use postgresql index via index bridging. "
+								 "Set automatically if index_bridging enabled for table",
+								 false,
+								 sizeof(GiSTOptions));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
+}
+
+/* Should be kept in sync with ginoptions */
+bytea *
+bridged_ginoptions(Datum reloptions, bool validate)
+{
+	static bool relopts_set = false;
+	static local_relopts relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(GinOptions) + sizeof(bool));
+
+		add_local_bool_reloption(&relopts, "fastupdate",
+								 "Enables \"fast update\" feature for this GIN index",
+								 true,
+								 offsetof(GinOptions, useFastUpdate));
+		add_local_int_reloption(&relopts, "gin_pending_list_limit",
+								"Maximum size of the pending list for this GIN index, in kilobytes.",
+								-1, 64, MAX_KILOBYTES,
+								offsetof(GinOptions, pendingListCleanupSize));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Use postgresql index via index bridging. "
+								 "Set automatically if index_bridging enabled for table",
+								 false,
+								 sizeof(GinOptions));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
+}
+
+/* Should be kept in sync with spgoptions */
+bytea *
+bridged_spgoptions(Datum reloptions, bool validate)
+{
+	static bool relopts_set = false;
+	static local_relopts relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(SpGistOptions) + sizeof(bool));
+
+		add_local_int_reloption(&relopts, "fillfactor",
+								"Packs spgist index pages only to this percentage",
+								SPGIST_DEFAULT_FILLFACTOR, SPGIST_MIN_FILLFACTOR, 100,
+								offsetof(SpGistOptions, fillfactor));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Use postgresql index via index bridging. "
+								 "Set automatically if index_bridging enabled for table",
+								 false,
+								 sizeof(SpGistOptions));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
+}
+
+/* Should be kept in sync with brinoptions */
+bytea *
+bridged_brinoptions(Datum reloptions, bool validate)
+{
+	static bool relopts_set = false;
+	static local_relopts relopts = {0};
+
+	if (!relopts_set)
+	{
+		MemoryContext oldcxt;
+
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		init_local_reloptions(&relopts, sizeof(BrinOptions) + sizeof(bool));
+
+		add_local_int_reloption(&relopts, "pages_per_range",
+								"Number of pages that each page range covers in a BRIN index",
+								128, 1, 131072,
+								offsetof(BrinOptions, pagesPerRange));
+		add_local_bool_reloption(&relopts, "autosummarize",
+								 "Enables automatic summarization on this BRIN index",
+								 false,
+								 offsetof(BrinOptions, autosummarize));
+		add_local_bool_reloption(&relopts, "index_bridging",
+								 "Use postgresql index via index bridging. "
+								 "Set automatically if index_bridging enabled for table",
+								 false,
+								 sizeof(BrinOptions));
+		MemoryContextSwitchTo(oldcxt);
+		relopts_set = true;
+	}
+
+	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
 }

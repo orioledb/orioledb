@@ -1185,7 +1185,7 @@ CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
  pk2    | integer |           | not null |         | plain   |              | 
  k      | integer |           |          |         | plain   |              | 
 Indexes:
-    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_hash_ix" hash (k) WITH (index_bridging='true')
     "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
@@ -1377,7 +1377,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  k      | integer   |           |          |         | plain    |              | 
  r      | integer[] |           |          |         | extended |              | 
 Indexes:
-    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_hash_ix" hash (k) WITH (index_bridging='true')
     "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
@@ -1448,7 +1448,7 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  k      | integer   |           |          |         | plain    |              | 
  r      | integer[] |           |          |         | extended |              | 
 Indexes:
-    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_hash_ix" hash (k) WITH (index_bridging='true')
     "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
 Options: index_bridging=true
 
@@ -1993,12 +1993,443 @@ SELECT * FROM o_test_bitmap_scans
 (6 rows)
 
 COMMIT;
+CREATE TABLE o_test_index_bridging_options (
+	i int NOT NULL,
+	j int4[],
+	p point
+) USING orioledb WITH (index_bridging);
+CREATE INDEX o_test_index_bridging_options_ix1 ON o_test_index_bridging_options USING btree (i);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (index_bridging);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix3 ON o_test_index_bridging_options USING hash (i);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix4 ON o_test_index_bridging_options USING hash (i) WITH (fillfactor=65);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options USING hash (i) WITH (index_bridging);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options USING gist (p);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options USING gin (j);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options USING spgist (p);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE INDEX o_test_index_bridging_options_ix9 ON o_test_index_bridging_options USING brin (i);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER TABLE o_test_index_bridging_options RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing tables
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER TABLE o_test_index_bridging_options SET (index_bridging);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix3 SET (index_bridging);
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix5 RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix2 RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix1 SET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix6 RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix7 RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix8 RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+ALTER INDEX o_test_index_bridging_options_ix9 RESET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_index_bridging_options
+                    Table "index_bridging.o_test_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_index_bridging_options_ix1" btree (i)
+    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+Options: index_bridging=true
+
+CREATE TABLE o_test_non_index_bridging_options (
+	i int NOT NULL,
+	j int4[],
+	p point
+) USING orioledb;
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+                  Table "index_bridging.o_test_non_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+
+ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing tables
+\d+ o_test_non_index_bridging_options
+                  Table "index_bridging.o_test_non_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+
+CREATE INDEX o_test_non_index_bridging_options_ix1 ON o_test_non_index_bridging_options USING btree (i);
+\d+ o_test_non_index_bridging_options
+                  Table "index_bridging.o_test_non_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_non_index_bridging_options_ix1" btree (i)
+
+CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (index_bridging);
+ERROR:  Cannot use 'index_bridging' on table without 'index_bridging' option
+\d+ o_test_non_index_bridging_options
+                  Table "index_bridging.o_test_non_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_non_index_bridging_options_ix1" btree (i)
+
+ALTER INDEX o_test_non_index_bridging_options_ix1 RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+                  Table "index_bridging.o_test_non_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_non_index_bridging_options_ix1" btree (i)
+
+ALTER INDEX o_test_non_index_bridging_options_ix1 SET (index_bridging);
+ERROR:  Cannot change index_bridging option for existing indices
+\d+ o_test_non_index_bridging_options
+                  Table "index_bridging.o_test_non_index_bridging_options"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer   |           | not null |         | plain    |              | 
+ j      | integer[] |           |          |         | extended |              | 
+ p      | point     |           |          |         | plain    |              | 
+Indexes:
+    "o_test_non_index_bridging_options_ix1" btree (i)
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
 drop cascades to table o_test_bitmap_scans
+drop cascades to table o_test_index_bridging_options
+drop cascades to table o_test_non_index_bridging_options
 DROP SCHEMA index_bridging CASCADE;
 RESET search_path;
