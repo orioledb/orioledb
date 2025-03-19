@@ -1242,7 +1242,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (is_orioledb_rel(rel))
 			{
 				table_close(rel, lockmode);
-				elog(ERROR, "concurrent index creation not supported for orioledb tables yet");
+				elog(ERROR, "concurrent index creation is not supported for orioledb tables yet");
 			}
 			table_close(rel, lockmode);
 		}
