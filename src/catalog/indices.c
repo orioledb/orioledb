@@ -129,7 +129,9 @@ static void build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDes
 static void rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 										Sharedsort **sharedsort, int sortmem,
 										bool progress);
-static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[], uint64 *ctid);
+static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan,
+											 Tuplesortstate **sortstates, bool progress, double *heap_tuples,
+											 double *index_tuples[], uint64 *ctid, uint64 *bridge_ctid);
 
 
 /* copied from tablecmds.c */
@@ -170,7 +172,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 		table_close(toastrel, NoLock);
 	}
 
-	if (ORelOidsIsValid(oTable->bridge_oids))
+	if (oTable->index_bridging)
 	{
 		oTable->bridge_oids.datoid = MyDatabaseId;
 		oTable->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
@@ -201,7 +203,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
 			OBTOptions *options = (OBTOptions *) iRel->rd_options;
 
-			if (iRel->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging))
+			if (iRel->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
 				RelationSetNewRelfilenode(iRel, persistence);
 			index_close(iRel, AccessExclusiveLock);
 		}
@@ -413,7 +415,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		}
 
 		fillfactor = options->bt_options.fillfactor;
-		Assert(!options->index_bridging);
+		Assert(options->orioledb_index);
 	}
 
 	if (index->rd_index->indisprimary)
@@ -1541,7 +1543,7 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 
 	rebuild_indices_worker_heap_scan(btspool->old_descr, btspool->descr,
 									 poscan, btspool->sortstates, false,
-									 &heaptuples, &indtuples, NULL);
+									 &heaptuples, &indtuples, NULL, NULL);
 
 	/* Execute this worker's part of the sort */
 	if (progress)
@@ -1581,7 +1583,7 @@ static void
 rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 								 ParallelOScanDesc poscan, Tuplesortstate **sortstates,
 								 bool progress, double *heap_tuples, double *index_tuples[],
-								 uint64 *ctid)
+								 uint64 *ctid, uint64 *bridge_ctid)
 {
 	void	   *sscan;
 	OIndexDescr *idx;
@@ -1621,10 +1623,19 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 				if (idx->primaryIsCtid)
 				{
 					Assert(ctid);
-					primarySlot->tts_tid.ip_posid = (OffsetNumber) (*ctid);
+					primarySlot->tts_tid.ip_posid = (OffsetNumber) (*ctid + 1);
 					BlockIdSet(&primarySlot->tts_tid.ip_blkid,
-							   (uint32) (*ctid >> 16));
+							   (uint32) ((*ctid + 1) >> 16));
 					(*ctid)++;
+				}
+				if (idx->bridging && bridge_ctid)
+				{
+					OTableSlot *o_slot = (OTableSlot *) primarySlot;
+
+					o_slot->bridge_ctid.ip_posid = (OffsetNumber) (*bridge_ctid + 1);
+					BlockIdSet(&o_slot->bridge_ctid.ip_blkid,
+							   (uint32) ((*bridge_ctid + 1) >> 16));
+					(*bridge_ctid)++;
 				}
 
 				newTup = tts_orioledb_form_orphan_tuple(primarySlot, descr);
@@ -1690,12 +1701,17 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	old_td = &GET_PRIMARY(old_descr)->desc;
 	o_btree_load_shmem(old_td);
 	meta = BTREE_GET_META(old_td);
-	bridge_ctid = pg_atomic_read_u64(&meta->bridge_ctid);
+	if (descr->bridge && old_descr->bridge)
+		bridge_ctid = pg_atomic_read_u64(&meta->bridge_ctid);
+	else
+		bridge_ctid = 0;
 
 	buildstate.btleader = NULL;
 
 	/* Attempt to launch parallel worker scan when required */
-	if (ActiveSnapshotSet() && (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0) && !descr->indices[PrimaryIndexNumber]->primaryIsCtid)
+	if (ActiveSnapshotSet() && (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0) &&
+		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
+		!(descr->bridge && !old_descr->bridge))
 	{
 		btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
 		btspool->o_table = o_table;
@@ -1749,7 +1765,8 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		/* Serial build */
 		rebuild_indices_worker_heap_scan(old_descr, descr, NULL, sortstates,
 										 false, &heap_tuples, &index_tuples,
-										 &ctid);
+										 &ctid,
+										 (descr->bridge && !old_descr->bridge) ? &bridge_ctid : NULL);
 	}
 	else
 	{
@@ -1839,7 +1856,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
 		index_update_stats(tableRelation, true, heap_tuples);
 
-		for (i = PrimaryIndexNumber; i < descr->nIndices; i++)
+		for (i = PrimaryIndexNumber; i < o_table->nindices; i++)
 		{
 			if (i == 0 && result)
 			{

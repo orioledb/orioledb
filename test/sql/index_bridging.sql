@@ -11,7 +11,7 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
-) USING orioledb WITH (index_bridging);
+) USING orioledb;
 
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
 \d+ o_test_ix_ams
@@ -26,7 +26,7 @@ SELECT * FROM o_test_ix_ams;
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
-CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging, deduplicate_items = off);
+CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
 SELECT ctid, htid, tids FROM
 		 generate_series(1,
 						 (SELECT relpages - 1 FROM pg_class
@@ -234,7 +234,7 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams ORDER BY j;
 COMMIT;
 
-CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging, deduplicate_items = off);
+CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (orioledb_index = off, deduplicate_items = off);
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 
@@ -338,7 +338,7 @@ EXPLAIN (COSTS OFF)
 SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 COMMIT;
 
-CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb WITH (index_bridging);
+CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
 INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
 SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
 CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
@@ -356,7 +356,7 @@ CREATE TABLE o_test_bridging_with_regular_no_pkey (
 ) USING orioledb WITH (index_bridging);
 
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
-	o_test_bridging_with_regular_no_pkey using btree (j) WITH (index_bridging);
+	o_test_bridging_with_regular_no_pkey using btree (j) WITH (orioledb_index = off);
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
 	o_test_bridging_with_regular_no_pkey using btree (j);
 
@@ -380,7 +380,7 @@ CREATE TABLE o_test_bridging_with_regular_pkey (
 ) USING orioledb WITH (index_bridging);
 
 CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
-	o_test_bridging_with_regular_pkey using btree (j) WITH (index_bridging);
+	o_test_bridging_with_regular_pkey using btree (j) WITH (orioledb_index = off);
 CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
 	o_test_bridging_with_regular_pkey using btree (k);
 INSERT INTO o_test_bridging_with_regular_pkey
@@ -411,7 +411,7 @@ CREATE INDEX o_test_bitmap_scans_ix1 on o_test_bitmap_scans using hash (j);
 CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
 CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
 CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
-CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (index_bridging);
+CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (orioledb_index = off);
 
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -435,6 +435,59 @@ SELECT * FROM o_test_bitmap_scans
 	WHERE (j > ARRAY[25, 41] OR j2 < ARRAY[68,97]) OR p <@ box(point(8,8), point(10, 10));
 
 COMMIT;
+
+CREATE TABLE o_test_index_bridging_options (
+	i int NOT NULL,
+	j int4[],
+	p point
+) USING orioledb WITH (index_bridging);
+
+CREATE INDEX o_test_index_bridging_options_ix1 ON o_test_index_bridging_options USING btree (i);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix3 ON o_test_index_bridging_options USING hash (i);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix4 ON o_test_index_bridging_options USING hash (i) WITH (fillfactor=65);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options USING gist (p);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options USING gin (j);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options USING spgist (p);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options USING brin (i);
+\d+ o_test_index_bridging_options
+
+ALTER TABLE o_test_index_bridging_options RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER TABLE o_test_index_bridging_options SET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix2 RESET (orioledb_index);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix1 SET (orioledb_index = off);
+\d+ o_test_index_bridging_options
+
+CREATE TABLE o_test_non_index_bridging_options (
+	i int NOT NULL,
+	j int4[],
+	p point
+) USING orioledb;
+
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
+\d+ o_test_non_index_bridging_options
+
+CREATE INDEX o_test_non_index_bridging_options_ix1 ON o_test_non_index_bridging_options USING btree (i);
+\d+ o_test_non_index_bridging_options
+CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+\d+ o_test_non_index_bridging_options
+
+ALTER INDEX o_test_non_index_bridging_options_ix2 RESET (orioledb_index);
+\d+ o_test_non_index_bridging_options
+ALTER INDEX o_test_non_index_bridging_options_ix1 SET (orioledb_index = off);
+\d+ o_test_non_index_bridging_options
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;

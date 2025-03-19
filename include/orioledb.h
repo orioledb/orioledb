@@ -386,7 +386,7 @@ typedef struct OBTOptions
 {
 	BTOptions	bt_options;
 	int			compress_offset;
-	bool		index_bridging;
+	bool		orioledb_index;
 } OBTOptions;
 
 extern int16 o_parse_compress(const char *value);

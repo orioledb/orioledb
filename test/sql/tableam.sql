@@ -28,7 +28,6 @@ CREATE TABLE o_tableam1
 CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
 ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
-CREATE INDEX o_tableam1_ix_hash on o_tableam1 using hash(key);
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 

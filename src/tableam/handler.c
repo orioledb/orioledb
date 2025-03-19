@@ -130,8 +130,8 @@ orioledb_index_fetch_begin(Relation rel)
 	{
 		OBTOptions *options = (OBTOptions *) o_current_index->rd_options;
 
-		o_scan->bridged_tuple = (options && options->index_bridging) ||
-			(o_current_index->rd_rel->relam != BTREE_AM_OID);
+		o_scan->bridged_tuple = (o_current_index->rd_rel->relam != BTREE_AM_OID) ||
+			(options && !options->orioledb_index);
 		o_current_index = NULL;
 	}
 
@@ -816,7 +816,7 @@ drop_indices_for_rel(Relation rel, bool primary)
 		ind = relation_open(indexOid, AccessShareLock);
 		options = (OBTOptions *) ind->rd_options;
 
-		if (ind->rd_rel->relam == BTREE_AM_OID && !(options && options->index_bridging) &&
+		if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index) &&
 			((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary)))
 		{
 			OIndexNumber ix_num;
@@ -953,7 +953,7 @@ orioledb_index_build_range_scan(Relation heapRelation,
 {
 	OBTOptions *options = (OBTOptions *) indexRelation->rd_options;
 
-	if ((options && options->index_bridging) || indexRelation->rd_rel->relam != BTREE_AM_OID)
+	if (indexRelation->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
 	{
 		OTableDescr *descr;
 		BTreeSeqScan *seq_scan;
@@ -1949,7 +1949,7 @@ orioledb_default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 								   offsetof(ORelOptions,
 											toast_compress_offset));
 		add_local_bool_reloption(&relopts, "index_bridging",
-								 "Enables implicit ctid index and ctid column for all indices",
+								 "Enables implicit bridge ctid index and support of non-btree indices via bridging",
 								 false,
 								 offsetof(ORelOptions,
 										  index_bridging));

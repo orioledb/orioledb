@@ -2,12 +2,15 @@
 # coding: utf-8
 
 import re
+import unittest
 
 from .base_test import BaseTest
 
 
 class IndexBridgingTest(BaseTest):
 
+	@unittest.skipIf(not BaseTest.extension_installed("pageinspect"),
+	                 "'pageinspect' is not installed")
 	def test_ctid_overflow(self):
 		node = self.node
 		node.append_conf("orioledb.debug_max_bridge_ctid_blkno=1")
@@ -33,9 +36,9 @@ class IndexBridgingTest(BaseTest):
 			CREATE TABLE o_test (
 				i int NOT NULL,
 				j int
-			) USING orioledb WITH (index_bridging);
+			) USING orioledb;
 
-			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (orioledb_index=off);
 			CREATE INDEX o_test_ix2 on o_test using btree (j);
 		""")
 
@@ -83,6 +86,8 @@ class IndexBridgingTest(BaseTest):
 		    expected_ctids, key=lambda ctid: int(ctid[0][1:-1].split(',')[1]))
 		check(expected_ctids)
 
+	@unittest.skipIf(not BaseTest.extension_installed("pageinspect"),
+	                 "'pageinspect' is not installed")
 	def test_ctid_overflow_two_times(self):
 		node = self.node
 		node.append_conf("orioledb.debug_max_bridge_ctid_blkno=1")
@@ -109,9 +114,9 @@ class IndexBridgingTest(BaseTest):
 				i int NOT NULL,
 				j int,
 				k int
-			) USING orioledb WITH (index_bridging);
+			) USING orioledb;
 
-			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (orioledb_index=off);
 			CREATE INDEX o_test_ix2 on o_test using btree (k);
 		""")
 
@@ -195,7 +200,6 @@ class IndexBridgingTest(BaseTest):
 
 		node.safe_psql("""
 			CREATE EXTENSION orioledb;
-			CREATE EXTENSION pageinspect;
 		""")
 
 		node.safe_psql("""
@@ -203,9 +207,9 @@ class IndexBridgingTest(BaseTest):
 				i int NOT NULL,
 				j int,
 				k int
-			) USING orioledb WITH (index_bridging);
+			) USING orioledb;
 
-			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (orioledb_index=off);
 			CREATE INDEX o_test_ix2 on o_test using btree (k);
 		""")
 

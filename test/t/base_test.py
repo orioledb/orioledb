@@ -209,6 +209,18 @@ class BaseTest(unittest.TestCase):
 					return True
 		return False
 
+	@staticmethod
+	def extension_installed(name: str) -> bool:
+		if sys.platform.startswith("win") or sys.platform.startswith("cygwin"):
+			dlsuffix = 'dll'
+		elif sys.platform.startswith("darwin"):
+			dlsuffix = 'dylib'
+		else:
+			dlsuffix = 'so'
+		pkg_lib_dir = get_pg_config()["PKGLIBDIR"]
+		path = os.path.join(pkg_lib_dir, f'{name}.{dlsuffix}')
+		return os.path.isfile(path)
+
 	def catchup_orioledb(self, replica):
 		# wait for synchronization
 		replica.catchup()

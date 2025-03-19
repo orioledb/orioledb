@@ -1056,7 +1056,7 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 	{
 		bridge_data.bridge_iptr = &oslot->bridge_ctid;
 		bridge_data.is_pkey = false;
-		bridge_data.attnum = idx->desc.type == oIndexBridge ? 1 : ctid_off + 1;
+		bridge_data.attnum = 1;
 		bridge_data_arg = &bridge_data;
 	}
 

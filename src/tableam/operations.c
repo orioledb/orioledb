@@ -743,7 +743,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				OBTOptions *options = (OBTOptions *) index_rel->rd_options;
 
-				intresting = options && options->index_bridging;
+				intresting = options && !options->orioledb_index;
 			}
 			if (intresting)
 			{

@@ -262,7 +262,7 @@ vac_open_bridged_indexes(Relation relation, LOCKMODE lockmode,
 		{
 			OBTOptions *options = (OBTOptions *) indrel->rd_options;
 
-			if (!(options && options->index_bridging))
+			if (!(options && !options->orioledb_index))
 			{
 				index_close(indrel, lockmode);
 				continue;
