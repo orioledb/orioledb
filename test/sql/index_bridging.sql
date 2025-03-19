@@ -436,6 +436,73 @@ SELECT * FROM o_test_bitmap_scans
 
 COMMIT;
 
+CREATE TABLE o_test_index_bridging_options (
+	i int NOT NULL,
+	j int4[],
+	p point
+) USING orioledb WITH (index_bridging);
+
+CREATE INDEX o_test_index_bridging_options_ix1 ON o_test_index_bridging_options USING btree (i);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (index_bridging);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix3 ON o_test_index_bridging_options USING hash (i);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix4 ON o_test_index_bridging_options USING hash (i) WITH (fillfactor=65);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options USING hash (i) WITH (index_bridging);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options USING gist (p);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options USING gin (j);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options USING spgist (p);
+\d+ o_test_index_bridging_options
+CREATE INDEX o_test_index_bridging_options_ix9 ON o_test_index_bridging_options USING brin (i);
+\d+ o_test_index_bridging_options
+
+ALTER TABLE o_test_index_bridging_options RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER TABLE o_test_index_bridging_options SET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix3 SET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix5 RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix2 RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix1 SET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix6 RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix7 RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix8 RESET (index_bridging);
+\d+ o_test_index_bridging_options
+ALTER INDEX o_test_index_bridging_options_ix9 RESET (index_bridging);
+\d+ o_test_index_bridging_options
+
+CREATE TABLE o_test_non_index_bridging_options (
+	i int NOT NULL,
+	j int4[],
+	p point
+) USING orioledb;
+
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
+\d+ o_test_non_index_bridging_options
+
+CREATE INDEX o_test_non_index_bridging_options_ix1 ON o_test_non_index_bridging_options USING btree (i);
+\d+ o_test_non_index_bridging_options
+CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (index_bridging);
+\d+ o_test_non_index_bridging_options
+
+ALTER INDEX o_test_non_index_bridging_options_ix1 RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+ALTER INDEX o_test_non_index_bridging_options_ix1 SET (index_bridging);
+\d+ o_test_non_index_bridging_options
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

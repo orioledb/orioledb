@@ -1671,7 +1671,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 					options = (OBTOptions *) index->rd_options;
 
-					if ((options && options->index_bridging) || index->rd_rel->relam != BTREE_AM_OID)
+					if (index->rd_rel->relam != BTREE_AM_OID || (options && options->index_bridging))
 					{
 						index_close(index, AccessShareLock);
 						continue;

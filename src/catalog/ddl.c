@@ -28,8 +28,13 @@
 #include "utils/compress.h"
 #include "recovery/wal.h"
 
+#include "access/brin.h"
+#include "access/gin_private.h"
+#include "access/gist_private.h"
+#include "access/hash.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
+#include "access/spgist_private.h"
 #include "access/tableam.h"
 #include "access/toast_compression.h"
 #include "access/transam.h"
@@ -2135,7 +2140,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 		{
 			OBTOptions *options = (OBTOptions *) ind->rd_options;
 
-			if ((options && options->index_bridging) || ind->rd_rel->relam != BTREE_AM_OID)
+			if (ind->rd_rel->relam != BTREE_AM_OID || (options && options->index_bridging))
 			{
 				ReindexParams reindex_params = {0};
 
@@ -2173,6 +2178,69 @@ redefine_pkey_for_rel(Relation rel)
 	redefine_indices(rel, o_table, true);
 
 	o_table_free(o_table);
+}
+
+static void
+index_set_index_bridging(Relation index)
+{
+	Oid			relid;
+	Relation	pgclass;
+	HeapTuple	tuple;
+	HeapTuple	newtuple;
+	Datum		datum;
+	bool		isnull;
+	Datum		newOptions;
+	Datum		repl_val[Natts_pg_class];
+	bool		repl_null[Natts_pg_class];
+	bool		repl_repl[Natts_pg_class];
+	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+	DefElem    *bridging_def;
+
+	pgclass = table_open(RelationRelationId, RowExclusiveLock);
+
+	/* Fetch heap tuple */
+	relid = RelationGetRelid(index);
+	tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for relation %u", relid);
+
+
+	/* Get the old reloptions */
+	datum = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
+
+	/* Generate new proposed reloptions (text array) */
+	bridging_def = makeDefElem("index_bridging", (Node *) makeBoolean(true), -1);
+	newOptions = transformRelOptions(isnull ? (Datum) 0 : datum,
+									 list_make1(bridging_def), NULL, validnsps, false, false);
+
+	/* Validate */
+	(void) index_reloptions(index->rd_indam->amoptions, newOptions, true);
+
+	/*
+	 * All we need do here is update the pg_class row; the new options will be
+	 * propagated into relcaches during post-commit cache inval.
+	 */
+	memset(repl_val, 0, sizeof(repl_val));
+	memset(repl_null, false, sizeof(repl_null));
+	memset(repl_repl, false, sizeof(repl_repl));
+
+	if (newOptions != (Datum) 0)
+		repl_val[Anum_pg_class_reloptions - 1] = newOptions;
+	else
+		repl_null[Anum_pg_class_reloptions - 1] = true;
+
+	repl_repl[Anum_pg_class_reloptions - 1] = true;
+
+	newtuple = heap_modify_tuple(tuple, RelationGetDescr(pgclass),
+								 repl_val, repl_null, repl_repl);
+
+	CatalogTupleUpdate(pgclass, &newtuple->t_self, newtuple);
+
+	heap_freetuple(newtuple);
+
+	ReleaseSysCache(tuple);
+
+	table_close(pgclass, RowExclusiveLock);
 }
 
 static void
@@ -2532,6 +2600,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 											errdetail("this feature is only for testing"));
 							}
 						}
+						else
+							index_set_index_bridging(rel);
 
 						if (define)
 						{
@@ -2740,7 +2810,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						elog(NOTICE, "orioledb table %s not found",
 							 RelationGetRelationName(tbl));
 					}
-					else
+					else if (rel->rd_rel->relam == BTREE_AM_OID &&
+							 !(rel->rd_options &&
+							   ((OBTOptions *) rel->rd_options)->index_bridging))
 					{
 						int			ix_num;
 						OSnapshot	oSnapshot;
@@ -2749,13 +2821,15 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 						ORelOidsSetFromRel(idx_oids, rel);
+						CommandCounterIncrement();
+						if (rel->rd_options && ((OBTOptions *) rel->rd_options)->index_bridging)
+							elog(ERROR, "Cannot change index_bridging option for existing indices");
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							OTableIndex *index = &o_table->indices[ix_num];
 
 							if (ORelOidsIsEqual(index->oids, idx_oids))
 							{
-								CommandCounterIncrement();
 								namestrcpy(&index->name,
 										   rel->rd_rel->relname.data);
 								if (options)
@@ -2779,6 +2853,66 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 													   O_INVALIDATE_OIDS_ON_ABORT);
 						}
 						o_table_free(o_table);
+					}
+					else if (rel->rd_options)
+					{
+						bool		old_index_bridging = false;
+						bool		new_index_bridging = false;
+
+						switch (rel->rd_amhandler)
+						{
+							case F_BTHANDLER:
+								old_index_bridging = ((OBTOptions *) rel->rd_options)->index_bridging;
+								CommandCounterIncrement();
+								new_index_bridging = rel->rd_options &&
+									((OBTOptions *) rel->rd_options)->index_bridging;
+								break;
+							case F_HASHHANDLER:
+								old_index_bridging = *(bool *) (((Pointer) rel->rd_options) +
+																sizeof(HashOptions));
+								CommandCounterIncrement();
+								new_index_bridging = rel->rd_options &&
+									*(bool *) (((Pointer) rel->rd_options) +
+											   sizeof(HashOptions));
+								break;
+							case F_GISTHANDLER:
+								old_index_bridging = *(bool *) (((Pointer) rel->rd_options) +
+																sizeof(GiSTOptions));
+								CommandCounterIncrement();
+								new_index_bridging = rel->rd_options &&
+									*(bool *) (((Pointer) rel->rd_options) +
+											   sizeof(GiSTOptions));
+								break;
+							case F_SPGHANDLER:
+								old_index_bridging = *(bool *) (((Pointer) rel->rd_options) +
+																sizeof(SpGistOptions));
+								CommandCounterIncrement();
+								new_index_bridging = rel->rd_options &&
+									*(bool *) (((Pointer) rel->rd_options) +
+											   sizeof(SpGistOptions));
+								break;
+							case F_GINHANDLER:
+								old_index_bridging = *(bool *) (((Pointer) rel->rd_options) +
+																sizeof(GinOptions));
+								CommandCounterIncrement();
+								new_index_bridging = rel->rd_options &&
+									*(bool *) (((Pointer) rel->rd_options) +
+											   sizeof(GinOptions));
+								break;
+							case F_BRINHANDLER:
+								old_index_bridging = *(bool *) (((Pointer) rel->rd_options) +
+																sizeof(BrinOptions));
+								CommandCounterIncrement();
+								new_index_bridging = rel->rd_options &&
+									*(bool *) (((Pointer) rel->rd_options) +
+											   sizeof(BrinOptions));
+								break;
+							default:
+								break;
+						}
+						if (old_index_bridging != new_index_bridging)
+							elog(ERROR, "Cannot change index_bridging option for existing indices");
+
 					}
 				}
 				relation_close(tbl, AccessShareLock);
@@ -2862,6 +2996,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OTableDescr *descr;
 					ORelOptions *options = (ORelOptions *) tbl->rd_options;
 					uint8		new_fillfactor;
+					bool		new_index_bridging;
 
 					ORelOidsSetFromRel(oids, tbl);
 					descr = o_fetch_table_descr(oids);
@@ -2872,6 +3007,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					else
 						new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
 
+					if (options)
+						new_index_bridging = options->index_bridging;
+					else
+						new_index_bridging = false;
+
+					if (GET_PRIMARY(descr)->bridging != new_index_bridging)
+						elog(ERROR, "Cannot change index_bridging option for existing tables");
 					if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
 						set_toast_oids_and_options(tbl, rel, true);
 				}
