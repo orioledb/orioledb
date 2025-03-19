@@ -1417,13 +1417,26 @@ Datum
 orioledb_tbl_indices(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
-	bool		internal = PG_GETARG_BOOL(1);
-	bool		oids = PG_GETARG_BOOL(2);
+	bool		internal = false;
+	bool		oids = false;
 	Relation	rel;
 	OTableDescr *descr;
 	StringInfoData buf;
 	text	   *result;
 	int			i;
+
+	if (PG_NARGS() == 3)
+	{
+		internal = PG_ARGISNULL(1) ? false : PG_GETARG_BOOL(1);
+		oids = PG_ARGISNULL(2) ? false : PG_GETARG_BOOL(2);
+	}
+	else if (PG_NARGS() != 1)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+				 errmsg("orioledb_tbl_indices can be defined only as "
+						"orioledb_tbl_indices(oid) or orioledb_tbl_indices(oid, bool, bool)")));
+	}
 
 	orioledb_check_shmem();
 
