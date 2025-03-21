@@ -2,12 +2,15 @@
 # coding: utf-8
 
 import re
+import unittest
 
 from .base_test import BaseTest
 
 
 class IndexBridgingTest(BaseTest):
 
+	@unittest.skipIf(not BaseTest.extension_installed("pageinspect"),
+	                 "'pageinspect' is not installed")
 	def test_ctid_overflow(self):
 		node = self.node
 		node.append_conf("orioledb.debug_max_bridge_ctid_blkno=1")
@@ -83,6 +86,8 @@ class IndexBridgingTest(BaseTest):
 		    expected_ctids, key=lambda ctid: int(ctid[0][1:-1].split(',')[1]))
 		check(expected_ctids)
 
+	@unittest.skipIf(not BaseTest.extension_installed("pageinspect"),
+	                 "'pageinspect' is not installed")
 	def test_ctid_overflow_two_times(self):
 		node = self.node
 		node.append_conf("orioledb.debug_max_bridge_ctid_blkno=1")
@@ -195,7 +200,6 @@ class IndexBridgingTest(BaseTest):
 
 		node.safe_psql("""
 			CREATE EXTENSION orioledb;
-			CREATE EXTENSION pageinspect;
 		""")
 
 		node.safe_psql("""

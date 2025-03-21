@@ -12,19 +12,6 @@ from testgres.utils import get_pg_config
 
 from .base_test import BaseTest
 
-
-def extension_installed(name: str) -> bool:
-	if sys.platform.startswith("win") or sys.platform.startswith("cygwin"):
-		dlsuffix = 'dll'
-	elif sys.platform.startswith("darwin"):
-		dlsuffix = 'dylib'
-	else:
-		dlsuffix = 'so'
-	pkg_lib_dir = get_pg_config()["PKGLIBDIR"]
-	path = os.path.join(pkg_lib_dir, f'{name}.{dlsuffix}')
-	return os.path.isfile(path)
-
-
 class LogicalTest(BaseTest):
 
 	def setUp(self):
@@ -40,7 +27,7 @@ class LogicalTest(BaseTest):
 			result = result + line + "\n"
 		return result
 
-	@unittest.skipIf(not extension_installed("test_decoding"),
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_simple(self):
 		node = self.node
@@ -70,7 +57,7 @@ class LogicalTest(BaseTest):
 		    "BEGIN\ntable public.data: INSERT: id[integer]:1 data[text]:'1'\ntable public.data: INSERT: id[integer]:2 data[text]:'2'\nCOMMIT\n"
 		)
 
-	@unittest.skipIf(not extension_installed("wal2json"),
+	@unittest.skipIf(not BaseTest.extension_installed("wal2json"),
 	                 "'wal2json' is not installed")
 	def test_wal2json(self):
 		node = self.node
