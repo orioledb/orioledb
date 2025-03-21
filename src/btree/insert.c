@@ -57,7 +57,7 @@ typedef struct BTreeInsertStackItem
 
 /* Fills BTreeInsertStackItem as a downlink of current incomplete split. */
 static void o_btree_split_fill_downlink_item(BTreeInsertStackItem *insert_item,
-											 OInMemoryBlkno left_blkno,
+											 BTreePageContext *leftPageContext,
 											 bool lock);
 
 /*
@@ -111,7 +111,7 @@ o_btree_split_is_incomplete(OInMemoryBlkno left_blkno, bool *relocked)
 
 static void
 o_btree_split_fill_downlink_item_with_key(BTreeInsertStackItem *insert_item,
-										  OInMemoryBlkno left_blkno,
+										  BTreePageContext *leftPageContext,
 										  bool lock,
 										  OTuple key,
 										  LocationIndex keylen,
@@ -119,7 +119,7 @@ o_btree_split_fill_downlink_item_with_key(BTreeInsertStackItem *insert_item,
 {
 	BTreePageHeader *header;
 	OInMemoryBlkno right_blkno;
-	Page		left_page = O_GET_IN_MEMORY_PAGE(left_blkno),
+	Page		left_page = leftPageContext->page,
 				right_page;
 
 	header = (BTreePageHeader *) left_page;
@@ -147,22 +147,21 @@ o_btree_split_fill_downlink_item_with_key(BTreeInsertStackItem *insert_item,
 
 static void
 o_btree_split_fill_downlink_item(BTreeInsertStackItem *insert_item,
-								 OInMemoryBlkno left_blkno,
+								 BTreePageContext *leftPageContext,
 								 bool lock)
 {
-	Page		left_page = O_GET_IN_MEMORY_PAGE(left_blkno);
 	OTuple		hikey;
 	OTuple		key;
 	LocationIndex keylen;
 	BTreeNonLeafTuphdr *internal_header = palloc(sizeof(BTreeNonLeafTuphdr));
 
-	keylen = BTREE_PAGE_GET_HIKEY_SIZE(left_page);
-	BTREE_PAGE_GET_HIKEY(hikey, left_page);
+	hikey = btree_get_hikey(leftPageContext);
+	keylen = btree_get_tuple_size(leftPageContext->hikeyChunk, hikey);
 	key.data = (Pointer) palloc(keylen);
 	key.formatFlags = hikey.formatFlags;
 	memcpy(key.data, hikey.data, keylen);
 
-	o_btree_split_fill_downlink_item_with_key(insert_item, left_blkno, lock,
+	o_btree_split_fill_downlink_item_with_key(insert_item, leftPageContext, lock,
 											  key, keylen, internal_header);
 }
 
@@ -249,6 +248,7 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 {
 	BTreeInsertStackItem iitem;
 	OBTreeFindPageContext context;
+	BTreePageContext leftPageContext;
 	Page		p = O_GET_IN_MEMORY_PAGE(left_blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	OFixedKey	key;
@@ -257,8 +257,12 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	Assert(O_PAGE_IS(p, BROKEN_SPLIT));
 	Assert(left_blkno != desc->rootInfo.rootPageBlkno);
 
+	btree_page_context_init(&leftPageContext, desc);
+	btree_page_context_set(&leftPageContext, p);
+
 	iitem.context = &context;
-	copy_fixed_hikey(desc, &key, p);
+	btree_copy_fixed_hikey(&leftPageContext, &key);
+
 	START_CRIT_SECTION();
 	header->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
 
@@ -268,6 +272,7 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	 */
 	btree_register_inprogress_split(left_blkno);
 	END_CRIT_SECTION();
+
 	unlock_page(left_blkno);
 
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 2);
@@ -275,14 +280,18 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	init_page_find_context(iitem.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
 	find_page(iitem.context, &key, BTreeKeyPageHiKey, level + 1);
+
 	iitem.left_blkno = left_blkno;
 	iitem.replace = false;
 	iitem.refind = false;
 	iitem.level = level + 1;
 	iitem.next = NULL;
 
-	o_btree_split_fill_downlink_item(&iitem, left_blkno, true);
+	o_btree_split_fill_downlink_item(&iitem, &leftPageContext, true);
 	o_btree_insert_item(&iitem, PPOOL_RESERVE_FIND);
+
+	btree_page_context_release(&leftPageContext);
+	release_page_find_context(iitem.context);
 }
 
 /*
@@ -320,12 +329,16 @@ static BTreeInsertStackItem *
 o_btree_insert_stack_push_split_item(BTreeInsertStackItem *insert_item,
 									 OInMemoryBlkno left_blkno)
 {
+	BTreePageContext pageContext;
 	Page		p = O_GET_IN_MEMORY_PAGE(left_blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	BTreeInsertStackItem *new_item = palloc(sizeof(BTreeInsertStackItem));
 
 	/* Should not be here. */
 	Assert(insert_item->context->index != 0);
+
+	btree_page_context_init(&pageContext, insert_item->context->desc);
+	btree_page_context_set(&pageContext, p);
 
 	/*
 	 * The incomplete split found. We should fill a new insert item which will
@@ -339,18 +352,21 @@ o_btree_insert_stack_push_split_item(BTreeInsertStackItem *insert_item,
 	new_item->level = insert_item->level + 1;
 	new_item->next = insert_item;
 
-	o_btree_split_fill_downlink_item(new_item, left_blkno, true);
+	o_btree_split_fill_downlink_item(new_item, &pageContext, true);
 
 	/* Removes broken flag and unlock page. */
 	START_CRIT_SECTION();
 	header->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
 	btree_register_inprogress_split(left_blkno);
 	END_CRIT_SECTION();
+
 	unlock_page(left_blkno);
 	insert_item->refind = true;
 
 	new_item->left_blkno = left_blkno;
 	new_item->refind = true;
+
+	btree_page_context_release(&pageContext);
 
 	return new_item;
 }
@@ -367,6 +383,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 	Pointer		ptr;
 	bool		place_right = false;
 	BTreePageItemLocator loc;
+	BTreePageContext pageContext;
 
 	Assert(insert_item != NULL);
 
@@ -384,6 +401,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 	 *    incorrect.
 	 */
 	Assert(!(insert_item->context->flags & BTREE_PAGE_FIND_FIX_LEAF_SPLIT));
+
+	btree_page_context_init(&pageContext, desc);
 
 	while (insert_item != NULL)
 	{
@@ -474,6 +493,9 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 		Assert(OInMemoryBlknoIsValid(blkno));
 		p = O_GET_IN_MEMORY_PAGE(blkno);
+
+		btree_page_context_set(&pageContext, p);
+		btree_page_context_hikey_init(&pageContext);
 
 		if (insert_item->level > 0)
 		{
@@ -614,6 +636,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
 			BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
 
+			btree_page_context_invalidate(&pageContext);
+
 			if (insert_item->left_blkno != OInvalidInMemoryBlkno)
 			{
 				btree_split_mark_finished(insert_item->left_blkno, true, true);
@@ -651,7 +675,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				needsUndo = false;
 
 			if (STOPEVENTS_ENABLED())
-				params = btree_page_stopevent_params(desc, p);
+				params = btree_page_stopevent_params(&pageContext);
 
 			offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
@@ -686,7 +710,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			if (checkpoint_state->stack[insert_item->level].hikeyBlkno == blkno)
 				checkpoint_state->stack[insert_item->level].hikeyBlkno = right_blkno;
 
-			perform_page_split(desc, blkno, right_blkno,
+			perform_page_split(blkno, right_blkno, &pageContext,
 							   left_count, split_key, split_key_len,
 							   &offset, &place_right,
 							   insert_item->tupheader,
@@ -707,7 +731,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 			tupheaderlen = BTreeNonLeafTuphdrSize;
 
-			o_btree_split_fill_downlink_item_with_key(insert_item, blkno, false,
+			o_btree_split_fill_downlink_item_with_key(insert_item, &pageContext,
+													  false,
 													  split_key, split_key_len,
 													  internal_header);
 
@@ -759,6 +784,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 		}
 	}
 	ppool_release_reserved(desc->ppool, PPOOL_KIND_GET_MASK(reserve_kind));
+
+	btree_page_context_release(&pageContext);
 }
 
 void

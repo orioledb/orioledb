@@ -81,8 +81,8 @@ extern OBTreeModifyResult o_btree_insert_unique(BTreeDescr *desc,
 												BTreeKeyType tupleType,
 												Pointer key,
 												BTreeKeyType keyType,
-												OXid my_oxid, CommitSeqNo my_csn,
-												RowLockMode lock_mode,
+												OXid opOxid, CommitSeqNo opCsn,
+												RowLockMode lockMode,
 												BTreeLocationHint *hint,
 												BTreeModifyCallbackInfo *callbackInfo);
 

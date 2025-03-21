@@ -16,7 +16,116 @@
 
 #include "btree/chunk_ops.h"
 
+#include "utils/memdebug.h"
+
 const BTreeChunkOps BTreeHiKeyChunkOps;
+
+static inline uint16 htc_get_item_size(BTreeHiKeyChunkDesc *hikeyChunk,
+									   OffsetNumber itemOffset);
+
+/*
+ * Page utility functions.
+ */
+
+OTuple
+btree_get_hikey(BTreePageContext *pageContext)
+{
+	BTreeChunkDesc *chunk;
+	OTuple		tuple;
+	bool		needsFree;
+
+	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
+
+	btree_page_context_hikey_init(pageContext);
+	chunk = pageContext->hikeyChunk;
+
+	Assert(chunk->chunkItemsCount > 0);
+
+	chunk->ops->read_tuple(chunk, NULL, NULL, chunk->chunkItemsCount - 1,
+						   NULL, &tuple, &needsFree);
+	Assert(!needsFree);
+
+	return tuple;
+}
+
+int
+btree_get_hikey_size(BTreePageContext *pageContext)
+{
+	BTreeChunkDesc *chunk;
+	BTreeHiKeyChunkDesc *hikeyChunk;
+
+	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
+
+	btree_page_context_hikey_init(pageContext);
+	chunk = pageContext->hikeyChunk;
+	hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
+
+	Assert(chunk->chunkItemsCount > 0);
+
+	return htc_get_item_size(hikeyChunk, chunk->chunkItemsCount - 1);
+}
+
+void
+btree_copy_fixed_hikey(BTreePageContext *pageContext, OFixedKey *dst)
+{
+	OTuple		src;
+
+	src = btree_get_hikey(pageContext);
+	copy_fixed_key(pageContext->treeDesc, dst, src);
+}
+
+void
+btree_copy_fixed_shmem_hikey(BTreePageContext *pageContext, OFixedShmemKey *dst)
+{
+	OTuple		src;
+
+	src = btree_get_hikey(pageContext);
+	copy_fixed_shmem_key(pageContext->treeDesc, dst, src);
+}
+
+OTuple
+btree_read_hikey(BTreePageContext *pageContext, OffsetNumber itemOffset)
+{
+	OTuple		tuple;
+	bool		needsFree;
+
+	btree_page_context_hikey_init(pageContext);
+
+	pageContext->hikeyChunk->ops->read_tuple(pageContext->hikeyChunk, NULL, NULL,
+											 itemOffset, NULL, &tuple, &needsFree);
+	Assert(!needsFree);
+
+	return tuple;
+}
+
+bool
+btree_fits_hikey(BTreePageContext *pageContext, LocationIndex newHikeySize)
+{
+	BTreePageHeader *header = (BTreePageHeader *) pageContext->page;
+	LocationIndex dataShift,
+				hikeyLocation,
+				dataLocation;
+
+	Assert(newHikeySize = MAXALIGN(newHikeySize));
+	Assert(header->chunksCount == 1);
+
+	hikeyLocation = SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
+	dataLocation = SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation);
+	if (hikeyLocation + newHikeySize <= dataLocation)
+		return true;
+
+	dataShift = hikeyLocation + newHikeySize - dataLocation;
+	return (header->dataSize + dataShift <= ORIOLEDB_BLCKSZ);
+}
+
+/*
+ * Utility functions
+ */
+uint16
+btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple)
+{
+	return chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
+}
 
 /*
  * Implementation of hikey chunks.
@@ -496,6 +605,8 @@ htc_builder_finish(BTreeChunkBuilder *chunkBuilder, BTreeChunkDesc *chunk)
 
 		dataShift += chunkBuilder->chunkItems[i].size;
 	}
+
+	VALGRIND_CHECK_MEM_IS_DEFINED(chunk->chunkData, chunk->chunkDataSize);
 }
 
 const BTreeChunkOps BTreeHiKeyChunkOps = {

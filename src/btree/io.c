@@ -20,6 +20,7 @@
 
 #include "orioledb.h"
 
+#include "btree/chunk_ops.h"
 #include "btree/io.h"
 #include "btree/find.h"
 #include "btree/merge.h"
@@ -1339,6 +1340,7 @@ load_page(OBTreeFindPageContext *context)
 	BTreeDescr *desc = context->desc;
 	OInMemoryBlkno parent_blkno;
 	Page		parent_page;
+	BTreePageContext parentPageContext;
 	BTreePageItemLocator *parent_loc;
 	CommitSeqNo csn;
 	uint64		downlink;
@@ -1350,6 +1352,7 @@ load_page(OBTreeFindPageContext *context)
 	OFixedKey	target_hikey;
 	int			target_level;
 	Page		page;
+	BTreePageContext pageContext;
 	char		buf[ORIOLEDB_BLCKSZ];
 	bool		was_modify;
 	bool		was_downlink_location;
@@ -1363,6 +1366,9 @@ load_page(OBTreeFindPageContext *context)
 	parent_loc = &context->items[context_index].locator;
 	parent_change_count = context->items[context_index].pageChangeCount;
 	parent_page = O_GET_IN_MEMORY_PAGE(parent_blkno);
+
+	btree_page_context_init(&parentPageContext, desc);
+	btree_page_context_set(&parentPageContext, parent_page);
 
 	ionum = assign_io_num(parent_blkno, BTREE_PAGE_LOCATOR_GET_OFFSET(parent_page, parent_loc));
 
@@ -1381,7 +1387,7 @@ load_page(OBTreeFindPageContext *context)
 	if (BTREE_PAGE_LOCATOR_IS_VALID(parent_page, parent_loc))
 		copy_fixed_page_key(desc, &target_hikey, parent_page, parent_loc);
 	else if (!O_PAGE_IS(parent_page, RIGHTMOST))
-		copy_fixed_hikey(desc, &target_hikey, parent_page);
+		btree_copy_fixed_hikey(&parentPageContext, &target_hikey);
 	else
 		clear_fixed_key(&target_hikey);
 	target_level = PAGE_GET_LEVEL(parent_page) - 1;
@@ -1418,6 +1424,10 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
+
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, page);
+
 	page_change_usage_count(&desc->ppool->ucm, blkno,
 							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
 	page_desc->type = parent_page_desc->type;
@@ -1451,7 +1461,7 @@ load_page(OBTreeFindPageContext *context)
 	{
 		Jsonb	   *params;
 
-		params = btree_page_stopevent_params(desc, page);
+		params = btree_page_stopevent_params(&pageContext);
 		STOPEVENT(STOPEVENT_LOAD_PAGE_REFIND, params);
 	}
 
@@ -1497,10 +1507,10 @@ load_page(OBTreeFindPageContext *context)
 	{
 		OTuple		hikey;
 
-		BTREE_PAGE_GET_HIKEY(hikey, page);
+		hikey = btree_get_hikey(&pageContext);
 
 		if (O_TUPLE_IS_NULL(target_hikey.tuple) ||
-			o_btree_cmp(desc, &hikey, BTreeKeyNonLeafKey, &target_hikey, BTreeKeyNonLeafKey) != 0)
+			o_btree_cmp(desc, &hikey, BTreeKeyNonLeafKey, &target_hikey.tuple, BTreeKeyNonLeafKey) != 0)
 			ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 							errmsg("error reading downlink %X/%X in relfile (%u, %u)",
 								   (uint32) (downlink >> 32), (uint32) (downlink),
@@ -1529,6 +1539,9 @@ load_page(OBTreeFindPageContext *context)
 	parent_blkno = context->items[context_index].blkno;
 	parent_loc = &context->items[context_index].locator;
 	parent_change_count = context->items[context_index].pageChangeCount;
+
+	btree_page_context_release(&pageContext);
+	btree_page_context_release(&parentPageContext);
 
 	/* Replace parent downlink with orioledb downlink */
 	page_block_reads(parent_blkno);
@@ -2041,9 +2054,13 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 	}
 	else
 	{
+		BTreePageContext pageContext;
 		uint64		new_downlink,
 					old_downlink = 0;
 		bool		dirty_parent;
+
+		btree_page_context_init(&pageContext, desc);
+		btree_page_context_set(&pageContext, p);
 
 		/* Mark parent downlink as IO in-progress. */
 		if (evict)
@@ -2084,7 +2101,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			{
 				Jsonb	   *params;
 
-				params = btree_page_stopevent_params(desc, p);
+				params = btree_page_stopevent_params(&pageContext);
 				STOPEVENT(STOPEVENT_AFTER_IONUM_SET, params);
 			}
 			new_downlink = perform_page_io(desc, blkno, img,
@@ -2109,6 +2126,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			else if (!dirty_parent)
 			{
 				page_desc->ionum = -1;
+				btree_page_context_release(&pageContext);
 				unlock_io(ionum);
 				perform_writeback(&io_writeback);
 				return;
@@ -2129,7 +2147,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			{
 				OTuple		hikey;
 
-				BTREE_PAGE_GET_HIKEY(hikey, p);
+				hikey = btree_get_hikey(&pageContext);
 				refind_page(context, &hikey, BTreeKeyPageHiKey, PAGE_GET_LEVEL(p) + 1,
 							parent_blkno, parent_change_count);
 			}
@@ -2168,6 +2186,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 				}
 			}
 		}
+		btree_page_context_release(&pageContext);
 		page_desc->ionum = -1;
 		unlock_io(ionum);
 	}
@@ -2383,6 +2402,7 @@ walk_page(OInMemoryBlkno blkno, bool evict)
 {
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 	OBTreeFindPageContext context;
+	BTreePageContext pageContext;
 	BTreeDescr *desc;
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno),
 				parent_page;
@@ -2516,12 +2536,17 @@ retry:
 	/* If page is rootPageBlkno, we don't need to search parent page. */
 	context.desc = desc;
 	context.index = 0;
+
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, p);
+
 	if (!is_root)
 	{
 		init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY
 							   | BTREE_PAGE_FIND_TRY_LOCK
 							   | BTREE_PAGE_FIND_DOWNLINK_LOCATION
 							   | BTREE_PAGE_FIND_NO_FIX_SPLIT);
+
 		if (O_PAGE_IS(p, RIGHTMOST))
 		{
 			found = find_page(&context, NULL, BTreeKeyRightmost, PAGE_GET_LEVEL(p) + 1);
@@ -2530,12 +2555,14 @@ retry:
 		{
 			OTuple		hikey;
 
-			BTREE_PAGE_GET_HIKEY(hikey, p);
+			hikey = btree_get_hikey(&pageContext);
 			found = find_page(&context, &hikey, BTreeKeyPageHiKey, PAGE_GET_LEVEL(p) + 1);
 		}
 
 		if (!found)
 		{
+			btree_page_context_release(&pageContext);
+			release_page_find_context(&context);
 			unlock_page(blkno);
 			Assert(!have_locked_pages());
 			return OWalkPageSkipped;
@@ -2549,6 +2576,9 @@ retry:
 		if (!DOWNLINK_IS_IN_MEMORY(int_hdr->downlink) ||
 			DOWNLINK_GET_IN_MEMORY_BLKNO(int_hdr->downlink) != blkno)
 		{
+			btree_page_context_release(&pageContext);
+			release_page_find_context(&context);
+
 			/*
 			 * We didn't find downlink pointing to this page.  This could
 			 * happend because of concurrent split.  Give up then...
@@ -2560,17 +2590,22 @@ retry:
 	}
 	else if (IS_SYS_TREE_OIDS(oids))
 	{
+		btree_page_context_release(&pageContext);
 		Assert(is_root);
 		unlock_page(blkno);
 		return OWalkPageSkipped;
 	}
 
-	if (!get_checkpoint_number(desc, blkno, &checkpoint_number, &copy_blkno))
+	if (!get_checkpoint_number(blkno, &pageContext, &checkpoint_number, &copy_blkno))
 	{
+		btree_page_context_release(&pageContext);
 		unlock_page(blkno);
 
 		if (!is_root)
+		{
 			unlock_page(context.items[context.index].blkno);
+			release_page_find_context(&context);
+		}
 		return OWalkPageSkipped;
 	}
 
@@ -2582,6 +2617,7 @@ retry:
 
 		if (tree_is_under_checkpoint(desc))
 		{
+			btree_page_context_release(&pageContext);
 			unlock_page(blkno);
 			return OWalkPageSkipped;
 		}
@@ -2621,6 +2657,8 @@ retry:
 					unlock_page(blkno);
 				}
 
+				btree_page_context_release(&pageContext);
+
 				if (!recovery)
 					o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
 				o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
@@ -2632,6 +2670,7 @@ retry:
 					o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
 			}
 		}
+		btree_page_context_release(&pageContext);
 		unlock_page(blkno);
 		return OWalkPageSkipped;
 	}
@@ -2639,6 +2678,10 @@ retry:
 	STOPEVENT(STOPEVENT_BEFORE_WRITE_PAGE, NULL);
 
 	write_page(&context, blkno, img, checkpoint_number, evict, copy_blkno);
+
+	btree_page_context_release(&pageContext);
+	if (!is_root)
+		release_page_find_context(&context);
 
 	STOPEVENT(STOPEVENT_AFTER_WRITE_PAGE, NULL);
 

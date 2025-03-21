@@ -39,7 +39,8 @@
 static bool can_be_merged(BTreeDescr *desc, Page left, Page right,
 						  CommitSeqNo csn);
 static void merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
-						Page right, CommitSeqNo csn);
+						BTreePageContext *leftPageContext, BTreePageContext *rightPageContext,
+						CommitSeqNo csn);
 
 
 /*
@@ -59,6 +60,9 @@ btree_try_merge_pages(BTreeDescr *desc,
 	Page		parent = O_GET_IN_MEMORY_PAGE(parent_blkno),
 				left = O_GET_IN_MEMORY_PAGE(left_blkno),
 				right = O_GET_IN_MEMORY_PAGE(right_blkno);
+	BTreePageContext parentPageContext,
+				leftPageContext,
+				rightPageContext;
 	OrioleDBPageDesc *right_desc;
 	BTreePageHeader *left_header = (BTreePageHeader *) left;
 	FileExtent	right_extent;
@@ -75,9 +79,25 @@ btree_try_merge_pages(BTreeDescr *desc,
 		return false;
 	}
 
-	if (!get_checkpoint_number(desc, right_blkno,
+	btree_page_context_init(&parentPageContext, desc);
+	btree_page_context_set(&parentPageContext, parent);
+	btree_page_context_hikey_init(&parentPageContext);
+
+	btree_page_context_init(&leftPageContext, desc);
+	btree_page_context_set(&leftPageContext, left);
+	btree_page_context_hikey_init(&leftPageContext);
+
+	btree_page_context_init(&rightPageContext, desc);
+	btree_page_context_set(&rightPageContext, right);
+	btree_page_context_hikey_init(&rightPageContext);
+
+	if (!get_checkpoint_number(right_blkno, &rightPageContext,
 							   &checkpoint_number, &copy_blkno))
 	{
+		btree_page_context_release(&parentPageContext);
+		btree_page_context_release(&leftPageContext);
+		btree_page_context_release(&parentPageContext);
+
 		/*
 		 * page is concurrent to in progress checkpoint and can not be merged
 		 */
@@ -96,6 +116,9 @@ btree_try_merge_pages(BTreeDescr *desc,
 
 	if (!can_be_merged(desc, left, right, csn))
 	{
+		btree_page_context_release(&parentPageContext);
+		btree_page_context_release(&leftPageContext);
+		btree_page_context_release(&parentPageContext);
 		return false;
 	}
 
@@ -116,7 +139,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 		 * required for non-leaf pages.
 		 */
 		if (!O_PAGE_IS(parent, RIGHTMOST))
-			copy_fixed_hikey(desc, parent_hikey, parent);
+			btree_copy_fixed_hikey(&parentPageContext, parent_hikey);
 		else
 			O_TUPLE_SET_NULL(parent_hikey->tuple);
 		unlock_page(parent_blkno);
@@ -152,7 +175,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	 * It contains the required memory barrier between making undo image and
 	 * setting the undo location.
 	 */
-	merge_pages(desc, left_blkno, right, csn);
+	merge_pages(desc, left_blkno, &leftPageContext, &rightPageContext, csn);
 	btree_page_update_max_key_len(desc, left);
 	MARK_DIRTY_EXTENDED(desc, left_blkno, checkpoint);
 
@@ -192,6 +215,10 @@ btree_try_merge_pages(BTreeDescr *desc,
 								   checkpoint_number);
 	}
 
+	btree_page_context_release(&parentPageContext);
+	btree_page_context_release(&leftPageContext);
+	btree_page_context_release(&parentPageContext);
+
 	return true;
 }
 
@@ -210,6 +237,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				parent,
 				right,
 				left;
+	BTreePageContext targetPageContext;
 	OFixedKey	key;
 	int			level;
 	OBTreeFindPageContext find_context;
@@ -246,9 +274,12 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	page_block_reads(blkno);
 
+	btree_page_context_init(&targetPageContext, desc);
+	btree_page_context_set(&targetPageContext, target);
+
 	/* copy hikey of current page */
 	if (!O_PAGE_IS(target, RIGHTMOST))
-		copy_fixed_hikey(desc, &key, target);
+		btree_copy_fixed_hikey(&targetPageContext, &key);
 	else
 		O_TUPLE_SET_NULL(key.tuple);
 
@@ -270,6 +301,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		find_page(&find_context, &key.tuple, BTreeKeyPageHiKey, level + 1);
 	else
 		find_page(&find_context, NULL, BTreeKeyRightmost, level + 1);
+
 	parent_blkno = find_context.items[find_context.index].blkno;
 	parent_change_count = find_context.items[find_context.index].pageChangeCount;
 
@@ -318,6 +350,8 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		/* all ok, lock target page */
 		lock_page(target_blkno);
 		target = O_GET_IN_MEMORY_PAGE(target_blkno);
+		btree_page_context_set(&targetPageContext, target);
+
 		Assert((level == 0) == O_PAGE_IS(target, LEAF));
 
 		if (BTREE_PAGE_ITEMS_COUNT(parent) == 1 ||
@@ -494,6 +528,9 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (needsUndo)
 		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 
+	release_page_find_context(&find_context);
+	btree_page_context_release(&targetPageContext);
+
 	Assert(!have_locked_pages());
 	return success;
 }
@@ -540,9 +577,11 @@ can_be_merged(BTreeDescr *desc, Page left, Page right, CommitSeqNo csn)
  */
 static void
 merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
-			Page right, CommitSeqNo csn)
+			BTreePageContext *leftPageContext, BTreePageContext *rightPageContext,
+			CommitSeqNo csn)
 {
-	Page		left = O_GET_IN_MEMORY_PAGE(left_blkno);
+	Page		left = leftPageContext->page,
+				right = rightPageContext->page;
 	BTreePageHeader *left_header = (BTreePageHeader *) left,
 			   *right_header = (BTreePageHeader *) right;
 	OTuple		leftHikey,
@@ -559,8 +598,8 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	Assert(O_PAGE_IS(left, LEAF) == O_PAGE_IS(right, LEAF));
 	Assert(!O_PAGE_IS(left, RIGHTMOST));
 
-	leftHikeySize = BTREE_PAGE_GET_HIKEY_SIZE(left);
-	BTREE_PAGE_GET_HIKEY(leftHikey, left);
+	leftHikey = btree_get_hikey(leftPageContext);
+	leftHikeySize = btree_get_tuple_size(leftPageContext->hikeyChunk, leftHikey);
 	if (O_PAGE_IS(right, RIGHTMOST))
 	{
 		rightHikeySize = 0;
@@ -568,8 +607,8 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	}
 	else
 	{
-		rightHikeySize = BTREE_PAGE_GET_HIKEY_SIZE(right);
-		BTREE_PAGE_GET_HIKEY(rightHikey, right);
+		rightHikey = btree_get_hikey(rightPageContext);
+		rightHikeySize = btree_get_tuple_size(rightPageContext->hikeyChunk, rightHikey);
 	}
 
 	i = 0;
@@ -641,15 +680,20 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			if (first)
 			{
 				first = false;
+
 				memcpy(newItem,
 					   BTREE_PAGE_LOCATOR_GET_ITEM(right, &loc),
 					   BTreeNonLeafTuphdrSize);
 				memcpy(&newItem[BTreeNonLeafTuphdrSize],
 					   leftHikey.data,
 					   leftHikeySize);
+				if (leftHikeySize != MAXALIGN(leftHikeySize))
+					memset(&newItem[BTreeNonLeafTuphdrSize] + leftHikeySize, 0,
+						   MAXALIGN(leftHikeySize) - leftHikeySize);
+
 				items[i].data = newItem;
 				items[i].flags = leftHikey.formatFlags;
-				items[i].size = MAXALIGN(BTreeNonLeafTuphdrSize + leftHikeySize);
+				items[i].size = BTreeNonLeafTuphdrSize + MAXALIGN(leftHikeySize);
 				items[i].newItem = false;
 				i++;
 				continue;

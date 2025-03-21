@@ -218,6 +218,8 @@ typedef struct
 
 extern CheckpointState *checkpoint_state;
 
+typedef struct BTreePageContext BTreePageContext;
+
 extern Size checkpoint_shmem_size(void);
 extern void checkpoint_shmem_init(Pointer ptr, bool found);
 extern uint32 o_get_latest_chkp_num(Oid datoid, Oid relnode,
@@ -232,7 +234,8 @@ extern void o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo,
 extern bool page_is_under_checkpoint(BTreeDescr *desc, OInMemoryBlkno blkno,
 									 bool includingHikeyBlkno);
 extern bool tree_is_under_checkpoint(BTreeDescr *desc);
-extern bool get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 *checkpoint_number, bool *copy_blkno);
+extern bool get_checkpoint_number(OInMemoryBlkno blkno, BTreePageContext *pageContext,
+								  uint32 *checkpoint_number, bool *copy_blkno);
 extern uint32 get_cur_checkpoint_number(ORelOids *oids, OIndexType type, bool *checkpoint_concurrent);
 extern bool can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num);
 extern void free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num);
