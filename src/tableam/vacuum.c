@@ -734,6 +734,7 @@ static void
 lazy_vacuum_brige_index(LVRelState *vacrel)
 {
 	OBTreeFindPageContext context;
+	BTreePageLocator pageContext;
 	OTableDescr *descr = vacrel->descr;
 	OIndexDescr *bridge = descr->bridge;
 	BlockNumber vacuumed_pages = 0;
@@ -751,6 +752,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 	init_page_find_context(&context, &bridge->desc,
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY);
+	btree_page_locator_init(&pageContext, &bridge->desc);
 
 	bound.nkeys = 1;
 	bound.n_row_keys = 0;
@@ -816,6 +818,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 				have_page = true;
 				item = &context.items[context.index];
 				p = O_GET_IN_MEMORY_PAGE(item->blkno);
+				btree_page_context_set(&pageContext, p);
 			}
 			else
 			{
@@ -823,6 +826,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 				item = &context.items[context.index];
 				p = O_GET_IN_MEMORY_PAGE(item->blkno);
+				btree_page_context_set(&pageContext, p);
 				if (O_PAGE_IS(p, RIGHTMOST))
 				{
 					pageMatch = true;
@@ -831,7 +835,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 				{
 					OTuple		pageHiKey;
 
-					BTREE_PAGE_GET_HIKEY(pageHiKey, p);
+					pageHiKey = btree_get_hikey(&pageContext);
 					pageMatch = (o_btree_cmp(&bridge->desc,
 											 &bound, BTreeKeyBound,
 											 &pageHiKey, BTreeKeyNonLeafKey) < 0);
@@ -841,7 +845,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 				{
 					bool		found;
 
-					found = btree_page_search(&bridge->desc, p,
+					found = btree_page_search(&pageContext,
 											  (Pointer) &bound, BTreeKeyBound,
 											  NULL, &item->locator);
 
@@ -865,7 +869,9 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 					(void) find_page(&context, &bound, BTreeKeyBound, 0);
 					have_page = true;
 					item = &context.items[context.index];
+
 					p = O_GET_IN_MEMORY_PAGE(item->blkno);
+					btree_page_context_set(&pageContext, p);
 				}
 			}
 
@@ -922,6 +928,9 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 	/* Revert to the previous phase information for error traceback */
 	restore_vacuum_error_info(vacrel, &saved_err_info);
+
+	btree_page_context_release(&pageContext);
+	release_page_find_context(&context);
 }
 
 /*
@@ -1144,6 +1153,8 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	/* Do final index cleanup (call each index's amvacuumcleanup routine) */
 	if (vacrel->nindexes > 0 && vacrel->do_index_cleanup)
 		lazy_cleanup_all_indexes(vacrel);
+
+	release_page_find_context(&context);
 }
 
 /*

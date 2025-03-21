@@ -17,6 +17,7 @@
 
 #include "btree/btree.h"
 #include "btree/check.h"
+#include "btree/chunk_ops.h"
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
@@ -913,9 +914,13 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 	Datum		values[4];
 	bool		nulls[4];
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageLocator pageContext;
 	BTreePageHeader *pageHdr = (BTreePageHeader *) p;
 	int			j = 0;
 	BTreePageItemLocator loc;
+
+	btree_page_locator_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, p);
 
 	values[j] = Int64GetDatum(blkno);
 	nulls[j] = false;
@@ -939,7 +944,7 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 		JsonbValue *jsval;
 		OTuple		hikey;
 
-		BTREE_PAGE_GET_HIKEY(hikey, p);
+		hikey = btree_get_hikey(&pageContext);
 		jsval = o_btree_key_to_jsonb(desc, hikey, &state);
 		values[j] = PointerGetDatum(JsonbValueToJsonb(jsval));
 		nulls[j] = false;
@@ -952,7 +957,10 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 	tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
 	if (O_PAGE_IS(p, LEAF))
+	{
+		btree_page_context_release(&pageContext);
 		return;
+	}
 
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 	{
@@ -964,6 +972,7 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 								  tupdesc, tupstore);
 	}
 
+	btree_page_context_release(&pageContext);
 }
 
 Datum
@@ -1508,20 +1517,21 @@ fetch_index_descr_by_oid(Oid relid)
 
 
 static void
-add_page_stat(BTreeDescr *desc, Page p, ORelationStat *stat)
+add_page_stat(BTreePageLocator *pageContext, ORelationStat *stat)
 {
-	int			level = PAGE_GET_LEVEL(p);
+	Page		page = pageContext->page;
+	int			level = PAGE_GET_LEVEL(page);
 
-	if (!O_PAGE_IS(p, RIGHTMOST))
-		copy_fixed_hikey(desc, &stat->levels[level].hikey, p);
+	if (!O_PAGE_IS(page, RIGHTMOST))
+		btree_copy_fixed_hikey(pageContext, &stat->levels[level].hikey);
 	else
 		clear_fixed_key(&stat->levels[level].hikey);
 
 	stat->levels[level].count++;
-	stat->levels[level].occupied += ((BTreePageHeader *) (p))->dataSize;
+	stat->levels[level].occupied += ((BTreePageHeader *) (page))->dataSize;
 
-	if (O_PAGE_IS(p, LEAF))
-		stat->levels[level].vacated += PAGE_GET_N_VACATED(p);
+	if (O_PAGE_IS(page, LEAF))
+		stat->levels[level].vacated += PAGE_GET_N_VACATED(page);
 }
 
 static void
@@ -1538,15 +1548,19 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 	for (level = 0; level < ORIOLEDB_MAX_DEPTH; level++)
 	{
 		(void) find_page(&context, NULL, BTreeKeyNone, level);
+
 		if (PAGE_GET_LEVEL(context.img) != level)
 			break;
 
-		add_page_stat(desc, context.img, stat);
+		add_page_stat(&context.pageContext, stat);
 	}
 	maxLevel = level;
 
 	if (maxLevel == 0)
+	{
+		release_page_find_context(&context);
 		return;
+	}
 
 	while (true)
 	{
@@ -1567,13 +1581,18 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 							&key.tuple, BTreeKeyNonLeafKey,
 							&stat->levels[level].hikey.tuple, BTreeKeyNonLeafKey) >= 0)
 			{
-				if (find_page(&context, &key.tuple, BTreeKeyNonLeafKey, level))
-					add_page_stat(desc, context.img, stat);
+				bool		found;
+
+				found = find_page(&context, &key.tuple, BTreeKeyNonLeafKey, level);
+				if (found)
+					add_page_stat(&context.pageContext, stat);
 				else
 					break;
 			}
 		}
 	}
+
+	release_page_find_context(&context);
 }
 
 Datum

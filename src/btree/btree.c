@@ -28,7 +28,6 @@
 #include "transam/oxid.h"
 #include "tuple/format.h"
 #include "utils/page_pool.h"
-#include "utils/stopevent.h"
 
 #include "fmgr.h"
 #include "miscadmin.h"
@@ -306,106 +305,4 @@ btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 				   (uint32) (ctid / MaxHeapTuplesPerPage % max_block_number),
 				   (OffsetNumber) (ctid % MaxHeapTuplesPerPage + FirstOffsetNumber));
 	return result;
-}
-
-static inline OIndexDescr *
-o_get_tree_def(BTreeDescr *desc)
-{
-	return desc->arg;
-}
-
-void
-btree_desc_stopevent_params_internal(BTreeDescr *desc, JsonbParseState **state)
-{
-	jsonb_push_int8_key(state, "datoid", desc->oids.datoid);
-	jsonb_push_int8_key(state, "reloid", desc->oids.reloid);
-	jsonb_push_int8_key(state, "relnode", desc->oids.relnode);
-
-	if (IS_SYS_TREE_OIDS(desc->oids))
-		jsonb_push_string_key(state, "treeName", "sys_tree");
-	else if (desc->type == oIndexToast)
-		jsonb_push_string_key(state, "treeName", "toast");
-	else
-		jsonb_push_string_key(state, "treeName", o_get_tree_def(desc)->name.data);
-}
-
-void
-btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
-									 JsonbParseState **state)
-{
-	jsonb_push_int8_key(state, "level", PAGE_GET_LEVEL(p));
-	jsonb_push_int8_key(state, "pageChangeCount", O_PAGE_GET_CHANGE_COUNT(p));
-
-	jsonb_push_key(state, "hikey");
-	if (!O_PAGE_IS(p, RIGHTMOST))
-	{
-		OTuple		hikey;
-
-		BTREE_PAGE_GET_HIKEY(hikey, p);
-		(void) o_btree_key_to_jsonb(desc, hikey, state);
-	}
-	else
-	{
-		JsonbValue	jval;
-
-		jval.type = jbvNull;
-		(void) pushJsonbValue(state, WJB_VALUE, &jval);
-	}
-}
-
-Jsonb *
-btree_page_stopevent_params(BTreeDescr *desc, Page p)
-{
-	JsonbParseState *state = NULL;
-	Jsonb	   *res;
-	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
-
-	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
-	btree_desc_stopevent_params_internal(desc, &state);
-	btree_page_stopevent_params_internal(desc, p, &state);
-	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
-	MemoryContextSwitchTo(mctx);
-
-	return res;
-}
-
-Jsonb *
-btree_downlink_stopevent_params(BTreeDescr *desc, Page p, BTreePageItemLocator *loc)
-{
-	JsonbParseState *state = NULL;
-	Jsonb	   *res;
-	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
-	BTreeNonLeafTuphdr *internal_ptr;
-
-	internal_ptr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, loc);
-
-	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
-	btree_desc_stopevent_params_internal(desc, &state);
-	btree_page_stopevent_params_internal(desc, p, &state);
-
-	jsonb_push_key(&state, "downlink");
-	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
-	jsonb_push_int8_key(&state, "blkno", DOWNLINK_GET_IN_MEMORY_BLKNO(internal_ptr->downlink));
-	jsonb_push_int8_key(&state, "pageChangeCount", DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(internal_ptr->downlink));
-	jsonb_push_key(&state, "key");
-	if (BTREE_PAGE_LOCATOR_GET_OFFSET(p, loc) > 0)
-	{
-		OTuple		key;
-
-		BTREE_PAGE_READ_INTERNAL_TUPLE(key, p, loc);
-		(void) o_btree_key_to_jsonb(desc, key, &state);
-	}
-	else
-	{
-		JsonbValue	jval;
-
-		jval.type = jbvNull;
-		(void) pushJsonbValue(&state, WJB_VALUE, &jval);
-	}
-	pushJsonbValue(&state, WJB_END_OBJECT, NULL);
-
-	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
-	MemoryContextSwitchTo(mctx);
-
-	return res;
 }

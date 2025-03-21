@@ -168,6 +168,14 @@ extern const BTreeChunkOps BTreeLeafTupleChunkOps;
 extern const BTreeChunkOps BTreeInternalTupleChunkOps;
 extern const BTreeChunkOps BTreeHiKeyChunkOps;
 
+typedef struct BTreePageLocator
+{
+	BTreeDescr *treeDesc;
+	Page		page;
+
+	BTreeChunkDesc hikeyChunk;
+} BTreePageLocator;
+
 /*
  * Chunk initialization functions.
  */
@@ -180,5 +188,31 @@ extern void init_btree_chunk_desc(BTreeChunkDesc *desc,
 extern void init_btree_chunk_builder(BTreeChunkBuilder *chunkBuilder,
 									 const BTreeChunkOps *ops,
 									 BTreeDescr *treeDesc);
+
+/*
+ * Page context utility functions.
+ */
+
+extern void btree_page_locator_init(BTreePageLocator *pageLocator,
+									BTreeDescr *treeDesc, Page page);
+extern void btree_page_locator_hikey_init(BTreePageLocator *pageLocator,
+										  const BTreeChunkOps *ops);
+
+/*
+ * Hikey utility functions.
+ */
+
+extern OTuple btree_get_hikey(BTreePageLocator *pageLocator);
+extern uint16 btree_get_hikey_size(BTreePageLocator *pageLocator, OTuple tuple);
+
+extern void btree_copy_fixed_hikey(BTreePageLocator *pageLocator, OFixedKey *dst);
+extern void btree_copy_fixed_shmem_hikey(BTreePageLocator *pageLocator,
+										 OFixedShmemKey *dst);
+
+extern OTuple btree_read_hikey(BTreePageLocator *pageLocator,
+							   OffsetNumber itemOffset);
+
+extern bool btree_fits_hikey(BTreePageLocator *pageLocator,
+							 LocationIndex newHikeySize);
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */

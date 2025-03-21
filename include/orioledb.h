@@ -353,7 +353,7 @@ extern char *s3_cainfo;
 	 &oProcData[MYPROCNUMBER])
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
-	 (Page)(o_shared_buffers + ((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ)))
+	 (Page)(o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ))))
 #define O_GET_IN_MEMORY_PAGEDESC(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), page_descs + (blkno))
 #define O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(blkno) \

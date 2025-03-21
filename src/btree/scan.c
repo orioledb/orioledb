@@ -43,11 +43,13 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/chunk_ops.h"
 #include "btree/find.h"
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
 #include "btree/scan.h"
+#include "btree/stopevent.h"
 #include "btree/undo.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
@@ -83,6 +85,9 @@ struct BTreeSeqScan
 	OBTreeFindPageContext context;
 	OFixedKey	prevHikey;
 	BTreeLocationHint hint;
+
+	BTreePageLocator leafPageContext;
+	BTreePageLocator histPageContext;
 
 	BTreePageItemLocator intLoc;
 
@@ -141,8 +146,9 @@ struct BTreeSeqScan
 
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
 
-static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey, OTuple keyRangeHigh);
-static void get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page);
+static void scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh);
+static void get_next_key(BTreePageLocator *pageContext,
+						 BTreePageItemLocator *intLoc, OFixedKey *nextKey);
 
 BTreeScanShmem *btreeScanShmem;
 
@@ -185,7 +191,7 @@ load_first_historical_page(BTreeSeqScan *scan)
 		return;
 
 	if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
-		copy_fixed_hikey(scan->desc, &hikey, scan->leafImg);
+		btree_copy_fixed_hikey(&scan->leafPageContext, &hikey);
 	else
 		O_TUPLE_SET_NULL(hikey.tuple);
 	O_TUPLE_SET_NULL(lokey.tuple);
@@ -201,12 +207,12 @@ load_first_historical_page(BTreeSeqScan *scan)
 					 errmsg("snapshot too old")));
 		}
 
-		(void) get_page_from_undo(scan->desc, header->undoLocation, key, kind,
-								  scan->histImg, NULL, NULL, NULL,
+		(void) get_page_from_undo(&scan->histPageContext, header->undoLocation,
+								  key, kind, NULL, NULL, NULL,
 								  lokeyPtr, &hikey.tuple);
 
 		if (!O_PAGE_IS(scan->histImg, RIGHTMOST))
-			copy_fixed_hikey(scan->desc, &hikey, scan->histImg);
+			btree_copy_fixed_hikey(&scan->histPageContext, &hikey);
 		else
 			O_TUPLE_SET_NULL(hikey.tuple);
 
@@ -225,11 +231,11 @@ load_first_historical_page(BTreeSeqScan *scan)
 
 	if (!O_TUPLE_IS_NULL(lokey.tuple))
 	{
-		(void) btree_page_search(scan->desc, scan->histImg,
+		(void) btree_page_search(&scan->histPageContext,
 								 (Pointer) &lokey.tuple,
 								 BTreeKeyNonLeafKey, NULL,
 								 &scan->histLoc);
-		(void) page_locator_find_real_item(scan->histImg, NULL, &scan->histLoc);
+		(void) page_locator_find_real_item(&scan->histPageContext, NULL, &scan->histLoc);
 	}
 	else
 	{
@@ -244,7 +250,7 @@ load_next_historical_page(BTreeSeqScan *scan)
 	BTreePageHeader *header = (BTreePageHeader *) scan->leafImg;
 	OFixedKey	prevHikey;
 
-	copy_fixed_hikey(scan->desc, &prevHikey, scan->histImg);
+	btree_copy_fixed_hikey(&scan->histPageContext, &prevHikey);
 
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->oSnapshot.csn)
@@ -256,10 +262,9 @@ load_next_historical_page(BTreeSeqScan *scan)
 					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("snapshot too old")));
 		}
-		(void) get_page_from_undo(scan->desc, header->undoLocation,
+		(void) get_page_from_undo(&scan->histPageContext, header->undoLocation,
 								  (Pointer) &prevHikey.tuple, BTreeKeyNonLeafKey,
-								  scan->histImg, NULL, NULL, NULL,
-								  NULL, NULL);
+								  NULL, NULL, NULL, NULL, NULL);
 		header = (BTreePageHeader *) scan->histImg;
 	}
 	BTREE_PAGE_LOCATOR_FIRST(scan->histImg, &scan->histLoc);
@@ -273,7 +278,7 @@ load_next_historical_page(BTreeSeqScan *scan)
  */
 static bool
 load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
-						Page page,
+						BTreePageLocator *destPageContext,
 						BTreePageItemLocator *intLoc,
 						OffsetNumber *startOffset)
 {
@@ -288,31 +293,32 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 		find_page(&scan->context, NULL, BTreeKeyNone, 1);
 
 	/* In case of parallel scan copy page image into shared state */
-	if (page != scan->context.img)
+	if (destPageContext->page != scan->context.img)
 	{
 		Assert(scan->poscan);
-		memcpy(page, scan->context.img, ORIOLEDB_BLCKSZ);
+		memcpy(destPageContext->page, scan->context.img, ORIOLEDB_BLCKSZ);
 	}
 	else
 	{
 		Assert(!scan->poscan);
 		scan->firstPageIsLoaded = true;
 	}
+	btree_page_context_invalidate(destPageContext);
 
-	if (PAGE_GET_LEVEL(page) == 1)
+	if (PAGE_GET_LEVEL(destPageContext->page) == 1)
 	{
 		/*
 		 * Check if the left bound of the found keyrange corresponds to the
 		 * previous hikey.  Otherwise, use iterator to correct the situation.
 		 */
 		*intLoc = scan->context.items[scan->context.index].locator;
-		*startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, intLoc);
+		*startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(destPageContext->page, intLoc);
 		if (!O_TUPLE_IS_NULL(prevHikey))
 		{
 			OTuple		intTup;
 
 			if (*startOffset > 0)
-				BTREE_PAGE_READ_INTERNAL_TUPLE(intTup, page, intLoc);
+				BTREE_PAGE_READ_INTERNAL_TUPLE(intTup, destPageContext->page, intLoc);
 			else
 				intTup = scan->context.lokey.tuple;
 
@@ -320,7 +326,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 							&prevHikey, BTreeKeyNonLeafKey,
 							&intTup, BTreeKeyNonLeafKey) != 0)
 			{
-				get_next_key(scan, intLoc, &scan->keyRangeHigh, page);
+				get_next_key(destPageContext, intLoc, &scan->keyRangeHigh);
 				elog(DEBUG3, "scan_make_iterator");
 
 				scan_make_iterator(scan, prevHikey, scan->keyRangeHigh.tuple);
@@ -330,13 +336,17 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	}
 	else
 	{
-		Assert(PAGE_GET_LEVEL(page) == 0);
-		memcpy(scan->leafImg, page, ORIOLEDB_BLCKSZ);
+		Assert(PAGE_GET_LEVEL(destPageContext->page) == 0);
+
+		memcpy(scan->leafPageContext.page, destPageContext->page, ORIOLEDB_BLCKSZ);
+		btree_page_context_invalidate(&scan->leafPageContext);
+
 		BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 		scan->hint.blkno = scan->context.items[0].blkno;
 		scan->hint.pageChangeCount = scan->context.items[0].pageChangeCount;
 		BTREE_PAGE_LOCATOR_SET_INVALID(&scan->intLoc);
 		O_TUPLE_SET_NULL(scan->nextKey.tuple);
+
 		load_first_historical_page(scan);
 		has_next = false;
 	}
@@ -525,31 +535,30 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 
 /* Output item downlink and key using provided page and current locator */
 static void
-get_current_downlink_key(BTreeSeqScan *scan,
+get_current_downlink_key(BTreePageLocator *pageContext,
 						 BTreePageItemLocator *loc,
 						 OffsetNumber startOffset,
 						 OTuple prevHiKey,
 						 OFixedKey *curKey,
-						 uint64 *downlink,
-						 Page page)
+						 uint64 *downlink)
 {
 	BTreeNonLeafTuphdr *tuphdr;
 	OTuple		tuple;
 
-	STOPEVENT(STOPEVENT_STEP_DOWN, btree_downlink_stopevent_params(scan->desc,
-																   page, loc));
+	STOPEVENT(STOPEVENT_STEP_DOWN, btree_downlink_stopevent_params(pageContext,
+																   loc));
 
-	BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, tuple, page, loc);
+	BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, tuple, pageContext->page, loc);
 	*downlink = tuphdr->downlink;
 
-	if (BTREE_PAGE_LOCATOR_GET_OFFSET(page, loc) != startOffset)
+	if (BTREE_PAGE_LOCATOR_GET_OFFSET(pageContext->page, loc) != startOffset)
 	{
-		copy_fixed_key(scan->desc, curKey, tuple);
+		copy_fixed_key(pageContext->treeDesc, curKey, tuple);
 	}
-	else if (!O_PAGE_IS(page, LEFTMOST))
+	else if (!O_PAGE_IS(pageContext->page, LEFTMOST))
 	{
 		Assert(!O_TUPLE_IS_NULL(prevHiKey));
-		copy_fixed_key(scan->desc, curKey, prevHiKey);
+		copy_fixed_key(pageContext->treeDesc, curKey, prevHiKey);
 	}
 	else
 	{
@@ -560,13 +569,14 @@ get_current_downlink_key(BTreeSeqScan *scan,
 
 /* Output next key and locator on a provided internal page */
 static void
-get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page)
+get_next_key(BTreePageLocator *pageContext,
+			 BTreePageItemLocator *intLoc, OFixedKey *nextKey)
 {
-	BTREE_PAGE_LOCATOR_NEXT(page, intLoc);
-	if (BTREE_PAGE_LOCATOR_IS_VALID(page, intLoc))
-		copy_fixed_page_key(scan->desc, nextKey, page, intLoc);
-	else if (!O_PAGE_IS(page, RIGHTMOST))
-		copy_fixed_hikey(scan->desc, nextKey, page);
+	BTREE_PAGE_LOCATOR_NEXT(pageContext->page, intLoc);
+	if (BTREE_PAGE_LOCATOR_IS_VALID(pageContext->page, intLoc))
+		copy_fixed_page_key(pageContext->treeDesc, nextKey, pageContext->page, intLoc);
+	else if (!O_PAGE_IS(pageContext->page, RIGHTMOST))
+		btree_copy_fixed_hikey(pageContext, nextKey);
 	else
 		clear_fixed_key(nextKey);
 }
@@ -601,11 +611,12 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				if (scan->firstPageIsLoaded)
 				{
 					Assert(!O_PAGE_IS(scan->context.img, RIGHTMOST));
-					copy_fixed_hikey(scan->desc, &scan->prevHikey, scan->context.img);
+					btree_copy_fixed_hikey(&scan->context.pageContext,
+										   &scan->prevHikey);
 				}
 
 				if (!load_next_internal_page(scan, scan->prevHikey.tuple,
-											 scan->context.img,
+											 &scan->context.pageContext,
 											 &scan->intLoc,
 											 &scan->intStartOffset))
 				{
@@ -623,15 +634,17 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 
 			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
 			{
-				get_current_downlink_key(scan, &scan->intLoc, scan->intStartOffset,
+				get_current_downlink_key(&scan->context.pageContext,
+										 &scan->intLoc, scan->intStartOffset,
 										 scan->prevHikey.tuple, keyRangeLow,
-										 downlink, scan->context.img);
+										 downlink);
 
 				/*
 				 * construct fixed hikey of internal item and get next
 				 * internal locator
 				 */
-				get_next_key(scan, &scan->intLoc, keyRangeHigh, scan->context.img);
+				get_next_key(&scan->context.pageContext, &scan->intLoc,
+							 keyRangeHigh);
 				return true;
 			}
 
@@ -643,6 +656,12 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 	}
 	else
 	{
+		BTreePageLocator curPageContext,
+					nextPageContext;
+
+		btree_page_locator_init(&curPageContext, scan->desc);
+		btree_page_locator_init(&nextPageContext, scan->desc);
+
 		/* Parallel case */
 		while (true)
 		{
@@ -654,8 +673,14 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			curPage = CUR_PAGE(poscan);
 			nextPage = NEXT_PAGE(poscan);
 
+			btree_page_context_set(&curPageContext, curPage->img);
+			btree_page_context_set(&nextPageContext, nextPage->img);
+
 			if (poscan->flags & O_PARALLEL_IS_SINGLE_LEAF_PAGE)
 			{
+				btree_page_context_release(&curPageContext);
+				btree_page_context_release(&nextPageContext);
+
 				SpinLockRelease(&poscan->intpageAccess);
 				scan->haveHistImg = false;
 				BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
@@ -675,6 +700,9 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				else
 				{
 					Assert(O_PAGE_IS(nextPage->img, RIGHTMOST));
+					btree_page_context_release(&curPageContext);
+					btree_page_context_release(&nextPageContext);
+
 					SpinLockRelease(&poscan->intpageAccess);
 					return false;
 				}
@@ -684,7 +712,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 
 				loaded = load_next_internal_page(scan,
 												 fixed_shmem_key_get_tuple(&curPage->prevHikey),
-												 curPage->img,
+												 &curPageContext,
 												 &loc,
 												 &curPage->startOffset);
 				if (!loaded)
@@ -694,6 +722,10 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					clear_fixed_key(keyRangeLow);
 					clear_fixed_key(keyRangeHigh);
 					SpinLockRelease(&poscan->intpageAccess);
+
+					btree_page_context_release(&curPageContext);
+					btree_page_context_release(&nextPageContext);
+
 					LWLockRelease(&poscan->intpageLoad);
 					return false;
 				}
@@ -707,7 +739,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				LWLockRelease(&poscan->intpageLoad);
 
 				if (scan->iter)
+				{
+					btree_page_context_release(&curPageContext);
+					btree_page_context_release(&nextPageContext);
 					return false;
+				}
 				continue;
 			}
 			else if (curPage->status == OParallelScanPageInProgress)
@@ -723,14 +759,14 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			{
 				bool		loaded PG_USED_FOR_ASSERTS_ONLY;
 
-				copy_fixed_shmem_hikey(scan->desc, &nextPage->prevHikey, curPage->img);
+				btree_copy_fixed_shmem_hikey(&curPageContext, &nextPage->prevHikey);
 				nextPage->status = OParallelScanPageInProgress;
 				LWLockAcquire(&poscan->intpageLoad, LW_EXCLUSIVE);
 				SpinLockRelease(&poscan->intpageAccess);
 
 				loaded = load_next_internal_page(scan,
 												 fixed_shmem_key_get_tuple(&nextPage->prevHikey),
-												 nextPage->img,
+												 &nextPageContext,
 												 &loc,
 												 &nextPage->startOffset);
 				Assert(loaded);
@@ -743,7 +779,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				LWLockRelease(&poscan->intpageLoad);
 
 				if (scan->iter)
+				{
+					btree_page_context_release(&curPageContext);
+					btree_page_context_release(&nextPageContext);
 					return false;
+				}
 				continue;
 			}
 
@@ -751,15 +791,19 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 
 			if (BTREE_PAGE_LOCATOR_IS_VALID(curPage->img, &loc))	/* inside int page */
 			{
-				get_current_downlink_key(scan, &loc, curPage->startOffset,
+				get_current_downlink_key(&curPageContext, &loc, curPage->startOffset,
 										 fixed_shmem_key_get_tuple(&curPage->prevHikey),
-										 keyRangeLow, downlink, curPage->img);
+										 keyRangeLow, downlink);
 				/* Get next internal page locator and next internal item hikey */
-				get_next_key(scan, &loc, keyRangeHigh, curPage->img);
+				get_next_key(&curPageContext, &loc, keyRangeHigh);
 
 				/* Push next internal item page offset into shared state */
 				curPage->offset = BTREE_PAGE_LOCATOR_GET_OFFSET(curPage->img, &loc);
 				scan->context.imgReadCsn = curPage->imgReadCsn;
+
+				btree_page_context_release(&curPageContext);
+				btree_page_context_release(&nextPageContext);
+
 				SpinLockRelease(&poscan->intpageAccess);
 				return true;
 			}
@@ -770,6 +814,9 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				SpinLockRelease(&poscan->intpageAccess);
 			}
 		}
+
+		btree_page_context_release(&curPageContext);
+		btree_page_context_release(&nextPageContext);
 	}
 }
 
@@ -787,7 +834,7 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 	bool		result = false;
 
 	if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
-		BTREE_PAGE_GET_HIKEY(leafHikey, scan->leafImg);
+		leafHikey = btree_get_hikey(&scan->leafPageContext);
 	else
 		O_TUPLE_SET_NULL(leafHikey);
 
@@ -858,10 +905,9 @@ iterate_internal_page(BTreeSeqScan *scan)
 			{
 				ReadPageResult result;
 
-				result = o_btree_try_read_page(scan->desc,
+				result = o_btree_try_read_page(&scan->leafPageContext,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
 											   DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink),
-											   scan->leafImg,
 											   scan->context.imgReadCsn,
 											   NULL,
 											   BTreeKeyNone,
@@ -952,14 +998,14 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 								  scan->leafImg,
 								  downlink.downlink,
 								  &extent);
+	btree_page_context_invalidate(&scan->leafPageContext);
 	header = (BTreePageHeader *) scan->leafImg;
 	if (header->csn >= downlink.csn)
-		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
+		read_page_from_undo(&scan->leafPageContext, header->undoLocation,
 							downlink.csn, NULL, BTreeKeyNone, NULL);
 
 	STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
-			  btree_page_stopevent_params(scan->desc,
-										  scan->leafImg));
+			  btree_page_stopevent_params(&scan->leafPageContext));
 
 	if (!success)
 		elog(ERROR, "can not read leaf page from disk");
@@ -1090,6 +1136,10 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 						   BTREE_PAGE_FIND_IMAGE |
 						   BTREE_PAGE_FIND_KEEP_LOKEY |
 						   BTREE_PAGE_FIND_READ_CSN);
+
+	btree_page_context_set(&scan->leafPageContext, scan->leafImg);
+	btree_page_context_set(&scan->histPageContext, scan->histImg);
+
 	clear_fixed_key(&scan->prevHikey);
 	clear_fixed_key(&scan->keyRangeHigh);
 	clear_fixed_key(&scan->keyRangeLow);
@@ -1135,6 +1185,10 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
+
+	memset(&scan->context, 0, sizeof(scan->context));
+	btree_page_locator_init(&scan->leafPageContext, desc);
+	btree_page_locator_init(&scan->histPageContext, desc);
 
 	return scan;
 }
@@ -1188,9 +1242,11 @@ btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
 
 static bool
 adjust_location_with_next_key(BTreeSeqScan *scan,
-							  Page p, BTreePageItemLocator *loc)
+							  BTreePageLocator *pageContext,
+							  BTreePageItemLocator *loc)
 {
 	BTreeDescr *desc = scan->desc;
+	Page		p = pageContext->page;
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	int			cmp;
 	OTuple		key;
@@ -1212,8 +1268,7 @@ adjust_location_with_next_key(BTreeSeqScan *scan,
 		if (loc->chunkOffset == (header->chunksCount - 1))
 			break;
 
-		key.formatFlags = header->chunkDesc[loc->chunkOffset].hikeyFlags;
-		key.data = (Pointer) p + SHORT_GET_LOCATION(header->chunkDesc[loc->chunkOffset].hikeyShortLocation);
+		key = btree_read_hikey(pageContext, loc->chunkOffset);
 		cmp = o_btree_cmp(desc, &key, BTreeKeyNonLeafKey,
 						  &scan->nextKey.tuple, BTreeKeyNonLeafKey);
 		if (cmp > 0)
@@ -1289,12 +1344,12 @@ apply_next_key(BTreeSeqScan *scan)
 		}
 
 		leafResult = adjust_location_with_next_key(scan,
-												   scan->leafImg,
+												   &scan->leafPageContext,
 												   &scan->leafLoc);
 		if (scan->haveHistImg)
 		{
 			histResult = adjust_location_with_next_key(scan,
-													   scan->histImg,
+													   &scan->histPageContext,
 													   &scan->histLoc);
 			if (leafResult || histResult)
 				return;
@@ -1340,8 +1395,8 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 					OTuple		leafHikey,
 								histHikey;
 
-					BTREE_PAGE_GET_HIKEY(leafHikey, scan->leafImg);
-					BTREE_PAGE_GET_HIKEY(histHikey, scan->histImg);
+					leafHikey = btree_get_hikey(&scan->leafPageContext);
+					histHikey = btree_get_hikey(&scan->histPageContext);
 					if (o_btree_cmp(scan->desc,
 									&histHikey, BTreeKeyNonLeafKey,
 									&leafHikey, BTreeKeyNonLeafKey) >= 0)
@@ -1370,7 +1425,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 				if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
 				{
-					BTREE_PAGE_GET_HIKEY(leafHikey, scan->leafImg);
+					leafHikey = btree_get_hikey(&scan->leafPageContext);
 					if (o_btree_cmp(scan->desc,
 									&histTuple, BTreeKeyLeafTuple,
 									&leafHikey, BTreeKeyNonLeafKey) >= 0)
@@ -1644,6 +1699,9 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 																			 * have already detached */
 		dsm_detach(scan->dsmSeg);
 	}
+	release_page_find_context(&scan->context);
+	btree_page_context_release(&scan->leafPageContext);
+	btree_page_context_release(&scan->histPageContext);
 	pfree(scan->diskDownlinks);
 	pfree(scan);
 }
