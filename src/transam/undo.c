@@ -1102,7 +1102,11 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 	{
 		UndoLocation location;
 
-		Assert(reserved_undo_sizes[(int) undoType] >= size);
+		if (reserved_undo_sizes[(int) undoType] < size)
+			elog(PANIC, "get_undo_record(): not enough reserved undo (undoType: %d, reservedSize %u, requestedSize: %u",
+				 (int) undoType,
+				 (unsigned int) reserved_undo_sizes[(int) undoType],
+				 (unsigned int) size);
 
 		location = pg_atomic_fetch_add_u64(&meta->lastUsedLocation, size);
 		reserved_undo_sizes[(int) undoType] -= size;

@@ -594,6 +594,18 @@ unlock_page(OInMemoryBlkno blkno)
 #ifdef CHECK_PAGE_STRUCT
 	if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
 		o_check_page_struct(NULL, p);
+#else
+	if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) p;
+		BTreePageChunkDesc *lastChunk = &header->chunkDesc[header->chunksCount - 1];
+
+		if (SHORT_GET_LOCATION(lastChunk->shortLocation) > header->dataSize ||
+			header->dataSize > ORIOLEDB_BLCKSZ)
+			elog(PANIC, "broken page: (blkno: %u, p: %p, lastChunk: %u, dataSize: %u)",
+				 blkno, p, SHORT_GET_LOCATION(lastChunk->shortLocation),
+				 header->dataSize);
+	}
 #endif
 
 #ifdef CHECK_PAGE_STATS
