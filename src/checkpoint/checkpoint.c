@@ -641,7 +641,7 @@ flush_xids_queue(void)
 		if (OFileWrite(xidFile,
 					   (Pointer) &checkpoint_state->xidRecQueue[startPos % XID_RECS_QUEUE_SIZE],
 					   sizeof(XidFileRec) * (endPos - startPos),
-					   sizeof(uint32) + sizeof(XidFileRec) * startPos,
+					   sizeof(uint32) + (sizeof(XidFileRec) * startPos),
 					   WAIT_EVENT_SLRU_WRITE) != sizeof(XidFileRec) * (endPos - startPos))
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not write xid record to file %s: %m", xidFilename)));
@@ -658,7 +658,7 @@ flush_xids_queue(void)
 		if (OFileWrite(xidFile,
 					   (Pointer) &checkpoint_state->xidRecQueue[startPos % XID_RECS_QUEUE_SIZE],
 					   sizeof(XidFileRec) * len1,
-					   sizeof(uint32) + sizeof(XidFileRec) * startPos,
+					   sizeof(uint32) + (sizeof(XidFileRec) * startPos),
 					   WAIT_EVENT_SLRU_WRITE) != sizeof(XidFileRec) * len1)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not write xid record to file %s: %m", xidFilename)));
@@ -666,7 +666,7 @@ flush_xids_queue(void)
 		if (OFileWrite(xidFile,
 					   (Pointer) &checkpoint_state->xidRecQueue[0],
 					   sizeof(XidFileRec) * len2,
-					   sizeof(uint32) + sizeof(XidFileRec) * (startPos + len1),
+					   sizeof(uint32) + (sizeof(XidFileRec) * (startPos + len1)),
 					   WAIT_EVENT_SLRU_WRITE) != sizeof(XidFileRec) * len2)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not write xid record to file %s: %m", xidFilename)));
@@ -2111,13 +2111,13 @@ tree_is_under_checkpoint(BTreeDescr *desc)
  * we will have the offset both free and busy for the current checkpoint.
  */
 static inline int
-side_of_checkpoint_bound(BTreeDescr *descr, Page page,
+side_of_checkpoint_bound(BTreePageContext *pageContext,
 						 OTuple cur_key, CurKeyType cur_key_type,
 						 OTuple lvl_hikey, CheckpointBound bound)
 {
 	int			cmp;
 	OTuple		hikey;
-	bool		page_is_rightmost = O_PAGE_IS(page, RIGHTMOST);
+	bool		page_is_rightmost = O_PAGE_IS(pageContext->page, RIGHTMOST);
 
 	Assert(cur_key_type == CurKeyValue || cur_key_type == CurKeyGreatest);
 
@@ -2144,8 +2144,10 @@ side_of_checkpoint_bound(BTreeDescr *descr, Page page,
 	 * left bound comparison
 	 */
 	Assert(!page_is_rightmost && cur_key_type == CurKeyValue);
-	BTREE_PAGE_GET_HIKEY(hikey, page);
-	cmp = o_btree_cmp(descr, &hikey, BTreeKeyNonLeafKey, &cur_key, BTreeKeyNonLeafKey);
+
+	hikey = page_get_hikey(pageContext);
+	cmp = o_btree_cmp(pageContext->treeDesc, &hikey, BTreeKeyNonLeafKey,
+					  &cur_key, BTreeKeyNonLeafKey);
 
 	if (cmp == 0)
 		return 0;
@@ -2171,7 +2173,8 @@ side_of_checkpoint_bound(BTreeDescr *descr, Page page,
 	 * right bound comparison
 	 */
 	Assert(!page_is_rightmost && bound == CheckpointBoundHikey);
-	cmp = o_btree_cmp(descr, &hikey, BTreeKeyNonLeafKey, &lvl_hikey, BTreeKeyNonLeafKey);
+	cmp = o_btree_cmp(pageContext->treeDesc, &hikey, BTreeKeyNonLeafKey,
+					  &lvl_hikey, BTreeKeyNonLeafKey);
 	if (cmp <= 0)
 		return 0;
 	return -1;
@@ -2212,17 +2215,17 @@ chkp_ordering_cmp(OIndexType type1, Oid datoid1, Oid relnode1,
  * Determine which checkpoint `blkno` should be written to.
  */
 bool
-get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno,
+get_checkpoint_number(OInMemoryBlkno blkno, BTreePageContext *pageContext,
 					  uint32 *checkpoint_number, bool *copy_blkno)
 {
+	BTreeDescr *desc = pageContext->treeDesc;
 	CheckpointBound bound;
 	CurKeyType	cur_key_type;
 	OFixedKey	lvl_hikey,
 				cur_key;
-	Page		page = O_GET_IN_MEMORY_PAGE(blkno);
 	Oid			datoid,
 				relnode;
-	int			level = PAGE_GET_LEVEL(page),
+	int			level = PAGE_GET_LEVEL(pageContext->page),
 				before_changecount,
 				after_changecount,
 				cmp;
@@ -2279,7 +2282,7 @@ get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno,
 		}
 
 		under_checkpoint = (chkp_lvl_blkno == blkno || chkp_lvl_hikey_blkno == blkno);
-		if (!under_checkpoint && O_PAGE_IS(page, LEFTMOST))
+		if (!under_checkpoint && O_PAGE_IS(pageContext->page, LEFTMOST))
 		{
 			/*
 			 * Page can be under checkpoint if concurrent rootPageBlkno split
@@ -2328,7 +2331,7 @@ get_checkpoint_number(BTreeDescr *desc, OInMemoryBlkno blkno,
 		if (before_changecount != after_changecount)
 			continue;
 
-		cmp = side_of_checkpoint_bound(desc, page, cur_key.tuple, cur_key_type,
+		cmp = side_of_checkpoint_bound(pageContext, cur_key.tuple, cur_key_type,
 									   lvl_hikey.tuple, bound);
 
 		chkp_save_changecount_after(checkpoint_state, after_changecount);
@@ -2819,6 +2822,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 {
 	Page		page,
 				img;
+	BTreePageContext pageContext;
 	int			l,
 				page_level;
 	OInMemoryBlkno next_blkno;
@@ -2839,6 +2843,9 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 		Assert(page_chage_count != O_PAGE_GET_CHANGE_COUNT(page));
 		return;
 	}
+
+	page_context_init(&pageContext, descr);
+	page_context_set_page(&pageContext, page);
 
 	/*
 	 * only rootPageBlkno page split increases page level (and only for
@@ -2873,7 +2880,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 		if (!autonomous && !O_PAGE_IS(page, RIGHTMOST))
 		{
 			/* we did not forget about merge */
-			copy_fixed_shmem_hikey(descr, &state->stack[l].hikey, page);
+			copy_fixed_shmem_hikey(&pageContext, &state->stack[l].hikey);
 			state->stack[l].bound = CheckpointBoundHikey;
 		}
 
@@ -2908,6 +2915,8 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 		lock_page(*blkno);
 		page = O_GET_IN_MEMORY_PAGE(*blkno);
 		chkp_inc_changecount_before(state);
+
+		page_context_set_page(&pageContext, page);
 	}
 
 	Assert(l == level);
@@ -2919,7 +2928,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 	checkpointer_update_autonomous(descr, state);
 	if (!state->stack[level].autonomous)
 	{
-		copy_fixed_shmem_hikey(descr, &state->stack[level].hikey, page);
+		copy_fixed_shmem_hikey(&pageContext, &state->stack[level].hikey);
 		state->stack[level].bound = CheckpointBoundHikey;
 	}
 	else if (!autonomous)
@@ -2937,6 +2946,7 @@ checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 	}
 	chkp_inc_changecount_after(state);
 
+	page_context_release(&pageContext);
 }
 
 static void
@@ -3316,6 +3326,8 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			bool		was_dirty,
 						parent_dirty;
 			Page		img;
+			BTreePageContext pageContext,
+						curPageContext;
 			OrioleDBPageDesc *page_desc = NULL;
 
 			Assert(level > 0);
@@ -3345,14 +3357,20 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			}
 
 			img = state->stack[level].image;
+
+			page_context_init(&pageContext, descr);
+			page_context_set_page(&pageContext, page);
+
+			page_context_init(&curPageContext, descr);
+			page_context_set_page(&curPageContext, img);
+
 			if (!state->stack[level].autonomous)
 			{
 				/* Updates right checkpoint bound. */
 				chkp_inc_changecount_before(state);
 				if (!O_PAGE_IS(page, RIGHTMOST))
 				{
-					copy_fixed_shmem_hikey(descr, &state->stack[level].hikey,
-										   page);
+					copy_fixed_shmem_hikey(&pageContext, &state->stack[level].hikey);
 					state->stack[level].bound = CheckpointBoundHikey;
 					state->stack[level].hikeyBlkno = blkno;
 				}
@@ -3404,6 +3422,9 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				ionum = page_desc->ionum;
 				if (ionum >= 0)
 				{
+					page_context_release(&pageContext);
+					page_context_release(&curPageContext);
+
 					unlock_page(blkno);
 					wait_for_io_completion(ionum);
 					level++;
@@ -3419,6 +3440,8 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			if (level == 0)
 			{
 				memcpy(img, page, ORIOLEDB_BLCKSZ);
+				page_context_set_invalid(&curPageContext);
+
 				was_dirty = IS_DIRTY(blkno);
 				if (was_dirty)
 				{
@@ -3482,10 +3505,14 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				else
 				{
 					message.content.upwards.nextkeyType = NextKeyValue;
-					copy_fixed_hikey(descr, &message.content.upwards.nextkey, img);
+					copy_fixed_hikey(&curPageContext, &message.content.upwards.nextkey);
 				}
 				BTREE_PAGE_ITEMS_COUNT(img) = 0;
 				state->stack[level].nextkeyType = NextKeyNone;
+
+				page_context_release(&pageContext);
+				page_context_release(&curPageContext);
+
 				continue;
 			}
 			/* else level != 0 */
@@ -3494,6 +3521,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 			{
 				memset(img, 0, ORIOLEDB_BLCKSZ);
 				init_page_first_chunk(descr, img, 0);
+				page_context_set_invalid(&curPageContext);
 			}
 
 			/* saves lokey for the node */
@@ -3508,6 +3536,9 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 									 &state->stack[level].lokey,
 									 message.content.downwards.lokey.tuple);
 			}
+
+			page_context_release(&pageContext);
+			page_context_release(&curPageContext);
 		}
 		else if (message.action == WalkUpwards)
 		{
@@ -3607,12 +3638,13 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
  * only for autonomous images.
  */
 static inline bool
-checkpoint_image_add_item(CheckpointPageInfo *page_info,
+checkpoint_image_add_item(BTreePageContext *pageContext,
+						  bool autonomousPage,
 						  StackImageAddType type,
 						  OTuple key,
 						  uint key_size)
 {
-	Page		img = page_info->image;
+	Page		img = pageContext->page;
 	int			img_count = BTREE_PAGE_ITEMS_COUNT(img);
 	uint		item_size;
 
@@ -3622,15 +3654,19 @@ checkpoint_image_add_item(CheckpointPageInfo *page_info,
 		Assert(key_size != 0);
 		item_size = MAXALIGN(key_size);
 
-		if (!page_info->autonomous || img_count == 0 ||
+		if (!autonomousPage || img_count == 0 ||
 			page_fits_hikey(img, item_size))
 		{
 			OTuple		hikey;
 
 			page_resize_hikey(img, item_size);
 			BTREE_PAGE_SET_HIKEY_FLAGS(img, key.formatFlags);
-			BTREE_PAGE_GET_HIKEY(hikey, img);
+
+			page_context_set_invalid(pageContext);
+			hikey = page_get_hikey(pageContext);
+
 			memcpy(hikey.data, key.data, key_size);
+
 			return true;
 		}
 	}
@@ -3644,10 +3680,11 @@ checkpoint_image_add_item(CheckpointPageInfo *page_info,
 		item_size = MAXALIGN(BTreeNonLeafTuphdrSize + key_size);
 		BTREE_PAGE_LOCATOR_TAIL(img, &loc);
 
-		if (!page_info->autonomous || img_count == 0 ||
+		if (!autonomousPage || img_count == 0 ||
 			page_locator_fits_new_item(img, &loc, item_size))
 		{
 			page_locator_insert_item(img, &loc, item_size);
+			page_context_set_invalid(pageContext);
 
 			if (key_size != 0)
 			{
@@ -3661,7 +3698,7 @@ checkpoint_image_add_item(CheckpointPageInfo *page_info,
 		}
 	}
 
-	Assert(page_info->autonomous);
+	Assert(autonomousPage);
 	return false;
 }
 
@@ -3672,16 +3709,16 @@ checkpoint_image_add_item(CheckpointPageInfo *page_info,
  * 2. BTreeNonLeafTuphdr will be returned.
  */
 static BTreeNonLeafTuphdr
-autonomous_image_split(BTreeDescr *descr, CheckpointPageInfo *page_info)
+autonomous_image_split(BTreePageContext *pageContext, bool autonomousPage)
 {
 	BTreeNonLeafTuphdr result;
 	OFixedKey	saved_key;
 	OTuple		hikey;
-	Page		img = page_info->image;
+	Page		img = pageContext->page;
 	int			key_len;
 	BTreePageItemLocator loc;
 
-	Assert(page_info->autonomous);
+	Assert(autonomousPage);
 	/* page must contain a full node tuple (downlink + key) */
 	Assert(BTREE_PAGE_ITEMS_COUNT(img) > 1);
 
@@ -3693,8 +3730,8 @@ autonomous_image_split(BTreeDescr *descr, CheckpointPageInfo *page_info)
 		   sizeof(BTreeNonLeafTuphdr));
 
 	/* save key to the buffer */
-	copy_fixed_page_key(descr, &saved_key, img, &loc);
-	key_len = MAXALIGN(o_btree_len(descr, saved_key.tuple, OKeyLength));
+	copy_fixed_page_key(pageContext->treeDesc, &saved_key, img, &loc);
+	key_len = MAXALIGN(o_btree_len(pageContext->treeDesc, saved_key.tuple, OKeyLength));
 
 	/* remove tuple */
 	page_locator_delete_item(img, &loc);
@@ -3702,7 +3739,9 @@ autonomous_image_split(BTreeDescr *descr, CheckpointPageInfo *page_info)
 	/* add a new hikey */
 	page_resize_hikey(img, key_len);
 	BTREE_PAGE_SET_HIKEY_FLAGS(img, saved_key.tuple.formatFlags);
-	BTREE_PAGE_GET_HIKEY(hikey, img);
+	page_context_set_invalid(pageContext);
+
+	hikey = page_get_hikey(pageContext);
 	memcpy(hikey.data, saved_key.tuple.data, key_len);
 	return result;
 }
@@ -3711,10 +3750,10 @@ autonomous_image_split(BTreeDescr *descr, CheckpointPageInfo *page_info)
  * Writes the autonomous image of given stack level to disk.
  */
 static uint64
-autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
+autonomous_image_write(BTreePageContext *pageContext, CheckpointState *state,
 					   CheckpointWriteBack *writeback, int level, uint32 flags)
 {
-	Page		img = state->stack[level].image;
+	Page		img = pageContext->page;
 	BTreePageHeader *img_header;
 	uint64		downlink;
 	uint32		chkpNum = state->lastCheckpointNumber + 1;
@@ -3734,9 +3773,9 @@ autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
 	extent.off = InvalidFileExtentOff;
 
 	/* write the image to disk */
-	split_page_by_chunks(descr, img);
+	split_page_by_chunks(pageContext);
 
-	downlink = perform_page_io_autonomous(descr, chkpNum, img, &extent);
+	downlink = perform_page_io_autonomous(pageContext->treeDesc, chkpNum, img, &extent);
 	writeback_put_extent(writeback, &extent);
 
 	Assert(DiskDownlinkIsValid(downlink));
@@ -3745,7 +3784,7 @@ autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
 	 * The BTree is not contain a page with the offset, so we need to free it
 	 * for next checkpoint because it will not be possible in the future.
 	 */
-	free_extent_for_checkpoint(descr, &extent, chkpNum + 1);
+	free_extent_for_checkpoint(pageContext->treeDesc, &extent, chkpNum + 1);
 
 	/* the next page no more can be leftmost for the current level */
 	state->stack[level].autonomousLeftmost = false;
@@ -3828,6 +3867,7 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 		BTreePageItemLocator curLoc;
 		CheckpointPageInfo *curItem = &state->stack[cur_level];
 		uint32		flags = curItem->autonomousLeftmost ? O_BTREE_FLAG_LEFTMOST : 0;
+		BTreePageContext pageContext;
 
 		/*
 		 * It might happen that "checkpointed" tree grow up higher than
@@ -3848,21 +3888,29 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 			curItem->hikeyBlkno = OInvalidInMemoryBlkno;
 		}
 
+		page_context_init(&pageContext, descr);
+		page_context_set_page(&pageContext, curItem->image);
+
 		if (cur_level != level)
 		{
 			BTREE_PAGE_LOCATOR_LAST(curItem->image, &curLoc);
 			header = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(curItem->image, &curLoc);
 			header->downlink = downlink;
 
-			inserted = checkpoint_image_add_item(curItem,
+			inserted = checkpoint_image_add_item(&pageContext,
+												 curItem->autonomous,
 												 StackImageAddDownlink,
 												 curKey,
 												 curKeySize);
 			if (inserted)
+			{
+				page_context_release(&pageContext);
 				break;
+			}
 
 			/* It still might happen, that we can insert item as a hikey */
-			inserted = checkpoint_image_add_item(curItem,
+			inserted = checkpoint_image_add_item(&pageContext,
+												 curItem->autonomous,
 												 StackImageAddHikey,
 												 curKey,
 												 curKeySize);
@@ -3870,22 +3918,29 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 		}
 
 		if (!inserted)
-			savedHeader = autonomous_image_split(descr, &state->stack[cur_level]);
+			savedHeader = autonomous_image_split(&pageContext, curItem->autonomous);
 
-		downlink = autonomous_image_write(descr, state, writeback, cur_level, flags);
+		downlink = autonomous_image_write(&pageContext, state, writeback, cur_level, flags);
 
-		copy_fixed_hikey(descr, &hikey[cur_level % 2], curItem->image);
+		page_context_set_invalid(&pageContext);
+
+		copy_fixed_hikey(&pageContext, &hikey[cur_level % 2]);
+
 		hikeySize[cur_level % 2] = BTREE_PAGE_GET_HIKEY_SIZE(curItem->image);
 
 		init_page_first_chunk(descr, curItem->image, 0);
 		BTREE_PAGE_LOCATOR_FIRST(curItem->image, &curLoc);
 		page_locator_insert_item(curItem->image, &curLoc, BTreeNonLeafTuphdrSize);
+
+		page_context_set_invalid(&pageContext);
+
 		header = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(curItem->image, &curLoc);
 		*header = savedHeader;
 
 		if (cur_level != level && !inserted)
 		{
-			inserted = checkpoint_image_add_item(curItem,
+			inserted = checkpoint_image_add_item(&pageContext,
+												 curItem->autonomous,
 												 StackImageAddDownlink,
 												 curKey,
 												 curKeySize);
@@ -3897,6 +3952,8 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 
 		cur_level++;
 		Assert(cur_level < ORIOLEDB_MAX_DEPTH);
+
+		page_context_release(&pageContext);
 	}
 }
 
@@ -3906,20 +3963,25 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
  * For autonomous pages it can modify stack if on the page is not enough space.
  */
 static void
-checkpoint_stack_image_add_item(BTreeDescr *descr, CheckpointState *state,
+checkpoint_stack_image_add_item(BTreePageContext *pageContext, bool autonomousPage,
+								CheckpointState *state,
 								CheckpointWriteBack *writeback, int level,
 								StackImageAddType type, OTuple item, int item_size)
 {
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
 
-	if (checkpoint_image_add_item(&state->stack[level], type, item, item_size))
+	if (checkpoint_image_add_item(pageContext, autonomousPage,
+								  type, item, item_size))
 		return;
 
+	Assert(autonomousPage);
+
 	/* no space for the item */
-	checkpoint_stack_image_split_flush(descr, state, writeback, level);
+	checkpoint_stack_image_split_flush(pageContext->treeDesc,
+									   state, writeback, level);
 
 	/* repeat insert must be success */
-	inserted = checkpoint_image_add_item(&state->stack[level], type,
+	inserted = checkpoint_image_add_item(pageContext, autonomousPage, type,
 										 item, item_size);
 	Assert(inserted);
 }
@@ -3955,16 +4017,22 @@ autonomous_stack_flush_to_disk(BTreeDescr *descr, CheckpointState *state,
 	for (; cur_level < to_level; cur_level++)
 	{
 		BTreeNonLeafTuphdr *tuphdr;
+		CheckpointPageInfo *curInfo = &state->stack[cur_level];
 		Page		parent_img = state->stack[cur_level + 1].image;
 		int			flags;
 		BTreePageItemLocator loc;
+		BTreePageContext pageContext;
+
+		page_context_init(&pageContext, descr);
+		page_context_set_page(&pageContext, curInfo->image);
 
 		/* write the autonomous image with given hikey */
-		checkpoint_stack_image_add_item(descr, state, writeback, cur_level,
+		checkpoint_stack_image_add_item(&pageContext, curInfo->autonomous,
+										state, writeback, cur_level,
 										StackImageAddHikey, hikey, hikey_size);
 
 		flags = state->stack[cur_level].leftmost ? O_BTREE_FLAG_LEFTMOST : 0;
-		downlink = autonomous_image_write(descr, state, writeback,
+		downlink = autonomous_image_write(&pageContext, state, writeback,
 										  cur_level, flags);
 
 		/* update last parent downlink with the offset */
@@ -3981,6 +4049,8 @@ autonomous_stack_flush_to_disk(BTreeDescr *descr, CheckpointState *state,
 		BTREE_PAGE_ITEMS_COUNT(state->stack[cur_level].image) = 0;
 		state->stack[cur_level].nextkeyType = NextKeyNone;
 		state->stack[cur_level].autonomousTupleExist = false;
+
+		page_context_release(&pageContext);
 	}
 }
 
@@ -3994,6 +4064,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 	OTuple		write_hikey;
 	Page		page,
 				img;
+	BTreePageContext pageContext,
+				imgPageContext;
 	uint64		downlink;
 	int			page_count,
 				ionum;
@@ -4013,6 +4085,12 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 	BTREE_PAGE_OFFSET_GET_LOCATOR(page, state->stack[level].offset, &loc);
 	img = state->stack[level].image;
 	page_count = BTREE_PAGE_ITEMS_COUNT(page);
+
+	page_context_init(&pageContext, descr);
+	page_context_set_page(&pageContext, page);
+
+	page_context_init(&imgPageContext, descr);
+	page_context_set_page(&imgPageContext, img);
 
 	Assert(level > 0);
 	Assert(PAGE_GET_LEVEL(page) == level);
@@ -4077,7 +4155,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 
 				if (!O_PAGE_IS(page, RIGHTMOST))
 				{
-					BTREE_PAGE_GET_HIKEY(hikey, page);
+					hikey = page_get_hikey(&pageContext);
 					levelHikey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
 				}
 
@@ -4155,7 +4233,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					downlink_key_size = o_btree_len(descr, downlink_key, OKeyLength);
 				}
 
-				if (!checkpoint_image_add_item(&state->stack[level],
+				if (!checkpoint_image_add_item(&imgPageContext,
+											   state->stack[level].autonomous,
 											   StackImageAddDownlink,
 											   downlink_key, downlink_key_size))
 				{
@@ -4180,6 +4259,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 												  &state->stack[level].nextkey,
 												  page, &loc);
 					}
+
+					page_context_release(&imgPageContext);
 					unlock_page(blkno);
 
 					checkpoint_stack_image_split_flush(descr, state, writeback, level);
@@ -4220,8 +4301,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 				else
 				{
 					state->stack[level].nextkeyType = NextKeyValue;
-					copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
-										   page);
+					copy_fixed_shmem_hikey(&pageContext, &state->stack[level].nextkey);
 				}
 			}
 
@@ -4242,7 +4322,10 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 									page, &loc);
 			}
 
+			page_context_release(&pageContext);
+			page_context_release(&imgPageContext);
 			unlock_page(blkno);
+
 			message->action = WalkDownwards;
 			message->content.downwards.blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(downlink);
 			message->content.downwards.pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink);
@@ -4287,7 +4370,11 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 											  page, &loc);
 					hikey = fixed_shmem_key_get_tuple(&state->stack[level].nextkey);
 				}
+
+				page_context_release(&pageContext);
+				page_context_release(&imgPageContext);
 				unlock_page(blkno);
+
 				hikey_size = MAXALIGN(o_btree_len(descr, hikey, OKeyLength));
 
 				autonomous_stack_flush_to_disk(descr, state, writeback,
@@ -4313,7 +4400,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					copy_fixed_shmem_page_key(descr, &state->curKeyValue, page,
 											  &nextLoc);
 				else
-					copy_fixed_shmem_hikey(descr, &state->curKeyValue, page);
+					copy_fixed_shmem_hikey(&pageContext, &state->curKeyValue);
 
 				update_lowest_level_hikey(descr, state, level,
 										  fixed_shmem_key_get_tuple(&state->curKeyValue));
@@ -4335,8 +4422,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			{
 				if (!O_PAGE_IS(page, RIGHTMOST))
 				{
-					copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
-										   page);
+					copy_fixed_shmem_hikey(&pageContext, &state->stack[level].nextkey);
 					state->stack[level].nextkeyType = NextKeyValue;
 				}
 				else
@@ -4367,7 +4453,10 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			message->action = WalkContinue;
 			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
 
+			page_context_release(&pageContext);
+			page_context_release(&imgPageContext);
 			unlock_page(blkno);
+
 			/* IO is in-progress.  So, wait for completeness and retry. */
 			wait_for_io_completion(DOWNLINK_GET_IO_LOCKNUM(downlink));
 			return;
@@ -4386,7 +4475,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		OTuple		hikey;
 		OTuple		levelHikey;
 
-		BTREE_PAGE_GET_HIKEY(hikey, page);
+		hikey = page_get_hikey(&pageContext);
 		levelHikey = fixed_shmem_key_get_tuple(&state->stack[level].hikey);
 		cmp = o_btree_cmp(descr, &levelHikey, BTreeKeyNonLeafKey,
 						  &hikey, BTreeKeyNonLeafKey);
@@ -4424,6 +4513,9 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 
 		if (!write_img)
 		{
+			page_context_release(&pageContext);
+			page_context_release(&imgPageContext);
+
 			/* no need to write the autonomous image */
 			message->action = WalkUpwards;
 			copy_from_fixed_shmem_key(&message->content.upwards.nextkey,
@@ -4451,12 +4543,15 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			else
 			{
 				state->stack[level].nextkeyType = NextKeyValue;
-				copy_fixed_shmem_hikey(descr, &state->stack[level].nextkey,
-									   page);
+				copy_fixed_shmem_hikey(&pageContext, &state->stack[level].nextkey);
 			}
 			message->action = WalkContinue;
 			state->stack[level].offset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, &loc);
+
+			page_context_release(&pageContext);
+			page_context_release(&imgPageContext);
 			unlock_page(blkno);
+
 			wait_for_io_completion(ionum);
 			return;
 		}
@@ -4478,14 +4573,14 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		else
 		{
 			Assert(!autonomous);
-			BTREE_PAGE_GET_HIKEY(write_hikey, page);
+			write_hikey = page_get_hikey(&pageContext);
 			hikey_len = BTREE_PAGE_GET_HIKEY_SIZE(page);
 		}
 
-		checkpoint_stack_image_add_item(descr, state,
-										writeback, level, StackImageAddHikey,
-										write_hikey,
-										hikey_len);
+		checkpoint_stack_image_add_item(&imgPageContext, state->stack[level].autonomous,
+										state, writeback, level,
+										StackImageAddHikey,
+										write_hikey, hikey_len);
 	}
 	state->stack[level].autonomous = false;
 
@@ -4503,7 +4598,8 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		if (write_rightmost)
 			flags |= O_BTREE_FLAG_RIGHTMOST;
 
-		written_downlink = autonomous_image_write(descr, state, writeback, level, flags);
+		written_downlink = autonomous_image_write(&imgPageContext,
+												  state, writeback, level, flags);
 		message->content.upwards.diskDownlink = written_downlink;
 		message->content.upwards.parentDirty = false;
 	}
@@ -4555,7 +4651,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 			 * TODO: Non-leaf page isn't modified during checkpoint.  We can
 			 * reuse original chunks layout/max key length.
 			 */
-			split_page_by_chunks(descr, img);
+			split_page_by_chunks(&imgPageContext);
 
 			written_downlink = perform_page_io(descr,
 											   blkno,
@@ -4601,11 +4697,14 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 	else
 	{
 		message->content.upwards.nextkeyType = NextKeyValue;
-		copy_fixed_hikey(descr, &message->content.upwards.nextkey, img);
+		copy_fixed_hikey(&imgPageContext, &message->content.upwards.nextkey);
 	}
 
 	state->stack[level].nextkeyType = NextKeyNone;
 	BTREE_PAGE_ITEMS_COUNT(img) = 0;
+
+	page_context_release(&pageContext);
+	page_context_release(&imgPageContext);
 }
 
 
@@ -4619,12 +4718,16 @@ static void
 prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
 {
 	Page		page;
+	BTreePageContext pageContext;
 	OInMemoryBlkno blkno = state->stack[0].blkno;
 
 	/*
 	 * Update checkpoint bound key.
 	 */
 	page = O_GET_IN_MEMORY_PAGE(blkno);
+	
+	page_context_init(&pageContext, descr);
+	page_context_set_page(&pageContext, page);
 
 	chkp_inc_changecount_before(state);
 	if (O_PAGE_IS(page, RIGHTMOST))
@@ -4634,10 +4737,11 @@ prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
 	else
 	{
 		state->curKeyType = CurKeyValue;
-		copy_fixed_shmem_hikey(descr, &state->curKeyValue, page);
+		copy_fixed_shmem_hikey(&pageContext, &state->curKeyValue);
 	}
 	chkp_inc_changecount_after(state);
 
+	page_context_release(&pageContext);
 	unlock_page(blkno);
 }
 

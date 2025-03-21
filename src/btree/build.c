@@ -41,6 +41,7 @@
 typedef struct OIndexBuildStackItem
 {
 	char		img[ORIOLEDB_BLCKSZ];
+	BTreePageContext pageContext;
 	BTreePageItemLocator loc;
 	OFixedKey	key;
 	int			keysize;
@@ -169,6 +170,8 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	btree_page_reorg(desc, img, items, left_count,
 					 rightbound_key_size, rightbound_key, NULL);
 
+	page_context_set_invalid(&stack[level].pageContext);
+
 	if (key_palloc)
 		pfree(rightbound_key.data);
 }
@@ -206,6 +209,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		memcpy(tuple_ptr, tuple.data, tuplesize);
 		BTREE_PAGE_SET_ITEM_FLAGS(stack[level].img, &stack[level].loc, tuple.formatFlags);
 
+		page_context_set_invalid(&stack[level].pageContext);
 		BTREE_PAGE_LOCATOR_NEXT(stack[level].img, &stack[level].loc);
 	}
 	else
@@ -276,7 +280,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		keysize = stack[level].keysize;
 
 		stack[level].keysize = BTREE_PAGE_GET_HIKEY_SIZE(stack[level].img);
-		copy_fixed_hikey(desc, &stack[level].key, stack[level].img);
+		copy_fixed_hikey(&stack[level].pageContext, &stack[level].key);
 
 		if (level > 0)
 		{
@@ -288,6 +292,8 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		/* copy new page to stack */
 		memcpy(stack[level].img, new_page, ORIOLEDB_BLCKSZ);
 		BTREE_PAGE_LOCATOR_TAIL(stack[level].img, &stack[level].loc);
+
+		page_context_set_invalid(&stack[level].pageContext);
 
 		put_downlink_to_stack(desc, stack, level + 1, downlink,
 							  key.tuple, keysize,
@@ -338,7 +344,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	OIndexBuildStackItem *stack;
 	int			root_level = 0,
 				saved_root_level;
-	Page		root_page;
+	BTreePageContext *rootPageContext;
 	uint64		downlink;
 	BTreePageHeader *root_page_header;
 	FileExtent	extent;
@@ -367,6 +373,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 			((BTreePageHeader *) stack[i].img)->flags = O_BTREE_FLAG_LEAF;
 		init_page_first_chunk(desc, stack[i].img, 0);
 		BTREE_PAGE_LOCATOR_FIRST(stack[i].img, &stack[i].loc);
+		page_context_init(&stack[i].pageContext, desc);
+		page_context_set_page(&stack[i].pageContext, stack[i].img);
 	}
 
 	idx_tup = tuplesort_getotuple(sortstate, true);
@@ -391,7 +399,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[i].img, ORIOLEDB_BLCKSZ);
 
-		split_page_by_chunks(desc, stack[i].img);
+		split_page_by_chunks(&stack[i].pageContext);
+
 		downlink = perform_page_io_build(desc, stack[i].img, &extent, &metaPageBlkno);
 		if (i == 0)
 			pg_atomic_add_fetch_u32(&metaPageBlkno.leafPagesNum, 1);
@@ -401,9 +410,9 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 							  &root_level, &metaPageBlkno);
 	}
 
-	root_page = stack[root_level].img;
+	rootPageContext = &stack[root_level].pageContext;
 
-	root_page_header = (BTreePageHeader *) root_page;
+	root_page_header = (BTreePageHeader *) rootPageContext->page;
 	if (root_level == 0)
 		root_page_header->flags = O_BTREE_FLAGS_ROOT_INIT;
 	root_page_header->rightLink = InvalidRightLink;
@@ -412,21 +421,27 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	root_page_header->checkpointNum = 0;
 	root_page_header->prevInsertOffset = MaxOffsetNumber;
 
-	if (!O_PAGE_IS(root_page, LEAF))
+	page_context_set_invalid(rootPageContext);
+
+	if (!O_PAGE_IS(rootPageContext->page, LEAF))
 	{
-		PAGE_SET_N_ONDISK(root_page, BTREE_PAGE_ITEMS_COUNT(root_page));
-		PAGE_SET_LEVEL(root_page, root_level);
+		PAGE_SET_N_ONDISK(rootPageContext->page, BTREE_PAGE_ITEMS_COUNT(rootPageContext->page));
+		PAGE_SET_LEVEL(rootPageContext->page, root_level);
 	}
 
 	extent.len = InvalidFileExtentLen;
 	extent.off = InvalidFileExtentOff;
 
-	VALGRIND_CHECK_MEM_IS_DEFINED(root_page, ORIOLEDB_BLCKSZ);
+	VALGRIND_CHECK_MEM_IS_DEFINED(rootPageContext->page, ORIOLEDB_BLCKSZ);
 
-	split_page_by_chunks(desc, root_page);
-	downlink = perform_page_io_build(desc, root_page, &extent, &metaPageBlkno);
+	split_page_by_chunks(rootPageContext);
+
+	downlink = perform_page_io_build(desc, rootPageContext->page, &extent, &metaPageBlkno);
 	if (root_level == 0)
 		pg_atomic_add_fetch_u32(&metaPageBlkno.leafPagesNum, 1);
+
+	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)
+		page_context_release(&stack[i].pageContext);
 
 	btree_close_smgr(desc);
 	pfree(stack);

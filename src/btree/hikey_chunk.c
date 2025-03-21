@@ -19,6 +19,49 @@
 const BTreeChunkOps HiKeyChunkOps;
 
 /*
+ * Page utility functions.
+ */
+
+OTuple
+page_get_hikey(BTreePageContext *pageContext)
+{
+	BTreeChunkDesc *chunk;
+	Pointer		header;
+	OTuple		tuple;
+	bool		needsFree;
+
+	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
+
+	page_context_ensure_chunk_init(pageContext);
+	chunk = pageContext->hikeyChunk;
+
+	Assert(chunk->chunkItemsCount > 0);
+
+	chunk->ops->read_tuple(chunk, NULL, NULL, chunk->chunkItemsCount -1,
+						   &header, &tuple, &needsFree);
+
+	return tuple;
+}
+
+void
+copy_fixed_hikey(BTreePageContext *pageContext, OFixedKey *dst)
+{
+	OTuple		src;
+
+	src = page_get_hikey(pageContext);
+	copy_fixed_key(pageContext->treeDesc, dst, src);
+}
+
+void
+copy_fixed_shmem_hikey(BTreePageContext *pageContext, OFixedShmemKey *dst)
+{
+	OTuple		src;
+
+	src = page_get_hikey(pageContext);
+	copy_fixed_shmem_key(pageContext->treeDesc, dst, src);
+}
+
+/*
  * Implementation of hikey chunks.
  */
 

@@ -187,6 +187,16 @@ extern const BTreeChunkOps LeafTupleChunkOps;
 extern const BTreeChunkOps InternalTupleChunkOps;
 extern const BTreeChunkOps HiKeyChunkOps;
 
+typedef struct BTreePageContext
+{
+	BTreeDescr *treeDesc;
+	Page		page;
+	BTreeChunkDesc *hikeyChunk;
+
+	MemoryContext mctx;
+	bool		isInitialized;
+} BTreePageContext;
+
 /*
  * Chunk initialization functions.
  */
@@ -198,5 +208,23 @@ extern void release_chunk_desc(BTreeChunkDesc *desc);
 
 extern BTreeChunkBuilder * make_chunk_builder(BTreeDescr *treeDesc, const BTreeChunkOps *ops);
 extern void release_chunk_builder(BTreeChunkBuilder *chunkBuilder);
+
+/*
+ * Page context utility functions.
+ */
+
+extern void page_context_init(BTreePageContext *pageContext, BTreeDescr *treeDesc);
+extern void page_context_release(BTreePageContext *pageContext);
+extern void page_context_set_page(BTreePageContext *pageContext, Page page);
+extern void page_context_set_invalid(BTreePageContext *pageContext);
+extern void page_context_ensure_chunk_init(BTreePageContext *pageContext);
+
+/*
+ * Page utility functions.
+ */
+
+extern OTuple page_get_hikey(BTreePageContext *pageContext);
+extern void copy_fixed_hikey(BTreePageContext *pageContext, OFixedKey *dst);
+extern void copy_fixed_shmem_hikey(BTreePageContext *pageContext, OFixedShmemKey *dst);
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */
