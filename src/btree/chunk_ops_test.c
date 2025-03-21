@@ -360,31 +360,29 @@ test_builder_add(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls,
 	OTuple		tuple;
 	uint16		tupleSize;
 	char	   *tupleData;
-	BTreeChunkBuilderItem chunkItem;
+	BTreeChunkBuilderItem chunkItem = {0};
 
 	tuple = make_otuple(testDesc, values, nulls, isLeaf);
-	tupleSize = MAXALIGN(ops->get_tuple_size(testDesc->chunkBuilder->treeDesc,
-											 tuple));
+	tupleSize = ops->get_tuple_size(testDesc->chunkBuilder->treeDesc, tuple);
 
 	chunkItem.flags = tuple.formatFlags;
 	if (header != NULL)
-		chunkItem.size = ops->itemHeaderSize + tupleSize;
+		chunkItem.size = ops->itemHeaderSize + MAXALIGN(tupleSize);
 	else
-		chunkItem.size = tupleSize;
+		chunkItem.size = MAXALIGN(tupleSize);
 
 	/* Do not pfree the tuple since we only copy pointer to the tuple */
-	tupleData = palloc(chunkItem.size);
+	tupleData = palloc0(chunkItem.size);
 
 	if (header != NULL)
 	{
 		Assert(ops->itemHeaderSize > 0);
 
 		memcpy(tupleData, header, ops->itemHeaderSize);
-		memcpy(tupleData + ops->itemHeaderSize, tuple.data,
-			   chunkItem.size - ops->itemHeaderSize);
+		memcpy(tupleData + ops->itemHeaderSize, tuple.data, tupleSize);
 	}
 	else
-		memcpy(tupleData, tuple.data, chunkItem.size);
+		memcpy(tupleData, tuple.data, tupleSize);
 
 	chunkItem.data = (Pointer) tupleData;
 	ops->builder_add(testDesc->chunkBuilder, &chunkItem);

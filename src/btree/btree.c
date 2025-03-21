@@ -330,19 +330,20 @@ btree_desc_stopevent_params_internal(BTreeDescr *desc, JsonbParseState **state)
 }
 
 void
-btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
+btree_page_stopevent_params_internal(BTreePageContext *pageContext,
 									 JsonbParseState **state)
 {
-	jsonb_push_int8_key(state, "level", PAGE_GET_LEVEL(p));
-	jsonb_push_int8_key(state, "pageChangeCount", O_PAGE_GET_CHANGE_COUNT(p));
+	jsonb_push_int8_key(state, "level", PAGE_GET_LEVEL(pageContext->page));
+	jsonb_push_int8_key(state, "pageChangeCount",
+						O_PAGE_GET_CHANGE_COUNT(pageContext->page));
 
 	jsonb_push_key(state, "hikey");
-	if (!O_PAGE_IS(p, RIGHTMOST))
+	if (!O_PAGE_IS(pageContext->page, RIGHTMOST))
 	{
 		OTuple		hikey;
 
-		BTREE_PAGE_GET_HIKEY(hikey, p);
-		(void) o_btree_key_to_jsonb(desc, hikey, state);
+		hikey = btree_get_hikey(pageContext);
+		(void) o_btree_key_to_jsonb(pageContext->treeDesc, hikey, state);
 	}
 	else
 	{
@@ -354,15 +355,15 @@ btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
 }
 
 Jsonb *
-btree_page_stopevent_params(BTreeDescr *desc, Page p)
+btree_page_stopevent_params(BTreePageContext *pageContext)
 {
 	JsonbParseState *state = NULL;
 	Jsonb	   *res;
 	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
 
 	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
-	btree_desc_stopevent_params_internal(desc, &state);
-	btree_page_stopevent_params_internal(desc, p, &state);
+	btree_desc_stopevent_params_internal(pageContext->treeDesc, &state);
+	btree_page_stopevent_params_internal(pageContext, &state);
 	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
 	MemoryContextSwitchTo(mctx);
 
@@ -370,30 +371,31 @@ btree_page_stopevent_params(BTreeDescr *desc, Page p)
 }
 
 Jsonb *
-btree_downlink_stopevent_params(BTreeDescr *desc, Page p, BTreePageItemLocator *loc)
+btree_downlink_stopevent_params(BTreePageContext *pageContext, BTreePageItemLocator *loc)
 {
 	JsonbParseState *state = NULL;
 	Jsonb	   *res;
 	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
 	BTreeNonLeafTuphdr *internal_ptr;
 
-	internal_ptr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, loc);
+	internal_ptr = (BTreeNonLeafTuphdr *)
+		BTREE_PAGE_LOCATOR_GET_ITEM(pageContext->page, loc);
 
 	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
-	btree_desc_stopevent_params_internal(desc, &state);
-	btree_page_stopevent_params_internal(desc, p, &state);
+	btree_desc_stopevent_params_internal(pageContext->treeDesc, &state);
+	btree_page_stopevent_params_internal(pageContext, &state);
 
 	jsonb_push_key(&state, "downlink");
 	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 	jsonb_push_int8_key(&state, "blkno", DOWNLINK_GET_IN_MEMORY_BLKNO(internal_ptr->downlink));
 	jsonb_push_int8_key(&state, "pageChangeCount", DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(internal_ptr->downlink));
 	jsonb_push_key(&state, "key");
-	if (BTREE_PAGE_LOCATOR_GET_OFFSET(p, loc) > 0)
+	if (BTREE_PAGE_LOCATOR_GET_OFFSET(pageContext->page, loc) > 0)
 	{
 		OTuple		key;
 
-		BTREE_PAGE_READ_INTERNAL_TUPLE(key, p, loc);
-		(void) o_btree_key_to_jsonb(desc, key, &state);
+		BTREE_PAGE_READ_INTERNAL_TUPLE(key, pageContext->page, loc);
+		(void) o_btree_key_to_jsonb(pageContext->treeDesc, key, &state);
 	}
 	else
 	{
