@@ -16,6 +16,7 @@
 #include "orioledb_types.h"
 #include "access/xlogdefs.h"
 #include "storage/off.h"
+#include "storage/itemptr.h"
 
 /*
  * Data sturctures for transactions in-progress recording.

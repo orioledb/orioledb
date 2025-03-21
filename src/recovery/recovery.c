@@ -307,9 +307,6 @@ static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
-static inline bool apply_sys_tree_modify_record(int sys_tree_num, RecoveryMsgType recType,
-												OTuple tup,
-												OXid oxid, CommitSeqNo csn);
 static inline void spread_idx_modify(BTreeDescr *desc,
 									 RecoveryMsgType recType,
 									 OTuple rec);
@@ -2715,7 +2712,7 @@ recovery_record_callback(uint8 rec_type, Pointer ptr, XLogRecPtr xlogPtr,
 
 				if (rarg->single)
 				{
-					recovery_switch_to_oxid(oxid, -1);
+					recovery_switch_to_oxid(rarg->oxid, -1);
 					replay_erase_bridge_item(rarg->indexDescr, &iptr);
 				}
 				else
@@ -3320,13 +3317,13 @@ worker_queue_flush(int worker_id)
  * commit transaction yet.
  */
 bool
-apply_sys_tree_modify_record(int sys_tree_num, uint16 type, OTuple tup,
+apply_sys_tree_modify_record(int sys_tree_num, RecoveryMsgType recType, OTuple tup,
 							 OXid oxid, CommitSeqNo csn)
 {
 	bool		result;
 
 	result = apply_btree_modify_record(get_sys_tree(sys_tree_num),
-									   type, tup, oxid, csn);
+									   recType, tup, oxid, csn);
 
 	return result;
 }

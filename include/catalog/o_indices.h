@@ -86,6 +86,6 @@ extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);
 extern void o_indices_foreach_oids(OIndexOidsCallback callback,
-								   CommitSeqNo csn, void *arg);
+								   OSnapshot *oSnapshot, void *arg);
 
 #endif

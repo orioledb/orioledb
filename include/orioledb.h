@@ -13,6 +13,8 @@
 #ifndef __ORIOLEDB_H__
 #define __ORIOLEDB_H__
 
+#include "orioledb_types.h"
+
 #include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/xact.h"

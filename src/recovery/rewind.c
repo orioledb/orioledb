@@ -345,13 +345,13 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 }
 
 static TupleFetchCallbackResult
-get_tup_oxid_callback(OTuple tuple, OXid tupOxid, CommitSeqNo csn,
+get_tup_oxid_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 					  bool deleted, void *arg,
 					  TupleFetchCallbackCheckType check_type)
 {
 	uint8	   *deleted_result = arg;
 
-	if (!(COMMITSEQNO_IS_INPROGRESS(csn) &&
+	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
 		  tupOxid == get_current_oxid_if_any()))
 		return OTupleFetchNext;
 
@@ -374,7 +374,7 @@ append_revived_tree(StringInfo str, OIndexChunkKey *ix_key)
 	o_btree_load_shmem(&ix_descr->desc);
 
 	iter = o_btree_iterator_create(&ix_descr->desc, NULL, BTreeKeyNone,
-								   COMMITSEQNO_NON_DELETED,
+								   &o_non_deleted_snapshot,
 								   ForwardScanDirection);
 
 	o_btree_iterator_set_callback(iter, get_tup_oxid_callback, &deleted);
@@ -414,7 +414,7 @@ create_key_iterator(BTreeDescr *td,
 
 	result->iter = o_btree_iterator_create(td, &result->first_key_tup,
 										   BTreeKeyNonLeafKey,
-										   COMMITSEQNO_NON_DELETED,
+										   &o_non_deleted_snapshot,
 										   ForwardScanDirection);
 	o_btree_iterator_set_callback(result->iter, get_tup_oxid_callback,
 								  &result->last_deleted);
@@ -602,14 +602,13 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 
 	if (sys_tree_num < 0)
 		apply_modify_record(descr, indexDescr,
-							deleted ? RECOVERY_DELETE : RECOVERY_INSERT,
+							deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
 							rewind_row);
 	else
 	{
 		Assert(sys_tree_supports_transactions(sys_tree_num));
 		apply_sys_tree_modify_record(sys_tree_num,
-									 deleted ? RECOVERY_DELETE :
-									 RECOVERY_INSERT,
+									 deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
 									 rewind_row, temp_oxid,
 									 COMMITSEQNO_INPROGRESS);
 	}
