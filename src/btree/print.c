@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/chunk_ops.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
 #include "btree/print.h"
@@ -193,6 +194,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 							  int depthLeft, StringInfo outbuf)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageContext pageContext;
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 	BTreePageItemLocator loc;
@@ -202,6 +204,9 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (depthLeft <= 0)
 		return;
+
+	page_context_init(&pageContext, desc);
+	page_context_set_page(&pageContext, p);
 
 	btree_print_page_number(blkno, outbuf, printData);
 	appendStringInfo(outbuf, "level = %d, maxKeyLen = %d",
@@ -311,8 +316,9 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	{
 		OTuple		hikey;
 
+		hikey = page_get_hikey(&pageContext);
+
 		btree_print_rightlink(RIGHTLINK_GET_BLKNO(header->rightLink), outbuf, printData);
-		BTREE_PAGE_GET_HIKEY(hikey, p);
 		appendStringInfo(outbuf, "    Hikey: offset = %d, key = ",
 						 (int) ((Pointer) hikey.data - (Pointer) p));
 		keyPrintFunc(desc, outbuf, hikey, printArg);
@@ -525,6 +531,8 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (OInMemoryBlknoIsValid(blkno))
 		print_page_contents_recursive(desc, blkno, keyPrintFunc, tuplePrintFunc,
 									  printArg, printData, depthLeft, outbuf);
+
+	page_context_release(&pageContext);
 }
 
 /*

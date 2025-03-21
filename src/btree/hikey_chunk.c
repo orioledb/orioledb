@@ -19,6 +19,87 @@
 const BTreeChunkOps HiKeyChunkOps;
 
 /*
+ * Page utility functions.
+ */
+
+OTuple
+page_get_hikey(BTreePageContext *pageContext)
+{
+	BTreeChunkDesc *chunk;
+	Pointer		header;
+	OTuple		tuple;
+	bool		needsFree;
+
+	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
+
+	page_context_ensure_chunk_init(pageContext);
+	chunk = pageContext->hikeyChunk;
+
+	Assert(chunk->chunkItemsCount > 0);
+
+	chunk->ops->read_tuple(chunk, NULL, NULL, chunk->chunkItemsCount - 1,
+						   &header, &tuple, &needsFree);
+
+	return tuple;
+}
+
+int
+page_get_hikey_size(BTreePageContext *pageContext)
+{
+	BTreeChunkDesc *chunk;
+	BTreeHiKeyChunkDesc *hikeyChunk;
+
+	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
+
+	page_context_ensure_chunk_init(pageContext);
+	chunk = pageContext->hikeyChunk;
+	hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
+
+	Assert(chunk->chunkItemsCount > 0);
+
+	return chunk->chunkDataSize -
+		ITEM_GET_OFFSET(hikeyChunk->chunkItems[chunk->chunkItemsCount - 1]);
+}
+
+void
+copy_fixed_hikey(BTreePageContext *pageContext, OFixedKey *dst)
+{
+	OTuple		src;
+
+	src = page_get_hikey(pageContext);
+	copy_fixed_key(pageContext->treeDesc, dst, src);
+}
+
+void
+copy_fixed_shmem_hikey(BTreePageContext *pageContext, OFixedShmemKey *dst)
+{
+	OTuple		src;
+
+	src = page_get_hikey(pageContext);
+	copy_fixed_shmem_key(pageContext->treeDesc, dst, src);
+}
+
+bool
+page_fits_hikey(BTreePageContext *pageContext, LocationIndex newHikeySize)
+{
+	BTreePageHeader *header = (BTreePageHeader *) pageContext->page;
+	LocationIndex dataShift,
+				hikeyLocation,
+				dataLocation;
+
+	Assert(newHikeySize = MAXALIGN(newHikeySize));
+	Assert(header->chunksCount == 1);
+
+	hikeyLocation = SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
+	dataLocation = SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation);
+	if (hikeyLocation + newHikeySize <= dataLocation)
+		return true;
+
+	dataShift = hikeyLocation + newHikeySize - dataLocation;
+	return (header->dataSize + dataShift <= ORIOLEDB_BLCKSZ);
+}
+
+/*
  * Implementation of hikey chunks.
  */
 

@@ -353,6 +353,8 @@ extern LWLockPadded *unique_locks;
 extern int	num_unique_locks;
 typedef struct ItemPointerData ItemPointerData;
 
+typedef struct BTreePageContext BTreePageContext;
+
 extern void o_btree_check_size_of_tuple(int len, char *relation_name, bool index);
 extern void o_btree_init_unique_lwlocks(void);
 extern void o_btree_init(BTreeDescr *descr);
@@ -363,10 +365,10 @@ extern ItemPointerData btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *ove
 extern void btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid);
 extern void btree_desc_stopevent_params_internal(BTreeDescr *desc,
 												 JsonbParseState **state);
-extern void btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
+extern void btree_page_stopevent_params_internal(BTreePageContext *pageContext,
 												 JsonbParseState **state);
-extern Jsonb *btree_page_stopevent_params(BTreeDescr *desc, Page p);
-extern Jsonb *btree_downlink_stopevent_params(BTreeDescr *desc, Page p,
+extern Jsonb *btree_page_stopevent_params(BTreePageContext *pageContext);
+extern Jsonb *btree_downlink_stopevent_params(BTreePageContext *pageContext,
 											  BTreePageItemLocator *loc);
 
 #endif							/* __BTREE_H__ */
