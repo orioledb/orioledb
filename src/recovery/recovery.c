@@ -141,6 +141,7 @@ typedef struct
 	ORelOids	cur_oids,
 			   *treeOids;
 	int			sys_tree_num;
+	Pointer		startPtr;
 	XLogRecPtr	xlogRecPtr;
 } RecoveryArg;
 
@@ -2513,10 +2514,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 }
 
 static void
-recovery_record_callback(uint8 rec_type, Pointer ptr, XLogRecPtr xlogPtr,
-						 void *arg)
+recovery_record_callback(uint8 rec_type, Pointer ptr, void *arg)
 {
 	RecoveryArg *rarg = arg;
+	XLogRecPtr xlogPtr = rarg->xlogRecPtr + (ptr - rarg->startPtr);
 
 	switch (rec_type)
 	{
@@ -2826,11 +2827,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 	recovery_arg.oxid = InvalidOXid;
 	recovery_arg.sys_tree_num = -1;
+	recovery_arg.startPtr = startPtr;
 	recovery_arg.xlogRecPtr = xlogRecPtr;
 	recovery_arg.single = single;
 
-	wal_iterate(startPtr, endPtr, xlogRecPtr, recovery_record_callback,
-				&recovery_arg);
+	wal_iterate(startPtr, endPtr, recovery_record_callback, &recovery_arg);
 	update_recovery_undo_loc_flush(single, -1);
 }
 

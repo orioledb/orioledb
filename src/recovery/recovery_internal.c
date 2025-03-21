@@ -7,7 +7,7 @@
 #include "access/xlogrecord.h"
 
 void
-wal_iterate(Pointer startPtr, Pointer endPtr, XLogRecPtr xlogRecPtr,
+wal_iterate(Pointer startPtr, Pointer endPtr,
 			wal_iterate_callback_type record_callback, void *arg)
 {
 	Pointer		ptr = startPtr;
@@ -15,26 +15,23 @@ wal_iterate(Pointer startPtr, Pointer endPtr, XLogRecPtr xlogRecPtr,
 	while (ptr < endPtr)
 	{
 		uint8		rec_type;
-		XLogRecPtr	xlogPtr = InvalidXLogRecPtr;
 
-		if (!XLogRecPtrIsInvalid(xlogRecPtr))
-			xlogPtr = xlogRecPtr + (ptr - startPtr);
 		rec_type = *ptr;
 		ptr++;
 
-		record_callback(rec_type, ptr, xlogPtr, arg);
+		record_callback(rec_type, ptr, arg);
 
 		if (rec_type == WAL_REC_XID)
 		{
-			ptr += sizeof(OXid) + sizeof(XLogRecPtr);
+			ptr += sizeof(OXid) + sizeof(TransactionId) + sizeof(XLogRecPtr);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
-			ptr += sizeof(OXid);
+			ptr += sizeof(OXid) + sizeof(CommitSeqNo);
 		}
 		else if (rec_type == WAL_REC_JOINT_COMMIT)
 		{
-			ptr += sizeof(TransactionId) + sizeof(OXid);
+			ptr += sizeof(TransactionId) + sizeof(OXid) + sizeof(CommitSeqNo);
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
@@ -53,7 +50,7 @@ wal_iterate(Pointer startPtr, Pointer endPtr, XLogRecPtr xlogRecPtr,
 		}
 		else if (rec_type == WAL_REC_SAVEPOINT)
 		{
-			ptr += sizeof(SubTransactionId);
+			ptr += sizeof(SubTransactionId) + sizeof(TransactionId) + sizeof(TransactionId);
 		}
 		else if (rec_type == WAL_REC_ROLLBACK_TO_SAVEPOINT)
 		{

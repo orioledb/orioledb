@@ -1433,8 +1433,6 @@ orioledb_table_oids(PG_FUNCTION_ARGS)
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
-	OSnapshot	oSnapshot;
-	OXid		oxid;
 
 	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -1450,10 +1448,8 @@ orioledb_table_oids(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
-	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-
 	o_tables_foreach_oids(o_table_oids_array_callback,
-						  &oSnapshot, rsinfo);
+						  &o_non_deleted_snapshot, rsinfo);
 
 	return (Datum) 0;
 }
