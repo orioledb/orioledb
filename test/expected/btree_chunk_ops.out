@@ -1,12 +1,12 @@
-CREATE SCHEMA tuple_chunk;
-SET SESSION search_path = 'tuple_chunk';
+CREATE SCHEMA chunk_ops;
+SET SESSION search_path = 'chunk_ops';
 CREATE EXTENSION orioledb;
-CREATE TABLE tuple_chunk_test
+CREATE TABLE chunk_ops_test
 (
     id int PRIMARY KEY,
     value text
 ) USING orioledb;
-SELECT test_btree_leaf_tuple_chunk('tuple_chunk_test'::regclass);
+SELECT test_btree_leaf_tuple_chunk('chunk_ops_test'::regclass);
 INFO:  Estimate INSERT operation ('1', 'value 1') at position 0: 48
 INFO:  Perform INSERT operation ('1', 'value 1') at position 0
 INFO:  Perform INSERT operation ('2', 'value 2') at position 1
@@ -583,7 +583,7 @@ INFO:  Read tuple at position 19: ('139', '139')
  
 (1 row)
 
-SELECT test_btree_leaf_tuple_chunk_builder('tuple_chunk_test'::regclass);
+SELECT test_btree_leaf_tuple_chunk_builder('chunk_ops_test'::regclass);
 INFO:  Estimate adding tuple ('1', 'value 1') to builder: 48
 INFO:  Perform adding tuple ('1', 'value 1') to builder
 INFO:  Perform adding tuple ('2', 'value 2') to builder
@@ -691,7 +691,7 @@ INFO:  Read tuple at position 49: ('50', 'value 50')
  
 (1 row)
 
-SELECT test_btree_hikey_chunk('tuple_chunk_test'::regclass);
+SELECT test_btree_hikey_chunk('chunk_ops_test'::regclass);
 INFO:  Estimate INSERT operation ('1') at position 0: 8
 INFO:  Perform INSERT operation ('1') at position 0
 INFO:  Perform INSERT operation ('2') at position 1
@@ -1010,7 +1010,7 @@ INFO:  Search for tuple ('100'): 0
  
 (1 row)
 
-SELECT test_btree_hikey_chunk_builder('tuple_chunk_test'::regclass);
+SELECT test_btree_hikey_chunk_builder('chunk_ops_test'::regclass);
 INFO:  Estimate adding tuple ('1') to builder: 8
 INFO:  Perform adding tuple ('1') to builder
 INFO:  Perform adding tuple ('2') to builder
@@ -1094,8 +1094,8 @@ INFO:  Read tuple at position 37: ('38')
  
 (1 row)
 
-DROP SCHEMA tuple_chunk CASCADE;
+DROP SCHEMA chunk_ops CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to extension orioledb
-drop cascades to table tuple_chunk_test
+drop cascades to table chunk_ops_test
 RESET search_path;
