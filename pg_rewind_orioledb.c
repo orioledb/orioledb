@@ -739,8 +739,7 @@ orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 }
 
 static void
-rewind_record_callback(uint8 rec_type, Pointer ptr, XLogRecPtr xlogPtr,
-					   void *arg)
+rewind_record_callback(uint8 rec_type, Pointer ptr, void *arg)
 {
 	OrioledbKeyMap *orioledb_map = arg;
 
@@ -838,8 +837,7 @@ extract_row_info(XLogReaderState *record, void *arg)
 			int			msg_len = XLogRecGetDataLen(record);
 			Pointer		endPtr = startPtr + msg_len;
 #endif
-			wal_iterate(startPtr, endPtr, InvalidXLogRecPtr,
-						rewind_record_callback, (void *) orioledb_map);
+			wal_iterate(startPtr, endPtr, rewind_record_callback, (void *) orioledb_map);
 #if PG_VERSION_NUM < 150000
 		}
 #endif

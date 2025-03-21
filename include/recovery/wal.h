@@ -151,10 +151,8 @@ extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
 
 /* recovery/recovery_internal.c */
-typedef void (*wal_iterate_callback_type) (uint8 rec_type, Pointer ptr,
-										   XLogRecPtr xlogPtr, void *arg);
+typedef void (*wal_iterate_callback_type) (uint8 rec_type, Pointer ptr, void *arg);
 extern void wal_iterate(Pointer startPtr, Pointer endPtr,
-						XLogRecPtr xlogRecPtr,
 						wal_iterate_callback_type record_callback, void *arg);
 
 #endif							/* __WAL_H__ */
