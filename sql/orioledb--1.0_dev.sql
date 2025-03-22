@@ -19,3 +19,25 @@ CREATE FUNCTION s3_put(objectname text, filename text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+-- tuple_chunk implementation testing functions
+
+CREATE FUNCTION test_leaf_tuple_chunk(relation regclass)
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION test_leaf_tuple_chunk_builder(relation regclass)
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION test_hikey_chunk(relation regclass)
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION test_hikey_chunk_builder(relation regclass)
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
