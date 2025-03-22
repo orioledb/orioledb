@@ -273,9 +273,6 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	int			nattrs;
 	OIndexType	ix_type;
 
-	if (indexInfo && indexInfo->ii_Concurrent)
-		elog(ERROR, "concurrent indexes are not supported.");
-
 	if (index->rd_index->indisexclusion)
 		elog(ERROR, "exclusion indices are not supported.");
 
@@ -1942,6 +1939,7 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 			 (unsigned) oids.datoid, (unsigned) oids.reloid, (unsigned) oids.relnode);
 	}
 
+	Assert(ix_num != InvalidIndexNumber && ix_num < o_table->nindices);
 	if (o_table->indices[ix_num].type == oIndexPrimary)
 		drop_primary_index(tbl, o_table);
 	else
