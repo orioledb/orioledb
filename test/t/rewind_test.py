@@ -49,7 +49,11 @@ class RewindTest(BaseTest):
 
 		# wait until it finishes and get stdout and stderr
 		out, err = process.communicate()
-		if (verbose == True) or (process.returncode != 0):
+		if (verbose == True):
+			with open(rewind_log_file, "a") as f:
+				f.write(out.decode("utf-8"))
+				f.write(err.decode("utf-8"))
+		elif (process.returncode != 0):
 			print(out.decode("utf-8"))
 			print(err.decode("utf-8"))
 		self.assertEqual(process.returncode, 0)

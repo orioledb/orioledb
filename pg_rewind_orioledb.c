@@ -754,6 +754,7 @@ rewind_record_callback(uint8 rec_type, Pointer ptr, void *arg)
 				if (orioledb_map->first_xid == InvalidOXid)
 					orioledb_map->first_xid = cur_oxid;
 				ptr += sizeof(OXid);
+				ptr += sizeof(TransactionId);
 				memcpy(&cur_trx_start, ptr, sizeof(XLogRecPtr));
 
 				if (!XLogRecPtrIsInvalid(cur_trx_start) &&
@@ -817,30 +818,13 @@ extract_row_info(XLogReaderState *record, void *arg)
 	RmgrId		rmid = XLogRecGetRmid(record);
 	OrioledbKeyMap *orioledb_map = (OrioledbKeyMap *) arg;
 
-#if PG_VERSION_NUM < 150000
-	if (rmid == RM_LOGICALMSG_ID)
-#else
 	if (rmid == ORIOLEDB_RMGR_ID)
-#endif
 	{
-#if PG_VERSION_NUM < 150000
-		char			   *rec = XLogRecGetData(record);
-		xl_logical_message *xlrec = (xl_logical_message *) rec;
+		Pointer		startPtr = (Pointer) XLogRecGetData(record);
+		int			msg_len = XLogRecGetDataLen(record);
+		Pointer		endPtr = startPtr + msg_len;
 
-		if (xlrec->prefix_size == (WAL_PREFIX_SIZE + 1) &&
-			strncmp(xlrec->message, WAL_PREFIX, WAL_PREFIX_SIZE) == 0)
-		{
-			Pointer startPtr = xlrec->message + xlrec->prefix_size;
-			Pointer endPtr = startPtr + xlrec->message_size;
-#else
-			Pointer		startPtr = (Pointer) XLogRecGetData(record);
-			int			msg_len = XLogRecGetDataLen(record);
-			Pointer		endPtr = startPtr + msg_len;
-#endif
-			wal_iterate(startPtr, endPtr, rewind_record_callback, (void *) orioledb_map);
-#if PG_VERSION_NUM < 150000
-		}
-#endif
+		wal_iterate(startPtr, endPtr, rewind_record_callback, (void *) orioledb_map);
 	}
 }
 

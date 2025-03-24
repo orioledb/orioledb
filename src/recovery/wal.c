@@ -160,6 +160,7 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 		local_oids.datoid = InvalidOid;
 		local_oids.reloid = InvalidOid;
 		local_oids.relnode = InvalidOid;
+		cur_trx_start = InvalidXLogRecPtr;
 		return InvalidXLogRecPtr;
 	}
 
@@ -219,6 +220,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid)
 		local_oids.datoid = InvalidOid;
 		local_oids.reloid = InvalidOid;
 		local_oids.relnode = InvalidOid;
+		cur_trx_start = InvalidXLogRecPtr;
 		return;
 	}
 
