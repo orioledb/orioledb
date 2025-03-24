@@ -17,7 +17,7 @@
 
 extern IndexAmRoutine *orioledb_indexam_routine_hook(Oid tamoid,
 													 Oid amhandler);
-extern IndexAmRoutine *orioledb_hash_handler(void);
+extern void o_add_bridged_option_to_ams(void);
 
 extern Relation o_current_index;
 
