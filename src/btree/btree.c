@@ -64,21 +64,21 @@ o_btree_init(BTreeDescr *desc)
 }
 
 static bool
-get_page_children(OInMemoryBlkno blkno, uint32 pageChangeCount,
+get_page_children(BTreePageContext *pageContext,
+				  OInMemoryBlkno blkno, uint32 pageChangeCount,
 				  OInMemoryBlkno childPageNumbers[BTREE_PAGE_MAX_CHUNK_ITEMS],
 				  uint32 childPageChangeCounts[BTREE_PAGE_MAX_CHUNK_ITEMS],
 				  int *childPagesCount)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	OrioleDBPageDesc *desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
-	BTreePageItemLocator loc;
+	OrioleDBPageDesc *pageDesc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 	int			ionum;
 
 retry:
 	lock_page(blkno);
-	if (desc->ionum >= 0)
+	if (pageDesc->ionum >= 0)
 	{
-		ionum = desc->ionum;
+		ionum = pageDesc->ionum;
 		unlock_page(blkno);
 
 		wait_for_io_completion(ionum);
@@ -98,22 +98,28 @@ retry:
 
 	if (!O_PAGE_IS(p, LEAF))
 	{
-		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
-		{
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+		BTreePageItemLocator loc;
 
-			if (DOWNLINK_IS_IN_IO(tuphdr->downlink))
+		BTREE_PAGE_LOCATOR_FOREACH(pageContext, &loc)
+		{
+			BTreeNonLeafTuphdr *header;
+			OTuple		tuple;
+
+			btree_read_tuple(pageContext->tupleChunk, NULL, NULL, loc.itemOffset,
+							 (Pointer *) &header, &tuple);
+
+			if (DOWNLINK_IS_IN_IO(header->downlink))
 			{
-				ionum = DOWNLINK_GET_IO_LOCKNUM(tuphdr->downlink);
+				ionum = DOWNLINK_GET_IO_LOCKNUM(header->downlink);
 				unlock_page(blkno);
 
 				wait_for_io_completion(ionum);
 				goto retry;
 			}
-			else if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			else if (DOWNLINK_IS_IN_MEMORY(header->downlink))
 			{
-				childPageNumbers[*childPagesCount] = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
-				childPageChangeCounts[*childPagesCount] = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(tuphdr->downlink);
+				childPageNumbers[*childPagesCount] = DOWNLINK_GET_IN_MEMORY_BLKNO(header->downlink);
+				childPageChangeCounts[*childPagesCount] = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(header->downlink);
 				(*childPagesCount)++;
 			}
 		}
@@ -126,7 +132,8 @@ retry:
  * children.
  */
 static void
-mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
+mark_page_pre_cleanup(BTreePageContext *pageContext, OInMemoryBlkno blkno,
+					  uint32 pageChangeCount)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
@@ -136,7 +143,7 @@ mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
 	int			i,
 				ionum;
 
-	if (!get_page_children(blkno, pageChangeCount,
+	if (!get_page_children(pageContext, blkno, pageChangeCount,
 						   childPageNumbers, childPageChangeCounts,
 						   &childPagesCount))
 		return;
@@ -150,7 +157,7 @@ mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
 		wait_for_io_completion(ionum);
 
 	for (i = 0; i < childPagesCount; i++)
-		mark_page_pre_cleanup(childPageNumbers[i],
+		mark_page_pre_cleanup(pageContext, childPageNumbers[i],
 							  childPageChangeCounts[i]);
 }
 
@@ -158,14 +165,15 @@ mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
  * Frees given page and all of its children recursively.
  */
 static void
-free_page(OPagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
+free_page(OPagePool *pool, BTreePageContext *pageContext,
+		  OInMemoryBlkno blkno, uint32 pageChangeCount)
 {
 	OInMemoryBlkno childPageNumbers[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	uint32		childPageChangeCounts[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			childPagesCount;
 	int			i;
 
-	if (!get_page_children(blkno, pageChangeCount,
+	if (!get_page_children(pageContext, blkno, pageChangeCount,
 						   childPageNumbers, childPageChangeCounts,
 						   &childPagesCount))
 		return;
@@ -175,7 +183,7 @@ free_page(OPagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
 	unlock_page(blkno);
 
 	for (i = 0; i < childPagesCount; i++)
-		free_page(pool,
+		free_page(pool, pageContext,
 				  childPageNumbers[i],
 				  childPageChangeCounts[i]);
 
@@ -186,7 +194,6 @@ free_page(OPagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
 	page_block_reads(blkno);
 	CLEAN_DIRTY(pool, blkno);
 	ppool_free_page(pool, blkno, true);
-
 }
 
 static inline void
@@ -223,17 +230,23 @@ free_meta_page(OPagePool *pool, OInMemoryBlkno metaPageBlkno)
  * using find_page().
  */
 void
-o_btree_cleanup_pages(OInMemoryBlkno rootPageBlkno, OInMemoryBlkno metaPageBlkno, uint32 rootPageChangeCount)
+o_btree_cleanup_pages(BTreeDescr *desc, OInMemoryBlkno rootPageBlkno,
+					  OInMemoryBlkno metaPageBlkno, uint32 rootPageChangeCount)
 {
+	BTreePageContext pageContext;
 	OPagePool  *pool = get_ppool_by_blkno(rootPageBlkno);
 
 	Assert(OInMemoryBlknoIsValid(rootPageBlkno));
 	Assert(OInMemoryBlknoIsValid(metaPageBlkno));
 	Assert(pool != NULL);
 
-	mark_page_pre_cleanup(rootPageBlkno, rootPageChangeCount);
-	free_page(pool, rootPageBlkno, rootPageChangeCount);
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, O_GET_IN_MEMORY_PAGE(rootPageBlkno));
 
+	mark_page_pre_cleanup(&pageContext, rootPageBlkno, rootPageChangeCount);
+	free_page(pool, &pageContext, rootPageBlkno, rootPageChangeCount);
+
+	btree_page_context_release(&pageContext);
 	free_meta_page(pool, metaPageBlkno);
 }
 

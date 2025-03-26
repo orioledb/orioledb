@@ -637,6 +637,7 @@ unlock_page(OInMemoryBlkno blkno)
 	if (!O_PAGE_IS(p, LEAF) && OidIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->oids.reloid))
 	{
 		int			on_disk = 0;
+
 		BTreePageItemLocator loc;
 
 		BTREE_PAGE_FOREACH_ITEMS(p, &loc)

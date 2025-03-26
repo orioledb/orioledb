@@ -81,15 +81,15 @@ btree_try_merge_pages(BTreeDescr *desc,
 
 	btree_page_context_init(&parentPageContext, desc);
 	btree_page_context_set(&parentPageContext, parent);
-	btree_page_context_hikey_init(&parentPageContext);
+	btree_page_context_hikey_init(&parentPageContext, &BTreeHiKeyChunkOps);
 
 	btree_page_context_init(&leftPageContext, desc);
 	btree_page_context_set(&leftPageContext, left);
-	btree_page_context_hikey_init(&leftPageContext);
+	btree_page_context_hikey_init(&leftPageContext, &BTreeHiKeyChunkOps);
 
 	btree_page_context_init(&rightPageContext, desc);
 	btree_page_context_set(&rightPageContext, right);
-	btree_page_context_hikey_init(&rightPageContext);
+	btree_page_context_hikey_init(&rightPageContext, &BTreeHiKeyChunkOps);
 
 	if (!get_checkpoint_number(right_blkno, &rightPageContext,
 							   &checkpoint_number, &copy_blkno))
@@ -614,6 +614,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	i = 0;
 	if (leaf)
 	{
+		/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 		BTREE_PAGE_FOREACH_ITEMS(left, &loc)
 		{
 			BTreeLeafTuphdr *tupHdr;
@@ -638,6 +639,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	}
 	else
 	{
+		/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 		BTREE_PAGE_FOREACH_ITEMS(left, &loc)
 		{
 			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(left, &loc);
@@ -650,6 +652,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 
 	if (leaf)
 	{
+		/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 		BTREE_PAGE_FOREACH_ITEMS(right, &loc)
 		{
 			BTreeLeafTuphdr *tupHdr;
@@ -675,6 +678,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	else
 	{
 		first = true;
+		/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 		BTREE_PAGE_FOREACH_ITEMS(right, &loc)
 		{
 			if (first)

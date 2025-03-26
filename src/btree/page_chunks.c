@@ -236,6 +236,7 @@ reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
 	/*
 	 * Iterate page items and check if they can be erased or truncated.
 	 */
+	/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 	{
 		BTreeLeafTuphdr *tupHdr;
@@ -1363,6 +1364,7 @@ split_page_by_chunks(BTreePageContext *pageContext)
 	OFixedKey	hikey;
 	LocationIndex hikeySize;
 
+	/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 	{
 		items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);

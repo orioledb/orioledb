@@ -921,7 +921,7 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 }
 
 void
-cleanup_btree(Oid datoid, Oid relnode, bool files)
+cleanup_btree(BTreeDescr *desc, Oid datoid, Oid relnode, bool files)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
@@ -938,7 +938,7 @@ cleanup_btree(Oid datoid, Oid relnode, bool files)
 		drop_result = o_drop_shared_root_info(datoid, relnode);
 		Assert(drop_result);
 		if (!shared->placeholder)
-			o_btree_cleanup_pages(shared->rootInfo.rootPageBlkno,
+			o_btree_cleanup_pages(desc, shared->rootInfo.rootPageBlkno,
 								  shared->rootInfo.metaPageBlkno,
 								  shared->rootInfo.rootPageChangeCount);
 		pfree(shared);

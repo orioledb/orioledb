@@ -754,14 +754,14 @@ orioledb_relation_set_new_filenode(Relation rel,
 		int			oldTreeOidsNum,
 					newTreeOidsNum;
 		ORelOids	old_oids,
-				   *oldTreeOids,
-					new_oids,
+					new_oids;
+		OTableIndexOidsKey *oldTreeOids,
 				   *newTreeOids;
 
 		ORelOidsSetFromRel(old_oids, rel);
 		old_o_table = o_tables_get(old_oids);
 		Assert(old_o_table != NULL);
-		oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
+		oldTreeOids = o_table_make_index_keys(old_o_table, &oldTreeOidsNum);
 
 		tupdesc = RelationGetDescr(rel);
 		ORelOidsSetFromRel(new_oids, rel);
@@ -773,7 +773,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		o_opclass_cache_add_table(new_o_table);
 		o_table_fill_oids(new_o_table, rel, newrnode);
 
-		newTreeOids = o_table_make_index_oids(new_o_table, &newTreeOidsNum);
+		newTreeOids = o_table_make_index_keys(new_o_table, &newTreeOidsNum);
 
 		o_tables_table_meta_lock(new_o_table);
 

@@ -13,7 +13,6 @@
 #ifndef __BTREE_PAGE_CHUNKS_H__
 #define __BTREE_PAGE_CHUNKS_H__
 
-#include "btree/chunk_ops.h"
 #include "btree/page_contents.h"
 
 typedef enum BTreeItemPageFitType

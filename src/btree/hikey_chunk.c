@@ -24,7 +24,7 @@ static inline uint16 htc_get_item_size(BTreeHiKeyChunkDesc *hikeyChunk,
 									   OffsetNumber itemOffset);
 
 /*
- * Page utility functions.
+ * Hikey utility functions.
  */
 
 OTuple
@@ -36,7 +36,7 @@ btree_get_hikey(BTreePageContext *pageContext)
 
 	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
 
-	btree_page_context_hikey_init(pageContext);
+	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
 	chunk = pageContext->hikeyChunk;
 
 	Assert(chunk->chunkItemsCount > 0);
@@ -56,7 +56,7 @@ btree_get_hikey_size(BTreePageContext *pageContext)
 
 	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
 
-	btree_page_context_hikey_init(pageContext);
+	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
 	chunk = pageContext->hikeyChunk;
 	hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
 
@@ -89,7 +89,7 @@ btree_read_hikey(BTreePageContext *pageContext, OffsetNumber itemOffset)
 	OTuple		tuple;
 	bool		needsFree;
 
-	btree_page_context_hikey_init(pageContext);
+	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
 
 	pageContext->hikeyChunk->ops->read_tuple(pageContext->hikeyChunk, NULL, NULL,
 											 itemOffset, NULL, &tuple, &needsFree);
@@ -121,11 +121,6 @@ btree_fits_hikey(BTreePageContext *pageContext, LocationIndex newHikeySize)
 /*
  * Utility functions
  */
-uint16
-btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple)
-{
-	return chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
-}
 
 /*
  * Implementation of hikey chunks.
@@ -476,7 +471,7 @@ htc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 	high = chunk->chunkItemsCount - 1;
 	nextkey = (keyType != BTreeKeyPageHiKey);
 
-	if (high < low)
+	if (unlikely(high < low))
 		return low;
 
 	targetCmpVal = nextkey ? 0 : 1; /* a target value of cmpFunc() */
@@ -619,6 +614,7 @@ const BTreeChunkOps BTreeHiKeyChunkOps = {
 	.estimate_change = htc_estimate_change,
 	.perform_change = htc_perform_change,
 	.compact = NULL,
+	.get_available_size = NULL,
 	.cmp = htc_cmp,
 	.search = htc_search,
 	.read_tuple = htc_read_tuple,

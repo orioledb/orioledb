@@ -2229,11 +2229,11 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 	closedir(dir);
 }
 
-static ORelOids *
+static OTableIndexOidsKey *
 o_indices_get_oids(Pointer tuple, ORelOids *tableOids)
 {
 	OIndexChunk chunk;
-	ORelOids   *treeOids;
+	OTableIndexOidsKey *treeOids;
 
 	memcpy(&chunk, tuple, offsetof(OIndexChunk, data));
 
@@ -2241,9 +2241,14 @@ o_indices_get_oids(Pointer tuple, ORelOids *tableOids)
 		return NULL;
 
 	Assert(chunk.dataLength >= sizeof(*tableOids));
+
 	memcpy(tableOids, tuple + offsetof(OIndexChunk, data), sizeof(*tableOids));
-	treeOids = (ORelOids *) MemoryContextAlloc(CurTransactionContext, sizeof(ORelOids));
-	*treeOids = chunk.key.oids;
+
+	treeOids = (OTableIndexOidsKey *) MemoryContextAlloc(CurTransactionContext,
+														 sizeof(OTableIndexOidsKey));
+	treeOids->oids = chunk.key.oids;
+	treeOids->type = chunk.key.type;
+	treeOids->ixNum = InvalidIndexNumber;
 
 	return treeOids;
 }
@@ -2519,8 +2524,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
 	OXid		oxid = InvalidOXid;
-	ORelOids	cur_oids = {0, 0, 0},
-			   *treeOids;
+	ORelOids	cur_oids = {0, 0, 0};
 	OffsetNumber length;
 	bool		success;
 	uint16		type;
@@ -2784,6 +2788,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 				if (sys_tree_num == SYS_TREES_O_INDICES && success)
 				{
+					OTableIndexOidsKey *treeOids = NULL;
 					ORelOids	tmp_oids;
 
 					if (type == RecoveryMsgTypeDelete)
@@ -2798,6 +2803,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						if (treeOids)
 							add_undo_create_relnode(tmp_oids, treeOids, 1);
 					}
+
+					if (treeOids != NULL)
+						pfree(treeOids);
 				}
 			}
 
