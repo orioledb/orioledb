@@ -358,7 +358,8 @@ typedef struct BTreePageContext BTreePageContext;
 extern void o_btree_check_size_of_tuple(int len, char *relation_name, bool index);
 extern void o_btree_init_unique_lwlocks(void);
 extern void o_btree_init(BTreeDescr *descr);
-extern void o_btree_cleanup_pages(OInMemoryBlkno root, OInMemoryBlkno metaPageBlkno,
+extern void o_btree_cleanup_pages(BTreeDescr *desc, OInMemoryBlkno rootPageBlkno,
+								  OInMemoryBlkno metaPageBlkno,
 								  uint32 rootPageChangeCount);
 extern ItemPointerData btree_ctid_get_and_inc(BTreeDescr *desc);
 extern ItemPointerData btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow);

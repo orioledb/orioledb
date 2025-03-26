@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
 #include "recovery/recovery.h"
@@ -1977,10 +1978,9 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 void
 o_truncate_table(ORelOids oids)
 {
-	ORelOids   *treeOids;
+	OTableIndexOidsKey *treeOids;
 	OTable	   *o_table;
 	int			treeOidsNum;
-	int			i;
 	bool		invalidatedTable = false;
 
 	o_tables_rel_lock(&oids, AccessExclusiveLock);
@@ -1988,26 +1988,33 @@ o_truncate_table(ORelOids oids)
 	o_table = o_tables_get(oids);
 	Assert(o_table != NULL);
 
-	treeOids = o_table_make_index_oids(o_table, &treeOidsNum);
+	treeOids = o_table_make_index_keys(o_table, &treeOidsNum);
 
-	for (i = 0; i < treeOidsNum; i++)
+	for (int i = 0; i < treeOidsNum; i++)
 	{
-		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, false);
-		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, true);
-		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode, true);
-		o_invalidate_oids(treeOids[i]);
+		o_tables_rel_lock_extended(&treeOids[i].oids, AccessExclusiveLock, false);
+		o_tables_rel_lock_extended(&treeOids[i].oids, AccessExclusiveLock, true);
+
+		cleanup_btree(&treeOids[i], true);
+
+		o_invalidate_oids(treeOids[i].oids);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(treeOids[i].datoid, treeOids[i].reloid,
 								treeOids[i].relnode);*/
-		if (ORelOidsIsEqual(oids, treeOids[i]))
+		if (ORelOidsIsEqual(oids, treeOids[i].oids))
 			invalidatedTable = true;
-		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, false);
-		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, true);
+
+		o_tables_rel_unlock_extended(&treeOids[i].oids, AccessExclusiveLock, false);
+		o_tables_rel_unlock_extended(&treeOids[i].oids, AccessExclusiveLock, true);
 	}
 
 	if (!invalidatedTable)
 	{
-		cleanup_btree(oids.datoid, oids.relnode, true);
+		OTableIndexOidsKey key;
+
+		key.oids = oids;
+		key.type = oIndexPrimary;
+		cleanup_btree(&key, true);
 		o_invalidate_oids(oids);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(oids.datoid, oids.reloid, oids.relnode);*/

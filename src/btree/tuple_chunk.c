@@ -18,9 +18,82 @@
 
 #include "btree/chunk_ops.h"
 #include "btree/find.h"
+#include <stdbool.h>
 
 const BTreeChunkOps BTreeLeafTupleChunkOps;
 const BTreeChunkOps BTreeInternalTupleChunkOps;
+
+/*
+ * Page iterating functions.
+ */
+
+void
+btree_page_locator_init(BTreePageContext *pageContext,
+						BTreePageItemLocator *locator)
+{
+	if (O_PAGE_IS(pageContext->page, LEAF))
+		btree_page_context_tuple_init(pageContext, &BTreeLeafTupleChunkOps,
+									  locator->chunkOffset);
+	else
+		btree_page_context_tuple_init(pageContext, &BTreeInternalTupleChunkOps,
+									  locator->chunkOffset);
+}
+
+inline void
+btree_page_locator_first(BTreePageContext *pageContext,
+						 BTreePageItemLocator *locator)
+{
+	if (O_PAGE_IS(pageContext->page, LEAF))
+		btree_page_context_tuple_init(pageContext, &BTreeLeafTupleChunkOps, 0);
+	else
+		btree_page_context_tuple_init(pageContext, &BTreeInternalTupleChunkOps, 0);
+
+	locator->chunkOffset = 0;
+	locator->itemOffset = 0;
+}
+
+bool
+btree_page_locator_is_valid(BTreePageContext *pageContext,
+							BTreePageItemLocator *locator)
+{
+	Assert(pageContext->tupleChunks != NULL);
+
+	return pageContext->tupleChunks[locator->chunkOffset] != NULL &&
+		locator->itemOffset < pageContext->tupleChunks[locator->chunkOffset]->chunkItemsCount;
+}
+
+bool
+btree_page_locator_next(BTreePageContext *pageContext,
+						BTreePageItemLocator *locator)
+{
+	Assert(pageContext->tupleChunks != NULL);
+
+	locator->itemOffset++;
+
+	/* Find next non-empty chunk */
+	while (unlikely(locator->itemOffset >=
+					pageContext->tupleChunks[locator->chunkOffset]->chunkItemsCount))
+	{
+		BTreePageHeader *header = (BTreePageHeader *) pageContext->page;
+
+		if (locator->chunkOffset + 1 < header->chunksCount)
+		{
+			if (O_PAGE_IS(pageContext->page, LEAF))
+				btree_page_context_tuple_init(pageContext, &BTreeLeafTupleChunkOps,
+											  locator->chunkOffset + 1);
+			else
+				btree_page_context_tuple_init(pageContext, &BTreeInternalTupleChunkOps,
+											  locator->chunkOffset + 1);
+
+			locator->chunkOffset++;
+			locator->itemOffset = 0;
+		}
+		else
+			return false;
+	}
+
+	return true;
+}
 
 /*
  * Implementation of leaf tuple chunks.
@@ -251,20 +324,19 @@ ltc_delete_item(BTreeChunkDesc *chunk, OffsetNumber itemOffset)
 static bool
 ltc_load_partially(BTreeChunkDesc *chunk, PartialPageState *partial, Page page)
 {
-	BTreeTupleChunkDesc *tupleChunk = (BTreeTupleChunkDesc *) chunk;
 	Page		sourcePage = partial->src;
 	uint32		pageState,
 				sourceState;
 	BTreePageHeader *header = (BTreePageHeader *) page;
 	BTreeChunkItem chunkLocation =
-		SHORT_GET_LOCATION(header->chunkDesc[tupleChunk->chunkOffset].shortLocation);
+		SHORT_GET_LOCATION(header->chunkDesc[chunk->chunkOffset].shortLocation);
 
 	Assert(partial != NULL);
 
-	if (!partial->isPartial || partial->chunkIsLoaded[tupleChunk->chunkOffset])
+	if (!partial->isPartial || partial->chunkIsLoaded[chunk->chunkOffset])
 		return true;
 
-	chunk->ops->init(chunk, page, tupleChunk->chunkOffset);
+	// chunk->ops->init(chunk, page, chunk->chunkOffset);
 
 	memcpy(chunk->chunkData, (Pointer) sourcePage + chunkLocation, chunk->chunkDataSize);
 
@@ -279,7 +351,7 @@ ltc_load_partially(BTreeChunkDesc *chunk, PartialPageState *partial, Page page)
 	if (O_PAGE_GET_CHANGE_COUNT(page) != O_PAGE_GET_CHANGE_COUNT(sourcePage))
 		return false;
 
-	partial->chunkIsLoaded[tupleChunk->chunkOffset] = true;
+	partial->chunkIsLoaded[chunk->chunkOffset] = true;
 
 	return true;
 }
@@ -307,7 +379,7 @@ ltc_init(BTreeChunkDesc *chunk, Page page, OffsetNumber chunkOffset)
 	else
 		chunk->chunkDataSize = header->dataSize - chunkLocation;
 
-	tupleChunk->chunkOffset = chunkOffset;
+	chunk->chunkOffset = chunkOffset;
 	tupleChunk->chunkItems = (BTreeChunkItem *) chunk->chunkData;
 
 	if (chunkOffset + 1 < header->chunksCount)
@@ -440,7 +512,7 @@ ltc_compact(BTreeChunkDesc *chunk)
 				lastOffset = 0;
 	uint16		batchSize = 0;
 
-	if (chunk->chunkItemsCount == 0)
+	if (unlikely(chunk->chunkItemsCount == 0))
 		return;
 
 	/* Detect deleted items and delete them from the items array */
@@ -449,11 +521,12 @@ ltc_compact(BTreeChunkDesc *chunk)
 	{
 		Pointer		header = NULL;
 		OTuple		tuple = {0};
-		bool		needsFree = false;
+		bool		isCopy = false;
 
 		chunk->ops->read_tuple(chunk, NULL, NULL, itemOffset,
-							   &header, &tuple, &needsFree);
+							   &header, &tuple, &isCopy);
 
+		/* TODO: Consider CommitSeqNo */
 		if (((BTreeLeafTuphdr *) header)->deleted == BTreeLeafTupleNonDeleted)
 			tupleChunk->chunkItems[lastOffset++] =
 				tupleChunk->chunkItems[itemOffset];
@@ -461,7 +534,7 @@ ltc_compact(BTreeChunkDesc *chunk)
 	chunk->chunkItemsCount = lastOffset;
 
 	/* All items were deleted, just exit */
-	if (chunk->chunkItemsCount == 0)
+	if (unlikely(chunk->chunkItemsCount == 0))
 	{
 		chunk->chunkDataSize = 0;
 		return;
@@ -476,7 +549,7 @@ ltc_compact(BTreeChunkDesc *chunk)
 	{
 		Pointer		header = NULL;
 		OTuple		tuple = {0};
-		bool		needsFree = false;
+		bool		isCopy = false;
 
 		/*
 		 * If there is a gap between the batch and the current item then move
@@ -505,7 +578,7 @@ ltc_compact(BTreeChunkDesc *chunk)
 		}
 
 		chunk->ops->read_tuple(chunk, NULL, NULL, itemOffset,
-							   &header, &tuple, &needsFree);
+							   &header, &tuple, &isCopy);
 		batchSize += chunk->ops->itemHeaderSize +
 			MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple));
 	}
@@ -527,6 +600,49 @@ ltc_compact(BTreeChunkDesc *chunk)
 }
 
 /*
+ * Get available size for compaction.
+ */
+static uint16
+ltc_get_available_size(BTreeChunkDesc *chunk, CommitSeqNo csn)
+{
+	uint16		available_size = 0;
+
+	if (unlikely(chunk->chunkItemsCount == 0))
+		return 0;
+
+	for (OffsetNumber itemOffset = 0; itemOffset < chunk->chunkItemsCount;
+		 itemOffset++)
+	{
+		BTreeLeafTuphdr *header = NULL;
+		OTuple		tuple = {0};
+		bool		isCopy = false;
+
+		chunk->ops->read_tuple(chunk, NULL, NULL, itemOffset,
+							   (Pointer *) &header, &tuple, &isCopy);
+
+		if (XACT_INFO_FINISHED_FOR_EVERYBODY(header->xactInfo))
+		{
+			if (header->deleted)
+			{
+				if (COMMITSEQNO_IS_INPROGRESS(csn) ||
+					XACT_INFO_MAP_CSN(header->xactInfo) < csn)
+					available_size += ltc_get_item_size((BTreeTupleChunkDesc *) chunk,
+														itemOffset);
+			}
+			else
+			{
+				available_size += ltc_get_item_size((BTreeTupleChunkDesc *) chunk,
+													itemOffset) -
+					(chunk->ops->itemHeaderSize +
+					 MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple)));
+			}
+		}
+	}
+
+	return available_size;
+}
+
+/*
  * Compare the given key to a tuple at the given offset.  Partially load the
  * chunk from the page if necessary.
  */
@@ -536,7 +652,7 @@ ltc_cmp(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 {
 	Pointer		header2 = NULL;
 	OTuple		tuple2 = {0};
-	bool		needsFree = false;
+	bool		isCopy = false;
 	OBTreeKeyCmp cmpFunc = chunk->treeDesc->ops->cmp;
 
 	if (partial && !ltc_load_partially(chunk, partial, page))
@@ -545,9 +661,9 @@ ltc_cmp(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 	Assert(itemOffset < chunk->chunkItemsCount);
 
 	chunk->ops->read_tuple(chunk, NULL, NULL, itemOffset,
-						   &header2, &tuple2, &needsFree);
+						   &header2, &tuple2, &isCopy);
 
-	Assert(!needsFree);
+	Assert(!isCopy);
 
 	*result = cmpFunc(chunk->treeDesc, key, keyType,
 					  &tuple2, chunk->ops->itemKeyType);
@@ -619,11 +735,11 @@ ltc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 		{
 			Pointer		midHeader;
 			OTuple		midTuple;
-			bool		needsFree;
+			bool		isCopy;
 
 			*itemOffset = mid;
 			chunk->ops->read_tuple(chunk, NULL, NULL, *itemOffset,
-								   &midHeader, &midTuple, &needsFree);
+								   &midHeader, &midTuple, &isCopy);
 
 			result = cmpFunc(chunk->treeDesc, key, keyType, &midTuple,
 							 chunk->ops->itemKeyType);
@@ -646,7 +762,7 @@ ltc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 static bool
 ltc_read_tuple(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 			   OffsetNumber itemOffset, Pointer *tupleHeader, OTuple *tuple,
-			   bool *needsFree)
+			   bool *isCopy)
 {
 	BTreeTupleChunkDesc *tupleChunk = (BTreeTupleChunkDesc *) chunk;
 	Pointer		item;
@@ -663,7 +779,7 @@ ltc_read_tuple(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 	tuple->formatFlags = ltc_get_item_flags(tupleChunk, itemOffset);
 
 	/* Set always to false in the current implementation */
-	*needsFree = false;
+	*isCopy = false;
 
 	return true;
 }
@@ -772,6 +888,7 @@ const BTreeChunkOps BTreeLeafTupleChunkOps = {
 	.estimate_change = ltc_estimate_change,
 	.perform_change = ltc_perform_change,
 	.compact = ltc_compact,
+	.get_available_size = ltc_get_available_size,
 	.cmp = ltc_cmp,
 	.search = ltc_search,
 	.read_tuple = ltc_read_tuple,
@@ -794,6 +911,7 @@ const BTreeChunkOps BTreeInternalTupleChunkOps = {
 	.estimate_change = ltc_estimate_change,
 	.perform_change = ltc_perform_change,
 	.compact = NULL,
+	.get_available_size = NULL,
 	.cmp = ltc_cmp,
 	.search = ltc_search,
 	.read_tuple = ltc_read_tuple,

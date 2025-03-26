@@ -1695,8 +1695,8 @@ static void
 set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfactor, bool index_bridging)
 {
 	ORelOids	oids,
-				toastOids,
-			   *treeOids;
+				toastOids;
+	OTableIndexOidsKey *treeOids;
 	int			numTreeOids;
 	OTable	   *o_table;
 	ORelOptions *options = (ORelOptions *) rel->rd_options;
@@ -1797,9 +1797,10 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	o_tables_update(o_table, oxid, oSnapshot.csn);
 	o_tables_after_update(o_table, oxid, oSnapshot.csn);
 
-	treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+	treeOids = o_table_make_index_keys(o_table, &numTreeOids);
 	add_undo_create_relnode(oids, treeOids, numTreeOids);
 	o_tables_rel_meta_unlock(rel, InvalidOid);
+
 	pfree(treeOids);
 	o_table_free(o_table);
 }
@@ -1912,7 +1913,7 @@ drop_table(ORelOids oids)
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	OTable	   *table;
-	ORelOids   *treeOids;
+	OTableIndexOidsKey *treeOids;
 	int			numTreeOids;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -1920,8 +1921,10 @@ drop_table(ORelOids oids)
 	o_tables_table_meta_lock(NULL);
 	table = o_tables_drop_by_oids(oids, oxid, oSnapshot.csn);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
-	treeOids = o_table_make_index_oids(table, &numTreeOids);
+
+	treeOids = o_table_make_index_keys(table, &numTreeOids);
 	add_undo_drop_relnode(oids, treeOids, numTreeOids);
+
 	pfree(treeOids);
 	o_table_free(table);
 }

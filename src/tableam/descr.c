@@ -920,14 +920,31 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 	Assert(inserted);
 }
 
+BTreeDescr *
+get_tree_descr(ORelOids oids, OIndexType type)
+{
+	if (IS_SYS_TREE_OIDS(oids))
+	{
+		return get_sys_tree(oids.relnode);
+	}
+	else
+	{
+		OIndexDescr *descr = o_fetch_index_descr(oids, type, false, NULL);
+
+		if (!descr)
+			return NULL;
+		return &descr->desc;
+	}
+}
+
 void
-cleanup_btree(Oid datoid, Oid relnode, bool files)
+cleanup_btree(OTableIndexOidsKey *indexKey, bool files)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
 
-	key.datoid = datoid;
-	key.relnode = relnode;
+	key.datoid = indexKey->oids.datoid;
+	key.relnode = indexKey->oids.relnode;
 
 	shared = o_find_shared_root_info(&key);
 
@@ -935,12 +952,19 @@ cleanup_btree(Oid datoid, Oid relnode, bool files)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
 
-		drop_result = o_drop_shared_root_info(datoid, relnode);
+		drop_result = o_drop_shared_root_info(key.datoid, key.relnode);
 		Assert(drop_result);
 		if (!shared->placeholder)
-			o_btree_cleanup_pages(shared->rootInfo.rootPageBlkno,
+		{
+			BTreeDescr *desc;
+
+			desc = get_tree_descr(indexKey->oids, indexKey->type);
+			Assert(desc != NULL);
+
+			o_btree_cleanup_pages(desc, shared->rootInfo.rootPageBlkno,
 								  shared->rootInfo.metaPageBlkno,
 								  shared->rootInfo.rootPageChangeCount);
+		}
 		pfree(shared);
 	}
 	if (files)

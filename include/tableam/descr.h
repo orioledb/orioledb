@@ -265,6 +265,8 @@ extern bool o_btree_try_use_shmem(BTreeDescr *desc);
 extern SharedRootInfo *o_find_shared_root_info(SharedRootInfoKey *key);
 extern void o_insert_shared_root_placeholder(Oid datoid, Oid relnode);
 
+extern BTreeDescr *get_tree_descr(ORelOids oids, OIndexType type);
+
 extern OComparator *o_find_comparator(Oid opfamily,
 									  Oid lefttype,
 									  Oid righttype,

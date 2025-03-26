@@ -242,14 +242,14 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 	int			oldTreeOidsNum,
 				newTreeOidsNum;
 	ORelOids	oldOids = old_o_table->oids,
-			   *oldTreeOids,
-				newOids = o_table->oids,
+				newOids = o_table->oids;
+	OTableIndexOidsKey *oldTreeOids,
 			   *newTreeOids;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-	oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
-	newTreeOids = o_table_make_index_oids(o_table, &newTreeOidsNum);
+	oldTreeOids = o_table_make_index_keys(old_o_table, &oldTreeOidsNum);
+	newTreeOids = o_table_make_index_keys(o_table, &newTreeOidsNum);
 
 	o_tables_drop_by_oids(old_o_table->oids, oxid, oSnapshot.csn);
 	o_tables_add(o_table, oxid, oSnapshot.csn);
@@ -572,7 +572,15 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 		o_tables_update(o_table, oxid, oSnapshot.csn);
 		if (!reuse_relnode)
-			add_undo_create_relnode(o_table->oids, &table_index->oids, 1);
+		{
+			OTableIndexOidsKey treeOids = {
+				.oids = table_index->oids,
+				.type = table_index->type,
+				.ixNum = ix_num,
+			};
+
+			add_undo_create_relnode(o_table->oids, &treeOids, 1);
+		}
 		recreate_table_descr_by_oids(oids);
 	}
 
@@ -1926,11 +1934,14 @@ drop_secondary_index(OTable *o_table, OIndexNumber ix_num)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
-	ORelOids	deletedOids;
+	OTableIndexOidsKey deletedOids;
 
 	Assert(o_table->indices[ix_num].type != oIndexInvalid);
 
-	deletedOids = o_table->indices[ix_num].oids;
+	deletedOids.oids = o_table->indices[ix_num].oids;
+	deletedOids.type = o_table->indices[ix_num].type;
+	deletedOids.ixNum = ix_num;
+
 	o_table->nindices--;
 	if (o_table->nindices > 0)
 	{

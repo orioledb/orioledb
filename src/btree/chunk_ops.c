@@ -72,57 +72,127 @@ btree_page_context_init(BTreePageContext *pageContext, BTreeDescr *treeDesc)
 	memset(pageContext, 0, sizeof(*pageContext));
 
 	pageContext->treeDesc = treeDesc;
-	pageContext->mctx = CurrentMemoryContext;
+	pageContext->mctx = AllocSetContextCreate(CurrentMemoryContext,
+											  "orioledb BTreePageContext context",
+											  ALLOCSET_DEFAULT_SIZES);
 }
 
 void
 btree_page_context_release(BTreePageContext *pageContext)
 {
-	if (pageContext->hikeyChunk != NULL)
-	{
-		release_btree_chunk_desc(pageContext->hikeyChunk);
-		pfree(pageContext->hikeyChunk);
-	}
 	pageContext->hikeyChunk = NULL;
-	pageContext->isInitialized = false;
+	pageContext->tupleChunks = NULL;
+
+	if (pageContext->mctx != NULL)
+		MemoryContextReset(pageContext->mctx);
 }
 
 void
 btree_page_context_set(BTreePageContext *pageContext, Page page)
 {
-	btree_page_context_invalidate(pageContext);
+	btree_page_context_release(pageContext);
 	pageContext->page = page;
 }
 
 void
 btree_page_context_invalidate(BTreePageContext *pageContext)
 {
-	if (pageContext->isInitialized)
-	{
-		pageContext->hikeyChunk->ops->release(pageContext->hikeyChunk);
-	}
-	pageContext->isInitialized = false;
+	btree_page_context_release(pageContext);
 }
 
 void
-btree_page_context_hikey_init(BTreePageContext *pageContext)
+btree_page_context_hikey_init(BTreePageContext *pageContext,
+							  const BTreeChunkOps *ops)
 {
-	if (!pageContext->isInitialized)
+	Assert(pageContext->hikeyChunk == NULL || pageContext->hikeyChunk->ops == ops);
+
+	if (pageContext->hikeyChunk == NULL)
 	{
 		MemoryContext oldctx = MemoryContextSwitchTo(pageContext->mctx);
 
-		if (pageContext->hikeyChunk == NULL)
-			pageContext->hikeyChunk = make_btree_chunk_desc(pageContext->treeDesc,
-															&BTreeHiKeyChunkOps,
-															pageContext->page, 0);
-		else
-			pageContext->hikeyChunk->ops->init(pageContext->hikeyChunk,
-											   pageContext->page, 0);
+		pageContext->hikeyChunk = make_btree_chunk_desc(pageContext->treeDesc,
+														ops,
+														pageContext->page, 0);
 
 		MemoryContextSwitchTo(oldctx);
-		pageContext->isInitialized = true;
 
 		VALGRIND_CHECK_MEM_IS_DEFINED(pageContext->hikeyChunk->chunkData,
 									  pageContext->hikeyChunk->chunkDataSize);
 	}
+}
+
+void
+btree_page_context_tuple_init(BTreePageContext *pageContext,
+							  const BTreeChunkOps *ops,
+							  OffsetNumber chunkOffset)
+{
+	if (pageContext->tupleChunks == NULL)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) pageContext->page;
+
+		pageContext->tupleChunks =
+			(BTreeChunkDesc **) palloc0(sizeof(BTreeChunkDesc *) *
+										header->chunksCount);
+	}
+
+	if (pageContext->tupleChunks[chunkOffset] == NULL)
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(pageContext->mctx);
+
+		pageContext->tupleChunks[chunkOffset] =
+			make_btree_chunk_desc(pageContext->treeDesc, ops,
+								  pageContext->page, chunkOffset);
+
+		MemoryContextSwitchTo(oldctx);
+	}
+	else
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(pageContext->mctx);
+
+		Assert(pageContext->tupleChunks[chunkOffset]->ops == ops);
+
+		pageContext->tupleChunks[chunkOffset]->ops->init(
+			pageContext->tupleChunks[chunkOffset],
+			pageContext->page, chunkOffset);
+
+		MemoryContextSwitchTo(oldctx);
+	}
+
+	VALGRIND_CHECK_MEM_IS_DEFINED(pageContext->tupleChunk->chunkData,
+								  pageContext->tupleChunk->chunkDataSize);
+}
+
+/*
+ * Utility functions
+ */
+
+bool
+btree_read_tuple(BTreePageContext *pageContext, PartialPageState *partial,
+				 BTreePageItemLocator *locator,
+				 Pointer *tupleHeader, OTuple *tuple, bool *isCopy)
+{
+	bool		result;
+
+	Assert(pageContext->tupleChunks != NULL);
+	Assert(pageContext->tupleChunks[locator->chunkOffset] != NULL);
+
+	result = pageContext->tupleChunks[locator->chunkOffset]->ops->read_tuple(
+		pageContext->tupleChunks[locator->chunkOffset],
+		partial, pageContext->page, locator->itemOffset,
+		tupleHeader, tuple, isCopy);
+	Assert(!(*isCopy));
+
+	return result;
+}
+
+uint16
+btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple)
+{
+	return chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
+}
+
+uint16
+btree_get_available_size(BTreeChunkDesc *chunk, CommitSeqNo csn)
+{
+	return chunk->ops->get_available_size(chunk, csn);
 }

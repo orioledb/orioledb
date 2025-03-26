@@ -637,8 +637,16 @@ unlock_page(OInMemoryBlkno blkno)
 	if (!O_PAGE_IS(p, LEAF) && OidIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->oids.reloid))
 	{
 		int			on_disk = 0;
+
 		BTreePageItemLocator loc;
 
+		/*
+		 * Make check here without using chunk API. Chunk API requires getting
+		 * BTreeDescr which can be expensive for every call of unlock_page().
+		 *
+		 * TODO: Once there will be additional chunk API implementations check
+		 * the type of the chunk and do the check only for BTreeInternalTupleChunkOps.
+		 */
 		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 		{
 			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);

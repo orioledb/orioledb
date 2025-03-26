@@ -1347,7 +1347,9 @@ load_page(OBTreeFindPageContext *context)
 	int			context_index,
 				ionum;
 	uint32		parent_change_count;
-	BTreeNonLeafTuphdr *int_hdr;
+	BTreeNonLeafTuphdr *parentHeader;
+	OTuple		parentTuple;
+	bool		parentIsCopy;
 	OInMemoryBlkno blkno;
 	OFixedKey	target_hikey;
 	int			target_level;
@@ -1369,17 +1371,22 @@ load_page(OBTreeFindPageContext *context)
 
 	btree_page_context_init(&parentPageContext, desc);
 	btree_page_context_set(&parentPageContext, parent_page);
+	btree_page_locator_init(&parentPageContext, parent_loc);
 
 	ionum = assign_io_num(parent_blkno, BTREE_PAGE_LOCATOR_GET_OFFSET(parent_page, parent_loc));
 
 	/* Modify parent downlink: indicate that IO is in-progress */
 	page_block_reads(parent_blkno);
-	int_hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
-	Assert(DOWNLINK_IS_ON_DISK(int_hdr->downlink));
 
-	downlink = int_hdr->downlink;
+	btree_read_tuple(&parentPageContext, NULL, parent_loc,
+					 (Pointer *) &parentHeader, &parentTuple, &parentIsCopy);
+	Assert(DOWNLINK_IS_ON_DISK(parentHeader->downlink));
 
-	int_hdr->downlink = MAKE_IO_DOWNLINK(ionum);
+	downlink = parentHeader->downlink;
+
+	parentHeader->downlink = MAKE_IO_DOWNLINK(ionum);
+
+
 	Assert(PAGE_GET_N_ONDISK(parent_page) > 0);
 	PAGE_DEC_N_ONDISK(parent_page);
 
@@ -1410,7 +1417,7 @@ load_page(OBTreeFindPageContext *context)
 	/* Read page data and put it to the page */
 	if (!read_page_from_disk(desc, buf, downlink, &page_desc->fileExtent))
 	{
-		int_hdr->downlink = downlink;
+		parentHeader->downlink = downlink;
 		PAGE_INC_N_ONDISK(parent_page);
 		unlock_io(ionum);
 		if (orioledb_s3_mode)
@@ -1444,12 +1451,16 @@ load_page(OBTreeFindPageContext *context)
 		 * In S3 mode schedule load of all the page children for faster
 		 * warmup.
 		 */
-		BTREE_PAGE_FOREACH_ITEMS(page, &loc)
+		BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
 		{
-			BTreeNonLeafTuphdr *tupHdr;
+			BTreeNonLeafTuphdr *header;
+			OTuple		tuple;
+			bool		isCopy;
 
-			tupHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
-			(void) s3_schedule_downlink_load(desc, tupHdr->downlink);
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &header, &tuple, &isCopy);
+
+			(void) s3_schedule_downlink_load(desc, header->downlink);
 		}
 	}
 
@@ -1535,20 +1546,23 @@ load_page(OBTreeFindPageContext *context)
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_UNSET(context, DOWNLINK_LOCATION);
 
+	if (parentIsCopy)
+		pfree(parentHeader);
+
 	context_index = context->index;
 	parent_blkno = context->items[context_index].blkno;
 	parent_loc = &context->items[context_index].locator;
 	parent_change_count = context->items[context_index].pageChangeCount;
 
-	btree_page_context_release(&pageContext);
-	btree_page_context_release(&parentPageContext);
-
 	/* Replace parent downlink with orioledb downlink */
 	page_block_reads(parent_blkno);
 	parent_page = O_GET_IN_MEMORY_PAGE(parent_blkno);
-	int_hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
-	Assert(int_hdr->downlink == MAKE_IO_DOWNLINK(ionum));
-	int_hdr->downlink = MAKE_IN_MEMORY_DOWNLINK(blkno, O_PAGE_HEADER(page)->pageChangeCount);
+	parentHeader = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
+	Assert(parentHeader->downlink == MAKE_IO_DOWNLINK(ionum));
+	parentHeader->downlink = MAKE_IN_MEMORY_DOWNLINK(blkno, O_PAGE_HEADER(page)->pageChangeCount);
+
+	btree_page_context_release(&pageContext);
+	btree_page_context_release(&parentPageContext);
 
 	unlock_io(ionum);
 }
@@ -1583,19 +1597,30 @@ get_write_img(BTreeDescr *desc, Page page, size_t *size)
 
 #ifdef USE_ASSERT_CHECKING
 static void
-prewrite_image_check(Page p)
+prewrite_image_check(BTreeDescr *desc, Page p)
 {
-	if (!O_PAGE_IS(p, LEAF))
+	BTreePageContext pageContext;
+	BTreePageItemLocator loc;
+
+	if (O_PAGE_IS(p, LEAF))
+		return;
+
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, p);
+
+	BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
 	{
-		BTreePageItemLocator loc;
+		BTreeNonLeafTuphdr *header;
+		OTuple		tuple;
+		bool		isCopy;
 
-		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
-		{
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+		btree_read_tuple(&pageContext, NULL, &loc,
+						 (Pointer *) &header, &tuple, &isCopy);
 
-			Assert(DOWNLINK_IS_ON_DISK(tuphdr->downlink));
-		}
+		Assert(DOWNLINK_IS_ON_DISK(header->downlink));
 	}
+
+	btree_page_context_release(&pageContext);
 }
 #endif
 
@@ -1617,7 +1642,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 				err = false;
 
 #ifdef USE_ASSERT_CHECKING
-	prewrite_image_check(img);
+	prewrite_image_check(desc, img);
 #endif
 
 	EA_WRITE_INC(blkno);
@@ -1821,7 +1846,7 @@ perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExten
 	size_t		write_size;
 
 #ifdef USE_ASSERT_CHECKING
-	prewrite_image_check(img);
+	prewrite_image_check(desc, img);
 #endif
 
 	write_img = get_write_img(desc, img, &write_size);
@@ -1879,7 +1904,7 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 	btree_page_update_max_key_len(desc, img);
 
 #ifdef USE_ASSERT_CHECKING
-	prewrite_image_check(img);
+	prewrite_image_check(desc, img);
 #endif
 
 	write_img = get_write_img(desc, img, &write_size);
@@ -1958,6 +1983,7 @@ prepare_non_leaf_page(Page p)
 {
 	BTreePageItemLocator loc;
 
+	/* TODO: Replace by BTREE_PAGE_LOCATOR_FOREACH() */
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 	{
 		BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
@@ -2689,7 +2715,7 @@ retry:
 }
 
 static bool
-write_tree_pages_recursive(UndoLogType undoType,
+write_tree_pages_recursive(BTreeDescr *desc,
 						   OInMemoryBlkno blkno, uint32 loadId,
 						   int maxLevel, bool evict)
 {
@@ -2699,7 +2725,6 @@ write_tree_pages_recursive(UndoLogType undoType,
 	uint32		childPageChangeCounts[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			childPagesCount = 0;
 	int			i;
-	BTreePageItemLocator loc;
 
 	if (!OInMemoryBlknoIsValid(blkno))
 		return false;
@@ -2715,23 +2740,36 @@ write_tree_pages_recursive(UndoLogType undoType,
 
 	if (!O_PAGE_IS(p, LEAF))
 	{
-		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
-		{
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+		BTreePageContext pageContext;
+		BTreePageItemLocator loc;
 
-			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+		btree_page_context_init(&pageContext, desc);
+		btree_page_context_set(&pageContext, p);
+
+		BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
+		{
+			BTreeNonLeafTuphdr *header;
+			OTuple		tuple;
+			bool		isCopy;
+
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &header, &tuple, &isCopy);
+
+			if (DOWNLINK_IS_IN_MEMORY(header->downlink))
 			{
-				childPageNumbers[childPagesCount] = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
-				childPageChangeCounts[childPagesCount] = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(tuphdr->downlink);
+				childPageNumbers[childPagesCount] = DOWNLINK_GET_IN_MEMORY_BLKNO(header->downlink);
+				childPageChangeCounts[childPagesCount] = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(header->downlink);
 				childPagesCount++;
 			}
 		}
+
+		btree_page_context_release(&pageContext);
 	}
 
 	unlock_page(blkno);
 
 	for (i = 0; i < childPagesCount; i++)
-		(void) write_tree_pages_recursive(undoType,
+		(void) write_tree_pages_recursive(desc,
 										  childPageNumbers[i],
 										  childPageChangeCounts[i],
 										  maxLevel,
@@ -2741,12 +2779,12 @@ write_tree_pages_recursive(UndoLogType undoType,
 	{
 		while (true)
 		{
-			reserve_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(undoType),
+			reserve_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
 							  2 * O_MERGE_UNDO_IMAGE_SIZE);
 			if (walk_page(blkno, evict) != OWalkPageMerged)
 				break;
 		}
-		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(undoType));
+		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 	}
 
 	return true;
@@ -2756,7 +2794,7 @@ static void
 write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 {
 	o_btree_load_shmem(desc);
-	if (!write_tree_pages_recursive(desc->undoType,
+	if (!write_tree_pages_recursive(desc,
 									desc->rootInfo.rootPageBlkno,
 									desc->rootInfo.rootPageChangeCount,
 									maxLevel, evict))
@@ -2765,7 +2803,7 @@ write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 		desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 		desc->rootInfo.rootPageChangeCount = 0;
 		o_btree_load_shmem(desc);
-		(void) write_tree_pages_recursive(desc->undoType,
+		(void) write_tree_pages_recursive(desc,
 										  desc->rootInfo.rootPageBlkno,
 										  desc->rootInfo.rootPageChangeCount,
 										  maxLevel, evict);

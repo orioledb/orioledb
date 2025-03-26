@@ -4471,12 +4471,12 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
      csn: CommitSeqNo(8)                      +
      rightLink: uint64(8)                     +
      checkpointNum: uint32(4)                 +
-     maxKeyLen: LocationIndex(2)              +
+     maxKeyLen: BTreeChunkItem(2)             +
      prevInsertOffset: OffsetNumber(2)        +
      chunksCount: OffsetNumber(2)             +
      itemsCount: OffsetNumber(2)              +
      hikeysEnd: OffsetNumber(2)               +
-     dataSize: LocationIndex(2)               +
+     dataSize: BTreeChunkItem(2)              +
      dataSize VALUE: 1536                     +
      chunkDesc: ARRAY:                        +
          [0]: BTreePageChunkDesc(4)           +
@@ -4489,8 +4489,8 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
  CHUNKS: ARRAY:                               +
      [0]: 1024                                +
          ITEMS: ARRAY:                        +
-             [0]: LocationIndex(2)            +
-             [1]: LocationIndex(2)            +
+             [0]: BTreeChunkItem(2)           +
+             [1]: BTreeChunkItem(2)           +
          ITEMS ARRAY ALIGN (4)                +
          ITEM DATA: ARRAY                     +
  Page 1:                                      +
@@ -4506,12 +4506,12 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
      csn: CommitSeqNo(8)                      +
      rightLink: uint64(8)                     +
      checkpointNum: uint32(4)                 +
-     maxKeyLen: LocationIndex(2)              +
+     maxKeyLen: BTreeChunkItem(2)             +
      prevInsertOffset: OffsetNumber(2)        +
      chunksCount: OffsetNumber(2)             +
      itemsCount: OffsetNumber(2)              +
      hikeysEnd: OffsetNumber(2)               +
-     dataSize: LocationIndex(2)               +
+     dataSize: BTreeChunkItem(2)              +
      dataSize VALUE: 7176                     +
      chunkDesc: ARRAY:                        +
          [0]: BTreePageChunkDesc(4)           +
@@ -4524,12 +4524,12 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
  CHUNKS: ARRAY:                               +
      [0]: 6112                                +
          ITEMS: ARRAY:                        +
-             [0]: LocationIndex(2)            +
-             [1]: LocationIndex(2)            +
-             [2]: LocationIndex(2)            +
-             [3]: LocationIndex(2)            +
-             [4]: LocationIndex(2)            +
-             [5]: LocationIndex(2)            +
+             [0]: BTreeChunkItem(2)           +
+             [1]: BTreeChunkItem(2)           +
+             [2]: BTreeChunkItem(2)           +
+             [3]: BTreeChunkItem(2)           +
+             [4]: BTreeChunkItem(2)           +
+             [5]: BTreeChunkItem(2)           +
          ITEMS ARRAY ALIGN (4)                +
          ITEM DATA: ARRAY                     +
              [0]: BTreeLeafTuphdr(16)         +
@@ -4638,12 +4638,12 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
      csn: CommitSeqNo(8)                      +
      rightLink: uint64(8)                     +
      checkpointNum: uint32(4)                 +
-     maxKeyLen: LocationIndex(2)              +
+     maxKeyLen: BTreeChunkItem(2)             +
      prevInsertOffset: OffsetNumber(2)        +
      chunksCount: OffsetNumber(2)             +
      itemsCount: OffsetNumber(2)              +
      hikeysEnd: OffsetNumber(2)               +
-     dataSize: LocationIndex(2)               +
+     dataSize: BTreeChunkItem(2)              +
      dataSize VALUE: 2304                     +
      chunkDesc: ARRAY:                        +
          [0]: BTreePageChunkDesc(4)           +
@@ -4656,8 +4656,8 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
  CHUNKS: ARRAY:                               +
      [0]: 2048                                +
          ITEMS: ARRAY:                        +
-             [0]: LocationIndex(2)            +
-             [1]: LocationIndex(2)            +
+             [0]: BTreeChunkItem(2)           +
+             [1]: BTreeChunkItem(2)           +
          ITEMS ARRAY ALIGN (4)                +
          ITEM DATA: ARRAY                     +
              [0]: BTreeLeafTuphdr(16)         +

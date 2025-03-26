@@ -13,7 +13,7 @@
 #ifndef __BTREE_UNDO_H__
 #define __BTREE_UNDO_H__
 
-#include "btree/chunk_ops.h"
+#include "catalog/o_tables.h"
 #include "btree/page_contents.h"
 
 /*
@@ -72,7 +72,7 @@ typedef struct
 	Oid			newRelnode;
 	int			newNumTreeOids;
 	bool		fsync;
-	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
+	OTableIndexOidsKey oids[FLEXIBLE_ARRAY_MEMBER];
 } RelnodeUndoStackItem;
 
 /* size of image in undo log produced by page compaction  */
@@ -152,13 +152,13 @@ extern void get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 extern void update_leaf_header_in_undo(UndoLogType undoType,
 									   BTreeLeafTuphdr *tuphdr,
 									   UndoLocation location);
-extern void add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
+extern void add_undo_truncate_relnode(ORelOids oldOids, OTableIndexOidsKey *oldTreeOids,
 									  int oldNumTreeOids,
-									  ORelOids newOids, ORelOids *newTreeOids,
+									  ORelOids newOids, OTableIndexOidsKey *newTreeOids,
 									  int newNumTreeOids);
-extern void add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids,
+extern void add_undo_drop_relnode(ORelOids oids, OTableIndexOidsKey *treeOids,
 								  int numTreeOids);
-extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
+extern void add_undo_create_relnode(ORelOids oids, OTableIndexOidsKey *treeOids,
 									int numTreeOids);
 extern void check_pending_truncates(void);
 

@@ -24,7 +24,7 @@ static inline uint16 htc_get_item_size(BTreeHiKeyChunkDesc *hikeyChunk,
 									   OffsetNumber itemOffset);
 
 /*
- * Page utility functions.
+ * Hikey utility functions.
  */
 
 OTuple
@@ -32,18 +32,18 @@ btree_get_hikey(BTreePageContext *pageContext)
 {
 	BTreeChunkDesc *chunk;
 	OTuple		tuple;
-	bool		needsFree;
+	bool		isCopy;
 
 	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
 
-	btree_page_context_hikey_init(pageContext);
+	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
 	chunk = pageContext->hikeyChunk;
 
 	Assert(chunk->chunkItemsCount > 0);
 
 	chunk->ops->read_tuple(chunk, NULL, NULL, chunk->chunkItemsCount - 1,
-						   NULL, &tuple, &needsFree);
-	Assert(!needsFree);
+						   NULL, &tuple, &isCopy);
+	Assert(!isCopy);
 
 	return tuple;
 }
@@ -56,7 +56,7 @@ btree_get_hikey_size(BTreePageContext *pageContext)
 
 	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
 
-	btree_page_context_hikey_init(pageContext);
+	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
 	chunk = pageContext->hikeyChunk;
 	hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
 
@@ -87,13 +87,13 @@ OTuple
 btree_read_hikey(BTreePageContext *pageContext, OffsetNumber itemOffset)
 {
 	OTuple		tuple;
-	bool		needsFree;
+	bool		isCopy;
 
-	btree_page_context_hikey_init(pageContext);
+	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
 
 	pageContext->hikeyChunk->ops->read_tuple(pageContext->hikeyChunk, NULL, NULL,
-											 itemOffset, NULL, &tuple, &needsFree);
-	Assert(!needsFree);
+											 itemOffset, NULL, &tuple, &isCopy);
+	Assert(!isCopy);
 
 	return tuple;
 }
@@ -121,11 +121,6 @@ btree_fits_hikey(BTreePageContext *pageContext, LocationIndex newHikeySize)
 /*
  * Utility functions
  */
-uint16
-btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple)
-{
-	return chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
-}
 
 /*
  * Implementation of hikey chunks.
@@ -432,23 +427,23 @@ htc_perform_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
 }
 
 /*
- * Compare the given key to a tuple at the given offset.  Partially load the
- * chunk from the page if necessary.
+ * Compare the given key to a tuple at the given offset.
  */
 static bool
 htc_cmp(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 		OffsetNumber itemOffset, void *key, BTreeKeyType keyType, int *result)
 {
 	OTuple		tuple2 = {0};
-	bool		needsFree = false;
+	bool		isCopy = false;
 	OBTreeKeyCmp cmpFunc = chunk->treeDesc->ops->cmp;
 
 	Assert(itemOffset < chunk->chunkItemsCount);
+	Assert(partial == NULL);
 
 	chunk->ops->read_tuple(chunk, NULL, NULL, itemOffset,
-						   NULL, &tuple2, &needsFree);
+						   NULL, &tuple2, &isCopy);
 
-	Assert(!needsFree);
+	Assert(!isCopy);
 
 	*result = cmpFunc(chunk->treeDesc, key, keyType,
 					  &tuple2, chunk->ops->itemKeyType);
@@ -471,12 +466,13 @@ htc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 	OBTreeKeyCmp cmpFunc = chunk->treeDesc->ops->cmp;
 
 	Assert(chunk->chunkItemsCount > 0);
+	Assert(partial == NULL);
 
 	low = 0;
 	high = chunk->chunkItemsCount - 1;
 	nextkey = (keyType != BTreeKeyPageHiKey);
 
-	if (high < low)
+	if (unlikely(high < low))
 		return low;
 
 	targetCmpVal = nextkey ? 0 : 1; /* a target value of cmpFunc() */
@@ -491,14 +487,14 @@ htc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 	while (high > low)
 	{
 		OTuple		midTuple;
-		bool		needsFree;
+		bool		isCopy;
 
 		mid = low + ((high - low) / 2);
 
 		Assert(mid < chunk->chunkItemsCount - 1);
 
 		chunk->ops->read_tuple(chunk, NULL, NULL, mid,
-							   NULL, &midTuple, &needsFree);
+							   NULL, &midTuple, &isCopy);
 
 		result = cmpFunc(chunk->treeDesc, key, keyType, &midTuple,
 						 BTreeKeyNonLeafKey);
@@ -520,18 +516,19 @@ htc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 static bool
 htc_read_tuple(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 			   OffsetNumber itemOffset, Pointer *tupleHeader, OTuple *tuple,
-			   bool *needsFree)
+			   bool *isCopy)
 {
 	BTreeHiKeyChunkDesc *hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
 
 	Assert(itemOffset < chunk->chunkItemsCount);
 	Assert(tupleHeader == NULL);
+	Assert(partial == NULL);
 
 	tuple->data = htc_get_item(hikeyChunk, itemOffset);
 	tuple->formatFlags = htc_get_item_flags(hikeyChunk, itemOffset);
 
 	/* Set always to false in the current implementation */
-	*needsFree = false;
+	*isCopy = false;
 
 	return true;
 }
@@ -619,6 +616,7 @@ const BTreeChunkOps BTreeHiKeyChunkOps = {
 	.estimate_change = htc_estimate_change,
 	.perform_change = htc_perform_change,
 	.compact = NULL,
+	.get_available_size = NULL,
 	.cmp = htc_cmp,
 	.search = htc_search,
 	.read_tuple = htc_read_tuple,

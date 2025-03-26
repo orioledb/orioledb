@@ -427,29 +427,29 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 LocationIndex
 page_get_vacated_space(BTreeDescr *desc, Page p, CommitSeqNo csn)
 {
+	BTreePageHeader *header = (BTreePageHeader *) p;
 	LocationIndex vacated_bytes = 0;
+	BTreePageContext pageContext;
 	BTreePageItemLocator loc;
 
-	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
-	{
-		BTreeLeafTuphdr *header;
-		OTuple		tuple;
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, p);
 
-		BTREE_PAGE_READ_LEAF_ITEM(header, tuple, p, &loc);
-		if (XACT_INFO_FINISHED_FOR_EVERYBODY(header->xactInfo))
-		{
-			if (header->deleted)
-			{
-				if (COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(header->xactInfo) < csn)
-					vacated_bytes += BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-			}
-			else
-			{
-				vacated_bytes += BTREE_PAGE_GET_ITEM_SIZE(p, &loc) -
-					(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength)));
-			}
-		}
+	/*
+	 * XXX: Should we try to optimize this function and re-use existing
+	 * BTreePageContext?
+	 */
+	for (loc.chunkOffset = 0; loc.chunkOffset < header->chunksCount;
+		 loc.chunkOffset++)
+	{
+		loc.itemOffset = 0;
+		btree_page_locator_init(&pageContext, &loc);
+
+		vacated_bytes += btree_get_available_size(
+			pageContext.tupleChunks[loc.chunkOffset], csn);
 	}
+
+	btree_page_context_release(&pageContext);
 
 	return vacated_bytes;
 }
@@ -515,6 +515,10 @@ o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p)
 		if (desc->type == oIndexBridge)
 			return;
 
+		/*
+		 * TODO: Executed under critical section.
+		 * Replace by BTREE_PAGE_LOCATOR_FOREACH() later.
+		 */
 		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 		{
 			BTreeLeafTuphdr *tupHdr;
@@ -534,6 +538,10 @@ o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p)
 	{
 		int			nOnDisk = 0;
 
+		/*
+		 * TODO: Executed under critical section.
+		 * Replace by BTREE_PAGE_LOCATOR_FOREACH() later.
+		 */
 		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 		{
 			BTreeNonLeafTuphdr *tupHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
@@ -778,7 +786,10 @@ btree_page_update_max_key_len(BTreeDescr *desc, Page p)
 	else
 		maxKeyLen = 0;
 
-
+	/*
+	 * TODO: Executed under critical section.
+	 * Replace by BTREE_PAGE_LOCATOR_FOREACH() later.
+	 */
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
 	{
 		LocationIndex keyLen;

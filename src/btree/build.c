@@ -86,6 +86,7 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 
 	/* Distribute the tuples according the the split location */
 	i = 0;
+	/* TODO: Replace by the chunk API */
 	BTREE_PAGE_LOCATOR_FIRST(img, &loc);
 	while (i < left_count)
 	{
@@ -127,6 +128,7 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		BTREE_PAGE_LOCATOR_NEXT(img, &loc);
 	}
 
+	/* TODO: Replace by the chunk API */
 	BTREE_PAGE_LOCATOR_FIRST(new_page, &newLoc);
 	while (BTREE_PAGE_LOCATOR_IS_VALID(img, &loc))
 	{
@@ -154,6 +156,7 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	BTREE_PAGE_SET_ITEM_FLAGS(new_page, &newLoc, tuple.formatFlags);
 
 	/* Setup the new high key on the left page */
+	/* TODO: Replace by the chunk API */
 	BTREE_PAGE_LOCATOR_FIRST(new_page, &newLoc);
 	BTREE_PAGE_READ_TUPLE(rightbound_key, new_page, &newLoc);
 	if (leaf)
@@ -375,6 +378,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 		if (i == 0)
 			((BTreePageHeader *) stack[i].img)->flags = O_BTREE_FLAG_LEAF;
 		init_page_first_chunk(desc, stack[i].img, 0);
+		/* TODO: Replace by the chunk API */
 		BTREE_PAGE_LOCATOR_FIRST(stack[i].img, &stack[i].loc);
 
 		btree_page_context_init(&stack[i].pageContext, desc);

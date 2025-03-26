@@ -105,6 +105,13 @@ typedef struct
 	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
 } OTable;
 
+typedef struct
+{
+	OIndexType	type;
+	ORelOids	oids;
+	OIndexNumber ixNum;
+} OTableIndexOidsKey;
+
 #define OGetTableContext(table) \
 	((table)->tbl_mctx ? \
 	 (table)->tbl_mctx : \
@@ -169,6 +176,8 @@ void		o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
 extern void o_table_free(OTable *table);
 
 extern ORelOids *o_table_make_index_oids(OTable *table, int *num);
+
+extern OTableIndexOidsKey *o_table_make_index_keys(OTable *table, int *num);
 
 /* callback for o_tables_foreach() */
 typedef void (*OTablesCallback) (OTable *descr, void *arg);

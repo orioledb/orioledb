@@ -57,6 +57,8 @@ typedef struct BTreeChunkDesc
 	uint16		chunkDataSize;
 	/* Number of chunk items */
 	uint16		chunkItemsCount;
+	/* Offset of the chunk within the page */
+	OffsetNumber chunkOffset;
 } BTreeChunkDesc;
 
 typedef struct BTreeChunkOps
@@ -105,6 +107,11 @@ typedef struct BTreeChunkOps
 	void		(*compact) (BTreeChunkDesc *chunk);
 
 	/*
+	 * Get available size for compaction.
+	 */
+	uint16		(*get_available_size) (BTreeChunkDesc *chunk, CommitSeqNo csn);
+
+	/*
 	 * Compare given key to the chunk tuple.  Return false if the chunk was
 	 * changed concurrently.
 	 */
@@ -127,7 +134,7 @@ typedef struct BTreeChunkOps
 	bool		(*read_tuple) (BTreeChunkDesc *chunk, PartialPageState *partial,
 							   Page page, OffsetNumber itemOffset,
 							   Pointer *tupleHeader, OTuple *tuple,
-							   bool *needsFree);
+							   bool *isCopy);
 
 	/*
 	 * Chunk builder functions.
@@ -169,8 +176,6 @@ typedef struct BTreeTupleChunkDesc
 {
 	BTreeChunkDesc base;
 
-	/* Offset of the chunk within the page */
-	OffsetNumber chunkOffset;
 	/* Array of offsets of chunk items */
 	BTreeChunkItem *chunkItems;
 } BTreeTupleChunkDesc;
@@ -191,10 +196,11 @@ typedef struct BTreePageContext
 {
 	BTreeDescr *treeDesc;
 	Page		page;
+
 	BTreeChunkDesc *hikeyChunk;
+	BTreeChunkDesc **tupleChunks;
 
 	MemoryContext mctx;
-	bool		isInitialized;
 } BTreePageContext;
 
 /*
@@ -219,7 +225,11 @@ extern void btree_page_context_init(BTreePageContext *pageContext,
 extern void btree_page_context_release(BTreePageContext *pageContext);
 extern void btree_page_context_set(BTreePageContext *pageContext, Page page);
 extern void btree_page_context_invalidate(BTreePageContext *pageContext);
-extern void btree_page_context_hikey_init(BTreePageContext *pageContext);
+extern void btree_page_context_hikey_init(BTreePageContext *pageContext,
+										  const BTreeChunkOps *ops);
+extern void btree_page_context_tuple_init(BTreePageContext *pageContext,
+										  const BTreeChunkOps *ops,
+										  OffsetNumber chunkOffset);
 
 /*
  * Hikey utility functions.
@@ -238,6 +248,32 @@ extern bool btree_fits_hikey(BTreePageContext *pageContext,
 /*
  * Utility functions
  */
+
+extern bool btree_read_tuple(BTreePageContext *pageContext,
+							 PartialPageState *partial,
+							 BTreePageItemLocator *locator,
+							 Pointer *tupleHeader, OTuple *tuple,
+							 bool *isCopy);
 extern uint16 btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple);
+
+extern uint16 btree_get_available_size(BTreeChunkDesc *chunk, CommitSeqNo csn);
+
+/*
+ * Page iterating functions.
+ */
+
+#define BTREE_PAGE_LOCATOR_FOREACH(pageContext, locator) \
+	for (btree_page_locator_first((pageContext), (locator)); \
+		 btree_page_locator_is_valid((pageContext), (locator)); \
+		 btree_page_locator_next((pageContext), (locator)))
+
+extern void btree_page_locator_init(BTreePageContext *pageContext,
+									BTreePageItemLocator *locator);
+extern void btree_page_locator_first(BTreePageContext *pageContext,
+									 BTreePageItemLocator *locator);
+extern bool btree_page_locator_is_valid(BTreePageContext *pageContext,
+										BTreePageItemLocator *locator);
+extern bool btree_page_locator_next(BTreePageContext *pageContext,
+									BTreePageItemLocator *locator);
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */

@@ -53,8 +53,8 @@ typedef struct
 } BTreeCheckStatus;
 
 static int	file_extent_cmp(const void *p1, const void *p2);
-static void check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
-							 OInMemoryBlkno parentPagenum);
+static void check_walk_btree(BTreeDescr *desc, BTreeCheckStatus *status,
+							 OInMemoryBlkno blkno, OInMemoryBlkno parentPagenum);
 static void add_extent(ExtentsArray *arr, FileExtent extent);
 static bool check_extents(ExtentsArray *busy, ExtentsArray *free);
 static void get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
@@ -101,7 +101,8 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 
 	Assert(checkpoint_number > 0);
 
-	check_walk_btree(&status, desc->rootInfo.rootPageBlkno, OInvalidInMemoryBlkno);
+	check_walk_btree(desc, &status, desc->rootInfo.rootPageBlkno,
+					 OInvalidInMemoryBlkno);
 
 	if (status.hasError)
 	{
@@ -541,7 +542,7 @@ add_extent(ExtentsArray *arr, FileExtent extent)
 }
 
 static void
-check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
+check_walk_btree(BTreeDescr *desc, BTreeCheckStatus *status, OInMemoryBlkno blkno,
 				 OInMemoryBlkno parentPagenum)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -567,32 +568,43 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 
 	if (!O_PAGE_IS(p, LEAF))
 	{
+		BTreePageContext pageContext;
 		BTreePageItemLocator loc;
 
-		BTREE_PAGE_LOCATOR_FIRST(p, &loc);
-		while (BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
-		{
-			Pointer		ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) ptr;
+		btree_page_context_init(&pageContext, desc);
+		btree_page_context_set(&pageContext, p);
 
-			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+		btree_page_locator_first(&pageContext, &loc);
+		while (btree_page_locator_is_valid(&pageContext, &loc))
+		{
+			BTreeNonLeafTuphdr *header;
+			OTuple		tuple;
+			bool		isCopy;
+
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &header, &tuple, &isCopy);
+
+			if (DOWNLINK_IS_IN_MEMORY(header->downlink))
 			{
-				check_walk_btree(status, DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink),
+				check_walk_btree(desc, status,
+								 DOWNLINK_GET_IN_MEMORY_BLKNO(header->downlink),
 								 blkno);
 			}
-			else if (DOWNLINK_IS_IN_IO(tuphdr->downlink))
+			else if (DOWNLINK_IS_IN_IO(header->downlink))
 			{
-				wait_for_io_completion(DOWNLINK_GET_IO_LOCKNUM(tuphdr->downlink));
+				wait_for_io_completion(DOWNLINK_GET_IO_LOCKNUM(header->downlink));
 				continue;
 			}
-			else if (DOWNLINK_IS_ON_DISK(tuphdr->downlink))
+			else if (DOWNLINK_IS_ON_DISK(header->downlink))
 			{
 				context->items[context->index].locator = loc;
 				load_page(context);
 				continue;
 			}
-			BTREE_PAGE_LOCATOR_NEXT(p, &loc);
+			btree_page_locator_next(&pageContext, &loc);
 		}
+
+		btree_page_context_release(&pageContext);
 	}
 
 	if (FileExtentIsValid(page_desc->fileExtent))

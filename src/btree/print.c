@@ -89,7 +89,7 @@ static void print_page_contents_recursive(BTreeDescr *desc,
 										  Pointer printArg,
 										  BTreePrintData *printData,
 										  int depthLeft, StringInfo outbuf);
-static void btree_calculate_min_values(UndoLogType undoType,
+static void btree_calculate_min_values(BTreeDescr *desc,
 									   OInMemoryBlkno blkno,
 									   BTreePrintData *printData);
 static bool btree_print_csn(CommitSeqNo csn, StringInfo outbuf,
@@ -167,7 +167,7 @@ o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 		printData.NLRPageNumber = 0;
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			printData.undosList[i] = NIL;
-		btree_calculate_min_values(desc->undoType,
+		btree_calculate_min_values(desc,
 								   desc->rootInfo.rootPageBlkno,
 								   &printData);
 	}
@@ -198,9 +198,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 	BTreePageItemLocator loc;
-	OffsetNumber i,
-				j,
-				k;
+	OffsetNumber i;
 
 	if (depthLeft <= 0)
 		return;
@@ -329,39 +327,45 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	}
 
 	i = 0;
-	j = 0;
-	for (j = 0; j < header->chunksCount; j++)
+	for (loc.chunkOffset = 0; loc.chunkOffset < header->chunksCount; loc.chunkOffset++)
 	{
-		appendStringInfo(outbuf, "  Chunk %i: offset = %u, location = %u, hikey location = %u",
-						 j,
-						 header->chunkDesc[j].offset,
-						 SHORT_GET_LOCATION(header->chunkDesc[j].shortLocation),
-						 SHORT_GET_LOCATION(header->chunkDesc[j].hikeyShortLocation));
+		loc.itemOffset = 0;
+		btree_page_locator_init(&pageContext, &loc);
 
-		if (!O_PAGE_IS(p, RIGHTMOST) || j < header->chunksCount - 1)
+		appendStringInfo(outbuf, "  Chunk %i: offset = %u, location = %u, hikey location = %u",
+						 loc.chunkOffset,
+						 header->chunkDesc[loc.chunkOffset].offset,
+						 SHORT_GET_LOCATION(header->chunkDesc[loc.chunkOffset].shortLocation),
+						 SHORT_GET_LOCATION(header->chunkDesc[loc.chunkOffset].hikeyShortLocation));
+
+		if (!O_PAGE_IS(p, RIGHTMOST) || loc.chunkOffset < header->chunksCount - 1)
 		{
 			OTuple		hikey;
 
-			hikey = btree_read_hikey(&pageContext, j);
+			hikey = btree_read_hikey(&pageContext, loc.chunkOffset);
 
 			appendStringInfo(outbuf, ", hikey = ");
 			keyPrintFunc(desc, outbuf, hikey, printArg);
 		}
 
 		appendStringInfo(outbuf, "\n");
-		page_chunk_fill_locator(p, j, &loc);
-		for (k = 0; k < loc.chunkItemsCount; k++)
+
+		for (loc.itemOffset = 0;
+			 loc.itemOffset < pageContext.tupleChunks[loc.chunkOffset]->chunkItemsCount;
+			 loc.itemOffset++)
 		{
-			loc.itemOffset = k;
 			if (O_PAGE_IS(p, LEAF))
 			{
 				BTreeLeafTuphdr tuphdr,
-						   *pageTuphdr;
+						   *tuphdrPtr;
 				OTuple		tuple;
+				bool		isCopy;
 				bool		inUndo = false;
 
-				BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, p, &loc);
-				tuphdr = *pageTuphdr;
+				btree_read_tuple(&pageContext, NULL, &loc,
+								 (Pointer *) &tuphdrPtr, &tuple, &isCopy);
+				tuphdr = *tuphdrPtr;
+
 				appendStringInfo(outbuf, "    Item %i: ", i);
 
 				while (true)
@@ -474,8 +478,10 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 			{
 				BTreeNonLeafTuphdr *tuphdr;
 				OTuple		tuple;
+				bool		isCopy;
 
-				BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, tuple, p, &loc);
+				btree_read_tuple(&pageContext, NULL, &loc,
+								 (Pointer *) &tuphdr, &tuple, &isCopy);
 
 				appendStringInfo(outbuf, "    Item %i: ", i);
 				if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
@@ -503,15 +509,20 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (!O_PAGE_IS(p, LEAF))
 	{
-		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+		BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
 		{
-			Pointer		ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) ptr;
+			BTreeNonLeafTuphdr *header;
+			OTuple		tuple;
+			bool		isCopy;
 
-			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &header, &tuple, &isCopy);
+
+			if (DOWNLINK_IS_IN_MEMORY(header->downlink))
 				print_page_contents_recursive(desc,
-											  DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink),
-											  keyPrintFunc, tuplePrintFunc, printArg, printData,
+											  DOWNLINK_GET_IN_MEMORY_BLKNO(header->downlink),
+											  keyPrintFunc, tuplePrintFunc,
+											  printArg, printData,
 											  depthLeft - 1, outbuf);
 		}
 	}
@@ -529,17 +540,20 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
  * relative CSNs and Undo locations.
  */
 static void
-btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
+btree_calculate_min_values(BTreeDescr *desc, OInMemoryBlkno blkno,
 						   BTreePrintData *printData)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageContext pageContext;
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	PageHashEntry *pageHashEntry;
 	BackendIdHashEntry *backendIdHashEntry;
 	BTreePageItemLocator loc;
 	bool		found;
-	UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(undoType);
+	UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, p);
 
 	/* if page number is not in hash, then add new value to hash */
 	pageHashEntry = (PageHashEntry *) hash_search(printData->pageHash,
@@ -557,19 +571,24 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 																header->undoLocation);
 
 	/* Iterate over the child nodes */
-	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
 	{
-		Pointer		ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-
 		if (O_PAGE_IS(p, LEAF))
 		{
-			BTreeLeafTuphdr tuphdr = *((BTreeLeafTuphdr *) ptr);
+			BTreeLeafTuphdr tuphdr,
+					   *tuphdrPtr;
+			OTuple		tuple;
+			bool		isCopy;
+
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &tuphdrPtr, &tuple, &isCopy);
+			tuphdr = *tuphdrPtr;
 
 			while (true)
 			{
-				printData->undosList[(int) undoType] = ladd_unique_undo(printData->undosList[(int) undoType],
-																		undoType,
-																		tuphdr.undoLocation);
+				printData->undosList[(int) desc->undoType] = ladd_unique_undo(printData->undosList[(int) desc->undoType],
+																			  desc->undoType,
+																			  tuphdr.undoLocation);
 
 				if (XACT_INFO_IS_FINISHED(tuphdr.xactInfo))
 				{
@@ -598,20 +617,25 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 				}
 				if ((!XACT_INFO_IS_FINISHED(tuphdr.xactInfo) || tuphdr.chainHasLocks) &&
 					UndoLocationIsValid(tuphdr.undoLocation))
-					get_prev_leaf_header_from_undo(undoType, &tuphdr, false);
+					get_prev_leaf_header_from_undo(desc->undoType, &tuphdr, false);
 				else
 					break;
 			}
 		}
 		else
 		{
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) ptr;
+			BTreeNonLeafTuphdr *tuphdr;
+			OTuple		tuple;
+			bool		isCopy;
+
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &tuphdr, &tuple, &isCopy);
 
 			/* If tuple is downlink in memory */
 			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
 			{
 				/* recursively traverse to every child */
-				btree_calculate_min_values(undoType,
+				btree_calculate_min_values(desc,
 										   DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink),
 										   printData);
 			}
@@ -621,7 +645,9 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 	/* If node has valid rightlink also traverse to it */
 	blkno = RIGHTLINK_GET_BLKNO(BTREE_PAGE_GET_RIGHTLINK(p));
 	if (OInMemoryBlknoIsValid(blkno))
-		btree_calculate_min_values(undoType, blkno, printData);
+		btree_calculate_min_values(desc, blkno, printData);
+
+	btree_page_context_release(&pageContext);
 }
 
 /*

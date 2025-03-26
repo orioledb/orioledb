@@ -417,14 +417,15 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 						 bool print_bytes, int depthLeft, StringInfo outbuf)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageHeader *header = (BTreePageHeader *) p;
+	BTreePageContext pageContext;
 	BTreePageItemLocator loc;
-	OffsetNumber i,
-				j,
-				k;
+	BTreePageHeader *header = (BTreePageHeader *) p;
 	OffsetNumber offset,
 				bit_offset;
 	int			level = 0;
+
+	btree_page_context_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, p);
 
 	appendStringInfo(outbuf, "Page %u: ", *NLRPageNumber);
 	offset = 0;
@@ -454,12 +455,12 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	APPEND_FIELD("csn", CommitSeqNo);
 	APPEND_FIELD("rightLink", uint64);
 	APPEND_FIELD("checkpointNum", uint32);
-	APPEND_FIELD("maxKeyLen", LocationIndex);
+	APPEND_FIELD("maxKeyLen", BTreeChunkItem);
 	APPEND_FIELD("prevInsertOffset", OffsetNumber);
 	APPEND_FIELD("chunksCount", OffsetNumber);
 	APPEND_FIELD("itemsCount", OffsetNumber);
 	APPEND_FIELD("hikeysEnd", OffsetNumber);
-	APPEND_FIELD("dataSize", LocationIndex);
+	APPEND_FIELD("dataSize", BTreeChunkItem);
 	appendStringInfoSpaces(outbuf, level * 4);
 	appendStringInfo(outbuf, "dataSize VALUE: %u\n", header->dataSize);
 
@@ -467,10 +468,10 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	appendStringInfo(outbuf, "chunkDesc: ARRAY:\n");
 	level++;					/* chunkDesc BEGIN */
 
-	for (i = 0; i < header->chunksCount; i++)
+	for (OffsetNumber chunkOffset = 0; chunkOffset < header->chunksCount; chunkOffset++)
 	{
 		appendStringInfoSpaces(outbuf, level * 4);
-		appendStringInfo(outbuf, "[%d]: BTreePageChunkDesc(%lu)\n", i,
+		appendStringInfo(outbuf, "[%d]: BTreePageChunkDesc(%lu)\n", chunkOffset,
 						 sizeof(BTreePageChunkDesc));
 		level++;				/* chunkDesc[i] BEGIN */
 
@@ -502,50 +503,38 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	appendStringInfo(outbuf, "CHUNKS: ARRAY:\n");
 	level++;					/* CHUNKS BEGIN */
-	for (i = 0; i < header->chunksCount; i++)
+	for (loc.chunkOffset = 0; loc.chunkOffset < header->chunksCount; loc.chunkOffset++)
 	{
-		OffsetNumber chunkItemsCount;
-		LocationIndex chunkSize;
-		BTreePageChunk *chunk;
+		BTreeChunkDesc *tupleChunk;
 		int			align;
 
-		if (i + 1 < header->chunksCount)
-		{
-			chunkItemsCount =
-				header->chunkDesc[i + 1].offset - header->chunkDesc[i].offset;
-			chunkSize =
-				SHORT_GET_LOCATION(header->chunkDesc[i + 1].shortLocation) -
-				SHORT_GET_LOCATION(header->chunkDesc[i].shortLocation);
-		}
-		else
-		{
-			chunkItemsCount = header->itemsCount - header->chunkDesc[i].offset;
-			chunkSize = header->dataSize -
-				SHORT_GET_LOCATION(header->chunkDesc[i].shortLocation);
-		}
-		chunk = (BTreePageChunk *) &p[offset];
+		loc.itemOffset = 0;
+		btree_page_locator_init(&pageContext, &loc);
+		tupleChunk = pageContext.tupleChunks[loc.chunkOffset];
 
 		appendStringInfoSpaces(outbuf, level * 4);
-		appendStringInfo(outbuf, "[%d]: %d\n", i, chunkSize);
+		appendStringInfo(outbuf, "[%d]: %d\n",
+						 loc.chunkOffset, tupleChunk->chunkDataSize);
 		level++;				/* CHUNKS[i] BEGIN */
 
 		appendStringInfoSpaces(outbuf, level * 4);
 		appendStringInfo(outbuf, "ITEMS: ARRAY:\n");
 		level++;				/* ITEMS BEGIN */
-		for (j = 0; j < chunkItemsCount; j++)
+		for (OffsetNumber itemOffset = 0;
+			 itemOffset < tupleChunk->chunkItemsCount; itemOffset++)
 		{
 			appendStringInfoSpaces(outbuf, level * 4);
-			appendStringInfo(outbuf, "[%d]: LocationIndex(%zu)\n", j,
-							 sizeof(LocationIndex));
+			appendStringInfo(outbuf, "[%d]: BTreeChunkItem(%zu)\n", itemOffset,
+							 sizeof(BTreeChunkItem));
 			level++;			/* ITEMS[j] BEGIN */
-			append_bytes(outbuf, p, &offset, sizeof(LocationIndex), level,
+			append_bytes(outbuf, p, &offset, sizeof(BTreeChunkItem), level,
 						 print_bytes);
 			level--;			/* ITEMS[j] END */
 		}
 		level--;				/* ITEMS END */
 
-		align = MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) -
-			sizeof(LocationIndex) * chunkItemsCount;
+		align = MAXALIGN(sizeof(BTreeChunkItem) * tupleChunk->chunkItemsCount) -
+			sizeof(BTreeChunkItem) * tupleChunk->chunkItemsCount;
 		if (align > 0)
 		{
 			appendStringInfoSpaces(outbuf, level * 4);
@@ -557,18 +546,22 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 		appendStringInfo(outbuf, "ITEM DATA: ARRAY\n");
 		level++;				/* ITEM DATA BEGIN */
 
-		for (j = 0; j < chunkItemsCount; j++)
+		for (loc.itemOffset = 0;
+			 loc.itemOffset < tupleChunk->chunkItemsCount;
+			 loc.itemOffset++)
 		{
 			if (O_PAGE_IS(p, LEAF))
 			{
+				Pointer		header;
 				OTuple		tup;
+				bool		isCopy;
 				OTupleReaderState reader;
 				TuplePrintOpaque *opaque = (TuplePrintOpaque *) printArg;
 				TupleDesc	tupdesc = opaque->keyDesc;
 
 				appendStringInfoSpaces(outbuf, level * 4);
-				appendStringInfo(outbuf, "[%d]: BTreeLeafTuphdr(%zu)\n", j,
-								 sizeof(BTreeLeafTuphdr));
+				appendStringInfo(outbuf, "[%d]: BTreeLeafTuphdr(%zu)\n",
+								 loc.itemOffset, sizeof(BTreeLeafTuphdr));
 				level++;		/* ITEM DATA[j] BEGIN */
 
 				bit_offset = 0;
@@ -582,8 +575,8 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				APPEND_BIT_FIELD("formatFlags", 2);
 				Assert(bit_offset == sizeof(UndoLocation) * BITS_PER_BYTE);
 
-				tup.data = &p[offset];
-				tup.formatFlags = ITEM_GET_FLAGS(chunk->items[j]);
+				btree_read_tuple(&pageContext, NULL, &loc,
+								 &header, &tup, &isCopy);
 				o_tuple_init_reader(&reader, tup, tupdesc, opaque->keySpec);
 
 				if (!(tup.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
@@ -618,10 +611,10 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 					appendStringInfoSpaces(outbuf, level * 4);
 					appendStringInfo(outbuf, "Tuple data: %d\n", len);
 					level++;	/* Tuple data BEGIN */
-					for (k = 0; k < opaque->keyDesc->natts; k++)
+					for (int att = 0; att < opaque->keyDesc->natts; att++)
 					{
 						Form_pg_attribute atti =
-							TupleDescAttr(opaque->keyDesc, k);
+							TupleDescAttr(opaque->keyDesc, att);
 
 						appendStringInfoSpaces(outbuf, level * 4);
 						appendStringInfo(outbuf, "%s: %u - %u: %c\n",
@@ -670,16 +663,20 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	if (!O_PAGE_IS(p, LEAF))
 	{
-		BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+		BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
 		{
-			Pointer		ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-			BTreeNonLeafTuphdr *tuphdr = (BTreeNonLeafTuphdr *) ptr;
+			BTreeNonLeafTuphdr *header;
+			OTuple		tuple;
+			bool		isCopy;
 
-			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
+			btree_read_tuple(&pageContext, NULL, &loc,
+							 (Pointer *) &header, &tuple, &isCopy);
+
+			if (DOWNLINK_IS_IN_MEMORY(header->downlink))
 			{
 				OInMemoryBlkno downlink;
 
-				downlink = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+				downlink = DOWNLINK_GET_IN_MEMORY_BLKNO(header->downlink);
 				(*NLRPageNumber)++;
 				print_page_bin_structure(desc, downlink, NLRPageNumber,
 										 printArg, print_bytes, depthLeft - 1,
@@ -695,6 +692,8 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 		print_page_bin_structure(desc, blkno, NLRPageNumber, printArg,
 								 print_bytes, depthLeft, outbuf);
 	}
+
+	btree_page_context_release(&pageContext);
 }
 
 
@@ -962,13 +961,17 @@ table_pages_walk_page(BTreeDescr *desc, BlockNumber blkno,
 		return;
 	}
 
-	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	BTREE_PAGE_LOCATOR_FOREACH(&pageContext, &loc)
 	{
-		BTreeNonLeafTuphdr *hdr;
+		BTreeNonLeafTuphdr *header;
+		OTuple		tuple;
+		bool		isCopy;
 
-		hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-		if (DOWNLINK_IS_IN_MEMORY(hdr->downlink))
-			table_pages_walk_page(desc, DOWNLINK_GET_IN_MEMORY_BLKNO(hdr->downlink),
+		btree_read_tuple(&pageContext, NULL, &loc,
+						 (Pointer *) &header, &tuple, &isCopy);
+
+		if (DOWNLINK_IS_IN_MEMORY(header->downlink))
+			table_pages_walk_page(desc, DOWNLINK_GET_IN_MEMORY_BLKNO(header->downlink),
 								  tupdesc, tupstore);
 	}
 

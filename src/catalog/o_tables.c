@@ -15,6 +15,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/io.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/o_indices.h"
@@ -86,13 +87,6 @@ typedef struct
 	Oid			type_oid;
 	Form_pg_type type_data;
 } OTablesDropAllWithTypeArg;
-
-typedef struct
-{
-	OIndexType	type;
-	ORelOids	oids;
-	OIndexNumber ixNum;
-} OTableIndexOidsKey;
 
 static void o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name, OTableField *field);
 static void o_tables_foreach_callback(ORelOids oids, void *arg);
@@ -810,7 +804,7 @@ index_keys_cmp(const void *p1, const void *p2)
 	return 0;
 }
 
-static OTableIndexOidsKey *
+OTableIndexOidsKey *
 o_table_make_index_keys(OTable *table, int *num)
 {
 	OTableIndexOidsKey *keys;
@@ -997,6 +991,11 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			j++;
 		}
 	}
+
+	if (old_keys)
+		pfree(old_keys);
+	if (new_keys)
+		pfree(new_keys);
 }
 
 OTable *
@@ -1482,10 +1481,10 @@ o_tables_drop_all_callback(ORelOids oids, void *arg)
 
 		if (table)
 		{
-			ORelOids   *treeOids;
+			OTableIndexOidsKey *treeOids;
 			int			numTreeOids;
 
-			treeOids = o_table_make_index_oids(table, &numTreeOids);
+			treeOids = o_table_make_index_keys(table, &numTreeOids);
 			add_undo_drop_relnode(oids, treeOids, numTreeOids);
 			pfree(treeOids);
 			o_table_free(table);
@@ -1524,16 +1523,14 @@ o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
 													   false);
 			if (result)
 			{
-				ORelOids   *treeOids;
+				OTableIndexOidsKey *treeOids;
 				int			numTreeOids;
 				int			i;
 
-				treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+				treeOids = o_table_make_index_keys(o_table, &numTreeOids);
 				for (i = 0; i < numTreeOids; i++)
-				{
-					cleanup_btree(treeOids[i].datoid, treeOids[i].relnode,
-								  true);
-				}
+					cleanup_btree(&treeOids[i], true);
+
 				pfree(treeOids);
 			}
 		}
