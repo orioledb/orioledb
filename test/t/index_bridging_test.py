@@ -36,9 +36,9 @@ class IndexBridgingTest(BaseTest):
 			CREATE TABLE o_test (
 				i int NOT NULL,
 				j int
-			) USING orioledb WITH (index_bridging);
+			) USING orioledb;
 
-			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (orioledb_index=off);
 			CREATE INDEX o_test_ix2 on o_test using btree (j);
 		""")
 
@@ -114,9 +114,9 @@ class IndexBridgingTest(BaseTest):
 				i int NOT NULL,
 				j int,
 				k int
-			) USING orioledb WITH (index_bridging);
+			) USING orioledb;
 
-			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (orioledb_index=off);
 			CREATE INDEX o_test_ix2 on o_test using btree (k);
 		""")
 
@@ -207,9 +207,9 @@ class IndexBridgingTest(BaseTest):
 				i int NOT NULL,
 				j int,
 				k int
-			) USING orioledb WITH (index_bridging);
+			) USING orioledb;
 
-			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (index_bridging);
+			CREATE INDEX o_test_ix1 on o_test using btree (j) WITH (orioledb_index=off);
 			CREATE INDEX o_test_ix2 on o_test using btree (k);
 		""")
 

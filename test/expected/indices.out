@@ -6727,76 +6727,76 @@ SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass, 'nue');
  Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                             +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                             +
      Leftmost, Rightmost                                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,1)')                   +
-     Item 0: offset = 264, tuple = ('(0,0)', '1', 'XXX1', '10', '100', 'b')                      +
-   Chunk 1: offset = 1, location = 320, hikey location = 88, hikey = ('(0,2)')                   +
-     Item 1: offset = 328, tuple = ('(0,1)', '2', 'XXX2', '20', '200', 'c')                      +
-   Chunk 2: offset = 2, location = 384, hikey location = 96, hikey = ('(0,3)')                   +
-     Item 2: offset = 392, tuple = ('(0,2)', '3', 'XXX3', '30', '300', 'd')                      +
-   Chunk 3: offset = 3, location = 448, hikey location = 104, hikey = ('(0,4)')                  +
-     Item 3: offset = 456, tuple = ('(0,3)', '4', 'XXX4', '40', '400', 'e')                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,2)')                   +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', 'XXX1', '10', '100', 'b')                      +
+   Chunk 1: offset = 1, location = 320, hikey location = 88, hikey = ('(0,3)')                   +
+     Item 1: offset = 328, tuple = ('(0,2)', '2', 'XXX2', '20', '200', 'c')                      +
+   Chunk 2: offset = 2, location = 384, hikey location = 96, hikey = ('(0,4)')                   +
+     Item 2: offset = 392, tuple = ('(0,3)', '3', 'XXX3', '30', '300', 'd')                      +
+   Chunk 3: offset = 3, location = 448, hikey location = 104, hikey = ('(0,5)')                  +
+     Item 3: offset = 456, tuple = ('(0,4)', '4', 'XXX4', '40', '400', 'e')                      +
    Chunk 4: offset = 4, location = 512, hikey location = 112                                     +
-     Item 4: offset = 520, tuple = ('(0,4)', '5', 'XXX5', '50', '500', 'f')                      +
+     Item 4: offset = 520, tuple = ('(0,5)', '5', 'XXX5', '50', '500', 'f')                      +
                                                                                                  +
  Index o_test_reuse_multiple_indices_ix1 contents                                                +
  Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                                            +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
      Leftmost, Rightmost                                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('XXX2', '(0,1)')           +
-     Item 0: offset = 264, tuple = ('XXX1', '(0,0)')                                             +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('XXX3', '(0,2)')          +
-     Item 1: offset = 312, tuple = ('XXX2', '(0,1)')                                             +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('XXX4', '(0,3)')          +
-     Item 2: offset = 360, tuple = ('XXX3', '(0,2)')                                             +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('XXX5', '(0,4)')          +
-     Item 3: offset = 408, tuple = ('XXX4', '(0,3)')                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('XXX2', '(0,2)')           +
+     Item 0: offset = 264, tuple = ('XXX1', '(0,1)')                                             +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('XXX3', '(0,3)')          +
+     Item 1: offset = 312, tuple = ('XXX2', '(0,2)')                                             +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('XXX4', '(0,4)')          +
+     Item 2: offset = 360, tuple = ('XXX3', '(0,3)')                                             +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('XXX5', '(0,5)')          +
+     Item 3: offset = 408, tuple = ('XXX4', '(0,4)')                                             +
    Chunk 4: offset = 4, location = 448, hikey location = 176                                     +
-     Item 4: offset = 456, tuple = ('XXX5', '(0,4)')                                             +
+     Item 4: offset = 456, tuple = ('XXX5', '(0,5)')                                             +
                                                                                                  +
  Index o_test_reuse_multiple_indices_ix2 contents                                                +
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                            +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
      Leftmost, Rightmost                                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('40', 'XXX4', '(0,3)')     +
-     Item 0: offset = 264, tuple = ('50', 'XXX5', '(0,4)')                                       +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30', 'XXX3', '(0,2)')    +
-     Item 1: offset = 312, tuple = ('40', 'XXX4', '(0,3)')                                       +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('20', 'XXX2', '(0,1)')    +
-     Item 2: offset = 360, tuple = ('30', 'XXX3', '(0,2)')                                       +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('10', 'XXX1', '(0,0)')    +
-     Item 3: offset = 408, tuple = ('20', 'XXX2', '(0,1)')                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('40', 'XXX4', '(0,4)')     +
+     Item 0: offset = 264, tuple = ('50', 'XXX5', '(0,5)')                                       +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('30', 'XXX3', '(0,3)')    +
+     Item 1: offset = 312, tuple = ('40', 'XXX4', '(0,4)')                                       +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('20', 'XXX2', '(0,2)')    +
+     Item 2: offset = 360, tuple = ('30', 'XXX3', '(0,3)')                                       +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('10', 'XXX1', '(0,1)')    +
+     Item 3: offset = 408, tuple = ('20', 'XXX2', '(0,2)')                                       +
    Chunk 4: offset = 4, location = 448, hikey location = 176                                     +
-     Item 4: offset = 456, tuple = ('10', 'XXX1', '(0,0)')                                       +
+     Item 4: offset = 456, tuple = ('10', 'XXX1', '(0,1)')                                       +
                                                                                                  +
  Index o_test_reuse_multiple_indices_ix3 contents                                                +
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                            +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
      Leftmost, Rightmost                                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('200', 'XXX2', '(0,1)')    +
-     Item 0: offset = 264, tuple = ('100', 'XXX1', '(0,0)')                                      +
-   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('300', 'XXX3', '(0,2)')   +
-     Item 1: offset = 312, tuple = ('200', 'XXX2', '(0,1)')                                      +
-   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('400', 'XXX4', '(0,3)')   +
-     Item 2: offset = 360, tuple = ('300', 'XXX3', '(0,2)')                                      +
-   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('500', 'XXX5', '(0,4)')   +
-     Item 3: offset = 408, tuple = ('400', 'XXX4', '(0,3)')                                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('200', 'XXX2', '(0,2)')    +
+     Item 0: offset = 264, tuple = ('100', 'XXX1', '(0,1)')                                      +
+   Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('300', 'XXX3', '(0,3)')   +
+     Item 1: offset = 312, tuple = ('200', 'XXX2', '(0,2)')                                      +
+   Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('400', 'XXX4', '(0,4)')   +
+     Item 2: offset = 360, tuple = ('300', 'XXX3', '(0,3)')                                      +
+   Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('500', 'XXX5', '(0,5)')   +
+     Item 3: offset = 408, tuple = ('400', 'XXX4', '(0,4)')                                      +
    Chunk 4: offset = 4, location = 448, hikey location = 176                                     +
-     Item 4: offset = 456, tuple = ('500', 'XXX5', '(0,4)')                                      +
+     Item 4: offset = 456, tuple = ('500', 'XXX5', '(0,5)')                                      +
                                                                                                  +
  Index o_test_reuse_multiple_indices_ix4 contents                                                +
  Page 0: level = 0, maxKeyLen = 28, nVacatedBytes = 0                                            +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                             +
      Leftmost, Rightmost                                                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('c', '2', 'XXX2', '(0,1)') +
-     Item 0: offset = 264, tuple = ('b', '1', 'XXX1', '(0,0)')                                   +
-   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('d', '3', 'XXX3', '(0,2)')+
-     Item 1: offset = 320, tuple = ('c', '2', 'XXX2', '(0,1)')                                   +
-   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e', '4', 'XXX4', '(0,3)')+
-     Item 2: offset = 376, tuple = ('d', '3', 'XXX3', '(0,2)')                                   +
-   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('f', '5', 'XXX5', '(0,4)')+
-     Item 3: offset = 432, tuple = ('e', '4', 'XXX4', '(0,3)')                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('c', '2', 'XXX2', '(0,2)') +
+     Item 0: offset = 264, tuple = ('b', '1', 'XXX1', '(0,1)')                                   +
+   Chunk 1: offset = 1, location = 312, hikey location = 112, hikey = ('d', '3', 'XXX3', '(0,3)')+
+     Item 1: offset = 320, tuple = ('c', '2', 'XXX2', '(0,2)')                                   +
+   Chunk 2: offset = 2, location = 368, hikey location = 144, hikey = ('e', '4', 'XXX4', '(0,4)')+
+     Item 2: offset = 376, tuple = ('d', '3', 'XXX3', '(0,3)')                                   +
+   Chunk 3: offset = 3, location = 424, hikey location = 176, hikey = ('f', '5', 'XXX5', '(0,5)')+
+     Item 3: offset = 432, tuple = ('e', '4', 'XXX4', '(0,4)')                                   +
    Chunk 4: offset = 4, location = 480, hikey location = 208                                     +
-     Item 4: offset = 488, tuple = ('f', '5', 'XXX5', '(0,4)')                                   +
+     Item 4: offset = 488, tuple = ('f', '5', 'XXX5', '(0,5)')                                   +
                                                                                                  +
  Index toast: not loaded                                                                         +
  

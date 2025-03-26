@@ -11,7 +11,7 @@ CREATE TABLE o_test_ix_ams (
 	p point,
 	pk1 int,
 	pk2 int
-) USING orioledb WITH (index_bridging);
+) USING orioledb;
 SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
@@ -34,48 +34,35 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  p      | point     |           |          |         | plain    |              | 
  pk1    | integer   |           |          |         | plain    |              | 
  pk2    | integer   |           |          |         | plain    |              | 
-Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
-                        orioledb_tbl_indices                         
----------------------------------------------------------------------
- Index ctid_primary                                                 +
-     Index type: primary, unique, ctid                              +
-     Leaf tuple size: 7, non-leaf tuple size: 1                     +
-     Non-leaf tuple fields: ctid                                    +
-     Leaf tuple fields: ctid, index_bridging_ctid, i, j, p, pk1, pk2+
- Index index_bridge                                                 +
-     Index type: secondary                                          +
-     Leaf tuple size: 2, non-leaf tuple size: 1                     +
-     Non-leaf tuple fields: index_bridging_ctid                     +
-     Leaf tuple fields: index_bridging_ctid, ctid                   +
- Index toast                                                        +
-     Index type: secondary                                          +
-     Leaf tuple size: 4, non-leaf tuple size: 3                     +
-     Non-leaf tuple fields: ctid, attnum, chunknum                  +
-     Leaf tuple fields: ctid, attnum, chunknum, data                +
+                orioledb_tbl_indices                 
+-----------------------------------------------------
+ Index ctid_primary                                 +
+     Index type: primary, unique, ctid              +
+     Leaf tuple size: 6, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: ctid                    +
+     Leaf tuple fields: ctid, i, j, p, pk1, pk2     +
+ Index toast                                        +
+     Index type: secondary                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3     +
+     Non-leaf tuple fields: ctid, attnum, chunknum  +
+     Leaf tuple fields: ctid, attnum, chunknum, data+
  
 (1 row)
 
 INSERT INTO o_test_ix_ams VALUES (1, ARRAY[2,3], point(4, 5), 6, 7);
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-                                orioledb_tbl_structure                                 
----------------------------------------------------------------------------------------
- Index ctid_primary contents                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
-     Leftmost, Rightmost                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
-                                                                                      +
- Index index_bridge contents                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                   +
-     Leftmost, Rightmost                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                 +
-                                                                                      +
- Index toast: not loaded                                                              +
+                            orioledb_tbl_structure                            
+------------------------------------------------------------------------------
+ Index ctid_primary contents                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
+                                                                             +
+ Index toast: not loaded                                                     +
  
 (1 row)
 
@@ -93,29 +80,23 @@ SELECT * FROM o_test_ix_ams;
 (1 row)
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-                                orioledb_tbl_structure                                 
----------------------------------------------------------------------------------------
- Index ctid_primary contents                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
-     Leftmost, Rightmost                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
-                                                                                      +
- Index index_bridge contents                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                   +
-     Leftmost, Rightmost                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                 +
-                                                                                      +
- Index toast: not loaded                                                              +
+                            orioledb_tbl_structure                            
+------------------------------------------------------------------------------
+ Index ctid_primary contents                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
+                                                                             +
+ Index toast: not loaded                                                     +
  
 (1 row)
 
-CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (index_bridging, deduplicate_items = off);
+CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
+WARNING:  Enabling bridging for orioledb table 'o_test_ix_ams'
 SELECT ctid, htid, tids FROM
 		 generate_series(1,
 						 (SELECT relpages - 1 FROM pg_class
@@ -136,7 +117,7 @@ HINT:  No function matches the given name and argument types. You might need to 
  pk1    | integer   |           |          |         | plain    |              | 
  pk2    | integer   |           |          |         | plain    |              | 
 Indexes:
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+    "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -190,15 +171,15 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
                                 orioledb_tbl_structure                                 
 ---------------------------------------------------------------------------------------
  Index ctid_primary contents                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                  +
      Leftmost, Rightmost                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 64                           +
      Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')+
                                                                                       +
  Index index_bridge contents                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                  +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                   +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = bridge, clean                   +
      Leftmost, Rightmost                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 64                           +
      Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                 +
@@ -561,12 +542,12 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
      Leftmost, Rightmost                                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,1)')                      +
-     Item 0: offset = 264, tuple = ('(0,0)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
-   Chunk 1: offset = 1, location = 360, hikey location = 80, hikey = ('(0,2)')                      +
-     Item 1: offset = 368, tuple = ('(0,1)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,2)')                      +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
+   Chunk 1: offset = 1, location = 360, hikey location = 80, hikey = ('(0,3)')                      +
+     Item 1: offset = 368, tuple = ('(0,2)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
    Chunk 2: offset = 2, location = 464, hikey location = 88                                         +
-     Item 2: offset = 472, tuple = ('(0,2)', '(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
+     Item 2: offset = 472, tuple = ('(0,3)', '(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
                                                                                                     +
  Index index_bridge: not loaded                                                                     +
  Index toast: not loaded                                                                            +
@@ -608,23 +589,23 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
      Leftmost, Rightmost                                                                            +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,1)')                      +
-     Item 0: offset = 264, tuple = ('(0,0)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
-   Chunk 1: offset = 1, location = 360, hikey location = 80, hikey = ('(0,2)')                      +
-     Item 1: offset = 368, tuple = ('(0,1)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,2)')                      +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '{2,3}', '(4,5)', '6', '7')              +
+   Chunk 1: offset = 1, location = 360, hikey location = 80, hikey = ('(0,3)')                      +
+     Item 1: offset = 368, tuple = ('(0,2)', '(0,2)', '10', '{20,30}', '(40,50)', '60', '70')       +
    Chunk 2: offset = 2, location = 464, hikey location = 88                                         +
-     Item 2: offset = 472, tuple = ('(0,2)', '(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
+     Item 2: offset = 472, tuple = ('(0,3)', '(0,3)', '100', '{200,300}', '(400,500)', '600', '700')+
                                                                                                     +
  Index index_bridge contents                                                                        +
  Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                                +
  state = free, datoid equal, relnode equal, ix_type = bridge, clean                                 +
      Leftmost, Rightmost                                                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,2)')                      +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,0)')                                               +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                               +
    Chunk 1: offset = 1, location = 296, hikey location = 80, hikey = ('(0,3)')                      +
-     Item 1: offset = 304, tuple = ('(0,2)', '(0,1)')                                               +
+     Item 1: offset = 304, tuple = ('(0,2)', '(0,2)')                                               +
    Chunk 2: offset = 2, location = 336, hikey location = 88                                         +
-     Item 2: offset = 344, tuple = ('(0,3)', '(0,2)')                                               +
+     Item 2: offset = 344, tuple = ('(0,3)', '(0,3)')                                               +
                                                                                                     +
  Index toast: not loaded                                                                            +
  
@@ -853,7 +834,7 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  pk2    | integer |           | not null |         | plain   |              | 
  k      | integer |           |          |         | plain   |              | 
 Indexes:
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+    "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
 Options: index_bridging=true
 
 -- Don't update bridge_index when updated column not indexed by any bridged index
@@ -997,7 +978,7 @@ SELECT * FROM o_test_ix_ams ORDER BY j;
 (3 rows)
 
 COMMIT;
-CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (index_bridging, deduplicate_items = off);
+CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (orioledb_index = off, deduplicate_items = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1152,8 +1133,8 @@ CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
  pk2    | integer |           | not null |         | plain   |              | 
  k      | integer |           |          |         | plain   |              | 
 Indexes:
-    "o_test_ix_ams_hash_ix" hash (k) WITH (index_bridging='true')
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1342,8 +1323,8 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  k      | integer   |           |          |         | plain    |              | 
  r      | integer[] |           |          |         | extended |              | 
 Indexes:
-    "o_test_ix_ams_hash_ix" hash (k) WITH (index_bridging='true')
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT *, r IS NULL FROM o_test_ix_ams;
@@ -1413,8 +1394,8 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
  k      | integer   |           |          |         | plain    |              | 
  r      | integer[] |           |          |         | extended |              | 
 Indexes:
-    "o_test_ix_ams_hash_ix" hash (k) WITH (index_bridging='true')
-    "o_test_ix_ams_ix1" btree (j) WITH (index_bridging='true', deduplicate_items=off)
+    "o_test_ix_ams_hash_ix" hash (k)
+    "o_test_ix_ams_ix1" btree (j) WITH (orioledb_index=off, deduplicate_items=off)
 Options: index_bridging=true
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
@@ -1524,38 +1505,28 @@ SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 (3 rows)
 
 COMMIT;
-CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb WITH (index_bridging);
+CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
 INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
 SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-                        orioledb_tbl_structure                         
------------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                            +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                  +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty  +
-     Leftmost, Rightmost                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64           +
-     Item 0: offset = 272, tuple = ('(0,1)', '1', null, '(0.01,0.02)')+
-     Item 1: offset = 336, tuple = ('(0,2)', '2', null, '(0.02,0.04)')+
-     Item 2: offset = 400, tuple = ('(0,3)', '3', null, '(0.03,0.06)')+
-     Item 3: offset = 464, tuple = ('(0,4)', '4', null, '(0.04,0.08)')+
-     Item 4: offset = 528, tuple = ('(0,5)', '5', null, '(0.05,0.1)') +
-                                                                      +
- Index index_bridge contents                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                  +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty   +
-     Leftmost, Rightmost                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64           +
-     Item 0: offset = 272, tuple = ('(0,1)', '1')                     +
-     Item 1: offset = 304, tuple = ('(0,2)', '2')                     +
-     Item 2: offset = 336, tuple = ('(0,3)', '3')                     +
-     Item 3: offset = 368, tuple = ('(0,4)', '4')                     +
-     Item 4: offset = 400, tuple = ('(0,5)', '5')                     +
-                                                                      +
- Index toast: not loaded                                              +
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_briging_vacuum_test_pkey contents                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 272, tuple = ('1', null, '(0.01,0.02)')       +
+     Item 1: offset = 328, tuple = ('2', null, '(0.02,0.04)')       +
+     Item 2: offset = 384, tuple = ('3', null, '(0.03,0.06)')       +
+     Item 3: offset = 440, tuple = ('4', null, '(0.04,0.08)')       +
+     Item 4: offset = 496, tuple = ('5', null, '(0.05,0.1)')        +
+                                                                    +
+ Index toast: not loaded                                            +
  
 (1 row)
 
 CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
+WARNING:  Enabling bridging for orioledb table 'o_briging_vacuum_test'
 DELETE FROM o_briging_vacuum_test;
 VACUUM o_briging_vacuum_test;
 SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
@@ -1567,18 +1538,22 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
                              orioledb_tbl_structure                             
 --------------------------------------------------------------------------------
  Index o_briging_vacuum_test_pkey contents                                     +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 320                         +
+ Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 320                         +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty           +
      Leftmost, Rightmost                                                       +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                    +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '1', null, '(0.01,0.02)')+
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('2')     +
+     Item 0: deleted, offset = 264, tuple = ('(0,1)', '1', null, '(0.01,0.02)')+
+   Chunk 1: offset = 1, location = 328, hikey location = 88, hikey = ('3')     +
      Item 1: deleted, offset = 336, tuple = ('(0,2)', '2', null, '(0.02,0.04)')+
-     Item 2: deleted, offset = 400, tuple = ('(0,3)', '3', null, '(0.03,0.06)')+
-     Item 3: deleted, offset = 464, tuple = ('(0,4)', '4', null, '(0.04,0.08)')+
-     Item 4: deleted, offset = 528, tuple = ('(0,5)', '5', null, '(0.05,0.1)') +
+   Chunk 2: offset = 2, location = 400, hikey location = 96, hikey = ('4')     +
+     Item 2: deleted, offset = 408, tuple = ('(0,3)', '3', null, '(0.03,0.06)')+
+   Chunk 3: offset = 3, location = 472, hikey location = 104, hikey = ('5')    +
+     Item 3: deleted, offset = 480, tuple = ('(0,4)', '4', null, '(0.04,0.08)')+
+   Chunk 4: offset = 4, location = 544, hikey location = 112                   +
+     Item 4: deleted, offset = 552, tuple = ('(0,5)', '5', null, '(0.05,0.1)') +
                                                                                +
  Index index_bridge contents                                                   +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                           +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                           +
  state = free, datoid equal, relnode equal, ix_type = bridge, dirty            +
      Leftmost, Rightmost                                                       +
    Chunk 0: offset = 0, location = 256, hikey location = 64                    +
@@ -1598,7 +1573,7 @@ CREATE TABLE o_test_bridging_with_regular_no_pkey (
 	j int
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
-	o_test_bridging_with_regular_no_pkey using btree (j) WITH (index_bridging);
+	o_test_bridging_with_regular_no_pkey using btree (j) WITH (orioledb_index = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
@@ -1744,7 +1719,7 @@ CREATE TABLE o_test_bridging_with_regular_pkey (
 	k int
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
-	o_test_bridging_with_regular_pkey using btree (j) WITH (index_bridging);
+	o_test_bridging_with_regular_pkey using btree (j) WITH (orioledb_index = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
@@ -1864,7 +1839,7 @@ CREATE INDEX o_test_bitmap_scans_ix1 on o_test_bitmap_scans using hash (j);
 CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
 CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
 CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
-CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (index_bridging);
+CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (orioledb_index = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 BEGIN;
@@ -1971,7 +1946,7 @@ Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
 Options: index_bridging=true
 
-CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (index_bridging);
+CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (orioledb_index = off);
 WARNING:  Using bridged btree index for orioledb
 DETAIL:  this feature is only for testing
 \d+ o_test_index_bridging_options
@@ -1983,7 +1958,7 @@ DETAIL:  this feature is only for testing
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix3 ON o_test_index_bridging_options USING hash (i);
@@ -1996,8 +1971,8 @@ CREATE INDEX o_test_index_bridging_options_ix3 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix4 ON o_test_index_bridging_options USING hash (i) WITH (fillfactor=65);
@@ -2010,12 +1985,12 @@ CREATE INDEX o_test_index_bridging_options_ix4 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
 Options: index_bridging=true
 
-CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options USING hash (i) WITH (index_bridging);
+CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options USING gist (p);
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2025,13 +2000,13 @@ CREATE INDEX o_test_index_bridging_options_ix5 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
 Options: index_bridging=true
 
-CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options USING gist (p);
+CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options USING gin (j);
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2041,14 +2016,14 @@ CREATE INDEX o_test_index_bridging_options_ix6 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
 Options: index_bridging=true
 
-CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options USING gin (j);
+CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options USING spgist (p);
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2058,15 +2033,15 @@ CREATE INDEX o_test_index_bridging_options_ix7 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
+    "o_test_index_bridging_options_ix7" spgist (p)
 Options: index_bridging=true
 
-CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options USING spgist (p);
+CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options USING brin (i);
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2076,37 +2051,17 @@ CREATE INDEX o_test_index_bridging_options_ix8 ON o_test_index_bridging_options 
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-Options: index_bridging=true
-
-CREATE INDEX o_test_index_bridging_options_ix9 ON o_test_index_bridging_options USING brin (i);
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
+    "o_test_index_bridging_options_ix7" spgist (p)
+    "o_test_index_bridging_options_ix8" brin (i)
 Options: index_bridging=true
 
 ALTER TABLE o_test_index_bridging_options RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing tables
+ERROR:  Cannot change index_bridging option manually
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2116,14 +2071,13 @@ ERROR:  Cannot change index_bridging option for existing tables
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
+    "o_test_index_bridging_options_ix7" spgist (p)
+    "o_test_index_bridging_options_ix8" brin (i)
 Options: index_bridging=true
 
 ALTER TABLE o_test_index_bridging_options SET (index_bridging);
@@ -2136,17 +2090,17 @@ ALTER TABLE o_test_index_bridging_options SET (index_bridging);
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
+    "o_test_index_bridging_options_ix7" spgist (p)
+    "o_test_index_bridging_options_ix8" brin (i)
 Options: index_bridging=true
 
-ALTER INDEX o_test_index_bridging_options_ix3 SET (index_bridging);
+ALTER INDEX o_test_index_bridging_options_ix2 RESET (orioledb_index);
+ERROR:  Cannot change 'orioledb_index' option for existing indices
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2156,18 +2110,17 @@ ALTER INDEX o_test_index_bridging_options_ix3 SET (index_bridging);
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
+    "o_test_index_bridging_options_ix7" spgist (p)
+    "o_test_index_bridging_options_ix8" brin (i)
 Options: index_bridging=true
 
-ALTER INDEX o_test_index_bridging_options_ix5 RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
+ALTER INDEX o_test_index_bridging_options_ix1 SET (orioledb_index = off);
+ERROR:  Cannot change 'orioledb_index' option for existing indices
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2177,140 +2130,13 @@ ERROR:  Cannot change index_bridging option for existing indices
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
-Options: index_bridging=true
-
-ALTER INDEX o_test_index_bridging_options_ix2 RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
-Options: index_bridging=true
-
-ALTER INDEX o_test_index_bridging_options_ix1 SET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
-Options: index_bridging=true
-
-ALTER INDEX o_test_index_bridging_options_ix6 RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
-Options: index_bridging=true
-
-ALTER INDEX o_test_index_bridging_options_ix7 RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
-Options: index_bridging=true
-
-ALTER INDEX o_test_index_bridging_options_ix8 RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
-Options: index_bridging=true
-
-ALTER INDEX o_test_index_bridging_options_ix9 RESET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
-\d+ o_test_index_bridging_options
-                    Table "index_bridging.o_test_index_bridging_options"
- Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
---------+-----------+-----------+----------+---------+----------+--------------+-------------
- i      | integer   |           | not null |         | plain    |              | 
- j      | integer[] |           |          |         | extended |              | 
- p      | point     |           |          |         | plain    |              | 
-Indexes:
-    "o_test_index_bridging_options_ix1" btree (i)
-    "o_test_index_bridging_options_ix2" btree (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix3" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65', index_bridging='true')
-    "o_test_index_bridging_options_ix5" hash (i) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix6" gist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix7" gin (j) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix8" spgist (p) WITH (index_bridging='true')
-    "o_test_index_bridging_options_ix9" brin (i) WITH (index_bridging='true')
+    "o_test_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+    "o_test_index_bridging_options_ix3" hash (i)
+    "o_test_index_bridging_options_ix4" hash (i) WITH (fillfactor='65')
+    "o_test_index_bridging_options_ix5" gist (p)
+    "o_test_index_bridging_options_ix6" gin (j)
+    "o_test_index_bridging_options_ix7" spgist (p)
+    "o_test_index_bridging_options_ix8" brin (i)
 Options: index_bridging=true
 
 CREATE TABLE o_test_non_index_bridging_options (
@@ -2328,7 +2154,7 @@ ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
  p      | point     |           |          |         | plain    |              | 
 
 ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing tables
+ERROR:  Cannot change index_bridging option manually
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2348,8 +2174,10 @@ CREATE INDEX o_test_non_index_bridging_options_ix1 ON o_test_non_index_bridging_
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
 
-CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (index_bridging);
-ERROR:  Cannot use 'index_bridging' on table without 'index_bridging' option
+CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+WARNING:  Using bridged btree index for orioledb
+DETAIL:  this feature is only for testing
+WARNING:  Enabling bridging for orioledb table 'o_test_non_index_bridging_options'
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2359,8 +2187,11 @@ ERROR:  Cannot use 'index_bridging' on table without 'index_bridging' option
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
+    "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+Options: index_bridging=true
 
-ALTER INDEX o_test_non_index_bridging_options_ix1 RESET (index_bridging);
+ALTER INDEX o_test_non_index_bridging_options_ix2 RESET (orioledb_index);
+ERROR:  Cannot change 'orioledb_index' option for existing indices
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2370,9 +2201,11 @@ ALTER INDEX o_test_non_index_bridging_options_ix1 RESET (index_bridging);
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
+    "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+Options: index_bridging=true
 
-ALTER INDEX o_test_non_index_bridging_options_ix1 SET (index_bridging);
-ERROR:  Cannot change index_bridging option for existing indices
+ALTER INDEX o_test_non_index_bridging_options_ix1 SET (orioledb_index = off);
+ERROR:  Cannot change 'orioledb_index' option for existing indices
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2382,6 +2215,8 @@ ERROR:  Cannot change index_bridging option for existing indices
  p      | point     |           |          |         | plain    |              | 
 Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
+    "o_test_non_index_bridging_options_ix2" btree (i) WITH (orioledb_index=off)
+Options: index_bridging=true
 
 DROP EXTENSION pageinspect;
 ERROR:  extension "pageinspect" does not exist

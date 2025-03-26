@@ -12,6 +12,7 @@ from testgres.utils import get_pg_config
 
 from .base_test import BaseTest
 
+
 class LogicalTest(BaseTest):
 
 	def setUp(self):

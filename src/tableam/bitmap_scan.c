@@ -378,7 +378,7 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				}
 
 				if (node->biss_RelationDesc->rd_rel->relam != BTREE_AM_OID ||
-					(options && options->index_bridging))
+					(options && !options->orioledb_index))
 				{
 					TIDBitmap  *bridged_bitmap = tbm_create(work_mem * 1024L, NULL);
 					TBMIterator *tbmiterator;

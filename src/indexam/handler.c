@@ -110,12 +110,6 @@ static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 							 IndexInfo *indexInfo);
 static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
 
-static bytea *bridged_hashoptions(Datum reloptions, bool validate);
-static bytea *bridged_gistoptions(Datum reloptions, bool validate);
-static bytea *bridged_ginoptions(Datum reloptions, bool validate);
-static bytea *bridged_spgoptions(Datum reloptions, bool validate);
-static bytea *bridged_brinoptions(Datum reloptions, bool validate);
-
 typedef struct BrigedIndexAmRoutine
 {
 	IndexAmRoutine *original_routine;
@@ -235,26 +229,6 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged->routine.ambuild = bridged_ambuild;
 				bridged->routine.aminsertextended = bridged_aminsert;
 				bridged->routine.ambeginscan = bridged_ambeginscan;
-				switch (amhandler)
-				{
-					case F_HASHHANDLER:
-						bridged->routine.amoptions = bridged_hashoptions;
-						break;
-					case F_GISTHANDLER:
-						bridged->routine.amoptions = bridged_gistoptions;
-						break;
-					case F_GINHANDLER:
-						bridged->routine.amoptions = bridged_ginoptions;
-						break;
-					case F_SPGHANDLER:
-						bridged->routine.amoptions = bridged_spgoptions;
-						break;
-					case F_BRINHANDLER:
-						bridged->routine.amoptions = bridged_brinoptions;
-						break;
-					default:
-						break;
-				}
 				MemoryContextSwitchTo(old_mcxt);
 				amroutine = palloc0(sizeof(IndexAmRoutine));
 				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
@@ -278,7 +252,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	String	   *relname;
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 	{
 		OTableDescr *descr;
 
@@ -533,7 +507,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
 		Pointer		p;
@@ -668,7 +642,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	int			i;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return true;
 
 	if (rel->rd_index->indisprimary)
@@ -822,7 +796,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	int			i;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return true;
 
 	if (rel->rd_index->indisprimary)
@@ -940,7 +914,7 @@ orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 {
 	OBTOptions *options = (OBTOptions *) info->index->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btbulkdelete(info, stats, callback, callback_state);
 
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
@@ -952,7 +926,7 @@ orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 {
 	OBTOptions *options = (OBTOptions *) info->index->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btvacuumcleanup(info, stats);
 
 	return stats;
@@ -963,7 +937,7 @@ orioledb_amcanreturn(Relation index, int attno)
 {
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btcanreturn(index, attno);
 
 	return true;
@@ -1350,11 +1324,10 @@ orioledb_amoptions(Datum reloptions, bool validate)
 								   "Compression level of a particular index",
 								   NULL, validate_index_compress, NULL,
 								   offsetof(OBTOptions, compress_offset));
-		add_local_bool_reloption(&relopts, "index_bridging",
-								 "Use postgresql index via index bridging. "
-								 "Set automatically if index_bridging enabled for table",
-								 false,
-								 offsetof(OBTOptions, index_bridging));
+		add_local_bool_reloption(&relopts, "orioledb_index",
+								 "Use orioledb own implementation of index",
+								 true,
+								 offsetof(OBTOptions, orioledb_index));
 		MemoryContextSwitchTo(oldcxt);
 		relopts_set = true;
 	}
@@ -1430,7 +1403,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 
 	o_current_index = NULL;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 	{
 		o_current_index = rel;
 		return btbeginscan(rel, nkeys, norderbys);
@@ -1502,7 +1475,7 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 	OScanState *o_scan = (OScanState *) scan;
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 
 	MemoryContextReset(o_scan->cxt);
@@ -1721,7 +1694,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btgettuple(scan, dir);
 
 	o_scan->scanDir = dir;
@@ -1781,7 +1754,7 @@ orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btgetbitmap(scan, tbm);
 	return 0;
 }
@@ -1792,7 +1765,7 @@ orioledb_amendscan(IndexScanDesc scan)
 	OScanState *o_scan = (OScanState *) scan;
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btendscan(scan);
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
@@ -1805,7 +1778,7 @@ orioledb_ammarkpos(IndexScanDesc scan)
 {
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btmarkpos(scan);
 }
 
@@ -1814,7 +1787,7 @@ orioledb_amrestrpos(IndexScanDesc scan)
 {
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
-	if (options && options->index_bridging)
+	if (options && !options->orioledb_index)
 		return btrestrpos(scan);
 }
 
@@ -1943,113 +1916,4 @@ bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 	Assert(amroutine != NULL);
 
 	return amroutine->ambeginscan(rel, nkeys, norderbys);
-}
-
-void o_add_bridged_option_to_ams()
-{
-	static bool first_call = true;
-	static int last_assigned_relopt = RELOPT_KIND_LAST_DEFAULT;
-	if (first_call)
-	{
-		add_bool_reloption(RELOPT_KIND_HASH, "index_bridging",
-						   "Use postgresql index via index bridging. "
-						   "Set automatically if index_bridging enabled for table",
-						   false, AccessExclusiveLock);
-		add_bool_reloption(RELOPT_KIND_GIST, "index_bridging",
-						   "Use postgresql index via index bridging. "
-						   "Set automatically if index_bridging enabled for table",
-						   false, AccessExclusiveLock);
-		add_bool_reloption(RELOPT_KIND_GIN, "index_bridging",
-						   "Use postgresql index via index bridging. "
-						   "Set automatically if index_bridging enabled for table",
-						   false, AccessExclusiveLock);
-		add_bool_reloption(RELOPT_KIND_SPGIST, "index_bridging",
-						   "Use postgresql index via index bridging. "
-						   "Set automatically if index_bridging enabled for table",
-						   false, AccessExclusiveLock);
-		add_bool_reloption(RELOPT_KIND_BRIN, "index_bridging",
-						   "Use postgresql index via index bridging. "
-						   "Set automatically if index_bridging enabled for table",
-						   false, AccessExclusiveLock);
-		first_call = false;
-	}
-}
-
-/* Should be kept in sync with hashoptions */
-bytea *
-bridged_hashoptions(Datum reloptions, bool validate)
-{
-	static const relopt_parse_elt tab[] = {
-		{"fillfactor", RELOPT_TYPE_INT, offsetof(HashOptions, fillfactor)},
-		{"index_bridging", RELOPT_TYPE_BOOL, sizeof(HashOptions)},
-	};
-
-	return (bytea *) build_reloptions(reloptions, validate,
-									  RELOPT_KIND_HASH,
-									  sizeof(HashOptions) + sizeof(bool),
-									  tab, lengthof(tab));
-}
-
-/* Should be kept in sync with gistoptions */
-bytea *
-bridged_gistoptions(Datum reloptions, bool validate)
-{
-	static const relopt_parse_elt tab[] = {
-		{"fillfactor", RELOPT_TYPE_INT, offsetof(GiSTOptions, fillfactor)},
-		{"buffering", RELOPT_TYPE_ENUM, offsetof(GiSTOptions, buffering_mode)},
-		{"index_bridging", RELOPT_TYPE_BOOL, sizeof(GiSTOptions)},
-	};
-
-	return (bytea *) build_reloptions(reloptions, validate,
-									  RELOPT_KIND_GIST,
-									  sizeof(GiSTOptions) + sizeof(bool),
-									  tab, lengthof(tab));
-}
-
-/* Should be kept in sync with ginoptions */
-bytea *
-bridged_ginoptions(Datum reloptions, bool validate)
-{
-	static const relopt_parse_elt tab[] = {
-		{"fastupdate", RELOPT_TYPE_BOOL, offsetof(GinOptions, useFastUpdate)},
-		{"gin_pending_list_limit", RELOPT_TYPE_INT, offsetof(GinOptions,
-															 pendingListCleanupSize)},
-		{"index_bridging", RELOPT_TYPE_BOOL, sizeof(GinOptions)},
-	};
-
-	return (bytea *) build_reloptions(reloptions, validate,
-									  RELOPT_KIND_GIN,
-									  sizeof(GinOptions) + sizeof(bool),
-									  tab, lengthof(tab));
-}
-
-/* Should be kept in sync with spgoptions */
-bytea *
-bridged_spgoptions(Datum reloptions, bool validate)
-{
-	static const relopt_parse_elt tab[] = {
-		{"fillfactor", RELOPT_TYPE_INT, offsetof(SpGistOptions, fillfactor)},
-		{"index_bridging", RELOPT_TYPE_BOOL, sizeof(SpGistOptions)},
-	};
-
-	return (bytea *) build_reloptions(reloptions, validate,
-									  RELOPT_KIND_SPGIST,
-									  sizeof(SpGistOptions) + sizeof(bool),
-									  tab, lengthof(tab));
-}
-
-/* Should be kept in sync with brinoptions */
-bytea *
-bridged_brinoptions(Datum reloptions, bool validate)
-{
-	static const relopt_parse_elt tab[] = {
-		{"pages_per_range", RELOPT_TYPE_INT, offsetof(BrinOptions, pagesPerRange)},
-		{"autosummarize", RELOPT_TYPE_BOOL, offsetof(BrinOptions, autosummarize)},
-		{"index_bridging", RELOPT_TYPE_BOOL, sizeof(BrinOptions)},
-	};
-
-	return (bytea *) build_reloptions(reloptions, validate,
-									  RELOPT_KIND_BRIN,
-									  sizeof(BrinOptions) + sizeof(bool),
-									  tab, lengthof(tab));
 }

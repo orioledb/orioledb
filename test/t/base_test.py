@@ -221,7 +221,6 @@ class BaseTest(unittest.TestCase):
 		path = os.path.join(pkg_lib_dir, f'{name}.{dlsuffix}')
 		return os.path.isfile(path)
 
-
 	def catchup_orioledb(self, replica):
 		# wait for synchronization
 		replica.catchup()

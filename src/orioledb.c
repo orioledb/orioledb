@@ -954,7 +954,6 @@ _PG_init(void)
 	base_init_startup_hook = o_base_init_startup_hook;
 	IndexAMRoutineHook = orioledb_indexam_routine_hook;
 	orioledb_setup_ddl_hooks();
-	o_add_bridged_option_to_ams();
 	stopevents_make_cxt();
 }
 
@@ -1672,7 +1671,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 					options = (OBTOptions *) index->rd_options;
 
-					if (index->rd_rel->relam != BTREE_AM_OID || (options && options->index_bridging))
+					if (index->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
 					{
 						index_close(index, AccessShareLock);
 						continue;
