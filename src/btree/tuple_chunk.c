@@ -18,9 +18,59 @@
 
 #include "btree/chunk_ops.h"
 #include "btree/find.h"
+#include <stdbool.h>
 
 const BTreeChunkOps LeafTupleChunkOps;
 const BTreeChunkOps InternalTupleChunkOps;
+
+/*
+ * Page iterating functions.
+ */
+
+inline void
+btpage_locator_first(BTreePageContext *pageContext, BTreePageItemLocator *locator)
+{
+	if (O_PAGE_IS(pageContext->page, LEAF))
+		page_context_tuple_init(pageContext, &LeafTupleChunkOps, 0);
+	else
+		page_context_tuple_init(pageContext, &InternalTupleChunkOps, 0);
+}
+
+bool
+btpage_locator_is_valid(BTreePageContext *pageContext, BTreePageItemLocator *locator)
+{
+	Assert(pageContext->tupleChunk != NULL);
+
+	return pageContext->tupleChunk != NULL &&
+		locator->itemOffset < pageContext->tupleChunk->chunkItemsCount;
+}
+
+bool
+btpage_locator_next(BTreePageContext *pageContext, BTreePageItemLocator *locator)
+{
+	Assert(pageContext->tupleChunk != NULL);
+
+	locator->itemOffset++;
+
+	if (unlikely(locator->itemOffset >= pageContext->tupleChunk->chunkItemsCount))
+	{
+		BTreePageHeader *header = (BTreePageHeader *) pageContext->page;
+
+		if (pageContext->tupleChunk->chunkOffset + 1 < header->chunksCount)
+		{
+			if (O_PAGE_IS(pageContext->page, LEAF))
+				page_context_tuple_init(pageContext, &LeafTupleChunkOps,
+										pageContext->tupleChunk->chunkOffset + 1);
+			else
+				page_context_tuple_init(pageContext, &InternalTupleChunkOps,
+										pageContext->tupleChunk->chunkOffset + 1);
+		}
+		else
+			return false;
+	}
+
+	return true;
+}
 
 /*
  * Implementation of leaf tuple chunks.
@@ -251,20 +301,19 @@ ltc_delete_item(BTreeChunkDesc *chunk, OffsetNumber itemOffset)
 static bool
 ltc_load_partially(BTreeChunkDesc *chunk, PartialPageState *partial, Page page)
 {
-	BTreeTupleChunkDesc *tupleChunk = (BTreeTupleChunkDesc *) chunk;
 	Page		sourcePage = partial->src;
 	uint32		pageState,
 				sourceState;
 	BTreePageHeader *header = (BTreePageHeader *) page;
 	BTreeChunkItem chunkLocation =
-		SHORT_GET_LOCATION(header->chunkDesc[tupleChunk->chunkOffset].shortLocation);
+		SHORT_GET_LOCATION(header->chunkDesc[chunk->chunkOffset].shortLocation);
 
 	Assert(partial != NULL);
 
-	if (!partial->isPartial || partial->chunkIsLoaded[tupleChunk->chunkOffset])
+	if (!partial->isPartial || partial->chunkIsLoaded[chunk->chunkOffset])
 		return true;
 
-	chunk->ops->init(chunk, page, tupleChunk->chunkOffset);
+	chunk->ops->init(chunk, page, chunk->chunkOffset);
 
 	memcpy(chunk->chunkData, (Pointer) sourcePage + chunkLocation, chunk->chunkDataSize);
 
@@ -279,7 +328,7 @@ ltc_load_partially(BTreeChunkDesc *chunk, PartialPageState *partial, Page page)
 	if (O_PAGE_GET_CHANGE_COUNT(page) != O_PAGE_GET_CHANGE_COUNT(sourcePage))
 		return false;
 
-	partial->chunkIsLoaded[tupleChunk->chunkOffset] = true;
+	partial->chunkIsLoaded[chunk->chunkOffset] = true;
 
 	return true;
 }
@@ -307,7 +356,7 @@ ltc_init(BTreeChunkDesc *chunk, Page page, OffsetNumber chunkOffset)
 	else
 		chunk->chunkDataSize = header->dataSize - chunkLocation;
 
-	tupleChunk->chunkOffset = chunkOffset;
+	chunk->chunkOffset = chunkOffset;
 	tupleChunk->chunkItems = (BTreeChunkItem *) chunk->chunkData;
 
 	if (chunkOffset + 1 < header->chunksCount)
@@ -440,7 +489,7 @@ ltc_compact(BTreeChunkDesc *chunk)
 				lastOffset = 0;
 	uint16		batchSize = 0;
 
-	if (chunk->chunkItemsCount == 0)
+	if (unlikely(chunk->chunkItemsCount == 0))
 		return;
 
 	/* Detect deleted items and delete them from the items array */
@@ -461,7 +510,7 @@ ltc_compact(BTreeChunkDesc *chunk)
 	chunk->chunkItemsCount = lastOffset;
 
 	/* All items were deleted, just exit */
-	if (chunk->chunkItemsCount == 0)
+	if (unlikely(chunk->chunkItemsCount == 0))
 	{
 		chunk->chunkDataSize = 0;
 		return;

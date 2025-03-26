@@ -57,6 +57,8 @@ typedef struct BTreeChunkDesc
 	uint16		chunkDataSize;
 	/* Number of chunk items */
 	uint16		chunkItemsCount;
+	/* Offset of the chunk within the page */
+	OffsetNumber chunkOffset;
 } BTreeChunkDesc;
 
 typedef struct BTreeChunkOps
@@ -169,8 +171,6 @@ typedef struct BTreeTupleChunkDesc
 {
 	BTreeChunkDesc base;
 
-	/* Offset of the chunk within the page */
-	OffsetNumber chunkOffset;
 	/* Array of offsets of chunk items */
 	BTreeChunkItem *chunkItems;
 } BTreeTupleChunkDesc;
@@ -191,10 +191,11 @@ typedef struct BTreePageContext
 {
 	BTreeDescr *treeDesc;
 	Page		page;
+
 	BTreeChunkDesc *hikeyChunk;
+	BTreeChunkDesc *tupleChunk;
 
 	MemoryContext mctx;
-	bool		isInitialized;
 } BTreePageContext;
 
 /*
@@ -217,10 +218,14 @@ extern void page_context_init(BTreePageContext *pageContext, BTreeDescr *treeDes
 extern void page_context_release(BTreePageContext *pageContext);
 extern void page_context_set_page(BTreePageContext *pageContext, Page page);
 extern void page_context_set_invalid(BTreePageContext *pageContext);
-extern void page_context_ensure_chunk_init(BTreePageContext *pageContext);
+extern void page_context_hikey_init(BTreePageContext *pageContext,
+									const BTreeChunkOps *ops);
+extern void page_context_tuple_init(BTreePageContext *pageContext,
+									const BTreeChunkOps *ops,
+									OffsetNumber chunkOffset);
 
 /*
- * Page utility functions.
+ * Hikey utility functions.
  */
 
 extern OTuple page_get_hikey(BTreePageContext *pageContext);
@@ -230,5 +235,18 @@ extern void copy_fixed_shmem_hikey(BTreePageContext *pageContext, OFixedShmemKey
 
 extern bool page_fits_hikey(BTreePageContext *pageContext,
 							LocationIndex newHikeySize);
+
+/*
+ * Page iterating functions.
+ */
+
+#define BTPAGE_LOCATOR_FOREACH(pageContext, locator) \
+	for (btpage_locator_first((pageContext), (locator)); \
+		 btpage_locator_is_valid((pageContext), (locator)); \
+		 btpage_locator_next((pageContext), (locator)))
+
+extern void btpage_locator_first(BTreePageContext *pageContext, BTreePageItemLocator *locator);
+extern bool btpage_locator_is_valid(BTreePageContext *pageContext, BTreePageItemLocator *locator);
+extern bool btpage_locator_next(BTreePageContext *pageContext, BTreePageItemLocator *locator);
 
 #endif							/* __BTREE_CHUNK_OPS_H__ */

@@ -80,44 +80,70 @@ page_context_release(BTreePageContext *pageContext)
 	{
 		release_chunk_desc(pageContext->hikeyChunk);
 		pfree(pageContext->hikeyChunk);
+		pageContext->hikeyChunk = NULL;
 	}
-	pageContext->hikeyChunk = NULL;
-	pageContext->isInitialized = false;
+
+	if (pageContext->tupleChunk != NULL)
+	{
+		release_chunk_desc(pageContext->tupleChunk);
+		pfree(pageContext->tupleChunk);
+		pageContext->tupleChunk = NULL;
+	}
 }
 
 void
 page_context_set_page(BTreePageContext *pageContext, Page page)
 {
-	page_context_set_invalid(pageContext);
+	page_context_release(pageContext);
 	pageContext->page = page;
 }
 
 void
 page_context_set_invalid(BTreePageContext *pageContext)
 {
-	if (pageContext->isInitialized)
-	{
-		pageContext->hikeyChunk->ops->release(pageContext->hikeyChunk);
-	}
-	pageContext->isInitialized = false;
+	page_context_release(pageContext);
 }
 
 void
-page_context_ensure_chunk_init(BTreePageContext *pageContext)
+page_context_hikey_init(BTreePageContext *pageContext, const BTreeChunkOps *ops)
 {
-	if (!pageContext->isInitialized)
+	Assert(pageContext->hikeyChunk == NULL || pageContext->hikeyChunk->ops == ops);
+
+	if (pageContext->hikeyChunk == NULL)
 	{
 		MemoryContext oldctx = MemoryContextSwitchTo(pageContext->mctx);
 
-		if (pageContext->hikeyChunk == NULL)
-			pageContext->hikeyChunk = make_chunk_desc(pageContext->treeDesc,
-													  &HiKeyChunkOps,
-													  pageContext->page, 0);
-		else
-			pageContext->hikeyChunk->ops->init(pageContext->hikeyChunk,
-											   pageContext->page, 0);
+		pageContext->hikeyChunk = make_chunk_desc(pageContext->treeDesc,
+												  ops,
+												  pageContext->page, 0);
 
 		MemoryContextSwitchTo(oldctx);
-		pageContext->isInitialized = true;
+	}
+}
+
+void
+page_context_tuple_init(BTreePageContext *pageContext, const BTreeChunkOps *ops,
+						OffsetNumber chunkOffset)
+{
+	if (pageContext->tupleChunk == NULL)
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(pageContext->mctx);
+
+		pageContext->tupleChunk = make_chunk_desc(pageContext->treeDesc,
+												  ops,
+												  pageContext->page, chunkOffset);
+
+		MemoryContextSwitchTo(oldctx);
+	}
+	else
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(pageContext->mctx);
+
+		Assert(pageContext->tupleChunk->ops == ops);
+
+		pageContext->tupleChunk->ops->init(pageContext->tupleChunk,
+										   pageContext->page, chunkOffset);
+
+		MemoryContextSwitchTo(oldctx);
 	}
 }

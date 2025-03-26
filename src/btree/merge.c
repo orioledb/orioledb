@@ -81,15 +81,15 @@ btree_try_merge_pages(BTreeDescr *desc,
 
 	page_context_init(&parentPageContext, desc);
 	page_context_set_page(&parentPageContext, parent);
-	page_context_ensure_chunk_init(&parentPageContext);
+	page_context_hikey_init(&parentPageContext, &HiKeyChunkOps);
 
 	page_context_init(&leftPageContext, desc);
 	page_context_set_page(&leftPageContext, left);
-	page_context_ensure_chunk_init(&leftPageContext);
+	page_context_hikey_init(&leftPageContext, &HiKeyChunkOps);
 
 	page_context_init(&rightPageContext, desc);
 	page_context_set_page(&rightPageContext, right);
-	page_context_ensure_chunk_init(&rightPageContext);
+	page_context_hikey_init(&rightPageContext, &HiKeyChunkOps);
 
 	if (!get_checkpoint_number(right_blkno, &rightPageContext,
 							   &checkpoint_number, &copy_blkno))

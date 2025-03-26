@@ -495,7 +495,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 		p = O_GET_IN_MEMORY_PAGE(blkno);
 
 		page_context_set_page(&pageContext, p);
-		page_context_ensure_chunk_init(&pageContext);
+		page_context_hikey_init(&pageContext, &HiKeyChunkOps);
 
 		if (insert_item->level > 0)
 		{

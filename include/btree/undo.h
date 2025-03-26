@@ -13,7 +13,6 @@
 #ifndef __BTREE_UNDO_H__
 #define __BTREE_UNDO_H__
 
-#include "btree/chunk_ops.h"
 #include "btree/page_contents.h"
 
 /*

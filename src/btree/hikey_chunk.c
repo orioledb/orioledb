@@ -19,7 +19,7 @@
 const BTreeChunkOps HiKeyChunkOps;
 
 /*
- * Page utility functions.
+ * Hikey utility functions.
  */
 
 OTuple
@@ -32,7 +32,7 @@ page_get_hikey(BTreePageContext *pageContext)
 
 	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
 
-	page_context_ensure_chunk_init(pageContext);
+	page_context_hikey_init(pageContext, &HiKeyChunkOps);
 	chunk = pageContext->hikeyChunk;
 
 	Assert(chunk->chunkItemsCount > 0);
@@ -51,7 +51,7 @@ page_get_hikey_size(BTreePageContext *pageContext)
 
 	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
 
-	page_context_ensure_chunk_init(pageContext);
+	page_context_hikey_init(pageContext, &HiKeyChunkOps);
 	chunk = pageContext->hikeyChunk;
 	hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
 
@@ -447,7 +447,7 @@ htc_search(BTreeChunkDesc *chunk, PartialPageState *partial, Page page,
 	high = chunk->chunkItemsCount - 1;
 	nextkey = (keyType != BTreeKeyPageHiKey);
 
-	if (high < low)
+	if (unlikely(high < low))
 		return low;
 
 	targetCmpVal = nextkey ? 0 : 1; /* a target value of cmpFunc() */
