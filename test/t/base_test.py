@@ -23,6 +23,7 @@ from testgres.utils import get_pg_version, get_pg_config
 
 class BaseTest(unittest.TestCase):
 	replica = None
+	restoredNode = None
 	basePort = None
 	_myName = None
 
@@ -56,6 +57,17 @@ class BaseTest(unittest.TestCase):
 			replica.append_conf(port=replica.port)
 			self.replica = replica
 		return self.replica
+
+	def restoreNode(self, port: int, filename: str) -> testgres.PostgresNode:
+		self.assertIsNone(self.restoredNode)
+
+		restoredNode = self.initNode(port, "restored_tgsn")
+		restoredNode.start()
+		restoredNode.restore(filename)
+
+		self.restoredNode = restoredNode
+
+		return restoredNode
 
 	def initNode(self, port, suffix='tgsn') -> testgres.PostgresNode:
 		(test_path,
@@ -121,6 +133,16 @@ class BaseTest(unittest.TestCase):
 				self.replica.cleanup()
 			else:
 				print("\nReplica base directory: " + self.replica.base_dir)
+		if self.restoredNode:
+			if self.restoredNode.status() == NodeStatus.Running:
+				self.restoredNode.stop(
+				)  # just comment it if node should not stops on fails
+				pass
+			if ok:
+				self.restoredNode.cleanup()
+			else:
+				print("\nRestored node base directory: " +
+				      self.restoredNode.base_dir)
 		t = time.time() - self.startTime
 		sys.stderr.write('%.3f s ' % (t, ))
 
