@@ -108,22 +108,32 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 
 /*
  * Given page item modified by in-progress transaction.  Rollback changes
- * using undo chain.  Specify 'wholeChain' flag to revert all in-progress
- * changes from the chain.  Otherise, only last change item is reverted.
+ * using undo chain.
+ *
+ * Undo modes:
+ * BTreeUndoModeSingle - revert last single operation from the undo chain
+ * BTreeUndoModeXact - revert all changes from the chain belonging to in-progress transaction
+ * BTreeUndoModeLimit- revert changes for secondary index from the chain down to limitUndoLocation
+
  *
  * Return true if page item still exists.
  *
  * 'nonLockTuphdrPtr' and 'nonLockUndoLocation' are a hint to the first
  * non-lock-only undo record in the chain.
+ *
  */
 bool
 page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
-				   bool wholeChain, BTreeLeafTuphdr *nonLockTuphdrPtr,
-				   UndoLocation nonLockUndoLocation)
+				   BTreeUndoMode undoMode, BTreeLeafTuphdr *nonLockTuphdrPtr,
+				   UndoLocation nonLockUndoLocation, UndoLocation limitUndoLocation)
 {
 	Pointer		item;
 	BTreeLeafTuphdr *tuphdr,
 				nonLockTuphdr;
+
+	Assert(undoMode == BTreeUndoModeLimit ?
+			UndoLocationIsValid(limitUndoLocation) :
+			!UndoLocationIsValid(limitUndoLocation));
 
 	item = BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
 	tuphdr = (BTreeLeafTuphdr *) item;
@@ -162,8 +172,21 @@ retry:
 		if (!UndoLocationIsValid(nonLockUndoLocation))
 			*nonLockTuphdrPtr = *tuphdr;
 
-		if (!XACT_INFO_IS_FINISHED(tuphdr->xactInfo) && wholeChain)
+		if (!XACT_INFO_IS_FINISHED(tuphdr->xactInfo) && (undoMode == BTreeUndoModeXact))
 			goto retry;
+
+		if (undoMode == BTreeUndoModeLimit &&
+					UndoLocationGetValue(tuphdr->undoLocation) >= UndoLocationGetValue(limitUndoLocation))
+		{
+			
+			result = o_update_secondary_index(index_descr, ix_num,
+									  new_valid, old_valid,
+									  new_slot, new_tuple,
+									  old_slot, oxid, oSnapshot.csn);
+
+			goto retry;
+		}
+
 	}
 	else if (UndoLocationIsValid(nonLockTuphdrPtr->undoLocation))
 	{
@@ -222,17 +245,31 @@ retry:
 
 		BTREE_PAGE_SET_ITEM_FLAGS(p, locator, tuple.formatFlags);
 
+		if (undoMode == BTreeUndoModeUndoLimit)
+		{
+			tupleUndoLocationValue = UndoLocationGetValue(tuphdr->undoLocation);
+			limitUndoLocationValue = UndoLocationGetValue(limitUndoLocation);
+			result = o_update_secondary_index(index_descr, ix_num,
+									  new_valid, old_valid,
+									  new_slot, new_tuple,
+									  old_slot, oxid, oSnapshot.csn);
+		}
+
 		/* Follow the row-level undo chain if needed */
-		if ((UndoLocationIsValid(nonLockUndoLocation) ||
-			 !XACT_INFO_IS_FINISHED(prev_header.xactInfo)) && wholeChain)
+		if (undoMode == BTreeUndoModeXact && (UndoLocationIsValid(nonLockUndoLocation) ||
+			 !XACT_INFO_IS_FINISHED(prev_header.xactInfo)) ||
+			(undoMode == BTreeUndoModeUndoLimit) && tupleUndoLocationValue >= limitUndoLocationValue)
 		{
 			/* Find the next item in the chain */
 			nonLockUndoLocation = find_non_lock_only_undo_record(desc->undoType,
 																 nonLockTuphdrPtr);
-			if (XACT_INFO_IS_FINISHED(nonLockTuphdrPtr->xactInfo))
+			if (undoMode == BTreeUndoModeXact && XACT_INFO_IS_FINISHED(nonLockTuphdrPtr->xactInfo))
 				return true;
+			else if (undoMode == BTreeUndoModeUndoLimit) && UndoLocationGetValue(tuphdr->undoLocation) >= UndoLocationGetValue(limitUndoLocation)
+
 			item = BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
 			tuphdr = (BTreeLeafTuphdr *) item;
+
 			goto retry;
 		}
 	}
@@ -484,8 +521,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (nonLockTupHdr.undoLocation == location + offsetof(BTreeModifyUndoStackItem, tuphdr) ||
 		(!UndoLocationIsValid(nonLockTupHdr.undoLocation) && item->action == BTreeOperationInsert))
 	{
-		(void) page_item_rollback(desc, p, loc, false,
-								  &nonLockTupHdr, nonLockUndoLocation);
+		(void) page_item_rollback(desc, p, loc, BTreeUndoModeSingle,
+								  &nonLockTupHdr, nonLockUndoLocation, InvalidUndoLocation);
 	}
 
 	MARK_DIRTY(desc, blkno);

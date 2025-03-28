@@ -66,8 +66,8 @@ typedef enum
 #define O_UNDO_GET_IMAGE_LOCATION(undo_loc, left) ((undo_loc) + MAXALIGN(sizeof(UndoPageImageHeader)) + ((left) ? 0 : ORIOLEDB_BLCKSZ))
 
 extern bool page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
-							   bool loop, BTreeLeafTuphdr *non_lock_tuphdr_ptr,
-							   UndoLocation nonLockUndoLocation);
+							   BTreeUndoMode undoMode, BTreeLeafTuphdr *non_lock_tuphdr_ptr,
+							   UndoLocation nonLockUndoLocation, UndoLocation limitUndoLocation);
 extern BTreeLeafTuphdr *make_undo_record(BTreeDescr *desc, OTuple tuple,
 										 bool is_tuple, BTreeOperationType action,
 										 OInMemoryBlkno blkno, uint32 pageChangeCount,

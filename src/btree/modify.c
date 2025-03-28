@@ -504,9 +504,10 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 */
 				START_CRIT_SECTION();
 				page_block_reads(blkno);
-				if (!page_item_rollback(desc, page, loc, true,
+				if (!page_item_rollback(desc, page, loc, BTreeUndoModeXact,
 										&context->conflictTupHdr,
-										context->conflictUndoLocation))
+										context->conflictUndoLocation,
+										InvalidUndoLocation))
 					context->cmp = -1;
 				MARK_DIRTY(desc, blkno);
 				END_CRIT_SECTION();
@@ -665,9 +666,10 @@ o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);
-	applyResult = page_item_rollback(desc, page, &loc, false,
+	applyResult = page_item_rollback(desc, page, &loc, BTreeUndoModeSingle,
 									 &context->conflictTupHdr,
-									 context->conflictUndoLocation);
+									 context->conflictUndoLocation,
+									 InvalidUndoLocation);
 	MARK_DIRTY(desc, blkno);
 	END_CRIT_SECTION();
 

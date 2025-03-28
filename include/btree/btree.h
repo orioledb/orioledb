@@ -93,6 +93,13 @@ typedef enum BTreeLeafTupleDeletedStatus
 	BTreeLeafTuplePKChanged = 3
 } BTreeLeafTupleDeletedStatus;
 
+typedef enum BTreeUndoMode
+{
+	BTreeUndoModeSingle = 0,
+	BTreeUndoModeXactChain = 1,
+	BTreeUndoModeLongChain = 2
+}
+
 typedef struct
 {
 	Pointer		data;
