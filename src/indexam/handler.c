@@ -29,12 +29,7 @@
 #include "utils/stopevent.h"
 
 #include "access/amapi.h"
-#include "access/brin.h"
-#include "access/gin_private.h"
-#include "access/gist_private.h"
-#include "access/hash.h"
 #include "access/relation.h"
-#include "access/spgist_private.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
 #include "nodes/pathnodes.h"

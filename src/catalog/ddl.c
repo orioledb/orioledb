@@ -28,13 +28,8 @@
 #include "utils/compress.h"
 #include "recovery/wal.h"
 
-#include "access/brin.h"
-#include "access/gin_private.h"
-#include "access/gist_private.h"
-#include "access/hash.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
-#include "access/spgist_private.h"
 #include "access/tableam.h"
 #include "access/toast_compression.h"
 #include "access/transam.h"
