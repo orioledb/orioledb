@@ -2591,8 +2591,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 								if (options && !options->orioledb_index)
 								{
-									ereport(WARNING, errmsg("Using bridged btree index for orioledb"),
-											errdetail("this feature is only for testing"));
+									ereport(WARNING,
+											errcode(ERRCODE_WARNING),
+											errmsg("using bridged btree index for orioledb"),
+											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 									add_bridging = true;
 								}
 								else
@@ -2612,8 +2614,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 								if (options && !options->orioledb_index)
-									ereport(WARNING, errmsg("Using bridged btree index for orioledb"),
-											errdetail("this feature is only for testing"));
+									ereport(WARNING,
+											errcode(ERRCODE_WARNING),
+											errmsg("using bridged btree index for orioledb"),
+											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 							}
 						}
 
@@ -2635,8 +2639,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							OTableDescr *descr;
 							OTableDescr *old_descr;
 
-							ereport(WARNING, errmsg("Enabling bridging for orioledb table '%s'",
-													RelationGetRelationName(tbl)));
+							ereport(NOTICE,
+									errmsg("enabling index bridging for orioledb table '%s'",
+										   RelationGetRelationName(tbl)),
+									errdetail("The required index access method is not natively supported, so index bridgind is automatically enabled."));
 
 							old_o_table = o_table;
 							o_table = o_tables_get(o_table->oids);

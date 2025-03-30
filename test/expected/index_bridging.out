@@ -93,9 +93,10 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 (1 row)
 
 CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
-WARNING:  Enabling bridging for orioledb table 'o_test_ix_ams'
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  enabling index bridging for orioledb table 'o_test_ix_ams'
+DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
 SELECT ctid, htid, tids FROM
 		 generate_series(1,
 						 (SELECT relpages - 1 FROM pg_class
@@ -1005,8 +1006,8 @@ SELECT * FROM o_test_ix_ams ORDER BY j;
 
 COMMIT;
 CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (orioledb_index = off, deduplicate_items = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                           orioledb_tbl_indices                          
 ------------------------------------------------------------------------
@@ -1565,7 +1566,8 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
 (1 row)
 
 CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
-WARNING:  Enabling bridging for orioledb table 'o_briging_vacuum_test'
+NOTICE:  enabling index bridging for orioledb table 'o_briging_vacuum_test'
+DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
 DELETE FROM o_briging_vacuum_test;
 VACUUM o_briging_vacuum_test;
 SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
@@ -1613,8 +1615,8 @@ CREATE TABLE o_test_bridging_with_regular_no_pkey (
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
 	o_test_bridging_with_regular_no_pkey using btree (j) WITH (orioledb_index = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
 	o_test_bridging_with_regular_no_pkey using btree (j);
 INSERT INTO o_test_bridging_with_regular_no_pkey
@@ -1759,8 +1761,8 @@ CREATE TABLE o_test_bridging_with_regular_pkey (
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
 	o_test_bridging_with_regular_pkey using btree (j) WITH (orioledb_index = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
 	o_test_bridging_with_regular_pkey using btree (k);
 INSERT INTO o_test_bridging_with_regular_pkey
@@ -1879,8 +1881,8 @@ CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
 CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
 CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
 CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (orioledb_index = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 BEGIN;
 SET LOCAL enable_seqscan = off;
 SET LOCAL enable_indexscan = off;
@@ -1986,8 +1988,8 @@ Indexes:
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (orioledb_index = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2214,9 +2216,10 @@ Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
-WARNING:  Using bridged btree index for orioledb
-DETAIL:  this feature is only for testing
-WARNING:  Enabling bridging for orioledb table 'o_test_non_index_bridging_options'
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  enabling index bridging for orioledb table 'o_test_non_index_bridging_options'
+DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
