@@ -21,6 +21,7 @@
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "tableam/operations.h"
+#include "catalog/pg_am.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -2239,7 +2240,7 @@ change_bridging_option(Relation rel, bool value, bool isReset)
 }
 
 static void
-add_bridge_index(Relation tbl, OTable *o_table, bool manually)
+add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
@@ -2249,10 +2250,33 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually)
 	int			ix_num = InvalidIndexNumber;
 
 	if (!manually)
-		ereport(NOTICE,
-				errmsg("enabling index bridging for orioledb table '%s'",
-					   RelationGetRelationName(tbl)),
-				errdetail("The required index access method is not natively supported, so index bridgind is automatically enabled."));
+	{
+		HeapTuple	tuple;
+		Form_pg_am	amform;
+
+		tuple = SearchSysCache1(AMOID, ObjectIdGetDatum(amoid));
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for access method %u", amoid);
+
+		amform = (Form_pg_am) GETSTRUCT(tuple);
+
+		if (amoid != BTREE_AM_OID)
+		{
+			ereport(NOTICE,
+					errmsg("index bridging is enabled for orioledb table '%s'",
+						   RelationGetRelationName(tbl)),
+					errdetail("index access method '%s' is supported only via index bridging for OrioleDB table", NameStr(amform->amname)));
+		}
+		else
+		{
+			ereport(NOTICE,
+					errmsg("index bridging is enabled for orioledb table '%s'",
+						   RelationGetRelationName(tbl)),
+					errdetail("index access method '%s' is requested with index bridging for OrioleDB table", NameStr(amform->amname)));
+		}
+
+		ReleaseSysCache(tuple);
+	}
 
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
@@ -2730,7 +2754,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 
 						if (add_bridging)
-							add_bridge_index(tbl, o_table, false);
+							add_bridge_index(tbl, o_table, false, rel->rd_rel->relam);
 						else
 							o_table_free(o_table);
 					}
@@ -3122,12 +3146,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						if (!has_bridged)
 						{
 							if (new_index_bridging)
-								add_bridge_index(tbl, o_table, true);
+								add_bridge_index(tbl, o_table, true, InvalidOid);
 							else
 								drop_bridge_index(tbl, o_table);
 						}
 						else
-							elog(ERROR, "Cannot change 'index_bridging' manually when there are bridged indices");
+							elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
 					}
 					if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
 						set_toast_oids_and_options(tbl, rel, true, false);

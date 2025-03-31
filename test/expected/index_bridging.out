@@ -95,8 +95,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
 WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
-NOTICE:  enabling index bridging for orioledb table 'o_test_ix_ams'
-DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
+NOTICE:  index bridging is enabled for orioledb table 'o_test_ix_ams'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
 SELECT ctid, htid, tids FROM
 		 generate_series(1,
 						 (SELECT relpages - 1 FROM pg_class
@@ -1566,8 +1566,8 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
 (1 row)
 
 CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
-NOTICE:  enabling index bridging for orioledb table 'o_briging_vacuum_test'
-DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
+NOTICE:  index bridging is enabled for orioledb table 'o_briging_vacuum_test'
+DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
 DELETE FROM o_briging_vacuum_test;
 VACUUM o_briging_vacuum_test;
 SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
@@ -2102,7 +2102,7 @@ Indexes:
 Options: index_bridging=true
 
 ALTER TABLE o_test_index_bridging_options RESET (index_bridging);
-ERROR:  Cannot change 'index_bridging' manually when there are bridged indices
+ERROR:  cannot disable 'index_bridging' for a table with bridged indices
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2433,7 +2433,7 @@ SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
 
 COMMIT;
 ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
-ERROR:  Cannot change 'index_bridging' manually when there are bridged indices
+ERROR:  cannot disable 'index_bridging' for a table with bridged indices
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2591,8 +2591,8 @@ Indexes:
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
 WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
-NOTICE:  enabling index bridging for orioledb table 'o_test_non_index_bridging_options'
-DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
+NOTICE:  index bridging is enabled for orioledb table 'o_test_non_index_bridging_options'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2673,7 +2673,7 @@ SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true)
 (1 row)
 
 ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
-ERROR:  Cannot change 'index_bridging' manually when there are bridged indices
+ERROR:  cannot disable 'index_bridging' for a table with bridged indices
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -3201,8 +3201,8 @@ SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
 WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
-NOTICE:  enabling index bridging for orioledb table 'o_test_non_index_bridging_options'
-DETAIL:  The required index access method is not natively supported, so index bridgind is automatically enabled.
+NOTICE:  index bridging is enabled for orioledb table 'o_test_non_index_bridging_options'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
  Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
