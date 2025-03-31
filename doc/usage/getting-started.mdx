@@ -183,27 +183,25 @@ In order to activate block device mode, one should specify `orioledb.device_file
 
 ## Experimental support of indexes other than btree
 
-OrioleDB has experimental support for indexes other than btree. For this additional "bridge index" between non-btree
-index and OrioleDB table is automatically added at the first non-btree index build. 
+OrioleDB has experimental support for indexes other than btree. It is implemented by an internal "bridge index" between non-btree index and OrioleDB table. Bridge index is automatically added when the first non-btree index is built. 
 
 ```
--- Create an index
-CREATE INDEX blog_post_title_idx ON blog_post USING GIN (title);
+CREATE INDEX blog_post_title_gin_idx ON blog_post USING GIN (title);
 ```
 
-Manual build of a bridge index for a table is possible but not necessary:
+Manual build of a bridge index for a table is not necessary but possible:
 ```
 ALTER TABLE blog_post SET (index_bridging);
 ```
 
-If all existing indexes for a table were removed, the "bridge index" is not removed automatically. If you don't plan to add non-btree indexes anymore you can delete unnecessary "bridge index" for this table:
+If all existing bridged indexes for a table were removed, the "bridge index" would not be removed automatically. If you don't plan to add non-btree indexes anymore you can delete unnecessary "bridge index" for this table:
 ```
 ALTER TABLE blog_post RESET (index_bridging);
 ```
 
 Note: btree index could also be built as a bridged index (use only for testing purposes, not recommended) 
 ```
-CREATE INDEX blog_post_title_idx ON blog_post USING btree(title) with orioledb_index = off
+CREATE INDEX blog_post_title_idx ON blog_post USING btree(title) with (orioledb_index = off);
 ```
 
 ## Links
