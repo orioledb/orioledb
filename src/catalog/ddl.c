@@ -2251,8 +2251,8 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 
 	if (!manually)
 	{
-		HeapTuple       tuple;
-		Form_pg_am      amform;
+		HeapTuple	tuple;
+		Form_pg_am	amform;
 
 		tuple = SearchSysCache1(AMOID, ObjectIdGetDatum(amoid));
 		if (!HeapTupleIsValid(tuple))
@@ -2260,7 +2260,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 
 		amform = (Form_pg_am) GETSTRUCT(tuple);
 
-		if(amoid != BTREE_AM_OID)
+		if (amoid != BTREE_AM_OID)
 		{
 			ereport(NOTICE,
 					errmsg("index bridging is enabled for orioledb table '%s'",
