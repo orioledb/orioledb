@@ -473,11 +473,49 @@ CREATE TABLE o_test_non_index_bridging_options (
 	j int4[],
 	p point
 ) USING orioledb;
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+
+INSERT INTO o_test_non_index_bridging_options
+	SELECT v, ARRAY[v+17,v+33], point(v + 5, v + 5) FROM generate_series(1, 10) v;
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
 
 ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
 \d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
+
 ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
 \d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
+
+CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+\d+ o_test_non_index_bridging_options
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
+SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
+COMMIT;
+
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+DROP INDEX o_test_non_index_bridging_options_ix2;
+
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
+
+INSERT INTO o_test_non_index_bridging_options
+	SELECT v, ARRAY[v+17,v+33], point(v + 5, v + 5) FROM generate_series(11, 15) v;
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
 
 CREATE INDEX o_test_non_index_bridging_options_ix1 ON o_test_non_index_bridging_options USING btree (i);
 \d+ o_test_non_index_bridging_options
@@ -488,6 +526,58 @@ ALTER INDEX o_test_non_index_bridging_options_ix2 RESET (orioledb_index);
 \d+ o_test_non_index_bridging_options
 ALTER INDEX o_test_non_index_bridging_options_ix1 SET (orioledb_index = off);
 \d+ o_test_non_index_bridging_options
+
+ALTER TABLE o_test_non_index_bridging_options SET (index_bridging);
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
+
+ALTER TABLE o_test_non_index_bridging_options ADD PRIMARY KEY (i);
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
+
+INSERT INTO o_test_non_index_bridging_options
+	SELECT v, ARRAY[v+17,v+33], point(v + 5, v + 5) FROM generate_series(16, 20) v;
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+
+DROP INDEX o_test_non_index_bridging_options_ix1;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
+SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
+COMMIT;
+
+DROP INDEX o_test_non_index_bridging_options_ix2;
+
+ALTER TABLE o_test_non_index_bridging_options RESET (index_bridging);
+\d+ o_test_non_index_bridging_options
+ALTER TABLE o_test_non_index_bridging_options DROP CONSTRAINT o_test_non_index_bridging_options_pkey;
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+SELECT * FROM o_test_non_index_bridging_options;
+
+INSERT INTO o_test_non_index_bridging_options
+	SELECT v, ARRAY[v+17,v+33], point(v + 5, v + 5) FROM generate_series(21, 25) v;
+SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne');
+
+CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+\d+ o_test_non_index_bridging_options
+SELECT orioledb_tbl_indices('o_test_non_index_bridging_options'::regclass, true);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
+SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
+COMMIT;
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
