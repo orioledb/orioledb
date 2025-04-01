@@ -815,6 +815,13 @@ o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 	return result;
 }
 
+void
+o_deform_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec, OTuple tuple,
+			   Datum *values, bool *isnull)
+{
+	for (int i = 0; i < tupleDesc->natts; i++)
+		values[i] = o_fastgetattr(tuple, i + 1, tupleDesc, spec, &isnull[i]);
+}
 
 uint32
 o_tuple_get_version(OTuple tuple)
