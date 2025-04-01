@@ -125,15 +125,18 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 bool
 page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 				   BTreeUndoMode undoMode, BTreeLeafTuphdr *nonLockTuphdrPtr,
-				   UndoLocation nonLockUndoLocation, UndoLocation limitUndoLocation)
+				   UndoLocation nonLockUndoLocation, SecondaryIndexRollbackCxt rollbackSecondary)
 {
 	Pointer		item;
 	BTreeLeafTuphdr *tuphdr,
 				nonLockTuphdr;
+	UndoLocation tupleUndoLocationValue,
+				 limitUndoLocationValue1,
+				 limitUndoLocationValue2;
+	bool		res = false;
+	bool 		undone;
 
-	Assert(undoMode == BTreeUndoModeLimit ?
-			UndoLocationIsValid(limitUndoLocation) :
-			!UndoLocationIsValid(limitUndoLocation));
+	Assert(undoMode == BTreeUndoModeLimit ? rollbackSecondary != NULL : rollbackSecondary == NULL);
 
 	item = BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
 	tuphdr = (BTreeLeafTuphdr *) item;
@@ -146,9 +149,23 @@ page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 															 nonLockTuphdrPtr);
 	}
 
+	if (undoMode == BTreeUndoModeLimit)
+	{
+			Assert(UndoLocationIsValid(rollbackSecondary.limitUndoLocation1);
+			Assert(UndoLocationIsValid(rollbackSecondary.limitUndoLocation2);
+			limitUndoLocationValue1 = UndoLocationGetValue(rollbackSecondary.limitUndoLocation1);
+			limitUndoLocationValue2 = UndoLocationGetValue(rollbackSecondary.limitUndoLocation2);
+	}
+
 retry:
 
 	Assert(O_PAGE_IS(p, LEAF));
+
+	if (undoMode == BTreeUndoModeLimit)
+	{
+		Assert(UndoLocationIsValid(tuphdr->undoLocation));
+		tupleUndoLocationValue = UndoLocationGetValue(tuphdr->undoLocation);
+	}
 
 	if (tuphdr->deleted != BTreeLeafTupleNonDeleted)
 	{
@@ -159,34 +176,49 @@ retry:
 		 * row-level lock on this tuple.
 		 */
 		Assert(!UndoLocationIsValid(nonLockUndoLocation));
-		Assert(UndoLocationIsValid(tuphdr->undoLocation));
 		Assert(UNDO_REC_EXISTS(desc->undoType, tuphdr->undoLocation));
 
 		get_prev_leaf_header_from_undo(desc->undoType, tuphdr, true);
-		BTREE_PAGE_READ_TUPLE(prev_tuple, p, locator);
-		PAGE_SUB_N_VACATED(p,
-						   BTreeLeafTuphdrSize +
-						   MAXALIGN(o_btree_len(desc, prev_tuple, OTupleLength)));
-		tuphdr->formatFlags = 0;
 
-		if (!UndoLocationIsValid(nonLockUndoLocation))
-			*nonLockTuphdrPtr = *tuphdr;
-
-		if (!XACT_INFO_IS_FINISHED(tuphdr->xactInfo) && (undoMode == BTreeUndoModeXact))
-			goto retry;
-
-		if (undoMode == BTreeUndoModeLimit &&
-					UndoLocationGetValue(tuphdr->undoLocation) >= UndoLocationGetValue(limitUndoLocation))
+		if (undoMode != BTreeUndoModeLimit)
 		{
-			
-			result = o_update_secondary_index(index_descr, ix_num,
-									  new_valid, old_valid,
-									  new_slot, new_tuple,
-									  old_slot, oxid, oSnapshot.csn);
+			BTREE_PAGE_READ_TUPLE(prev_tuple, p, locator);
+			PAGE_SUB_N_VACATED(p, BTreeLeafTuphdrSize +
+					MAXALIGN(o_btree_len(desc, prev_tuple, OTupleLength)));
+			tuphdr->formatFlags = 0;
+			if (!UndoLocationIsValid(nonLockUndoLocation))
+				*nonLockTuphdrPtr = *tuphdr;
 
-			goto retry;
+			if (!XACT_INFO_IS_FINISHED(tuphdr->xactInfo) && (undoMode == BTreeUndoModeXact))
+				goto retry;
 		}
+		else
+		{
+			if (tupleUndoLocationValue >= limitUndoLocationValue2)
+			{
+				/* Continue to look for changes between undo1 and undo2 */
+				goto retry;
+			}
+			else if (tupleUndoLocationValue >= limitUndoLocationValue1)
+			{
+				/* Rollback changes to secondary index */
+				TupleTableSlot *new_slot = rollbackSecondary.index_descr->new_leaf_slot;
+				OTuple      	new_tuple; /* 'new' is restored previous tuple */
 
+				tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple,
+												  rollbackSecondary.descr, csn,
+												  rollbackSecondary.ix_num, false, NULL);
+				undone = o_update_secondary_index(rollbackSecondary.index_descr,
+												  rollbackSecondary.ix_num,
+									  true, false,
+									  new_slot, new_tuple,
+									  NULL, oxid, oSnapshot.csn);
+				res = res || undone;
+				goto retry;
+			}
+			else
+				return res;
+		}
 	}
 	else if (UndoLocationIsValid(nonLockTuphdrPtr->undoLocation))
 	{
@@ -247,9 +279,7 @@ retry:
 
 		if (undoMode == BTreeUndoModeUndoLimit)
 		{
-			tupleUndoLocationValue = UndoLocationGetValue(tuphdr->undoLocation);
-			limitUndoLocationValue = UndoLocationGetValue(limitUndoLocation);
-			result = o_update_secondary_index(index_descr, ix_num,
+				result = o_update_secondary_index(index_descr, ix_num,
 									  new_valid, old_valid,
 									  new_slot, new_tuple,
 									  old_slot, oxid, oSnapshot.csn);

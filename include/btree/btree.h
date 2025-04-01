@@ -96,9 +96,19 @@ typedef enum BTreeLeafTupleDeletedStatus
 typedef enum BTreeUndoMode
 {
 	BTreeUndoModeSingle = 0,
-	BTreeUndoModeXactChain = 1,
-	BTreeUndoModeLongChain = 2
+	BTreeUndoModeXact = 1,
+	BTreeUndoModeLimit = 2  /* Undo secondary index down to limitUndoLocation */
 }
+
+typedef struct SecondaryIndexRollbackCxt
+{
+	UndoLocation	limitUndoLocation1;
+	UndoLocation    limitUndoLocation2;
+	Relation		rel;
+	OTableDescr		*descr;
+	OIndexNumber	ix_num;
+	OIndexDescr	 	*index_descr;
+} SecondaryIndexRollbackCxt;
 
 typedef struct
 {
