@@ -611,6 +611,81 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	return success;
 }
 
+static void
+o_report_secondary_index_conflict(BTreeOperationType primaryOp, OTableModifyResult result,
+							  Relation rel, Relation heapRel,
+							  OIndexDescr *index_descr, OTuple old_tuple, OTuple new_tuple,
+							  TupleTableSlot *new_slot, Datum *values, bool *isnull)
+{
+	int                     i;
+
+	switch (result.action)
+	{
+		case BTreeOperationUpdate:
+			{
+				StringInfo	str = makeStringInfo();
+
+				if (result.failedIxNum == PrimaryIndexNumber)
+					break;	/* it is ok */
+
+				appendStringInfo(str, "(");
+				for (i = 0; i < index_descr->nUniqueFields; i++)
+				{
+					if (i != 0)
+						appendStringInfo(str, ", ");
+					if (isnull[i])
+						appendStringInfo(str, "null");
+					else
+					{
+						Oid			typoutput;
+						bool		typisvarlena;
+						char	   *res;
+
+						getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
+										  &typoutput, &typisvarlena);
+						res = OidOutputFunctionCall(typoutput, values[i]);
+						appendStringInfo(str, "'%s'", res);
+					}
+				}
+
+				if (old_tuple.data)
+					pfree(old_tuple.data);
+				if (primaryOp == BTreeOperationUpdate && new_tuple.data)
+					pfree(new_tuple.data);
+
+				appendStringInfo(str, ")");
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("unable to remove tuple from secondary index in \"%s\"",
+								RelationGetRelationName(rel)),
+						 errdetail("Unable to remove %s from index \"%s\"",
+								   str->data,
+								   index_descr->name.data),
+						 errtableconstraint(rel, "sk")));
+				break;
+			}
+		case BTreeOperationInsert:
+			{
+				if(primaryOp == BTreeOperationUpdate)
+				{
+					o_report_duplicate(heapRel, index_descr, new_slot);
+				}
+				break;
+			}
+		default:
+			if (old_tuple.data)
+				pfree(old_tuple.data);
+
+			if(primaryOp == BTreeOperationUpdate && new_tuple.data)
+				pfree(new_tuple.data);
+
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Unsupported BTreeOperationType.")));
+			break;
+	}
+}
+
 bool
 orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *values, bool *isnull, Datum tupleid,
@@ -619,7 +694,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  IndexUniqueCheck checkUnique,
 				  IndexInfo *indexInfo)
 {
-	OTableModifyResult result;
+	OTableModifyResult secondary_result;
 	ORelOids	oids;
 	OIndexType	ix_type;
 	OIndexDescr *index_descr;
@@ -690,7 +765,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-	result = o_update_secondary_index(index_descr, ix_num,
+	secondary_result = o_update_secondary_index(index_descr, ix_num,
 									  new_valid, old_valid,
 									  new_slot, new_tuple,
 									  old_slot, oxid, oSnapshot.csn);
@@ -702,66 +777,11 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	}
 	pfree(vfree);
 
-	if (!result.success)
+	if (!secondary_result.success)
 	{
-		switch (result.action)
-		{
-			case BTreeOperationUpdate:
-				{
-					StringInfo	str = makeStringInfo();
-
-					if (result.failedIxNum == PrimaryIndexNumber)
-						break;	/* it is ok */
-
-					appendStringInfo(str, "(");
-					for (i = 0; i < index_descr->nUniqueFields; i++)
-					{
-						if (i != 0)
-							appendStringInfo(str, ", ");
-						if (isnull[i])
-							appendStringInfo(str, "null");
-						else
-						{
-							Oid			typoutput;
-							bool		typisvarlena;
-							char	   *res;
-
-							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
-											  &typoutput, &typisvarlena);
-							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
-							appendStringInfo(str, "'%s'", res);
-						}
-					}
-
-					if (old_tuple.data)
-						pfree(old_tuple.data);
-					if (new_tuple.data)
-						pfree(new_tuple.data);
-
-					appendStringInfo(str, ")");
-					ereport(ERROR,
-							(errcode(ERRCODE_INTERNAL_ERROR),
-							 errmsg("unable to remove tuple from secondary index in \"%s\"",
-									RelationGetRelationName(rel)),
-							 errdetail("Unable to remove %s from index \"%s\"",
-									   str->data,
-									   index_descr->name.data),
-							 errtableconstraint(rel, "sk")));
-					break;
-				}
-			case BTreeOperationInsert:
-				o_report_duplicate(heapRel, index_descr, new_slot);
-				break;
-			default:
-				if (old_tuple.data)
-					pfree(old_tuple.data);
-				if (new_tuple.data)
-					pfree(new_tuple.data);
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unsupported BTreeOperationType.")));
-				break;
-		}
+		o_report_secondary_index_conflict(BTreeOperationUpdate, secondary_result, rel, heapRel,
+						  index_descr, old_tuple, new_tuple, new_slot,
+						  valuesOld, isnull);
 	}
 
 	if (old_tuple.data)
@@ -769,13 +789,13 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	if (new_tuple.data)
 		pfree(new_tuple.data);
 
-	return result.success;
+	return secondary_result.success;
 }
 bool
 orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel, IndexInfo *indexInfo)
 {
-	OTableModifyResult result;
+	OTableModifyResult secondary_result;
 	ORelOids	oids;
 	OIndexType	ix_type;
 	OIndexDescr *index_descr;
@@ -832,7 +852,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-	result = o_tbl_index_delete(index_descr, ix_num, slot, oxid, oSnapshot.csn);
+	secondary_result = o_tbl_index_delete(index_descr, ix_num, slot, oxid, oSnapshot.csn);
 	for (i = 0; i < index_descr->nonLeafTupdesc->natts; i++)
 	{
 		if (vfree[i])
@@ -840,67 +860,20 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	}
 	pfree(vfree);
 
-	if (!result.success)
+	if (!secondary_result.success)
 	{
-		switch (result.action)
-		{
-			case BTreeOperationUpdate:
-				{
-					StringInfo	str = makeStringInfo();
+		OTuple unused_arg;
 
-					if (result.failedIxNum == PrimaryIndexNumber)
-						break;	/* it is ok */
-
-					appendStringInfo(str, "(");
-					for (i = 0; i < index_descr->nUniqueFields; i++)
-					{
-						if (i != 0)
-							appendStringInfo(str, ", ");
-						if (isnull[i])
-							appendStringInfo(str, "null");
-						else
-						{
-							Oid			typoutput;
-							bool		typisvarlena;
-							char	   *res;
-
-							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
-											  &typoutput, &typisvarlena);
-							res = OidOutputFunctionCall(typoutput, values[i]);
-							appendStringInfo(str, "'%s'", res);
-						}
-					}
-					appendStringInfo(str, ")");
-
-					if (tuple.data)
-						pfree(tuple.data);
-					ereport(ERROR,
-							(errcode(ERRCODE_INTERNAL_ERROR),
-							 errmsg("unable to remove tuple from secondary index in \"%s\"",
-									RelationGetRelationName(rel)),
-							 errdetail("Unable to remove %s from index \"%s\"",
-									   str->data,
-									   index_descr->name.data),
-							 errtableconstraint(rel, "sk")));
-					break;
-				}
-			case BTreeOperationInsert:
-				break;
-			default:
-				if (tuple.data)
-					pfree(tuple.data);
-
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unsupported BTreeOperationType.")));
-				break;
-		}
+		O_TUPLE_SET_NULL(unused_arg);
+		o_report_secondary_index_conflict(BTreeOperationDelete, secondary_result, rel, heapRel,
+				index_descr, tuple, unused_arg, NULL,
+				values, isnull);
 	}
 
 	if (tuple.data)
 		pfree(tuple.data);
 
-	return result.success;
+	return secondary_result.success;
 }
 
 IndexBulkDeleteResult *
