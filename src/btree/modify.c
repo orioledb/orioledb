@@ -480,7 +480,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 		}
 		else
 		{
-			CommitSeqNo csn = oxid_get_csn(oxid);
+			CommitSeqNo csn = oxid_get_csn(oxid, false);
 
 			if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && (COMMITSEQNO_IS_ABORTED(csn) ||
 													 COMMITSEQNO_IS_NORMAL(csn) ||

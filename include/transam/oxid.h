@@ -95,7 +95,7 @@ extern void current_oxid_precommit(void);
 extern void current_oxid_xlog_precommit(void);
 extern void current_oxid_commit(CommitSeqNo csn);
 extern void current_oxid_abort(void);
-extern CommitSeqNo oxid_get_csn(OXid oxid);
+extern CommitSeqNo oxid_get_csn(OXid oxid, bool getRawCsn);
 extern XLogRecPtr oxid_get_xlog_ptr(OXid oxid);
 extern void oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 								CommitSeqNo *outCsn, XLogRecPtr *outPtr);
@@ -104,5 +104,7 @@ extern int	oxid_get_procnum(OXid oxid);
 extern bool xid_is_finished(OXid xid);
 extern bool xid_is_finished_for_everybody(OXid xid);
 extern void fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info);
+extern void clear_rewind_oxid(OXid oxid);
+extern bool csn_is_retained_for_rewind(CommitSeqNo csn);
 
 #endif							/* __OXID_H__ */
