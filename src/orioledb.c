@@ -43,6 +43,7 @@
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
 #include "workers/bgwriter.h"
+#include "workers/rewind.h"
 
 #include "access/table.h"
 #include "access/xlog_internal.h"
@@ -135,6 +136,8 @@ char	   *s3_prefix = NULL;
 char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
+bool 		enable_rewind = true;
+int 		rewind_max_period = 0;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -191,6 +194,8 @@ static ShmemItem shmemItems[] = {
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
 	{s3_headers_shmem_needs, s3_headers_shmem_init}
+//	,
+//	{rewind_worker_shmem_needs, rewind_worker_shmem_init}
 };
 
 
@@ -795,6 +800,30 @@ _PG_init(void)
 							   NULL,
 							   NULL);
 
+	DefineCustomBoolVariable("orioledb.enable_rewind",
+							 "Enable rewind for OrioleDB tables",
+							 NULL,
+							 &enable_rewind,
+							 true,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("orioledb.rewind_max_period",
+							"Sets the maximum time to hold information for OrioleDB rewind.",
+							NULL,
+							&rewind_max_period,
+							500,
+							1,
+							86400,
+							PGC_POSTMASTER,
+							GUC_UNIT_S,
+							NULL,
+							NULL,
+							NULL);
+
 	if (orioledb_s3_mode)
 	{
 		if (!s3_host || !s3_region || !s3_accesskey || !s3_secretkey)
@@ -884,6 +913,9 @@ _PG_init(void)
 	/* Register background writers */
 	for (i = 0; i < bgwriter_num_workers; i++)
 		register_bgwriter();
+
+	if (enable_rewind)
+		register_rewind_worker();
 
 	if (orioledb_s3_mode)
 	{
