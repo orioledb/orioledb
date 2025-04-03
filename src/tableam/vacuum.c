@@ -1076,10 +1076,14 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 			OTuple		tup;
 			ItemPointer iptr;
 			bool		isnull;
+			bool		tuple_can_be_vaccumed;
 
 			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, p, &loc);
+
+			tuple_can_be_vaccumed = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
+
 			if (tupHdr->deleted != BTreeLeafTupleNonDeleted &&
-				XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo))
+				tuple_can_be_vaccumed)
 			{
 				Assert(tupHdr->deleted == BTreeLeafTupleDeleted);
 
