@@ -162,5 +162,10 @@ extern void add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids,
 extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
 									int numTreeOids);
 extern void check_pending_truncates(void);
+extern UndoLocation walk_undo_range_with_buf(UndoLogType undoType, UndoLocation location,
+											 UndoLocation toLoc,
+											 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+											 bool changeCountsValid);
+
 
 #endif							/* __BTREE_UNDO_H__ */

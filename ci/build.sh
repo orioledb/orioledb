@@ -8,7 +8,7 @@ else
 	export CC=gcc
 fi
 
-if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
+if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ] || [ $CHECK_TYPE = "valgrind_3" ]; then
 	sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" postgresql/src/include/pg_config_manual.h
 fi
 

@@ -16,6 +16,7 @@
 #include "orioledb.h"
 
 #include "btree/page_contents.h"
+#include "rewind/rewind.h"
 
 #include "access/xlogdefs.h"
 
@@ -137,6 +138,9 @@ typedef struct
 	UndoStackLocations undoLocation;
 } XidFileRec;
 
+/* Rewind types are shifted by UndoLogsCount compared to respective general undoTypes */
+#define XID_REC_REWIND_TYPES_OFFSET UndoLogsCount
+
 typedef struct
 {
 	uint64		controlIdentifier;
@@ -251,5 +255,6 @@ extern void systrees_lock_callback(UndoLogType undoType,
 								   bool abort, bool changeCountsValid);
 extern void before_writing_xids_file(int chkpnum);
 extern void write_to_xids_queue(XidFileRec *rec);
+void		checkpoint_write_rewind_item(RewindItem *rewindItem);
 
 #endif							/* __CHECKPOINT_H__ */

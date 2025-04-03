@@ -47,6 +47,7 @@ typedef struct
 	pg_atomic_uint64 lastUsedUndoLocationWhenUpdatedMinLocation;
 	pg_atomic_uint64 minProcTransactionRetainLocation;
 	pg_atomic_uint64 minProcRetainLocation;
+	pg_atomic_uint64 minRewindRetainLocation;
 	pg_atomic_uint64 minProcReservedLocation;
 	pg_atomic_uint64 checkpointRetainStartLocation;
 	pg_atomic_uint64 checkpointRetainEndLocation;
@@ -77,7 +78,8 @@ typedef enum
 	SysTreesLockUndoItemType,
 	InvalidateUndoItemType,
 	BranchUndoItemType,
-	SubXactUndoItemType
+	SubXactUndoItemType,
+	RewindRelFileNodeUndoItemType
 } UndoItemType;
 
 struct UndoStackItem
@@ -149,7 +151,7 @@ extern PendingTruncatesMeta *pending_truncates_meta;
 #define ORIOLEDB_UNDO_SYSTEM_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xsystem")
 #define UNDO_FILE_SIZE (0x4000000)
 
-#define UNDO_REC_EXISTS(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcRetainLocation) || \
+#define UNDO_REC_EXISTS(undoType, location) ((location) >= pg_atomic_read_u64(enable_rewind ? &get_undo_meta_by_type((undoType))->minRewindRetainLocation : &get_undo_meta_by_type((undoType))->minProcRetainLocation) || \
 											 ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainStartLocation) && \
 											  (location) < pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainEndLocation)))
 #define UNDO_REC_XACT_RETAIN(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcTransactionRetainLocation))
@@ -220,6 +222,9 @@ extern bool undo_type_has_retained_location(UndoLogType undoType);
 extern bool have_retained_undo_location(void);
 extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
 extern void orioledb_reset_xmin_hook(void);
+extern void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
+											   RelFileNode *onAbort,
+											   int nOnCommit, int nOnAbort);
 
 static inline void
 reserve_undo_size(UndoLogType type, Size size)
