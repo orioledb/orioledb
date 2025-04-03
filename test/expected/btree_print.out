@@ -91,6 +91,12 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 (1 row)
 
 DELETE FROM o_test1 WHERE id BETWEEN 2 AND 4;
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
                        orioledb_tbl_structure                        
 ---------------------------------------------------------------------

@@ -337,6 +337,7 @@ SELECT id, length(val) FROM o_test1;
 -- DELETE with TOAST values
 INSERT INTO o_test1 VALUES (2, generate_string(5, 10000));
 DELETE FROM o_test1 WHERE id = 2;
+SELECT orioledb_rewind_sync();
 INSERT INTO o_test1 VALUES (2, generate_string(6, 15000));
 SELECT id, length(val) FROM o_test1;
 
@@ -366,8 +367,10 @@ SELECT id, length(val) FROM o_test1 WHERE id = 5;
 -- update pk, delete all old toasted values and insert new
 INSERT INTO o_test1 VALUES (6, generate_string(13, 4000));
 UPDATE o_test1 SET id = 7 WHERE id = 6;
+SELECT orioledb_rewind_sync();
 SELECT id, length(val) FROM o_test1 WHERE id = 7;
 UPDATE o_test1 SET id = 6, val = generate_string(14, 5000) WHERE id = 7;
+SELECT orioledb_rewind_sync();
 SELECT id, length(val) FROM o_test1 WHERE id > 5;
 
 -- and see results

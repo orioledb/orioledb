@@ -21,6 +21,7 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'ne');
 UPDATE o_test1 SET val = 'xxx1' WHERE id BETWEEN 5 AND 10;
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 DELETE FROM o_test1 WHERE id BETWEEN 2 AND 4;
+SELECT orioledb_rewind_sync();
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
 INSERT INTO o_test1 (SELECT id, id || 'val' FROM generate_series(-1000, 0, 1) id);

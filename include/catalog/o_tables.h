@@ -203,6 +203,7 @@ extern bool o_tables_rel_try_lock_extended(ORelOids *oids, int lockmode, bool *n
 extern void o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 extern void o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
 												bool checkpoint);
+extern void o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids);
 extern void o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 
 /* Deserialize OTable stored in O_TABLES sys tree */

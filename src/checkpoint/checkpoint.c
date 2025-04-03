@@ -269,6 +269,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&undo_meta->writtenLocation, 0);
 			pg_atomic_init_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minRewindRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
 			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
@@ -839,6 +840,11 @@ finish_write_xids(uint32 chkpnum)
 		LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
 	}
 
+	if (enable_rewind)
+	{
+		checkpoint_write_rewind_xids();
+	}
+
 	recovery_undo_loc_flush->immediateRequestCheckpointNumber = chkpnum;
 
 	/*
@@ -849,6 +855,36 @@ finish_write_xids(uint32 chkpnum)
 	{
 		WakeupRecovery();
 		pg_usleep(10000L);
+	}
+}
+
+void
+checkpoint_write_rewind_item(RewindItem *rewindItem)
+{
+	XidFileRec	xidRec;
+	int			i;
+
+	/* Don't write subxids item */
+	if (rewindItem->tag != REWIND_ITEM_TAG)
+		return;
+
+	/*
+	 * Don't write rewind item for heap-only xact that doesn't contain undo
+	 * locations
+	 */
+	if (!OXidIsValid(rewindItem->oxid))
+		return;
+
+	xidRec.oxid = rewindItem->oxid;
+
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		xidRec.undoType = (UndoLogType) (i + XID_REC_REWIND_TYPES_OFFSET);
+		xidRec.undoLocation.onCommitLocation = rewindItem->onCommitUndoLocation[i];
+		xidRec.undoLocation.location = InvalidUndoLocation;
+		xidRec.undoLocation.branchLocation = InvalidUndoLocation;
+		xidRec.undoLocation.subxactLocation = InvalidUndoLocation;
+		write_to_xids_queue(&xidRec);
 	}
 }
 
