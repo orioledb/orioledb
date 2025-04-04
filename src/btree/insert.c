@@ -155,8 +155,8 @@ o_btree_split_fill_downlink_item(BTreeInsertStackItem *insert_item,
 	LocationIndex keylen;
 	BTreeNonLeafTuphdr *internal_header = palloc(sizeof(BTreeNonLeafTuphdr));
 
-	keylen = btree_get_hikey_size(leftPageContext);
 	hikey = btree_get_hikey(leftPageContext);
+	keylen = btree_get_tuple_size(leftPageContext->hikeyChunk, hikey);
 	key.data = (Pointer) palloc(keylen);
 	key.formatFlags = hikey.formatFlags;
 	memcpy(key.data, hikey.data, keylen);

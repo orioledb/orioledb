@@ -20,6 +20,9 @@
 
 const BTreeChunkOps BTreeHiKeyChunkOps;
 
+static inline uint16 htc_get_item_size(BTreeHiKeyChunkDesc *hikeyChunk,
+									   OffsetNumber itemOffset);
+
 /*
  * Page utility functions.
  */
@@ -59,8 +62,7 @@ btree_get_hikey_size(BTreePageContext *pageContext)
 
 	Assert(chunk->chunkItemsCount > 0);
 
-	return chunk->chunkDataSize -
-		ITEM_GET_OFFSET(hikeyChunk->chunkItems[chunk->chunkItemsCount - 1]);
+	return htc_get_item_size(hikeyChunk, chunk->chunkItemsCount - 1);
 }
 
 void
@@ -114,6 +116,15 @@ btree_fits_hikey(BTreePageContext *pageContext, LocationIndex newHikeySize)
 
 	dataShift = hikeyLocation + newHikeySize - dataLocation;
 	return (header->dataSize + dataShift <= ORIOLEDB_BLCKSZ);
+}
+
+/*
+ * Utility functions
+ */
+uint16
+btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple)
+{
+	return chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
 }
 
 /*

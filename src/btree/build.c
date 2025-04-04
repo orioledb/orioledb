@@ -217,6 +217,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		FileExtent	extent;
 		char		new_page[ORIOLEDB_BLCKSZ] = {0};
 		OFixedKey	key;
+		OTuple		hikey;
 		int			keysize;
 		BTreePageHeader *new_page_header = (BTreePageHeader *) new_page;
 		BTreePageHeader *header = (BTreePageHeader *) stack[level].img;
@@ -279,8 +280,10 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		copy_fixed_key(desc, &key, stack[level].key.tuple);
 		keysize = stack[level].keysize;
 
-		stack[level].keysize = btree_get_hikey_size(&stack[level].pageContext);
-		btree_copy_fixed_hikey(&stack[level].pageContext, &stack[level].key);
+		hikey = btree_get_hikey(&stack[level].pageContext);
+		stack[level].keysize = btree_get_tuple_size(stack[level].pageContext.hikeyChunk,
+													hikey);
+		copy_fixed_key(stack[level].pageContext.treeDesc, &stack[level].key, hikey);
 
 		if (level > 0)
 		{

@@ -235,4 +235,9 @@ extern OTuple btree_read_hikey(BTreePageContext *pageContext, OffsetNumber itemO
 extern bool btree_fits_hikey(BTreePageContext *pageContext,
 							 LocationIndex newHikeySize);
 
+/*
+ * Utility functions
+ */
+extern uint16 btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple);
+
 #endif							/* __BTREE_CHUNK_OPS_H__ */

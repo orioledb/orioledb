@@ -584,7 +584,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 				right = rightPageContext->page;
 	BTreePageHeader *left_header = (BTreePageHeader *) left,
 			   *right_header = (BTreePageHeader *) right;
-	OTuple		leftHikey,
+	OTuple	leftHikey,
 				rightHikey;
 	LocationIndex leftHikeySize,
 				rightHikeySize;
@@ -598,8 +598,8 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	Assert(O_PAGE_IS(left, LEAF) == O_PAGE_IS(right, LEAF));
 	Assert(!O_PAGE_IS(left, RIGHTMOST));
 
-	leftHikeySize = btree_get_hikey_size(leftPageContext);
 	leftHikey = btree_get_hikey(leftPageContext);
+	leftHikeySize = btree_get_tuple_size(leftPageContext->hikeyChunk, leftHikey);
 	if (O_PAGE_IS(right, RIGHTMOST))
 	{
 		rightHikeySize = 0;
@@ -607,8 +607,8 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	}
 	else
 	{
-		rightHikeySize = btree_get_hikey_size(rightPageContext);
 		rightHikey = btree_get_hikey(rightPageContext);
+		rightHikeySize = btree_get_tuple_size(rightPageContext->hikeyChunk, rightHikey);
 	}
 
 	i = 0;
@@ -680,15 +680,20 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			if (first)
 			{
 				first = false;
+
 				memcpy(newItem,
 					   BTREE_PAGE_LOCATOR_GET_ITEM(right, &loc),
 					   BTreeNonLeafTuphdrSize);
 				memcpy(&newItem[BTreeNonLeafTuphdrSize],
 					   leftHikey.data,
 					   leftHikeySize);
+				if (leftHikeySize != MAXALIGN(leftHikeySize))
+					memset(&newItem[BTreeNonLeafTuphdrSize] + leftHikeySize, 0,
+						   MAXALIGN(leftHikeySize) - leftHikeySize);
+
 				items[i].data = newItem;
 				items[i].flags = leftHikey.formatFlags;
-				items[i].size = MAXALIGN(BTreeNonLeafTuphdrSize + leftHikeySize);
+				items[i].size = BTreeNonLeafTuphdrSize + MAXALIGN(leftHikeySize);
 				items[i].newItem = false;
 				i++;
 				continue;

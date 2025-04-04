@@ -3925,8 +3925,8 @@ checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
 		btree_page_context_invalidate(&pageContext);
 
 		btree_copy_fixed_hikey(&pageContext, &hikey[cur_level % 2]);
-
-		hikeySize[cur_level % 2] = btree_get_hikey_size(&pageContext);
+		hikeySize[cur_level % 2] = btree_get_tuple_size(pageContext.hikeyChunk,
+														hikey[cur_level % 2].tuple);
 
 		init_page_first_chunk(descr, curItem->image, 0);
 		BTREE_PAGE_LOCATOR_FIRST(curItem->image, &curLoc);
@@ -4574,7 +4574,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		{
 			Assert(!autonomous);
 			write_hikey = btree_get_hikey(&pageContext);
-			hikey_len = btree_get_hikey_size(&pageContext);
+			hikey_len = btree_get_tuple_size(pageContext.hikeyChunk, write_hikey);
 		}
 
 		checkpoint_stack_image_add_item(&imgPageContext, state->stack[level].autonomous,
