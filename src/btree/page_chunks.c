@@ -37,10 +37,12 @@ static void reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
  * Load chunk to the partial page.
  */
 bool
-partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset)
+partial_load_chunk(BTreePageContext *pageContext, PartialPageState *partial,
+				   OffsetNumber chunkOffset)
 {
 	uint32		imgState,
 				srcState;
+	Page		img = pageContext->page;
 	Page		src = partial->src;
 	LocationIndex chunkBegin,
 				chunkEnd;
@@ -61,6 +63,8 @@ partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset
 	memcpy((Pointer) img + chunkBegin,
 		   (Pointer) src + chunkBegin,
 		   chunkEnd - chunkBegin);
+
+	btree_page_context_invalidate(pageContext);
 
 	pg_read_barrier();
 
@@ -1350,8 +1354,9 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 }
 
 void
-split_page_by_chunks(BTreeDescr *desc, Page p)
+split_page_by_chunks(BTreePageContext *pageContext)
 {
+	Page		p = pageContext->page;
 	BTreePageItemLocator loc;
 	BTreePageItem items[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			i = 0;
@@ -1374,18 +1379,20 @@ split_page_by_chunks(BTreeDescr *desc, Page p)
 	}
 	else
 	{
-		copy_fixed_hikey(desc, &hikey, p);
-		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
+		btree_copy_fixed_hikey(pageContext, &hikey);
+		hikeySize = btree_get_tuple_size(pageContext->hikeyChunk, hikey.tuple);
 	}
 
-	btree_page_reorg(desc, p, items, i, hikeySize, hikey.tuple, NULL);
+	btree_page_reorg(pageContext->treeDesc, p, items, i, hikeySize, hikey.tuple, NULL);
+	btree_page_context_invalidate(pageContext);
 }
 
 bool
-page_locator_find_real_item(Page p, PartialPageState *partial,
+page_locator_find_real_item(BTreePageContext *pageContext,
+							PartialPageState *partial,
 							BTreePageItemLocator *locator)
 {
-	BTreePageHeader *header = (BTreePageHeader *) p;
+	BTreePageHeader *header = (BTreePageHeader *) pageContext->page;
 	OffsetNumber offset;
 
 	while (locator->itemOffset >= locator->chunkItemsCount)
@@ -1396,10 +1403,10 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 		offset = locator->itemOffset - locator->chunkItemsCount;
 		if (partial)
 		{
-			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1))
+			if (!partial_load_chunk(pageContext, partial, locator->chunkOffset + 1))
 				return false;
 		}
-		page_chunk_fill_locator(p, locator->chunkOffset + 1, locator);
+		page_chunk_fill_locator(pageContext->page, locator->chunkOffset + 1, locator);
 		locator->itemOffset = offset;
 	}
 	return true;
