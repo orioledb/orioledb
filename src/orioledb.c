@@ -94,6 +94,7 @@ OrioleDBPageDesc *page_descs = NULL;
 int			main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
+static int  rewind_buffers_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
@@ -104,6 +105,8 @@ double		regular_block_undo_circular_buffer_fraction;
 double		system_undo_circular_buffer_fraction;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
+Size		rewind_circular_buffer_size = 0;
+uint32		rewind_buffers_count = 0;
 bool		remove_old_checkpoint_files = true;
 bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
@@ -193,9 +196,8 @@ static ShmemItem shmemItems[] = {
 	{btree_scan_shmem_needs, btree_scan_init_shmem},
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
-	{s3_headers_shmem_needs, s3_headers_shmem_init}
-//	,
-//	{rewind_worker_shmem_needs, rewind_worker_shmem_init}
+	{s3_headers_shmem_needs, s3_headers_shmem_init},
+	{rewind_shmem_needs, rewind_shmem_init}
 };
 
 
@@ -370,6 +372,19 @@ _PG_init(void)
 							"Size of orioledb engine xid buffers.",
 							NULL,
 							&xid_buffers_guc,
+							128,
+							128,
+							INT_MAX,
+							PGC_POSTMASTER,
+							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.rewind_buffers",
+							"Size of orioledb engine rewind buffers.",
+							NULL,
+							&rewind_buffers_guc,
 							128,
 							128,
 							INT_MAX,
@@ -855,6 +870,14 @@ _PG_init(void)
 	xid_circular_buffer_size /= ORIOLEDB_BLCKSZ;
 	xid_buffers_count = (uint32) xid_circular_buffer_size;
 	xid_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(OXidMapItem);
+
+	if (enable_rewind)
+	{
+		rewind_circular_buffer_size = ((Size) rewind_buffers_guc * BLCKSZ) / 2;
+		rewind_circular_buffer_size /= ORIOLEDB_BLCKSZ;
+		rewind_buffers_count = (uint32) rewind_circular_buffer_size;
+		rewind_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(RewindItem);
+	}
 
 	page_descs_size = CACHELINEALIGN(mul_size(orioledb_buffers_count, sizeof(OrioleDBPageDesc)));
 

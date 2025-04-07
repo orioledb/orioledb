@@ -148,6 +148,14 @@ typedef struct
 
 typedef struct
 {
+	uint64 location;
+	uint64 branchLocation;
+	uint64 subxactLocation;
+	uint64 onCommitLocation;
+} UndoStackLocations;
+
+typedef struct
+{
 	pg_atomic_uint64 location;
 	pg_atomic_uint64 branchLocation;
 	pg_atomic_uint64 subxactLocation;
