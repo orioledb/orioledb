@@ -117,10 +117,10 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
  quantity | text    |           |          |         | extended |             |              | 
  price    | bigint  |           |          |         | plain    |             |              | 
 View definition:
- SELECT "*VALUES*".column1 AS order_id,
-    "*VALUES*".column2 AS item_id,
-    "*VALUES*".column3 AS quantity,
-    "*VALUES*".column4 AS price
+ SELECT column1 AS order_id,
+    column2 AS item_id,
+    column3 AS quantity,
+    column4 AS price
    FROM (VALUES (100,1,'a'::text,nextval('o_matview_seq'::regclass)), (100,3,'b'::text,nextval('o_matview_seq'::regclass))) "*VALUES*";
 
 ALTER MATERIALIZED VIEW o_test_matview
@@ -157,10 +157,10 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
  quantity | text    |           |          |         | extended | pglz        |              | 
  price    | bigint  |           |          |         | plain    |             |              | 
 View definition:
- SELECT "*VALUES*".column1 AS order_id,
-    "*VALUES*".column2 AS item_id,
-    "*VALUES*".column3 AS quantity,
-    "*VALUES*".column4 AS price
+ SELECT column1 AS order_id,
+    column2 AS item_id,
+    column3 AS quantity,
+    column4 AS price
    FROM (VALUES (100,1,'a'::text,nextval('o_matview_seq'::regclass)), (100,3,'b'::text,nextval('o_matview_seq'::regclass))) "*VALUES*";
 
 SET orioledb.table_description_compress = false;

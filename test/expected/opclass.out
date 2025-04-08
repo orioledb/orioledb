@@ -66,54 +66,54 @@ $$ LANGUAGE plpgsql;
 -- v - volatile
 -- if several letters go one next to the other in name
 -- that means it calls that kind of function
-CREATE FUNCTION my_int_cmp_p_i(a int, b int) RETURNS int AS $$
+CREATE FUNCTION opclass.my_int_cmp_p_i(a int, b int) RETURNS int AS $$
 BEGIN
 	RETURN btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					 (b::bit(5) & X'A8'::bit(5))::int);
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_i(a int, b int) RETURNS int AS $$
+CREATE FUNCTION opclass.my_int_cmp_s_i(a int, b int) RETURNS int AS $$
 	SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					 (b::bit(5) & X'A8'::bit(5))::int);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_v_i(a int, b int) RETURNS int AS $$
+CREATE FUNCTION opclass.my_int_cmp_v_i(a int, b int) RETURNS int AS $$
 	SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					 (b::bit(5) & X'A8'::bit(5))::int);
 $$ LANGUAGE SQL VOLATILE;
-CREATE FUNCTION my_int_cmp_s_p_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_p_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_p_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_p_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_p_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_p_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_p_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_p_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_s_p_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_s_p_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_s_p_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_s_p_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_s_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_s_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_s_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_s_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_s_s_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_s_s_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_s_s_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_s_s_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_v_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_v_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_v_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_v_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_v_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_v_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_v_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_v_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_int_cmp_s_s_s_v_i(a int, b int) RETURNS int AS $$
-	SELECT my_int_cmp_s_s_v_i(a, b);
+CREATE FUNCTION opclass.my_int_cmp_s_s_s_v_i(a int, b int) RETURNS int AS $$
+	SELECT opclass.my_int_cmp_s_s_v_i(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE TABLE test_ints AS (SELECT generate_series(1, 5) val);
-CREATE PROCEDURE my_test_proc(a int, b int) AS $$
+CREATE TABLE opclass.test_ints AS (SELECT generate_series(1, 5) val);
+CREATE PROCEDURE opclass.my_test_proc(a int, b int) AS $$
 	SELECT a + b + 3;
 $$ LANGUAGE SQL;
 CREATE OPERATOR FAMILY my_op_family USING btree;
 -- INVALID OPCLASSES
-SELECT cmp_is_valid('my_int_cmp_p_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_p_i');
  cmp_is_valid 
 --------------
  t
@@ -121,13 +121,13 @@ SELECT cmp_is_valid('my_int_cmp_p_i');
 
 CREATE OPERATOR CLASS my_op_class_p_i FOR TYPE int
 	USING btree FAMILY my_op_family
-	AS FUNCTION 1 my_int_cmp_p_i(int, int);
+	AS FUNCTION 1 opclass.my_int_cmp_p_i(int, int);
 CREATE INDEX int_val_ix ON
 	o_test_custom_opclass(int_val my_op_class_p_i);
 ERROR:  function "my_int_cmp_p_i" cannot be used here
 HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 DROP OPERATOR CLASS my_op_class_p_i USING btree CASCADE;
-SELECT cmp_is_valid('my_int_cmp_s_p_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_p_i');
  cmp_is_valid 
 --------------
  t
@@ -135,14 +135,14 @@ SELECT cmp_is_valid('my_int_cmp_s_p_i');
 
 CREATE OPERATOR CLASS my_op_class_s_p_i FOR TYPE int
 	USING btree FAMILY my_op_family
-	AS FUNCTION 1 my_int_cmp_s_p_i(int, int);
+	AS FUNCTION 1 opclass.my_int_cmp_s_p_i(int, int);
 CREATE INDEX int_val_ix ON
 	o_test_custom_opclass(int_val my_op_class_s_p_i);
 ERROR:  function "my_int_cmp_p_i" cannot be used here
 HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_p_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_p_i USING btree CASCADE;
-SELECT cmp_is_valid('my_int_cmp_s_s_s_p_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_p_i');
  cmp_is_valid 
 --------------
  t
@@ -150,7 +150,7 @@ SELECT cmp_is_valid('my_int_cmp_s_s_s_p_i');
 
 CREATE OPERATOR CLASS my_op_class_s_s_s_p_i FOR TYPE int
 	USING btree FAMILY my_op_family
-	AS FUNCTION 1 my_int_cmp_s_s_s_p_i(int, int);
+	AS FUNCTION 1 opclass.my_int_cmp_s_s_s_p_i(int, int);
 CREATE INDEX int_val_ix ON
 	o_test_custom_opclass(int_val my_op_class_s_s_s_p_i);
 ERROR:  function "my_int_cmp_p_i" cannot be used here
@@ -159,7 +159,7 @@ CONTEXT:  SQL function "my_int_cmp_s_p_i" during body validation
 SQL function "my_int_cmp_s_s_p_i" during body validation
 SQL function "my_int_cmp_s_s_s_p_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_s_s_p_i USING btree CASCADE;
-SELECT cmp_is_valid('my_int_cmp_v_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_v_i');
  cmp_is_valid 
 --------------
  t
@@ -167,13 +167,13 @@ SELECT cmp_is_valid('my_int_cmp_v_i');
 
 CREATE OPERATOR CLASS my_op_class_v_i FOR TYPE int
 	USING btree FAMILY my_op_family
-	AS FUNCTION 1 my_int_cmp_v_i(int, int);
+	AS FUNCTION 1 opclass.my_int_cmp_v_i(int, int);
 CREATE INDEX int_val_ix ON
 	o_test_custom_opclass(int_val my_op_class_v_i);
 ERROR:  function "my_int_cmp_v_i" cannot be used here
 HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 DROP OPERATOR CLASS my_op_class_v_i USING btree CASCADE;
-SELECT cmp_is_valid('my_int_cmp_s_v_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_v_i');
  cmp_is_valid 
 --------------
  t
@@ -181,14 +181,14 @@ SELECT cmp_is_valid('my_int_cmp_s_v_i');
 
 CREATE OPERATOR CLASS my_op_class_s_v_i FOR TYPE int
 	USING btree FAMILY my_op_family
-	AS FUNCTION 1 my_int_cmp_s_v_i(int, int);
+	AS FUNCTION 1 opclass.my_int_cmp_s_v_i(int, int);
 CREATE INDEX int_val_ix ON
 	o_test_custom_opclass(int_val my_op_class_s_v_i);
 ERROR:  function "my_int_cmp_v_i" cannot be used here
 HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_v_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_v_i USING btree CASCADE;
-SELECT cmp_is_valid('my_int_cmp_s_s_s_v_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_v_i');
  cmp_is_valid 
 --------------
  t
@@ -196,7 +196,7 @@ SELECT cmp_is_valid('my_int_cmp_s_s_s_v_i');
 
 CREATE OPERATOR CLASS my_op_class_s_s_s_v_i FOR TYPE int
 	USING btree FAMILY my_op_family
-	AS FUNCTION 1 my_int_cmp_s_s_s_v_i(int, int);
+	AS FUNCTION 1 opclass.my_int_cmp_s_s_s_v_i(int, int);
 CREATE INDEX int_val_ix ON
 	o_test_custom_opclass(int_val my_op_class_s_s_s_v_i);
 ERROR:  function "my_int_cmp_v_i" cannot be used here
@@ -206,7 +206,7 @@ SQL function "my_int_cmp_s_s_v_i" during body validation
 SQL function "my_int_cmp_s_s_s_v_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_s_s_v_i USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_call(a int, b int) RETURNS int AS $$
-	CALL my_test_proc(1, 5);
+	CALL opclass.my_test_proc(1, 5);
 	SELECT (VALUES (a*a%11-b*b%11));
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_call');
@@ -224,7 +224,7 @@ CREATE INDEX int_val_ix ON
 ERROR:  CALL is not allowed in a non-volatile function
 DROP OPERATOR CLASS my_op_class_call USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_delete(a int, b int) RETURNS int AS $$
-	DELETE FROM test_ints WHERE val = a - b RETURNING val;
+	DELETE FROM opclass.test_ints WHERE val = a - b RETURNING val;
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_delete');
 ERROR:  DELETE is not allowed in a non-volatile function
@@ -243,7 +243,7 @@ HINT:  only queries without relation references should be used as B-tree compars
 CONTEXT:  SQL function "my_int_cmp_delete" during body validation
 DROP OPERATOR CLASS my_op_class_delete USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_update(a int, b int) RETURNS int AS $$
-	UPDATE test_ints SET val = val WHERE val = a - b RETURNING val;
+	UPDATE opclass.test_ints SET val = val WHERE val = a - b RETURNING val;
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_update');
 ERROR:  UPDATE is not allowed in a non-volatile function
@@ -262,7 +262,7 @@ HINT:  only queries without relation references should be used as B-tree compars
 CONTEXT:  SQL function "my_int_cmp_update" during body validation
 DROP OPERATOR CLASS my_op_class_update USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_insert(a int, b int) RETURNS int AS $$
-	INSERT INTO test_ints VALUES (-1) RETURNING val;
+	INSERT INTO opclass.test_ints VALUES (-1) RETURNING val;
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_insert');
 ERROR:  INSERT is not allowed in a non-volatile function
@@ -281,7 +281,7 @@ HINT:  only queries without relation references should be used as B-tree compars
 CONTEXT:  SQL function "my_int_cmp_insert" during body validation
 DROP OPERATOR CLASS my_op_class_insert USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_select_from_table(a int, b int) RETURNS int AS $$
-	SELECT a%(val+6)-b%(val+6) FROM test_ints LIMIT 1;
+	SELECT a%(val+6)-b%(val+6) FROM opclass.test_ints LIMIT 1;
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_select_from_table');
  cmp_is_valid 
@@ -310,7 +310,7 @@ CREATE OPERATOR =^ (
 	PROCEDURE = int4eq,
 	COMMUTATOR = OPERATOR(=^)
 );
-SELECT cmp_is_valid('my_int_cmp_s_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_i');
  cmp_is_valid 
 --------------
  t
@@ -319,7 +319,7 @@ SELECT cmp_is_valid('my_int_cmp_s_i');
 CREATE OPERATOR CLASS my_op_class_s_i FOR TYPE int
 	USING btree FAMILY my_op_family
 	AS OPERATOR 1 <^, OPERATOR 3 =^,
-	   FUNCTION 1 my_int_cmp_s_i(int, int);
+	   FUNCTION 1 opclass.my_int_cmp_s_i(int, int);
 CREATE INDEX int_val_ix_s_i ON
 	o_test_custom_opclass(int_val my_op_class_s_i);
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
@@ -349,7 +349,7 @@ SELECT * FROM o_test_custom_opclass
 DROP OPERATOR CLASS my_op_class_s_i USING btree CASCADE;
 NOTICE:  drop cascades to index int_val_ix_s_i
 TRUNCATE o_test_custom_opclass;
-SELECT cmp_is_valid('my_int_cmp_s_s_s_s_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_s_i');
  cmp_is_valid 
 --------------
  t
@@ -358,7 +358,7 @@ SELECT cmp_is_valid('my_int_cmp_s_s_s_s_i');
 CREATE OPERATOR CLASS my_op_class_s_s_s_s_i FOR TYPE int
 	USING btree FAMILY my_op_family
 	AS OPERATOR 1 <^, OPERATOR 3 =^,
-	   FUNCTION 1 my_int_cmp_s_s_s_s_i(int, int);
+	   FUNCTION 1 opclass.my_int_cmp_s_s_s_s_i(int, int);
 CREATE INDEX int_val_ix_s_s_s_s_i ON
 	o_test_custom_opclass(int_val my_op_class_s_s_s_s_i);
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,10);
@@ -607,12 +607,12 @@ SELECT * FROM o_test_custom_opclass
 DROP OPERATOR CLASS my_op_class_cte USING btree CASCADE;
 NOTICE:  drop cascades to index int_val_ix_cte
 TRUNCATE o_test_custom_opclass;
-CREATE FUNCTION my_test_func(a int, b int) RETURNS int AS $$
+CREATE FUNCTION opclass.my_test_func(a int, b int) RETURNS int AS $$
 	SELECT LEAST(a, a)%8 - GREATEST(b, b)%8;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_int_cmp_rows_func(a int, b int) RETURNS int
 AS $$
-	SELECT * FROM ROWS FROM(my_test_func(a, b));
+	SELECT * FROM ROWS FROM(opclass.my_test_func(a, b));
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_rows_func');
  cmp_is_valid 
@@ -927,7 +927,7 @@ SELECT * FROM o_test_custom_opclass
 DROP OPERATOR CLASS my_op_class_windowagg USING btree CASCADE;
 NOTICE:  drop cascades to index int_val_ix_windowagg
 TRUNCATE o_test_custom_opclass;
-SELECT cmp_is_valid('my_int_cmp_s_i');
+SELECT cmp_is_valid('opclass.my_int_cmp_s_i');
  cmp_is_valid 
 --------------
  t
@@ -936,7 +936,7 @@ SELECT cmp_is_valid('my_int_cmp_s_i');
 CREATE OPERATOR CLASS my_op_class_build_ix FOR TYPE int
 	USING btree FAMILY my_op_family
 	AS OPERATOR 1 <^, OPERATOR 3 =^,
-	   FUNCTION 1 my_int_cmp_s_i(int, int);
+	   FUNCTION 1 opclass.my_int_cmp_s_i(int, int);
 INSERT INTO o_test_custom_opclass SELECT generate_series(1,300);
 CREATE INDEX int_val_ix_build_ix ON
 	o_test_custom_opclass(int_val my_op_class_build_ix);

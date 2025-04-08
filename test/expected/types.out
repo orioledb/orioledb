@@ -558,51 +558,51 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                   +
      Leftmost, Rightmost                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(0,6)')         +
-     Item 0: offset = 272, tuple = ('(0,1)', '(1,2)', '5', '18', 'abc')                +
-     Item 1: offset = 336, tuple = ('(0,2)', '(2,4)', '5', '18', 'abc')                +
-     Item 2: offset = 400, tuple = ('(0,3)', '(3,6)', '5', '18', 'abc')                +
-     Item 3: offset = 464, tuple = ('(0,4)', '(4,8)', '5', '18', 'abc')                +
-     Item 4: offset = 528, tuple = ('(0,5)', '(5,10)', '5', '33', 'abc')               +
+     Item 0: tuple = ('(0,1)', '(1,2)', '5', '18', 'abc')                              +
+     Item 1: tuple = ('(0,2)', '(2,4)', '5', '18', 'abc')                              +
+     Item 2: tuple = ('(0,3)', '(3,6)', '5', '18', 'abc')                              +
+     Item 3: tuple = ('(0,4)', '(4,8)', '5', '18', 'abc')                              +
+     Item 4: tuple = ('(0,5)', '(5,10)', '5', '33', 'abc')                             +
    Chunk 1: offset = 5, location = 600, hikey location = 80, hikey = ('(0,11)')        +
-     Item 5: offset = 616, tuple = ('(0,6)', '(6,12)', '5', '33', 'abc')               +
-     Item 6: offset = 688, tuple = ('(0,7)', '(7,14)', '5', '33', 'c')                 +
-     Item 7: offset = 760, tuple = ('(0,8)', '(8,16)', '5', '33', 'c')                 +
-     Item 8: offset = 832, tuple = ('(0,9)', '(9,18)', '5', '18', 'c')                 +
-     Item 9: offset = 904, tuple = ('(0,10)', '(10,20)', '5', '18', 'abc')             +
+     Item 5: tuple = ('(0,6)', '(6,12)', '5', '33', 'abc')                             +
+     Item 6: tuple = ('(0,7)', '(7,14)', '5', '33', 'c')                               +
+     Item 7: tuple = ('(0,8)', '(8,16)', '5', '33', 'c')                               +
+     Item 8: tuple = ('(0,9)', '(9,18)', '5', '18', 'c')                               +
+     Item 9: tuple = ('(0,10)', '(10,20)', '5', '18', 'abc')                           +
    Chunk 2: offset = 10, location = 968, hikey location = 88                           +
-     Item 10: offset = 984, tuple = ('(0,11)', '(11,22)', '5', '11', 'b')              +
-     Item 11: offset = 1056, tuple = ('(0,12)', '(12,24)', '5', '12', 'b')             +
-     Item 12: offset = 1128, tuple = ('(0,13)', '(13,26)', '5', '13', 'b')             +
-     Item 13: offset = 1200, tuple = ('(0,14)', '(14,28)', '5', null, 'b')             +
-     Item 14: offset = 1280, tuple = ('(0,15)', '(15,30)', '5', null, 'b')             +
+     Item 10: tuple = ('(0,11)', '(11,22)', '5', '11', 'b')                            +
+     Item 11: tuple = ('(0,12)', '(12,24)', '5', '12', 'b')                            +
+     Item 12: tuple = ('(0,13)', '(13,26)', '5', '13', 'b')                            +
+     Item 13: tuple = ('(0,14)', '(14,28)', '5', null, 'b')                            +
+     Item 14: tuple = ('(0,15)', '(15,30)', '5', null, 'b')                            +
                                                                                        +
  Index o_test_record_type_alter_idx1 contents                                          +
  Page 0: level = 0, maxKeyLen = 18, nVacatedBytes = 0                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
      Leftmost, Rightmost                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('abc', '(0,3)')  +
-     Item 0: offset = 264, tuple = ('abc', '(0,1)')                                    +
-     Item 1: offset = 304, tuple = ('abc', '(0,2)')                                    +
+     Item 0: tuple = ('abc', '(0,1)')                                                  +
+     Item 1: tuple = ('abc', '(0,2)')                                                  +
    Chunk 1: offset = 2, location = 344, hikey location = 112, hikey = ('abc', '(0,5)') +
-     Item 2: offset = 352, tuple = ('abc', '(0,3)')                                    +
-     Item 3: offset = 392, tuple = ('abc', '(0,4)')                                    +
+     Item 2: tuple = ('abc', '(0,3)')                                                  +
+     Item 3: tuple = ('abc', '(0,4)')                                                  +
    Chunk 2: offset = 4, location = 432, hikey location = 136, hikey = ('abc', '(0,10)')+
-     Item 4: offset = 440, tuple = ('abc', '(0,5)')                                    +
-     Item 5: offset = 480, tuple = ('abc', '(0,6)')                                    +
+     Item 4: tuple = ('abc', '(0,5)')                                                  +
+     Item 5: tuple = ('abc', '(0,6)')                                                  +
    Chunk 3: offset = 6, location = 520, hikey location = 160, hikey = ('b', '(0,12)')  +
-     Item 6: offset = 528, tuple = ('abc', '(0,10)')                                   +
-     Item 7: offset = 568, tuple = ('b', '(0,11)')                                     +
+     Item 6: tuple = ('abc', '(0,10)')                                                 +
+     Item 7: tuple = ('b', '(0,11)')                                                   +
    Chunk 4: offset = 8, location = 600, hikey location = 176, hikey = ('b', '(0,14)')  +
-     Item 8: offset = 608, tuple = ('b', '(0,12)')                                     +
-     Item 9: offset = 640, tuple = ('b', '(0,13)')                                     +
+     Item 8: tuple = ('b', '(0,12)')                                                   +
+     Item 9: tuple = ('b', '(0,13)')                                                   +
    Chunk 5: offset = 10, location = 672, hikey location = 192, hikey = ('c', '(0,7)')  +
-     Item 10: offset = 680, tuple = ('b', '(0,14)')                                    +
-     Item 11: offset = 712, tuple = ('b', '(0,15)')                                    +
+     Item 10: tuple = ('b', '(0,14)')                                                  +
+     Item 11: tuple = ('b', '(0,15)')                                                  +
    Chunk 6: offset = 12, location = 744, hikey location = 208, hikey = ('c', '(0,9)')  +
-     Item 12: offset = 752, tuple = ('c', '(0,7)')                                     +
-     Item 13: offset = 784, tuple = ('c', '(0,8)')                                     +
+     Item 12: tuple = ('c', '(0,7)')                                                   +
+     Item 13: tuple = ('c', '(0,8)')                                                   +
    Chunk 7: offset = 14, location = 816, hikey location = 224                          +
-     Item 14: offset = 824, tuple = ('c', '(0,9)')                                     +
+     Item 14: tuple = ('c', '(0,9)')                                                   +
                                                                                        +
  Index toast: not loaded                                                               +
  
@@ -744,48 +744,48 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
      Leftmost, Rightmost                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(5,10)')       +
-     Item 0: offset = 264, tuple = ('(1,2)', '5', '18', 'abc', '(1,2)')               +
-     Item 1: offset = 368, tuple = ('(2,4)', '5', '18', 'abc', '(1,4)')               +
-     Item 2: offset = 472, tuple = ('(3,6)', '5', '18', 'abc', '(1,6)')               +
-     Item 3: offset = 576, tuple = ('(4,8)', '5', '18', 'abc', '(1,8)')               +
+     Item 0: tuple = ('(1,2)', '5', '18', 'abc', '(1,2)')                             +
+     Item 1: tuple = ('(2,4)', '5', '18', 'abc', '(1,4)')                             +
+     Item 2: tuple = ('(3,6)', '5', '18', 'abc', '(1,6)')                             +
+     Item 3: tuple = ('(4,8)', '5', '18', 'abc', '(1,8)')                             +
    Chunk 1: offset = 4, location = 680, hikey location = 112, hikey = ('(9,18)')      +
-     Item 4: offset = 688, tuple = ('(5,10)', '5', '33', 'abc', '(1,10)')             +
-     Item 5: offset = 792, tuple = ('(6,12)', '5', '33', 'abc', '(1,12)')             +
-     Item 6: offset = 896, tuple = ('(7,14)', '5', '33', 'c', '(1,14)')               +
-     Item 7: offset = 1000, tuple = ('(8,16)', '5', '33', 'c', '(1,16)')              +
+     Item 4: tuple = ('(5,10)', '5', '33', 'abc', '(1,10)')                           +
+     Item 5: tuple = ('(6,12)', '5', '33', 'abc', '(1,12)')                           +
+     Item 6: tuple = ('(7,14)', '5', '33', 'c', '(1,14)')                             +
+     Item 7: tuple = ('(8,16)', '5', '33', 'c', '(1,16)')                             +
    Chunk 2: offset = 8, location = 1104, hikey location = 152, hikey = ('(13,26)')    +
-     Item 8: offset = 1112, tuple = ('(9,18)', '5', '18', 'c', '(1,18)')              +
-     Item 9: offset = 1216, tuple = ('(10,20)', '5', '18', 'abc', '(1,20)')           +
-     Item 10: offset = 1320, tuple = ('(11,22)', '5', '11', 'b', '(1,22)')            +
-     Item 11: offset = 1424, tuple = ('(12,24)', '5', '12', 'b', '(1,24)')            +
+     Item 8: tuple = ('(9,18)', '5', '18', 'c', '(1,18)')                             +
+     Item 9: tuple = ('(10,20)', '5', '18', 'abc', '(1,20)')                          +
+     Item 10: tuple = ('(11,22)', '5', '11', 'b', '(1,22)')                           +
+     Item 11: tuple = ('(12,24)', '5', '12', 'b', '(1,24)')                           +
    Chunk 3: offset = 12, location = 1528, hikey location = 192                        +
-     Item 12: offset = 1536, tuple = ('(13,26)', '5', '13', 'b', '(1,26)')            +
-     Item 13: offset = 1640, tuple = ('(14,28)', '5', null, 'b', '(1,28)')            +
-     Item 14: offset = 1744, tuple = ('(15,30)', '5', null, 'b', '(1,30)')            +
+     Item 12: tuple = ('(13,26)', '5', '13', 'b', '(1,26)')                           +
+     Item 13: tuple = ('(14,28)', '5', null, 'b', '(1,28)')                           +
+     Item 14: tuple = ('(15,30)', '5', null, 'b', '(1,30)')                           +
                                                                                       +
  Index o_test_record_type_alter_idx1 contents                                         +
  Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                                 +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                  +
      Leftmost, Rightmost                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('abc', '(5,10)')+
-     Item 0: offset = 264, tuple = ('abc', '(1,2)')                                   +
-     Item 1: offset = 328, tuple = ('abc', '(2,4)')                                   +
-     Item 2: offset = 392, tuple = ('abc', '(3,6)')                                   +
-     Item 3: offset = 456, tuple = ('abc', '(4,8)')                                   +
+     Item 0: tuple = ('abc', '(1,2)')                                                 +
+     Item 1: tuple = ('abc', '(2,4)')                                                 +
+     Item 2: tuple = ('abc', '(3,6)')                                                 +
+     Item 3: tuple = ('abc', '(4,8)')                                                 +
    Chunk 1: offset = 4, location = 520, hikey location = 120, hikey = ('b', '(12,24)')+
-     Item 4: offset = 528, tuple = ('abc', '(5,10)')                                  +
-     Item 5: offset = 592, tuple = ('abc', '(6,12)')                                  +
-     Item 6: offset = 656, tuple = ('abc', '(10,20)')                                 +
-     Item 7: offset = 720, tuple = ('b', '(11,22)')                                   +
+     Item 4: tuple = ('abc', '(5,10)')                                                +
+     Item 5: tuple = ('abc', '(6,12)')                                                +
+     Item 6: tuple = ('abc', '(10,20)')                                               +
+     Item 7: tuple = ('b', '(11,22)')                                                 +
    Chunk 2: offset = 8, location = 776, hikey location = 160, hikey = ('c', '(7,14)') +
-     Item 8: offset = 784, tuple = ('b', '(12,24)')                                   +
-     Item 9: offset = 840, tuple = ('b', '(13,26)')                                   +
-     Item 10: offset = 896, tuple = ('b', '(14,28)')                                  +
-     Item 11: offset = 952, tuple = ('b', '(15,30)')                                  +
+     Item 8: tuple = ('b', '(12,24)')                                                 +
+     Item 9: tuple = ('b', '(13,26)')                                                 +
+     Item 10: tuple = ('b', '(14,28)')                                                +
+     Item 11: tuple = ('b', '(15,30)')                                                +
    Chunk 3: offset = 12, location = 1008, hikey location = 200                        +
-     Item 12: offset = 1016, tuple = ('c', '(7,14)')                                  +
-     Item 13: offset = 1072, tuple = ('c', '(8,16)')                                  +
-     Item 14: offset = 1128, tuple = ('c', '(9,18)')                                  +
+     Item 12: tuple = ('c', '(7,14)')                                                 +
+     Item 13: tuple = ('c', '(8,16)')                                                 +
+     Item 14: tuple = ('c', '(9,18)')                                                 +
                                                                                       +
  Index toast: not loaded                                                              +
  
@@ -822,16 +822,16 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('(0,1)', '1', '5')              +
-     Item 1: offset = 312, tuple = ('(0,2)', '2', '5')              +
-     Item 2: offset = 344, tuple = ('(0,3)', '3', '5')              +
-     Item 3: offset = 376, tuple = ('(0,4)', '4', '5')              +
-     Item 4: offset = 408, tuple = ('(0,5)', '5', '5')              +
-     Item 5: offset = 440, tuple = ('(0,6)', '6', '5')              +
-     Item 6: offset = 472, tuple = ('(0,7)', '7', '5')              +
-     Item 7: offset = 504, tuple = ('(0,8)', '8', '5')              +
-     Item 8: offset = 536, tuple = ('(0,9)', '9', '5')              +
-     Item 9: offset = 568, tuple = ('(0,10)', '10', '5')            +
+     Item 0: tuple = ('(0,1)', '1', '5')                            +
+     Item 1: tuple = ('(0,2)', '2', '5')                            +
+     Item 2: tuple = ('(0,3)', '3', '5')                            +
+     Item 3: tuple = ('(0,4)', '4', '5')                            +
+     Item 4: tuple = ('(0,5)', '5', '5')                            +
+     Item 5: tuple = ('(0,6)', '6', '5')                            +
+     Item 6: tuple = ('(0,7)', '7', '5')                            +
+     Item 7: tuple = ('(0,8)', '8', '5')                            +
+     Item 8: tuple = ('(0,9)', '9', '5')                            +
+     Item 9: tuple = ('(0,10)', '10', '5')                          +
                                                                     +
  Index toast: not loaded                                            +
  
@@ -862,16 +862,16 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('(0,1)', '1', '5', null, null)  +
-     Item 1: offset = 312, tuple = ('(0,2)', '2', '5', null, null)  +
-     Item 2: offset = 344, tuple = ('(0,3)', '3', '5', null, null)  +
-     Item 3: offset = 376, tuple = ('(0,4)', '4', '5', null, null)  +
-     Item 4: offset = 408, tuple = ('(0,5)', '5', '5', null, null)  +
-     Item 5: offset = 440, tuple = ('(0,6)', '6', '5', null, null)  +
-     Item 6: offset = 472, tuple = ('(0,7)', '7', '5', null, null)  +
-     Item 7: offset = 504, tuple = ('(0,8)', '8', '5', null, null)  +
-     Item 8: offset = 536, tuple = ('(0,9)', '9', '5', null, null)  +
-     Item 9: offset = 568, tuple = ('(0,10)', '10', '5', null, null)+
+     Item 0: tuple = ('(0,1)', '1', '5', null, null)                +
+     Item 1: tuple = ('(0,2)', '2', '5', null, null)                +
+     Item 2: tuple = ('(0,3)', '3', '5', null, null)                +
+     Item 3: tuple = ('(0,4)', '4', '5', null, null)                +
+     Item 4: tuple = ('(0,5)', '5', '5', null, null)                +
+     Item 5: tuple = ('(0,6)', '6', '5', null, null)                +
+     Item 6: tuple = ('(0,7)', '7', '5', null, null)                +
+     Item 7: tuple = ('(0,8)', '8', '5', null, null)                +
+     Item 8: tuple = ('(0,9)', '9', '5', null, null)                +
+     Item 9: tuple = ('(0,10)', '10', '5', null, null)              +
                                                                     +
  Index toast: not loaded                                            +
  
@@ -902,16 +902,16 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('(0,1)', '1', '5', null, null)  +
-     Item 1: offset = 312, tuple = ('(0,2)', '2', '5', null, null)  +
-     Item 2: offset = 344, tuple = ('(0,3)', '3', '5', null, null)  +
-     Item 3: offset = 376, tuple = ('(0,4)', '4', '5', null, null)  +
-     Item 4: offset = 408, tuple = ('(0,5)', '5', '5', null, null)  +
-     Item 5: offset = 440, tuple = ('(0,6)', '6', '5', null, null)  +
-     Item 6: offset = 472, tuple = ('(0,7)', '7', '5', null, null)  +
-     Item 7: offset = 504, tuple = ('(0,8)', '8', '5', null, null)  +
-     Item 8: offset = 536, tuple = ('(0,9)', '9', '5', null, null)  +
-     Item 9: offset = 568, tuple = ('(0,10)', '10', '5', null, null)+
+     Item 0: tuple = ('(0,1)', '1', '5', null, null)                +
+     Item 1: tuple = ('(0,2)', '2', '5', null, null)                +
+     Item 2: tuple = ('(0,3)', '3', '5', null, null)                +
+     Item 3: tuple = ('(0,4)', '4', '5', null, null)                +
+     Item 4: tuple = ('(0,5)', '5', '5', null, null)                +
+     Item 5: tuple = ('(0,6)', '6', '5', null, null)                +
+     Item 6: tuple = ('(0,7)', '7', '5', null, null)                +
+     Item 7: tuple = ('(0,8)', '8', '5', null, null)                +
+     Item 8: tuple = ('(0,9)', '9', '5', null, null)                +
+     Item 9: tuple = ('(0,10)', '10', '5', null, null)              +
                                                                     +
  Index toast: not loaded                                            +
  
@@ -927,16 +927,16 @@ SELECT orioledb_tbl_structure('o_test_record_type_alter2'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('(0,1)', '1', '5', null, null)  +
-     Item 1: offset = 312, tuple = ('(0,2)', '2', '5', null, null)  +
-     Item 2: offset = 344, tuple = ('(0,3)', '3', '5', null, null)  +
-     Item 3: offset = 376, tuple = ('(0,4)', '4', '5', null, null)  +
-     Item 4: offset = 408, tuple = ('(0,5)', '5', '5', null, null)  +
-     Item 5: offset = 440, tuple = ('(0,6)', '6', '5', '33', 'abc') +
-     Item 6: offset = 488, tuple = ('(0,7)', '7', '5', '33', 'c')   +
-     Item 7: offset = 536, tuple = ('(0,8)', '8', '5', '33', 'c')   +
-     Item 8: offset = 584, tuple = ('(0,9)', '9', '5', '18', 'c')   +
-     Item 9: offset = 632, tuple = ('(0,10)', '10', '5', null, null)+
+     Item 0: tuple = ('(0,1)', '1', '5', null, null)                +
+     Item 1: tuple = ('(0,2)', '2', '5', null, null)                +
+     Item 2: tuple = ('(0,3)', '3', '5', null, null)                +
+     Item 3: tuple = ('(0,4)', '4', '5', null, null)                +
+     Item 4: tuple = ('(0,5)', '5', '5', null, null)                +
+     Item 5: tuple = ('(0,6)', '6', '5', '33', 'abc')               +
+     Item 6: tuple = ('(0,7)', '7', '5', '33', 'c')                 +
+     Item 7: tuple = ('(0,8)', '8', '5', '33', 'c')                 +
+     Item 8: tuple = ('(0,9)', '9', '5', '18', 'c')                 +
+     Item 9: tuple = ('(0,10)', '10', '5', null, null)              +
                                                                     +
  Index toast: not loaded                                            +
  

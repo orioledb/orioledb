@@ -319,8 +319,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 		hikey = btree_get_hikey(&pageContext);
 
 		btree_print_rightlink(RIGHTLINK_GET_BLKNO(header->rightLink), outbuf, printData);
-		appendStringInfo(outbuf, "    Hikey: offset = %d, key = ",
-						 (int) ((Pointer) hikey.data - (Pointer) p));
+		appendStringInfo(outbuf, "    Hikey: key = ");
 		keyPrintFunc(desc, outbuf, hikey, printArg);
 		appendStringInfo(outbuf, "\n");
 	}
@@ -425,16 +424,6 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 					}
 					needsComma |= btree_print_undo_location(desc->undoType, (UndoLocation) tuphdr.undoLocation, outbuf, printData, needsComma);
 
-					if (!inUndo)
-					{
-						if (needsComma)
-							appendStringInfo(outbuf, ", ");
-						else
-							needsComma = true;
-						appendStringInfo(outbuf, "offset = %u",
-										 BTREE_PAGE_GET_ITEM_OFFSET(p, &loc));
-					}
-
 					if (tuphdr.chainHasLocks)
 					{
 						if (needsComma)
@@ -489,15 +478,13 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 				BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, tuple, p, &loc);
 
 				appendStringInfo(outbuf, "    Item %i: ", i);
-				appendStringInfo(outbuf, "offset = %u",
-								 BTREE_PAGE_GET_ITEM_OFFSET(p, &loc));
 				if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
 					btree_print_orioledb_downlink(tuphdr->downlink, outbuf, printData);
 				else if (DOWNLINK_IS_IN_IO(tuphdr->downlink))
-					appendStringInfo(outbuf, ", in-progress (%u)",
+					appendStringInfo(outbuf, "in-progress (%u)",
 									 DOWNLINK_GET_IO_LOCKNUM(tuphdr->downlink));
 				else
-					appendStringInfo(outbuf, ", downlink = on-disk (%lu, %u)",
+					appendStringInfo(outbuf, "downlink = on-disk (%lu, %u)",
 									 DOWNLINK_GET_DISK_OFF(tuphdr->downlink),
 									 DOWNLINK_GET_DISK_LEN(tuphdr->downlink));
 				if (i != 0)
@@ -799,7 +786,7 @@ btree_print_orioledb_downlink(uint64 downlink, StringInfo outbuf, BTreePrintData
 		Assert(found);
 		printedPageNumber = hentry->NLRPageNumber;
 	}
-	appendStringInfo(outbuf, ", downlink = %u", printedPageNumber);
+	appendStringInfo(outbuf, "downlink = %u", printedPageNumber);
 	if (printData->options->changeCountPrintType == BTreePrintAbsolute)
 		appendStringInfo(outbuf, " (%u)", DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink));
 }
