@@ -2,17 +2,17 @@ Parsed test spec with 2 sessions
 
 starting permutation: s1_structure s1_delete500_begin s1_evict s1_count s1_structure s1_delete500_end s1_evict s1_count s1_structure
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                                                                                                                                                                                        
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                                                                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('276')
-    Item 2: offset = 544, downlink = 3, key = ('551')
-    Item 3: offset = 560, downlink = 4, key = ('826')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('276')
+    Item 2: downlink = 3, key = ('551')
+    Item 3: downlink = 4, key = ('826')
 
 
 (1 row)
@@ -31,16 +31,16 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                                                                                                                                  
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('551')
-    Item 2: offset = 544, downlink = 3, key = ('826')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('551')
+    Item 2: downlink = 3, key = ('826')
 
 
 (1 row)
@@ -59,14 +59,14 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                      
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
+    Item 0: downlink = 1
 
 
 (1 row)
@@ -74,17 +74,17 @@ state = free, datoid equal, relnode equal, ix_type = primary, clean
 
 starting permutation: s1_structure s1_delete_80_perc s1_evict s1_count s1_structure
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                                                                                                                                                                                        
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                                                                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('276')
-    Item 2: offset = 544, downlink = 3, key = ('551')
-    Item 3: offset = 560, downlink = 4, key = ('826')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('276')
+    Item 2: downlink = 3, key = ('551')
+    Item 3: downlink = 4, key = ('826')
 
 
 (1 row)
@@ -103,15 +103,15 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                                                                            
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                                                                
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('551')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('551')
 
 
 (1 row)
@@ -368,14 +368,14 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                      
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
+    Item 0: downlink = 1
 
 
 (1 row)
@@ -412,15 +412,15 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                                                                            
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                                                                
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('551')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('551')
 
 
 (1 row)
@@ -464,14 +464,14 @@ count
 (1 row)
 
 step s2_structure: SELECT orioledb_tbl_structure('o_merge'::regclass, 'nue', 1);
-orioledb_tbl_structure                                                                                                                                                                                                                                                              
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_tbl_structure                                                                                                                                                                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
+    Item 0: downlink = 1
 
 Index toast: not loaded
 
@@ -509,15 +509,15 @@ count
 (1 row)
 
 step s2_structure: SELECT orioledb_tbl_structure('o_merge'::regclass, 'nue', 1);
-orioledb_tbl_structure                                                                                                                                                                                                                                                                                                                    
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_tbl_structure                                                                                                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('551')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('551')
 
 Index toast: not loaded
 
@@ -562,14 +562,14 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                      
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
+    Item 0: downlink = 1
 
 
 (1 row)
@@ -606,15 +606,15 @@ count
 (1 row)
 
 step s1_structure: SELECT orioledb_idx_structure('o_merge'::regclass, 'o_merge_pkey', 'nue', 1);
-orioledb_idx_structure                                                                                                                                                                                                                                                                                            
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_idx_structure                                                                                                                                                                                                                                                                
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, clean
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('551')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('551')
 
 
 (1 row)
@@ -658,14 +658,14 @@ count
 (1 row)
 
 step s2_structure: SELECT orioledb_tbl_structure('o_merge'::regclass, 'nue', 1);
-orioledb_tbl_structure                                                                                                                                                                                                                                                              
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_tbl_structure                                                                                                                                                                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
+    Item 0: downlink = 1
 
 Index toast: not loaded
 
@@ -703,15 +703,15 @@ count
 (1 row)
 
 step s2_structure: SELECT orioledb_tbl_structure('o_merge'::regclass, 'nue', 1);
-orioledb_tbl_structure                                                                                                                                                                                                                                                                                                                    
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+orioledb_tbl_structure                                                                                                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
 state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
-    Item 0: offset = 520, downlink = 1
-    Item 1: offset = 528, downlink = 2, key = ('551')
+    Item 0: downlink = 1
+    Item 1: downlink = 2, key = ('551')
 
 Index toast: not loaded
 

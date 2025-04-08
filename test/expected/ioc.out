@@ -355,8 +355,8 @@ SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('1', '2')                       +
-     Item 1: offset = 288, tuple = ('2', '3')                       +
+     Item 0: tuple = ('1', '2')                                     +
+     Item 1: tuple = ('2', '3')                                     +
                                                                     +
  Index toast: not loaded                                            +
  
@@ -371,19 +371,19 @@ TABLE o_test_ioc_change_pkey;
 (2 rows)
 
 SELECT orioledb_tbl_structure('o_test_ioc_change_pkey'::regclass, 'ne');
-                         orioledb_tbl_structure                          
--------------------------------------------------------------------------
- Index o_test_ioc_change_pkey_pkey contents                             +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 24                   +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty    +
-     Leftmost, Rightmost                                                +
-   Chunk 0: offset = 0, location = 256, hikey location = 64             +
-     Item 0: mode = update, PK changed, offset = 264, tuple = ('1', '2')+
-       Undo item:                                                       +
-     Item 1: offset = 288, tuple = ('2', '3')                           +
-     Item 2: mode = update, offset = 312, tuple = ('13', '2')           +
-                                                                        +
- Index toast: not loaded                                                +
+                       orioledb_tbl_structure                        
+---------------------------------------------------------------------
+ Index o_test_ioc_change_pkey_pkey contents                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 24               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: mode = update, PK changed, tuple = ('1', '2')          +
+       Undo item:                                                   +
+     Item 1: tuple = ('2', '3')                                     +
+     Item 2: mode = update, tuple = ('13', '2')                     +
+                                                                    +
+ Index toast: not loaded                                            +
  
 (1 row)
 

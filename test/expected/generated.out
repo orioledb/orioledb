@@ -136,8 +136,8 @@ SELECT orioledb_tbl_structure('o_test_generated_null'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('(0,1)', '1', '1', null)        +
-     Item 1: offset = 312, tuple = ('(0,2)', null, '1', null)       +
+     Item 0: tuple = ('(0,1)', '1', '1', null)                      +
+     Item 1: tuple = ('(0,2)', null, '1', null)                     +
                                                                     +
  Index toast: not loaded                                            +
  
@@ -185,8 +185,8 @@ SELECT orioledb_tbl_structure('o_test_generated_alter_type'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('(0,1)', '1', '2')              +
-     Item 1: offset = 296, tuple = ('(0,2)', '3', '6')              +
+     Item 0: tuple = ('(0,1)', '1', '2')                            +
+     Item 1: tuple = ('(0,2)', '3', '6')                            +
                                                                     +
  Index toast: not loaded                                            +
  

@@ -414,129 +414,129 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('8')+
-     Item 0: offset = 272, tuple = ('0', '0text')                         +
-     Item 1: offset = 312, tuple = ('1', '1text')                         +
-     Item 2: offset = 352, tuple = ('2', '2text')                         +
-     Item 3: offset = 392, tuple = ('3', '3text')                         +
-     Item 4: offset = 432, tuple = ('4', '4text')                         +
-     Item 5: offset = 472, tuple = ('5', '5text')                         +
-     Item 6: offset = 512, tuple = ('6', '6text')                         +
-     Item 7: offset = 552, tuple = ('7', '7text')                         +
+     Item 0: tuple = ('0', '0text')                                       +
+     Item 1: tuple = ('1', '1text')                                       +
+     Item 2: tuple = ('2', '2text')                                       +
+     Item 3: tuple = ('3', '3text')                                       +
+     Item 4: tuple = ('4', '4text')                                       +
+     Item 5: tuple = ('5', '5text')                                       +
+     Item 6: tuple = ('6', '6text')                                       +
+     Item 7: tuple = ('7', '7text')                                       +
    Chunk 1: offset = 8, location = 592, hikey location = 72               +
-     Item 8: offset = 624, tuple = ('8', '8text')                         +
-     Item 9: offset = 664, tuple = ('9', '9text')                         +
-     Item 10: offset = 704, tuple = ('10', '10text')                      +
-     Item 11: offset = 744, tuple = ('11', '11text')                      +
-     Item 12: offset = 784, tuple = ('12', '12text')                      +
-     Item 13: offset = 824, tuple = ('13', '13text')                      +
-     Item 14: offset = 864, tuple = ('14', '14text')                      +
-     Item 15: offset = 904, tuple = ('15', '15text')                      +
-     Item 16: offset = 944, tuple = ('16', '16text')                      +
-     Item 17: offset = 984, tuple = ('17', '17text')                      +
-     Item 18: offset = 1024, tuple = ('18', '18text')                     +
-     Item 19: offset = 1064, tuple = ('19', '19text')                     +
-     Item 20: offset = 1104, tuple = ('20', '20text')                     +
+     Item 8: tuple = ('8', '8text')                                       +
+     Item 9: tuple = ('9', '9text')                                       +
+     Item 10: tuple = ('10', '10text')                                    +
+     Item 11: tuple = ('11', '11text')                                    +
+     Item 12: tuple = ('12', '12text')                                    +
+     Item 13: tuple = ('13', '13text')                                    +
+     Item 14: tuple = ('14', '14text')                                    +
+     Item 15: tuple = ('15', '15text')                                    +
+     Item 16: tuple = ('16', '16text')                                    +
+     Item 17: tuple = ('17', '17text')                                    +
+     Item 18: tuple = ('18', '18text')                                    +
+     Item 19: tuple = ('19', '19text')                                    +
+     Item 20: tuple = ('20', '20text')                                    +
                                                                           +
  Index o_test_partial_ix1 contents                                        +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 280, tuple = ('11')                                 +
-     Item 1: offset = 304, tuple = ('12')                                 +
-     Item 2: offset = 328, tuple = ('13')                                 +
-     Item 3: offset = 352, tuple = ('14')                                 +
-     Item 4: offset = 376, tuple = ('15')                                 +
-     Item 5: offset = 400, tuple = ('16')                                 +
-     Item 6: offset = 424, tuple = ('17')                                 +
-     Item 7: offset = 448, tuple = ('18')                                 +
-     Item 8: offset = 472, tuple = ('19')                                 +
-     Item 9: offset = 496, tuple = ('20')                                 +
+     Item 0: tuple = ('11')                                               +
+     Item 1: tuple = ('12')                                               +
+     Item 2: tuple = ('13')                                               +
+     Item 3: tuple = ('14')                                               +
+     Item 4: tuple = ('15')                                               +
+     Item 5: tuple = ('16')                                               +
+     Item 6: tuple = ('17')                                               +
+     Item 7: tuple = ('18')                                               +
+     Item 8: tuple = ('19')                                               +
+     Item 9: tuple = ('20')                                               +
                                                                           +
  Index o_test_partial_ix2 contents                                        +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 280, tuple = ('11')                                 +
-     Item 1: offset = 304, tuple = ('12')                                 +
-     Item 2: offset = 328, tuple = ('13')                                 +
-     Item 3: offset = 352, tuple = ('14')                                 +
-     Item 4: offset = 376, tuple = ('15')                                 +
-     Item 5: offset = 400, tuple = ('16')                                 +
-     Item 6: offset = 424, tuple = ('17')                                 +
-     Item 7: offset = 448, tuple = ('18')                                 +
-     Item 8: offset = 472, tuple = ('19')                                 +
-     Item 9: offset = 496, tuple = ('20')                                 +
+     Item 0: tuple = ('11')                                               +
+     Item 1: tuple = ('12')                                               +
+     Item 2: tuple = ('13')                                               +
+     Item 3: tuple = ('14')                                               +
+     Item 4: tuple = ('15')                                               +
+     Item 5: tuple = ('16')                                               +
+     Item 6: tuple = ('17')                                               +
+     Item 7: tuple = ('18')                                               +
+     Item 8: tuple = ('19')                                               +
+     Item 9: tuple = ('20')                                               +
                                                                           +
  Index o_test_partial_ix3 contents                                        +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 296, tuple = ('1')                                  +
-     Item 1: offset = 320, tuple = ('2')                                  +
-     Item 2: offset = 344, tuple = ('3')                                  +
-     Item 3: offset = 368, tuple = ('4')                                  +
-     Item 4: offset = 392, tuple = ('5')                                  +
-     Item 5: offset = 416, tuple = ('6')                                  +
-     Item 6: offset = 440, tuple = ('7')                                  +
-     Item 7: offset = 464, tuple = ('8')                                  +
-     Item 8: offset = 488, tuple = ('9')                                  +
-     Item 9: offset = 512, tuple = ('10')                                 +
-     Item 10: offset = 536, tuple = ('11')                                +
-     Item 11: offset = 560, tuple = ('12')                                +
-     Item 12: offset = 584, tuple = ('13')                                +
-     Item 13: offset = 608, tuple = ('14')                                +
-     Item 14: offset = 632, tuple = ('15')                                +
-     Item 15: offset = 656, tuple = ('16')                                +
-     Item 16: offset = 680, tuple = ('17')                                +
-     Item 17: offset = 704, tuple = ('18')                                +
-     Item 18: offset = 728, tuple = ('19')                                +
-     Item 19: offset = 752, tuple = ('20')                                +
+     Item 0: tuple = ('1')                                                +
+     Item 1: tuple = ('2')                                                +
+     Item 2: tuple = ('3')                                                +
+     Item 3: tuple = ('4')                                                +
+     Item 4: tuple = ('5')                                                +
+     Item 5: tuple = ('6')                                                +
+     Item 6: tuple = ('7')                                                +
+     Item 7: tuple = ('8')                                                +
+     Item 8: tuple = ('9')                                                +
+     Item 9: tuple = ('10')                                               +
+     Item 10: tuple = ('11')                                              +
+     Item 11: tuple = ('12')                                              +
+     Item 12: tuple = ('13')                                              +
+     Item 13: tuple = ('14')                                              +
+     Item 14: tuple = ('15')                                              +
+     Item 15: tuple = ('16')                                              +
+     Item 16: tuple = ('17')                                              +
+     Item 17: tuple = ('18')                                              +
+     Item 18: tuple = ('19')                                              +
+     Item 19: tuple = ('20')                                              +
                                                                           +
  Index o_test_partial_ix4 contents                                        +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 304, tuple = ('0')                                  +
-     Item 1: offset = 328, tuple = ('1')                                  +
-     Item 2: offset = 352, tuple = ('2')                                  +
-     Item 3: offset = 376, tuple = ('3')                                  +
-     Item 4: offset = 400, tuple = ('4')                                  +
-     Item 5: offset = 424, tuple = ('5')                                  +
-     Item 6: offset = 448, tuple = ('6')                                  +
-     Item 7: offset = 472, tuple = ('7')                                  +
-     Item 8: offset = 496, tuple = ('8')                                  +
-     Item 9: offset = 520, tuple = ('9')                                  +
-     Item 10: offset = 544, tuple = ('10')                                +
-     Item 11: offset = 568, tuple = ('11')                                +
-     Item 12: offset = 592, tuple = ('12')                                +
-     Item 13: offset = 616, tuple = ('13')                                +
-     Item 14: offset = 640, tuple = ('14')                                +
-     Item 15: offset = 664, tuple = ('15')                                +
-     Item 16: offset = 688, tuple = ('16')                                +
-     Item 17: offset = 712, tuple = ('17')                                +
-     Item 18: offset = 736, tuple = ('18')                                +
-     Item 19: offset = 760, tuple = ('19')                                +
-     Item 20: offset = 784, tuple = ('20')                                +
+     Item 0: tuple = ('0')                                                +
+     Item 1: tuple = ('1')                                                +
+     Item 2: tuple = ('2')                                                +
+     Item 3: tuple = ('3')                                                +
+     Item 4: tuple = ('4')                                                +
+     Item 5: tuple = ('5')                                                +
+     Item 6: tuple = ('6')                                                +
+     Item 7: tuple = ('7')                                                +
+     Item 8: tuple = ('8')                                                +
+     Item 9: tuple = ('9')                                                +
+     Item 10: tuple = ('10')                                              +
+     Item 11: tuple = ('11')                                              +
+     Item 12: tuple = ('12')                                              +
+     Item 13: tuple = ('13')                                              +
+     Item 14: tuple = ('14')                                              +
+     Item 15: tuple = ('15')                                              +
+     Item 16: tuple = ('16')                                              +
+     Item 17: tuple = ('17')                                              +
+     Item 18: tuple = ('18')                                              +
+     Item 19: tuple = ('19')                                              +
+     Item 20: tuple = ('20')                                              +
                                                                           +
  Index o_test_partial_ix5 contents                                        +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                      +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 280, tuple = ('11')                                 +
-     Item 1: offset = 304, tuple = ('12')                                 +
-     Item 2: offset = 328, tuple = ('13')                                 +
-     Item 3: offset = 352, tuple = ('14')                                 +
-     Item 4: offset = 376, tuple = ('15')                                 +
-     Item 5: offset = 400, tuple = ('16')                                 +
-     Item 6: offset = 424, tuple = ('17')                                 +
-     Item 7: offset = 448, tuple = ('18')                                 +
-     Item 8: offset = 472, tuple = ('19')                                 +
-     Item 9: offset = 496, tuple = ('20')                                 +
+     Item 0: tuple = ('11')                                               +
+     Item 1: tuple = ('12')                                               +
+     Item 2: tuple = ('13')                                               +
+     Item 3: tuple = ('14')                                               +
+     Item 4: tuple = ('15')                                               +
+     Item 5: tuple = ('16')                                               +
+     Item 6: tuple = ('17')                                               +
+     Item 7: tuple = ('18')                                               +
+     Item 8: tuple = ('19')                                               +
+     Item 9: tuple = ('20')                                               +
                                                                           +
  Index o_test_partial_ix7 contents                                        +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                      +
@@ -549,22 +549,22 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 272, tuple = ('5text', '5')                         +
-     Item 1: offset = 312, tuple = ('6text', '6')                         +
-     Item 2: offset = 352, tuple = ('7text', '7')                         +
-     Item 3: offset = 392, tuple = ('8text', '8')                         +
-     Item 4: offset = 432, tuple = ('9text', '9')                         +
+     Item 0: tuple = ('5text', '5')                                       +
+     Item 1: tuple = ('6text', '6')                                       +
+     Item 2: tuple = ('7text', '7')                                       +
+     Item 3: tuple = ('8text', '8')                                       +
+     Item 4: tuple = ('9text', '9')                                       +
                                                                           +
  Index o_test_partial_ix9 contents                                        +
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                     +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
-     Item 0: offset = 272, tuple = ('5text', '5')                         +
-     Item 1: offset = 312, tuple = ('6text', '6')                         +
-     Item 2: offset = 352, tuple = ('7text', '7')                         +
-     Item 3: offset = 392, tuple = ('8text', '8')                         +
-     Item 4: offset = 432, tuple = ('9text', '9')                         +
+     Item 0: tuple = ('5text', '5')                                       +
+     Item 1: tuple = ('6text', '6')                                       +
+     Item 2: tuple = ('7text', '7')                                       +
+     Item 3: tuple = ('8text', '8')                                       +
+     Item 4: tuple = ('9text', '9')                                       +
                                                                           +
  Index toast: not loaded                                                  +
  
@@ -580,199 +580,199 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('8')   +
-     Item 0: offset = 272, tuple = ('0', '0text')                            +
-     Item 1: deleted, offset = 312, tuple = ('1', '1text')                   +
-     Item 2: offset = 352, tuple = ('2', '2text')                            +
-     Item 3: offset = 392, tuple = ('3', '3text')                            +
-     Item 4: offset = 432, tuple = ('4', '4text')                            +
-     Item 5: PK changed, offset = 472, tuple = ('5', '5text')                +
-     Item 6: PK changed, offset = 512, tuple = ('6', '6text')                +
-     Item 7: PK changed, offset = 552, tuple = ('7', '7text')                +
+     Item 0: tuple = ('0', '0text')                                          +
+     Item 1: deleted, tuple = ('1', '1text')                                 +
+     Item 2: tuple = ('2', '2text')                                          +
+     Item 3: tuple = ('3', '3text')                                          +
+     Item 4: tuple = ('4', '4text')                                          +
+     Item 5: PK changed, tuple = ('5', '5text')                              +
+     Item 6: PK changed, tuple = ('6', '6text')                              +
+     Item 7: PK changed, tuple = ('7', '7text')                              +
    Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')  +
-     Item 8: PK changed, offset = 608, tuple = ('8', '8text')                +
-     Item 9: PK changed, offset = 648, tuple = ('9', '9text')                +
-     Item 10: PK changed, offset = 688, tuple = ('10', '10text')             +
-     Item 11: PK changed, offset = 728, tuple = ('11', '11text')             +
-     Item 12: PK changed, offset = 768, tuple = ('12', '12text')             +
-     Item 13: PK changed, offset = 808, tuple = ('13', '13text')             +
-     Item 14: PK changed, offset = 848, tuple = ('14', '14text')             +
-     Item 15: PK changed, offset = 888, tuple = ('15', '15text')             +
+     Item 8: PK changed, tuple = ('8', '8text')                              +
+     Item 9: PK changed, tuple = ('9', '9text')                              +
+     Item 10: PK changed, tuple = ('10', '10text')                           +
+     Item 11: PK changed, tuple = ('11', '11text')                           +
+     Item 12: PK changed, tuple = ('12', '12text')                           +
+     Item 13: PK changed, tuple = ('13', '13text')                           +
+     Item 14: PK changed, tuple = ('14', '14text')                           +
+     Item 15: PK changed, tuple = ('15', '15text')                           +
    Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')+
-     Item 16: offset = 944, tuple = ('16', '16text')                         +
-     Item 17: offset = 984, tuple = ('17', '17text')                         +
-     Item 18: offset = 1024, tuple = ('18', '18text')                        +
-     Item 19: offset = 1064, tuple = ('19', '19text')                        +
-     Item 20: offset = 1104, tuple = ('20', '20text')                        +
-     Item 21: offset = 1144, tuple = ('105', '5text')                        +
-     Item 22: offset = 1184, tuple = ('106', '6text')                        +
-     Item 23: offset = 1224, tuple = ('107', '7text')                        +
+     Item 16: tuple = ('16', '16text')                                       +
+     Item 17: tuple = ('17', '17text')                                       +
+     Item 18: tuple = ('18', '18text')                                       +
+     Item 19: tuple = ('19', '19text')                                       +
+     Item 20: tuple = ('20', '20text')                                       +
+     Item 21: tuple = ('105', '5text')                                       +
+     Item 22: tuple = ('106', '6text')                                       +
+     Item 23: tuple = ('107', '7text')                                       +
    Chunk 3: offset = 24, location = 1264, hikey location = 96                +
-     Item 24: offset = 1280, tuple = ('108', '8text')                        +
-     Item 25: offset = 1320, tuple = ('109', '9text')                        +
-     Item 26: offset = 1360, tuple = ('110', '10text')                       +
-     Item 27: offset = 1400, tuple = ('111', '11text')                       +
-     Item 28: offset = 1440, tuple = ('112', '12text')                       +
-     Item 29: offset = 1480, tuple = ('113', '13text')                       +
-     Item 30: offset = 1520, tuple = ('114', '14text')                       +
-     Item 31: offset = 1560, tuple = ('115', '15text')                       +
+     Item 24: tuple = ('108', '8text')                                       +
+     Item 25: tuple = ('109', '9text')                                       +
+     Item 26: tuple = ('110', '10text')                                      +
+     Item 27: tuple = ('111', '11text')                                      +
+     Item 28: tuple = ('112', '12text')                                      +
+     Item 29: tuple = ('113', '13text')                                      +
+     Item 30: tuple = ('114', '14text')                                      +
+     Item 31: tuple = ('115', '15text')                                      +
                                                                              +
  Index o_test_partial_ix1 contents                                           +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 120                       +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: deleted, offset = 304, tuple = ('11')                           +
-     Item 1: deleted, offset = 328, tuple = ('12')                           +
-     Item 2: deleted, offset = 352, tuple = ('13')                           +
-     Item 3: deleted, offset = 376, tuple = ('14')                           +
-     Item 4: deleted, offset = 400, tuple = ('15')                           +
-     Item 5: offset = 424, tuple = ('16')                                    +
-     Item 6: offset = 448, tuple = ('17')                                    +
-     Item 7: offset = 472, tuple = ('18')                                    +
-     Item 8: offset = 496, tuple = ('19')                                    +
-     Item 9: offset = 520, tuple = ('20')                                    +
-     Item 10: offset = 544, tuple = ('105')                                  +
-     Item 11: offset = 568, tuple = ('106')                                  +
-     Item 12: offset = 592, tuple = ('107')                                  +
-     Item 13: offset = 616, tuple = ('108')                                  +
-     Item 14: offset = 640, tuple = ('109')                                  +
-     Item 15: offset = 664, tuple = ('110')                                  +
-     Item 16: offset = 688, tuple = ('111')                                  +
-     Item 17: offset = 712, tuple = ('112')                                  +
-     Item 18: offset = 736, tuple = ('113')                                  +
-     Item 19: offset = 760, tuple = ('114')                                  +
-     Item 20: offset = 784, tuple = ('115')                                  +
+     Item 0: deleted, tuple = ('11')                                         +
+     Item 1: deleted, tuple = ('12')                                         +
+     Item 2: deleted, tuple = ('13')                                         +
+     Item 3: deleted, tuple = ('14')                                         +
+     Item 4: deleted, tuple = ('15')                                         +
+     Item 5: tuple = ('16')                                                  +
+     Item 6: tuple = ('17')                                                  +
+     Item 7: tuple = ('18')                                                  +
+     Item 8: tuple = ('19')                                                  +
+     Item 9: tuple = ('20')                                                  +
+     Item 10: tuple = ('105')                                                +
+     Item 11: tuple = ('106')                                                +
+     Item 12: tuple = ('107')                                                +
+     Item 13: tuple = ('108')                                                +
+     Item 14: tuple = ('109')                                                +
+     Item 15: tuple = ('110')                                                +
+     Item 16: tuple = ('111')                                                +
+     Item 17: tuple = ('112')                                                +
+     Item 18: tuple = ('113')                                                +
+     Item 19: tuple = ('114')                                                +
+     Item 20: tuple = ('115')                                                +
                                                                              +
  Index o_test_partial_ix2 contents                                           +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 120                       +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: deleted, offset = 304, tuple = ('11')                           +
-     Item 1: deleted, offset = 328, tuple = ('12')                           +
-     Item 2: deleted, offset = 352, tuple = ('13')                           +
-     Item 3: deleted, offset = 376, tuple = ('14')                           +
-     Item 4: deleted, offset = 400, tuple = ('15')                           +
-     Item 5: offset = 424, tuple = ('16')                                    +
-     Item 6: offset = 448, tuple = ('17')                                    +
-     Item 7: offset = 472, tuple = ('18')                                    +
-     Item 8: offset = 496, tuple = ('19')                                    +
-     Item 9: offset = 520, tuple = ('20')                                    +
-     Item 10: offset = 544, tuple = ('105')                                  +
-     Item 11: offset = 568, tuple = ('106')                                  +
-     Item 12: offset = 592, tuple = ('107')                                  +
-     Item 13: offset = 616, tuple = ('108')                                  +
-     Item 14: offset = 640, tuple = ('109')                                  +
-     Item 15: offset = 664, tuple = ('110')                                  +
-     Item 16: offset = 688, tuple = ('111')                                  +
-     Item 17: offset = 712, tuple = ('112')                                  +
-     Item 18: offset = 736, tuple = ('113')                                  +
-     Item 19: offset = 760, tuple = ('114')                                  +
-     Item 20: offset = 784, tuple = ('115')                                  +
+     Item 0: deleted, tuple = ('11')                                         +
+     Item 1: deleted, tuple = ('12')                                         +
+     Item 2: deleted, tuple = ('13')                                         +
+     Item 3: deleted, tuple = ('14')                                         +
+     Item 4: deleted, tuple = ('15')                                         +
+     Item 5: tuple = ('16')                                                  +
+     Item 6: tuple = ('17')                                                  +
+     Item 7: tuple = ('18')                                                  +
+     Item 8: tuple = ('19')                                                  +
+     Item 9: tuple = ('20')                                                  +
+     Item 10: tuple = ('105')                                                +
+     Item 11: tuple = ('106')                                                +
+     Item 12: tuple = ('107')                                                +
+     Item 13: tuple = ('108')                                                +
+     Item 14: tuple = ('109')                                                +
+     Item 15: tuple = ('110')                                                +
+     Item 16: tuple = ('111')                                                +
+     Item 17: tuple = ('112')                                                +
+     Item 18: tuple = ('113')                                                +
+     Item 19: tuple = ('114')                                                +
+     Item 20: tuple = ('115')                                                +
                                                                              +
  Index o_test_partial_ix3 contents                                           +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 288                       +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('13')  +
-     Item 0: deleted, offset = 280, tuple = ('1')                            +
-     Item 1: offset = 304, tuple = ('2')                                     +
-     Item 2: offset = 328, tuple = ('3')                                     +
-     Item 3: offset = 352, tuple = ('4')                                     +
-     Item 4: deleted, offset = 376, tuple = ('5')                            +
-     Item 5: deleted, offset = 400, tuple = ('6')                            +
-     Item 6: deleted, offset = 424, tuple = ('7')                            +
-     Item 7: deleted, offset = 448, tuple = ('8')                            +
-     Item 8: deleted, offset = 472, tuple = ('9')                            +
-     Item 9: deleted, offset = 496, tuple = ('10')                           +
-     Item 10: deleted, offset = 520, tuple = ('11')                          +
-     Item 11: deleted, offset = 544, tuple = ('12')                          +
+     Item 0: deleted, tuple = ('1')                                          +
+     Item 1: tuple = ('2')                                                   +
+     Item 2: tuple = ('3')                                                   +
+     Item 3: tuple = ('4')                                                   +
+     Item 4: deleted, tuple = ('5')                                          +
+     Item 5: deleted, tuple = ('6')                                          +
+     Item 6: deleted, tuple = ('7')                                          +
+     Item 7: deleted, tuple = ('8')                                          +
+     Item 8: deleted, tuple = ('9')                                          +
+     Item 9: deleted, tuple = ('10')                                         +
+     Item 10: deleted, tuple = ('11')                                        +
+     Item 11: deleted, tuple = ('12')                                        +
    Chunk 1: offset = 12, location = 568, hikey location = 72                 +
-     Item 12: deleted, offset = 608, tuple = ('13')                          +
-     Item 13: deleted, offset = 632, tuple = ('14')                          +
-     Item 14: deleted, offset = 656, tuple = ('15')                          +
-     Item 15: offset = 680, tuple = ('16')                                   +
-     Item 16: offset = 704, tuple = ('17')                                   +
-     Item 17: offset = 728, tuple = ('18')                                   +
-     Item 18: offset = 752, tuple = ('19')                                   +
-     Item 19: offset = 776, tuple = ('20')                                   +
-     Item 20: offset = 800, tuple = ('105')                                  +
-     Item 21: offset = 824, tuple = ('106')                                  +
-     Item 22: offset = 848, tuple = ('107')                                  +
-     Item 23: offset = 872, tuple = ('108')                                  +
-     Item 24: offset = 896, tuple = ('109')                                  +
-     Item 25: offset = 920, tuple = ('110')                                  +
-     Item 26: offset = 944, tuple = ('111')                                  +
-     Item 27: offset = 968, tuple = ('112')                                  +
-     Item 28: offset = 992, tuple = ('113')                                  +
-     Item 29: offset = 1016, tuple = ('114')                                 +
-     Item 30: offset = 1040, tuple = ('115')                                 +
+     Item 12: deleted, tuple = ('13')                                        +
+     Item 13: deleted, tuple = ('14')                                        +
+     Item 14: deleted, tuple = ('15')                                        +
+     Item 15: tuple = ('16')                                                 +
+     Item 16: tuple = ('17')                                                 +
+     Item 17: tuple = ('18')                                                 +
+     Item 18: tuple = ('19')                                                 +
+     Item 19: tuple = ('20')                                                 +
+     Item 20: tuple = ('105')                                                +
+     Item 21: tuple = ('106')                                                +
+     Item 22: tuple = ('107')                                                +
+     Item 23: tuple = ('108')                                                +
+     Item 24: tuple = ('109')                                                +
+     Item 25: tuple = ('110')                                                +
+     Item 26: tuple = ('111')                                                +
+     Item 27: tuple = ('112')                                                +
+     Item 28: tuple = ('113')                                                +
+     Item 29: tuple = ('114')                                                +
+     Item 30: tuple = ('115')                                                +
                                                                              +
  Index o_test_partial_ix4 contents                                           +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 288                       +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('12')  +
-     Item 0: offset = 280, tuple = ('0')                                     +
-     Item 1: deleted, offset = 304, tuple = ('1')                            +
-     Item 2: offset = 328, tuple = ('2')                                     +
-     Item 3: offset = 352, tuple = ('3')                                     +
-     Item 4: offset = 376, tuple = ('4')                                     +
-     Item 5: deleted, offset = 400, tuple = ('5')                            +
-     Item 6: deleted, offset = 424, tuple = ('6')                            +
-     Item 7: deleted, offset = 448, tuple = ('7')                            +
-     Item 8: deleted, offset = 472, tuple = ('8')                            +
-     Item 9: deleted, offset = 496, tuple = ('9')                            +
-     Item 10: deleted, offset = 520, tuple = ('10')                          +
-     Item 11: deleted, offset = 544, tuple = ('11')                          +
+     Item 0: tuple = ('0')                                                   +
+     Item 1: deleted, tuple = ('1')                                          +
+     Item 2: tuple = ('2')                                                   +
+     Item 3: tuple = ('3')                                                   +
+     Item 4: tuple = ('4')                                                   +
+     Item 5: deleted, tuple = ('5')                                          +
+     Item 6: deleted, tuple = ('6')                                          +
+     Item 7: deleted, tuple = ('7')                                          +
+     Item 8: deleted, tuple = ('8')                                          +
+     Item 9: deleted, tuple = ('9')                                          +
+     Item 10: deleted, tuple = ('10')                                        +
+     Item 11: deleted, tuple = ('11')                                        +
    Chunk 1: offset = 12, location = 568, hikey location = 72                 +
-     Item 12: deleted, offset = 608, tuple = ('12')                          +
-     Item 13: deleted, offset = 632, tuple = ('13')                          +
-     Item 14: deleted, offset = 656, tuple = ('14')                          +
-     Item 15: deleted, offset = 680, tuple = ('15')                          +
-     Item 16: offset = 704, tuple = ('16')                                   +
-     Item 17: offset = 728, tuple = ('17')                                   +
-     Item 18: offset = 752, tuple = ('18')                                   +
-     Item 19: offset = 776, tuple = ('19')                                   +
-     Item 20: offset = 800, tuple = ('20')                                   +
-     Item 21: offset = 824, tuple = ('105')                                  +
-     Item 22: offset = 848, tuple = ('106')                                  +
-     Item 23: offset = 872, tuple = ('107')                                  +
-     Item 24: offset = 896, tuple = ('108')                                  +
-     Item 25: offset = 920, tuple = ('109')                                  +
-     Item 26: offset = 944, tuple = ('110')                                  +
-     Item 27: offset = 968, tuple = ('111')                                  +
-     Item 28: offset = 992, tuple = ('112')                                  +
-     Item 29: offset = 1016, tuple = ('113')                                 +
-     Item 30: offset = 1040, tuple = ('114')                                 +
-     Item 31: offset = 1064, tuple = ('115')                                 +
+     Item 12: deleted, tuple = ('12')                                        +
+     Item 13: deleted, tuple = ('13')                                        +
+     Item 14: deleted, tuple = ('14')                                        +
+     Item 15: deleted, tuple = ('15')                                        +
+     Item 16: tuple = ('16')                                                 +
+     Item 17: tuple = ('17')                                                 +
+     Item 18: tuple = ('18')                                                 +
+     Item 19: tuple = ('19')                                                 +
+     Item 20: tuple = ('20')                                                 +
+     Item 21: tuple = ('105')                                                +
+     Item 22: tuple = ('106')                                                +
+     Item 23: tuple = ('107')                                                +
+     Item 24: tuple = ('108')                                                +
+     Item 25: tuple = ('109')                                                +
+     Item 26: tuple = ('110')                                                +
+     Item 27: tuple = ('111')                                                +
+     Item 28: tuple = ('112')                                                +
+     Item 29: tuple = ('113')                                                +
+     Item 30: tuple = ('114')                                                +
+     Item 31: tuple = ('115')                                                +
                                                                              +
  Index o_test_partial_ix5 contents                                           +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 120                       +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: deleted, offset = 304, tuple = ('11')                           +
-     Item 1: deleted, offset = 328, tuple = ('12')                           +
-     Item 2: deleted, offset = 352, tuple = ('13')                           +
-     Item 3: deleted, offset = 376, tuple = ('14')                           +
-     Item 4: deleted, offset = 400, tuple = ('15')                           +
-     Item 5: offset = 424, tuple = ('16')                                    +
-     Item 6: offset = 448, tuple = ('17')                                    +
-     Item 7: offset = 472, tuple = ('18')                                    +
-     Item 8: offset = 496, tuple = ('19')                                    +
-     Item 9: offset = 520, tuple = ('20')                                    +
-     Item 10: offset = 544, tuple = ('105')                                  +
-     Item 11: offset = 568, tuple = ('106')                                  +
-     Item 12: offset = 592, tuple = ('107')                                  +
-     Item 13: offset = 616, tuple = ('108')                                  +
-     Item 14: offset = 640, tuple = ('109')                                  +
-     Item 15: offset = 664, tuple = ('110')                                  +
-     Item 16: offset = 688, tuple = ('111')                                  +
-     Item 17: offset = 712, tuple = ('112')                                  +
-     Item 18: offset = 736, tuple = ('113')                                  +
-     Item 19: offset = 760, tuple = ('114')                                  +
-     Item 20: offset = 784, tuple = ('115')                                  +
+     Item 0: deleted, tuple = ('11')                                         +
+     Item 1: deleted, tuple = ('12')                                         +
+     Item 2: deleted, tuple = ('13')                                         +
+     Item 3: deleted, tuple = ('14')                                         +
+     Item 4: deleted, tuple = ('15')                                         +
+     Item 5: tuple = ('16')                                                  +
+     Item 6: tuple = ('17')                                                  +
+     Item 7: tuple = ('18')                                                  +
+     Item 8: tuple = ('19')                                                  +
+     Item 9: tuple = ('20')                                                  +
+     Item 10: tuple = ('105')                                                +
+     Item 11: tuple = ('106')                                                +
+     Item 12: tuple = ('107')                                                +
+     Item 13: tuple = ('108')                                                +
+     Item 14: tuple = ('109')                                                +
+     Item 15: tuple = ('110')                                                +
+     Item 16: tuple = ('111')                                                +
+     Item 17: tuple = ('112')                                                +
+     Item 18: tuple = ('113')                                                +
+     Item 19: tuple = ('114')                                                +
+     Item 20: tuple = ('115')                                                +
                                                                              +
  Index o_test_partial_ix7 contents                                           +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                         +
@@ -785,32 +785,32 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: deleted, offset = 280, tuple = ('5text', '5')                   +
-     Item 1: offset = 320, tuple = ('5text', '105')                          +
-     Item 2: deleted, offset = 360, tuple = ('6text', '6')                   +
-     Item 3: offset = 400, tuple = ('6text', '106')                          +
-     Item 4: deleted, offset = 440, tuple = ('7text', '7')                   +
-     Item 5: offset = 480, tuple = ('7text', '107')                          +
-     Item 6: deleted, offset = 520, tuple = ('8text', '8')                   +
-     Item 7: offset = 560, tuple = ('8text', '108')                          +
-     Item 8: deleted, offset = 600, tuple = ('9text', '9')                   +
-     Item 9: offset = 640, tuple = ('9text', '109')                          +
+     Item 0: deleted, tuple = ('5text', '5')                                 +
+     Item 1: tuple = ('5text', '105')                                        +
+     Item 2: deleted, tuple = ('6text', '6')                                 +
+     Item 3: tuple = ('6text', '106')                                        +
+     Item 4: deleted, tuple = ('7text', '7')                                 +
+     Item 5: tuple = ('7text', '107')                                        +
+     Item 6: deleted, tuple = ('8text', '8')                                 +
+     Item 7: tuple = ('8text', '108')                                        +
+     Item 8: deleted, tuple = ('9text', '9')                                 +
+     Item 9: tuple = ('9text', '109')                                        +
                                                                              +
  Index o_test_partial_ix9 contents                                           +
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 200                      +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
-     Item 0: deleted, offset = 280, tuple = ('5text', '5')                   +
-     Item 1: offset = 320, tuple = ('5text', '105')                          +
-     Item 2: deleted, offset = 360, tuple = ('6text', '6')                   +
-     Item 3: offset = 400, tuple = ('6text', '106')                          +
-     Item 4: deleted, offset = 440, tuple = ('7text', '7')                   +
-     Item 5: offset = 480, tuple = ('7text', '107')                          +
-     Item 6: deleted, offset = 520, tuple = ('8text', '8')                   +
-     Item 7: offset = 560, tuple = ('8text', '108')                          +
-     Item 8: deleted, offset = 600, tuple = ('9text', '9')                   +
-     Item 9: offset = 640, tuple = ('9text', '109')                          +
+     Item 0: deleted, tuple = ('5text', '5')                                 +
+     Item 1: tuple = ('5text', '105')                                        +
+     Item 2: deleted, tuple = ('6text', '6')                                 +
+     Item 3: tuple = ('6text', '106')                                        +
+     Item 4: deleted, tuple = ('7text', '7')                                 +
+     Item 5: tuple = ('7text', '107')                                        +
+     Item 6: deleted, tuple = ('8text', '8')                                 +
+     Item 7: tuple = ('8text', '108')                                        +
+     Item 8: deleted, tuple = ('9text', '9')                                 +
+     Item 9: tuple = ('9text', '109')                                        +
                                                                              +
  Index toast: not loaded                                                     +
  
@@ -855,188 +855,188 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('(0,3)')           +
-     Item 0: offset = 264, tuple = ('(0,1)', '0', '0text')                               +
-     Item 1: offset = 312, tuple = ('(0,2)', '2', '2text')                               +
+     Item 0: tuple = ('(0,1)', '0', '0text')                                             +
+     Item 1: tuple = ('(0,2)', '2', '2text')                                             +
    Chunk 1: offset = 2, location = 360, hikey location = 104, hikey = ('(0,5)')          +
-     Item 2: offset = 368, tuple = ('(0,3)', '3', '3text')                               +
-     Item 3: offset = 416, tuple = ('(0,4)', '4', '4text')                               +
+     Item 2: tuple = ('(0,3)', '3', '3text')                                             +
+     Item 3: tuple = ('(0,4)', '4', '4text')                                             +
    Chunk 2: offset = 4, location = 464, hikey location = 112, hikey = ('(0,7)')          +
-     Item 4: offset = 472, tuple = ('(0,5)', '16', '16text')                             +
-     Item 5: offset = 520, tuple = ('(0,6)', '17', '17text')                             +
+     Item 4: tuple = ('(0,5)', '16', '16text')                                           +
+     Item 5: tuple = ('(0,6)', '17', '17text')                                           +
    Chunk 3: offset = 6, location = 568, hikey location = 120, hikey = ('(0,9)')          +
-     Item 6: offset = 576, tuple = ('(0,7)', '18', '18text')                             +
-     Item 7: offset = 624, tuple = ('(0,8)', '19', '19text')                             +
+     Item 6: tuple = ('(0,7)', '18', '18text')                                           +
+     Item 7: tuple = ('(0,8)', '19', '19text')                                           +
    Chunk 4: offset = 8, location = 672, hikey location = 128, hikey = ('(0,11)')         +
-     Item 8: offset = 680, tuple = ('(0,9)', '20', '20text')                             +
-     Item 9: offset = 728, tuple = ('(0,10)', '105', '5text')                            +
+     Item 8: tuple = ('(0,9)', '20', '20text')                                           +
+     Item 9: tuple = ('(0,10)', '105', '5text')                                          +
    Chunk 5: offset = 10, location = 776, hikey location = 136, hikey = ('(0,13)')        +
-     Item 10: offset = 784, tuple = ('(0,11)', '106', '6text')                           +
-     Item 11: offset = 832, tuple = ('(0,12)', '107', '7text')                           +
+     Item 10: tuple = ('(0,11)', '106', '6text')                                         +
+     Item 11: tuple = ('(0,12)', '107', '7text')                                         +
    Chunk 6: offset = 12, location = 880, hikey location = 144, hikey = ('(0,15)')        +
-     Item 12: offset = 888, tuple = ('(0,13)', '108', '8text')                           +
-     Item 13: offset = 936, tuple = ('(0,14)', '109', '9text')                           +
+     Item 12: tuple = ('(0,13)', '108', '8text')                                         +
+     Item 13: tuple = ('(0,14)', '109', '9text')                                         +
    Chunk 7: offset = 14, location = 984, hikey location = 152, hikey = ('(0,17)')        +
-     Item 14: offset = 992, tuple = ('(0,15)', '110', '10text')                          +
-     Item 15: offset = 1040, tuple = ('(0,16)', '111', '11text')                         +
+     Item 14: tuple = ('(0,15)', '110', '10text')                                        +
+     Item 15: tuple = ('(0,16)', '111', '11text')                                        +
    Chunk 8: offset = 16, location = 1088, hikey location = 160, hikey = ('(0,19)')       +
-     Item 16: offset = 1096, tuple = ('(0,17)', '112', '12text')                         +
-     Item 17: offset = 1144, tuple = ('(0,18)', '113', '13text')                         +
+     Item 16: tuple = ('(0,17)', '112', '12text')                                        +
+     Item 17: tuple = ('(0,18)', '113', '13text')                                        +
    Chunk 9: offset = 18, location = 1192, hikey location = 168                           +
-     Item 18: offset = 1200, tuple = ('(0,19)', '114', '14text')                         +
-     Item 19: offset = 1248, tuple = ('(0,20)', '115', '15text')                         +
+     Item 18: tuple = ('(0,19)', '114', '14text')                                        +
+     Item 19: tuple = ('(0,20)', '115', '15text')                                        +
                                                                                          +
  Index o_test_partial_ix1 contents                                                       +
  Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                    +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('18', '(0,7)')     +
-     Item 0: offset = 264, tuple = ('16', '(0,5)')                                       +
-     Item 1: offset = 296, tuple = ('17', '(0,6)')                                       +
+     Item 0: tuple = ('16', '(0,5)')                                                     +
+     Item 1: tuple = ('17', '(0,6)')                                                     +
    Chunk 1: offset = 2, location = 328, hikey location = 104, hikey = ('20', '(0,9)')    +
-     Item 2: offset = 336, tuple = ('18', '(0,7)')                                       +
-     Item 3: offset = 368, tuple = ('19', '(0,8)')                                       +
+     Item 2: tuple = ('18', '(0,7)')                                                     +
+     Item 3: tuple = ('19', '(0,8)')                                                     +
    Chunk 2: offset = 4, location = 400, hikey location = 120, hikey = ('106', '(0,11)')  +
-     Item 4: offset = 408, tuple = ('20', '(0,9)')                                       +
-     Item 5: offset = 440, tuple = ('105', '(0,10)')                                     +
+     Item 4: tuple = ('20', '(0,9)')                                                     +
+     Item 5: tuple = ('105', '(0,10)')                                                   +
    Chunk 3: offset = 6, location = 472, hikey location = 136, hikey = ('108', '(0,13)')  +
-     Item 6: offset = 480, tuple = ('106', '(0,11)')                                     +
-     Item 7: offset = 512, tuple = ('107', '(0,12)')                                     +
+     Item 6: tuple = ('106', '(0,11)')                                                   +
+     Item 7: tuple = ('107', '(0,12)')                                                   +
    Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('110', '(0,15)')  +
-     Item 8: offset = 552, tuple = ('108', '(0,13)')                                     +
-     Item 9: offset = 584, tuple = ('109', '(0,14)')                                     +
+     Item 8: tuple = ('108', '(0,13)')                                                   +
+     Item 9: tuple = ('109', '(0,14)')                                                   +
    Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('112', '(0,17)') +
-     Item 10: offset = 624, tuple = ('110', '(0,15)')                                    +
-     Item 11: offset = 656, tuple = ('111', '(0,16)')                                    +
+     Item 10: tuple = ('110', '(0,15)')                                                  +
+     Item 11: tuple = ('111', '(0,16)')                                                  +
    Chunk 6: offset = 12, location = 688, hikey location = 184, hikey = ('114', '(0,19)') +
-     Item 12: offset = 696, tuple = ('112', '(0,17)')                                    +
-     Item 13: offset = 728, tuple = ('113', '(0,18)')                                    +
+     Item 12: tuple = ('112', '(0,17)')                                                  +
+     Item 13: tuple = ('113', '(0,18)')                                                  +
    Chunk 7: offset = 14, location = 760, hikey location = 200                            +
-     Item 14: offset = 768, tuple = ('114', '(0,19)')                                    +
-     Item 15: offset = 800, tuple = ('115', '(0,20)')                                    +
+     Item 14: tuple = ('114', '(0,19)')                                                  +
+     Item 15: tuple = ('115', '(0,20)')                                                  +
                                                                                          +
  Index o_test_partial_ix2 contents                                                       +
  Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                    +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('18', '(0,7)')     +
-     Item 0: offset = 264, tuple = ('16', '(0,5)')                                       +
-     Item 1: offset = 296, tuple = ('17', '(0,6)')                                       +
+     Item 0: tuple = ('16', '(0,5)')                                                     +
+     Item 1: tuple = ('17', '(0,6)')                                                     +
    Chunk 1: offset = 2, location = 328, hikey location = 104, hikey = ('20', '(0,9)')    +
-     Item 2: offset = 336, tuple = ('18', '(0,7)')                                       +
-     Item 3: offset = 368, tuple = ('19', '(0,8)')                                       +
+     Item 2: tuple = ('18', '(0,7)')                                                     +
+     Item 3: tuple = ('19', '(0,8)')                                                     +
    Chunk 2: offset = 4, location = 400, hikey location = 120, hikey = ('106', '(0,11)')  +
-     Item 4: offset = 408, tuple = ('20', '(0,9)')                                       +
-     Item 5: offset = 440, tuple = ('105', '(0,10)')                                     +
+     Item 4: tuple = ('20', '(0,9)')                                                     +
+     Item 5: tuple = ('105', '(0,10)')                                                   +
    Chunk 3: offset = 6, location = 472, hikey location = 136, hikey = ('108', '(0,13)')  +
-     Item 6: offset = 480, tuple = ('106', '(0,11)')                                     +
-     Item 7: offset = 512, tuple = ('107', '(0,12)')                                     +
+     Item 6: tuple = ('106', '(0,11)')                                                   +
+     Item 7: tuple = ('107', '(0,12)')                                                   +
    Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('110', '(0,15)')  +
-     Item 8: offset = 552, tuple = ('108', '(0,13)')                                     +
-     Item 9: offset = 584, tuple = ('109', '(0,14)')                                     +
+     Item 8: tuple = ('108', '(0,13)')                                                   +
+     Item 9: tuple = ('109', '(0,14)')                                                   +
    Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('112', '(0,17)') +
-     Item 10: offset = 624, tuple = ('110', '(0,15)')                                    +
-     Item 11: offset = 656, tuple = ('111', '(0,16)')                                    +
+     Item 10: tuple = ('110', '(0,15)')                                                  +
+     Item 11: tuple = ('111', '(0,16)')                                                  +
    Chunk 6: offset = 12, location = 688, hikey location = 184, hikey = ('114', '(0,19)') +
-     Item 12: offset = 696, tuple = ('112', '(0,17)')                                    +
-     Item 13: offset = 728, tuple = ('113', '(0,18)')                                    +
+     Item 12: tuple = ('112', '(0,17)')                                                  +
+     Item 13: tuple = ('113', '(0,18)')                                                  +
    Chunk 7: offset = 14, location = 760, hikey location = 200                            +
-     Item 14: offset = 768, tuple = ('114', '(0,19)')                                    +
-     Item 15: offset = 800, tuple = ('115', '(0,20)')                                    +
+     Item 14: tuple = ('114', '(0,19)')                                                  +
+     Item 15: tuple = ('115', '(0,20)')                                                  +
                                                                                          +
  Index o_test_partial_ix3 contents                                                       +
  Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                    +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('4', '(0,4)')      +
-     Item 0: offset = 264, tuple = ('2', '(0,2)')                                        +
-     Item 1: offset = 296, tuple = ('3', '(0,3)')                                        +
+     Item 0: tuple = ('2', '(0,2)')                                                      +
+     Item 1: tuple = ('3', '(0,3)')                                                      +
    Chunk 1: offset = 2, location = 328, hikey location = 112, hikey = ('17', '(0,6)')    +
-     Item 2: offset = 336, tuple = ('4', '(0,4)')                                        +
-     Item 3: offset = 368, tuple = ('16', '(0,5)')                                       +
+     Item 2: tuple = ('4', '(0,4)')                                                      +
+     Item 3: tuple = ('16', '(0,5)')                                                     +
    Chunk 2: offset = 4, location = 400, hikey location = 128, hikey = ('19', '(0,8)')    +
-     Item 4: offset = 408, tuple = ('17', '(0,6)')                                       +
-     Item 5: offset = 440, tuple = ('18', '(0,7)')                                       +
+     Item 4: tuple = ('17', '(0,6)')                                                     +
+     Item 5: tuple = ('18', '(0,7)')                                                     +
    Chunk 3: offset = 6, location = 472, hikey location = 144, hikey = ('105', '(0,10)')  +
-     Item 6: offset = 480, tuple = ('19', '(0,8)')                                       +
-     Item 7: offset = 512, tuple = ('20', '(0,9)')                                       +
+     Item 6: tuple = ('19', '(0,8)')                                                     +
+     Item 7: tuple = ('20', '(0,9)')                                                     +
    Chunk 4: offset = 8, location = 544, hikey location = 160, hikey = ('107', '(0,12)')  +
-     Item 8: offset = 552, tuple = ('105', '(0,10)')                                     +
-     Item 9: offset = 584, tuple = ('106', '(0,11)')                                     +
+     Item 8: tuple = ('105', '(0,10)')                                                   +
+     Item 9: tuple = ('106', '(0,11)')                                                   +
    Chunk 5: offset = 10, location = 616, hikey location = 176, hikey = ('109', '(0,14)') +
-     Item 10: offset = 624, tuple = ('107', '(0,12)')                                    +
-     Item 11: offset = 656, tuple = ('108', '(0,13)')                                    +
+     Item 10: tuple = ('107', '(0,12)')                                                  +
+     Item 11: tuple = ('108', '(0,13)')                                                  +
    Chunk 6: offset = 12, location = 688, hikey location = 192, hikey = ('111', '(0,16)') +
-     Item 12: offset = 696, tuple = ('109', '(0,14)')                                    +
-     Item 13: offset = 728, tuple = ('110', '(0,15)')                                    +
+     Item 12: tuple = ('109', '(0,14)')                                                  +
+     Item 13: tuple = ('110', '(0,15)')                                                  +
    Chunk 7: offset = 14, location = 760, hikey location = 208, hikey = ('113', '(0,18)') +
-     Item 14: offset = 768, tuple = ('111', '(0,16)')                                    +
-     Item 15: offset = 800, tuple = ('112', '(0,17)')                                    +
+     Item 14: tuple = ('111', '(0,16)')                                                  +
+     Item 15: tuple = ('112', '(0,17)')                                                  +
    Chunk 8: offset = 16, location = 832, hikey location = 224, hikey = ('115', '(0,20)') +
-     Item 16: offset = 840, tuple = ('113', '(0,18)')                                    +
-     Item 17: offset = 872, tuple = ('114', '(0,19)')                                    +
+     Item 16: tuple = ('113', '(0,18)')                                                  +
+     Item 17: tuple = ('114', '(0,19)')                                                  +
    Chunk 9: offset = 18, location = 904, hikey location = 240                            +
-     Item 18: offset = 912, tuple = ('115', '(0,20)')                                    +
+     Item 18: tuple = ('115', '(0,20)')                                                  +
                                                                                          +
  Index o_test_partial_ix4 contents                                                       +
  Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                    +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('4', '(0,4)')      +
-     Item 0: offset = 264, tuple = ('0', '(0,1)')                                        +
-     Item 1: offset = 296, tuple = ('2', '(0,2)')                                        +
-     Item 2: offset = 328, tuple = ('3', '(0,3)')                                        +
+     Item 0: tuple = ('0', '(0,1)')                                                      +
+     Item 1: tuple = ('2', '(0,2)')                                                      +
+     Item 2: tuple = ('3', '(0,3)')                                                      +
    Chunk 1: offset = 3, location = 360, hikey location = 104, hikey = ('18', '(0,7)')    +
-     Item 3: offset = 368, tuple = ('4', '(0,4)')                                        +
-     Item 4: offset = 400, tuple = ('16', '(0,5)')                                       +
-     Item 5: offset = 432, tuple = ('17', '(0,6)')                                       +
+     Item 3: tuple = ('4', '(0,4)')                                                      +
+     Item 4: tuple = ('16', '(0,5)')                                                     +
+     Item 5: tuple = ('17', '(0,6)')                                                     +
    Chunk 2: offset = 6, location = 464, hikey location = 120, hikey = ('105', '(0,10)')  +
-     Item 6: offset = 472, tuple = ('18', '(0,7)')                                       +
-     Item 7: offset = 504, tuple = ('19', '(0,8)')                                       +
-     Item 8: offset = 536, tuple = ('20', '(0,9)')                                       +
+     Item 6: tuple = ('18', '(0,7)')                                                     +
+     Item 7: tuple = ('19', '(0,8)')                                                     +
+     Item 8: tuple = ('20', '(0,9)')                                                     +
    Chunk 3: offset = 9, location = 568, hikey location = 136, hikey = ('108', '(0,13)')  +
-     Item 9: offset = 576, tuple = ('105', '(0,10)')                                     +
-     Item 10: offset = 608, tuple = ('106', '(0,11)')                                    +
-     Item 11: offset = 640, tuple = ('107', '(0,12)')                                    +
+     Item 9: tuple = ('105', '(0,10)')                                                   +
+     Item 10: tuple = ('106', '(0,11)')                                                  +
+     Item 11: tuple = ('107', '(0,12)')                                                  +
    Chunk 4: offset = 12, location = 672, hikey location = 152, hikey = ('111', '(0,16)') +
-     Item 12: offset = 680, tuple = ('108', '(0,13)')                                    +
-     Item 13: offset = 712, tuple = ('109', '(0,14)')                                    +
-     Item 14: offset = 744, tuple = ('110', '(0,15)')                                    +
+     Item 12: tuple = ('108', '(0,13)')                                                  +
+     Item 13: tuple = ('109', '(0,14)')                                                  +
+     Item 14: tuple = ('110', '(0,15)')                                                  +
    Chunk 5: offset = 15, location = 776, hikey location = 168, hikey = ('114', '(0,19)') +
-     Item 15: offset = 784, tuple = ('111', '(0,16)')                                    +
-     Item 16: offset = 816, tuple = ('112', '(0,17)')                                    +
-     Item 17: offset = 848, tuple = ('113', '(0,18)')                                    +
+     Item 15: tuple = ('111', '(0,16)')                                                  +
+     Item 16: tuple = ('112', '(0,17)')                                                  +
+     Item 17: tuple = ('113', '(0,18)')                                                  +
    Chunk 6: offset = 18, location = 880, hikey location = 184                            +
-     Item 18: offset = 888, tuple = ('114', '(0,19)')                                    +
-     Item 19: offset = 920, tuple = ('115', '(0,20)')                                    +
+     Item 18: tuple = ('114', '(0,19)')                                                  +
+     Item 19: tuple = ('115', '(0,20)')                                                  +
                                                                                          +
  Index o_test_partial_ix5 contents                                                       +
  Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                    +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('18', '(0,7)')     +
-     Item 0: offset = 264, tuple = ('16', '(0,5)')                                       +
-     Item 1: offset = 296, tuple = ('17', '(0,6)')                                       +
+     Item 0: tuple = ('16', '(0,5)')                                                     +
+     Item 1: tuple = ('17', '(0,6)')                                                     +
    Chunk 1: offset = 2, location = 328, hikey location = 104, hikey = ('20', '(0,9)')    +
-     Item 2: offset = 336, tuple = ('18', '(0,7)')                                       +
-     Item 3: offset = 368, tuple = ('19', '(0,8)')                                       +
+     Item 2: tuple = ('18', '(0,7)')                                                     +
+     Item 3: tuple = ('19', '(0,8)')                                                     +
    Chunk 2: offset = 4, location = 400, hikey location = 120, hikey = ('106', '(0,11)')  +
-     Item 4: offset = 408, tuple = ('20', '(0,9)')                                       +
-     Item 5: offset = 440, tuple = ('105', '(0,10)')                                     +
+     Item 4: tuple = ('20', '(0,9)')                                                     +
+     Item 5: tuple = ('105', '(0,10)')                                                   +
    Chunk 3: offset = 6, location = 472, hikey location = 136, hikey = ('108', '(0,13)')  +
-     Item 6: offset = 480, tuple = ('106', '(0,11)')                                     +
-     Item 7: offset = 512, tuple = ('107', '(0,12)')                                     +
+     Item 6: tuple = ('106', '(0,11)')                                                   +
+     Item 7: tuple = ('107', '(0,12)')                                                   +
    Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('110', '(0,15)')  +
-     Item 8: offset = 552, tuple = ('108', '(0,13)')                                     +
-     Item 9: offset = 584, tuple = ('109', '(0,14)')                                     +
+     Item 8: tuple = ('108', '(0,13)')                                                   +
+     Item 9: tuple = ('109', '(0,14)')                                                   +
    Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('112', '(0,17)') +
-     Item 10: offset = 624, tuple = ('110', '(0,15)')                                    +
-     Item 11: offset = 656, tuple = ('111', '(0,16)')                                    +
+     Item 10: tuple = ('110', '(0,15)')                                                  +
+     Item 11: tuple = ('111', '(0,16)')                                                  +
    Chunk 6: offset = 12, location = 688, hikey location = 184, hikey = ('114', '(0,19)') +
-     Item 12: offset = 696, tuple = ('112', '(0,17)')                                    +
-     Item 13: offset = 728, tuple = ('113', '(0,18)')                                    +
+     Item 12: tuple = ('112', '(0,17)')                                                  +
+     Item 13: tuple = ('113', '(0,18)')                                                  +
    Chunk 7: offset = 14, location = 760, hikey location = 200                            +
-     Item 14: offset = 768, tuple = ('114', '(0,19)')                                    +
-     Item 15: offset = 800, tuple = ('115', '(0,20)')                                    +
+     Item 14: tuple = ('114', '(0,19)')                                                  +
+     Item 15: tuple = ('115', '(0,20)')                                                  +
                                                                                          +
  Index o_test_partial_ix7 contents                                                       +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                                     +
@@ -1049,30 +1049,30 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('6text', '(0,11)') +
-     Item 0: offset = 264, tuple = ('5text', '(0,10)')                                   +
+     Item 0: tuple = ('5text', '(0,10)')                                                 +
    Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('7text', '(0,12)')+
-     Item 1: offset = 312, tuple = ('6text', '(0,11)')                                   +
+     Item 1: tuple = ('6text', '(0,11)')                                                 +
    Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('8text', '(0,13)')+
-     Item 2: offset = 360, tuple = ('7text', '(0,12)')                                   +
+     Item 2: tuple = ('7text', '(0,12)')                                                 +
    Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('9text', '(0,14)')+
-     Item 3: offset = 408, tuple = ('8text', '(0,13)')                                   +
+     Item 3: tuple = ('8text', '(0,13)')                                                 +
    Chunk 4: offset = 4, location = 448, hikey location = 176                             +
-     Item 4: offset = 456, tuple = ('9text', '(0,14)')                                   +
+     Item 4: tuple = ('9text', '(0,14)')                                                 +
                                                                                          +
  Index o_test_partial_ix9 contents                                                       +
  Page 0: level = 0, maxKeyLen = 20, nVacatedBytes = 0                                    +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                     +
      Leftmost, Rightmost                                                                 +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('6text', '(0,11)') +
-     Item 0: offset = 264, tuple = ('5text', '(0,10)')                                   +
+     Item 0: tuple = ('5text', '(0,10)')                                                 +
    Chunk 1: offset = 1, location = 304, hikey location = 104, hikey = ('7text', '(0,12)')+
-     Item 1: offset = 312, tuple = ('6text', '(0,11)')                                   +
+     Item 1: tuple = ('6text', '(0,11)')                                                 +
    Chunk 2: offset = 2, location = 352, hikey location = 128, hikey = ('8text', '(0,13)')+
-     Item 2: offset = 360, tuple = ('7text', '(0,12)')                                   +
+     Item 2: tuple = ('7text', '(0,12)')                                                 +
    Chunk 3: offset = 3, location = 400, hikey location = 152, hikey = ('9text', '(0,14)')+
-     Item 3: offset = 408, tuple = ('8text', '(0,13)')                                   +
+     Item 3: tuple = ('8text', '(0,13)')                                                 +
    Chunk 4: offset = 4, location = 448, hikey location = 176                             +
-     Item 4: offset = 456, tuple = ('9text', '(0,14)')                                   +
+     Item 4: tuple = ('9text', '(0,14)')                                                 +
                                                                                          +
  Index toast: not loaded                                                                 +
  
@@ -1266,316 +1266,316 @@ RESET enable_seqscan;
 DELETE FROM o_test_expression WHERE key = 1;
 UPDATE o_test_expression SET key = key + 100 WHERE key BETWEEN 5 AND 15;
 SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
-                                orioledb_tbl_structure                                
---------------------------------------------------------------------------------------
- Index o_test_expression_pkey contents                                               +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 480                               +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('8')           +
-     Item 0: offset = 272, tuple = ('0', '0text')                                    +
-     Item 1: deleted, offset = 312, tuple = ('1', '1text')                           +
-     Item 2: offset = 352, tuple = ('2', '2text')                                    +
-     Item 3: offset = 392, tuple = ('3', '3text')                                    +
-     Item 4: offset = 432, tuple = ('4', '4text')                                    +
-     Item 5: PK changed, offset = 472, tuple = ('5', '5text')                        +
-     Item 6: PK changed, offset = 512, tuple = ('6', '6text')                        +
-     Item 7: PK changed, offset = 552, tuple = ('7', '7text')                        +
-   Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')          +
-     Item 8: PK changed, offset = 608, tuple = ('8', '8text')                        +
-     Item 9: PK changed, offset = 648, tuple = ('9', '9text')                        +
-     Item 10: PK changed, offset = 688, tuple = ('10', '10text')                     +
-     Item 11: PK changed, offset = 728, tuple = ('11', '11text')                     +
-     Item 12: PK changed, offset = 768, tuple = ('12', '12text')                     +
-     Item 13: PK changed, offset = 808, tuple = ('13', '13text')                     +
-     Item 14: PK changed, offset = 848, tuple = ('14', '14text')                     +
-     Item 15: PK changed, offset = 888, tuple = ('15', '15text')                     +
-   Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')        +
-     Item 16: offset = 944, tuple = ('16', '16text')                                 +
-     Item 17: offset = 984, tuple = ('17', '17text')                                 +
-     Item 18: offset = 1024, tuple = ('18', '18text')                                +
-     Item 19: offset = 1064, tuple = ('19', '19text')                                +
-     Item 20: offset = 1104, tuple = ('20', '20text')                                +
-     Item 21: offset = 1144, tuple = ('105', '5text')                                +
-     Item 22: offset = 1184, tuple = ('106', '6text')                                +
-     Item 23: offset = 1224, tuple = ('107', '7text')                                +
-   Chunk 3: offset = 24, location = 1264, hikey location = 96                        +
-     Item 24: offset = 1280, tuple = ('108', '8text')                                +
-     Item 25: offset = 1320, tuple = ('109', '9text')                                +
-     Item 26: offset = 1360, tuple = ('110', '10text')                               +
-     Item 27: offset = 1400, tuple = ('111', '11text')                               +
-     Item 28: offset = 1440, tuple = ('112', '12text')                               +
-     Item 29: offset = 1480, tuple = ('113', '13text')                               +
-     Item 30: offset = 1520, tuple = ('114', '14text')                               +
-     Item 31: offset = 1560, tuple = ('115', '15text')                               +
-                                                                                     +
- Index o_test_expression_ix1 contents                                                +
- Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 384                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('0', '0')                                        +
-     Item 1: deleted, offset = 352, tuple = ('100', '1')                             +
-     Item 2: offset = 384, tuple = ('200', '2')                                      +
-     Item 3: offset = 416, tuple = ('300', '3')                                      +
-     Item 4: offset = 448, tuple = ('400', '4')                                      +
-     Item 5: deleted, offset = 480, tuple = ('500', '5')                             +
-     Item 6: deleted, offset = 512, tuple = ('600', '6')                             +
-     Item 7: deleted, offset = 544, tuple = ('700', '7')                             +
-     Item 8: deleted, offset = 576, tuple = ('800', '8')                             +
-     Item 9: deleted, offset = 608, tuple = ('900', '9')                             +
-     Item 10: deleted, offset = 640, tuple = ('1000', '10')                          +
-     Item 11: deleted, offset = 672, tuple = ('1100', '11')                          +
-     Item 12: deleted, offset = 704, tuple = ('1200', '12')                          +
-     Item 13: deleted, offset = 736, tuple = ('1300', '13')                          +
-     Item 14: deleted, offset = 768, tuple = ('1400', '14')                          +
-     Item 15: deleted, offset = 800, tuple = ('1500', '15')                          +
-     Item 16: offset = 832, tuple = ('1600', '16')                                   +
-     Item 17: offset = 864, tuple = ('1700', '17')                                   +
-     Item 18: offset = 896, tuple = ('1800', '18')                                   +
-     Item 19: offset = 928, tuple = ('1900', '19')                                   +
-     Item 20: offset = 960, tuple = ('2000', '20')                                   +
-     Item 21: offset = 992, tuple = ('10500', '105')                                 +
-     Item 22: offset = 1024, tuple = ('10600', '106')                                +
-     Item 23: offset = 1056, tuple = ('10700', '107')                                +
-     Item 24: offset = 1088, tuple = ('10800', '108')                                +
-     Item 25: offset = 1120, tuple = ('10900', '109')                                +
-     Item 26: offset = 1152, tuple = ('11000', '110')                                +
-     Item 27: offset = 1184, tuple = ('11100', '111')                                +
-     Item 28: offset = 1216, tuple = ('11200', '112')                                +
-     Item 29: offset = 1248, tuple = ('11300', '113')                                +
-     Item 30: offset = 1280, tuple = ('11400', '114')                                +
-     Item 31: offset = 1312, tuple = ('11500', '115')                                +
-                                                                                     +
- Index o_test_expression_ix2 contents                                                +
- Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 384                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('0', '0')                                        +
-     Item 1: deleted, offset = 352, tuple = ('1', '100')                             +
-     Item 2: offset = 384, tuple = ('2', '200')                                      +
-     Item 3: offset = 416, tuple = ('3', '300')                                      +
-     Item 4: offset = 448, tuple = ('4', '400')                                      +
-     Item 5: deleted, offset = 480, tuple = ('5', '500')                             +
-     Item 6: deleted, offset = 512, tuple = ('6', '600')                             +
-     Item 7: deleted, offset = 544, tuple = ('7', '700')                             +
-     Item 8: deleted, offset = 576, tuple = ('8', '800')                             +
-     Item 9: deleted, offset = 608, tuple = ('9', '900')                             +
-     Item 10: deleted, offset = 640, tuple = ('10', '1000')                          +
-     Item 11: deleted, offset = 672, tuple = ('11', '1100')                          +
-     Item 12: deleted, offset = 704, tuple = ('12', '1200')                          +
-     Item 13: deleted, offset = 736, tuple = ('13', '1300')                          +
-     Item 14: deleted, offset = 768, tuple = ('14', '1400')                          +
-     Item 15: deleted, offset = 800, tuple = ('15', '1500')                          +
-     Item 16: offset = 832, tuple = ('16', '1600')                                   +
-     Item 17: offset = 864, tuple = ('17', '1700')                                   +
-     Item 18: offset = 896, tuple = ('18', '1800')                                   +
-     Item 19: offset = 928, tuple = ('19', '1900')                                   +
-     Item 20: offset = 960, tuple = ('20', '2000')                                   +
-     Item 21: offset = 992, tuple = ('105', '10500')                                 +
-     Item 22: offset = 1024, tuple = ('106', '10600')                                +
-     Item 23: offset = 1056, tuple = ('107', '10700')                                +
-     Item 24: offset = 1088, tuple = ('108', '10800')                                +
-     Item 25: offset = 1120, tuple = ('109', '10900')                                +
-     Item 26: offset = 1152, tuple = ('110', '11000')                                +
-     Item 27: offset = 1184, tuple = ('111', '11100')                                +
-     Item 28: offset = 1216, tuple = ('112', '11200')                                +
-     Item 29: offset = 1248, tuple = ('113', '11300')                                +
-     Item 30: offset = 1280, tuple = ('114', '11400')                                +
-     Item 31: offset = 1312, tuple = ('115', '11500')                                +
-                                                                                     +
- Index o_test_expression_ix3 contents                                                +
- Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 576                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('0textWOW', '0')                                 +
-     Item 1: deleted, offset = 368, tuple = ('10textWOW', '10')                      +
-     Item 2: offset = 416, tuple = ('10textWOW', '110')                              +
-     Item 3: deleted, offset = 464, tuple = ('11textWOW', '11')                      +
-     Item 4: offset = 512, tuple = ('11textWOW', '111')                              +
-     Item 5: deleted, offset = 560, tuple = ('12textWOW', '12')                      +
-     Item 6: offset = 608, tuple = ('12textWOW', '112')                              +
-     Item 7: deleted, offset = 656, tuple = ('13textWOW', '13')                      +
-     Item 8: offset = 704, tuple = ('13textWOW', '113')                              +
-     Item 9: deleted, offset = 752, tuple = ('14textWOW', '14')                      +
-     Item 10: offset = 800, tuple = ('14textWOW', '114')                             +
-     Item 11: deleted, offset = 848, tuple = ('15textWOW', '15')                     +
-     Item 12: offset = 896, tuple = ('15textWOW', '115')                             +
-     Item 13: offset = 944, tuple = ('16textWOW', '16')                              +
-     Item 14: offset = 992, tuple = ('17textWOW', '17')                              +
-     Item 15: offset = 1040, tuple = ('18textWOW', '18')                             +
-     Item 16: offset = 1088, tuple = ('19textWOW', '19')                             +
-     Item 17: deleted, offset = 1136, tuple = ('1textWOW', '1')                      +
-     Item 18: offset = 1184, tuple = ('20textWOW', '20')                             +
-     Item 19: offset = 1232, tuple = ('2textWOW', '2')                               +
-     Item 20: offset = 1280, tuple = ('3textWOW', '3')                               +
-     Item 21: offset = 1328, tuple = ('4textWOW', '4')                               +
-     Item 22: deleted, offset = 1376, tuple = ('5textWOW', '5')                      +
-     Item 23: offset = 1424, tuple = ('5textWOW', '105')                             +
-     Item 24: deleted, offset = 1472, tuple = ('6textWOW', '6')                      +
-     Item 25: offset = 1520, tuple = ('6textWOW', '106')                             +
-     Item 26: deleted, offset = 1568, tuple = ('7textWOW', '7')                      +
-     Item 27: offset = 1616, tuple = ('7textWOW', '107')                             +
-     Item 28: deleted, offset = 1664, tuple = ('8textWOW', '8')                      +
-     Item 29: offset = 1712, tuple = ('8textWOW', '108')                             +
-     Item 30: deleted, offset = 1760, tuple = ('9textWOW', '9')                      +
-     Item 31: offset = 1808, tuple = ('9textWOW', '109')                             +
-                                                                                     +
- Index o_test_expression_ix4 contents                                                +
- Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 624                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('0text', '0textWOW', '0')                        +
-     Item 1: deleted, offset = 368, tuple = ('10text', '10textWOW', '10')            +
-     Item 2: offset = 424, tuple = ('10text', '10textWOW', '110')                    +
-     Item 3: deleted, offset = 480, tuple = ('11text', '11textWOW', '11')            +
-     Item 4: offset = 536, tuple = ('11text', '11textWOW', '111')                    +
-     Item 5: deleted, offset = 592, tuple = ('12text', '12textWOW', '12')            +
-     Item 6: offset = 648, tuple = ('12text', '12textWOW', '112')                    +
-     Item 7: deleted, offset = 704, tuple = ('13text', '13textWOW', '13')            +
-     Item 8: offset = 760, tuple = ('13text', '13textWOW', '113')                    +
-     Item 9: deleted, offset = 816, tuple = ('14text', '14textWOW', '14')            +
-     Item 10: offset = 872, tuple = ('14text', '14textWOW', '114')                   +
-     Item 11: deleted, offset = 928, tuple = ('15text', '15textWOW', '15')           +
-     Item 12: offset = 984, tuple = ('15text', '15textWOW', '115')                   +
-     Item 13: offset = 1040, tuple = ('16text', '16textWOW', '16')                   +
-     Item 14: offset = 1096, tuple = ('17text', '17textWOW', '17')                   +
-     Item 15: offset = 1152, tuple = ('18text', '18textWOW', '18')                   +
-     Item 16: offset = 1208, tuple = ('19text', '19textWOW', '19')                   +
-     Item 17: deleted, offset = 1264, tuple = ('1text', '1textWOW', '1')             +
-     Item 18: offset = 1312, tuple = ('20text', '20textWOW', '20')                   +
-     Item 19: offset = 1368, tuple = ('2text', '2textWOW', '2')                      +
-     Item 20: offset = 1416, tuple = ('3text', '3textWOW', '3')                      +
-     Item 21: offset = 1464, tuple = ('4text', '4textWOW', '4')                      +
-     Item 22: deleted, offset = 1512, tuple = ('5text', '5textWOW', '5')             +
-     Item 23: offset = 1560, tuple = ('5text', '5textWOW', '105')                    +
-     Item 24: deleted, offset = 1608, tuple = ('6text', '6textWOW', '6')             +
-     Item 25: offset = 1656, tuple = ('6text', '6textWOW', '106')                    +
-     Item 26: deleted, offset = 1704, tuple = ('7text', '7textWOW', '7')             +
-     Item 27: offset = 1752, tuple = ('7text', '7textWOW', '107')                    +
-     Item 28: deleted, offset = 1800, tuple = ('8text', '8textWOW', '8')             +
-     Item 29: offset = 1848, tuple = ('8text', '8textWOW', '108')                    +
-     Item 30: deleted, offset = 1896, tuple = ('9text', '9textWOW', '9')             +
-     Item 31: offset = 1944, tuple = ('9text', '9textWOW', '109')                    +
-                                                                                     +
- Index o_test_expression_ix5 contents                                                +
- Page 0: level = 0, maxKeyLen = 48, nVacatedBytes = 768                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('0', '0text', '0', '0textWOW2')                  +
-     Item 1: deleted, offset = 384, tuple = ('1000', '1text', '1', '1textWOW2')      +
-     Item 2: offset = 448, tuple = ('2000', '2text', '2', '2textWOW2')               +
-     Item 3: offset = 512, tuple = ('3000', '3text', '3', '3textWOW2')               +
-     Item 4: offset = 576, tuple = ('4000', '4text', '4', '4textWOW2')               +
-     Item 5: deleted, offset = 640, tuple = ('5000', '5text', '5', '5textWOW2')      +
-     Item 6: deleted, offset = 704, tuple = ('6000', '6text', '6', '6textWOW2')      +
-     Item 7: deleted, offset = 768, tuple = ('7000', '7text', '7', '7textWOW2')      +
-     Item 8: deleted, offset = 832, tuple = ('8000', '8text', '8', '8textWOW2')      +
-     Item 9: deleted, offset = 896, tuple = ('9000', '9text', '9', '9textWOW2')      +
-     Item 10: deleted, offset = 960, tuple = ('10000', '10text', '10', '10textWOW2') +
-     Item 11: deleted, offset = 1024, tuple = ('11000', '11text', '11', '11textWOW2')+
-     Item 12: deleted, offset = 1088, tuple = ('12000', '12text', '12', '12textWOW2')+
-     Item 13: deleted, offset = 1152, tuple = ('13000', '13text', '13', '13textWOW2')+
-     Item 14: deleted, offset = 1216, tuple = ('14000', '14text', '14', '14textWOW2')+
-     Item 15: deleted, offset = 1280, tuple = ('15000', '15text', '15', '15textWOW2')+
-     Item 16: offset = 1344, tuple = ('16000', '16text', '16', '16textWOW2')         +
-     Item 17: offset = 1408, tuple = ('17000', '17text', '17', '17textWOW2')         +
-     Item 18: offset = 1472, tuple = ('18000', '18text', '18', '18textWOW2')         +
-     Item 19: offset = 1536, tuple = ('19000', '19text', '19', '19textWOW2')         +
-     Item 20: offset = 1600, tuple = ('20000', '20text', '20', '20textWOW2')         +
-     Item 21: offset = 1664, tuple = ('105000', '5text', '105', '5textWOW2')         +
-     Item 22: offset = 1728, tuple = ('106000', '6text', '106', '6textWOW2')         +
-     Item 23: offset = 1792, tuple = ('107000', '7text', '107', '7textWOW2')         +
-     Item 24: offset = 1856, tuple = ('108000', '8text', '108', '8textWOW2')         +
-     Item 25: offset = 1920, tuple = ('109000', '9text', '109', '9textWOW2')         +
-     Item 26: offset = 1984, tuple = ('110000', '10text', '110', '10textWOW2')       +
-     Item 27: offset = 2048, tuple = ('111000', '11text', '111', '11textWOW2')       +
-     Item 28: offset = 2112, tuple = ('112000', '12text', '112', '12textWOW2')       +
-     Item 29: offset = 2176, tuple = ('113000', '13text', '113', '13textWOW2')       +
-     Item 30: offset = 2240, tuple = ('114000', '14text', '114', '14textWOW2')       +
-     Item 31: offset = 2304, tuple = ('115000', '15text', '115', '15textWOW2')       +
-                                                                                     +
- Index o_test_expression_ix6 contents                                                +
- Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 576                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('0TEXT', '0', '0text')                           +
-     Item 1: deleted, offset = 368, tuple = ('10TEXT', '10', '10text')               +
-     Item 2: offset = 416, tuple = ('10TEXT', '110', '10text')                       +
-     Item 3: deleted, offset = 464, tuple = ('11TEXT', '11', '11text')               +
-     Item 4: offset = 512, tuple = ('11TEXT', '111', '11text')                       +
-     Item 5: deleted, offset = 560, tuple = ('12TEXT', '12', '12text')               +
-     Item 6: offset = 608, tuple = ('12TEXT', '112', '12text')                       +
-     Item 7: deleted, offset = 656, tuple = ('13TEXT', '13', '13text')               +
-     Item 8: offset = 704, tuple = ('13TEXT', '113', '13text')                       +
-     Item 9: deleted, offset = 752, tuple = ('14TEXT', '14', '14text')               +
-     Item 10: offset = 800, tuple = ('14TEXT', '114', '14text')                      +
-     Item 11: deleted, offset = 848, tuple = ('15TEXT', '15', '15text')              +
-     Item 12: offset = 896, tuple = ('15TEXT', '115', '15text')                      +
-     Item 13: offset = 944, tuple = ('16TEXT', '16', '16text')                       +
-     Item 14: offset = 992, tuple = ('17TEXT', '17', '17text')                       +
-     Item 15: offset = 1040, tuple = ('18TEXT', '18', '18text')                      +
-     Item 16: offset = 1088, tuple = ('19TEXT', '19', '19text')                      +
-     Item 17: deleted, offset = 1136, tuple = ('1TEXT', '1', '1text')                +
-     Item 18: offset = 1184, tuple = ('20TEXT', '20', '20text')                      +
-     Item 19: offset = 1232, tuple = ('2TEXT', '2', '2text')                         +
-     Item 20: offset = 1280, tuple = ('3TEXT', '3', '3text')                         +
-     Item 21: offset = 1328, tuple = ('4TEXT', '4', '4text')                         +
-     Item 22: deleted, offset = 1376, tuple = ('5TEXT', '5', '5text')                +
-     Item 23: offset = 1424, tuple = ('5TEXT', '105', '5text')                       +
-     Item 24: deleted, offset = 1472, tuple = ('6TEXT', '6', '6text')                +
-     Item 25: offset = 1520, tuple = ('6TEXT', '106', '6text')                       +
-     Item 26: deleted, offset = 1568, tuple = ('7TEXT', '7', '7text')                +
-     Item 27: offset = 1616, tuple = ('7TEXT', '107', '7text')                       +
-     Item 28: deleted, offset = 1664, tuple = ('8TEXT', '8', '8text')                +
-     Item 29: offset = 1712, tuple = ('8TEXT', '108', '8text')                       +
-     Item 30: deleted, offset = 1760, tuple = ('9TEXT', '9', '9text')                +
-     Item 31: offset = 1808, tuple = ('9TEXT', '109', '9text')                       +
-                                                                                     +
- Index o_test_expression_ix7 contents                                                +
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 480                              +
- state = free, datoid equal, relnode equal, ix_type = regular, dirty                 +
-     Leftmost, Rightmost                                                             +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                          +
-     Item 0: offset = 320, tuple = ('t', '0', 't')                                   +
-     Item 1: deleted, offset = 360, tuple = ('t', '1', 't')                          +
-     Item 2: offset = 400, tuple = ('t', '2', 't')                                   +
-     Item 3: offset = 440, tuple = ('t', '3', 't')                                   +
-     Item 4: offset = 480, tuple = ('t', '4', 't')                                   +
-     Item 5: deleted, offset = 520, tuple = ('t', '5', 't')                          +
-     Item 6: deleted, offset = 560, tuple = ('t', '6', 't')                          +
-     Item 7: deleted, offset = 600, tuple = ('t', '7', 't')                          +
-     Item 8: deleted, offset = 640, tuple = ('t', '8', 't')                          +
-     Item 9: deleted, offset = 680, tuple = ('t', '9', 't')                          +
-     Item 10: deleted, offset = 720, tuple = ('t', '10', 't')                        +
-     Item 11: deleted, offset = 760, tuple = ('t', '11', 't')                        +
-     Item 12: deleted, offset = 800, tuple = ('t', '12', 't')                        +
-     Item 13: deleted, offset = 840, tuple = ('t', '13', 't')                        +
-     Item 14: deleted, offset = 880, tuple = ('t', '14', 't')                        +
-     Item 15: deleted, offset = 920, tuple = ('t', '15', 't')                        +
-     Item 16: offset = 960, tuple = ('t', '16', 't')                                 +
-     Item 17: offset = 1000, tuple = ('t', '17', 't')                                +
-     Item 18: offset = 1040, tuple = ('t', '18', 't')                                +
-     Item 19: offset = 1080, tuple = ('t', '19', 't')                                +
-     Item 20: offset = 1120, tuple = ('t', '20', 't')                                +
-     Item 21: offset = 1160, tuple = ('t', '105', 't')                               +
-     Item 22: offset = 1200, tuple = ('t', '106', 't')                               +
-     Item 23: offset = 1240, tuple = ('t', '107', 't')                               +
-     Item 24: offset = 1280, tuple = ('t', '108', 't')                               +
-     Item 25: offset = 1320, tuple = ('t', '109', 't')                               +
-     Item 26: offset = 1360, tuple = ('t', '110', 't')                               +
-     Item 27: offset = 1400, tuple = ('t', '111', 't')                               +
-     Item 28: offset = 1440, tuple = ('t', '112', 't')                               +
-     Item 29: offset = 1480, tuple = ('t', '113', 't')                               +
-     Item 30: offset = 1520, tuple = ('t', '114', 't')                               +
-     Item 31: offset = 1560, tuple = ('t', '115', 't')                               +
-                                                                                     +
- Index toast: not loaded                                                             +
+                            orioledb_tbl_structure                            
+------------------------------------------------------------------------------
+ Index o_test_expression_pkey contents                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 480                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('8')   +
+     Item 0: tuple = ('0', '0text')                                          +
+     Item 1: deleted, tuple = ('1', '1text')                                 +
+     Item 2: tuple = ('2', '2text')                                          +
+     Item 3: tuple = ('3', '3text')                                          +
+     Item 4: tuple = ('4', '4text')                                          +
+     Item 5: PK changed, tuple = ('5', '5text')                              +
+     Item 6: PK changed, tuple = ('6', '6text')                              +
+     Item 7: PK changed, tuple = ('7', '7text')                              +
+   Chunk 1: offset = 8, location = 592, hikey location = 80, hikey = ('16')  +
+     Item 8: PK changed, tuple = ('8', '8text')                              +
+     Item 9: PK changed, tuple = ('9', '9text')                              +
+     Item 10: PK changed, tuple = ('10', '10text')                           +
+     Item 11: PK changed, tuple = ('11', '11text')                           +
+     Item 12: PK changed, tuple = ('12', '12text')                           +
+     Item 13: PK changed, tuple = ('13', '13text')                           +
+     Item 14: PK changed, tuple = ('14', '14text')                           +
+     Item 15: PK changed, tuple = ('15', '15text')                           +
+   Chunk 2: offset = 16, location = 928, hikey location = 88, hikey = ('108')+
+     Item 16: tuple = ('16', '16text')                                       +
+     Item 17: tuple = ('17', '17text')                                       +
+     Item 18: tuple = ('18', '18text')                                       +
+     Item 19: tuple = ('19', '19text')                                       +
+     Item 20: tuple = ('20', '20text')                                       +
+     Item 21: tuple = ('105', '5text')                                       +
+     Item 22: tuple = ('106', '6text')                                       +
+     Item 23: tuple = ('107', '7text')                                       +
+   Chunk 3: offset = 24, location = 1264, hikey location = 96                +
+     Item 24: tuple = ('108', '8text')                                       +
+     Item 25: tuple = ('109', '9text')                                       +
+     Item 26: tuple = ('110', '10text')                                      +
+     Item 27: tuple = ('111', '11text')                                      +
+     Item 28: tuple = ('112', '12text')                                      +
+     Item 29: tuple = ('113', '13text')                                      +
+     Item 30: tuple = ('114', '14text')                                      +
+     Item 31: tuple = ('115', '15text')                                      +
+                                                                             +
+ Index o_test_expression_ix1 contents                                        +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 384                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('0', '0')                                              +
+     Item 1: deleted, tuple = ('100', '1')                                   +
+     Item 2: tuple = ('200', '2')                                            +
+     Item 3: tuple = ('300', '3')                                            +
+     Item 4: tuple = ('400', '4')                                            +
+     Item 5: deleted, tuple = ('500', '5')                                   +
+     Item 6: deleted, tuple = ('600', '6')                                   +
+     Item 7: deleted, tuple = ('700', '7')                                   +
+     Item 8: deleted, tuple = ('800', '8')                                   +
+     Item 9: deleted, tuple = ('900', '9')                                   +
+     Item 10: deleted, tuple = ('1000', '10')                                +
+     Item 11: deleted, tuple = ('1100', '11')                                +
+     Item 12: deleted, tuple = ('1200', '12')                                +
+     Item 13: deleted, tuple = ('1300', '13')                                +
+     Item 14: deleted, tuple = ('1400', '14')                                +
+     Item 15: deleted, tuple = ('1500', '15')                                +
+     Item 16: tuple = ('1600', '16')                                         +
+     Item 17: tuple = ('1700', '17')                                         +
+     Item 18: tuple = ('1800', '18')                                         +
+     Item 19: tuple = ('1900', '19')                                         +
+     Item 20: tuple = ('2000', '20')                                         +
+     Item 21: tuple = ('10500', '105')                                       +
+     Item 22: tuple = ('10600', '106')                                       +
+     Item 23: tuple = ('10700', '107')                                       +
+     Item 24: tuple = ('10800', '108')                                       +
+     Item 25: tuple = ('10900', '109')                                       +
+     Item 26: tuple = ('11000', '110')                                       +
+     Item 27: tuple = ('11100', '111')                                       +
+     Item 28: tuple = ('11200', '112')                                       +
+     Item 29: tuple = ('11300', '113')                                       +
+     Item 30: tuple = ('11400', '114')                                       +
+     Item 31: tuple = ('11500', '115')                                       +
+                                                                             +
+ Index o_test_expression_ix2 contents                                        +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 384                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('0', '0')                                              +
+     Item 1: deleted, tuple = ('1', '100')                                   +
+     Item 2: tuple = ('2', '200')                                            +
+     Item 3: tuple = ('3', '300')                                            +
+     Item 4: tuple = ('4', '400')                                            +
+     Item 5: deleted, tuple = ('5', '500')                                   +
+     Item 6: deleted, tuple = ('6', '600')                                   +
+     Item 7: deleted, tuple = ('7', '700')                                   +
+     Item 8: deleted, tuple = ('8', '800')                                   +
+     Item 9: deleted, tuple = ('9', '900')                                   +
+     Item 10: deleted, tuple = ('10', '1000')                                +
+     Item 11: deleted, tuple = ('11', '1100')                                +
+     Item 12: deleted, tuple = ('12', '1200')                                +
+     Item 13: deleted, tuple = ('13', '1300')                                +
+     Item 14: deleted, tuple = ('14', '1400')                                +
+     Item 15: deleted, tuple = ('15', '1500')                                +
+     Item 16: tuple = ('16', '1600')                                         +
+     Item 17: tuple = ('17', '1700')                                         +
+     Item 18: tuple = ('18', '1800')                                         +
+     Item 19: tuple = ('19', '1900')                                         +
+     Item 20: tuple = ('20', '2000')                                         +
+     Item 21: tuple = ('105', '10500')                                       +
+     Item 22: tuple = ('106', '10600')                                       +
+     Item 23: tuple = ('107', '10700')                                       +
+     Item 24: tuple = ('108', '10800')                                       +
+     Item 25: tuple = ('109', '10900')                                       +
+     Item 26: tuple = ('110', '11000')                                       +
+     Item 27: tuple = ('111', '11100')                                       +
+     Item 28: tuple = ('112', '11200')                                       +
+     Item 29: tuple = ('113', '11300')                                       +
+     Item 30: tuple = ('114', '11400')                                       +
+     Item 31: tuple = ('115', '11500')                                       +
+                                                                             +
+ Index o_test_expression_ix3 contents                                        +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 576                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('0textWOW', '0')                                       +
+     Item 1: deleted, tuple = ('10textWOW', '10')                            +
+     Item 2: tuple = ('10textWOW', '110')                                    +
+     Item 3: deleted, tuple = ('11textWOW', '11')                            +
+     Item 4: tuple = ('11textWOW', '111')                                    +
+     Item 5: deleted, tuple = ('12textWOW', '12')                            +
+     Item 6: tuple = ('12textWOW', '112')                                    +
+     Item 7: deleted, tuple = ('13textWOW', '13')                            +
+     Item 8: tuple = ('13textWOW', '113')                                    +
+     Item 9: deleted, tuple = ('14textWOW', '14')                            +
+     Item 10: tuple = ('14textWOW', '114')                                   +
+     Item 11: deleted, tuple = ('15textWOW', '15')                           +
+     Item 12: tuple = ('15textWOW', '115')                                   +
+     Item 13: tuple = ('16textWOW', '16')                                    +
+     Item 14: tuple = ('17textWOW', '17')                                    +
+     Item 15: tuple = ('18textWOW', '18')                                    +
+     Item 16: tuple = ('19textWOW', '19')                                    +
+     Item 17: deleted, tuple = ('1textWOW', '1')                             +
+     Item 18: tuple = ('20textWOW', '20')                                    +
+     Item 19: tuple = ('2textWOW', '2')                                      +
+     Item 20: tuple = ('3textWOW', '3')                                      +
+     Item 21: tuple = ('4textWOW', '4')                                      +
+     Item 22: deleted, tuple = ('5textWOW', '5')                             +
+     Item 23: tuple = ('5textWOW', '105')                                    +
+     Item 24: deleted, tuple = ('6textWOW', '6')                             +
+     Item 25: tuple = ('6textWOW', '106')                                    +
+     Item 26: deleted, tuple = ('7textWOW', '7')                             +
+     Item 27: tuple = ('7textWOW', '107')                                    +
+     Item 28: deleted, tuple = ('8textWOW', '8')                             +
+     Item 29: tuple = ('8textWOW', '108')                                    +
+     Item 30: deleted, tuple = ('9textWOW', '9')                             +
+     Item 31: tuple = ('9textWOW', '109')                                    +
+                                                                             +
+ Index o_test_expression_ix4 contents                                        +
+ Page 0: level = 0, maxKeyLen = 40, nVacatedBytes = 624                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('0text', '0textWOW', '0')                              +
+     Item 1: deleted, tuple = ('10text', '10textWOW', '10')                  +
+     Item 2: tuple = ('10text', '10textWOW', '110')                          +
+     Item 3: deleted, tuple = ('11text', '11textWOW', '11')                  +
+     Item 4: tuple = ('11text', '11textWOW', '111')                          +
+     Item 5: deleted, tuple = ('12text', '12textWOW', '12')                  +
+     Item 6: tuple = ('12text', '12textWOW', '112')                          +
+     Item 7: deleted, tuple = ('13text', '13textWOW', '13')                  +
+     Item 8: tuple = ('13text', '13textWOW', '113')                          +
+     Item 9: deleted, tuple = ('14text', '14textWOW', '14')                  +
+     Item 10: tuple = ('14text', '14textWOW', '114')                         +
+     Item 11: deleted, tuple = ('15text', '15textWOW', '15')                 +
+     Item 12: tuple = ('15text', '15textWOW', '115')                         +
+     Item 13: tuple = ('16text', '16textWOW', '16')                          +
+     Item 14: tuple = ('17text', '17textWOW', '17')                          +
+     Item 15: tuple = ('18text', '18textWOW', '18')                          +
+     Item 16: tuple = ('19text', '19textWOW', '19')                          +
+     Item 17: deleted, tuple = ('1text', '1textWOW', '1')                    +
+     Item 18: tuple = ('20text', '20textWOW', '20')                          +
+     Item 19: tuple = ('2text', '2textWOW', '2')                             +
+     Item 20: tuple = ('3text', '3textWOW', '3')                             +
+     Item 21: tuple = ('4text', '4textWOW', '4')                             +
+     Item 22: deleted, tuple = ('5text', '5textWOW', '5')                    +
+     Item 23: tuple = ('5text', '5textWOW', '105')                           +
+     Item 24: deleted, tuple = ('6text', '6textWOW', '6')                    +
+     Item 25: tuple = ('6text', '6textWOW', '106')                           +
+     Item 26: deleted, tuple = ('7text', '7textWOW', '7')                    +
+     Item 27: tuple = ('7text', '7textWOW', '107')                           +
+     Item 28: deleted, tuple = ('8text', '8textWOW', '8')                    +
+     Item 29: tuple = ('8text', '8textWOW', '108')                           +
+     Item 30: deleted, tuple = ('9text', '9textWOW', '9')                    +
+     Item 31: tuple = ('9text', '9textWOW', '109')                           +
+                                                                             +
+ Index o_test_expression_ix5 contents                                        +
+ Page 0: level = 0, maxKeyLen = 48, nVacatedBytes = 768                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('0', '0text', '0', '0textWOW2')                        +
+     Item 1: deleted, tuple = ('1000', '1text', '1', '1textWOW2')            +
+     Item 2: tuple = ('2000', '2text', '2', '2textWOW2')                     +
+     Item 3: tuple = ('3000', '3text', '3', '3textWOW2')                     +
+     Item 4: tuple = ('4000', '4text', '4', '4textWOW2')                     +
+     Item 5: deleted, tuple = ('5000', '5text', '5', '5textWOW2')            +
+     Item 6: deleted, tuple = ('6000', '6text', '6', '6textWOW2')            +
+     Item 7: deleted, tuple = ('7000', '7text', '7', '7textWOW2')            +
+     Item 8: deleted, tuple = ('8000', '8text', '8', '8textWOW2')            +
+     Item 9: deleted, tuple = ('9000', '9text', '9', '9textWOW2')            +
+     Item 10: deleted, tuple = ('10000', '10text', '10', '10textWOW2')       +
+     Item 11: deleted, tuple = ('11000', '11text', '11', '11textWOW2')       +
+     Item 12: deleted, tuple = ('12000', '12text', '12', '12textWOW2')       +
+     Item 13: deleted, tuple = ('13000', '13text', '13', '13textWOW2')       +
+     Item 14: deleted, tuple = ('14000', '14text', '14', '14textWOW2')       +
+     Item 15: deleted, tuple = ('15000', '15text', '15', '15textWOW2')       +
+     Item 16: tuple = ('16000', '16text', '16', '16textWOW2')                +
+     Item 17: tuple = ('17000', '17text', '17', '17textWOW2')                +
+     Item 18: tuple = ('18000', '18text', '18', '18textWOW2')                +
+     Item 19: tuple = ('19000', '19text', '19', '19textWOW2')                +
+     Item 20: tuple = ('20000', '20text', '20', '20textWOW2')                +
+     Item 21: tuple = ('105000', '5text', '105', '5textWOW2')                +
+     Item 22: tuple = ('106000', '6text', '106', '6textWOW2')                +
+     Item 23: tuple = ('107000', '7text', '107', '7textWOW2')                +
+     Item 24: tuple = ('108000', '8text', '108', '8textWOW2')                +
+     Item 25: tuple = ('109000', '9text', '109', '9textWOW2')                +
+     Item 26: tuple = ('110000', '10text', '110', '10textWOW2')              +
+     Item 27: tuple = ('111000', '11text', '111', '11textWOW2')              +
+     Item 28: tuple = ('112000', '12text', '112', '12textWOW2')              +
+     Item 29: tuple = ('113000', '13text', '113', '13textWOW2')              +
+     Item 30: tuple = ('114000', '14text', '114', '14textWOW2')              +
+     Item 31: tuple = ('115000', '15text', '115', '15textWOW2')              +
+                                                                             +
+ Index o_test_expression_ix6 contents                                        +
+ Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 576                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('0TEXT', '0', '0text')                                 +
+     Item 1: deleted, tuple = ('10TEXT', '10', '10text')                     +
+     Item 2: tuple = ('10TEXT', '110', '10text')                             +
+     Item 3: deleted, tuple = ('11TEXT', '11', '11text')                     +
+     Item 4: tuple = ('11TEXT', '111', '11text')                             +
+     Item 5: deleted, tuple = ('12TEXT', '12', '12text')                     +
+     Item 6: tuple = ('12TEXT', '112', '12text')                             +
+     Item 7: deleted, tuple = ('13TEXT', '13', '13text')                     +
+     Item 8: tuple = ('13TEXT', '113', '13text')                             +
+     Item 9: deleted, tuple = ('14TEXT', '14', '14text')                     +
+     Item 10: tuple = ('14TEXT', '114', '14text')                            +
+     Item 11: deleted, tuple = ('15TEXT', '15', '15text')                    +
+     Item 12: tuple = ('15TEXT', '115', '15text')                            +
+     Item 13: tuple = ('16TEXT', '16', '16text')                             +
+     Item 14: tuple = ('17TEXT', '17', '17text')                             +
+     Item 15: tuple = ('18TEXT', '18', '18text')                             +
+     Item 16: tuple = ('19TEXT', '19', '19text')                             +
+     Item 17: deleted, tuple = ('1TEXT', '1', '1text')                       +
+     Item 18: tuple = ('20TEXT', '20', '20text')                             +
+     Item 19: tuple = ('2TEXT', '2', '2text')                                +
+     Item 20: tuple = ('3TEXT', '3', '3text')                                +
+     Item 21: tuple = ('4TEXT', '4', '4text')                                +
+     Item 22: deleted, tuple = ('5TEXT', '5', '5text')                       +
+     Item 23: tuple = ('5TEXT', '105', '5text')                              +
+     Item 24: deleted, tuple = ('6TEXT', '6', '6text')                       +
+     Item 25: tuple = ('6TEXT', '106', '6text')                              +
+     Item 26: deleted, tuple = ('7TEXT', '7', '7text')                       +
+     Item 27: tuple = ('7TEXT', '107', '7text')                              +
+     Item 28: deleted, tuple = ('8TEXT', '8', '8text')                       +
+     Item 29: tuple = ('8TEXT', '108', '8text')                              +
+     Item 30: deleted, tuple = ('9TEXT', '9', '9text')                       +
+     Item 31: tuple = ('9TEXT', '109', '9text')                              +
+                                                                             +
+ Index o_test_expression_ix7 contents                                        +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 480                      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
+     Leftmost, Rightmost                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                  +
+     Item 0: tuple = ('t', '0', 't')                                         +
+     Item 1: deleted, tuple = ('t', '1', 't')                                +
+     Item 2: tuple = ('t', '2', 't')                                         +
+     Item 3: tuple = ('t', '3', 't')                                         +
+     Item 4: tuple = ('t', '4', 't')                                         +
+     Item 5: deleted, tuple = ('t', '5', 't')                                +
+     Item 6: deleted, tuple = ('t', '6', 't')                                +
+     Item 7: deleted, tuple = ('t', '7', 't')                                +
+     Item 8: deleted, tuple = ('t', '8', 't')                                +
+     Item 9: deleted, tuple = ('t', '9', 't')                                +
+     Item 10: deleted, tuple = ('t', '10', 't')                              +
+     Item 11: deleted, tuple = ('t', '11', 't')                              +
+     Item 12: deleted, tuple = ('t', '12', 't')                              +
+     Item 13: deleted, tuple = ('t', '13', 't')                              +
+     Item 14: deleted, tuple = ('t', '14', 't')                              +
+     Item 15: deleted, tuple = ('t', '15', 't')                              +
+     Item 16: tuple = ('t', '16', 't')                                       +
+     Item 17: tuple = ('t', '17', 't')                                       +
+     Item 18: tuple = ('t', '18', 't')                                       +
+     Item 19: tuple = ('t', '19', 't')                                       +
+     Item 20: tuple = ('t', '20', 't')                                       +
+     Item 21: tuple = ('t', '105', 't')                                      +
+     Item 22: tuple = ('t', '106', 't')                                      +
+     Item 23: tuple = ('t', '107', 't')                                      +
+     Item 24: tuple = ('t', '108', 't')                                      +
+     Item 25: tuple = ('t', '109', 't')                                      +
+     Item 26: tuple = ('t', '110', 't')                                      +
+     Item 27: tuple = ('t', '111', 't')                                      +
+     Item 28: tuple = ('t', '112', 't')                                      +
+     Item 29: tuple = ('t', '113', 't')                                      +
+     Item 30: tuple = ('t', '114', 't')                                      +
+     Item 31: tuple = ('t', '115', 't')                                      +
+                                                                             +
+ Index toast: not loaded                                                     +
  
 (1 row)
 
@@ -1612,250 +1612,250 @@ SELECT orioledb_tbl_structure('o_test_expression'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('(0,3)')                                         +
-     Item 0: offset = 264, tuple = ('(0,1)', '0', '0text')                                                             +
-     Item 1: offset = 312, tuple = ('(0,2)', '2', '2text')                                                             +
+     Item 0: tuple = ('(0,1)', '0', '0text')                                                                           +
+     Item 1: tuple = ('(0,2)', '2', '2text')                                                                           +
    Chunk 1: offset = 2, location = 360, hikey location = 104, hikey = ('(0,5)')                                        +
-     Item 2: offset = 368, tuple = ('(0,3)', '3', '3text')                                                             +
-     Item 3: offset = 416, tuple = ('(0,4)', '4', '4text')                                                             +
+     Item 2: tuple = ('(0,3)', '3', '3text')                                                                           +
+     Item 3: tuple = ('(0,4)', '4', '4text')                                                                           +
    Chunk 2: offset = 4, location = 464, hikey location = 112, hikey = ('(0,7)')                                        +
-     Item 4: offset = 472, tuple = ('(0,5)', '16', '16text')                                                           +
-     Item 5: offset = 520, tuple = ('(0,6)', '17', '17text')                                                           +
+     Item 4: tuple = ('(0,5)', '16', '16text')                                                                         +
+     Item 5: tuple = ('(0,6)', '17', '17text')                                                                         +
    Chunk 3: offset = 6, location = 568, hikey location = 120, hikey = ('(0,9)')                                        +
-     Item 6: offset = 576, tuple = ('(0,7)', '18', '18text')                                                           +
-     Item 7: offset = 624, tuple = ('(0,8)', '19', '19text')                                                           +
+     Item 6: tuple = ('(0,7)', '18', '18text')                                                                         +
+     Item 7: tuple = ('(0,8)', '19', '19text')                                                                         +
    Chunk 4: offset = 8, location = 672, hikey location = 128, hikey = ('(0,11)')                                       +
-     Item 8: offset = 680, tuple = ('(0,9)', '20', '20text')                                                           +
-     Item 9: offset = 728, tuple = ('(0,10)', '105', '5text')                                                          +
+     Item 8: tuple = ('(0,9)', '20', '20text')                                                                         +
+     Item 9: tuple = ('(0,10)', '105', '5text')                                                                        +
    Chunk 5: offset = 10, location = 776, hikey location = 136, hikey = ('(0,13)')                                      +
-     Item 10: offset = 784, tuple = ('(0,11)', '106', '6text')                                                         +
-     Item 11: offset = 832, tuple = ('(0,12)', '107', '7text')                                                         +
+     Item 10: tuple = ('(0,11)', '106', '6text')                                                                       +
+     Item 11: tuple = ('(0,12)', '107', '7text')                                                                       +
    Chunk 6: offset = 12, location = 880, hikey location = 144, hikey = ('(0,15)')                                      +
-     Item 12: offset = 888, tuple = ('(0,13)', '108', '8text')                                                         +
-     Item 13: offset = 936, tuple = ('(0,14)', '109', '9text')                                                         +
+     Item 12: tuple = ('(0,13)', '108', '8text')                                                                       +
+     Item 13: tuple = ('(0,14)', '109', '9text')                                                                       +
    Chunk 7: offset = 14, location = 984, hikey location = 152, hikey = ('(0,17)')                                      +
-     Item 14: offset = 992, tuple = ('(0,15)', '110', '10text')                                                        +
-     Item 15: offset = 1040, tuple = ('(0,16)', '111', '11text')                                                       +
+     Item 14: tuple = ('(0,15)', '110', '10text')                                                                      +
+     Item 15: tuple = ('(0,16)', '111', '11text')                                                                      +
    Chunk 8: offset = 16, location = 1088, hikey location = 160, hikey = ('(0,19)')                                     +
-     Item 16: offset = 1096, tuple = ('(0,17)', '112', '12text')                                                       +
-     Item 17: offset = 1144, tuple = ('(0,18)', '113', '13text')                                                       +
+     Item 16: tuple = ('(0,17)', '112', '12text')                                                                      +
+     Item 17: tuple = ('(0,18)', '113', '13text')                                                                      +
    Chunk 9: offset = 18, location = 1192, hikey location = 168                                                         +
-     Item 18: offset = 1200, tuple = ('(0,19)', '114', '14text')                                                       +
-     Item 19: offset = 1248, tuple = ('(0,20)', '115', '15text')                                                       +
+     Item 18: tuple = ('(0,19)', '114', '14text')                                                                      +
+     Item 19: tuple = ('(0,20)', '115', '15text')                                                                      +
                                                                                                                        +
  Index o_test_expression_ix1 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 14, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('400', '(0,4)')                                  +
-     Item 0: offset = 264, tuple = ('0', '(0,1)')                                                                      +
-     Item 1: offset = 296, tuple = ('200', '(0,2)')                                                                    +
-     Item 2: offset = 328, tuple = ('300', '(0,3)')                                                                    +
+     Item 0: tuple = ('0', '(0,1)')                                                                                    +
+     Item 1: tuple = ('200', '(0,2)')                                                                                  +
+     Item 2: tuple = ('300', '(0,3)')                                                                                  +
    Chunk 1: offset = 3, location = 360, hikey location = 104, hikey = ('1800', '(0,7)')                                +
-     Item 3: offset = 368, tuple = ('400', '(0,4)')                                                                    +
-     Item 4: offset = 400, tuple = ('1600', '(0,5)')                                                                   +
-     Item 5: offset = 432, tuple = ('1700', '(0,6)')                                                                   +
+     Item 3: tuple = ('400', '(0,4)')                                                                                  +
+     Item 4: tuple = ('1600', '(0,5)')                                                                                 +
+     Item 5: tuple = ('1700', '(0,6)')                                                                                 +
    Chunk 2: offset = 6, location = 464, hikey location = 120, hikey = ('10500', '(0,10)')                              +
-     Item 6: offset = 472, tuple = ('1800', '(0,7)')                                                                   +
-     Item 7: offset = 504, tuple = ('1900', '(0,8)')                                                                   +
-     Item 8: offset = 536, tuple = ('2000', '(0,9)')                                                                   +
+     Item 6: tuple = ('1800', '(0,7)')                                                                                 +
+     Item 7: tuple = ('1900', '(0,8)')                                                                                 +
+     Item 8: tuple = ('2000', '(0,9)')                                                                                 +
    Chunk 3: offset = 9, location = 568, hikey location = 136, hikey = ('10800', '(0,13)')                              +
-     Item 9: offset = 576, tuple = ('10500', '(0,10)')                                                                 +
-     Item 10: offset = 608, tuple = ('10600', '(0,11)')                                                                +
-     Item 11: offset = 640, tuple = ('10700', '(0,12)')                                                                +
+     Item 9: tuple = ('10500', '(0,10)')                                                                               +
+     Item 10: tuple = ('10600', '(0,11)')                                                                              +
+     Item 11: tuple = ('10700', '(0,12)')                                                                              +
    Chunk 4: offset = 12, location = 672, hikey location = 152, hikey = ('11100', '(0,16)')                             +
-     Item 12: offset = 680, tuple = ('10800', '(0,13)')                                                                +
-     Item 13: offset = 712, tuple = ('10900', '(0,14)')                                                                +
-     Item 14: offset = 744, tuple = ('11000', '(0,15)')                                                                +
+     Item 12: tuple = ('10800', '(0,13)')                                                                              +
+     Item 13: tuple = ('10900', '(0,14)')                                                                              +
+     Item 14: tuple = ('11000', '(0,15)')                                                                              +
    Chunk 5: offset = 15, location = 776, hikey location = 168, hikey = ('11400', '(0,19)')                             +
-     Item 15: offset = 784, tuple = ('11100', '(0,16)')                                                                +
-     Item 16: offset = 816, tuple = ('11200', '(0,17)')                                                                +
-     Item 17: offset = 848, tuple = ('11300', '(0,18)')                                                                +
+     Item 15: tuple = ('11100', '(0,16)')                                                                              +
+     Item 16: tuple = ('11200', '(0,17)')                                                                              +
+     Item 17: tuple = ('11300', '(0,18)')                                                                              +
    Chunk 6: offset = 18, location = 880, hikey location = 184                                                          +
-     Item 18: offset = 888, tuple = ('11400', '(0,19)')                                                                +
-     Item 19: offset = 920, tuple = ('11500', '(0,20)')                                                                +
+     Item 18: tuple = ('11400', '(0,19)')                                                                              +
+     Item 19: tuple = ('11500', '(0,20)')                                                                              +
                                                                                                                        +
  Index o_test_expression_ix2 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 22, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('4', '400', '(0,4)')                             +
-     Item 0: offset = 264, tuple = ('0', '0', '(0,1)')                                                                 +
-     Item 1: offset = 304, tuple = ('2', '200', '(0,2)')                                                               +
-     Item 2: offset = 344, tuple = ('3', '300', '(0,3)')                                                               +
+     Item 0: tuple = ('0', '0', '(0,1)')                                                                               +
+     Item 1: tuple = ('2', '200', '(0,2)')                                                                             +
+     Item 2: tuple = ('3', '300', '(0,3)')                                                                             +
    Chunk 1: offset = 3, location = 384, hikey location = 112, hikey = ('18', '1800', '(0,7)')                          +
-     Item 3: offset = 392, tuple = ('4', '400', '(0,4)')                                                               +
-     Item 4: offset = 432, tuple = ('16', '1600', '(0,5)')                                                             +
-     Item 5: offset = 472, tuple = ('17', '1700', '(0,6)')                                                             +
+     Item 3: tuple = ('4', '400', '(0,4)')                                                                             +
+     Item 4: tuple = ('16', '1600', '(0,5)')                                                                           +
+     Item 5: tuple = ('17', '1700', '(0,6)')                                                                           +
    Chunk 2: offset = 6, location = 512, hikey location = 136, hikey = ('105', '10500', '(0,10)')                       +
-     Item 6: offset = 520, tuple = ('18', '1800', '(0,7)')                                                             +
-     Item 7: offset = 560, tuple = ('19', '1900', '(0,8)')                                                             +
-     Item 8: offset = 600, tuple = ('20', '2000', '(0,9)')                                                             +
+     Item 6: tuple = ('18', '1800', '(0,7)')                                                                           +
+     Item 7: tuple = ('19', '1900', '(0,8)')                                                                           +
+     Item 8: tuple = ('20', '2000', '(0,9)')                                                                           +
    Chunk 3: offset = 9, location = 640, hikey location = 160, hikey = ('108', '10800', '(0,13)')                       +
-     Item 9: offset = 648, tuple = ('105', '10500', '(0,10)')                                                          +
-     Item 10: offset = 688, tuple = ('106', '10600', '(0,11)')                                                         +
-     Item 11: offset = 728, tuple = ('107', '10700', '(0,12)')                                                         +
+     Item 9: tuple = ('105', '10500', '(0,10)')                                                                        +
+     Item 10: tuple = ('106', '10600', '(0,11)')                                                                       +
+     Item 11: tuple = ('107', '10700', '(0,12)')                                                                       +
    Chunk 4: offset = 12, location = 768, hikey location = 184, hikey = ('111', '11100', '(0,16)')                      +
-     Item 12: offset = 776, tuple = ('108', '10800', '(0,13)')                                                         +
-     Item 13: offset = 816, tuple = ('109', '10900', '(0,14)')                                                         +
-     Item 14: offset = 856, tuple = ('110', '11000', '(0,15)')                                                         +
+     Item 12: tuple = ('108', '10800', '(0,13)')                                                                       +
+     Item 13: tuple = ('109', '10900', '(0,14)')                                                                       +
+     Item 14: tuple = ('110', '11000', '(0,15)')                                                                       +
    Chunk 5: offset = 15, location = 896, hikey location = 208, hikey = ('114', '11400', '(0,19)')                      +
-     Item 15: offset = 904, tuple = ('111', '11100', '(0,16)')                                                         +
-     Item 16: offset = 944, tuple = ('112', '11200', '(0,17)')                                                         +
-     Item 17: offset = 984, tuple = ('113', '11300', '(0,18)')                                                         +
+     Item 15: tuple = ('111', '11100', '(0,16)')                                                                       +
+     Item 16: tuple = ('112', '11200', '(0,17)')                                                                       +
+     Item 17: tuple = ('113', '11300', '(0,18)')                                                                       +
    Chunk 6: offset = 18, location = 1024, hikey location = 232                                                         +
-     Item 18: offset = 1032, tuple = ('114', '11400', '(0,19)')                                                        +
-     Item 19: offset = 1072, tuple = ('115', '11500', '(0,20)')                                                        +
+     Item 18: tuple = ('114', '11400', '(0,19)')                                                                       +
+     Item 19: tuple = ('115', '11500', '(0,20)')                                                                       +
                                                                                                                        +
  Index o_test_expression_ix3 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('12textWOW', '(0,17)')                           +
-     Item 0: offset = 264, tuple = ('0textWOW', '(0,1)')                                                               +
-     Item 1: offset = 304, tuple = ('10textWOW', '(0,15)')                                                             +
-     Item 2: offset = 344, tuple = ('11textWOW', '(0,16)')                                                             +
+     Item 0: tuple = ('0textWOW', '(0,1)')                                                                             +
+     Item 1: tuple = ('10textWOW', '(0,15)')                                                                           +
+     Item 2: tuple = ('11textWOW', '(0,16)')                                                                           +
    Chunk 1: offset = 3, location = 384, hikey location = 112, hikey = ('15textWOW', '(0,20)')                          +
-     Item 3: offset = 392, tuple = ('12textWOW', '(0,17)')                                                             +
-     Item 4: offset = 432, tuple = ('13textWOW', '(0,18)')                                                             +
-     Item 5: offset = 472, tuple = ('14textWOW', '(0,19)')                                                             +
+     Item 3: tuple = ('12textWOW', '(0,17)')                                                                           +
+     Item 4: tuple = ('13textWOW', '(0,18)')                                                                           +
+     Item 5: tuple = ('14textWOW', '(0,19)')                                                                           +
    Chunk 2: offset = 6, location = 512, hikey location = 136, hikey = ('18textWOW', '(0,7)')                           +
-     Item 6: offset = 520, tuple = ('15textWOW', '(0,20)')                                                             +
-     Item 7: offset = 560, tuple = ('16textWOW', '(0,5)')                                                              +
-     Item 8: offset = 600, tuple = ('17textWOW', '(0,6)')                                                              +
+     Item 6: tuple = ('15textWOW', '(0,20)')                                                                           +
+     Item 7: tuple = ('16textWOW', '(0,5)')                                                                            +
+     Item 8: tuple = ('17textWOW', '(0,6)')                                                                            +
    Chunk 3: offset = 9, location = 640, hikey location = 160, hikey = ('2textWOW', '(0,2)')                            +
-     Item 9: offset = 648, tuple = ('18textWOW', '(0,7)')                                                              +
-     Item 10: offset = 688, tuple = ('19textWOW', '(0,8)')                                                             +
-     Item 11: offset = 728, tuple = ('20textWOW', '(0,9)')                                                             +
+     Item 9: tuple = ('18textWOW', '(0,7)')                                                                            +
+     Item 10: tuple = ('19textWOW', '(0,8)')                                                                           +
+     Item 11: tuple = ('20textWOW', '(0,9)')                                                                           +
    Chunk 4: offset = 12, location = 768, hikey location = 184, hikey = ('5textWOW', '(0,10)')                          +
-     Item 12: offset = 776, tuple = ('2textWOW', '(0,2)')                                                              +
-     Item 13: offset = 816, tuple = ('3textWOW', '(0,3)')                                                              +
-     Item 14: offset = 856, tuple = ('4textWOW', '(0,4)')                                                              +
+     Item 12: tuple = ('2textWOW', '(0,2)')                                                                            +
+     Item 13: tuple = ('3textWOW', '(0,3)')                                                                            +
+     Item 14: tuple = ('4textWOW', '(0,4)')                                                                            +
    Chunk 5: offset = 15, location = 896, hikey location = 208, hikey = ('8textWOW', '(0,13)')                          +
-     Item 15: offset = 904, tuple = ('5textWOW', '(0,10)')                                                             +
-     Item 16: offset = 944, tuple = ('6textWOW', '(0,11)')                                                             +
-     Item 17: offset = 984, tuple = ('7textWOW', '(0,12)')                                                             +
+     Item 15: tuple = ('5textWOW', '(0,10)')                                                                           +
+     Item 16: tuple = ('6textWOW', '(0,11)')                                                                           +
+     Item 17: tuple = ('7textWOW', '(0,12)')                                                                           +
    Chunk 6: offset = 18, location = 1024, hikey location = 232                                                         +
-     Item 18: offset = 1032, tuple = ('8textWOW', '(0,13)')                                                            +
-     Item 19: offset = 1072, tuple = ('9textWOW', '(0,14)')                                                            +
+     Item 18: tuple = ('8textWOW', '(0,13)')                                                                           +
+     Item 19: tuple = ('9textWOW', '(0,14)')                                                                           +
                                                                                                                        +
  Index o_test_expression_ix4 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 32, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('13text', '13textWOW', '(0,18)')                 +
-     Item 0: offset = 264, tuple = ('0text', '0textWOW', '(0,1)')                                                      +
-     Item 1: offset = 312, tuple = ('10text', '10textWOW', '(0,15)')                                                   +
-     Item 2: offset = 360, tuple = ('11text', '11textWOW', '(0,16)')                                                   +
-     Item 3: offset = 408, tuple = ('12text', '12textWOW', '(0,17)')                                                   +
+     Item 0: tuple = ('0text', '0textWOW', '(0,1)')                                                                    +
+     Item 1: tuple = ('10text', '10textWOW', '(0,15)')                                                                 +
+     Item 2: tuple = ('11text', '11textWOW', '(0,16)')                                                                 +
+     Item 3: tuple = ('12text', '12textWOW', '(0,17)')                                                                 +
    Chunk 1: offset = 4, location = 456, hikey location = 112, hikey = ('17text', '17textWOW', '(0,6)')                 +
-     Item 4: offset = 464, tuple = ('13text', '13textWOW', '(0,18)')                                                   +
-     Item 5: offset = 512, tuple = ('14text', '14textWOW', '(0,19)')                                                   +
-     Item 6: offset = 560, tuple = ('15text', '15textWOW', '(0,20)')                                                   +
-     Item 7: offset = 608, tuple = ('16text', '16textWOW', '(0,5)')                                                    +
+     Item 4: tuple = ('13text', '13textWOW', '(0,18)')                                                                 +
+     Item 5: tuple = ('14text', '14textWOW', '(0,19)')                                                                 +
+     Item 6: tuple = ('15text', '15textWOW', '(0,20)')                                                                 +
+     Item 7: tuple = ('16text', '16textWOW', '(0,5)')                                                                  +
    Chunk 2: offset = 8, location = 656, hikey location = 144, hikey = ('2text', '2textWOW', '(0,2)')                   +
-     Item 8: offset = 664, tuple = ('17text', '17textWOW', '(0,6)')                                                    +
-     Item 9: offset = 712, tuple = ('18text', '18textWOW', '(0,7)')                                                    +
-     Item 10: offset = 760, tuple = ('19text', '19textWOW', '(0,8)')                                                   +
-     Item 11: offset = 808, tuple = ('20text', '20textWOW', '(0,9)')                                                   +
+     Item 8: tuple = ('17text', '17textWOW', '(0,6)')                                                                  +
+     Item 9: tuple = ('18text', '18textWOW', '(0,7)')                                                                  +
+     Item 10: tuple = ('19text', '19textWOW', '(0,8)')                                                                 +
+     Item 11: tuple = ('20text', '20textWOW', '(0,9)')                                                                 +
    Chunk 3: offset = 12, location = 856, hikey location = 176, hikey = ('6text', '6textWOW', '(0,11)')                 +
-     Item 12: offset = 864, tuple = ('2text', '2textWOW', '(0,2)')                                                     +
-     Item 13: offset = 912, tuple = ('3text', '3textWOW', '(0,3)')                                                     +
-     Item 14: offset = 960, tuple = ('4text', '4textWOW', '(0,4)')                                                     +
-     Item 15: offset = 1008, tuple = ('5text', '5textWOW', '(0,10)')                                                   +
+     Item 12: tuple = ('2text', '2textWOW', '(0,2)')                                                                   +
+     Item 13: tuple = ('3text', '3textWOW', '(0,3)')                                                                   +
+     Item 14: tuple = ('4text', '4textWOW', '(0,4)')                                                                   +
+     Item 15: tuple = ('5text', '5textWOW', '(0,10)')                                                                  +
    Chunk 4: offset = 16, location = 1056, hikey location = 208                                                         +
-     Item 16: offset = 1064, tuple = ('6text', '6textWOW', '(0,11)')                                                   +
-     Item 17: offset = 1112, tuple = ('7text', '7textWOW', '(0,12)')                                                   +
-     Item 18: offset = 1160, tuple = ('8text', '8textWOW', '(0,13)')                                                   +
-     Item 19: offset = 1208, tuple = ('9text', '9textWOW', '(0,14)')                                                   +
+     Item 16: tuple = ('6text', '6textWOW', '(0,11)')                                                                  +
+     Item 17: tuple = ('7text', '7textWOW', '(0,12)')                                                                  +
+     Item 18: tuple = ('8text', '8textWOW', '(0,13)')                                                                  +
+     Item 19: tuple = ('9text', '9textWOW', '(0,14)')                                                                  +
                                                                                                                        +
  Index o_test_expression_ix5 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 50, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('19000', '19text', '19', '19textWOW2', '(0,8)')  +
-     Item 0: offset = 272, tuple = ('0', '0text', '0', '0textWOW2', '(0,1)')                                           +
-     Item 1: offset = 336, tuple = ('2000', '2text', '2', '2textWOW2', '(0,2)')                                        +
-     Item 2: offset = 400, tuple = ('3000', '3text', '3', '3textWOW2', '(0,3)')                                        +
-     Item 3: offset = 464, tuple = ('4000', '4text', '4', '4textWOW2', '(0,4)')                                        +
-     Item 4: offset = 528, tuple = ('16000', '16text', '16', '16textWOW2', '(0,5)')                                    +
-     Item 5: offset = 600, tuple = ('17000', '17text', '17', '17textWOW2', '(0,6)')                                    +
-     Item 6: offset = 672, tuple = ('18000', '18text', '18', '18textWOW2', '(0,7)')                                    +
+     Item 0: tuple = ('0', '0text', '0', '0textWOW2', '(0,1)')                                                         +
+     Item 1: tuple = ('2000', '2text', '2', '2textWOW2', '(0,2)')                                                      +
+     Item 2: tuple = ('3000', '3text', '3', '3textWOW2', '(0,3)')                                                      +
+     Item 3: tuple = ('4000', '4text', '4', '4textWOW2', '(0,4)')                                                      +
+     Item 4: tuple = ('16000', '16text', '16', '16textWOW2', '(0,5)')                                                  +
+     Item 5: tuple = ('17000', '17text', '17', '17textWOW2', '(0,6)')                                                  +
+     Item 6: tuple = ('18000', '18text', '18', '18textWOW2', '(0,7)')                                                  +
    Chunk 1: offset = 7, location = 744, hikey location = 128, hikey = ('109000', '9text', '109', '9textWOW2', '(0,14)')+
-     Item 7: offset = 760, tuple = ('19000', '19text', '19', '19textWOW2', '(0,8)')                                    +
-     Item 8: offset = 832, tuple = ('20000', '20text', '20', '20textWOW2', '(0,9)')                                    +
-     Item 9: offset = 904, tuple = ('105000', '5text', '105', '5textWOW2', '(0,10)')                                   +
-     Item 10: offset = 968, tuple = ('106000', '6text', '106', '6textWOW2', '(0,11)')                                  +
-     Item 11: offset = 1032, tuple = ('107000', '7text', '107', '7textWOW2', '(0,12)')                                 +
-     Item 12: offset = 1096, tuple = ('108000', '8text', '108', '8textWOW2', '(0,13)')                                 +
+     Item 7: tuple = ('19000', '19text', '19', '19textWOW2', '(0,8)')                                                  +
+     Item 8: tuple = ('20000', '20text', '20', '20textWOW2', '(0,9)')                                                  +
+     Item 9: tuple = ('105000', '5text', '105', '5textWOW2', '(0,10)')                                                 +
+     Item 10: tuple = ('106000', '6text', '106', '6textWOW2', '(0,11)')                                                +
+     Item 11: tuple = ('107000', '7text', '107', '7textWOW2', '(0,12)')                                                +
+     Item 12: tuple = ('108000', '8text', '108', '8textWOW2', '(0,13)')                                                +
    Chunk 2: offset = 13, location = 1160, hikey location = 176                                                         +
-     Item 13: offset = 1176, tuple = ('109000', '9text', '109', '9textWOW2', '(0,14)')                                 +
-     Item 14: offset = 1240, tuple = ('110000', '10text', '110', '10textWOW2', '(0,15)')                               +
-     Item 15: offset = 1312, tuple = ('111000', '11text', '111', '11textWOW2', '(0,16)')                               +
-     Item 16: offset = 1384, tuple = ('112000', '12text', '112', '12textWOW2', '(0,17)')                               +
-     Item 17: offset = 1456, tuple = ('113000', '13text', '113', '13textWOW2', '(0,18)')                               +
-     Item 18: offset = 1528, tuple = ('114000', '14text', '114', '14textWOW2', '(0,19)')                               +
-     Item 19: offset = 1600, tuple = ('115000', '15text', '115', '15textWOW2', '(0,20)')                               +
+     Item 13: tuple = ('109000', '9text', '109', '9textWOW2', '(0,14)')                                                +
+     Item 14: tuple = ('110000', '10text', '110', '10textWOW2', '(0,15)')                                              +
+     Item 15: tuple = ('111000', '11text', '111', '11textWOW2', '(0,16)')                                              +
+     Item 16: tuple = ('112000', '12text', '112', '12textWOW2', '(0,17)')                                              +
+     Item 17: tuple = ('113000', '13text', '113', '13textWOW2', '(0,18)')                                              +
+     Item 18: tuple = ('114000', '14text', '114', '14textWOW2', '(0,19)')                                              +
+     Item 19: tuple = ('115000', '15text', '115', '15textWOW2', '(0,20)')                                              +
                                                                                                                        +
  Index o_test_expression_ix6 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 38, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('14TEXT', '114', '14text', '(0,19)')             +
-     Item 0: offset = 272, tuple = ('0TEXT', '0', '0text', '(0,1)')                                                    +
-     Item 1: offset = 328, tuple = ('10TEXT', '110', '10text', '(0,15)')                                               +
-     Item 2: offset = 384, tuple = ('11TEXT', '111', '11text', '(0,16)')                                               +
-     Item 3: offset = 440, tuple = ('12TEXT', '112', '12text', '(0,17)')                                               +
-     Item 4: offset = 496, tuple = ('13TEXT', '113', '13text', '(0,18)')                                               +
+     Item 0: tuple = ('0TEXT', '0', '0text', '(0,1)')                                                                  +
+     Item 1: tuple = ('10TEXT', '110', '10text', '(0,15)')                                                             +
+     Item 2: tuple = ('11TEXT', '111', '11text', '(0,16)')                                                             +
+     Item 3: tuple = ('12TEXT', '112', '12text', '(0,17)')                                                             +
+     Item 4: tuple = ('13TEXT', '113', '13text', '(0,18)')                                                             +
    Chunk 1: offset = 5, location = 552, hikey location = 112, hikey = ('19TEXT', '19', '19text', '(0,8)')              +
-     Item 5: offset = 568, tuple = ('14TEXT', '114', '14text', '(0,19)')                                               +
-     Item 6: offset = 624, tuple = ('15TEXT', '115', '15text', '(0,20)')                                               +
-     Item 7: offset = 680, tuple = ('16TEXT', '16', '16text', '(0,5)')                                                 +
-     Item 8: offset = 736, tuple = ('17TEXT', '17', '17text', '(0,6)')                                                 +
-     Item 9: offset = 792, tuple = ('18TEXT', '18', '18text', '(0,7)')                                                 +
+     Item 5: tuple = ('14TEXT', '114', '14text', '(0,19)')                                                             +
+     Item 6: tuple = ('15TEXT', '115', '15text', '(0,20)')                                                             +
+     Item 7: tuple = ('16TEXT', '16', '16text', '(0,5)')                                                               +
+     Item 8: tuple = ('17TEXT', '17', '17text', '(0,6)')                                                               +
+     Item 9: tuple = ('18TEXT', '18', '18text', '(0,7)')                                                               +
    Chunk 2: offset = 10, location = 848, hikey location = 152, hikey = ('5TEXT', '105', '5text', '(0,10)')             +
-     Item 10: offset = 864, tuple = ('19TEXT', '19', '19text', '(0,8)')                                                +
-     Item 11: offset = 920, tuple = ('20TEXT', '20', '20text', '(0,9)')                                                +
-     Item 12: offset = 976, tuple = ('2TEXT', '2', '2text', '(0,2)')                                                   +
-     Item 13: offset = 1032, tuple = ('3TEXT', '3', '3text', '(0,3)')                                                  +
-     Item 14: offset = 1088, tuple = ('4TEXT', '4', '4text', '(0,4)')                                                  +
+     Item 10: tuple = ('19TEXT', '19', '19text', '(0,8)')                                                              +
+     Item 11: tuple = ('20TEXT', '20', '20text', '(0,9)')                                                              +
+     Item 12: tuple = ('2TEXT', '2', '2text', '(0,2)')                                                                 +
+     Item 13: tuple = ('3TEXT', '3', '3text', '(0,3)')                                                                 +
+     Item 14: tuple = ('4TEXT', '4', '4text', '(0,4)')                                                                 +
    Chunk 3: offset = 15, location = 1144, hikey location = 192                                                         +
-     Item 15: offset = 1160, tuple = ('5TEXT', '105', '5text', '(0,10)')                                               +
-     Item 16: offset = 1216, tuple = ('6TEXT', '106', '6text', '(0,11)')                                               +
-     Item 17: offset = 1272, tuple = ('7TEXT', '107', '7text', '(0,12)')                                               +
-     Item 18: offset = 1328, tuple = ('8TEXT', '108', '8text', '(0,13)')                                               +
-     Item 19: offset = 1384, tuple = ('9TEXT', '109', '9text', '(0,14)')                                               +
+     Item 15: tuple = ('5TEXT', '105', '5text', '(0,10)')                                                              +
+     Item 16: tuple = ('6TEXT', '106', '6text', '(0,11)')                                                              +
+     Item 17: tuple = ('7TEXT', '107', '7text', '(0,12)')                                                              +
+     Item 18: tuple = ('8TEXT', '108', '8text', '(0,13)')                                                              +
+     Item 19: tuple = ('9TEXT', '109', '9text', '(0,14)')                                                              +
                                                                                                                        +
  Index o_test_expression_ix7 contents                                                                                  +
  Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 0                                                                  +
  state = free, datoid equal, relnode equal, ix_type = regular, clean                                                   +
      Leftmost, Rightmost                                                                                               +
    Chunk 0: offset = 0, location = 256, hikey location = 88, hikey = ('t', '4', 't', '(0,4)')                          +
-     Item 0: offset = 264, tuple = ('t', '0', 't', '(0,1)')                                                            +
-     Item 1: offset = 304, tuple = ('t', '2', 't', '(0,2)')                                                            +
-     Item 2: offset = 344, tuple = ('t', '3', 't', '(0,3)')                                                            +
+     Item 0: tuple = ('t', '0', 't', '(0,1)')                                                                          +
+     Item 1: tuple = ('t', '2', 't', '(0,2)')                                                                          +
+     Item 2: tuple = ('t', '3', 't', '(0,3)')                                                                          +
    Chunk 1: offset = 3, location = 384, hikey location = 112, hikey = ('t', '18', 't', '(0,7)')                        +
-     Item 3: offset = 392, tuple = ('t', '4', 't', '(0,4)')                                                            +
-     Item 4: offset = 432, tuple = ('t', '16', 't', '(0,5)')                                                           +
-     Item 5: offset = 472, tuple = ('t', '17', 't', '(0,6)')                                                           +
+     Item 3: tuple = ('t', '4', 't', '(0,4)')                                                                          +
+     Item 4: tuple = ('t', '16', 't', '(0,5)')                                                                         +
+     Item 5: tuple = ('t', '17', 't', '(0,6)')                                                                         +
    Chunk 2: offset = 6, location = 512, hikey location = 136, hikey = ('t', '105', 't', '(0,10)')                      +
-     Item 6: offset = 520, tuple = ('t', '18', 't', '(0,7)')                                                           +
-     Item 7: offset = 560, tuple = ('t', '19', 't', '(0,8)')                                                           +
-     Item 8: offset = 600, tuple = ('t', '20', 't', '(0,9)')                                                           +
+     Item 6: tuple = ('t', '18', 't', '(0,7)')                                                                         +
+     Item 7: tuple = ('t', '19', 't', '(0,8)')                                                                         +
+     Item 8: tuple = ('t', '20', 't', '(0,9)')                                                                         +
    Chunk 3: offset = 9, location = 640, hikey location = 160, hikey = ('t', '108', 't', '(0,13)')                      +
-     Item 9: offset = 648, tuple = ('t', '105', 't', '(0,10)')                                                         +
-     Item 10: offset = 688, tuple = ('t', '106', 't', '(0,11)')                                                        +
-     Item 11: offset = 728, tuple = ('t', '107', 't', '(0,12)')                                                        +
+     Item 9: tuple = ('t', '105', 't', '(0,10)')                                                                       +
+     Item 10: tuple = ('t', '106', 't', '(0,11)')                                                                      +
+     Item 11: tuple = ('t', '107', 't', '(0,12)')                                                                      +
    Chunk 4: offset = 12, location = 768, hikey location = 184, hikey = ('t', '111', 't', '(0,16)')                     +
-     Item 12: offset = 776, tuple = ('t', '108', 't', '(0,13)')                                                        +
-     Item 13: offset = 816, tuple = ('t', '109', 't', '(0,14)')                                                        +
-     Item 14: offset = 856, tuple = ('t', '110', 't', '(0,15)')                                                        +
+     Item 12: tuple = ('t', '108', 't', '(0,13)')                                                                      +
+     Item 13: tuple = ('t', '109', 't', '(0,14)')                                                                      +
+     Item 14: tuple = ('t', '110', 't', '(0,15)')                                                                      +
    Chunk 5: offset = 15, location = 896, hikey location = 208, hikey = ('t', '114', 't', '(0,19)')                     +
-     Item 15: offset = 904, tuple = ('t', '111', 't', '(0,16)')                                                        +
-     Item 16: offset = 944, tuple = ('t', '112', 't', '(0,17)')                                                        +
-     Item 17: offset = 984, tuple = ('t', '113', 't', '(0,18)')                                                        +
+     Item 15: tuple = ('t', '111', 't', '(0,16)')                                                                      +
+     Item 16: tuple = ('t', '112', 't', '(0,17)')                                                                      +
+     Item 17: tuple = ('t', '113', 't', '(0,18)')                                                                      +
    Chunk 6: offset = 18, location = 1024, hikey location = 232                                                         +
-     Item 18: offset = 1032, tuple = ('t', '114', 't', '(0,19)')                                                       +
-     Item 19: offset = 1072, tuple = ('t', '115', 't', '(0,20)')                                                       +
+     Item 18: tuple = ('t', '114', 't', '(0,19)')                                                                      +
+     Item 19: tuple = ('t', '115', 't', '(0,20)')                                                                      +
                                                                                                                        +
  Index toast: not loaded                                                                                               +
  

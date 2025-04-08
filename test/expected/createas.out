@@ -433,10 +433,10 @@ Indexes:
     "o_test_matview_ix1" btree (item_id DESC)
     "o_test_matview_ix2" btree (quantity2)
 View definition:
- SELECT "*VALUES*".column1 AS order_id,
-    "*VALUES*".column2 AS item_id,
-    "*VALUES*".column3 AS quantity2,
-    "*VALUES*".column4 AS price
+ SELECT column1 AS order_id,
+    column2 AS item_id,
+    column3 AS quantity2,
+    column4 AS price
    FROM (VALUES (100,1,'a'::text,nextval('o_matview_seq'::regclass)), (100,3,'b'::text,nextval('o_matview_seq'::regclass))) "*VALUES*";
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_matview ORDER BY quantity2;

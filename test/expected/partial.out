@@ -1,7 +1,7 @@
 CREATE SCHEMA partial;
 SET SESSION search_path = 'partial';
 CREATE EXTENSION orioledb;
-CREATE FUNCTION my_cmp_plpgsql(a int, b int) RETURNS int AS $$
+CREATE FUNCTION partial.my_cmp_plpgsql(a int, b int) RETURNS int AS $$
 DECLARE
 	a_tr int := (a::bit(5) & X'A8'::bit(5))::int;
 	b_tr int := (b::bit(5) & X'A8'::bit(5))::int;
@@ -9,54 +9,54 @@ BEGIN
 	RETURN btint4cmp(a_tr, b_tr);
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
-CREATE FUNCTION my_cmp_sql(a int, b int) RETURNS int AS $$
+CREATE FUNCTION partial.my_cmp_sql(a int, b int) RETURNS int AS $$
 	SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					(b::bit(5) & X'A8'::bit(5))::int);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_cmp_sql_sql(a int, b int) RETURNS int AS $$
+CREATE FUNCTION partial.my_cmp_sql_sql(a int, b int) RETURNS int AS $$
 	SELECT extract(epoch from current_timestamp)::integer +
-		   my_cmp_sql(a, b);
+		   partial.my_cmp_sql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_cmp_sql_plpgsql(a int, b int) RETURNS int AS $$
-	SELECT my_cmp_plpgsql(a, b);
+CREATE FUNCTION partial.my_cmp_sql_plpgsql(a int, b int) RETURNS int AS $$
+	SELECT partial.my_cmp_plpgsql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_cmp_sql_sql_sql(a int, b int) RETURNS int AS $$
-	SELECT my_cmp_sql_sql(a, b);
+	SELECT partial.my_cmp_sql_sql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_cmp_sql_sql_plpgsql(a int, b int) RETURNS int AS $$
-	SELECT my_cmp_sql_plpgsql(a, b);
+CREATE FUNCTION partial.my_cmp_sql_sql_plpgsql(a int, b int) RETURNS int AS $$
+	SELECT partial.my_cmp_sql_plpgsql(a, b);
 $$ LANGUAGE SQL IMMUTABLE;
-CREATE FUNCTION my_cmp_sql_body(a int, b int) RETURNS int
+CREATE FUNCTION partial.my_cmp_sql_body(a int, b int) RETURNS int
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
 	SELECT btint4cmp((a::bit(5) & X'A8'::bit(5))::int,
 					(b::bit(5) & X'A8'::bit(5))::int);
 END;
-CREATE FUNCTION my_cmp_inter(a int, b int) RETURNS int
+CREATE FUNCTION partial.my_cmp_inter(a int, b int) RETURNS int
 	AS 'btint4cmp'
 	LANGUAGE internal;
-CREATE FUNCTION my_c_func(a int, b int)
+CREATE FUNCTION partial.my_c_func(a int, b int)
 	RETURNS int8
 	AS 'orioledb', 'orioledb_compression_max_level'
 	LANGUAGE C STRICT IMMUTABLE;
 CREATE FUNCTION my_eq_p_p(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_plpgsql(a, b) = 0;
+	RETURN partial.my_cmp_plpgsql(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE FUNCTION my_eq_p_s(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_sql(a, b) = 0;
+	RETURN partial.my_cmp_sql(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE FUNCTION my_eq_p_sb(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_sql_body(a, b) = 0;
+	RETURN partial.my_cmp_sql_body(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE FUNCTION my_eq_p_i(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN my_cmp_inter(a, b) = 0;
+	RETURN partial.my_cmp_inter(a, b) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE FUNCTION my_eq_p_b(a int, b int) RETURNS bool AS $$
@@ -66,54 +66,54 @@ END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE FUNCTION my_eq_p_c(a int, b int) RETURNS bool AS $$
 BEGIN
-	RETURN ((a % (my_c_func(a, b) - 20)) -
-			(b % (my_c_func(a, b) - 20))) = 0;
+	RETURN ((a % (partial.my_c_func(a, b) - 20)) -
+			(b % (partial.my_c_func(a, b) - 20))) = 0;
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE FUNCTION my_eq_s_p(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_plpgsql(a, b) = 0;
+	SELECT partial.my_cmp_plpgsql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_s(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql(a, b) = 0;
+	SELECT partial.my_cmp_sql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_s_s_s(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql_sql_sql(a, b) = 0;
+	SELECT partial.my_cmp_sql_sql_sql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_s_s_p(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql_sql_plpgsql(a, b) = 0;
+	SELECT partial.my_cmp_sql_sql_plpgsql(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_sb(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_sql_body(a, b) = 0;
+	SELECT partial.my_cmp_sql_body(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_i(a int, b int) RETURNS bool AS $$
-	SELECT my_cmp_inter(a, b) = 0;
+	SELECT partial.my_cmp_inter(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_b(a int, b int) RETURNS bool AS $$
 	SELECT btint4cmp(a, b) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_s_c(a int, b int) RETURNS bool AS $$
-	SELECT ((a % (my_c_func(a, b) - 20)) -
-			(b % (my_c_func(a, b) - 20))) = 0;
+	SELECT ((a % (partial.my_c_func(a, b) - 20)) -
+			(b % (partial.my_c_func(a, b) - 20))) = 0;
 $$ LANGUAGE SQL IMMUTABLE;
 CREATE FUNCTION my_eq_sb_p(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_plpgsql(a, b) = 0;
+	SELECT partial.my_cmp_plpgsql(a, b) = 0;
 END;
 CREATE FUNCTION my_eq_sb_s(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_sql(a, b) = 0;
+	SELECT partial.my_cmp_sql(a, b) = 0;
 END;
 CREATE FUNCTION my_eq_sb_sb(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_sql_body(a, b) = 0;
+	SELECT partial.my_cmp_sql_body(a, b) = 0;
 END;
 CREATE FUNCTION my_eq_sb_i(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT my_cmp_inter(a, b) = 0;
+	SELECT partial.my_cmp_inter(a, b) = 0;
 END;
 CREATE FUNCTION my_eq_sb_b(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
@@ -123,8 +123,8 @@ END;
 CREATE FUNCTION my_eq_sb_c(a int, b int) RETURNS bool
 	LANGUAGE SQL IMMUTABLE
 BEGIN ATOMIC
-	SELECT ((a % (my_c_func(a, b) - 20)) -
-			(b % (my_c_func(a, b) - 20))) = 0;
+	SELECT ((a % (partial.my_c_func(a, b) - 20)) -
+			(b % (partial.my_c_func(a, b) - 20))) = 0;
 END;
 CREATE FUNCTION my_eq_i(a int, b int) RETURNS bool
 	AS 'int4eq'
@@ -204,7 +204,7 @@ CREATE INDEX o_test_sql_func_ix_i ON
 CREATE INDEX o_test_sql_func_ix_b ON
 	o_test_sql_func(val) WHERE (int4eq(val % 4, 3));
 CREATE INDEX o_test_sql_func_ix_c ON
-	o_test_sql_func(val) WHERE ((val % (my_c_func(val,
+	o_test_sql_func(val) WHERE ((val % (partial.my_c_func(val,
 														   val + 1) - 18)) =
 								0);
 CREATE SEQUENCE o_test_sql_func_seq;
@@ -240,125 +240,125 @@ SELECT orioledb_tbl_structure('o_test_sql_func'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 280, tuple = ('(0,1)', '1')                   +
-     Item 1: offset = 312, tuple = ('(0,2)', '2')                   +
-     Item 2: offset = 344, tuple = ('(0,3)', '3')                   +
-     Item 3: offset = 376, tuple = ('(0,4)', '4')                   +
-     Item 4: offset = 408, tuple = ('(0,5)', '5')                   +
-     Item 5: offset = 440, tuple = ('(0,6)', '6')                   +
-     Item 6: offset = 472, tuple = ('(0,7)', '7')                   +
-     Item 7: offset = 504, tuple = ('(0,8)', '8')                   +
-     Item 8: offset = 536, tuple = ('(0,9)', '9')                   +
-     Item 9: offset = 568, tuple = ('(0,10)', '10')                 +
+     Item 0: tuple = ('(0,1)', '1')                                 +
+     Item 1: tuple = ('(0,2)', '2')                                 +
+     Item 2: tuple = ('(0,3)', '3')                                 +
+     Item 3: tuple = ('(0,4)', '4')                                 +
+     Item 4: tuple = ('(0,5)', '5')                                 +
+     Item 5: tuple = ('(0,6)', '6')                                 +
+     Item 6: tuple = ('(0,7)', '7')                                 +
+     Item 7: tuple = ('(0,8)', '8')                                 +
+     Item 8: tuple = ('(0,9)', '9')                                 +
+     Item 9: tuple = ('(0,10)', '10')                               +
                                                                     +
  Index o_test_sql_func_ix_s_s contents                              +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '(0,1)')                   +
-     Item 1: offset = 304, tuple = ('3', '(0,3)')                   +
-     Item 2: offset = 336, tuple = ('4', '(0,4)')                   +
-     Item 3: offset = 368, tuple = ('7', '(0,7)')                   +
-     Item 4: offset = 400, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('1', '(0,1)')                                 +
+     Item 1: tuple = ('3', '(0,3)')                                 +
+     Item 2: tuple = ('4', '(0,4)')                                 +
+     Item 3: tuple = ('7', '(0,7)')                                 +
+     Item 4: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_s_sb contents                             +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '(0,1)')                   +
-     Item 1: offset = 304, tuple = ('3', '(0,3)')                   +
-     Item 2: offset = 336, tuple = ('4', '(0,4)')                   +
-     Item 3: offset = 368, tuple = ('7', '(0,7)')                   +
-     Item 4: offset = 400, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('1', '(0,1)')                                 +
+     Item 1: tuple = ('3', '(0,3)')                                 +
+     Item 2: tuple = ('4', '(0,4)')                                 +
+     Item 3: tuple = ('7', '(0,7)')                                 +
+     Item 4: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_s_b contents                              +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('3', '(0,3)')                   +
-     Item 1: offset = 296, tuple = ('6', '(0,6)')                   +
-     Item 2: offset = 328, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('3', '(0,3)')                                 +
+     Item 1: tuple = ('6', '(0,6)')                                 +
+     Item 2: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_s_c contents                              +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '(0,1)')                   +
-     Item 1: offset = 304, tuple = ('3', '(0,3)')                   +
-     Item 2: offset = 336, tuple = ('5', '(0,5)')                   +
-     Item 3: offset = 368, tuple = ('7', '(0,7)')                   +
-     Item 4: offset = 400, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('1', '(0,1)')                                 +
+     Item 1: tuple = ('3', '(0,3)')                                 +
+     Item 2: tuple = ('5', '(0,5)')                                 +
+     Item 3: tuple = ('7', '(0,7)')                                 +
+     Item 4: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_sb_s contents                             +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '(0,1)')                   +
-     Item 1: offset = 304, tuple = ('3', '(0,3)')                   +
-     Item 2: offset = 336, tuple = ('4', '(0,4)')                   +
-     Item 3: offset = 368, tuple = ('7', '(0,7)')                   +
-     Item 4: offset = 400, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('1', '(0,1)')                                 +
+     Item 1: tuple = ('3', '(0,3)')                                 +
+     Item 2: tuple = ('4', '(0,4)')                                 +
+     Item 3: tuple = ('7', '(0,7)')                                 +
+     Item 4: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_sb_sb contents                            +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '(0,1)')                   +
-     Item 1: offset = 304, tuple = ('3', '(0,3)')                   +
-     Item 2: offset = 336, tuple = ('4', '(0,4)')                   +
-     Item 3: offset = 368, tuple = ('7', '(0,7)')                   +
-     Item 4: offset = 400, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('1', '(0,1)')                                 +
+     Item 1: tuple = ('3', '(0,3)')                                 +
+     Item 2: tuple = ('4', '(0,4)')                                 +
+     Item 3: tuple = ('7', '(0,7)')                                 +
+     Item 4: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_sb_b contents                             +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('3', '(0,3)')                   +
-     Item 1: offset = 296, tuple = ('6', '(0,6)')                   +
-     Item 2: offset = 328, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('3', '(0,3)')                                 +
+     Item 1: tuple = ('6', '(0,6)')                                 +
+     Item 2: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_sb_c contents                             +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 272, tuple = ('1', '(0,1)')                   +
-     Item 1: offset = 304, tuple = ('3', '(0,3)')                   +
-     Item 2: offset = 336, tuple = ('5', '(0,5)')                   +
-     Item 3: offset = 368, tuple = ('7', '(0,7)')                   +
-     Item 4: offset = 400, tuple = ('9', '(0,9)')                   +
+     Item 0: tuple = ('1', '(0,1)')                                 +
+     Item 1: tuple = ('3', '(0,3)')                                 +
+     Item 2: tuple = ('5', '(0,5)')                                 +
+     Item 3: tuple = ('7', '(0,7)')                                 +
+     Item 4: tuple = ('9', '(0,9)')                                 +
                                                                     +
  Index o_test_sql_func_ix_i contents                                +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('2', '(0,2)')                   +
-     Item 1: offset = 296, tuple = ('6', '(0,6)')                   +
-     Item 2: offset = 328, tuple = ('10', '(0,10)')                 +
+     Item 0: tuple = ('2', '(0,2)')                                 +
+     Item 1: tuple = ('6', '(0,6)')                                 +
+     Item 2: tuple = ('10', '(0,10)')                               +
                                                                     +
  Index o_test_sql_func_ix_b contents                                +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('3', '(0,3)')                   +
-     Item 1: offset = 296, tuple = ('7', '(0,7)')                   +
+     Item 0: tuple = ('3', '(0,3)')                                 +
+     Item 1: tuple = ('7', '(0,7)')                                 +
                                                                     +
  Index o_test_sql_func_ix_c contents                                +
  Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0               +
  state = free, datoid equal, relnode equal, ix_type = regular, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = ('4', '(0,4)')                   +
-     Item 1: offset = 296, tuple = ('8', '(0,8)')                   +
+     Item 0: tuple = ('4', '(0,4)')                                 +
+     Item 1: tuple = ('8', '(0,8)')                                 +
                                                                     +
  Index toast: not loaded                                            +
  

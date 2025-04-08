@@ -346,7 +346,7 @@ def tbl_structure_to_json(structure: str) -> dict[str, dict[int, Any]]:
 	page_pattern_str = r"Page (?P<page>\d+?): level = (?P<level>\d+?)(?:, \S+ = \d+)*(?P<sparse>, sparse)?"
 	page_pattern = re.compile(page_pattern_str)
 
-	hikey_pattern_str = r"\s+Hikey: offset = \d+, key = (.+)"
+	hikey_pattern_str = r"\s+Hikey: key = (.+)"
 	hikey_pattern = re.compile(hikey_pattern_str)
 
 	for line in structure.splitlines():
