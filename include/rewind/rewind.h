@@ -25,4 +25,10 @@ typedef struct
 	TimestampTz			timestamp;
 } RewindItem
 
+typedef struct
+{
+	uint64		writtenPos;
+	uint64		readPos;
+} RewindMeta
+
 #endif							/* __REWIND_WORKER_H__ */

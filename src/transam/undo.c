@@ -766,7 +766,41 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	}
 
 	pg_atomic_write_u64(&sharedLocations->location, location);
-	pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
+
+	if (enable_rewind)
+	{
+		RewindItem  *rewindItem;
+		bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindMapItem);
+
+		rewindMeta->currentPos++;
+
+		/* Write some entries out of circular buffer if needed. */
+		if (rewindMeta->currentPos >= rewindMeta->writtenPos + rewind_circular_buffer_size)
+		{
+			o_buffers_write(&buffersDesc,
+							(Pointer) &rewindBuffer[rewindMeta->writtenPos % rewind_circular_buffer_size],
+							REWWIND_BUFFERS_TAG,
+							lastWrittenXmin * sizeof(RewindMapItem),
+							);
+			rewindMeta->writtenPos += rewind_circular_buffer_size;
+		}
+
+		/* Fill entry in circular buffer. */
+		rewindItem = &rewindBuffer[rewindMeta.currentPos % rewind_circular_buffer_size];
+
+		rewindItem->oxid = oxid;
+		rewindItem->undoStackLocations.location = location;
+		rewindItem->undoStackLocations.branchLocation = pg_atomic_read_u64(&sharedLocations->branchLocation);
+		rewindItem->undoStackLocations.subxactLocation  = pg_atomic_read_u64(&sharedLocations->subxacthLocation);
+		rewindItem->undoStackLocations.onCommitLocation = newOnCommitLocation;
+		rewindItem->timestamp = GetCurrentTimestamp();
+
+	}
+	else
+	{
+		pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
+	}
+
 	LWLockRelease(&curProcData->undoStackLocationsFlushLock);
 
 	free_undo_item_buf(&buf);
@@ -1357,6 +1391,11 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
+
+				if (enable_rewind)
+				{
+					// SET csn ?  RetainedForRewind
+				}
 				wal_after_commit();
 				reset_cur_undo_locations();
 				oxid_needs_wal_flush = false;
