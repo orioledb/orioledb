@@ -847,6 +847,7 @@ finish_write_xids(uint32 chkpnum)
 	while (recovery_undo_loc_flush->completedCheckpointNumber <
 		   recovery_undo_loc_flush->immediateRequestCheckpointNumber)
 	{
+		WakeupRecovery();
 		pg_usleep(10000L);
 	}
 }
