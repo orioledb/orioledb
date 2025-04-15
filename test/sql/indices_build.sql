@@ -400,10 +400,10 @@ SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
 SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
 SELECT key, val FROM o_indices8;
@@ -416,7 +416,7 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 ALTER TABLE o_indices8
   ADD CONSTRAINT o_indices8_pkey
     PRIMARY KEY (key);
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT key, val FROM o_indices8;
 SELECT * FROM o_indices8;
@@ -424,7 +424,7 @@ SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
 CREATE TABLE o_indices8_ctid

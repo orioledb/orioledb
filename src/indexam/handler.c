@@ -285,6 +285,11 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
+	if (index->rd_index->indisprimary)
+	{
+		*result = o_pkey_result;
+		memset(&o_pkey_result, 0, sizeof(o_pkey_result));
+	}
 
 	if (in_nontransactional_truncate || (!index->rd_index->indisprimary && !OidIsValid(o_saved_relrewrite)))
 	{
