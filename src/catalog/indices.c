@@ -1809,7 +1809,14 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	{
 		pfree(btspool);
 		if (!is_recovery_in_progress())
+		{
+			for (i = 0; i < descr->nIndices; i++)
+			{
+				if (index_tuples[i] == 0)
+					index_tuples[i] = buildstate.btleader->btshared->indtuples[i];
+			}
 			_o_index_end_parallel(buildstate.btleader);
+		}
 	}
 
 	/*
@@ -1861,9 +1868,9 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			if (i == 0 && result)
 			{
 				result->heap_tuples = heap_tuples;
-				result->index_tuples = index_tuples[0];
+				result->index_tuples = index_tuples[i];
 			}
-			else
+			if (i != 0 || o_table->has_primary)
 			{
 				OTableIndex *table_index = &o_table->indices[i];
 				Relation	indexRelation;

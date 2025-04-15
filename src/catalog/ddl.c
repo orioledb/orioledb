@@ -113,6 +113,7 @@ static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
+IndexBuildResult o_pkey_result = {0};
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -2750,7 +2751,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							relation_close(rel, AccessShareLock);
 							closed = true;
 							if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, NULL);
+								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, &o_pkey_result);
 						}
 
 						if (add_bridging)
@@ -3341,5 +3342,6 @@ o_ddl_cleanup(void)
 		list_free_deep(reindex_list);
 		reindex_list = NIL;
 	}
+	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
 }

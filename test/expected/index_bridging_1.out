@@ -2975,10 +2975,11 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
- Index Scan using o_test_non_index_bridging_options_ix2 on o_test_non_index_bridging_options
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_non_index_bridging_options
+   Forward index scan of: o_test_non_index_bridging_options_pkey
+(2 rows)
 
 SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
  i  |    j    |    p    

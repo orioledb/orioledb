@@ -22949,10 +22949,10 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
  
 (1 row)
 
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Index Only Scan using o_indices8_idx1 on o_indices8  (cost=0.13..8.17 rows=2 width=36)
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Only Scan using o_indices8_idx1 on o_indices8
    Index Cond: (val > 'a'::text)
 (2 rows)
 
@@ -22966,10 +22966,10 @@ SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 (4 rows)
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Index Scan using o_indices8_idx1 on o_indices8  (cost=0.13..8.17 rows=2 width=36)
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Scan using o_indices8_idx1 on o_indices8
    Index Cond: (val > 'a'::text)
 (2 rows)
 
@@ -23129,10 +23129,10 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 ALTER TABLE o_indices8
   ADD CONSTRAINT o_indices8_pkey
     PRIMARY KEY (key);
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Index Only Scan using o_indices8_idx1 on o_indices8  (cost=0.12..8.14 rows=1 width=36)
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Only Scan using o_indices8_idx1 on o_indices8
    Index Cond: (val > 'a'::text)
 (2 rows)
 
@@ -23244,10 +23244,10 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 (1 row)
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
-EXPLAIN SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Index Scan using o_indices8_idx1 on o_indices8  (cost=0.13..8.17 rows=2 width=36)
+EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Scan using o_indices8_idx1 on o_indices8
    Index Cond: (val > 'a'::text)
 (2 rows)
 
