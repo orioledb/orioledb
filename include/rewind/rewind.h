@@ -27,8 +27,10 @@ typedef struct
 
 typedef struct
 {
-	uint64		writtenPos;
-	uint64		readPos;
+	uint64		addPos;		/* Added to circular buffer */
+	uint64		cleanedPos; /* Removed from circular buffer */
+	uint64		writtenPos; /* Written to disk buffers */
+	uint64		readPos;	/* Read from disk buffer */
 } RewindMeta
 
 #endif							/* __REWIND_WORKER_H__ */
