@@ -98,7 +98,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->rewindMapTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&rewindMeta->xidMapWriteLock, rewindMeta->rewindMapTrancheId);
 
-		rewindMeta.cleanedPos = 0;
+		rewindMeta.readPos = 0;
 		rewindMeta.writtenPos = 0;
 	}
 }
@@ -195,12 +195,14 @@ rewind_worker_main(Datum main_arg)
 			{
 				UndoStackSharedLocations *sharedLocations;
 
-				if (rewind_circular_buffer_size - (rewindMeta.currentPos - rewindMeta.cleanedPos) < bufferLength)
+				if (rewindMeta.cleanedPos == rewindMeta.addPos)
 				{
-					//Read buffer from disk
+					/* All are already fixed, do nothing */
+					break;
 				}
 
 				rewindItem = &rewindBuffer[rewindMeta.cleanedPos % xid_circular_buffer_size];
+				Assert (rewindItem->oxid != InvalidOXid);
 
 				if (!TimestampDifferenceExceeds(rewindItem->timestamp,
 												 GetCurrentTimestamp(),
@@ -210,22 +212,59 @@ rewind_worker_main(Datum main_arg)
 					break;
 				}
 
-				if (rewindMeta.cleanedPos == rewindMeta.currentPos)
-				{
-					/* All are already fixed, do nothing */
-					break;
-				}
-
-				/* Fix current transaction and move on to the next in the circular buffer*/
+				/* Fix current transaction clear the item in the circular buffer and move to the next */
 				sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
 				pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
-				// Set csn completed
-				// 
+
+				Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(rewindItem.csn));
+
+				csn = rewindItem->oxid.csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
+				///
+				///
+				///
+
+				rewindItem->oxid = InvalidOXid;
 
 				rewindMeta.cleanedPos++;
+
+				if (rewindMeta.cleanedPos - rewindMeta.readPos > bufferLength)
+				{
+					/* Read buffer from disk */
+					int start = rewindMeta.readPos % rewind_circular_buffer_size;
+					int length_to_end = rewind_circular_buffer_size - start;
+
+#ifdef USE_ASSERT_CHECKING
+					for(int pos = rewindMeta.readPos; pos <= rewindMeta.readPos + bufferLength; pos++)
+						Assert(rewindBuffer[pos % rewind_circular_buffer_size].oxid == InvalidOXid);
+#endif
+
+					if (length_to_end < bufferLength)
+					{
+						o_buffers_read(&buffersDesc,
+								(Pointer) &rewindBuffer[start], REWWIND_BUFFERS_TAG,
+								rewindMeta->readPos * sizeof(RewindMapItem),
+								length_to_end * sizeof(RewindMapItem));
+						o_buffers_read(&buffersDesc,
+								(Pointer) &rewindBuffer[0], REWWIND_BUFFERS_TAG,
+								(rewindMeta->readPos + length_to_end) * sizeof(RewindMapItem),
+								(bufferLength - length_to_end) * sizeof(RewindMapItem));
+					}
+					else
+					{
+						o_buffers_read(&buffersDesc,
+								(Pointer) &rewindBuffer[start], REWWIND_BUFFERS_TAG,
+								rewindMeta->readPos * sizeof(RewindMapItem),
+								bufferLength * sizeof(RewindMapItem));
+					}
+
+#ifdef USE_ASSERT_CHECKING
+					for(int pos = rewindMeta.readPos; pos <= rewindMeta.readPos + bufferLength; pos++)
+						Assert(rewindBuffer[pos % rewind_circular_buffer_size].oxid != InvalidOXid);
+#endif
+					rewindMeta->readPos += bufferLength;
+				}
+
 			}
-		//			MemoryContextReset(CurTransactionContext);
-		//			MemoryContextReset(TopTransactionContext);
 
 			ResetLatch(MyLatch);
 		}

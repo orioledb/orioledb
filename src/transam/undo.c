@@ -684,6 +684,64 @@ apply_undo_branches(UndoLogType undoType, OXid oxid)
 	free_undo_item_buf(&buf);
 }
 
+static void
+add_to_rewind_buffer(OXid oxid, UndoStackSharedLocations *sharedLocations,
+					 UndoLocation location, UndoLocation newOnCommitLocation)
+{
+		RewindItem  *rewindItem;
+
+		rewindMeta->addPos++;
+
+		/* Write and clear page of entries out of circular buffer if needed. */
+		if (rewindMeta->addPos >= rewindMeta->writtenPos + rewind_circular_buffer_size)
+		{
+			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindMapItem);
+			int pos;
+			int start = rewindMeta->writtenPos % rewind_circular_buffer_size;
+			int length_to_end = rewind_circular_buffer_size - start;
+
+			if (length_to_end < bufferLength);
+			{
+				o_buffers_write(&buffersDesc,
+							(Pointer) &rewindBuffer[start],
+							REWWIND_BUFFERS_TAG,
+							rewindMeta->writtenPos * sizeof(RewindMapItem),
+							length_to_end * sizeof(RewindMapItem));
+
+				o_buffers_write(&buffersDesc,
+							(Pointer) &rewindBuffer[0],
+							REWWIND_BUFFERS_TAG,
+							(rewindMeta->writtenPos + length_to_end) * sizeof(RewindMapItem),
+							(bufferLength - length_to_end) * sizeof(RewindMapItem));
+			}
+			else
+			{
+				o_buffers_write(&buffersDesc,
+							(Pointer) &rewindBuffer[start],
+							REWWIND_BUFFERS_TAG,
+							rewindMeta->writtenPos * sizeof(RewindMapItem),
+							bufferLength * sizeof(RewindMapItem));
+			}
+
+			for (pos = written_pos; pos <= written_pos + bufferLength; pos++)
+				rewindBuffer[pos % rewind_circular_buffer_size].oxid = InvalidOXid;
+
+			rewindMeta->writtenPos += bufferLength;
+		}
+
+		/* Fill entry in a circular buffer. */
+		rewindItem = &rewindBuffer[rewindMeta.addPos % rewind_circular_buffer_size];
+
+		Assert(rewindItem->oxid == InvalidOXid);
+		rewindItem->oxid = oxid;
+		rewindItem->undoStackLocations.location = location;
+		rewindItem->undoStackLocations.branchLocation = pg_atomic_read_u64(sharedLocations->branchLocation);
+		rewindItem->undoStackLocations.subxactLocation  = pg_atomic_read_u64(sharedLocations->subxacthLocation);
+		rewindItem->undoStackLocations.onCommitLocation = newOnCommitLocation;
+		rewindItem->timestamp = GetCurrentTimestamp();
+}
+
+
 /*
  * Walk transaction undo stack chain during (sub)transaction abort or
  * transaction commit.
@@ -769,32 +827,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 
 	if (enable_rewind)
 	{
-		RewindItem  *rewindItem;
-		bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindMapItem);
-
-		rewindMeta->currentPos++;
-
-		/* Write some entries out of circular buffer if needed. */
-		if (rewindMeta->currentPos >= rewindMeta->writtenPos + rewind_circular_buffer_size)
-		{
-			o_buffers_write(&buffersDesc,
-							(Pointer) &rewindBuffer[rewindMeta->writtenPos % rewind_circular_buffer_size],
-							REWWIND_BUFFERS_TAG,
-							lastWrittenXmin * sizeof(RewindMapItem),
-							);
-			rewindMeta->writtenPos += rewind_circular_buffer_size;
-		}
-
-		/* Fill entry in circular buffer. */
-		rewindItem = &rewindBuffer[rewindMeta.currentPos % rewind_circular_buffer_size];
-
-		rewindItem->oxid = oxid;
-		rewindItem->undoStackLocations.location = location;
-		rewindItem->undoStackLocations.branchLocation = pg_atomic_read_u64(&sharedLocations->branchLocation);
-		rewindItem->undoStackLocations.subxactLocation  = pg_atomic_read_u64(&sharedLocations->subxacthLocation);
-		rewindItem->undoStackLocations.onCommitLocation = newOnCommitLocation;
-		rewindItem->timestamp = GetCurrentTimestamp();
-
+		add_to_rewind_buffer(oxid, &sharedLocations, location, newOnCommitLocation);
 	}
 	else
 	{
@@ -1387,15 +1420,16 @@ undo_xact_callback(XactEvent event, void *arg)
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+
+				if (enable_rewind)
+				{
+					csn = csn & COMMITSEQNO_RETAINED_FOR_REWIND;
+				}
 				current_oxid_commit(csn);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 
-				if (enable_rewind)
-				{
-					// SET csn ?  RetainedForRewind
-				}
 				wal_after_commit();
 				reset_cur_undo_locations();
 				oxid_needs_wal_flush = false;
