@@ -630,6 +630,14 @@ serialize_o_index(OIndex *o_index, int *size)
 	StringInfoData str;
 
 	initStringInfo(&str);
+	/*
+	 * Here there is a bug in offset calculation and it should be:
+	 * offsetof(OIndex, leafTableFields) - offsetof(OIndex, tableOids)
+	 *
+	 * But it is late to fix this without breaking backward compatibility. The
+	 * bug doesn't cause any data corruption, but it writes additional bytes
+	 * and makes stored in SYS_TREES_O_INDICES value slightly bigger.
+	 */
 	appendBinaryStringInfo(&str,
 						   (Pointer) o_index + offsetof(OIndex, tableOids),
 						   offsetof(OIndex, leafFields) - offsetof(OIndex, tableOids));
@@ -660,6 +668,10 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex->indexOids = key->oids;
 	oIndex->indexType = key->type;
 
+	/*
+	 * Here there is a bug in offset calculation, see the comment on
+	 * serialize_o_index().
+	 */
 	len = offsetof(OIndex, leafFields) - offsetof(OIndex, tableOids);
 	Assert((ptr - data) + len <= length);
 	memcpy((Pointer) oIndex + offsetof(OIndex, tableOids), ptr, len);
