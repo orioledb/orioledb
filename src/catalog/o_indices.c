@@ -632,7 +632,7 @@ serialize_o_index(OIndex *o_index, int *size)
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str,
 						   (Pointer) o_index + offsetof(OIndex, tableOids),
-						   offsetof(OIndex, leafFields) - offsetof(OIndex, tableOids));
+						   offsetof(OIndex, leafTableFields) - offsetof(OIndex, tableOids));
 	appendBinaryStringInfo(&str, (Pointer) o_index->leafTableFields,
 						   o_index->nLeafFields * sizeof(o_index->leafTableFields[0]));
 	appendBinaryStringInfo(&str, (Pointer) o_index->leafFields,
@@ -660,7 +660,7 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex->indexOids = key->oids;
 	oIndex->indexType = key->type;
 
-	len = offsetof(OIndex, leafFields) - offsetof(OIndex, tableOids);
+	len = offsetof(OIndex, leafTableFields) - offsetof(OIndex, tableOids);
 	Assert((ptr - data) + len <= length);
 	memcpy((Pointer) oIndex + offsetof(OIndex, tableOids), ptr, len);
 	ptr += len;
