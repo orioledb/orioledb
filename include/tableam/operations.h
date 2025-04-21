@@ -136,6 +136,7 @@ extern void o_check_tbl_update_mres(OTableModifyResult mres,
 									TupleTableSlot *slot);
 extern void o_check_tbl_delete_mres(OTableModifyResult mres,
 									OTableDescr *descr, Relation rel);
+extern void o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot);
 
 extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   TupleTableSlot *slot,

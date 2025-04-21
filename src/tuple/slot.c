@@ -1113,25 +1113,36 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 {
 	int			i;
 	ListCell   *indexpr_item = list_head(id->expressions_state);
+	OTableSlot *oslot = (OTableSlot *) slot;
+
+	bool		index_order;
+
+	index_order = slot->tts_tupleDescriptor->tdtypeid == RECORDOID;
+	if (oslot->ixnum == PrimaryIndexNumber)
+		index_order = index_order &&
+			slot->tts_tupleDescriptor->natts == id->nFields;
 
 	slot_getallattrs(slot);
 
 	appendStringInfo(str, "(");
 	for (i = 0; i < id->nUniqueFields; i++)
 	{
-		Datum		value;
-		bool		isnull;
+		Datum		value = slot->tts_values[i];
+		bool		isnull = slot->tts_isnull[i];
 		int			attnum = id->fields[i].tableAttnum;
 
-		if (attnum != EXPR_ATTNUM)
-			value = get_tbl_att(slot, attnum, id->primaryIsCtid,
-								&isnull, NULL);
-		else
+		if (!index_order)
 		{
-			value = get_idx_expr_att(slot, id,
-									 (ExprState *) lfirst(indexpr_item),
-									 &isnull);
-			indexpr_item = lnext(id->expressions_state, indexpr_item);
+			if (attnum != EXPR_ATTNUM)
+				value = get_tbl_att(slot, attnum, id->primaryIsCtid,
+									&isnull, NULL);
+			else
+			{
+				value = get_idx_expr_att(slot, id,
+										 (ExprState *) lfirst(indexpr_item),
+										 &isnull);
+				indexpr_item = lnext(id->expressions_state, indexpr_item);
+			}
 		}
 
 		if (i != 0)

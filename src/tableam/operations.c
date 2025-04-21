@@ -140,8 +140,6 @@ static OBTreeModifyCallbackAction o_lock_deleted_callback(BTreeDescr *descr, OTu
 														  RowLockMode *lock_mode, BTreeLocationHint *hint,
 														  void *arg);
 static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
-static void o_report_duplicate(Relation rel, OIndexDescr *id,
-							   TupleTableSlot *slot);
 
 static TupleTableSlot *
 update_arg_get_slot(OModifyCallbackArg *arg)
@@ -1933,7 +1931,7 @@ is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 					  (Pointer) k2, BTreeKeyBound) == 0);
 }
 
-static void
+void
 o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 {
 	bool		is_ctid = id->primaryIsCtid;

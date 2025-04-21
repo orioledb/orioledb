@@ -327,69 +327,6 @@ o_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 }
 
 static void
-o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
-{
-	bool		is_ctid = id->primaryIsCtid;
-	bool		is_primary = id->desc.type == oIndexPrimary;
-
-	if (is_primary && is_ctid)
-	{
-		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-						errmsg("ctid index key duplicate.")));
-	}
-	else
-	{
-		StringInfo	str = makeStringInfo();
-		int			i;
-
-		appendStringInfo(str, "(");
-		for (i = 0; i < id->nKeyFields; i++)
-		{
-			if (i != 0)
-				appendStringInfo(str, ", ");
-			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
-		}
-		appendStringInfo(str, ")=");
-
-		slot_getallattrs(slot);
-
-		appendStringInfo(str, "(");
-		for (i = 0; i < id->nUniqueFields; i++)
-		{
-			Datum		value = slot->tts_values[i];
-			bool		isnull = slot->tts_isnull[i];
-
-			if (i != 0)
-				appendStringInfo(str, ", ");
-			if (isnull)
-				appendStringInfo(str, "null");
-			else
-			{
-				Oid			typoutput;
-				bool		typisvarlena;
-				char	   *res;
-
-				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
-								  &typoutput, &typisvarlena);
-				res = OidOutputFunctionCall(typoutput, value);
-				appendStringInfo(str, "'%s'", res);
-			}
-		}
-		appendStringInfo(str, ")");
-
-		ereport(ERROR,
-				(errcode(ERRCODE_UNIQUE_VIOLATION),
-				 errmsg("duplicate key value violates unique "
-						"constraint \"%s\"", id->name.data),
-				 errdetail("Key %s already exists.", str->data),
-				 errtableconstraint(rel, id->desc.type == oIndexPrimary ?
-									"pk" : "sk")));
-	}
-}
-
-
-static void
 append_rowid_values(OIndexDescr *id,
 					TupleDesc pk_tupdesc, OTupleFixedFormatSpec *pk_spec,
 					Datum pkDatum, Datum *values, bool *isnull,
@@ -611,81 +548,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	return success;
 }
 
-static void
-o_report_secondary_index_conflict(BTreeOperationType primaryOp, OTableModifyResult result,
-							  Relation rel, Relation heapRel,
-							  OIndexDescr *index_descr, OTuple old_tuple, OTuple new_tuple,
-							  TupleTableSlot *new_slot, Datum *values, bool *isnull)
-{
-	int                     i;
-
-	switch (result.action)
-	{
-		case BTreeOperationUpdate:
-			{
-				StringInfo	str = makeStringInfo();
-
-				if (result.failedIxNum == PrimaryIndexNumber)
-					break;	/* it is ok */
-
-				appendStringInfo(str, "(");
-				for (i = 0; i < index_descr->nUniqueFields; i++)
-				{
-					if (i != 0)
-						appendStringInfo(str, ", ");
-					if (isnull[i])
-						appendStringInfo(str, "null");
-					else
-					{
-						Oid			typoutput;
-						bool		typisvarlena;
-						char	   *res;
-
-						getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
-										  &typoutput, &typisvarlena);
-						res = OidOutputFunctionCall(typoutput, values[i]);
-						appendStringInfo(str, "'%s'", res);
-					}
-				}
-
-				if (old_tuple.data)
-					pfree(old_tuple.data);
-				if (primaryOp == BTreeOperationUpdate && new_tuple.data)
-					pfree(new_tuple.data);
-
-				appendStringInfo(str, ")");
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("unable to remove tuple from secondary index in \"%s\"",
-								RelationGetRelationName(rel)),
-						 errdetail("Unable to remove %s from index \"%s\"",
-								   str->data,
-								   index_descr->name.data),
-						 errtableconstraint(rel, "sk")));
-				break;
-			}
-		case BTreeOperationInsert:
-			{
-				if(primaryOp == BTreeOperationUpdate)
-				{
-					o_report_duplicate(heapRel, index_descr, new_slot);
-				}
-				break;
-			}
-		default:
-			if (old_tuple.data)
-				pfree(old_tuple.data);
-
-			if(primaryOp == BTreeOperationUpdate && new_tuple.data)
-				pfree(new_tuple.data);
-
-			ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Unsupported BTreeOperationType.")));
-			break;
-	}
-}
-
 bool
 orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *values, bool *isnull, Datum tupleid,
@@ -766,9 +628,9 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	secondary_result = o_update_secondary_index(index_descr, ix_num,
-									  new_valid, old_valid,
-									  new_slot, new_tuple,
-									  old_slot, oxid, oSnapshot.csn);
+												new_valid, old_valid,
+												new_slot, new_tuple,
+												old_slot, oxid, oSnapshot.csn);
 
 	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
@@ -778,11 +640,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	pfree(vfree);
 
 	if (!secondary_result.success)
-	{
-		o_report_secondary_index_conflict(BTreeOperationUpdate, secondary_result, rel, heapRel,
-						  index_descr, old_tuple, new_tuple, new_slot,
-						  valuesOld, isnull);
-	}
+		o_check_tbl_update_mres(secondary_result, descr, rel, new_slot);
 
 	if (old_tuple.data)
 		pfree(old_tuple.data);
@@ -861,14 +719,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	pfree(vfree);
 
 	if (!secondary_result.success)
-	{
-		OTuple unused_arg;
-
-		O_TUPLE_SET_NULL(unused_arg);
-		o_report_secondary_index_conflict(BTreeOperationDelete, secondary_result, rel, heapRel,
-				index_descr, tuple, unused_arg, NULL,
-				values, isnull);
-	}
+		o_check_tbl_delete_mres(secondary_result, descr, rel);
 
 	if (tuple.data)
 		pfree(tuple.data);
