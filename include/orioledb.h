@@ -317,9 +317,11 @@ extern Size orioledb_buffers_count;
 extern Size undo_circular_buffer_size;
 extern uint32 undo_buffers_count;
 extern Size xid_circular_buffer_size;
+extern Size rewind_circular_buffer_size;
 extern double regular_block_undo_circular_buffer_fraction;
 extern double system_undo_circular_buffer_fraction;
 extern uint32 xid_buffers_count;
+extern uint32 rewind_buffers_count;
 extern Pointer o_shared_buffers;
 extern ODBProcData *oProcData;
 extern int	max_procs;
@@ -354,6 +356,8 @@ extern char *s3_prefix;
 extern char *s3_accesskey;
 extern char *s3_secretkey;
 extern char *s3_cainfo;
+extern bool enable_rewind;
+extern int rewind_max_period;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MYPROCNUMBER >= 0 && \

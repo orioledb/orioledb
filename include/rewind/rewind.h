@@ -13,24 +13,37 @@
 #ifndef __REWIND_WORKER_H__
 #define __REWIND_WORKER_H__
 
-//extern bool IsBGWriter;
+#include "utils/o_buffers.h"
 
-extern void register_rewindworker(void);
+#define REWIND_FILE_SIZE (0x1000000)
+#define REWIND_BUFFERS_TAG (0)
+
+OBuffersDesc rewindBuffersDesc;
+
+extern void register_rewind_worker(void);
 PGDLLEXPORT void rewind_worker_main(Datum);
+extern Size rewind_shmem_needs(void);
+extern void rewind_init_shmem(Pointer buf, bool found);
 
 typedef struct
 {
 	OXid				oxid;
+	CommitSeqNo			csn;
 	UndoStackLocations	undoStackLocations;
 	TimestampTz			timestamp;
-} RewindItem
+} RewindItem;
+
+RewindItem *rewindBuffer;
 
 typedef struct
 {
-	uint64		addPos;		/* Added to circular buffer */
-	uint64		cleanedPos; /* Removed from circular buffer */
-	uint64		writtenPos; /* Written to disk buffers */
-	uint64		readPos;	/* Read from disk buffer */
-} RewindMeta
+	uint64		addedPos;				/* Added to circular buffer */
+	uint64		completedPos;			/* Removed from circular buffer */
+	uint64		writtenPos;			/* Written to disk buffers */
+	uint64		readPos;			/* Read from disk buffer */
+	uint64		oldCleanedFileNum; 	/* Last removed buffer file number */
+} RewindMeta;
+
+RewindMeta    *rewindMeta;
 
 #endif							/* __REWIND_WORKER_H__ */
