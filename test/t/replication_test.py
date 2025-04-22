@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import unittest
-import testgres
-import time
 import os
 import re
 import subprocess
 
 from .base_test import BaseTest
-
-
-def catchup_orioledb(replica):
-	replica.catchup()
-	replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
-	                         expected=True)
 
 
 class ReplicationTest(BaseTest):
@@ -32,7 +23,7 @@ class ReplicationTest(BaseTest):
 				master.execute("INSERT INTO o_test VALUES (1);")
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				self.assertEqual(
 				    1,
 				    replica.execute("SELECT * FROM o_test;")[0][0])
@@ -98,7 +89,7 @@ class ReplicationTest(BaseTest):
 				self.assertTrue(self.all_tables_dropped(master))
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 
 				# check that DROP replicated
 				self.assertTrue(self.all_tables_dropped(replica))
@@ -132,7 +123,7 @@ class ReplicationTest(BaseTest):
 				self.assertTrue(self.all_tables_dropped(master))
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 
 				# check that DROP replicated
 				self.assertTrue(self.all_tables_dropped(replica))
@@ -162,7 +153,7 @@ class ReplicationTest(BaseTest):
 				self.assertTrue(self.all_tables_dropped(master))
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 
 				# check that drop replicated
 				self.assertTrue(self.all_tables_dropped(replica))
@@ -196,7 +187,7 @@ class ReplicationTest(BaseTest):
 				self.assertEqual(1, self.get_tbl_count(master))
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				replica.safe_psql("SELECT * FROM o_test;")
 
 				self.assertEqual(1, self.get_tbl_count(replica))
@@ -230,7 +221,7 @@ class ReplicationTest(BaseTest):
 					con1.execute("DROP TABLE o_test;")
 					con1.rollback()
 
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				replica.safe_psql("SELECT * FROM o_test;")
 
 				self.assertTrue(self.has_only_one_relnode(replica))
@@ -245,7 +236,7 @@ class ReplicationTest(BaseTest):
 					con1.rollback()
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				replica.safe_psql("SELECT * FROM o_test;")
 
 				self.assertTrue(self.has_only_one_relnode(replica))
@@ -273,7 +264,7 @@ class ReplicationTest(BaseTest):
 						INSERT INTO o_test_1 VALUES (1);
 					""")
 					con1.commit()
-					catchup_orioledb(replica)
+					self.catchup_orioledb(replica)
 
 	def test_replication_non_root_eviction(self):
 		with self.node as master:
@@ -305,7 +296,7 @@ class ReplicationTest(BaseTest):
 				con.close()
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 
 				replica.poll_query_until(
 				    "SELECT orioledb_has_retained_undo();", expected=False)
@@ -382,7 +373,7 @@ class ReplicationTest(BaseTest):
 				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				replica.poll_query_until(
 				    "SELECT orioledb_has_retained_undo();", expected=False)
 
@@ -514,7 +505,7 @@ class ReplicationTest(BaseTest):
 				master.execute("ALTER TABLE o_test DROP COLUMN val_2")
 
 				# wait for synchronization
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				self.assertEqual(
 				    1,
 				    replica.execute("SELECT * FROM o_test;")[0][0])
@@ -543,7 +534,7 @@ class ReplicationTest(BaseTest):
 					""")
 					con.commit()
 
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 				self.assertEqual(master.execute("SELECT * FROM o_test_1"),
 				                 [(1, 1), (2, 2), (3, 3)])
 				self.assertEqual(replica.execute("SELECT * FROM o_test_1"),
@@ -596,7 +587,7 @@ class ReplicationTest(BaseTest):
 									SELECT * FROM o_test_1 ORDER BY val_2;
 								 """))
 
-				catchup_orioledb(replica)
+				self.catchup_orioledb(replica)
 
 				self.assertEqual([(1, ), (3, )],
 				                 replica.execute("""
@@ -655,7 +646,7 @@ class ReplicationTest(BaseTest):
 					""")
 					con1.commit()
 
-					catchup_orioledb(replica)
+					self.catchup_orioledb(replica)
 
 	def test_replication_row_type(self):
 		node = self.node
