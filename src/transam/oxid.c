@@ -1212,8 +1212,6 @@ current_oxid_commit(CommitSeqNo csn)
 {
 	ODBProcData *my_proc_info = &oProcData[MYPROCNUMBER];
 
-	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
-
 	if (!OXidIsValid(curOxid))
 		return;
 
@@ -1230,8 +1228,6 @@ void
 current_oxid_abort(void)
 {
 	ODBProcData *my_proc_info = &oProcData[MYPROCNUMBER];
-
-	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
 	if (!OXidIsValid(curOxid))
 		return;
