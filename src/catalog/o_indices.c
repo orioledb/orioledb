@@ -630,6 +630,7 @@ serialize_o_index(OIndex *o_index, int *size)
 	StringInfoData str;
 
 	initStringInfo(&str);
+
 	/*
 	 * Here there is a bug in offset calculation and it should be:
 	 * offsetof(OIndex, leafTableFields) - offsetof(OIndex, tableOids)

@@ -53,8 +53,8 @@ typedef struct
 	AttrNumber	primaryFieldsAttnums[INDEX_MAX_KEYS];
 
 	/*
-	 * Fields above are stored in SYS_TREES_O_INDICES and serialized/deserialized
-	 * by serialize_o_index()/deserialize_o_index().
+	 * Fields above are stored in SYS_TREES_O_INDICES and
+	 * serialized/deserialized by serialize_o_index()/deserialize_o_index().
 	 * Fields below are also storied in SYS_TREES_O_INDICES, but they are
 	 * palloc'ed by deserialize_o_index().
 	 *
