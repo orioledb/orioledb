@@ -178,6 +178,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/indices_build_test.py \
 						test/t/logical_test.py \
 						test/t/not_supported_yet_test.py \
+						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \
 						test/t/reindex_test.py \
 						test/t/s3_test.py \

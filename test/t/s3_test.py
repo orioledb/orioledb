@@ -498,9 +498,10 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+		with testgres.get_new_node('test',
+		                           base_dir=new_temp_dir,
+		                           port=self.getBasePort() + 1) as new_node:
 			self.loader.download(new_node.data_dir)
-			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 
 			new_node.start()
@@ -558,9 +559,10 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+		with testgres.get_new_node('test',
+		                           base_dir=new_temp_dir,
+		                           port=self.getBasePort() + 1) as new_node:
 			self.loader.download(new_node.data_dir)
-			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 
 			new_node.start()
@@ -617,9 +619,10 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+		with testgres.get_new_node('test',
+		                           base_dir=new_temp_dir,
+		                           port=self.getBasePort() + 1) as new_node:
 			self.loader.download(new_node.data_dir)
-			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 
 			new_node.start()
@@ -673,9 +676,10 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+		with testgres.get_new_node('test',
+		                           base_dir=new_temp_dir,
+		                           port=self.getBasePort() + 1) as new_node:
 			self.loader.download(new_node.data_dir)
-			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 
 			new_node.start()
@@ -728,9 +732,10 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test', base_dir=new_temp_dir) as new_node:
+		with testgres.get_new_node('test',
+		                           base_dir=new_temp_dir,
+		                           port=self.getBasePort() + 1) as new_node:
 			self.loader.download(new_node.data_dir)
-			new_node.port = self.getBasePort() + 1
 			new_node.append_conf(port=new_node.port)
 
 			new_node.start()
