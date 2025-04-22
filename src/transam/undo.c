@@ -1275,15 +1275,14 @@ orioledb_reset_xmin_hook(void)
 											 pairingheap_first(&retainUndoLocHeaps[undoType]));
 			snapshot = RetainUndoLocationPHNodeGetSnapshot(location, undoType);
 			if (location->undoLocation > pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation))
-			{
 				pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation, location->undoLocation);
-				if (!OXidIsValid(xmin) || snapshot->csnSnapshotData.xmin < xmin)
-					xmin = snapshot->csnSnapshotData.xmin;
-			}
+			if (!OXidIsValid(xmin) || snapshot->csnSnapshotData.xmin < xmin)
+				xmin = snapshot->csnSnapshotData.xmin;
 		}
 	}
 
-	pg_atomic_write_u64(&curProcData->xmin, xmin);
+	if (xmin > pg_atomic_read_u64(&curProcData->xmin))
+		pg_atomic_write_u64(&curProcData->xmin, xmin);
 }
 
 void
