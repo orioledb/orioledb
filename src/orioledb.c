@@ -43,7 +43,7 @@
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
 #include "workers/bgwriter.h"
-#include "workers/rewind.h"
+#include "rewind/rewind.h"
 
 #include "access/table.h"
 #include "access/xlog_internal.h"
@@ -106,7 +106,7 @@ double		system_undo_circular_buffer_fraction;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
 Size		rewind_circular_buffer_size = 0;
-uint32		rewind_buffers_count = 0;
+uint32		rewind_buffers_count;
 bool		remove_old_checkpoint_files = true;
 bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
@@ -197,7 +197,7 @@ static ShmemItem shmemItems[] = {
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
 	{s3_headers_shmem_needs, s3_headers_shmem_init},
-	{rewind_shmem_needs, rewind_shmem_init}
+	{rewind_shmem_needs, rewind_init_shmem}
 };
 
 

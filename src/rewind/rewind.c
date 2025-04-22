@@ -37,19 +37,6 @@
 
 static volatile sig_atomic_t shutdown_requested = false;
 int 	RewindHorizonCheckDelay = 1000; /* Time between checking in ms */
-static	RewindItem *rewindBuffer = NULL;
-
-#define REWIND_FILE_SIZE (0x1000000)
-#define REWIND_BUFFERS_TAG (0)
-
-RewindMeta    *rewindMeta;
-
-static OBuffersDesc buffersDesc = {
-	.singleFileSize = REWIND_FILE_SIZE,
-	.filenameTemplate = {ORIOLEDB_DATA_DIR "/%02X%08X.rewindmap"},
-	.groupCtlTrancheName = "rewindBuffersGroupCtlTranche",
-	.bufferCtlTrancheName = "rewindBuffersCtlTranche"
-};
 
 Size
 rewind_shmem_needs(void)
@@ -59,13 +46,40 @@ rewind_shmem_needs(void)
 	if (!enable_rewind)
 		return 0;
 
-	buffersDesc.buffersCount = rewind_buffers_count;
+	rewindBuffersDesc.buffersCount = rewind_buffers_count;
 
 	size = CACHELINEALIGN(sizeof(RewindMeta));
 	size = add_size(size, mul_size(rewind_circular_buffer_size, sizeof(RewindItem)));
-	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
+	size = add_size(size, o_buffers_shmem_needs(&rewindBuffersDesc));
 
 	return size;
+}
+
+static void
+cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
+{
+	char        curFileName[MAXPGPATH];
+	File        curFile;
+	uint64 		fileNum = 0;
+
+	Assert(OBuffersMaxTagIsValid(tag));
+
+	while (true)
+	{
+		pg_snprintf(curFileName, MAXPGPATH,
+					desc->filenameTemplate[tag],
+					(uint32) (fileNum >> 32),
+					(uint32) fileNum);
+		curFile = PathNameOpenFile(curFileName,
+				O_RDWR | O_CREAT | PG_BINARY);
+		if (curFile < 0)
+			break;
+
+		FileClose(curFile);
+
+		(void) unlink(curFileName);
+		fileNum++;
+	}
 }
 
 void
@@ -74,12 +88,17 @@ rewind_init_shmem(Pointer ptr, bool found)
 	if (!enable_rewind)
 		return;
 
-	rewind_meta = (XidMeta *) ptr;
+	rewindBuffersDesc.singleFileSize = REWIND_FILE_SIZE;
+	rewindBuffersDesc.filenameTemplate = ORIOLEDB_DATA_DIR "/%02X%08X.rewindmap";
+	rewindBuffersDesc.groupCtlTrancheName = "rewindBuffersGroupCtlTranche";
+	rewindBuffersDesc.bufferCtlTrancheName = "rewindBuffersCtlTranche";
+
+	rewindMeta = (RewindMeta *) ptr;
 	ptr += MAXALIGN(sizeof(RewindMeta));
 	rewindBuffer = (RewindItem *) ptr;
 	ptr += rewind_circular_buffer_size * sizeof(RewindItem);
-	o_buffers_shmem_init(&buffersDesc, ptr, found);
-	ptr += o_buffers_shmem_needs(&buffersDesc);
+	o_buffers_shmem_init(&rewindBuffersDesc, ptr, found);
+	ptr += o_buffers_shmem_needs(&rewindBuffersDesc);
 
 	if (!found)
 	{
@@ -95,11 +114,17 @@ rewind_init_shmem(Pointer ptr, bool found)
 			rewindBuffer[i].timestamp = 0;
 		}
 
-		rewindMeta->rewindMapTrancheId = LWLockNewTrancheId();
-		LWLockInitialize(&rewindMeta->xidMapWriteLock, rewindMeta->rewindMapTrancheId);
+	//	rewindMeta->rewindMapTrancheId = LWLockNewTrancheId();
+	//	LWLockInitialize(&rewindMeta->xidMapWriteLock, rewindMeta->rewindMapTrancheId);
 
-		rewindMeta.readPos = 0;
-		rewindMeta.writtenPos = 0;
+		rewindMeta->readPos = 0;
+		rewindMeta->writtenPos = 0;
+		rewindMeta->addedPos = 0;
+		rewindMeta->completedPos = 0;
+		rewindMeta->oldCleanedFileNum = 0;
+
+		/* Rewind buffers are not persistent */
+		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
 	}
 }
 
@@ -115,7 +140,7 @@ handle_sigterm(SIGNAL_ARGS)
 }
 
 void
-register_rewindworker(void)
+register_rewind_worker(void)
 {
 	BackgroundWorker worker;
 
@@ -136,9 +161,9 @@ rewind_worker_main(Datum main_arg)
 {
 	int			rc,
 				wake_events = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT;
-				UndoStackSharedLocations *sharedLocations;
-				RewindItem  *rewindItem;
-				bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindMapItem);
+	UndoStackSharedLocations *sharedLocations;
+	RewindItem  *rewindItem;
+	int			bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
 
 	/* enable timeout for relation lock */
 	RegisterTimeout(DEADLOCK_TIMEOUT, CheckDeadLockAlert);
@@ -189,19 +214,21 @@ rewind_worker_main(Datum main_arg)
 			if (rc & WL_POSTMASTER_DEATH)
 				shutdown_requested = true;
 
-			elog(LOG, "Rewind worker came to check");
+//			elog(LOG, "Rewind worker came to check");
 
 			while (true)
 			{
-				UndoStackSharedLocations *sharedLocations;
+				UndoStackSharedLocations   *sharedLocations;
+				XLogRecPtr				 	xlogPtr;
+				CommitSeqNo					csn;
 
-				if (rewindMeta.cleanedPos == rewindMeta.addPos)
+				if (rewindMeta->completedPos == rewindMeta->addedPos)
 				{
 					/* All are already fixed, do nothing */
 					break;
 				}
 
-				rewindItem = &rewindBuffer[rewindMeta.cleanedPos % xid_circular_buffer_size];
+				rewindItem = &rewindBuffer[rewindMeta->completedPos % xid_circular_buffer_size];
 				Assert (rewindItem->oxid != InvalidOXid);
 
 				if (!TimestampDifferenceExceeds(rewindItem->timestamp,
@@ -213,57 +240,71 @@ rewind_worker_main(Datum main_arg)
 				}
 
 				/* Fix current transaction clear the item in the circular buffer and move to the next */
-				sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
-				pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
 
-				Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(rewindItem.csn));
-
-				csn = rewindItem->oxid.csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
-				///
+				map_oxid(rewindItem->oxid, &csn, &xlogPtr);
+				Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn));
+				csn = csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
 				///
 				///
 
+				// XXXX Do we need only regular ?
+				sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(UndoLogRegular);
+				pg_atomic_write_u64(&sharedLocations->onCommitLocation, rewindItem->undoStackLocations.onCommitLocation);
 				rewindItem->oxid = InvalidOXid;
 
-				rewindMeta.cleanedPos++;
+				rewindMeta->completedPos++;
 
-				if (rewindMeta.cleanedPos - rewindMeta.readPos > bufferLength)
+				if (rewindMeta->completedPos - rewindMeta->readPos > bufferLength)
 				{
-					/* Read buffer from disk */
-					int start = rewindMeta.readPos % rewind_circular_buffer_size;
-					int length_to_end = rewind_circular_buffer_size - start;
+					int		 start = rewindMeta->readPos % rewind_circular_buffer_size;
+					int		 length_to_end = rewind_circular_buffer_size - start;
+					uint64	 currentCleanFileNum;
+					int 	 itemsPerFile;
 
+					/* Read buffer from disk */
 #ifdef USE_ASSERT_CHECKING
-					for(int pos = rewindMeta.readPos; pos <= rewindMeta.readPos + bufferLength; pos++)
+					for(int pos = rewindMeta->readPos; pos <= rewindMeta->readPos + bufferLength; pos++)
 						Assert(rewindBuffer[pos % rewind_circular_buffer_size].oxid == InvalidOXid);
 #endif
 
 					if (length_to_end < bufferLength)
 					{
-						o_buffers_read(&buffersDesc,
-								(Pointer) &rewindBuffer[start], REWWIND_BUFFERS_TAG,
-								rewindMeta->readPos * sizeof(RewindMapItem),
-								length_to_end * sizeof(RewindMapItem));
-						o_buffers_read(&buffersDesc,
-								(Pointer) &rewindBuffer[0], REWWIND_BUFFERS_TAG,
-								(rewindMeta->readPos + length_to_end) * sizeof(RewindMapItem),
-								(bufferLength - length_to_end) * sizeof(RewindMapItem));
+						o_buffers_read(&rewindBuffersDesc,
+								(Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
+								rewindMeta->readPos * sizeof(RewindItem),
+								length_to_end * sizeof(RewindItem));
+						o_buffers_read(&rewindBuffersDesc,
+								(Pointer) &rewindBuffer[0], REWIND_BUFFERS_TAG,
+								(rewindMeta->readPos + length_to_end) * sizeof(RewindItem),
+								(bufferLength - length_to_end) * sizeof(RewindItem));
 					}
 					else
 					{
-						o_buffers_read(&buffersDesc,
-								(Pointer) &rewindBuffer[start], REWWIND_BUFFERS_TAG,
-								rewindMeta->readPos * sizeof(RewindMapItem),
-								bufferLength * sizeof(RewindMapItem));
+						o_buffers_read(&rewindBuffersDesc,
+								(Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
+								rewindMeta->readPos * sizeof(RewindItem),
+								bufferLength * sizeof(RewindItem));
 					}
 
 #ifdef USE_ASSERT_CHECKING
-					for(int pos = rewindMeta.readPos; pos <= rewindMeta.readPos + bufferLength; pos++)
+					for(int pos = rewindMeta->readPos; pos <= rewindMeta->readPos + bufferLength; pos++)
 						Assert(rewindBuffer[pos % rewind_circular_buffer_size].oxid != InvalidOXid);
 #endif
 					rewindMeta->readPos += bufferLength;
-				}
 
+					/* Clean old buffer files if needed */
+					itemsPerFile = REWIND_FILE_SIZE / sizeof(RewindItem);
+					currentCleanFileNum = rewindMeta->completedPos / itemsPerFile;
+
+					if (currentCleanFileNum > rewindMeta->oldCleanedFileNum)
+					{
+						o_buffers_unlink_files_range(&rewindBuffersDesc,
+													 REWIND_BUFFERS_TAG,
+													 rewindMeta->oldCleanedFileNum,
+													 currentCleanFileNum);
+						rewindMeta->oldCleanedFileNum = currentCleanFileNum;
+					}
+				}
 			}
 
 			ResetLatch(MyLatch);

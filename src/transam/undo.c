@@ -29,6 +29,7 @@
 #include "utils/page_pool.h"
 #include "utils/snapshot.h"
 #include "utils/stopevent.h"
+#include "rewind/rewind.h"
 
 #include "access/transam.h"
 #include "miscadmin.h"
@@ -689,56 +690,79 @@ add_to_rewind_buffer(OXid oxid, UndoStackSharedLocations *sharedLocations,
 					 UndoLocation location, UndoLocation newOnCommitLocation)
 {
 		RewindItem  *rewindItem;
-
-		rewindMeta->addPos++;
+		int 		 onDiskRange;
+		int 		 freeRange;
 
 		/* Write and clear page of entries out of circular buffer if needed. */
-		if (rewindMeta->addPos >= rewindMeta->writtenPos + rewind_circular_buffer_size)
+		onDiskRange = rewindMeta->writtenPos - rewindMeta->readPos;
+		Assert(onDiskRange >=0);
+
+		freeRange = rewind_circular_buffer_size - ((rewindMeta->addedPos - rewindMeta->completedPos) - onDiskRange);
+		Assert(freeRange >=0);
+		if (freeRange == 0)
 		{
-			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindMapItem);
+			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
 			int pos;
-			int start = rewindMeta->writtenPos % rewind_circular_buffer_size;
-			int length_to_end = rewind_circular_buffer_size - start;
+			int start;
+			int length_to_end;
 
-			if (length_to_end < bufferLength);
+			/*
+			 * If all previously written buffers are fully read into ring buffer,
+			 * start writing new buffer from (addedPos-rewind_circular_buffer_size)
+			 * Otherwise continue from the previous writtenPos to have continuous
+			 * range written to disk.
+			 */
+			if (onDiskRange == 0)
 			{
-				o_buffers_write(&buffersDesc,
-							(Pointer) &rewindBuffer[start],
-							REWWIND_BUFFERS_TAG,
-							rewindMeta->writtenPos * sizeof(RewindMapItem),
-							length_to_end * sizeof(RewindMapItem));
+				rewindMeta->writtenPos = rewindMeta->addedPos - rewind_circular_buffer_size;
+			}
 
-				o_buffers_write(&buffersDesc,
+			/* Write bufferLength number of records to disk */
+			start = rewindMeta->writtenPos % rewind_circular_buffer_size;
+			length_to_end = rewind_circular_buffer_size - start;
+			if (length_to_end < bufferLength)
+			{
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindBuffer[start],
+							REWIND_BUFFERS_TAG,
+							rewindMeta->writtenPos * sizeof(RewindItem),
+							length_to_end * sizeof(RewindItem));
+
+				o_buffers_write(&rewindBuffersDesc,
 							(Pointer) &rewindBuffer[0],
-							REWWIND_BUFFERS_TAG,
-							(rewindMeta->writtenPos + length_to_end) * sizeof(RewindMapItem),
-							(bufferLength - length_to_end) * sizeof(RewindMapItem));
+							REWIND_BUFFERS_TAG,
+							(rewindMeta->writtenPos + length_to_end) * sizeof(RewindItem),
+							(bufferLength - length_to_end) * sizeof(RewindItem));
 			}
 			else
 			{
-				o_buffers_write(&buffersDesc,
+				o_buffers_write(&rewindBuffersDesc,
 							(Pointer) &rewindBuffer[start],
-							REWWIND_BUFFERS_TAG,
-							rewindMeta->writtenPos * sizeof(RewindMapItem),
-							bufferLength * sizeof(RewindMapItem));
+							REWIND_BUFFERS_TAG,
+							rewindMeta->writtenPos * sizeof(RewindItem),
+							bufferLength * sizeof(RewindItem));
 			}
 
-			for (pos = written_pos; pos <= written_pos + bufferLength; pos++)
+			/* Clear written items from ring buffer */
+			for (pos = rewindMeta->writtenPos; pos <= rewindMeta->writtenPos + bufferLength; pos++)
 				rewindBuffer[pos % rewind_circular_buffer_size].oxid = InvalidOXid;
 
 			rewindMeta->writtenPos += bufferLength;
 		}
 
 		/* Fill entry in a circular buffer. */
-		rewindItem = &rewindBuffer[rewindMeta.addPos % rewind_circular_buffer_size];
+		rewindItem = &rewindBuffer[rewindMeta->addedPos % rewind_circular_buffer_size];
 
 		Assert(rewindItem->oxid == InvalidOXid);
 		rewindItem->oxid = oxid;
+		rewindItem->csn = 
 		rewindItem->undoStackLocations.location = location;
-		rewindItem->undoStackLocations.branchLocation = pg_atomic_read_u64(sharedLocations->branchLocation);
-		rewindItem->undoStackLocations.subxactLocation  = pg_atomic_read_u64(sharedLocations->subxacthLocation);
+		rewindItem->undoStackLocations.branchLocation = pg_atomic_read_u64(&sharedLocations->branchLocation);
+		rewindItem->undoStackLocations.subxactLocation  = pg_atomic_read_u64(&sharedLocations->subxactLocation);
 		rewindItem->undoStackLocations.onCommitLocation = newOnCommitLocation;
 		rewindItem->timestamp = GetCurrentTimestamp();
+
+		rewindMeta->addedPos++;
 }
 
 
