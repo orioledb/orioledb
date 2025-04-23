@@ -107,11 +107,9 @@ rewind_init_shmem(Pointer ptr, bool found)
 		for (i = 0; i < rewind_circular_buffer_size; i++)
 		{
 			rewindBuffer[i].oxid = InvalidOXid;
-			rewindBuffer[i].undoStackLocations.location = InvalidUndoLocation;
-			rewindBuffer[i].undoStackLocations.branchLocation = InvalidUndoLocation;
-			rewindBuffer[i].undoStackLocations.subxactLocation = InvalidUndoLocation;
-			rewindBuffer[i].undoStackLocations.onCommitLocation = InvalidUndoLocation;
+			rewindBuffer[i].undoStackLocation = InvalidUndoLocation;
 			rewindBuffer[i].timestamp = 0;
+			rewindBuffer[i].changeCountsValid = false;
 		}
 
 	//	rewindMeta->rewindMapTrancheId = LWLockNewTrancheId();
@@ -161,7 +159,6 @@ rewind_worker_main(Datum main_arg)
 {
 	int			rc,
 				wake_events = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT;
-	UndoStackSharedLocations *sharedLocations;
 	RewindItem  *rewindItem;
 	int			bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
 
@@ -218,9 +215,10 @@ rewind_worker_main(Datum main_arg)
 
 			while (true)
 			{
-				UndoStackSharedLocations   *sharedLocations;
 				XLogRecPtr				 	xlogPtr;
 				CommitSeqNo					csn;
+				UndoItemBufi			    buf;
+				uint64						location;
 
 				if (rewindMeta->completedPos == rewindMeta->addedPos)
 				{
@@ -239,17 +237,17 @@ rewind_worker_main(Datum main_arg)
 					break;
 				}
 
-				/* Fix current transaction clear the item in the circular buffer and move to the next */
+				/* Fix current rewind item */
 
 				map_oxid(rewindItem->oxid, &csn, &xlogPtr);
 				Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn));
 				csn = csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
-				///
-				///
+				location = walk_undo_range(UndoLogRegular, rewindItem->undoStackLocation, InvalidUndoLocation,
+										   &buf, rewindItem->oxid, false, NULL,
+										   rewindItem->changeCountsValid);
+				Assert(!UndoLocationIsValid(location));
 
-				// XXXX Do we need only regular ?
-				sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(UndoLogRegular);
-				pg_atomic_write_u64(&sharedLocations->onCommitLocation, rewindItem->undoStackLocations.onCommitLocation);
+				/* Clear the item from the circular buffer */
 				rewindItem->oxid = InvalidOXid;
 
 				rewindMeta->completedPos++;

@@ -28,9 +28,9 @@ extern void rewind_init_shmem(Pointer buf, bool found);
 typedef struct
 {
 	OXid				oxid;
-	CommitSeqNo			csn;
-	UndoStackLocations	undoStackLocations;
+	uint64				undoStackLocation;
 	TimestampTz			timestamp;
+	bool				changeCountsValid;
 } RewindItem;
 
 RewindItem *rewindBuffer;

@@ -96,6 +96,14 @@ typedef struct
 
 typedef struct
 {
+	UndoLocation location;
+	UndoLocation branchLocation;
+	UndoLocation subxactLocation;
+	UndoLocation onCommitLocation;
+} UndoStackLocations;
+
+typedef struct
+{
 	bool		needs_wal_flush;
 	bool		has_retained_undo_location[(int) UndoLogsCount];
 	bool		local_wal_has_material_changes;
