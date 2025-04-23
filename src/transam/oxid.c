@@ -31,6 +31,22 @@
 #define XID_FILE_SIZE (0x1000000)
 #define OXID_BUFFERS_TAG (0)
 
+#define	COMMITSEQNO_SPECIAL_BIT (UINT64CONST(1) << 63)
+#define COMMITSEQNO_RETAINED_FOR_REWIND (UINT64CONST(1) << 62)
+#define COMMITSEQNO_STATUS_IN_PROGRESS (0x0)
+#define COMMITSEQNO_STATUS_CSN_COMMITTING (0x1)
+#define COMMITSEQNO_IS_SPECIAL(csn) ((csn) & COMMITSEQNO_SPECIAL_BIT)
+#define COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn) ((csn) & COMMITSEQNO_RETAINED_FOR_REWIND)
+#define COMMITSEQNO_GET_STATUS(csn) \
+	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), (csn) & 0x1)
+#define COMMITSEQNO_GET_LEVEL(csn) \
+	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), ((csn) >> 31) & 0xFFFFFFFF)
+#define COMMITSEQNO_GET_PROCNUM(csn) \
+	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), ((csn) >> 15) & 0xFFFF)
+#define COMMITSEQNO_MAKE_SPECIAL(procnum, level, status) \
+	(COMMITSEQNO_SPECIAL_BIT | ((uint64) procnum << 15) | \
+	 ((uint64) level << 31) | (status))
+
 #define	XLOG_PTR_SPECIAL_BIT (0x1)
 #define XLOG_PTR_IN_PROGRESS (0x0)
 #define XLOG_PTR_COMMITTING (0x2)
@@ -419,7 +435,7 @@ set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr)
 /*
  * Read csn of given xid from xidmap.
  */
-void
+static void
 map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 {
 	OXidMapItem mapItem = {0};
@@ -476,6 +492,24 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 		*outCsn = pg_atomic_read_u64(&mapItem.csn);
 	if (outPtr)
 		*outPtr = pg_atomic_read_u64(&mapItem.commitPtr);
+}
+
+void
+mark_rewind_csn(CommitSeqNo *csn)
+{
+	Assert(!COMMITSEQNO_IS_RETAINED_FOR_REWIND(*csn));
+	*csn = *csn & COMMITSEQNO_RETAINED_FOR_REWIND;
+}
+
+void
+fix_rewind_oxid(OXid oxid);
+{
+	XLogRecPtr	xlogPtr;
+	CommitSeqNo	*csn;
+
+	map_oxid(oxid, csn, &xlogPtr);
+	Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(*csn));
+	*csn = *csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
 }
 
 /*

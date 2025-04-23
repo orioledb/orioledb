@@ -216,7 +216,6 @@ rewind_worker_main(Datum main_arg)
 			while (true)
 			{
 				XLogRecPtr				 	xlogPtr;
-				CommitSeqNo					csn;
 				UndoItemBufi			    buf;
 				uint64						location;
 
@@ -239,9 +238,7 @@ rewind_worker_main(Datum main_arg)
 
 				/* Fix current rewind item */
 
-				map_oxid(rewindItem->oxid, &csn, &xlogPtr);
-				Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn));
-				csn = csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
+				fix_rewind_oxid(rewindItem->oxid);
 				location = walk_undo_range(UndoLogRegular, rewindItem->undoStackLocation, InvalidUndoLocation,
 										   &buf, rewindItem->oxid, false, NULL,
 										   rewindItem->changeCountsValid);
