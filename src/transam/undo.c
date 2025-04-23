@@ -754,7 +754,7 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 
 		Assert(rewindItem->oxid == InvalidOXid);
 		rewindItem->oxid = oxid;
-		rewindItem->location = location;
+		rewindItem->undoStackLocation = location;
 		rewindItem->changeCountsValid = changeCountsValid;
 		rewindItem->timestamp = GetCurrentTimestamp();
 
@@ -1443,7 +1443,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				if (enable_rewind)
 				{
-					csn = csn & COMMITSEQNO_RETAINED_FOR_REWIND;
+					mark_rewind_csn(&csn);
 				}
 				current_oxid_commit(csn);
 

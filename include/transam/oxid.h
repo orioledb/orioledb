@@ -13,23 +13,6 @@
 #ifndef __OXID_H__
 #define __OXID_H__
 
-#define COMMITSEQNO_SPECIAL_BIT (UINT64CONST(1) << 63)
-#define COMMITSEQNO_RETAINED_FOR_REWIND (UINT64CONST(1) << 62)
-#define COMMITSEQNO_STATUS_IN_PROGRESS (0x0)
-#define COMMITSEQNO_STATUS_CSN_COMMITTING (0x1)
-#define COMMITSEQNO_IS_SPECIAL(csn) ((csn) & COMMITSEQNO_SPECIAL_BIT)
-#define COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn) ((csn) & COMMITSEQNO_RETAINED_FOR_REWIND)
-#define COMMITSEQNO_GET_STATUS(csn) \
-	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), (csn) & 0x1)
-#define COMMITSEQNO_GET_LEVEL(csn) \
-	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), ((csn) >> 31) & 0xFFFFFFFF)
-#define COMMITSEQNO_GET_PROCNUM(csn) \
-	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), ((csn) >> 15) & 0xFFFF)
-#define COMMITSEQNO_MAKE_SPECIAL(procnum, level, status) \
-	(COMMITSEQNO_SPECIAL_BIT | ((uint64) procnum << 15) | \
-	 ((uint64) level << 31) | (status))
-
-
 typedef struct
 {
 	pg_atomic_uint64 csn;
@@ -114,6 +97,7 @@ extern int	oxid_get_procnum(OXid oxid);
 extern bool xid_is_finished(OXid xid);
 extern bool xid_is_finished_for_everybody(OXid xid);
 extern void fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info);
-extern void map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr);
+extern void fix_rewind_oxid(OXid oxid);
+extern void mark_rewind_csn(CommitSeqNo *csn);
 
 #endif							/* __OXID_H__ */
