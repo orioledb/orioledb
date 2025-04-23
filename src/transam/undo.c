@@ -686,8 +686,7 @@ apply_undo_branches(UndoLogType undoType, OXid oxid)
 }
 
 static void
-add_to_rewind_buffer(OXid oxid, UndoStackSharedLocations *sharedLocations,
-					 UndoLocation location, UndoLocation newOnCommitLocation)
+add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 {
 		RewindItem  *rewindItem;
 		int 		 onDiskRange;
@@ -755,11 +754,8 @@ add_to_rewind_buffer(OXid oxid, UndoStackSharedLocations *sharedLocations,
 
 		Assert(rewindItem->oxid == InvalidOXid);
 		rewindItem->oxid = oxid;
-		rewindItem->csn = 
-		rewindItem->undoStackLocations.location = location;
-		rewindItem->undoStackLocations.branchLocation = pg_atomic_read_u64(&sharedLocations->branchLocation);
-		rewindItem->undoStackLocations.subxactLocation  = pg_atomic_read_u64(&sharedLocations->subxactLocation);
-		rewindItem->undoStackLocations.onCommitLocation = newOnCommitLocation;
+		rewindItem->location = location;
+		rewindItem->changeCountsValid = changeCountsValid;
 		rewindItem->timestamp = GetCurrentTimestamp();
 
 		rewindMeta->addedPos++;
@@ -803,10 +799,18 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		location = walk_undo_range(undoType, location, InvalidUndoLocation,
+
+		if (enable_rewind)
+		{
+			add_to_rewind_buffer(oxid, location, changeCountsValid);
+		}
+		else
+		{
+			location = walk_undo_range(undoType, location, InvalidUndoLocation,
 								   &buf, oxid, false, NULL,
 								   changeCountsValid);
-		Assert(!UndoLocationIsValid(location));
+			Assert(!UndoLocationIsValid(location));
+		}
 		newOnCommitLocation = InvalidUndoLocation;
 	}
 	else
@@ -848,15 +852,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	}
 
 	pg_atomic_write_u64(&sharedLocations->location, location);
-
-	if (enable_rewind)
-	{
-		add_to_rewind_buffer(oxid, &sharedLocations, location, newOnCommitLocation);
-	}
-	else
-	{
-		pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
-	}
+	pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
 
 	LWLockRelease(&curProcData->undoStackLocationsFlushLock);
 
