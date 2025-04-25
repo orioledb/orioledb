@@ -312,6 +312,7 @@ _main() {
 
 			# check dir permissions to reduce likelihood of half-initialized database
 			ls /docker-entrypoint-initdb.d/ > /dev/null
+			ls /docker-default-initdb.d/ > /dev/null
 
 			docker_init_database_dir
 			pg_setup_hba_conf "$@"
@@ -322,6 +323,7 @@ _main() {
 			docker_temp_server_start "$@"
 
 			docker_setup_db
+			docker_process_init_files /docker-default-initdb.d/*
 			docker_process_init_files /docker-entrypoint-initdb.d/*
 
 			docker_temp_server_stop

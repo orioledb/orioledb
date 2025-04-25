@@ -46,7 +46,7 @@ RUN mkdir -p /usr/src/postgresql/contrib/orioledb
 
 COPY . /usr/src/postgresql/contrib/orioledb
 
-RUN mkdir /docker-entrypoint-initdb.d
+RUN mkdir /docker-entrypoint-initdb.d /docker-default-initdb.d
 
 RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
 
@@ -240,10 +240,13 @@ RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PG
 VOLUME /var/lib/postgresql/data
 
 RUN mkdir -p /etc/postgresql && chown -R postgres:postgres /etc/postgresql && chmod 700 /etc/postgresql
-COPY --chown=postgres:postgres docker/postgresql.docker.conf /etc/postgresql/postgresql.conf
+COPY --chown=postgres:postgres docker/init/postgresql.docker.conf /etc/postgresql/postgresql.conf
 ENV PG_CONF=/etc/postgresql/postgresql.conf
 
-COPY docker/docker-entrypoint.sh /usr/local/bin/
+ENV POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en"
+
+COPY docker/init/docker-entrypoint.sh /usr/local/bin/
+COPY docker/init/default-orioledb.sh /docker-default-initdb.d/
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL
