@@ -1279,6 +1279,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
 		List	   *relids = NIL;
+		List	   *rels = NIL;
 		ListCell   *cell;
 
 		/*
@@ -1301,16 +1302,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			/* open the relation, we already hold a lock on it */
 			rel = table_open(myrelid, NoLock);
-			if (is_orioledb_rel(rel))
-			{
-				redefine_pkey_for_rel(rel);
-			}
 
+			rels = lappend(rels, rel);
 			relids = lappend_oid(relids, myrelid);
 
 			if (recurse)
 			{
-				Relation	child_rel;
 				ListCell   *child;
 				List	   *children;
 
@@ -1324,14 +1321,44 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						continue;
 
 					/* find_all_inheritors already got lock */
-					child_rel = table_open(childrelid, NoLock);
-					if (is_orioledb_rel(child_rel))
-					{
-						redefine_pkey_for_rel(child_rel);
-					}
-					table_close(child_rel, lockmode);
+					rel = table_open(childrelid, NoLock);
+					rels = lappend(rels, rel);
+					relids = lappend_oid(relids, childrelid);
 				}
 			}
+		}
+
+		if (tstmt->behavior == DROP_CASCADE)
+		{
+			for (;;)
+			{
+				List	   *newrelids;
+
+				newrelids = heap_truncate_find_FKs(relids);
+				if (newrelids == NIL)
+					break;		/* nothing else to add */
+
+				foreach(cell, newrelids)
+				{
+					Oid			relid = lfirst_oid(cell);
+					Relation	rel;
+
+					rel = table_open(relid, AccessExclusiveLock);
+					rels = lappend(rels, rel);
+					relids = lappend_oid(relids, relid);
+				}
+			}
+		}
+
+		foreach(cell, rels)
+		{
+			Relation	rel = (Relation) lfirst(cell);
+
+			if (is_orioledb_rel(rel))
+			{
+				redefine_pkey_for_rel(rel);
+			}
+
 			table_close(rel, NoLock);
 		}
 	}
