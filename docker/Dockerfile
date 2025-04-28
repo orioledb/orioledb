@@ -1,8 +1,8 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14 ]
-ARG ALPINE_VERSION=3.20
+# set ALPINE_VERSION= [ edge 3.21 3.20 3.19 3.18 ]
+ARG ALPINE_VERSION=3.21
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION

@@ -1,8 +1,8 @@
 # This is modified Dockerfile from 16/bookworm in
 # https://github.com/docker-library/postgres
 
-# Set UBUNTU_VERSION = [ devel 24.10    24.04 22.04 20.04 ]
-#                   or [ devel oracular noble jammy focal ]
+# Set UBUNTU_VERSION = [ devel 25.04 24.10 24.04 22.04 ]
+#                   or [ devel plucky oracular noble jammy ]
 
 ARG UBUNTU_VERSION=noble
 FROM ubuntu:${UBUNTU_VERSION}

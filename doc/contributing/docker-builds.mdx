@@ -34,7 +34,7 @@ Connect to the server via psql:
 You should expect a similar psql message:
 
 ```
-psql (17.0 OrioleDB public beta 10 PGTAG=patches17_6 alpine:3.20+clang build:2024-10-25T19:54:25+00:00 17.0)
+psql (17.0 OrioleDB public beta 10 PGTAG=patches17_6 alpine:3.21+clang build:2024-10-25T19:54:25+00:00 17.0)
 Type "help" for help.
 postgres=#
 ```
@@ -203,10 +203,10 @@ Read more: https://github.com/docker-library/docs/blob/master/postgres/README.md
 
 Please check the Dockerfiles for the full list of build args!
 - Alpine Linux: `./Dockerfile`
-  - supported [ `edge 3.20 3.19 3.18 3.17 3.16 3.15 3.14` ]
-  - example: `--build-arg ALPINE_VERSION="3.20" -f docker/Dockerfile `
+  - supported [ `edge 3.21 3.20 3.19 3.18` ]
+  - example: `--build-arg ALPINE_VERSION="3.21" -f docker/Dockerfile `
 - Ubuntu Linux: `./Dockerfile.ubuntu`
-  - supported [ `devel 24.10 24.04 22.04 20.04 oracular noble jammy focal` ]
+  - supported [ `devel 25.04 24.10 24.04 22.04 plucky oracular noble jammy` ]
   - example: `--build-arg UBUNTU_VERSION="24.04" -f docker/Dockerfile.ubuntu `
 
 Other important build args:
@@ -217,15 +217,15 @@ Other important build args:
   - Choose the C compiler. Default is `clang`.
   - You can choose either `clang` or `gcc`.
 
-For example, to build an image using Alpine version `3.20`, the `gcc` compiler and PostgreSQL version `16`, use the following command:
+For example, to build an image using Alpine version `3.21`, the `gcc` compiler and PostgreSQL version `16`, use the following command:
 
 ```bash
 docker build --pull --network=host --progress=plain \
-    --build-arg ALPINE_VERSION="3.20" \
+    --build-arg ALPINE_VERSION="3.21" \
     --build-arg BUILD_CC_COMPILER="gcc" \
     --build-arg PG_MAJOR="16" \
     -f docker/Dockerfile \
-    -t orioletest:16-gcc-alpine3.20 .
+    -t orioletest:16-gcc-alpine3.21 .
 ```
 
 To build an image using Ubuntu version `devel`, the `clang` compiler and PostgreSQL version `17`, use the following command:
@@ -245,15 +245,15 @@ The "devel" version is the latest development Ubuntu version, so it might not be
 Known limitations:
 - OrioleDB `gist`, `sp-gist`, and other related indexes are not yet supported.
 
-#### Step 1: create image: `orioletest:17-gcc-alpine3.20`
+#### Step 1: create image: `orioletest:17-gcc-alpine3.21`
 
 ```bash
 docker build --pull --network=host --progress=plain \
-    --build-arg ALPINE_VERSION="3.20" \
+    --build-arg ALPINE_VERSION="3.21" \
     --build-arg BUILD_CC_COMPILER="gcc" \
     --build-arg PG_MAJOR="17" \
     -f docker/Dockerfile \
-    -t orioletest:17-gcc-alpine3.20 .
+    -t orioletest:17-gcc-alpine3.21 .
 ```
 
 #### Step2: Build the `oriolegis:17-3.5-alpine` image.
@@ -264,7 +264,7 @@ in a new directory, run this commands:
 git clone --depth=1 https://github.com/postgis/docker-postgis.git
 cd ./docker-postgis/17-3.5/alpine
 docker build --network=host --progress=plain \
-     --build-arg BASE_IMAGE=orioletest:17-gcc-alpine3.20 \
+     --build-arg BASE_IMAGE=orioletest:17-gcc-alpine3.21 \
      -t oriolegis:17-3.5-alpine .
 ```
 

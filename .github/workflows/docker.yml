@@ -19,9 +19,9 @@ jobs:
         compiler: [clang]
         distr: [alpine, ubuntu]
         include:
-          - distr-version: 3.19
+          - distr-version: 3.21
             distr: alpine
-          - distr-version: focal
+          - distr-version: noble
             distr: ubuntu
 
     name: Push Docker image to Docker Hub

@@ -16,7 +16,7 @@ env:
 jobs:
   config_build_push:
     name: Build config docker images and push to Antithesis repository
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v4
@@ -60,7 +60,7 @@ jobs:
             PGTAG=${{ env.PGTAG }}
   app_build_push:
     name: Build app/workload docker images and push to Antithesis repository
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: true
       matrix:
@@ -128,7 +128,7 @@ jobs:
 
   regress_webhook:
     name: Run regression/isolation tests with fault injection to test system resiliency
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     needs:
       - config_build_push
       - app_build_push
@@ -149,7 +149,7 @@ jobs:
           curl -X POST https://orioledb.antithesis.com/api/v1/launch_experiment/${{ env.ENDPOINT }}${{ matrix.pg_version }}-latest -u '${{ secrets.ANTITHESIS_API_USER }}'
   testgres_webhook:
     name: Run randomized testgres tests without any test harness
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     needs:
       - config_build_push
       - app_build_push
