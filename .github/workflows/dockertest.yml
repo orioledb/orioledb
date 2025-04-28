@@ -17,9 +17,9 @@ jobs:
         compiler: [clang]
         distr: [alpine, ubuntu]
         include:
-          - distr-version: "3.20"
+          - distr-version: "3.21"
             distr: alpine
-          - distr-version: "focal"
+          - distr-version: "noble"
             distr: ubuntu
 
     name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
