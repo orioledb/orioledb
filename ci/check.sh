@@ -51,7 +51,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     sed -i "s/^#*shared_preload_libraries.*/shared_preload_libraries = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
     # Run Postgress regression tests
-    make installcheck-oriole -j $(nproc) || status=$?
+    make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
 else
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi
