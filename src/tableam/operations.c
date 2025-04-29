@@ -610,6 +610,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 			larg.wouldBlock = false;
 			larg.modified = false;
 			larg.selfModified = false;
+			larg.deleted = BTreeLeafTupleNonDeleted;
+			larg.tupUndoLocation = InvalidUndoLocation;
 
 			lockResult = o_tbl_lock(descr, &key, lockmode, oxid, &larg, &hint);
 
@@ -1871,7 +1873,17 @@ o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 
 	if (XACT_INFO_IS_FINISHED(xactInfo))
 	{
-		o_arg->csn = o_arg->modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
+		/*
+		 * modified here means that tuple was modified, but current lock is
+		 * weaker so it uses original tuple
+		 */
+		if (o_arg->modified)
+		{
+			CommitSeqNo csn = XACT_INFO_MAP_CSN(xactInfo);
+
+			if (COMMITSEQNO_IS_NORMAL(csn))
+				o_arg->csn = (csn + 1);
+		}
 	}
 	else
 	{
