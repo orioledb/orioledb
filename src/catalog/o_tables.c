@@ -1166,9 +1166,8 @@ o_table_free(OTable *table)
 	pfree(table);
 }
 
-static bool
-o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
-					   bool update_indices)
+bool
+o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 {
 	OTableChunkKey key;
 	OTable	   *old_table;
@@ -1185,8 +1184,7 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 
 	systrees_modify_start();
 	old_table = o_tables_get(table->oids);
-	if (update_indices)
-		o_tables_oids_indexes(old_table, table, oxid, csn);
+	o_tables_oids_indexes(old_table, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
@@ -1197,18 +1195,6 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	o_table_free(old_table);
 
 	return result;
-}
-
-bool
-o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
-{
-	return o_tables_update_common(table, oxid, csn, true);
-}
-
-bool
-o_tables_update_without_oids_indexes(OTable *table, OXid oxid, CommitSeqNo csn)
-{
-	return o_tables_update_common(table, oxid, csn, false);
 }
 
 void
