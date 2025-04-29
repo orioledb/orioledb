@@ -159,10 +159,6 @@ extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
 
-/* Updates OTable description in o_tables list without indices processing */
-extern bool o_tables_update_without_oids_indexes(OTable *table, OXid oxid,
-												 CommitSeqNo csn);
-
 /* Invalidates descriptors after o_tables_update */
 void		o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
 
