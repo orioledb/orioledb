@@ -576,7 +576,7 @@ class PgBenchTest:
 			self.results_dir = tempfile.mkdtemp(prefix='benchmark_')
 
 		if args.initdb:
-			node.init() # run initdb
+			node.init(["--no-locale", "--encoding=UTF8"]) # run initdb
 
 			if args.wal_dir:
 				shutil.move(os.path.join(node.data_dir, 'pg_wal'),
