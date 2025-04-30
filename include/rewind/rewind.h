@@ -37,13 +37,75 @@ RewindItem *rewindBuffer;
 
 typedef struct
 {
-	uint64		addedPos;				/* Added to circular buffer */
-	uint64		completedPos;			/* Removed from circular buffer */
-	uint64		writtenPos;			/* Written to disk buffers */
-	uint64		readPos;			/* Read from disk buffer */
+	uint64		addPos;			    /* Added to circular buffer */
+	uint64		completePos;		/* Removed from circular buffer */
+	uint64		evictPos; 			/* Evict/restore position. Evict - left, restore - right */
+	uint64		writePos;			/* Written to disk buffers. Increments by bufferLength only */
+	uint64		readPos;			/* Read from disk buffer. Increments by bufferLength only */
 	uint64		oldCleanedFileNum; 	/* Last removed buffer file number */
+	uint64 		freeSpace;			/* Free space in a circular buffer */
 } RewindMeta;
 
+#define InvalidRewindPos UINT64_MAX
+
+/* Circular buffer:
+ * A - addedPos, C - completedPos, E - evictPos
+ * freeSpace - A -> C
+ * -> Direction of adding new/removing completed.
+ *
+ * 1. Only ring buffer E = 0
+ * 0                      A     C
+ * |----------|----------|-     ----|---------|
+ *
+ * 2. Evict extent to disk
+ * Stage 1 (before inserting item that doesn't fit buffer)
+ * 							    E
+ *                  		    A
+ *                  		    C
+ * |----------|------....|......----|---------|
+ * Stage 2
+ *                   E
+ *                   A          C
+ * |----------|------    |      ----|---------|
+
+ * 3. Add more entries to ring buffer
+ * 					 E	   A    C
+ * |----------|------====|=     ----|---------|
+ *
+ * 4. Remove entries
+ * 			         E     A 	      C
+ * |----------|------====|=         | --------|
+ *
+ * 5. Restore extent from disk:
+
+ * Stage 1 (shift last page part by one page right)
+			         E                A
+					 				  C
+ * |----------|------    |      ====|=--------|
+ * Stage 2 (restore oldest disk page before the last circular buffer page)
+ * 						 	    E     A
+ * 						 	          C
+ * |----------|------++++|++++++====|=--------|
+
+ * 6. Remove entries
+ * 							    E	  A C
+ * |----------|------++++|++++++====|=  ------|
+ *
+ * 7. Add more entries to ring buffer
+ * 										A
+ * 							    E		C
+ * |----------|------++++|++++++====|===------|
+ *
+ * 8. Evict extent to disk:
+ * Stage 1
+ * 										A
+ * 				     E 	     	        C
+ * |----------|------....|......====|===------|
+ * Stage 2 (shift last page part by one page left)
+ * 				     E 	     A 	        C
+ * |----------|------====|===       |   ------|
+ */
+ 
 RewindMeta    *rewindMeta;
 
 #endif							/* __REWIND_WORKER_H__ */
