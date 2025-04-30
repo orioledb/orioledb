@@ -505,11 +505,12 @@ void
 fix_rewind_oxid(OXid oxid)
 {
 	XLogRecPtr	xlogPtr;
-	CommitSeqNo	*csn;
+	CommitSeqNo	csn;
 
-	map_oxid(oxid, csn, &xlogPtr);
-	Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(*csn));
-	*csn = *csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
+	map_oxid(oxid, &csn, &xlogPtr);
+	Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn));
+	csn = csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
+	// XXX Need to write cleared csn ? 
 }
 
 /*
