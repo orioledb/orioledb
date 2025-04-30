@@ -37,8 +37,10 @@
 
 static volatile sig_atomic_t shutdown_requested = false;
 int 	RewindHorizonCheckDelay = 1000; /* Time between checking in ms */
+static	RewindItem	*rewindBuffer = NULL;
+static	RewindMeta	*rewindMeta = NULL;
 
-OBuffersDesc buffersDesc = {
+static OBuffersDesc rewindBuffersDesc = {
 	.singleFileSize = REWIND_FILE_SIZE,
 	.filenameTemplate = {ORIOLEDB_DATA_DIR "/%02X%08X.rewindmap"},
 	.groupCtlTrancheName = "rewindBuffersGroupCtlTranche",
@@ -339,3 +341,88 @@ rewind_worker_main(Datum main_arg)
 	}
 	PG_END_TRY();
 }
+
+void
+add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
+{
+		RewindItem  *rewindItem;
+
+		rewindMeta->addPos++;
+		rewindMeta->freeSpace--;
+		Assert(rewindMeta->addPos <= rewindMeta->completePos + rewind_circular_buffer_size -
+				(rewindMeta->writePos - rewindMeta->readPos));
+
+		/* Operation 8. Evict page from a ring buffer to disk */
+		if (rewindMeta->freeSpace == 0)
+		{
+			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
+			int pos;
+			int start;
+			int length_to_end;
+			int oldEvictPos;
+
+			if (rewindMeta->evictPos == InvalidRewindPos)
+				rewindMeta->evictPos = rewindMeta->addPos;
+
+			/* Stage 1. Shift evictPos and write bufferLength number of records to disk  */
+			oldEvictPos = rewindMeta->evictPos;
+			rewindMeta->evictPos -= bufferLength;
+
+			start = (rewindMeta->evictPos % rewind_circular_buffer_size);
+			length_to_end = rewind_circular_buffer_size - start;
+
+			if (length_to_end < bufferLength)
+			{
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindBuffer[start],
+							REWIND_BUFFERS_TAG,
+							rewindMeta->writePos * sizeof(RewindItem),
+							length_to_end * sizeof(RewindItem));
+
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindBuffer[0],
+							REWIND_BUFFERS_TAG,
+							(rewindMeta->writePos + length_to_end) * sizeof(RewindItem),
+							(bufferLength - length_to_end) * sizeof(RewindItem));
+			}
+			else
+			{
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindBuffer[start],
+							REWIND_BUFFERS_TAG,
+							rewindMeta->writePos * sizeof(RewindItem),
+							bufferLength * sizeof(RewindItem));
+			}
+			rewindMeta->writePos += bufferLength;
+
+			/* Clean written items from ring buffer */
+			for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + bufferLength; pos++)
+			{
+				rewindBuffer[(pos % rewind_circular_buffer_size)].oxid = InvalidOXid;
+			}
+
+			/* Stage 2. Shift last page part by one page left */
+			for (pos = oldEvictPos; pos < rewindMeta->addPos; pos++)
+			{
+				int src = pos % rewind_circular_buffer_size;
+				int dst = (pos - bufferLength)  % rewind_circular_buffer_size;
+
+				memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
+				rewindBuffer[src].oxid = InvalidOXid;
+			}
+
+			/* Continue to add from the beginning of last clean page in ring buffer */
+			rewindMeta->addPos -= bufferLength;
+			rewindMeta->freeSpace += bufferLength;
+		}
+
+		/* Fill entry in a circular buffer. */
+		rewindItem = &rewindBuffer[rewindMeta->addPos % rewind_circular_buffer_size];
+
+		Assert(rewindItem->oxid == InvalidOXid);
+		rewindItem->oxid = oxid;
+		rewindItem->undoStackLocation = location;
+		rewindItem->changeCountsValid = changeCountsValid;
+		rewindItem->timestamp = GetCurrentTimestamp();
+}
+

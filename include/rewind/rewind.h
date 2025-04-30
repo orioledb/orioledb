@@ -18,12 +18,13 @@
 #define REWIND_FILE_SIZE (0x1000000)
 #define REWIND_BUFFERS_TAG (0)
 
-OBuffersDesc rewindBuffersDesc;
 
 extern void register_rewind_worker(void);
 PGDLLEXPORT void rewind_worker_main(Datum);
 extern Size rewind_shmem_needs(void);
 extern void rewind_init_shmem(Pointer buf, bool found);
+
+extern void add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid);
 
 typedef struct
 {
@@ -32,8 +33,6 @@ typedef struct
 	TimestampTz			timestamp;
 	bool				changeCountsValid;
 } RewindItem;
-
-RewindItem *rewindBuffer;
 
 typedef struct
 {
@@ -106,6 +105,5 @@ typedef struct
  * |----------|------====|===       |   ------|
  */
  
-RewindMeta    *rewindMeta;
 
 #endif							/* __REWIND_WORKER_H__ */
