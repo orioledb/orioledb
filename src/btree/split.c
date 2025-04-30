@@ -493,7 +493,7 @@ perform_page_split(OInMemoryBlkno blkno, OInMemoryBlkno new_blkno,
 	else
 	{
 		hikey = btree_get_hikey(pageContext);
-		hikeySize = btree_get_tuple_size(pageContext->hikeyChunk, hikey);
+		hikeySize = btree_get_hikey_size(pageContext, hikey);
 	}
 
 	btree_page_reorg(desc, right_page, &items[left_count], count - left_count,

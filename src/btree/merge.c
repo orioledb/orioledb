@@ -599,7 +599,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	Assert(!O_PAGE_IS(left, RIGHTMOST));
 
 	leftHikey = btree_get_hikey(leftPageContext);
-	leftHikeySize = btree_get_tuple_size(leftPageContext->hikeyChunk, leftHikey);
+	leftHikeySize = btree_get_hikey_size(leftPageContext, leftHikey);
 	if (O_PAGE_IS(right, RIGHTMOST))
 	{
 		rightHikeySize = 0;
@@ -608,7 +608,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 	else
 	{
 		rightHikey = btree_get_hikey(rightPageContext);
-		rightHikeySize = btree_get_tuple_size(rightPageContext->hikeyChunk, rightHikey);
+		rightHikeySize = btree_get_hikey_size(rightPageContext, rightHikey);
 	}
 
 	i = 0;

@@ -166,31 +166,6 @@ btree_page_context_tuple_init(BTreePageContext *pageContext,
  * Utility functions
  */
 
-bool
-btree_read_tuple(BTreePageContext *pageContext, PartialPageState *partial,
-				 BTreePageItemLocator *locator,
-				 Pointer *tupleHeader, OTuple *tuple, bool *isCopy)
-{
-	bool		result;
-
-	Assert(pageContext->tupleChunks != NULL);
-	Assert(pageContext->tupleChunks[locator->chunkOffset] != NULL);
-
-	result = pageContext->tupleChunks[locator->chunkOffset]->ops->read_tuple(
-		pageContext->tupleChunks[locator->chunkOffset],
-		partial, pageContext->page, locator->itemOffset,
-		tupleHeader, tuple, isCopy);
-	Assert(!(*isCopy));
-
-	return result;
-}
-
-uint16
-btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple)
-{
-	return chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
-}
-
 uint16
 btree_get_available_size(BTreeChunkDesc *chunk, CommitSeqNo csn)
 {

@@ -18,10 +18,65 @@
 
 #include "btree/chunk_ops.h"
 #include "btree/find.h"
-#include <stdbool.h>
 
 const BTreeChunkOps BTreeLeafTupleChunkOps;
 const BTreeChunkOps BTreeInternalTupleChunkOps;
+
+/*
+ * Tuple utility functions.
+ */
+bool
+btree_read_tuple(BTreePageContext *pageContext, PartialPageState *partial,
+				 BTreePageItemLocator *locator,
+				 Pointer *tupleHeader, OTuple *tuple, bool *isCopy)
+{
+	bool		result;
+
+	Assert(pageContext->tupleChunks != NULL);
+	Assert(pageContext->tupleChunks[locator->chunkOffset] != NULL);
+
+	result = pageContext->tupleChunks[locator->chunkOffset]->ops->read_tuple(
+		pageContext->tupleChunks[locator->chunkOffset],
+		partial, pageContext->page, locator->itemOffset,
+		tupleHeader, tuple, isCopy);
+	Assert(!(*isCopy));
+
+	return result;
+}
+
+void
+btree_copy_fixed_tuple(BTreePageContext *pageContext,
+					   BTreePageItemLocator *locator, OFixedKey *dst)
+{
+	OTuple		tuple;
+	Pointer		header;
+	bool		isCopy;
+
+	Assert(pageContext->tupleChunks != NULL);
+	Assert(pageContext->tupleChunks[locator->chunkOffset] != NULL);
+
+	pageContext->tupleChunks[locator->chunkOffset]->ops->read_tuple(
+		pageContext->tupleChunks[locator->chunkOffset],
+		NULL, pageContext->page, locator->itemOffset,
+		&header, &tuple, &isCopy);
+	Assert(!isCopy);
+
+	copy_fixed_key(pageContext->treeDesc, dst, tuple);
+}
+
+void
+btree_perform_change(BTreePageContext *pageContext,
+					 BTreePageItemLocator *locator,
+					 BTreeChunkOperationType operation,
+					 Pointer tupleHeader, OTuple tuple)
+{
+	Assert(pageContext->tupleChunks != NULL);
+	Assert(pageContext->tupleChunks[locator->chunkOffset] != NULL);
+
+	pageContext->tupleChunks[locator->chunkOffset]->ops->perform_change(
+		pageContext->tupleChunks[locator->chunkOffset],
+		locator->itemOffset, operation, tupleHeader, tuple);
+}
 
 /*
  * Page iterating functions.
@@ -413,13 +468,14 @@ ltc_estimate_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
 			MAXALIGN(sizeof(BTreeChunkItem) * chunk->chunkItemsCount);
 
 		sizeNeeded = chunk->ops->itemHeaderSize +
-			MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple)) +
+			MAXALIGN(o_btree_len(chunk->treeDesc, tuple, chunk->ops->itemLengthType)) +
 			itemsShift;
 	}
 	else if (operation == BTreeChunkOperationUpdate)
 	{
 		sizeNeeded = (chunk->ops->itemHeaderSize +
-					  MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple))) -
+					  MAXALIGN(o_btree_len(chunk->treeDesc, tuple,
+										   chunk->ops->itemLengthType))) -
 			ltc_get_item_size(tupleChunk, itemOffset);
 
 		/* We don't move items to fill the gap if the new tuple is smaller */
@@ -456,7 +512,8 @@ ltc_perform_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
 
 	if (operation == BTreeChunkOperationInsert ||
 		operation == BTreeChunkOperationUpdate)
-		tupleSize = chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
+		tupleSize = o_btree_len(chunk->treeDesc, tuple,
+								chunk->ops->itemLengthType);
 
 	if (operation == BTreeChunkOperationInsert)
 	{
@@ -580,7 +637,8 @@ ltc_compact(BTreeChunkDesc *chunk)
 		chunk->ops->read_tuple(chunk, NULL, NULL, itemOffset,
 							   &header, &tuple, &isCopy);
 		batchSize += chunk->ops->itemHeaderSize +
-			MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple));
+			MAXALIGN(o_btree_len(chunk->treeDesc, tuple,
+								 chunk->ops->itemLengthType));
 	}
 
 	/* Move the last batch */
@@ -634,7 +692,8 @@ ltc_get_available_size(BTreeChunkDesc *chunk, CommitSeqNo csn)
 				available_size += ltc_get_item_size((BTreeTupleChunkDesc *) chunk,
 													itemOffset) -
 					(chunk->ops->itemHeaderSize +
-					 MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple)));
+					 MAXALIGN(o_btree_len(chunk->treeDesc, tuple,
+										  chunk->ops->itemLengthType)));
 			}
 		}
 	}
@@ -805,7 +864,8 @@ ltc_builder_estimate(BTreeChunkBuilder *chunkBuilder, OTuple tuple)
 		MAXALIGN(sizeof(BTreeChunkItem) * chunkBuilder->chunkItemsCount);
 
 	return chunkBuilder->ops->itemHeaderSize +
-		MAXALIGN(chunkBuilder->ops->get_tuple_size(chunkBuilder->treeDesc, tuple)) +
+		MAXALIGN(o_btree_len(chunkBuilder->treeDesc, tuple,
+							 chunkBuilder->ops->itemLengthType)) +
 		itemsShift;
 }
 
@@ -862,26 +922,150 @@ ltc_builder_finish(BTreeChunkBuilder *chunkBuilder, BTreeChunkDesc *chunk)
 	}
 }
 
-static inline uint16
-ltc_get_tuple_size(BTreeDescr *treeDesc, OTuple tuple)
-{
-	return o_btree_len(treeDesc, tuple, OTupleLength);
-}
-
 /*
  * Implementation of internal tuple chunks.
  */
 
-static inline uint16
-itc_get_tuple_size(BTreeDescr *treeDesc, OTuple tuple)
+/*
+ * Estimate size shift of the operation over the internal tuple chunk.
+ */
+static int32
+itc_estimate_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
+					BTreeChunkOperationType operation, OTuple tuple)
 {
-	return o_btree_len(treeDesc, tuple, OKeyLength);
+	BTreeTupleChunkDesc *tupleChunk = (BTreeTupleChunkDesc *) chunk;
+	uint16		tupleSize = 0;
+	int32		itemsShift = 0,
+				sizeNeeded = 0;
+
+	if (operation == BTreeChunkOperationInsert ||
+		operation == BTreeChunkOperationUpdate)
+	{
+		if (chunk->chunkOffset != 0 && itemOffset != 0)
+			tupleSize = o_btree_len(chunk->treeDesc, tuple,
+									chunk->ops->itemLengthType);
+		else
+		{
+			/*
+			 * The leftmost tuple of the leftmost chunk doesn't store any data,
+			 * therefore don't expect any passed data here.
+			 */
+			Assert(tuple.data == NULL);
+		}
+	}
+
+	if (operation == BTreeChunkOperationInsert)
+	{
+		/* Calculate the change of (maxaligned) item array size */
+		itemsShift = MAXALIGN(sizeof(BTreeChunkItem) * (chunk->chunkItemsCount + 1)) -
+			MAXALIGN(sizeof(BTreeChunkItem) * chunk->chunkItemsCount);
+
+		sizeNeeded = chunk->ops->itemHeaderSize + MAXALIGN(tupleSize) +
+			itemsShift;
+	}
+	else if (operation == BTreeChunkOperationUpdate)
+	{
+		sizeNeeded = (chunk->ops->itemHeaderSize + MAXALIGN(tupleSize)) -
+			ltc_get_item_size(tupleChunk, itemOffset);
+
+		/* We don't move items to fill the gap if the new tuple is smaller */
+		if (sizeNeeded < 0)
+			sizeNeeded = 0;
+	}
+	else if (operation == BTreeChunkOperationDelete)
+	{
+		/* Calculate the change of (maxaligned) item array size */
+		itemsShift = MAXALIGN(sizeof(BTreeChunkItem) * chunk->chunkItemsCount) -
+			MAXALIGN(sizeof(BTreeChunkItem) * (chunk->chunkItemsCount - 1));
+
+		sizeNeeded = (-1) * (ltc_get_item_size(tupleChunk, itemOffset) +
+							 itemsShift);
+	}
+	else
+		Assert(false);
+
+	return sizeNeeded;
+}
+
+/*
+ * Perform the operation over the internal tuple chunk.  A caller is responsible
+ * that the chunk has enough space.
+ */
+static void
+itc_perform_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
+				   BTreeChunkOperationType operation,
+				   Pointer tupleHeader, OTuple tuple)
+{
+	BTreeTupleChunkDesc *tupleChunk = (BTreeTupleChunkDesc *) chunk;
+	Pointer		itemPtr;
+	uint16		tupleSize;
+
+	if (operation == BTreeChunkOperationInsert ||
+		operation == BTreeChunkOperationUpdate)
+	{
+		if (chunk->chunkOffset != 0 && itemOffset != 0)
+			tupleSize = o_btree_len(chunk->treeDesc, tuple,
+									chunk->ops->itemLengthType);
+		else
+		{
+			/*
+			 * The leftmost tuple of the leftmost chunk doesn't store any data,
+			 * therefore don't expect any passed data here.
+			 */
+			Assert(tuple.data == NULL);
+		}
+	}
+
+	if (operation == BTreeChunkOperationInsert)
+	{
+		/* Allocate space for the new item, move other items if necessary */
+		ltc_allocate_item(chunk, itemOffset,
+						  chunk->ops->itemHeaderSize + MAXALIGN(tupleSize));
+
+		/* Copy the new tuple and its header */
+		itemPtr = ltc_get_item(tupleChunk, itemOffset);
+
+		memcpy(itemPtr, tupleHeader, chunk->ops->itemHeaderSize);
+		if (tupleSize > 0)
+		{
+			itemPtr += chunk->ops->itemHeaderSize;
+			memcpy(itemPtr, tuple.data, tupleSize);
+		}
+
+		ltc_set_item_flags(tupleChunk, itemOffset, tuple.formatFlags);
+	}
+	else if (operation == BTreeChunkOperationUpdate)
+	{
+		ltc_resize_item(chunk, itemOffset,
+						chunk->ops->itemHeaderSize + MAXALIGN(tupleSize));
+
+		/* Copy the new tuple and its header */
+		itemPtr = ltc_get_item(tupleChunk, itemOffset);
+
+		memcpy(itemPtr, tupleHeader, chunk->ops->itemHeaderSize);
+		if (tupleSize > 0)
+		{
+			itemPtr += chunk->ops->itemHeaderSize;
+			memcpy(itemPtr, tuple.data, tupleSize);
+		}
+
+		ltc_set_item_flags(tupleChunk, itemOffset, tuple.formatFlags);
+	}
+	else if (operation == BTreeChunkOperationDelete)
+	{
+		Assert(tupleHeader == NULL);
+
+		ltc_delete_item(chunk, itemOffset);
+	}
+	else
+		elog(ERROR, "invalid BTreeChunkOperationType: %d", operation);
 }
 
 const BTreeChunkOps BTreeLeafTupleChunkOps = {
 	.chunkDescSize = sizeof(BTreeTupleChunkDesc),
 	.itemHeaderSize = BTreeLeafTuphdrSize,
 	.itemKeyType = BTreeKeyLeafTuple,
+	.itemLengthType = OTupleLength,
 	/* Main functions */
 	.init = ltc_init,
 	.release = ltc_release,
@@ -897,19 +1081,18 @@ const BTreeChunkOps BTreeLeafTupleChunkOps = {
 	.builder_estimate = ltc_builder_estimate,
 	.builder_add = ltc_builder_add,
 	.builder_finish = ltc_builder_finish,
-	/* Utility functions */
-	.get_tuple_size = ltc_get_tuple_size,
 };
 
 const BTreeChunkOps BTreeInternalTupleChunkOps = {
 	.chunkDescSize = sizeof(BTreeTupleChunkDesc),
 	.itemHeaderSize = BTreeNonLeafTuphdrSize,
 	.itemKeyType = BTreeKeyNonLeafKey,
+	.itemLengthType = OKeyLength,
 	/* Main functions */
 	.init = ltc_init,
 	.release = ltc_release,
-	.estimate_change = ltc_estimate_change,
-	.perform_change = ltc_perform_change,
+	.estimate_change = itc_estimate_change,
+	.perform_change = itc_perform_change,
 	.compact = NULL,
 	.get_available_size = NULL,
 	.cmp = ltc_cmp,
@@ -920,6 +1103,4 @@ const BTreeChunkOps BTreeInternalTupleChunkOps = {
 	.builder_estimate = ltc_builder_estimate,
 	.builder_add = ltc_builder_add,
 	.builder_finish = ltc_builder_finish,
-	/* Utility functions */
-	.get_tuple_size = itc_get_tuple_size,
 };

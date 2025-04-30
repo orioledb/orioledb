@@ -48,21 +48,11 @@ btree_get_hikey(BTreePageContext *pageContext)
 	return tuple;
 }
 
-int
-btree_get_hikey_size(BTreePageContext *pageContext)
+uint16
+btree_get_hikey_size(BTreePageContext *pageContext, OTuple tuple)
 {
-	BTreeChunkDesc *chunk;
-	BTreeHiKeyChunkDesc *hikeyChunk;
-
-	Assert(!O_PAGE_IS(pageContext->page, RIGHTMOST));
-
-	btree_page_context_hikey_init(pageContext, &BTreeHiKeyChunkOps);
-	chunk = pageContext->hikeyChunk;
-	hikeyChunk = (BTreeHiKeyChunkDesc *) chunk;
-
-	Assert(chunk->chunkItemsCount > 0);
-
-	return htc_get_item_size(hikeyChunk, chunk->chunkItemsCount - 1);
+	return o_btree_len(pageContext->hikeyChunk->treeDesc, tuple,
+					   pageContext->hikeyChunk->ops->itemLengthType);
 }
 
 void
@@ -338,12 +328,6 @@ htc_release(BTreeChunkDesc *chunk)
 {
 }
 
-static inline uint16
-htc_get_tuple_size(BTreeDescr *treeDesc, OTuple tuple)
-{
-	return o_btree_len(treeDesc, tuple, OKeyLength);
-}
-
 /*
  * Estimate size shift of the operation over the hikey tuple chunk.
  */
@@ -355,10 +339,12 @@ htc_estimate_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
 	int32		sizeNeeded = 0;
 
 	if (operation == BTreeChunkOperationInsert)
-		sizeNeeded = MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple));
+		sizeNeeded = MAXALIGN(o_btree_len(chunk->treeDesc, tuple,
+										  chunk->ops->itemLengthType));
 	else if (operation == BTreeChunkOperationUpdate)
 	{
-		sizeNeeded = MAXALIGN(chunk->ops->get_tuple_size(chunk->treeDesc, tuple)) -
+		sizeNeeded = MAXALIGN(o_btree_len(chunk->treeDesc, tuple,
+										  chunk->ops->itemLengthType)) -
 			htc_get_item_size(hikeyChunk, itemOffset);
 
 		/* We don't move items to fill the gap if the new tuple is smaller */
@@ -393,7 +379,8 @@ htc_perform_change(BTreeChunkDesc *chunk, OffsetNumber itemOffset,
 
 	if (operation == BTreeChunkOperationInsert ||
 		operation == BTreeChunkOperationUpdate)
-		tupleSize = chunk->ops->get_tuple_size(chunk->treeDesc, tuple);
+		tupleSize = o_btree_len(chunk->treeDesc, tuple,
+								chunk->ops->itemLengthType);
 
 	if (operation == BTreeChunkOperationInsert)
 	{
@@ -549,7 +536,7 @@ static int32
 htc_builder_estimate(BTreeChunkBuilder *chunkBuilder, OTuple tuple)
 {
 	return chunkBuilder->ops->itemHeaderSize +
-		MAXALIGN(chunkBuilder->ops->get_tuple_size(chunkBuilder->treeDesc, tuple));
+		MAXALIGN(o_btree_len(chunkBuilder->treeDesc, tuple, OKeyLength));
 }
 
 /*
@@ -610,6 +597,7 @@ const BTreeChunkOps BTreeHiKeyChunkOps = {
 	.chunkDescSize = sizeof(BTreeHiKeyChunkDesc),
 	.itemHeaderSize = 0,
 	.itemKeyType = BTreeKeyNonLeafKey,
+	.itemLengthType = OKeyLength,
 	/* Main functions */
 	.init = htc_init,
 	.release = htc_release,
@@ -625,6 +613,4 @@ const BTreeChunkOps BTreeHiKeyChunkOps = {
 	.builder_estimate = htc_builder_estimate,
 	.builder_add = htc_builder_add,
 	.builder_finish = htc_builder_finish,
-	/* Utility functions */
-	.get_tuple_size = htc_get_tuple_size,
 };

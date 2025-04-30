@@ -1377,26 +1377,33 @@ load_page(OBTreeFindPageContext *context)
 
 	/* Modify parent downlink: indicate that IO is in-progress */
 	page_block_reads(parent_blkno);
-
 	btree_read_tuple(&parentPageContext, NULL, parent_loc,
 					 (Pointer *) &parentHeader, &parentTuple, &parentIsCopy);
 	Assert(DOWNLINK_IS_ON_DISK(parentHeader->downlink));
 
 	downlink = parentHeader->downlink;
-
 	parentHeader->downlink = MAKE_IO_DOWNLINK(ionum);
 
+	if (parentIsCopy)
+	{
+		/*
+		 * TODO Update the tuple in the chunk using perform_change method,
+		 * currently update is done in-place.
+		 */
+		Assert(false);
+	}
 
 	Assert(PAGE_GET_N_ONDISK(parent_page) > 0);
 	PAGE_DEC_N_ONDISK(parent_page);
 
-	BTREE_PAGE_LOCATOR_NEXT(parent_page, parent_loc);
-	if (BTREE_PAGE_LOCATOR_IS_VALID(parent_page, parent_loc))
-		copy_fixed_page_key(desc, &target_hikey, parent_page, parent_loc);
+	btree_page_locator_next(&parentPageContext, parent_loc);
+	if (btree_page_locator_is_valid(&parentPageContext, parent_loc))
+		btree_copy_fixed_tuple(&parentPageContext, parent_loc, &target_hikey);
 	else if (!O_PAGE_IS(parent_page, RIGHTMOST))
 		btree_copy_fixed_hikey(&parentPageContext, &target_hikey);
 	else
 		clear_fixed_key(&target_hikey);
+
 	target_level = PAGE_GET_LEVEL(parent_page) - 1;
 
 	unlock_page(parent_blkno);
@@ -1404,6 +1411,7 @@ load_page(OBTreeFindPageContext *context)
 	/* Prepare new page metaPage-data */
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
 	blkno = ppool_get_page(desc->ppool, PPOOL_RESERVE_FIND);
+
 	lock_page(blkno);
 	page_block_reads(blkno);
 
@@ -1419,6 +1427,7 @@ load_page(OBTreeFindPageContext *context)
 	{
 		parentHeader->downlink = downlink;
 		PAGE_INC_N_ONDISK(parent_page);
+
 		unlock_io(ionum);
 		if (orioledb_s3_mode)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
@@ -1481,6 +1490,7 @@ load_page(OBTreeFindPageContext *context)
 	was_modify = BTREE_PAGE_FIND_IS(context, MODIFY);
 	was_image = BTREE_PAGE_FIND_IS(context, IMAGE);
 	BTREE_PAGE_FIND_UNSET(context, IMAGE);
+
 	if (!was_modify)
 	{
 		was_fetch = BTREE_PAGE_FIND_IS(context, FETCH);
@@ -1488,6 +1498,7 @@ load_page(OBTreeFindPageContext *context)
 		BTREE_PAGE_FIND_UNSET(context, FETCH);
 		BTREE_PAGE_FIND_SET(context, MODIFY);
 	}
+
 	was_keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
 	if (was_keep_lokey)
 		BTREE_PAGE_FIND_UNSET(context, KEEP_LOKEY);
@@ -1495,6 +1506,7 @@ load_page(OBTreeFindPageContext *context)
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
 	context->csn = COMMITSEQNO_INPROGRESS;
+
 	if (PAGE_GET_LEVEL(page) != target_level)
 		ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						errmsg("error reading downlink %X/%X in relfile (%u, %u)",
@@ -1556,7 +1568,11 @@ load_page(OBTreeFindPageContext *context)
 
 	/* Replace parent downlink with orioledb downlink */
 	page_block_reads(parent_blkno);
+
 	parent_page = O_GET_IN_MEMORY_PAGE(parent_blkno);
+	btree_page_context_set(&parentPageContext, parent_page);
+	btree_page_locator_init(&parentPageContext, parent_loc);
+
 	parentHeader = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
 	Assert(parentHeader->downlink == MAKE_IO_DOWNLINK(ionum));
 	parentHeader->downlink = MAKE_IN_MEMORY_DOWNLINK(blkno, O_PAGE_HEADER(page)->pageChangeCount);

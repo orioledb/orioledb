@@ -66,6 +66,7 @@ typedef struct BTreeChunkOps
 	Size		chunkDescSize;
 	uint16		itemHeaderSize;
 	BTreeKeyType itemKeyType;
+	OLengthType	itemLengthType;
 
 	/*
 	 * Main API functions.
@@ -161,15 +162,6 @@ typedef struct BTreeChunkOps
 	 */
 	void		(*builder_finish) (BTreeChunkBuilder *chunkBuilder,
 								   BTreeChunkDesc *chunk);
-
-	/*
-	 * Utility functions.
-	 */
-
-	/*
-	 * Get size of the tuple.
-	 */
-	uint16		(*get_tuple_size) (BTreeDescr *treeDesc, OTuple tuple);
 } BTreeChunkOps;
 
 typedef struct BTreeTupleChunkDesc
@@ -236,7 +228,8 @@ extern void btree_page_context_tuple_init(BTreePageContext *pageContext,
  */
 
 extern OTuple btree_get_hikey(BTreePageContext *pageContext);
-extern int	btree_get_hikey_size(BTreePageContext *pageContext);
+extern uint16 btree_get_hikey_size(BTreePageContext *pageContext, OTuple tuple);
+
 extern void btree_copy_fixed_hikey(BTreePageContext *pageContext, OFixedKey *dst);
 extern void btree_copy_fixed_shmem_hikey(BTreePageContext *pageContext, OFixedShmemKey *dst);
 
@@ -246,7 +239,7 @@ extern bool btree_fits_hikey(BTreePageContext *pageContext,
 							 LocationIndex newHikeySize);
 
 /*
- * Utility functions
+ * Tuple utility functions
  */
 
 extern bool btree_read_tuple(BTreePageContext *pageContext,
@@ -254,7 +247,18 @@ extern bool btree_read_tuple(BTreePageContext *pageContext,
 							 BTreePageItemLocator *locator,
 							 Pointer *tupleHeader, OTuple *tuple,
 							 bool *isCopy);
-extern uint16 btree_get_tuple_size(BTreeChunkDesc *chunk, OTuple tuple);
+extern void btree_copy_fixed_tuple(BTreePageContext *pageContext,
+								   BTreePageItemLocator *locator,
+								   OFixedKey *dst);
+
+extern void btree_perform_change(BTreePageContext *pageContext,
+								 BTreePageItemLocator *locator,
+								 BTreeChunkOperationType operation,
+								 Pointer tupleHeader, OTuple tuple);
+
+/*
+ * Utility functions
+ */
 
 extern uint16 btree_get_available_size(BTreeChunkDesc *chunk, CommitSeqNo csn);
 

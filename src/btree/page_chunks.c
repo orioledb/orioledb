@@ -1382,7 +1382,7 @@ split_page_by_chunks(BTreePageContext *pageContext)
 	else
 	{
 		btree_copy_fixed_hikey(pageContext, &hikey);
-		hikeySize = btree_get_tuple_size(pageContext->hikeyChunk, hikey.tuple);
+		hikeySize = btree_get_hikey_size(pageContext, hikey.tuple);
 	}
 
 	btree_page_reorg(pageContext->treeDesc, p, items, i, hikeySize, hikey.tuple, NULL);

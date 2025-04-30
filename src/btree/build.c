@@ -284,7 +284,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		keysize = stack[level].keysize;
 
 		hikey = btree_get_hikey(&stack[level].pageContext);
-		stack[level].keysize = btree_get_tuple_size(stack[level].pageContext.hikeyChunk,
+		stack[level].keysize = btree_get_hikey_size(&stack[level].pageContext,
 													hikey);
 		copy_fixed_key(stack[level].pageContext.treeDesc, &stack[level].key, hikey);
 

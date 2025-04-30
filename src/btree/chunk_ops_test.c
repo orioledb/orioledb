@@ -363,7 +363,8 @@ test_builder_add(TupleChunkTestDesc *testDesc, Datum *values, bool *nulls,
 	BTreeChunkBuilderItem chunkItem = {0};
 
 	tuple = make_otuple(testDesc, values, nulls, isLeaf);
-	tupleSize = ops->get_tuple_size(testDesc->chunkBuilder->treeDesc, tuple);
+	tupleSize = o_btree_len(testDesc->chunkBuilder->treeDesc, tuple,
+							ops->itemLengthType);
 
 	chunkItem.flags = tuple.formatFlags;
 	if (header != NULL)
