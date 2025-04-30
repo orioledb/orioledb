@@ -502,7 +502,7 @@ mark_rewind_csn(CommitSeqNo *csn)
 }
 
 void
-fix_rewind_oxid(OXid oxid);
+fix_rewind_oxid(OXid oxid)
 {
 	XLogRecPtr	xlogPtr;
 	CommitSeqNo	*csn;

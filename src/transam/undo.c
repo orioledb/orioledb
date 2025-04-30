@@ -527,15 +527,6 @@ wait_for_reserved_location(UndoLogType undoType,
 	return true;
 }
 
-#define UNDO_ITEM_BUF_SIZE	2048
-
-typedef struct
-{
-	char		staticData[UNDO_ITEM_BUF_SIZE];
-	Pointer		data;
-	Size		length;
-} UndoItemBuf;
-
 static void
 init_undo_item_buf(UndoItemBuf *buf)
 {
@@ -612,7 +603,7 @@ o_add_branch_undo_item(UndoLogType undoType, UndoLocation newLocation)
 /*
  * Walk through the undo stack calling the callbacks for each item.
  */
-static UndoLocation
+UndoLocation
 walk_undo_range(UndoLogType undoType,
 				UndoLocation location, UndoLocation toLoc, UndoItemBuf *buf,
 				OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
@@ -692,45 +683,42 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 		int 		 onDiskRange;
 		int 		 freeRange;
 
-		/* Write and clear page of entries out of circular buffer if needed. */
-		onDiskRange = rewindMeta->writtenPos - rewindMeta->readPos;
-		Assert(onDiskRange >=0);
+		rewindMeta->addPos++;
+		rewindMeta->freeSpace--;
+		Assert(rewindMeta->addPos <= rewindMeta->completePos + rewind_circular_buffer_size -
+				(rewindMeta->writePos - rewindMeta->readPos));
 
-		freeRange = rewind_circular_buffer_size - ((rewindMeta->addedPos - rewindMeta->completedPos) - onDiskRange);
-		Assert(freeRange >=0);
-		if (freeRange == 0)
+		/* Operation 8. Evict page from a ring buffer to disk */
+		if (rewindMeta->freeSpace == 0)
 		{
 			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
 			int pos;
 			int start;
 			int length_to_end;
+			int oldEvictPos;
 
-			/*
-			 * If all previously written buffers are fully read into ring buffer,
-			 * start writing new buffer from (addedPos-rewind_circular_buffer_size)
-			 * Otherwise continue from the previous writtenPos to have continuous
-			 * range written to disk.
-			 */
-			if (onDiskRange == 0)
-			{
-				rewindMeta->writtenPos = rewindMeta->addedPos - rewind_circular_buffer_size;
-			}
+			if (rewindMeta->evictPos == InvalidRewindPos)
+				rewindMeta->evictPos = rewindMeta->addPos;
 
-			/* Write bufferLength number of records to disk */
-			start = rewindMeta->writtenPos % rewind_circular_buffer_size;
+			/* Stage 1. Shift evictPos and write bufferLength number of records to disk  */
+			oldEvictPos = rewindMeta->evictPos;
+			rewindMeta->evictPos -= bufferLength;
+
+			start = (rewindMeta->evictPos % rewind_circular_buffer_size);
 			length_to_end = rewind_circular_buffer_size - start;
+
 			if (length_to_end < bufferLength)
 			{
 				o_buffers_write(&rewindBuffersDesc,
 							(Pointer) &rewindBuffer[start],
 							REWIND_BUFFERS_TAG,
-							rewindMeta->writtenPos * sizeof(RewindItem),
+							rewindMeta->writePos * sizeof(RewindItem),
 							length_to_end * sizeof(RewindItem));
 
 				o_buffers_write(&rewindBuffersDesc,
 							(Pointer) &rewindBuffer[0],
 							REWIND_BUFFERS_TAG,
-							(rewindMeta->writtenPos + length_to_end) * sizeof(RewindItem),
+							(rewindMeta->writePos + length_to_end) * sizeof(RewindItem),
 							(bufferLength - length_to_end) * sizeof(RewindItem));
 			}
 			else
@@ -738,27 +726,40 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 				o_buffers_write(&rewindBuffersDesc,
 							(Pointer) &rewindBuffer[start],
 							REWIND_BUFFERS_TAG,
-							rewindMeta->writtenPos * sizeof(RewindItem),
+							rewindMeta->writePos * sizeof(RewindItem),
 							bufferLength * sizeof(RewindItem));
 			}
+			rewindMeta->writePos += bufferLength;
 
-			/* Clear written items from ring buffer */
-			for (pos = rewindMeta->writtenPos; pos <= rewindMeta->writtenPos + bufferLength; pos++)
-				rewindBuffer[pos % rewind_circular_buffer_size].oxid = InvalidOXid;
+			/* Clean written items from ring buffer */
+			for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + bufferLength; pos++)
+			{
+				rewindBuffer[(pos % rewind_circular_buffer_size)].oxid = InvalidOXid;
+			}
 
-			rewindMeta->writtenPos += bufferLength;
+			/* Stage 2. Shift last page part by one page left */
+			for (pos = oldEvictPos; pos < rewindMeta->addPos; pos++)
+			{
+				int src = pos % rewind_circular_buffer_size;
+				int dst = (pos - bufferLength)  % rewind_circular_buffer_size;
+
+				memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
+				rewindBuffer[src].oxid = InvalidOXid;
+			}
+
+			/* Continue to add from the beginning of last clean page in ring buffer */
+			rewindMeta->addPos -= bufferLength;
+			rewindMeta->freeSpace += bufferLength;
 		}
 
 		/* Fill entry in a circular buffer. */
-		rewindItem = &rewindBuffer[rewindMeta->addedPos % rewind_circular_buffer_size];
+		rewindItem = &rewindBuffer[rewindMeta->addPos % rewind_circular_buffer_size];
 
 		Assert(rewindItem->oxid == InvalidOXid);
 		rewindItem->oxid = oxid;
 		rewindItem->undoStackLocation = location;
 		rewindItem->changeCountsValid = changeCountsValid;
 		rewindItem->timestamp = GetCurrentTimestamp();
-
-		rewindMeta->addedPos++;
 }
 
 
