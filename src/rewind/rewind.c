@@ -243,7 +243,7 @@ rewind_worker_main(Datum main_arg)
 
 				/* Fix current rewind item */
 
-				fix_rewind_oxid(rewindItem->oxid);
+				clear_rewind_oxid(rewindItem->oxid);
 				location = walk_undo_range(UndoLogRegular, rewindItem->undoStackLocation, InvalidUndoLocation,
 										   &buf, rewindItem->oxid, false, NULL,
 										   rewindItem->changeCountsValid);
@@ -346,6 +346,8 @@ void
 add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 {
 		RewindItem  *rewindItem;
+
+		mark_rewind_oxid(oxid);
 
 		rewindMeta->freeSpace--;
 		Assert(rewindMeta->addPos <= rewindMeta->completePos + rewind_circular_buffer_size -
