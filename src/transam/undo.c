@@ -1359,7 +1359,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				if (enable_rewind)
 				{
-					mark_rewind_csn(&csn);
+//					mark_rewind_csn(&csn);
 				}
 				else
 				{
