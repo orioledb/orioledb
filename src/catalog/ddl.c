@@ -2357,7 +2357,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
 	o_table->index_bridging = true;
-	assign_new_oids(o_table, tbl);
+	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	o_table->primary_init_nfields = o_table->nfields + 1;
@@ -2412,7 +2412,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_table->bridge_oids.datoid = InvalidOid;
 	o_table->bridge_oids.reloid = InvalidOid;
 	o_table->bridge_oids.relnode = InvalidOid;
-	assign_new_oids(o_table, tbl);
+	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	o_table->primary_init_nfields = o_table->nfields - 1;

@@ -1837,7 +1837,7 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
 }
 
 void
-o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
+o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, bool drop_pkey)
 {
 	Relation	toastRel,
 				indexRel;
@@ -1861,9 +1861,18 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
 
 	for (i = 0; i < oTable->nindices; i++)
 	{
-		indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
-		ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
-		relation_close(indexRel, AccessShareLock);
+		/*
+		 * There is a memmove in drop_primary_index,
+		 * and also when dropping pkey for partition tables
+		 * it calls this function after removing index
+		 * from system catalogs
+		 */
+		if (!drop_pkey || oTable->indices[i].type != oIndexPrimary)
+		{
+			indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
+			ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
+			relation_close(indexRel, AccessShareLock);
+		}
 	}
 }
 
