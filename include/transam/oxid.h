@@ -99,5 +99,5 @@ extern bool xid_is_finished_for_everybody(OXid xid);
 extern void fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info);
 extern void fix_rewind_oxid(OXid oxid);
 extern void mark_rewind_csn(CommitSeqNo *csn);
-
+extern bool csn_is_retained_for_rewind(CommitSeqNo csn);
 #endif							/* __OXID_H__ */

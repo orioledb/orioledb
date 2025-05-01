@@ -79,8 +79,8 @@ cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 					desc->filenameTemplate[tag],
 					(uint32) (fileNum >> 32),
 					(uint32) fileNum);
-		curFile = PathNameOpenFile(curFileName,
-				O_RDWR | O_CREAT | PG_BINARY);
+		curFile = BasicOpenFile(curFileName, O_RDONLY | PG_BINARY);
+
 		if (curFile < 0)
 			break;
 
@@ -254,7 +254,7 @@ rewind_worker_main(Datum main_arg)
 				rewindMeta->completePos++;
 				rewindMeta->freeSpace++;
 
-				/* Operation 5. Restore extent from disk */
+				/* Restore extent from disk (Operation 5 described in rewind/rewind.h) */
 				if (rewindMeta->readPos < rewindMeta->writePos)
 				{
 					Assert (rewindMeta->freeSpace <= bufferLength);
@@ -347,12 +347,11 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 {
 		RewindItem  *rewindItem;
 
-		rewindMeta->addPos++;
 		rewindMeta->freeSpace--;
 		Assert(rewindMeta->addPos <= rewindMeta->completePos + rewind_circular_buffer_size -
 				(rewindMeta->writePos - rewindMeta->readPos));
 
-		/* Operation 8. Evict page from a ring buffer to disk */
+		/* Evict page from a ring buffer to disk. (Operation 8 described in rewind/rewind.h) */
 		if (rewindMeta->freeSpace == 0)
 		{
 			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
@@ -424,5 +423,7 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 		rewindItem->undoStackLocation = location;
 		rewindItem->changeCountsValid = changeCountsValid;
 		rewindItem->timestamp = GetCurrentTimestamp();
+
+		rewindMeta->addPos++;
 }
 

@@ -498,7 +498,7 @@ void
 mark_rewind_csn(CommitSeqNo *csn)
 {
 	Assert(!COMMITSEQNO_IS_RETAINED_FOR_REWIND(*csn));
-	*csn = *csn & COMMITSEQNO_RETAINED_FOR_REWIND;
+	*csn = *csn | COMMITSEQNO_RETAINED_FOR_REWIND;
 }
 
 void
@@ -510,7 +510,13 @@ fix_rewind_oxid(OXid oxid)
 	map_oxid(oxid, &csn, &xlogPtr);
 	Assert(COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn));
 	csn = csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
-	// XXX Need to write cleared csn ? 
+	set_oxid_csn(oxid, csn);
+}
+
+inline bool
+csn_is_retained_for_rewind(CommitSeqNo csn)
+{
+	return (bool)COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn);
 }
 
 /*

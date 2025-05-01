@@ -1361,6 +1361,10 @@ undo_xact_callback(XactEvent event, void *arg)
 				{
 					mark_rewind_csn(&csn);
 				}
+				else
+				{
+					Assert(!csn_is_retained_for_rewind(csn));
+				}
 				current_oxid_commit(csn);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
