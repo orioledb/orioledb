@@ -347,8 +347,6 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 {
 		RewindItem  *rewindItem;
 
-		mark_rewind_oxid(oxid);
-
 		rewindMeta->freeSpace--;
 		Assert(rewindMeta->addPos <= rewindMeta->completePos + rewind_circular_buffer_size -
 				(rewindMeta->writePos - rewindMeta->readPos));
@@ -428,4 +426,3 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 
 		rewindMeta->addPos++;
 }
-
