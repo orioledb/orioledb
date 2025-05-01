@@ -502,19 +502,6 @@ mark_rewind_csn(CommitSeqNo *csn)
 }
 
 void
-mark_rewind_oxid(OXid oxid)
-{
-	XLogRecPtr      xlogPtr;
-	CommitSeqNo     csn;
-
-	map_oxid(oxid, &csn, &xlogPtr);
-	elog(LOG, "csn set for rewind %lu -> %lu", csn, csn | COMMITSEQNO_RETAINED_FOR_REWIND);
-//	Assert(!COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn));
-	csn = csn | COMMITSEQNO_RETAINED_FOR_REWIND;
-	set_oxid_csn(oxid, csn);
-}
-
-void
 clear_rewind_oxid(OXid oxid)
 {
 	XLogRecPtr	xlogPtr;
@@ -530,7 +517,7 @@ clear_rewind_oxid(OXid oxid)
 inline bool
 csn_is_retained_for_rewind(CommitSeqNo csn)
 {
-	return (bool)COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn);
+	return (bool) COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn);
 }
 
 /*
@@ -1256,7 +1243,8 @@ current_oxid_commit(CommitSeqNo csn)
 	if (!OXidIsValid(curOxid))
 		return;
 
-	set_oxid_csn(curOxid, csn);
+	set_oxid_csn(curOxid,
+				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	pg_write_barrier();
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 

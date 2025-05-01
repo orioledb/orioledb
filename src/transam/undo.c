@@ -1357,15 +1357,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
-				if (enable_rewind)
-				{
-//					mark_rewind_csn(&csn);
-				}
-				else
-				{
-					Assert(!csn_is_retained_for_rewind(csn));
-				}
 				current_oxid_commit(csn);
+				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
