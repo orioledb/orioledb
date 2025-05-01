@@ -154,7 +154,7 @@ is_in_indexes_rebuild(void)
 }
 
 void
-assign_new_oids(OTable *oTable, Relation rel)
+assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 {
 	Oid			toast_relid;
 	ReindexParams params;
@@ -230,7 +230,7 @@ assign_new_oids(OTable *oTable, Relation rel)
 	}
 	PG_END_TRY();
 	in_indexes_rebuild = false;
-	o_table_fill_oids(oTable, rel, &RelGetNode(rel));
+	o_table_fill_oids(oTable, rel, &RelGetNode(rel), drop_pkey);
 	orioledb_free_rd_amcache(rel);
 }
 
@@ -489,7 +489,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			{
 				new_o_table = o_tables_get(oids);
 				o_table = new_o_table;
-				assign_new_oids(new_o_table, heap);
+				assign_new_oids(new_o_table, heap, false);
 				oids = new_o_table->oids;
 				o_table->has_primary = true;
 				o_table->primary_init_nfields = o_table->nfields;
@@ -1901,7 +1901,8 @@ drop_primary_index(Relation rel, OTable *o_table)
 
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
-	assign_new_oids(o_table, rel);
+	elog(WARNING, "assign_new_oids CALL 1");
+	assign_new_oids(o_table, rel, true);
 
 	memmove(&o_table->indices[0],
 			&o_table->indices[1],

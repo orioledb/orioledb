@@ -772,7 +772,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 rel->rd_rel->relpersistence,
 											 old_o_table->fillfactor);
 		o_opclass_cache_add_table(new_o_table);
-		o_table_fill_oids(new_o_table, rel, newrnode);
+		o_table_fill_oids(new_o_table, rel, newrnode, false);
 
 		newTreeOids = o_table_make_index_oids(new_o_table, &newTreeOidsNum);
 
