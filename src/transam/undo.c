@@ -716,9 +716,9 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
-		if (enable_rewind && undoType == UndoLogRegular)
+		if (enable_rewind)
 		{
-			add_to_rewind_buffer(oxid, location, changeCountsValid);
+			add_to_rewind_buffer(undoType, oxid, location, changeCountsValid);
 		}
 		else
 		{
