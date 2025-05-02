@@ -244,7 +244,7 @@ rewind_worker_main(Datum main_arg)
 				/* Fix current rewind item */
 
 				clear_rewind_oxid(rewindItem->oxid);
-				location = walk_undo_range(UndoLogRegular, rewindItem->undoStackLocation, InvalidUndoLocation,
+				location = walk_undo_range(rewindItem->undoType, rewindItem->undoStackLocation, InvalidUndoLocation,
 										   &buf, rewindItem->oxid, false, NULL,
 										   rewindItem->changeCountsValid);
 				Assert(!UndoLocationIsValid(location));
@@ -343,7 +343,7 @@ rewind_worker_main(Datum main_arg)
 }
 
 void
-add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
+add_to_rewind_buffer(UndoLogType undoType, OXid oxid, UndoLocation location, bool changeCountsValid)
 {
 		RewindItem  *rewindItem;
 
@@ -420,6 +420,7 @@ add_to_rewind_buffer(OXid oxid, UndoLocation location, bool changeCountsValid)
 
 		Assert(rewindItem->oxid == InvalidOXid);
 		rewindItem->oxid = oxid;
+		rewindItem->undoType = undoType;
 		rewindItem->undoStackLocation = location;
 		rewindItem->changeCountsValid = changeCountsValid;
 		rewindItem->timestamp = GetCurrentTimestamp();
