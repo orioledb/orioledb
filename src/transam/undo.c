@@ -527,7 +527,7 @@ wait_for_reserved_location(UndoLogType undoType,
 	return true;
 }
 
-static void
+void
 init_undo_item_buf(UndoItemBuf *buf)
 {
 	buf->data = buf->staticData;
@@ -568,7 +568,7 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 	return (UndoStackItem *) buf->data;
 }
 
-static void
+void
 free_undo_item_buf(UndoItemBuf *buf)
 {
 	if (buf->data != buf->staticData)
@@ -705,8 +705,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		STOPEVENT(STOPEVENT_BEFORE_APPLY_UNDO, params);
 	}
 
-	init_undo_item_buf(&buf);
-
 	if (!abortTrx)
 	{
 		/*
@@ -716,16 +714,14 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
-		if (enable_rewind)
+		if (!enable_rewind)
 		{
-			add_to_rewind_buffer(undoType, oxid, location, changeCountsValid);
-		}
-		else
-		{
+			init_undo_item_buf(&buf);
 			location = walk_undo_range(undoType, location, InvalidUndoLocation,
 								   &buf, oxid, false, NULL,
 								   changeCountsValid);
 			Assert(!UndoLocationIsValid(location));
+			free_undo_item_buf(&buf);
 		}
 		newOnCommitLocation = InvalidUndoLocation;
 	}
@@ -735,12 +731,14 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 * Abort can relate to part of transactio chain.  "On commit" location
 		 * needs to be updated accordingly.
 		 */
+		init_undo_item_buf(&buf);
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 		location = walk_undo_range(undoType, location,
 								   toLocation ? toLocation->location : InvalidUndoLocation,
 								   &buf, oxid, true, &newOnCommitLocation,
 								   changeCountsValid);
+		free_undo_item_buf(&buf);
 	}
 
 	/*
@@ -771,8 +769,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
 
 	LWLockRelease(&curProcData->undoStackLocationsFlushLock);
-
-	free_undo_item_buf(&buf);
 }
 
 void
@@ -1359,6 +1355,9 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				current_oxid_commit(csn);
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
+
+				if (enable_rewind)
+					add_to_rewind_buffer(oxid);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);

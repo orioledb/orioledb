@@ -107,13 +107,14 @@ rewind_init_shmem(Pointer ptr, bool found)
 	if (!found)
 	{
 		int64       i;
+		int 	    j;
 
 		for (i = 0; i < rewind_circular_buffer_size; i++)
 		{
 			rewindBuffer[i].oxid = InvalidOXid;
-			rewindBuffer[i].undoStackLocation = InvalidUndoLocation;
 			rewindBuffer[i].timestamp = 0;
-			rewindBuffer[i].changeCountsValid = false;
+			for (j = 0; j < (int) UndoLogsCount; j++)
+				rewindBuffer[i].undoStackLocation[j] = InvalidUndoLocation;
 		}
 
 	//	rewindMeta->rewindMapTrancheId = LWLockNewTrancheId();
@@ -221,8 +222,9 @@ rewind_worker_main(Datum main_arg)
 
 			while (true)
 			{
-				UndoItemBuf 			    buf;
-				uint64						location;
+				UndoItemBuf 	buf;
+				uint64		location;
+				int 		i;
 
 				if (rewindMeta->completePos == rewindMeta->addPos)
 				{
@@ -244,10 +246,15 @@ rewind_worker_main(Datum main_arg)
 				/* Fix current rewind item */
 
 				clear_rewind_oxid(rewindItem->oxid);
-				location = walk_undo_range(rewindItem->undoType, rewindItem->undoStackLocation, InvalidUndoLocation,
+				for (i = 0; i < (int) UndoLogsCount; i++)
+				{
+					init_undo_item_buf(&buf);
+					location = walk_undo_range((UndoLogType) i, rewindItem->undoStackLocation[i], InvalidUndoLocation,
 										   &buf, rewindItem->oxid, false, NULL,
-										   rewindItem->changeCountsValid);
-				Assert(!UndoLocationIsValid(location));
+										   true);
+					Assert(!UndoLocationIsValid(location));
+					free_undo_item_buf(&buf);
+				}
 
 				/* Clear the item from the circular buffer */
 				rewindItem->oxid = InvalidOXid;
@@ -343,9 +350,10 @@ rewind_worker_main(Datum main_arg)
 }
 
 void
-add_to_rewind_buffer(UndoLogType undoType, OXid oxid, UndoLocation location, bool changeCountsValid)
+add_to_rewind_buffer(OXid oxid)
 {
 		RewindItem  *rewindItem;
+		int i;
 
 		rewindMeta->freeSpace--;
 		Assert(rewindMeta->addPos <= rewindMeta->completePos + rewind_circular_buffer_size -
@@ -419,11 +427,15 @@ add_to_rewind_buffer(UndoLogType undoType, OXid oxid, UndoLocation location, boo
 		rewindItem = &rewindBuffer[rewindMeta->addPos % rewind_circular_buffer_size];
 
 		Assert(rewindItem->oxid == InvalidOXid);
-		rewindItem->oxid = oxid;
-		rewindItem->undoType = undoType;
-		rewindItem->undoStackLocation = location;
-		rewindItem->changeCountsValid = changeCountsValid;
+
 		rewindItem->timestamp = GetCurrentTimestamp();
+		rewindItem->oxid = oxid;
+
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
+			rewindItem->undoStackLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+		}
 
 		rewindMeta->addPos++;
 }

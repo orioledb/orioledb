@@ -173,4 +173,8 @@ extern UndoLocation walk_undo_range(UndoLogType undoType, UndoLocation location,
 									OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
 									bool changeCountsValid);
 
+extern void init_undo_item_buf(UndoItemBuf *buf);
+extern void free_undo_item_buf(UndoItemBuf *buf);
+
+
 #endif							/* __BTREE_UNDO_H__ */
