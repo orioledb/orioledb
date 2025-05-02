@@ -24,15 +24,13 @@ PGDLLEXPORT void rewind_worker_main(Datum);
 extern Size rewind_shmem_needs(void);
 extern void rewind_init_shmem(Pointer buf, bool found);
 
-extern void add_to_rewind_buffer(UndoLogType undoType, OXid oxid, UndoLocation location, bool changeCountsValid);
+extern void add_to_rewind_buffer(OXid oxid);
 
 typedef struct
 {
 	OXid				oxid;
-	UndoLogType			undoType;
-	uint64				undoStackLocation;
+	uint64				undoStackLocation[UndoLogsCount];
 	TimestampTz			timestamp;
-	bool				changeCountsValid;
 } RewindItem;
 
 typedef struct
