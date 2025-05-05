@@ -63,6 +63,12 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
+void
+free_page_find_context(OBTreeFindPageContext *context)
+{
+
+}
+
 /*--
  * Locate page and location within it for given key
  *

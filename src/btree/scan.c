@@ -1645,6 +1645,7 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 		dsm_detach(scan->dsmSeg);
 	}
 	pfree(scan->diskDownlinks);
+	free_page_find_context(&scan->context);
 	pfree(scan);
 }
 

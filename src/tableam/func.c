@@ -1622,6 +1622,7 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 			}
 		}
 	}
+	free_page_find_context(&context);
 }
 
 Datum

@@ -83,6 +83,7 @@ extern bool btree_page_search(BTreeDescr *desc, Page p, Pointer key,
 extern void init_page_find_context(OBTreeFindPageContext *context,
 								   BTreeDescr *desc,
 								   CommitSeqNo csn, uint16 flags);
+extern void free_page_find_context(OBTreeFindPageContext *context);
 
 extern bool find_page(OBTreeFindPageContext *context, void *key,
 					  BTreeKeyType keyType, uint16 targetLevel);

@@ -121,8 +121,8 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 {
 	BTreePageItemLocator loc;
 	OBTreeFindPageContext context;
-	char	   *img = context.img;
-	BTreePageHeader *header = (BTreePageHeader *) img;
+	char	   *img;
+	BTreePageHeader *header;
 	bool		combinedResult = false;
 	OTuple		result;
 
@@ -140,6 +140,8 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		(void) find_page(&context, key, kind, 0);
 
 	loc = context.items[context.index].locator;
+	img = context.img;
+	header = (BTreePageHeader *) img;
 
 	/* Adjust hint if given */
 	if (hint)
@@ -175,11 +177,13 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 					result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
 					memcpy(result.data, curTuple.data, result_size);
 					result.formatFlags = curTuple.formatFlags;
+					free_page_find_context(&context);
 					return result;
 				}
 				else
 				{
 					O_TUPLE_SET_NULL(result);
+					free_page_find_context(&context);
 					return result;
 				}
 			}
@@ -203,11 +207,15 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 			*deleted = (tupHdr->deleted != BTreeLeafTupleNonDeleted);
 
 		if (cmp == 0)
+		{
+			free_page_find_context(&context);
 			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
 										out_csn, mcxt, cb, arg);
+		}
 	}
 
 	/* Tuple isn't found */
+	free_page_find_context(&context);
 	O_TUPLE_SET_NULL(result);
 	return result;
 }
@@ -551,6 +559,7 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 void
 btree_iterator_free(BTreeIterator *it)
 {
+	free_page_find_context(&it->context);
 	pfree(it);
 }
 

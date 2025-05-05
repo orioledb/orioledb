@@ -2535,6 +2535,7 @@ retry:
 
 		if (!found)
 		{
+			free_page_find_context(&context);
 			unlock_page(blkno);
 			Assert(!have_locked_pages());
 			return OWalkPageSkipped;
@@ -2552,6 +2553,7 @@ retry:
 			 * We didn't find downlink pointing to this page.  This could
 			 * happend because of concurrent split.  Give up then...
 			 */
+			free_page_find_context(&context);
 			unlock_page(blkno);
 			unlock_page(context.items[context.index].blkno);
 			return OWalkPageSkipped;
@@ -2569,7 +2571,10 @@ retry:
 		unlock_page(blkno);
 
 		if (!is_root)
+		{
 			unlock_page(context.items[context.index].blkno);
+			free_page_find_context(&context);
+		}
 		return OWalkPageSkipped;
 	}
 
@@ -2638,6 +2643,9 @@ retry:
 	STOPEVENT(STOPEVENT_BEFORE_WRITE_PAGE, NULL);
 
 	write_page(&context, blkno, img, checkpoint_number, evict, copy_blkno);
+
+	if (!is_root)
+		free_page_find_context(&context);
 
 	STOPEVENT(STOPEVENT_AFTER_WRITE_PAGE, NULL);
 
