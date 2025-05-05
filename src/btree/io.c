@@ -205,7 +205,6 @@ typedef struct
 #define SH_HASH_KEY(tb, key) hash_any((unsigned char *) &key, sizeof(FileHashKey))
 #define SH_EQUAL(tb, a, b) memcmp(&a, &b, sizeof(FileHashKey)) == 0
 #define SH_SCOPE static inline
-#define SH_GET_HASH(tb, a) a->hash
 #define SH_DEFINE
 #define SH_DECLARE
 #include "lib/simplehash.h"
