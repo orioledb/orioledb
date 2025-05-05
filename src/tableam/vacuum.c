@@ -907,6 +907,8 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 		unlock_page(context.items[context.index].blkno);
 	}
 
+	free_page_find_context(&context);
+
 	/*
 	 * We set all LP_DEAD items from the first heap pass to LP_UNUSED during
 	 * the second heap pass.  No more, no less.
@@ -1115,6 +1117,8 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 		}
 		blocksScanned++;
 	} while (find_right_page(&context, &hikey));
+
+	free_page_find_context(&context);
 
 #if PG_VERSION_NUM >= 170000
 	finish_dead_items(vacrel);

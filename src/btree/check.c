@@ -96,6 +96,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	Assert(checkpoint_number > 0);
 
 	check_walk_btree(&status, desc->rootInfo.rootPageBlkno, OInvalidInMemoryBlkno);
+	free_page_find_context(&status.context);
 
 	if (status.hasError)
 		return false;

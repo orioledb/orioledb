@@ -421,6 +421,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * BTree can be already deleted and cleaned by
 		 * btree_relnode_undo_callback().
 		 */
+		free_page_find_context(&context);
 		return;
 	}
 
@@ -445,6 +446,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * was already "undone" earlier.
 		 */
 		unlock_page(blkno);
+		free_page_find_context(&context);
 		return;
 	}
 
@@ -459,6 +461,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * this might happend if operation was already "undone" earlier.
 		 */
 		unlock_page(blkno);
+		free_page_find_context(&context);
 		return;
 	}
 
@@ -482,6 +485,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	}
 	else
 		unlock_page(blkno);
+	free_page_find_context(&context);
 }
 
 /*
@@ -532,6 +536,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 		 * BTree can be already deleted and cleaned by
 		 * btree_relnode_undo_callback().
 		 */
+		free_page_find_context(&context);
 		return;
 	}
 
@@ -553,6 +558,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		/* Row already gone. Nothing to do. */
 		unlock_page(blkno);
+		free_page_find_context(&context);
 		return;
 	}
 
@@ -617,6 +623,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 		undoLocation = tuphdr.undoLocation;
 	}
 	unlock_page(blkno);
+	free_page_find_context(&context);
 }
 
 #define PENDING_TRUNCATES_FILENAME (ORIOLEDB_DATA_DIR "/pending_truncates")

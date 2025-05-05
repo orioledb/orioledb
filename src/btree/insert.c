@@ -283,6 +283,7 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 
 	o_btree_split_fill_downlink_item(&iitem, left_blkno, true);
 	o_btree_insert_item(&iitem, PPOOL_RESERVE_FIND);
+	free_page_find_context(iitem.context);
 }
 
 /*
