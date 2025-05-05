@@ -60,6 +60,7 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->index = 0;
 	context->flags = flags;
 	context->imgUndoLoc = InvalidUndoLocation;
+	context->img = NULL;
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
@@ -197,7 +198,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				 */
 				if (level <= targetLevel)
 				{
-					intCxt.pagePtr = context->img;
+					intCxt.pagePtr = context->img = context->imgData;
 					intCxt.partial = NULL;
 				}
 				else
@@ -211,7 +212,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				/*
 				 * In other cases we can use the img to hold a partial data.
 				 */
-				intCxt.pagePtr = context->img;
+				intCxt.pagePtr = context->img = context->imgData;
 				intCxt.partial = &context->partial;
 			}
 
@@ -679,7 +680,7 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	BTreeDescr *desc = context->desc;
 	OBTreeFindPageInternalContext intCxt;
 	BTreePageItemLocator loc;
-	char	   *img = context->img;
+	Pointer		img = context->img = context->parentImg;
 	bool		item_found = true;
 	Pointer		p;
 
