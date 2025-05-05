@@ -288,7 +288,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 		find_page(&scan->context, NULL, BTreeKeyNone, 1);
 
 	/* In case of parallel scan copy page image into shared state */
-	if (page != scan->context.img)
+	if (page)
 	{
 		Assert(scan->poscan);
 		memcpy(page, scan->context.img, ORIOLEDB_BLCKSZ);
@@ -297,6 +297,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	{
 		Assert(!scan->poscan);
 		scan->firstPageIsLoaded = true;
+		page = scan->context.img;
 	}
 
 	if (PAGE_GET_LEVEL(page) == 1)
@@ -605,7 +606,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				}
 
 				if (!load_next_internal_page(scan, scan->prevHikey.tuple,
-											 scan->context.img,
+											 NULL,
 											 &scan->intLoc,
 											 &scan->intStartOffset))
 				{
