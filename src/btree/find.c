@@ -42,6 +42,12 @@ static bool btree_find_read_page(OBTreeFindPageContext *context,
 								 OInMemoryBlkno blkno, uint32 pageChangeCount,
 								 bool parent, void *key, BTreeKeyType keyType,
 								 PartialPageState *partial);
+static bool btree_find_try_read_page(OBTreeFindPageContext *context,
+									 OInMemoryBlkno blkno,
+									 uint32 pageChangeCount, bool parent,
+									 void *key, BTreeKeyType keyType,
+									 PartialPageState *partial);
+
 static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 													Pointer key,
 													BTreeKeyType keyType);
@@ -112,7 +118,6 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				downlinkLocationFlag = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	bool		shmemIsReloaded = false;
 	Jsonb	   *params = NULL;
-	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 
 	memset(&intCxt, 0, sizeof(intCxt));
 	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
@@ -222,15 +227,12 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			{
 				ReadPageResult result;
 
-				if (!useParentImg)
-					intCxt.pagePtr = context->img = context->imgData;
-				else
-					intCxt.pagePtr = context->parentImg = context->parentImgData;
-
-				result = o_btree_try_read_page(desc, intCxt.blkno,
-											   intCxt.pageChangeCount, intCxt.pagePtr,
-											   context->csn, key, keyType, intCxt.partial,
-											   readCsn);
+				result = btree_find_try_read_page(context, intCxt.blkno,
+												  intCxt.pageChangeCount,
+												  useParentImg,
+												  key, keyType,
+												  intCxt.partial);
+				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (result == ReadPageResultWrongPageChangeCount)
 				{
 					wrongChangeCount = true;
@@ -242,10 +244,14 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 			else
 			{
-				if (!btree_find_read_page(context, intCxt.blkno,
-										  intCxt.pageChangeCount,
-										  useParentImg, key, keyType,
-										  intCxt.partial))
+				bool		result;
+
+				result = btree_find_read_page(context, intCxt.blkno,
+											  intCxt.pageChangeCount,
+											  useParentImg, key, keyType,
+											  intCxt.partial);
+				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
+				if (!result)
 				{
 					if (context->index == 0)
 					{
@@ -258,7 +264,6 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 					}
 				}
 			}
-			intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 		}
 
 
@@ -1172,13 +1177,36 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 								partial, &context->imgUndoLoc, readCsn);
 
 	if (!success)
-	{
 		return false;
-	}
 
 	if (lokey && !O_TUPLE_IS_NULL(lokey->tuple))
 		BTREE_PAGE_FIND_SET(context, LOKEY_UNDO);
 	return true;
+}
+
+/*
+ * Navigates and reads page image from undo log according to find context.
+ * Saves lokey of the founded page to context->lokey if needed.
+ */
+static bool
+btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
+						 uint32 pageChangeCount, bool parent, void *key,
+						 BTreeKeyType keyType, PartialPageState *partial)
+{
+	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
+	bool		success;
+	Pointer		pagePtr;
+
+	if (!parent)
+		pagePtr = context->img = context->imgData;
+	else
+		pagePtr = context->parentImg = context->parentImgData;
+
+	success = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
+									pagePtr, context->csn,
+									key, keyType, partial, readCsn);
+
+	return success;
 }
 
 void
