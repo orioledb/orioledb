@@ -33,9 +33,10 @@ struct PartialPageState
 typedef struct
 {
 	BTreeDescr *desc;
-	char		imgData[ORIOLEDB_BLCKSZ];
 	Pointer		img;
-	char		parentImg[ORIOLEDB_BLCKSZ];
+	Pointer		parentImg;
+	char		imgData[ORIOLEDB_BLCKSZ];
+	char		parentImgData[ORIOLEDB_BLCKSZ];
 	PartialPageState partial;
 	CommitSeqNo csn;
 	CommitSeqNo imgReadCsn;
