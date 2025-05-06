@@ -361,12 +361,5 @@ extern void o_btree_cleanup_pages(OInMemoryBlkno root, OInMemoryBlkno metaPageBl
 extern ItemPointerData btree_ctid_get_and_inc(BTreeDescr *desc);
 extern ItemPointerData btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow);
 extern void btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid);
-extern void btree_desc_stopevent_params_internal(BTreeDescr *desc,
-												 JsonbParseState **state);
-extern void btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
-												 JsonbParseState **state);
-extern Jsonb *btree_page_stopevent_params(BTreeDescr *desc, Page p);
-extern Jsonb *btree_downlink_stopevent_params(BTreeDescr *desc, Page p,
-											  BTreePageItemLocator *loc);
 
 #endif							/* __BTREE_H__ */
