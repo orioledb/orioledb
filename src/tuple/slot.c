@@ -1591,6 +1591,9 @@ tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 	bool		result = true;
 	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
+	if (descr->bridge)
+		ctid_off++;
+
 	slot_getallattrs(slot);
 
 	for (i = 0; i < descr->ntoastable; i++)

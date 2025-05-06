@@ -579,6 +579,12 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
 COMMIT;
 
+create table o_test_toastable_offset(i int, b int, a text, m int) using orioledb;
+alter table o_test_toastable_offset set (index_bridging=on);
+insert into o_test_toastable_offset values (4,6,'X',11);
+insert into o_test_toastable_offset values (1,3,'Y',12);
+delete from o_test_toastable_offset;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
