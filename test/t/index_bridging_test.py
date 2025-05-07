@@ -42,7 +42,7 @@ class IndexBridgingTest(BaseTest):
 			CREATE INDEX o_test_ix2 on o_test using btree (j);
 		""")
 
-		nrows = 2047  # max offset of ctid to overflow
+		nrows = 291  # MaxHeapTuplesPerPage
 		node.safe_psql("""
 			INSERT INTO o_test SELECT v, v FROM generate_series(1, %d) v;
 			ANALYZE o_test;
@@ -121,7 +121,7 @@ class IndexBridgingTest(BaseTest):
 		""")
 
 		all_rows = 0
-		nrows = 2047  # max offset of ctid to overflow
+		nrows = 291  # MaxHeapTuplesPerPage
 		node.safe_psql("""
 			INSERT INTO o_test SELECT v, 10000 + v, v FROM generate_series(1, %d) v;
 			ANALYZE o_test;
@@ -159,7 +159,7 @@ class IndexBridgingTest(BaseTest):
 		    expected_ctids, key=lambda ctid: int(ctid[0][1:-1].split(',')[1]))
 		check(expected_ctids)
 
-		nrows = 2047 - len(expected_ctids)
+		nrows = 291 - len(expected_ctids)
 		node.safe_psql("""
 			INSERT INTO o_test SELECT v * 4, %d + v, v FROM generate_series(1, %d) v;
 			ANALYZE o_test;
