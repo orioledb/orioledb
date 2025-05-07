@@ -7,11 +7,23 @@ setup
 		PRIMARY KEY (id)
 	) USING orioledb;
 	TRUNCATE o_iso_rr;
+
+	CREATE OR REPLACE PROCEDURE update_table(n integer)
+	LANGUAGE plpgsql AS $$
+	BEGIN
+	WHILE n > 0 LOOP
+		UPDATE o_iso_rr SET t = t::int + 1 WHERE id=1;
+		n = n - 1;
+		COMMIT;
+	END LOOP;
+	END;
+	$$;
 }
 
 teardown
 {
 	DROP TABLE o_iso_rr;
+	DROP PROCEDURE update_table;
 }
 
 session "s1"
@@ -57,6 +69,8 @@ step "s1_delete150" {
 step "s1_delete100" {
 	DELETE FROM o_iso_rr
 	WHERE id BETWEEN 100 and 140; }
+step "s1_update10000" { call update_table(10000); }
+step "s1_update100000" { call update_table(100000); }
 
 step "s1_select" { SELECT * FROM o_iso_rr; }
 step "s1_select20" {
@@ -90,6 +104,8 @@ step "s2_insert2" {
 	INSERT INTO o_iso_rr
 	SELECT i - 20, repeat('x', i) FROM generate_series(1, 15) AS i; }
 
+step "s2_insert_one" {
+	INSERT INTO o_iso_rr VALUES (1, '1'); }
 step "s2_delete_big" {
 	DELETE FROM o_iso_rr
 	WHERE id BETWEEN 1 and 100; }
@@ -110,6 +126,7 @@ step "s2_count200_end" {
 	SELECT count(*) FROM o_iso_rr WHERE id BETWEEN 301 and 500;
 	SELECT count(*) FROM o_iso_rr WHERE id > 300 and id < 501; }
 step "s2_count" { SELECT count(*) FROM o_iso_rr; }
+step "s2_select_one" { SELECT * FROM o_iso_rr WHERE id=1; }
 step "s2_rollback" { ROLLBACK; }
 step "s2_commit" { COMMIT; }
 
@@ -163,3 +180,5 @@ permutation "s1_insert_big1" "s1_begin" "s1_count200_end" "s2_begin" "s2_count20
 permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s1_count200_end" "s1_delete150" "s1_delete100" "s2_commit" "s1_rollback"
 permutation "s1_insert_big1" "s1_begin" "s1_count200_end" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_delete150" "s1_delete100" "s1_rollback"
 permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_count200_end" "s1_delete150" "s1_delete100" "s1_rollback"
+
+permutation "s2_insert_one" "s2_begin" "s2_select_one" "s1_update10000" "s1_update100000" "s2_commit"
