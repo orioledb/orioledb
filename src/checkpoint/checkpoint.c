@@ -839,6 +839,11 @@ finish_write_xids(uint32 chkpnum)
 		LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
 	}
 
+	if (enable_rewind)
+	{
+		checkpoint_write_rewind_xids();
+	}
+
 	recovery_undo_loc_flush->immediateRequestCheckpointNumber = chkpnum;
 
 	/*
@@ -849,6 +854,25 @@ finish_write_xids(uint32 chkpnum)
 	{
 		WakeupRecovery();
 		pg_usleep(10000L);
+	}
+}
+
+void
+checkpoint_write_rewind_item(RewindItem *rewindItem)
+{
+	XidFileRec      xidRec;
+	int i;
+
+	xidRec.oxid = rewindItem->oxid;
+		
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		xidRec.undoType = (UndoLogType) (i + XID_REC_REWIND_TYPES_OFFSET);
+		xidRec.undoLocation.onCommitLocation = rewindItem->undoStackLocation[i];
+		xidRec.undoLocation.location = InvalidUndoLocation;
+		xidRec.undoLocation.branchLocation = InvalidUndoLocation;
+		xidRec.undoLocation.subxactLocation = InvalidUndoLocation;
+		write_to_xids_queue(&xidRec);
 	}
 }
 
