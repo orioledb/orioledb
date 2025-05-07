@@ -1631,10 +1631,14 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 				if (idx->bridging && bridge_ctid)
 				{
 					OTableSlot *o_slot = (OTableSlot *) primarySlot;
+					BlockNumber max_block_number = MaxBlockNumber;
 
-					o_slot->bridge_ctid.ip_posid = (OffsetNumber) (*bridge_ctid + 1);
-					BlockIdSet(&o_slot->bridge_ctid.ip_blkid,
-							   (uint32) ((*bridge_ctid + 1) >> 16));
+					if (BlockNumberIsValid(max_bridge_ctid_blkno))
+						max_block_number = max_bridge_ctid_blkno;
+
+					ItemPointerSet(&o_slot->bridge_ctid,
+								   (uint32) ((*bridge_ctid) / MaxHeapTuplesPerPage % max_block_number),
+								   (OffsetNumber) ((*bridge_ctid) % MaxHeapTuplesPerPage + FirstOffsetNumber));
 					(*bridge_ctid)++;
 				}
 

@@ -300,11 +300,11 @@ btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 	if (BlockNumberIsValid(max_bridge_ctid_blkno))
 		max_block_number = max_bridge_ctid_blkno;
 
-	*overflow = ctid / (MaxOffsetNumber - FirstOffsetNumber) >= max_block_number;
+	*overflow = ctid / MaxHeapTuplesPerPage >= max_block_number;
 
 	ItemPointerSet(&result,
-				   (uint32) (ctid / (MaxOffsetNumber - FirstOffsetNumber) % max_block_number),
-				   (OffsetNumber) (ctid % (MaxOffsetNumber - FirstOffsetNumber) + FirstOffsetNumber));
+				   (uint32) (ctid / MaxHeapTuplesPerPage % max_block_number),
+				   (OffsetNumber) (ctid % MaxHeapTuplesPerPage + FirstOffsetNumber));
 	return result;
 }
 
