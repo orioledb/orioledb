@@ -1862,10 +1862,9 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	for (i = 0; i < oTable->nindices; i++)
 	{
 		/*
-		 * There is a memmove in drop_primary_index,
-		 * and also when dropping pkey for partition tables
-		 * it calls this function after removing index
-		 * from system catalogs
+		 * There is a memmove in drop_primary_index, and also when dropping
+		 * pkey for partition tables it calls this function after removing
+		 * index from system catalogs
 		 */
 		if (!drop_pkey || oTable->indices[i].type != oIndexPrimary)
 		{
