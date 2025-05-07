@@ -269,6 +269,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&undo_meta->writtenLocation, 0);
 			pg_atomic_init_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minRewindRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
 			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);

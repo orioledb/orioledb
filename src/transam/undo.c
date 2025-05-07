@@ -306,13 +306,13 @@ update_min_undo_locations(UndoLogType undoType,
 	 */
 	minReservedLocation = Max(pg_atomic_read_u64(&meta->minProcReservedLocation),
 							  minReservedLocation);
-	minRetainLocation = Max(pg_atomic_read_u64(&meta->minProcRetainLocation),
+	minRetainLocation = Max(pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation),
 							minRetainLocation);
 	minTransactionRetainLocation = Max(pg_atomic_read_u64(&meta->minProcTransactionRetainLocation),
 									   minTransactionRetainLocation);
 
 	pg_atomic_write_u64(&meta->minProcReservedLocation, minReservedLocation);
-	pg_atomic_write_u64(&meta->minProcRetainLocation, minRetainLocation);
+	pg_atomic_write_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation, minRetainLocation);
 	pg_atomic_write_u64(&meta->minProcTransactionRetainLocation, minTransactionRetainLocation);
 	pg_atomic_write_u64(&meta->lastUsedUndoLocationWhenUpdatedMinLocation, lastUsedLocation);
 
@@ -482,7 +482,7 @@ set_my_retain_location(UndoLogType undoType)
 		 * Retry if minimal positions run higher due to concurrent
 		 * update_min_undo_locations().
 		 */
-		if (pg_atomic_read_u64(&meta->minProcRetainLocation) > retainUndoLocation)
+		if (pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation) > retainUndoLocation)
 			continue;
 
 		break;
@@ -900,7 +900,7 @@ write_undo(UndoLogType undoType,
 
 	update_min_undo_locations(undoType, true, false);
 
-	retainUndoLocation = pg_atomic_read_u64(&meta->minProcRetainLocation);
+	retainUndoLocation = pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation);
 
 	if (targetUndoLocation <= retainUndoLocation ||
 		targetUndoLocation <= pg_atomic_read_u64(&meta->writtenLocation))
