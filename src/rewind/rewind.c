@@ -234,7 +234,7 @@ rewind_worker_main(Datum main_arg)
 			while (true)
 			{
 				UndoItemBuf 	buf;
-				uint64		location;
+				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 				int 		i;
 
 				if (rewindMeta->completePos == rewindMeta->addPos)
