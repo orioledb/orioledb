@@ -236,6 +236,8 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 		BTScanOpaque so = (BTScanOpaque) ostate.scandesc.opaque;
 
 		_bt_preprocess_keys(&ostate.scandesc);
+		if (!so->qual_ok)
+			return nTuples;
 		if (so->numArrayKeys)
 			_bt_start_array_keys(&ostate.scandesc, ForwardScanDirection);
 		ostate.curKeyRange.empty = true;
