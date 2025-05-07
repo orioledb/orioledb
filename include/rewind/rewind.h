@@ -18,12 +18,11 @@
 #define REWIND_FILE_SIZE (0x1000000)
 #define REWIND_BUFFERS_TAG (0)
 
-
 extern void register_rewind_worker(void);
 PGDLLEXPORT void rewind_worker_main(Datum);
 extern Size rewind_shmem_needs(void);
 extern void rewind_init_shmem(Pointer buf, bool found);
-
+extern void checkpoint_write_rewind_xids(void);
 extern void add_to_rewind_buffer(OXid oxid);
 
 typedef struct
@@ -33,6 +32,8 @@ typedef struct
 	TimestampTz			timestamp;
 } RewindItem;
 
+#define REWIND_DISK_BUFFER_LENGTH (ORIOLEDB_BLCKSZ / sizeof(RewindItem))
+
 typedef struct
 {
 	uint64		addPos;			    /* Added to circular buffer */
@@ -40,6 +41,7 @@ typedef struct
 	uint64		evictPos; 			/* Evict/restore position. Evict - left, restore - right */
 	uint64		writePos;			/* Written to disk buffers. Increments by bufferLength only */
 	uint64		readPos;			/* Read from disk buffer. Increments by bufferLength only */
+	uint64 		checkpointPos;			/* Already included into checkpoint. Start point for writing rewindItem-s into checkpoint. */
 	uint64		oldCleanedFileNum; 	/* Last removed buffer file number */
 	uint64 		freeSpace;			/* Free space in a circular buffer */
 } RewindMeta;
@@ -57,50 +59,50 @@ typedef struct
  *
  * 2. Evict extent to disk
  * Stage 1 (before inserting item that doesn't fit buffer)
- * 							    E
- *                  		    A
- *                  		    C
+ *                              E
+ *                              A
+ *                              C
  * |----------|------....|......----|---------|
  * Stage 2
  *                   E
  *                   A          C
  * |----------|------    |      ----|---------|
-
+ *
  * 3. Add more entries to ring buffer
- * 					 E	   A    C
+ *                   E     A    C
  * |----------|------====|=     ----|---------|
  *
  * 4. Remove entries
- * 			         E     A 	      C
+ *                   E     A 	      C
  * |----------|------====|=         | --------|
  *
  * 5. Restore extent from disk:
-
+ *
  * Stage 1 (shift last page part by one page right)
-			         E                A
-					 				  C
+ *                   E                A
+ *                                    C
  * |----------|------    |      ====|=--------|
  * Stage 2 (restore oldest disk page before the last circular buffer page)
- * 						 	    E     A
- * 						 	          C
+ *                              E     A
+ *                                    C
  * |----------|------++++|++++++====|=--------|
-
+ *
  * 6. Remove entries
- * 							    E	  A C
+ *                              E     A C
  * |----------|------++++|++++++====|=  ------|
  *
  * 7. Add more entries to ring buffer
- * 										A
- * 							    E		C
+ *                                      A
+ *                              E       C
  * |----------|------++++|++++++====|===------|
  *
  * 8. Evict extent to disk:
  * Stage 1
- * 										A
- * 				     E 	     	        C
+ *                                      A
+ *                   E                  C
  * |----------|------....|......====|===------|
  * Stage 2 (shift last page part by one page left)
- * 				     E 	     A 	        C
+ *                   E 	     A 	        C
  * |----------|------====|===       |   ------|
  */
  

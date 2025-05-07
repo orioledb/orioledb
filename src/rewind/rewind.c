@@ -32,6 +32,7 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timeout.h"
+#include "checkpoint/checkpoint.h"
 
 #include "pgstat.h"
 
@@ -167,7 +168,6 @@ rewind_worker_main(Datum main_arg)
 	int			rc,
 				wake_events = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT;
 	RewindItem  *rewindItem;
-	int			bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
 
 	/* enable timeout for relation lock */
 	RegisterTimeout(DEADLOCK_TIMEOUT, CheckDeadLockAlert);
@@ -264,9 +264,9 @@ rewind_worker_main(Datum main_arg)
 				/* Restore extent from disk (Operation 5 described in rewind/rewind.h) */
 				if (rewindMeta->readPos < rewindMeta->writePos)
 				{
-					Assert (rewindMeta->freeSpace <= bufferLength);
+					Assert (rewindMeta->freeSpace <= REWIND_DISK_BUFFER_LENGTH);
 
-					if (rewindMeta->freeSpace == bufferLength)
+					if (rewindMeta->freeSpace == REWIND_DISK_BUFFER_LENGTH)
 					{
 						int		start;
 						int 	length_to_end;
@@ -276,18 +276,18 @@ rewind_worker_main(Datum main_arg)
 						/* Stage 1. Shift last page part in a ring buffer have a page-sized space in a
 						 * circular buffer before it*/
 
-						for(int pos = rewindMeta->evictPos; pos < rewindMeta->addPos; pos++)
+						for(uint64 pos = rewindMeta->evictPos; pos < rewindMeta->addPos; pos++)
 						{
 							int src = pos % rewind_circular_buffer_size;
-							int dst = (pos + bufferLength) % rewind_circular_buffer_size;
+							int dst = (pos + REWIND_DISK_BUFFER_LENGTH) % rewind_circular_buffer_size;
 
 							Assert(rewindBuffer[dst].oxid == InvalidOXid);
 							memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
 						}
 
 						/* Shift addPos according to moving last page */
-						rewindMeta->addPos += bufferLength;
-						rewindMeta->freeSpace -= bufferLength;
+						rewindMeta->addPos += REWIND_DISK_BUFFER_LENGTH;
+						rewindMeta->freeSpace -= REWIND_DISK_BUFFER_LENGTH;
 
 						/*
 						 * Stage 2. Restore oldest written buffer page to a clean space before the
@@ -296,7 +296,7 @@ rewind_worker_main(Datum main_arg)
 						start = rewindMeta->evictPos % rewind_circular_buffer_size;
 						length_to_end = rewind_circular_buffer_size - start;
 
-						if (length_to_end <= bufferLength)
+						if (length_to_end <= REWIND_DISK_BUFFER_LENGTH)
 						{
 							o_buffers_read(&rewindBuffersDesc,
 									(Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
@@ -305,22 +305,22 @@ rewind_worker_main(Datum main_arg)
 							o_buffers_read(&rewindBuffersDesc,
 									(Pointer) &rewindBuffer[0], REWIND_BUFFERS_TAG,
 									(rewindMeta->readPos + length_to_end) * sizeof(RewindItem),
-									(bufferLength - length_to_end) * sizeof(RewindItem));
+									(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
 						}
 						else
 						{
 							o_buffers_read(&rewindBuffersDesc,
 								(Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
 								rewindMeta->readPos * sizeof(RewindItem),
-								bufferLength * sizeof(RewindItem));
+								REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 						}
 
 #ifdef USE_ASSERT_CHECKING
-						for(int pos = start; pos < start + bufferLength; pos++)
+						for(uint64 pos = start; pos < start + REWIND_DISK_BUFFER_LENGTH; pos++)
 							Assert(rewindBuffer[pos % rewind_circular_buffer_size].oxid != InvalidOXid);
 #endif
-						rewindMeta->evictPos += bufferLength;
-						rewindMeta->readPos += bufferLength;
+						rewindMeta->evictPos += REWIND_DISK_BUFFER_LENGTH;
+						rewindMeta->readPos += REWIND_DISK_BUFFER_LENGTH;
 
 						/* Clean old buffer files if needed */
 						itemsPerFile = REWIND_FILE_SIZE / sizeof(RewindItem);
@@ -362,8 +362,7 @@ add_to_rewind_buffer(OXid oxid)
 		/* Evict page from a ring buffer to disk. (Operation 8 described in rewind/rewind.h) */
 		if (rewindMeta->freeSpace == 0)
 		{
-			int bufferLength = ORIOLEDB_BLCKSZ / sizeof(RewindItem);
-			int pos;
+			uint64 pos;
 			int start;
 			int length_to_end;
 			int oldEvictPos;
@@ -371,14 +370,14 @@ add_to_rewind_buffer(OXid oxid)
 			if (rewindMeta->evictPos == InvalidRewindPos)
 				rewindMeta->evictPos = rewindMeta->addPos;
 
-			/* Stage 1. Shift evictPos and write bufferLength number of records to disk  */
+			/* Stage 1. Shift evictPos and write REWIND_DISK_BUFFER_LENGTH number of records to disk  */
 			oldEvictPos = rewindMeta->evictPos;
-			rewindMeta->evictPos -= bufferLength;
+			rewindMeta->evictPos -= REWIND_DISK_BUFFER_LENGTH;
 
 			start = (rewindMeta->evictPos % rewind_circular_buffer_size);
 			length_to_end = rewind_circular_buffer_size - start;
 
-			if (length_to_end < bufferLength)
+			if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 			{
 				o_buffers_write(&rewindBuffersDesc,
 							(Pointer) &rewindBuffer[start],
@@ -390,7 +389,7 @@ add_to_rewind_buffer(OXid oxid)
 							(Pointer) &rewindBuffer[0],
 							REWIND_BUFFERS_TAG,
 							(rewindMeta->writePos + length_to_end) * sizeof(RewindItem),
-							(bufferLength - length_to_end) * sizeof(RewindItem));
+							(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
 			}
 			else
 			{
@@ -398,12 +397,12 @@ add_to_rewind_buffer(OXid oxid)
 							(Pointer) &rewindBuffer[start],
 							REWIND_BUFFERS_TAG,
 							rewindMeta->writePos * sizeof(RewindItem),
-							bufferLength * sizeof(RewindItem));
+							REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 			}
-			rewindMeta->writePos += bufferLength;
+			rewindMeta->writePos += REWIND_DISK_BUFFER_LENGTH;
 
 			/* Clean written items from ring buffer */
-			for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + bufferLength; pos++)
+			for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + REWIND_DISK_BUFFER_LENGTH; pos++)
 			{
 				rewindBuffer[(pos % rewind_circular_buffer_size)].oxid = InvalidOXid;
 			}
@@ -412,15 +411,15 @@ add_to_rewind_buffer(OXid oxid)
 			for (pos = oldEvictPos; pos < rewindMeta->addPos; pos++)
 			{
 				int src = pos % rewind_circular_buffer_size;
-				int dst = (pos - bufferLength)  % rewind_circular_buffer_size;
+				int dst = (pos - REWIND_DISK_BUFFER_LENGTH)  % rewind_circular_buffer_size;
 
 				memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
 				rewindBuffer[src].oxid = InvalidOXid;
 			}
 
 			/* Continue to add from the beginning of last clean page in ring buffer */
-			rewindMeta->addPos -= bufferLength;
-			rewindMeta->freeSpace += bufferLength;
+			rewindMeta->addPos -= REWIND_DISK_BUFFER_LENGTH;
+			rewindMeta->freeSpace += REWIND_DISK_BUFFER_LENGTH;
 		}
 
 		/* Fill entry in a circular buffer. */
@@ -439,3 +438,51 @@ add_to_rewind_buffer(OXid oxid)
 
 		rewindMeta->addPos++;
 }
+
+/* 
+ * Write rewind records from circular in-memory rewind buffer and on-disk rewind buffer
+ * to xid buffer at checkpoint.
+ */
+void
+checkpoint_write_rewind_xids(void)
+{
+		int i;
+		uint64	pos;
+		uint64	start;
+		uint64 finish1;
+
+		/* Start from the last non-completed position not written to checkpoint yet */
+		if (rewindMeta->checkpointPos == InvalidRewindPos)
+			rewindMeta->checkpointPos = rewindMeta->completePos;
+
+		start = Max(rewindMeta->completePos, rewindMeta->checkpointPos);
+		finish1 = (rewindMeta->evictPos == InvalidRewindPos) ? rewindMeta->addPos : rewindMeta->evictPos;
+
+		/* Write rewind records from in-memory rewind buffer (before evicted records) */ 
+		for (pos = start; pos < finish1; pos++)
+			checkpoint_write_rewind_item(&rewindBuffer[pos % rewind_circular_buffer_size]);
+
+		/* Write rewind records from on-disk buffer if they exist */
+		for (pos = rewindMeta->readPos; pos < rewindMeta->writePos; pos += REWIND_DISK_BUFFER_LENGTH)
+		{
+			RewindItem  buffer[REWIND_DISK_BUFFER_LENGTH];
+
+			o_buffers_read(&rewindBuffersDesc,
+				       (Pointer) &buffer, REWIND_BUFFERS_TAG,
+				       rewindMeta->readPos * sizeof(RewindItem),
+				       REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+			
+			for(i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
+			{
+				Assert(pos + i < rewindMeta->writePos);
+				checkpoint_write_rewind_item(&buffer[pos + i]);
+			}
+		}
+
+		/* Write rewind records from in-memory rewind buffer (after evicted records if they exist) */
+		for (pos = finish1; pos < rewindMeta->addPos; pos++)
+			checkpoint_write_rewind_item(&rewindBuffer[pos % rewind_circular_buffer_size]);
+
+		rewindMeta->checkpointPos = pos;
+}
+
