@@ -115,7 +115,17 @@ rewind_init_shmem(Pointer ptr, bool found)
 			rewindBuffer[i].oxid = InvalidOXid;
 			rewindBuffer[i].timestamp = 0;
 			for (j = 0; j < (int) UndoLogsCount; j++)
+			{
 				rewindBuffer[i].undoStackLocation[j] = InvalidUndoLocation;
+				rewindBuffer[i].minRetainLocation[j] = 0;
+			}
+		}
+
+		for (j = 0; j < (int) UndoLogsCount; j++)
+		{
+			UndoMeta *undoMeta = get_undo_meta_by_type((UndoLogType) j);
+
+			pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, pg_atomic_read_u64(&undoMeta->minProcRetainLocation));
 		}
 
 	//	rewindMeta->rewindMapTrancheId = LWLockNewTrancheId();
@@ -128,6 +138,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->completePos = 0;
 		rewindMeta->oldCleanedFileNum = 0;
 		rewindMeta->freeSpace = rewind_circular_buffer_size;
+
 
 		/* Rewind buffers are not persistent */
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
@@ -248,12 +259,15 @@ rewind_worker_main(Datum main_arg)
 				clear_rewind_oxid(rewindItem->oxid);
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
+					UndoMeta *undoMeta = get_undo_meta_by_type((UndoLogType) i);
+
 					init_undo_item_buf(&buf);
 					location = walk_undo_range((UndoLogType) i, rewindItem->undoStackLocation[i], InvalidUndoLocation,
 										   &buf, rewindItem->oxid, false, NULL,
 										   true);
 					Assert(!UndoLocationIsValid(location));
 					free_undo_item_buf(&buf);
+					pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 				}
 
 				/* Clear the item from the circular buffer */
@@ -432,8 +446,11 @@ add_to_rewind_buffer(OXid oxid)
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
+			UndoMeta *undoMeta = get_undo_meta_by_type((UndoLogType) i);
+
 			UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 			rewindItem->undoStackLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+			rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 		}
 
 		rewindMeta->addPos++;

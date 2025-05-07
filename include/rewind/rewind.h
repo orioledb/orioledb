@@ -29,6 +29,7 @@ typedef struct
 {
 	OXid				oxid;
 	uint64				undoStackLocation[UndoLogsCount];
+	uint64				minRetainLocation[UndoLogsCount];
 	TimestampTz			timestamp;
 } RewindItem;
 

@@ -47,6 +47,7 @@ typedef struct
 	pg_atomic_uint64 lastUsedUndoLocationWhenUpdatedMinLocation;
 	pg_atomic_uint64 minProcTransactionRetainLocation;
 	pg_atomic_uint64 minProcRetainLocation;
+	pg_atomic_uint64 minRewindRetainLocation;
 	pg_atomic_uint64 minProcReservedLocation;
 	pg_atomic_uint64 checkpointRetainStartLocation;
 	pg_atomic_uint64 checkpointRetainEndLocation;
@@ -149,7 +150,7 @@ extern PendingTruncatesMeta *pending_truncates_meta;
 #define ORIOLEDB_UNDO_SYSTEM_FILENAME_TEMPLATE (ORIOLEDB_UNDO_DIR "/%02X%08Xsystem")
 #define UNDO_FILE_SIZE (0x4000000)
 
-#define UNDO_REC_EXISTS(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcRetainLocation) || \
+#define UNDO_REC_EXISTS(undoType, location) ((location) >= pg_atomic_read_u64(enable_rewind ? &get_undo_meta_by_type((undoType))->minRewindRetainLocation : &get_undo_meta_by_type((undoType))->minProcRetainLocation) || \
 											 ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainStartLocation) && \
 											  (location) < pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->checkpointRetainEndLocation)))
 #define UNDO_REC_XACT_RETAIN(undoType, location) ((location) >= pg_atomic_read_u64(&get_undo_meta_by_type((undoType))->minProcTransactionRetainLocation))
