@@ -10,6 +10,8 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "c.h"
+#include "lib/ilist.h"
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -19,6 +21,8 @@
 #include "btree/io.h"
 #include "btree/page_chunks.h"
 #include "tableam/descr.h"
+#include "utils/dsa.h"
+#include "utils/palloc.h"
 #include "utils/stopevent.h"
 
 #include "access/transam.h"
@@ -36,6 +40,32 @@ typedef struct
 	bool		haveLock;
 } OBTreeFindPageInternalContext;
 
+struct OPageCacheEntry
+{
+	dlist_node	node;
+	OInMemoryBlkno blkno;
+	uint32		changeCount;
+	uint32		pageChangeCount;
+	int			numAccesses;
+	int			pinCount;
+	Pointer		data;
+};
+
+#define O_PAGE_CACHE_BUCKET_SIZE	(4)
+#define MAX_NUM_ACCESSES (10)
+#define CACHE_NUM_ACCESSES (5)
+
+typedef struct
+{
+	OPageCacheEntry	(*entries)[O_PAGE_CACHE_BUCKET_SIZE];
+	dlist_head	recentPagesHead;
+	int			numCachedPages;
+	int			maxNumCachedPages;
+	MemoryContext mcxt;
+} OPageCache;
+
+static OPageCache cache;
+
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
 static void step_upward_level(OBTreeFindPageInternalContext *intCxt);
 static bool btree_find_read_page(OBTreeFindPageContext *context,
@@ -52,6 +82,200 @@ static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 													Pointer key,
 													BTreeKeyType keyType);
 
+
+void
+init_local_page_cache(void)
+{
+	int		i, j;
+
+	cache.mcxt = AllocSetContextCreate(TopMemoryContext,
+									   "OrioleDB local page cache memory context",
+									   ALLOCSET_DEFAULT_SIZES);
+	cache.maxNumCachedPages = (((Size) local_cache_size_guc) * BLCKSZ) / ORIOLEDB_BLCKSZ;
+	cache.numCachedPages = 0;
+	cache.entries = (OPageCacheEntry (*)[O_PAGE_CACHE_BUCKET_SIZE]) MemoryContextAllocZero(cache.mcxt,
+																						   sizeof(OPageCacheEntry) * O_PAGE_CACHE_BUCKET_SIZE * cache.maxNumCachedPages);
+	dlist_init(&cache.recentPagesHead);
+
+	for (i = 0; i < cache.maxNumCachedPages; i++)
+	{
+		for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
+			cache.entries[i][j].blkno = OInvalidInMemoryBlkno;
+	}
+}
+
+static OPageCacheEntry *
+search_local_cache(OInMemoryBlkno blkno)
+{
+	Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
+	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
+	int		i, j;
+
+	i = blkno % cache.maxNumCachedPages;
+
+	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
+	{
+		OPageCacheEntry *entry = &cache.entries[i][j];
+		if (entry->blkno == blkno)
+		{
+			if (entry->pageChangeCount == header->pageChangeCount &&
+				entry->changeCount == (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK))
+			{
+				return entry;
+			}
+			else
+			{
+				entry->blkno = OInvalidInMemoryBlkno;
+				if (entry->data)
+				{
+					if (entry->pinCount <= 0)
+					{
+						pfree(entry->data);
+						entry->data = NULL;
+					}
+					dlist_delete_from(&cache.recentPagesHead, &entry->node);
+					cache.numCachedPages--;
+				}
+				return NULL;
+			}
+		}
+	}
+	return NULL;
+}
+
+static OPageCacheEntry *
+local_cache_find_victim(OInMemoryBlkno blkno)
+{
+	int		i, j, victim = -1;
+
+	i = blkno % cache.maxNumCachedPages;
+
+	/* First pass: search for OInvalidInMemoryBlkno */
+	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
+	{
+		OPageCacheEntry *entry = &cache.entries[i][j];
+
+		if (entry->pinCount > 0)
+			continue;
+
+		if (entry->blkno == OInvalidInMemoryBlkno)
+			return entry;
+	}
+
+	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
+	{
+		OPageCacheEntry *entry = &cache.entries[i][j];
+
+		if (entry->numAccesses > 0)
+			entry->numAccesses--;
+
+		if (entry->pinCount == 0 && entry->numAccesses == 0)
+			victim = j;
+	}
+
+	return &cache.entries[i][victim];
+}
+
+static OPageCacheEntry *
+search_pin_local_cache(OInMemoryBlkno blkno)
+{
+	Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
+	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
+	OPageCacheEntry *entry;
+
+	entry = search_local_cache(blkno);
+
+	if (entry)
+	{
+		if (entry->numAccesses < MAX_NUM_ACCESSES)
+			entry->numAccesses++;
+
+		if (entry->data)
+		{
+			dlist_move_head(&cache.recentPagesHead, &entry->node);
+			entry->pinCount++;
+			return entry;
+		}
+
+		if (!entry->data && entry->numAccesses >= CACHE_NUM_ACCESSES)
+		{
+			Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
+			OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
+
+			entry->data = (Pointer) MemoryContextAllocZero(cache.mcxt,
+														   ORIOLEDB_BLCKSZ);
+			memcpy(entry->data, page, ORIOLEDB_BLCKSZ);
+
+			pg_read_barrier();
+
+			if (entry->pageChangeCount == header->pageChangeCount &&
+				entry->changeCount == (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK))
+			{
+				dlist_push_head(&cache.recentPagesHead, &entry->node);
+				cache.numCachedPages++;
+				while (cache.numCachedPages >= cache.maxNumCachedPages)
+				{
+					OPageCacheEntry *oldEntry;
+
+					oldEntry = (OPageCacheEntry *) dlist_tail_node(&cache.recentPagesHead);
+					Assert(oldEntry->data);
+
+					if (oldEntry->pinCount > 0)
+						break;
+
+					pfree(oldEntry->data);
+					oldEntry->data = NULL;
+					dlist_delete_from(&cache.recentPagesHead, &oldEntry->node);
+					cache.numCachedPages--;
+				}
+				entry->pinCount++;
+				return entry;
+			}
+			else
+			{
+				pfree(entry->data);
+				entry->blkno = OInvalidInMemoryBlkno;
+				return NULL;
+			}
+		}
+		return NULL;
+	}
+
+	entry = local_cache_find_victim(blkno);
+	Assert(entry->pinCount == 0);
+	if (entry->data)
+	{
+		pfree(entry->data);
+		entry->data = NULL;
+		if (entry->blkno != OInvalidInMemoryBlkno)
+		{
+			dlist_delete_from(&cache.recentPagesHead, &entry->node);
+			cache.numCachedPages--;
+		}
+	}
+
+	entry->blkno = 0;
+	entry->pageChangeCount = header->pageChangeCount;
+	entry->changeCount = (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK);
+	entry->numAccesses = 1;
+	return NULL;
+}
+
+static void
+unpin_local_cache(OPageCacheEntry *entry)
+{
+	entry->pinCount--;
+	Assert(entry->pinCount >= 0);
+
+	if (entry->pinCount == 0 &&
+		entry->blkno == OInvalidInMemoryBlkno &&
+		entry->data)
+	{
+		pfree(entry->data);
+		entry->data = NULL;
+	}
+}
+
 /*
  * Initialize B-tree page find context.
  */
@@ -67,13 +291,19 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->flags = flags;
 	context->imgUndoLoc = InvalidUndoLocation;
 	context->img = NULL;
+	context->imgEntry = NULL;
+	context->parentImg = NULL;
+	context->parentImgEntry = NULL;
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
 void
 free_page_find_context(OBTreeFindPageContext *context)
 {
-
+	if (context->imgEntry)
+		unpin_local_cache(context->imgEntry);
+	if (context->parentImgEntry)
+		unpin_local_cache(context->parentImgEntry);
 }
 
 /*--
@@ -1148,6 +1378,82 @@ btree_find_context_lokey(OBTreeFindPageContext *context)
 	}
 }
 
+static Pointer
+set_page_ptr(OBTreeFindPageContext *context, bool parent)
+{
+	Pointer		pagePtr;
+
+	if (!parent)
+	{
+		if (context->imgEntry)
+			unpin_local_cache(context->imgEntry);
+		context->imgEntry = NULL;
+		pagePtr = context->img = context->imgData;
+	}
+	else
+	{
+		if (context->parentImgEntry)
+			unpin_local_cache(context->parentImgEntry);
+		context->parentImgEntry = NULL;
+		pagePtr = context->parentImg = context->parentImgData;
+	}
+	return pagePtr;
+}
+
+static bool
+btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
+						 uint32 pageChangeCount, bool parent, void *key,
+						 BTreeKeyType keyType)
+{
+	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
+	Pointer		pagePtr;
+	OPageCacheEntry *entry;
+	BTreePageHeader *header;
+
+	entry = search_pin_local_cache(blkno);
+	if (!entry)
+		return false;
+
+	pagePtr = entry->data;
+	header = (BTreePageHeader *) pagePtr;
+
+	if (O_PAGE_IS(pagePtr, LEAF) &&
+		COMMITSEQNO_IS_NORMAL(context->csn) &&
+		header->csn >= context->csn)
+	{
+		pagePtr = set_page_ptr(context, parent);
+
+		read_page_from_undo(context->desc, pagePtr,
+							header->undoLocation, context->csn,
+							key, keyType, NULL);
+
+		header = (BTreePageHeader *) pagePtr;
+		header->o_header.pageChangeCount = pageChangeCount;
+		if (readCsn)
+			*readCsn = header->csn;
+
+		unpin_local_cache(entry);
+	}
+
+	if (!parent)
+	{
+		if (context->imgEntry)
+			unpin_local_cache(context->imgEntry);
+
+		context->imgEntry = entry;
+		context->img = pagePtr;
+	}
+	else
+	{
+		if (context->parentImgEntry)
+			unpin_local_cache(context->parentImgEntry);
+
+		context->parentImgEntry = entry;
+		context->parentImg = pagePtr;
+	}
+	return true;
+}
+
 /*
  * Navigates and reads page image from undo log according to find context.
  * Saves lokey of the founded page to context->lokey if needed.
@@ -1163,10 +1469,11 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	bool		success;
 	Pointer		pagePtr;
 
-	if (!parent)
-		pagePtr = context->img = context->imgData;
-	else
-		pagePtr = context->parentImg = context->parentImgData;
+	if (local_cache_size_guc > 0 &&
+		btree_find_page_in_cache(context, blkno, pageChangeCount, parent, key, keyType))
+		return true;
+
+	pagePtr = set_page_ptr(context, parent);
 
 	BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
 	if (lokey)
@@ -1197,10 +1504,11 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	bool		success;
 	Pointer		pagePtr;
 
-	if (!parent)
-		pagePtr = context->img = context->imgData;
-	else
-		pagePtr = context->parentImg = context->parentImgData;
+	if (local_cache_size_guc > 0 &&
+		btree_find_page_in_cache(context, blkno, pageChangeCount, parent, key, keyType))
+		return true;
+
+	pagePtr = set_page_ptr(context, parent);
 
 	success = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
 									pagePtr, context->csn,
