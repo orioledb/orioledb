@@ -30,11 +30,15 @@ struct PartialPageState
 	bool		chunkIsLoaded[BTREE_PAGE_MAX_CHUNKS];
 };
 
+typedef struct OPageCacheEntry OPageCacheEntry;
+
 typedef struct
 {
 	BTreeDescr *desc;
 	Pointer		img;
 	Pointer		parentImg;
+	OPageCacheEntry *imgEntry;
+	OPageCacheEntry *parentImgEntry;
 	char		imgData[ORIOLEDB_BLCKSZ];
 	char		parentImgData[ORIOLEDB_BLCKSZ];
 	PartialPageState partial;
@@ -79,6 +83,7 @@ typedef struct
 #define BTREE_PAGE_FIND_UNSET(context, flag) ((context)->flags &= ~(BTREE_PAGE_FIND_##flag))
 #define BTREE_PAGE_FIND_IS(context, flag) (((context)->flags & BTREE_PAGE_FIND_##flag)? true : false)
 
+extern void init_local_page_cache(void);
 extern bool btree_page_search(BTreeDescr *desc, Page p, Pointer key,
 							  BTreeKeyType keyType, PartialPageState *partial,
 							  BTreePageItemLocator *locator);
