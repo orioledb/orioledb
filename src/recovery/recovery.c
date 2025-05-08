@@ -545,8 +545,24 @@ apply_xids_branches(void)
 														 node,
 														 iter.cur);
 
-			set_cur_undo_locations(stack->undoType, stack->undoStack);
-			apply_undo_branches(stack->undoType, recovery_oxid);
+			if ((int) (stack->undoType) < UndoLogsCount)
+			{
+				set_cur_undo_locations(stack->undoType, stack->undoStack);
+				apply_undo_branches(stack->undoType, recovery_oxid);
+			}
+			else
+			{
+				UndoItemBuf     buf;
+				uint64          location PG_USED_FOR_ASSERTS_ONLY;	
+
+				init_undo_item_buf(&buf);	
+				location = walk_undo_range((UndoLogType)((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
+					       	stack->undoStack.onCommitLocation,
+					       	InvalidUndoLocation, &buf, recovery_oxid, false, NULL, true);
+				// NB rewindItem->oxid is not used in recovery
+				Assert(!UndoLocationIsValid(location));
+				free_undo_item_buf(&buf);
+			}
 		}
 	}
 
@@ -957,21 +973,24 @@ walk_checkpoint_stacks(CommitSeqNo csn,
 													 node,
 													 miter.cur);
 
-		set_cur_undo_locations(stack->undoType, stack->undoStack);
-		if (flushUndoPos)
-			flush_current_undo_stack();
-		if (COMMITSEQNO_IS_ABORTED(csn))
+		if ((int) (stack->undoType) < UndoLogsCount)
 		{
-			if (parentSubid == InvalidSubTransactionId)
-				apply_undo_stack(stack->undoType, recovery_oxid,
-								 NULL, false);
+			set_cur_undo_locations(stack->undoType, stack->undoStack);
+			if (flushUndoPos)
+				flush_current_undo_stack();
+			if (COMMITSEQNO_IS_ABORTED(csn))
+			{
+				if (parentSubid == InvalidSubTransactionId)
+					apply_undo_stack(stack->undoType, recovery_oxid,
+									 NULL, false);
+				else
+					rollback_to_savepoint(stack->undoType, UndoStackHead,
+										  parentSubid, false);
+			}
 			else
-				rollback_to_savepoint(stack->undoType, UndoStackHead,
-									  parentSubid, false);
-		}
-		else
-		{
-			on_commit_undo_stack(stack->undoType, recovery_oxid, false);
+			{
+				on_commit_undo_stack(stack->undoType, recovery_oxid, false);
+			}
 		}
 		dlist_delete(miter.cur);
 		pfree(stack);
