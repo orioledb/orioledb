@@ -35,6 +35,7 @@ typedef struct ODatabase
 	char	   *datlocale;
 	char	   *daticurules;
 #endif
+	char	   *datcollate;
 } ODatabase;
 
 static void o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
@@ -76,10 +77,8 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	ODatabase  *o_database = (ODatabase *) *entry_ptr;
 	MemoryContext prev_context;
 	Oid			dboid;
-#if PG_VERSION_NUM >= 170000
 	Datum		datum;
 	bool		isNull;
-#endif
 
 	dboid = DatumGetObjectId(key->keys[0]);
 
@@ -101,6 +100,13 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 
 	o_database->encoding = dbform->encoding;
 	o_database->datlocprovider = dbform->datlocprovider;
+
+	datum = SysCacheGetAttr(DATABASEOID, databasetup,
+							Anum_pg_database_datcollate, &isNull);
+	if (!isNull)
+		o_database->datcollate = TextDatumGetCString(datum);
+	else
+		o_database->datcollate = NULL;
 
 #if PG_VERSION_NUM >= 170000
 	datum = SysCacheGetAttr(DATABASEOID, databasetup,
@@ -181,6 +187,26 @@ o_database_cache_set_default_locale_provider()
 }
 #endif
 
+void
+o_database_cache_set_lc_collate()
+{
+	XLogRecPtr	cur_lsn;
+	ODatabase  *o_database;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+	o_database = o_database_cache_search(Template1DbOid, Template1DbOid, cur_lsn,
+										 database_cache->nkeys);
+	if (o_database && o_database->datcollate)
+	{
+		if (pg_perm_setlocale(LC_COLLATE, o_database->datcollate) == NULL)
+			ereport(FATAL,
+					(errmsg("database locale is incompatible with operating system"),
+					 errdetail("The database was initialized with LC_COLLATE \"%s\", "
+							   " which is not recognized by setlocale().", o_database->datcollate),
+					 errhint("Recreate the database with another locale or install the missing locale.")));
+	}
+}
+
 Pointer
 o_database_cache_serialize_entry(Pointer entry, int *len)
 {
@@ -198,8 +224,9 @@ o_database_cache_serialize_entry(Pointer entry, int *len)
 	o_serialize_string(o_database->daticurules, &str);
 #else
 	appendBinaryStringInfo(&str, ((Pointer) o_database) + offsetof(ODatabase, datlocprovider),
-						   sizeof(ODatabase) - offsetof(ODatabase, datlocprovider));
+						   offsetof(ODatabase, datcollate) - offsetof(ODatabase, datlocprovider));
 #endif
+	o_serialize_string(o_database->datcollate, &str);
 
 	*len = str.len;
 	return str.data;
@@ -222,7 +249,7 @@ o_database_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 #if PG_VERSION_NUM >= 170000
 	len = offsetof(ODatabase, datlocale) - offsetof(ODatabase, datlocprovider);
 #else
-	len = sizeof(ODatabase) - offsetof(ODatabase, datlocprovider);
+	len = offsetof(ODatabase, datcollate) - offsetof(ODatabase, datlocprovider);
 #endif
 	Assert((ptr - data) + len <= length);
 	memcpy(((Pointer) o_database) + offsetof(ODatabase, datlocprovider), ptr, len);
@@ -232,6 +259,9 @@ o_database_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 	o_database->datlocale = o_deserialize_string(&ptr);
 	o_database->daticurules = o_deserialize_string(&ptr);
 #endif
+
+	if ((ptr - data) != length)
+		o_database->datcollate = o_deserialize_string(&ptr);
 
 	return (Pointer) o_database;
 }

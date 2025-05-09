@@ -622,6 +622,7 @@ extern void o_database_cache_set_database_encoding(void);
 #if PG_VERSION_NUM >= 170000
 extern void o_database_cache_set_default_locale_provider(void);
 #endif
+extern void o_database_cache_set_lc_collate(void);
 
 static inline void
 o_set_sys_cache_search_datoid(Oid datoid)
@@ -635,6 +636,7 @@ o_set_sys_cache_search_datoid(Oid datoid)
 #if PG_VERSION_NUM >= 170000
 			o_database_cache_set_default_locale_provider();
 #endif
+			o_database_cache_set_lc_collate();
 		}
 	}
 }
