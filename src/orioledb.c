@@ -340,7 +340,7 @@ _PG_init(void)
 							"Size of local cache of recentrly used pages.",
 							NULL,
 							&local_cache_size_guc,
-							0,
+							1024,
 							0,
 							INT_MAX,
 							PGC_POSTMASTER,

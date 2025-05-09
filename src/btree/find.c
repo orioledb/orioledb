@@ -54,6 +54,7 @@ struct OPageCacheEntry
 #define O_PAGE_CACHE_BUCKET_SIZE	(4)
 #define MAX_NUM_ACCESSES (10)
 #define CACHE_NUM_ACCESSES (5)
+#define CACHE_N_TRIES (10)
 
 typedef struct
 {
@@ -173,7 +174,7 @@ local_cache_find_victim(OInMemoryBlkno blkno)
 			victim = j;
 	}
 
-	return &cache.entries[i][victim];
+	return (victim >= 0) ? &cache.entries[i][victim] : NULL;
 }
 
 static OPageCacheEntry *
@@ -182,6 +183,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 	Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
 	OPageCacheEntry *entry;
+	static int	ntries = 0;
 
 	entry = search_local_cache(blkno);
 
@@ -194,6 +196,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 		{
 			dlist_move_head(&cache.recentPagesHead, &entry->node);
 			entry->pinCount++;
+			//elog(LOG, "fetch from cache level %u", PAGE_GET_LEVEL(page));
 			return entry;
 		}
 
@@ -241,7 +244,12 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 		return NULL;
 	}
 
+	if ((ntries++) % CACHE_N_TRIES != 0)
+		return NULL;
+
 	entry = local_cache_find_victim(blkno);
+	if (!entry)
+		return NULL;
 	Assert(entry->pinCount == 0);
 	if (entry->data)
 	{
@@ -254,7 +262,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 		}
 	}
 
-	entry->blkno = 0;
+	entry->blkno = blkno;
 	entry->pageChangeCount = header->pageChangeCount;
 	entry->changeCount = (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK);
 	entry->numAccesses = 1;
