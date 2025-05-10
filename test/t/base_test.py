@@ -1,24 +1,76 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import unittest
-import testgres
-import sys
+import base64
+import hashlib
+import inspect
 import os
 import random
 import re
-import string
-import time
-import hashlib
-import base64
-import inspect
 import shutil
-from tempfile import mkdtemp
-from typing import Any
+import socket
+import string
+import sys
+import testgres
+import time
+import typing
+import unittest
 
 from threading import Thread
 from testgres.enums import NodeStatus
+from testgres.exceptions import PortForException
+from testgres.node import PostgresNode
+from testgres.operations.os_ops import OsOperations, ConnectionParams
+from testgres.port_manager import PortManager__Generic
 from testgres.utils import get_pg_version, get_pg_config
+from typing import Any
+
+
+class TestPortManager(PortManager__Generic):
+
+	def __init__(self, os_ops: OsOperations, base_port: int):
+		super().__init__(os_ops)
+		self._available_ports: typing.Set[int] = set(
+		    [base_port, base_port + 1])
+
+	def is_port_free(self, port: int):
+		port_free = port in self._available_ports
+
+		if port_free:
+			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				try:
+					s.bind(("", port))
+					return True
+				except OSError:
+					return False
+		return False
+
+	def reserve_port(self) -> int:
+		assert self._guard is not None
+		assert type(self._available_ports) == set  # noqa: E721t
+		assert type(self._reserved_ports) == set  # noqa: E721
+
+		with self._guard:
+			t = tuple(self._available_ports)
+			assert len(t) == len(self._available_ports)
+			t = None
+
+			for port in self._available_ports:
+				assert not (port in self._reserved_ports)
+
+				port_free = self.is_port_free(port)
+
+				if not port_free:
+					continue
+
+				self._reserved_ports.add(port)
+				self._available_ports.discard(port)
+				assert port in self._reserved_ports
+				assert not (port in self._available_ports)
+				return port
+
+		raise PortForException("Can't select a port.")
 
 
 class BaseTest(unittest.TestCase):
@@ -53,7 +105,6 @@ class BaseTest(unittest.TestCase):
 				shutil.rmtree(baseDir)
 			replica = self.node.backup(
 			    base_dir=baseDir).spawn_replica('replica')
-			replica.port = self.getBasePort() + 1
 			replica.append_conf(port=replica.port)
 			self.replica = replica
 		return self.replica
@@ -69,14 +120,18 @@ class BaseTest(unittest.TestCase):
 
 		return restoredNode
 
-	def initNode(self, port, suffix='tgsn') -> testgres.PostgresNode:
+	def initNode(self, base_port: int, suffix='tgsn') -> testgres.PostgresNode:
 		(test_path,
 		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 		baseDir = os.path.join(test_path, 'tmp_check_t',
 		                       self.myName + '_' + suffix)
 		if os.path.exists(baseDir):
 			shutil.rmtree(baseDir)
-		node = testgres.get_new_node('test', port=port, base_dir=baseDir)
+		port_manager = TestPortManager(
+		    PostgresNode._get_os_ops(ConnectionParams()), base_port)
+		node = testgres.get_new_node('test',
+		                             base_dir=baseDir,
+		                             port_manager=port_manager)
 		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
@@ -158,9 +213,10 @@ class BaseTest(unittest.TestCase):
 		return result[0:length].decode('ascii')
 
 	def stripErrorMsg(self, msg):
-		prefix = "Utility exited with non-zero code. Error: `"
-		if msg.startswith(prefix):
-			msg = msg[len(prefix):]
+		prefix = r'^Utility exited with non-zero code \(\d+\). Error: `'
+		match = re.match(prefix, msg)
+		if match:
+			msg = msg[len(match[0]):]
 		if msg.endswith('`'):
 			msg = msg[:-1]
 		return msg
