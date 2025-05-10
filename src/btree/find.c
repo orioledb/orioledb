@@ -54,7 +54,7 @@ struct OPageCacheEntry
 #define O_PAGE_CACHE_BUCKET_SIZE	(4)
 #define MAX_NUM_ACCESSES (10)
 #define CACHE_NUM_ACCESSES (5)
-#define CACHE_N_TRIES (10)
+#define CACHE_N_TRIES (11)
 
 typedef struct
 {
@@ -105,6 +105,18 @@ init_local_page_cache(void)
 	}
 }
 
+void
+local_page_cache_check_no_pins(void)
+{
+	int		i, j;
+
+	for (i = 0; i < cache.maxNumCachedPages; i++)
+	{
+		for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
+			Assert(cache.entries[i][j].pinCount == 0);
+	}
+}
+
 static OPageCacheEntry *
 search_local_cache(OInMemoryBlkno blkno)
 {
@@ -119,8 +131,12 @@ search_local_cache(OInMemoryBlkno blkno)
 		OPageCacheEntry *entry = &cache.entries[i][j];
 		if (entry->blkno == blkno)
 		{
+			uint32		state;
+			state = pg_atomic_read_u32(&header->state);
+
 			if (entry->pageChangeCount == header->pageChangeCount &&
-				entry->changeCount == (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK))
+				entry->changeCount == (state & PAGE_STATE_CHANGE_COUNT_MASK) &&
+				!O_PAGE_STATE_READ_IS_BLOCKED(state))
 			{
 				return entry;
 			}
@@ -204,6 +220,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 		{
 			Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
 			OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
+			uint32	state;
 
 			entry->data = (Pointer) MemoryContextAllocZero(cache.mcxt,
 														   ORIOLEDB_BLCKSZ);
@@ -211,8 +228,11 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 
 			pg_read_barrier();
 
+			state = pg_atomic_read_u32(&header->state);
+
 			if (entry->pageChangeCount == header->pageChangeCount &&
-				entry->changeCount == (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK))
+				entry->changeCount == (state & PAGE_STATE_CHANGE_COUNT_MASK) &&
+				!O_PAGE_STATE_READ_IS_BLOCKED(state))
 			{
 				dlist_push_head(&cache.recentPagesHead, &entry->node);
 				cache.numCachedPages++;
@@ -266,6 +286,9 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 	entry->pageChangeCount = header->pageChangeCount;
 	entry->changeCount = (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK);
 	entry->numAccesses = 1;
+
+	pg_read_barrier();
+
 	return NULL;
 }
 
@@ -1420,7 +1443,9 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 	entry = search_pin_local_cache(blkno);
 	if (!entry)
+	{
 		return false;
+	}
 
 	pagePtr = entry->data;
 	header = (BTreePageHeader *) pagePtr;
