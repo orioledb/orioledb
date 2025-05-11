@@ -94,7 +94,7 @@ OrioleDBPageDesc *page_descs = NULL;
 int			main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
-static int  rewind_buffers_guc;
+static int	rewind_buffers_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
@@ -139,8 +139,8 @@ char	   *s3_prefix = NULL;
 char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
-bool 		enable_rewind = false;
-int 		rewind_max_period = 0;
+bool		enable_rewind = false;
+int			rewind_max_period = 0;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;

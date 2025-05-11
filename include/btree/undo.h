@@ -78,9 +78,9 @@ typedef struct
 
 typedef struct
 {
-	char        staticData[UNDO_ITEM_BUF_SIZE];
-	Pointer     data;
-	Size        length;
+	char		staticData[UNDO_ITEM_BUF_SIZE];
+	Pointer		data;
+	Size		length;
 } UndoItemBuf;
 
 /* size of image in undo log produced by page compaction  */

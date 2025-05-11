@@ -505,10 +505,10 @@ void
 clear_rewind_oxid(OXid oxid)
 {
 	XLogRecPtr	xlogPtr;
-	CommitSeqNo	csn;
+	CommitSeqNo csn;
 
 	map_oxid(oxid, &csn, &xlogPtr);
-//	elog(LOG, "csn unset from rewind %lu -> %lu", csn, csn & (~COMMITSEQNO_RETAINED_FOR_REWIND));
+/* 	elog(LOG, "csn unset from rewind %lu -> %lu", csn, csn & (~COMMITSEQNO_RETAINED_FOR_REWIND)); */
 	csn = csn & (~COMMITSEQNO_RETAINED_FOR_REWIND);
 	set_oxid_csn(oxid, csn);
 }
