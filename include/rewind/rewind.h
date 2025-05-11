@@ -27,24 +27,29 @@ extern void add_to_rewind_buffer(OXid oxid);
 
 typedef struct
 {
-	OXid				oxid;
-	uint64				undoStackLocation[UndoLogsCount];
-	uint64				minRetainLocation[UndoLogsCount];
-	TimestampTz			timestamp;
+	OXid		oxid;
+	uint64		undoStackLocation[UndoLogsCount];
+	uint64		minRetainLocation[UndoLogsCount];
+	TimestampTz timestamp;
 } RewindItem;
 
 #define REWIND_DISK_BUFFER_LENGTH (ORIOLEDB_BLCKSZ / sizeof(RewindItem))
 
 typedef struct
 {
-	uint64		addPos;			    /* Added to circular buffer */
-	uint64		completePos;		/* Removed from circular buffer */
-	uint64		evictPos; 			/* Evict/restore position. Evict - left, restore - right */
-	uint64		writePos;			/* Written to disk buffers. Increments by bufferLength only */
-	uint64		readPos;			/* Read from disk buffer. Increments by bufferLength only */
-	uint64 		checkpointPos;			/* Already included into checkpoint. Start point for writing rewindItem-s into checkpoint. */
-	uint64		oldCleanedFileNum; 	/* Last removed buffer file number */
-	uint64 		freeSpace;			/* Free space in a circular buffer */
+	uint64		addPos;			/* Added to circular buffer */
+	uint64		completePos;	/* Removed from circular buffer */
+	uint64		evictPos;		/* Evict/restore position. Evict - left,
+								 * restore - right */
+	uint64		writePos;		/* Written to disk buffers. Increments by
+								 * bufferLength only */
+	uint64		readPos;		/* Read from disk buffer. Increments by
+								 * bufferLength only */
+	uint64		checkpointPos;	/* Already included into checkpoint. Start
+								 * point for writing rewindItem-s into
+								 * checkpoint. */
+	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
+	uint64		freeSpace;		/* Free space in a circular buffer */
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX
@@ -106,6 +111,6 @@ typedef struct
  *                   E 	     A 	        C
  * |----------|------====|===       |   ------|
  */
- 
+
 
 #endif							/* __REWIND_WORKER_H__ */

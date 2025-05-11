@@ -306,19 +306,22 @@ update_min_undo_locations(UndoLogType undoType,
 	 */
 	minReservedLocation = Max(pg_atomic_read_u64(&meta->minProcReservedLocation),
 							  minReservedLocation);
-	minRetainLocation = Max(pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation),
+	minRetainLocation = Max(pg_atomic_read_u64(&meta->minProcRetainLocation),
 							minRetainLocation);
 	minTransactionRetainLocation = Max(pg_atomic_read_u64(&meta->minProcTransactionRetainLocation),
 									   minTransactionRetainLocation);
 
 	pg_atomic_write_u64(&meta->minProcReservedLocation, minReservedLocation);
-	pg_atomic_write_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation, minRetainLocation);
+	pg_atomic_write_u64(&meta->minProcRetainLocation, minRetainLocation);
 	pg_atomic_write_u64(&meta->minProcTransactionRetainLocation, minTransactionRetainLocation);
 	pg_atomic_write_u64(&meta->lastUsedUndoLocationWhenUpdatedMinLocation, lastUsedLocation);
 
 	pg_write_barrier();
 
 	meta->minUndoLocationsChangeCount++;
+
+	minRetainLocation = Max(pg_atomic_read_u64(&meta->minRewindRetainLocation),
+							minRetainLocation);
 
 	Assert((meta->minUndoLocationsChangeCount & 1) == 0);
 
@@ -718,8 +721,8 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		{
 			init_undo_item_buf(&buf);
 			location = walk_undo_range(undoType, location, InvalidUndoLocation,
-								   &buf, oxid, false, NULL,
-								   changeCountsValid);
+									   &buf, oxid, false, NULL,
+									   changeCountsValid);
 			Assert(!UndoLocationIsValid(location));
 			free_undo_item_buf(&buf);
 		}

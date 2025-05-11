@@ -861,11 +861,11 @@ finish_write_xids(uint32 chkpnum)
 void
 checkpoint_write_rewind_item(RewindItem *rewindItem)
 {
-	XidFileRec      xidRec;
-	int i;
+	XidFileRec	xidRec;
+	int			i;
 
 	xidRec.oxid = rewindItem->oxid;
-		
+
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
 		xidRec.undoType = (UndoLogType) (i + XID_REC_REWIND_TYPES_OFFSET);

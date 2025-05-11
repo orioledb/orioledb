@@ -552,14 +552,14 @@ apply_xids_branches(void)
 			}
 			else
 			{
-				UndoItemBuf     buf;
-				uint64          location PG_USED_FOR_ASSERTS_ONLY;	
+				UndoItemBuf buf;
+				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 
-				init_undo_item_buf(&buf);	
-				location = walk_undo_range((UndoLogType)((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
-					       	stack->undoStack.onCommitLocation,
-					       	InvalidUndoLocation, &buf, recovery_oxid, false, NULL, true);
-				// NB rewindItem->oxid is not used in recovery
+				init_undo_item_buf(&buf);
+				location = walk_undo_range((UndoLogType) ((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
+										   stack->undoStack.onCommitLocation,
+										   InvalidUndoLocation, &buf, recovery_oxid, false, NULL, true);
+				/* NB rewindItem->oxid is not used in recovery */
 				Assert(!UndoLocationIsValid(location));
 				free_undo_item_buf(&buf);
 			}
