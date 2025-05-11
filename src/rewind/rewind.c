@@ -40,6 +40,7 @@ static volatile sig_atomic_t shutdown_requested = false;
 int			RewindHorizonCheckDelay = 1000; /* Time between checking in ms */
 static RewindItem *rewindBuffer = NULL;
 static RewindMeta *rewindMeta = NULL;
+static bool rewindWorker = false;
 
 static OBuffersDesc rewindBuffersDesc = {
 	.singleFileSize = REWIND_FILE_SIZE,
@@ -177,12 +178,20 @@ register_rewind_worker(void)
 	RegisterBackgroundWorker(&worker);
 }
 
+bool
+is_rewind_worker(void)
+{
+	return rewindWorker;
+}
+
 void
 rewind_worker_main(Datum main_arg)
 {
 	int			rc,
 				wake_events = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT;
 	RewindItem *rewindItem;
+
+	rewindWorker = true;
 
 	/* enable timeout for relation lock */
 	RegisterTimeout(DEADLOCK_TIMEOUT, CheckDeadLockAlert);
@@ -471,6 +480,7 @@ add_to_rewind_buffer(OXid oxid)
 		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
 		rewindItem->undoStackLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+		elog(LOG, "%llu %d %llu", oxid, i, rewindItem->undoStackLocation[i]);
 		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 	}
 

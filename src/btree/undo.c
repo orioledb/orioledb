@@ -21,6 +21,7 @@
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
+#include "rewind/rewind.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -773,7 +774,13 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 				remainRelnode;
 	int			dropNumTreeOids;
 	ORelOids   *dropTreeOids;
+	bool		doCleanup;
 	bool		cleanupFiles = true;
+
+	if (!enable_rewind || abort)
+		doCleanup = true;
+	else
+		doCleanup = is_rewind_worker();
 
 	datoid = relnode_item->datoid;
 	reloid = relnode_item->relid;
@@ -785,7 +792,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		dropTreeOids = &relnode_item->oids[0];
 		dropNumTreeOids = relnode_item->oldNumTreeOids;
 
-		if (have_backup_in_progress())
+		if (have_backup_in_progress() && doCleanup)
 		{
 			ORelOids	oids = {datoid, reloid, relnode_item->oldRelnode};
 
@@ -837,8 +844,11 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			if (!recovery)
 				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTreeOids[i]);
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
-			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
-			o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+			if (doCleanup)
+			{
+				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
+				o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+			}
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);

@@ -19,6 +19,7 @@
 #define REWIND_BUFFERS_TAG (0)
 
 extern void register_rewind_worker(void);
+extern bool is_rewind_worker(void);
 PGDLLEXPORT void rewind_worker_main(Datum);
 extern Size rewind_shmem_needs(void);
 extern void rewind_init_shmem(Pointer buf, bool found);

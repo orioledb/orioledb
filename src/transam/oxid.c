@@ -455,7 +455,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 
 	/* Optimisticly try to read csn and/or xlog ptr from circular buffer */
 	if (outCsn)
-		*outCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
+		*outCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn) & (~COMMITSEQNO_RETAINED_FOR_REWIND);
 	if (outPtr)
 		*outPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();
@@ -489,7 +489,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 	}
 
 	if (outCsn)
-		*outCsn = pg_atomic_read_u64(&mapItem.csn);
+		*outCsn = pg_atomic_read_u64(&mapItem.csn) & (~COMMITSEQNO_RETAINED_FOR_REWIND);
 	if (outPtr)
 		*outPtr = pg_atomic_read_u64(&mapItem.commitPtr);
 }
