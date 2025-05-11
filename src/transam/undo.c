@@ -320,7 +320,7 @@ update_min_undo_locations(UndoLogType undoType,
 
 	meta->minUndoLocationsChangeCount++;
 
-	minRetainLocation = Max(pg_atomic_read_u64(&meta->minRewindRetainLocation),
+	minRetainLocation = Min(pg_atomic_read_u64(&meta->minRewindRetainLocation),
 							minRetainLocation);
 
 	Assert((meta->minUndoLocationsChangeCount & 1) == 0);
@@ -717,15 +717,12 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
-		if (!enable_rewind)
-		{
-			init_undo_item_buf(&buf);
-			location = walk_undo_range(undoType, location, InvalidUndoLocation,
-									   &buf, oxid, false, NULL,
-									   changeCountsValid);
-			Assert(!UndoLocationIsValid(location));
-			free_undo_item_buf(&buf);
-		}
+		init_undo_item_buf(&buf);
+		location = walk_undo_range(undoType, location, InvalidUndoLocation,
+								   &buf, oxid, false, NULL,
+								   changeCountsValid);
+		Assert(!UndoLocationIsValid(location));
+		free_undo_item_buf(&buf);
 		newOnCommitLocation = InvalidUndoLocation;
 	}
 	else
