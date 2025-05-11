@@ -22,6 +22,7 @@
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "storage/lockdefs.h"
 #include "tableam/operations.h"
 #include "transam/oxid.h"
 #include "tuple/toast.h"
@@ -1284,6 +1285,17 @@ o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
 		locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
 
 	LockAcquire(&locktag, lockmode, false, false);
+}
+
+void
+o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids)
+{
+	LOCKTAG		locktag;
+
+	o_tables_rel_fill_locktag(&locktag, oids, AccessExclusiveLock, false);
+	locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
+
+	LockAcquire(&locktag, AccessExclusiveLock, false, false);
 }
 
 void

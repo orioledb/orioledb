@@ -139,7 +139,7 @@ char	   *s3_prefix = NULL;
 char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
-bool 		enable_rewind = true;
+bool 		enable_rewind = false;
 int 		rewind_max_period = 0;
 
 /* Previous values of hooks to chain call them */
@@ -819,7 +819,7 @@ _PG_init(void)
 							 "Enable rewind for OrioleDB tables",
 							 NULL,
 							 &enable_rewind,
-							 true,
+							 false,
 							 PGC_POSTMASTER,
 							 0,
 							 NULL,
