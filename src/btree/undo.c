@@ -824,7 +824,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		int			i;
 
 		if (!recovery)
-			o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, false);
+			o_tables_rel_lock_exclusive_no_inval_no_log(&oids);
 		o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, true);
 		CacheInvalidateRelcacheByDbidRelid(oids.datoid, oids.reloid);
 		o_invalidate_oids(oids);
@@ -835,7 +835,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		for (i = 0; i < dropNumTreeOids; i++)
 		{
 			if (!recovery)
-				o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, false);
+				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTreeOids[i]);
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
 			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
 			o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
