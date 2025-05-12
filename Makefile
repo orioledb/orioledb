@@ -13,7 +13,10 @@ EXTRA_CLEAN = include/utils/stopevents_defs.h \
 OBJS = src/btree/btree.o \
 	   src/btree/build.o \
 	   src/btree/check.o \
+	   src/btree/chunk_ops.o \
+	   src/btree/chunk_ops_test.o \
 	   src/btree/find.o \
+	   src/btree/hikey_chunk.o \
 	   src/btree/insert.o \
 	   src/btree/io.o \
 	   src/btree/iterator.o \
@@ -25,6 +28,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/print.o \
 	   src/btree/scan.o \
 	   src/btree/split.o \
+	   src/btree/tuple_chunk.o \
 	   src/btree/undo.o \
 	   src/catalog/ddl.o \
 	   src/catalog/free_extents.o \
@@ -91,6 +95,7 @@ OBJS = src/btree/btree.o \
 REGRESSCHECKS = btree_sys_check \
 				alter_type \
 				bitmap_scan \
+				btree_chunk_ops \
 				btree_compression \
 				btree_print \
 				createas \
