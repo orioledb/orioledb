@@ -22,7 +22,6 @@
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
-#include "storage/lockdefs.h"
 #include "tableam/operations.h"
 #include "transam/oxid.h"
 #include "tuple/toast.h"

@@ -29,7 +29,7 @@ extern void add_to_rewind_buffer(OXid oxid);
 typedef struct
 {
 	OXid		oxid;
-	uint64		undoStackLocation[UndoLogsCount];
+	uint64		onCommitUndoLocation[UndoLogsCount];
 	uint64		minRetainLocation[UndoLogsCount];
 	TimestampTz timestamp;
 } RewindItem;
