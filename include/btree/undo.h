@@ -74,15 +74,6 @@ typedef struct
 	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
 } RelnodeUndoStackItem;
 
-#define UNDO_ITEM_BUF_SIZE  2048
-
-typedef struct
-{
-	char		staticData[UNDO_ITEM_BUF_SIZE];
-	Pointer		data;
-	Size		length;
-} UndoItemBuf;
-
 /* size of image in undo log produced by page compaction  */
 #define O_COMPACT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ)
 /* max size of image in undo log produced by page split */
@@ -168,13 +159,10 @@ extern void add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids,
 extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
 									int numTreeOids);
 extern void check_pending_truncates(void);
-extern UndoLocation walk_undo_range(UndoLogType undoType, UndoLocation location,
-									UndoLocation toLoc, UndoItemBuf *buf,
+extern UndoLocation walk_undo_range_with_buf(UndoLogType undoType, UndoLocation location,
+									UndoLocation toLoc,
 									OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
 									bool changeCountsValid);
-
-extern void init_undo_item_buf(UndoItemBuf *buf);
-extern void free_undo_item_buf(UndoItemBuf *buf);
 
 
 #endif							/* __BTREE_UNDO_H__ */
