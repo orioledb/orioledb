@@ -117,7 +117,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 			rewindBuffer[i].timestamp = 0;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 			{
-				rewindBuffer[i].undoStackLocation[j] = InvalidUndoLocation;
+				rewindBuffer[i].onCommitUndoLocation[j] = InvalidUndoLocation;
 				rewindBuffer[i].minRetainLocation[j] = 0;
 			}
 		}
@@ -274,7 +274,7 @@ rewind_worker_main(Datum main_arg)
 				{
 					UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
 
-					location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->undoStackLocation[i], InvalidUndoLocation,
+					location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation,
 											   rewindItem->oxid, false, NULL,
 											   true);
 					Assert(!UndoLocationIsValid(location));
@@ -476,8 +476,8 @@ add_to_rewind_buffer(OXid oxid)
 
 		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
-		rewindItem->undoStackLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		elog(LOG, "%llu %d %llu", oxid, i, rewindItem->undoStackLocation[i]);
+		rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+		elog(LOG, "%lu %d %lu", oxid, i, rewindItem->onCommitUndoLocation[i]);
 		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 	}
 

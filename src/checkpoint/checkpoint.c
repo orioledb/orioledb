@@ -869,7 +869,7 @@ checkpoint_write_rewind_item(RewindItem *rewindItem)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
 		xidRec.undoType = (UndoLogType) (i + XID_REC_REWIND_TYPES_OFFSET);
-		xidRec.undoLocation.onCommitLocation = rewindItem->undoStackLocation[i];
+		xidRec.undoLocation.onCommitLocation = rewindItem->onCommitUndoLocation[i];
 		xidRec.undoLocation.location = InvalidUndoLocation;
 		xidRec.undoLocation.branchLocation = InvalidUndoLocation;
 		xidRec.undoLocation.subxactLocation = InvalidUndoLocation;

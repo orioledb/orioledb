@@ -36,7 +36,6 @@
 #define COMMITSEQNO_STATUS_IN_PROGRESS (0x0)
 #define COMMITSEQNO_STATUS_CSN_COMMITTING (0x1)
 #define COMMITSEQNO_IS_SPECIAL(csn) ((csn) & COMMITSEQNO_SPECIAL_BIT)
-#define COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn) ((csn) & COMMITSEQNO_RETAINED_FOR_REWIND)
 #define COMMITSEQNO_GET_STATUS(csn) \
 	(AssertMacro(COMMITSEQNO_IS_SPECIAL(csn)), (csn) & 0x1)
 #define COMMITSEQNO_GET_LEVEL(csn) \
@@ -495,13 +494,6 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 }
 
 void
-mark_rewind_csn(CommitSeqNo *csn)
-{
-	Assert(!COMMITSEQNO_IS_RETAINED_FOR_REWIND(*csn));
-	*csn = *csn | COMMITSEQNO_RETAINED_FOR_REWIND;
-}
-
-void
 clear_rewind_oxid(OXid oxid)
 {
 	XLogRecPtr	xlogPtr;
@@ -515,7 +507,7 @@ clear_rewind_oxid(OXid oxid)
 inline bool
 csn_is_retained_for_rewind(CommitSeqNo csn)
 {
-	return (bool) COMMITSEQNO_IS_RETAINED_FOR_REWIND(csn);
+	return (bool) ((csn) & COMMITSEQNO_RETAINED_FOR_REWIND);
 }
 
 /*

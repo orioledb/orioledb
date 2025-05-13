@@ -554,6 +554,9 @@ apply_xids_branches(void)
 			{
 				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 
+				Assert(!UndoLocationIsValid(stack->undoStack.location));
+				Assert(!UndoLocationIsValid(stack->undoStack.branchLocation));
+				Assert(!UndoLocationIsValid(stack->undoStack.subxactLocation));
 				location = walk_undo_range_with_buf((UndoLogType) ((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
 										   stack->undoStack.onCommitLocation,
 										   InvalidUndoLocation, recovery_oxid, false, NULL, true);
