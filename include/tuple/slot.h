@@ -88,4 +88,16 @@ extern bool tts_orioledb_modified(TupleTableSlot *oldSlot,
 								  Bitmapset *attrs);
 extern void tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr);
 
+static inline int
+o_ctid_off(OIndexDescr *id)
+{
+	int			ctid_off = id->primaryIsCtid ? 1 : 0;
+
+	if (id->desc.type == oIndexPrimary)
+	{
+		if (id->bridging)
+			ctid_off++;
+	}
+	return ctid_off;
+}
 #endif							/* __TUPLE_SLOT_H__ */

@@ -728,13 +728,13 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 	else
 	{
 		OTableIndex *tableIndex;
-		int			ctid_off = 0;
+		int			ctid_idx_off = 0;
 
 		if (primaryIsCtid)
-			ctid_off++;
+			ctid_idx_off++;
 
-		Assert(ixNum - ctid_off >= 0);
-		tableIndex = &table->indices[ixNum - ctid_off];
+		Assert(ixNum - ctid_idx_off >= 0);
+		tableIndex = &table->indices[ixNum - ctid_idx_off];
 
 		index = make_secondary_o_index(table, tableIndex);
 	}

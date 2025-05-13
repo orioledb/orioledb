@@ -146,7 +146,7 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	Datum	   *old_values = palloc0(natts * sizeof(Datum));
 	Datum	   *new_values = palloc0(natts * sizeof(Datum));
 	bool	   *isnull = palloc0(natts * sizeof(bool));
-	int			ctid_off = indexDescr->primaryIsCtid ? 1 : 0;
+	int			ctid_off = o_ctid_off(indexDescr);
 
 	/*
 	 * Decode original tuple.

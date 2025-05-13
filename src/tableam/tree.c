@@ -187,16 +187,21 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 				len;
 	OTuple		result;
 	uint32		version = keep_version ? o_tuple_get_version(tuple) : 0;
-	int			ctid_off = 0;
+	int			bridge_ctid_off = 0;
 
 	if (id->bridging && type == oIndexPrimary && !id->primaryIsCtid)
-		ctid_off = 1;
+		bridge_ctid_off = 1;
 
 	Assert(type == oIndexPrimary || type == oIndexRegular);
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum + ctid_off : i + 1;
+		int			attnum;
+
+		if (type == oIndexPrimary)
+			attnum = id->fields[i].tableAttnum + bridge_ctid_off;
+		else
+			attnum = i + 1;
 
 		Assert(attnum > 0);
 		key[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
@@ -332,17 +337,17 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 	TupleDesc	tupdesc = idx->leafTupdesc;
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	int			i = 0;
-	int			ctid_off = 0;
+	int			bridge_ctid_off = 0;
 
 	if (idx->bridging && idx->desc.type == oIndexPrimary && !idx->primaryIsCtid)
-		ctid_off = 1;
+		bridge_ctid_off = 1;
 
 	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)
 	{
 		int			attnum;
 
 		if (idx->desc.type == oIndexPrimary)
-			attnum = idx->fields[i].tableAttnum + ctid_off;
+			attnum = idx->fields[i].tableAttnum + bridge_ctid_off;
 		else
 			attnum = i + 1;
 
