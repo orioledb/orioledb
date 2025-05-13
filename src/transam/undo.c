@@ -530,7 +530,16 @@ wait_for_reserved_location(UndoLogType undoType,
 	return true;
 }
 
-void
+#define UNDO_ITEM_BUF_SIZE	2048
+
+typedef struct
+{
+	char		staticData[UNDO_ITEM_BUF_SIZE];
+	Pointer		data;
+	Size		length;
+} UndoItemBuf;
+
+static void
 init_undo_item_buf(UndoItemBuf *buf)
 {
 	buf->data = buf->staticData;
@@ -571,7 +580,7 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 	return (UndoStackItem *) buf->data;
 }
 
-void
+static void
 free_undo_item_buf(UndoItemBuf *buf)
 {
 	if (buf->data != buf->staticData)
@@ -606,7 +615,7 @@ o_add_branch_undo_item(UndoLogType undoType, UndoLocation newLocation)
 /*
  * Walk through the undo stack calling the callbacks for each item.
  */
-UndoLocation
+static UndoLocation
 walk_undo_range(UndoLogType undoType,
 				UndoLocation location, UndoLocation toLoc, UndoItemBuf *buf,
 				OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
@@ -652,6 +661,22 @@ walk_undo_range(UndoLogType undoType,
 	return location;
 }
 
+UndoLocation
+walk_undo_range_with_buf(UndoLogType undoType,
+			 UndoLocation location, UndoLocation toLoc,
+			 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+			 bool changeCountsValid)
+{
+	UndoItemBuf buf;
+
+	init_undo_item_buf(&buf);
+	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, abort_val,
+				   onCommitLocation, changeCountsValid);
+	free_undo_item_buf(&buf);
+	return location;
+}
+
+
 /*
  * Apply undo branches: parts of transaction undo chain, which should be already
  * aborted.  This is used during recovery: despite some parts of chain are
@@ -690,7 +715,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 				UndoStackLocations *toLocation, bool abortTrx,
 				bool changeCountsValid)
 {
-	UndoItemBuf buf;
 	UndoLocation location,
 				newOnCommitLocation;
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
@@ -717,12 +741,10 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
-		init_undo_item_buf(&buf);
-		location = walk_undo_range(undoType, location, InvalidUndoLocation,
-								   &buf, oxid, false, NULL,
+		location = walk_undo_range_with_buf(undoType, location, InvalidUndoLocation,
+								   oxid, false, NULL,
 								   changeCountsValid);
 		Assert(!UndoLocationIsValid(location));
-		free_undo_item_buf(&buf);
 		newOnCommitLocation = InvalidUndoLocation;
 	}
 	else
@@ -731,14 +753,12 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 * Abort can relate to part of transactio chain.  "On commit" location
 		 * needs to be updated accordingly.
 		 */
-		init_undo_item_buf(&buf);
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		location = walk_undo_range(undoType, location,
+		location = walk_undo_range_with_buf(undoType, location,
 								   toLocation ? toLocation->location : InvalidUndoLocation,
-								   &buf, oxid, true, &newOnCommitLocation,
+								   oxid, true, &newOnCommitLocation,
 								   changeCountsValid);
-		free_undo_item_buf(&buf);
 	}
 
 	/*

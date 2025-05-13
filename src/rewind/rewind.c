@@ -247,7 +247,6 @@ rewind_worker_main(Datum main_arg)
 
 			while (true)
 			{
-				UndoItemBuf buf;
 				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 				int			i;
 
@@ -275,12 +274,10 @@ rewind_worker_main(Datum main_arg)
 				{
 					UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
 
-					init_undo_item_buf(&buf);
-					location = walk_undo_range((UndoLogType) i, rewindItem->undoStackLocation[i], InvalidUndoLocation,
-											   &buf, rewindItem->oxid, false, NULL,
+					location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->undoStackLocation[i], InvalidUndoLocation,
+											   rewindItem->oxid, false, NULL,
 											   true);
 					Assert(!UndoLocationIsValid(location));
-					free_undo_item_buf(&buf);
 					pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 				}
 
