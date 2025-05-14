@@ -1268,7 +1268,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				 * transactions. We delete RLL for both committed and aborted
 				 * transactions.
 				 */
-				csn = oxid_get_csn(oxid);
+				csn = oxid_get_csn(oxid, false);
 				if (COMMITSEQNO_IS_ABORTED(csn) ||
 					COMMITSEQNO_IS_NORMAL(csn) ||
 					COMMITSEQNO_IS_FROZEN(csn))
