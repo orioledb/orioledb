@@ -243,7 +243,7 @@ o_btree_check_size_of_tuple(int len, char *relation_name, bool index)
 	if (len > O_BTREE_MAX_TUPLE_SIZE)
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("index row size %d orioledb maximum %zu for %s \"%s\"",
+				 errmsg("index row size %d exceeds orioledb maximum %zu for %s \"%s\"",
 						len,
 						O_BTREE_MAX_TUPLE_SIZE,
 						index ? "index" : "table",

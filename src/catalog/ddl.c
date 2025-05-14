@@ -2298,13 +2298,13 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	o_tables_rel_meta_lock(tbl);
 	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 	{
-		int			ctid_off;
+		int			ctid_idx_off;
 		OTableIndex *index;
 
-		ctid_off = o_table->has_primary ? 0 : 1;
+		ctid_idx_off = o_table->has_primary ? 0 : 1;
 		index = &o_table->indices[ix_num];
 
-		o_indices_update(o_table, ix_num + ctid_off, oxid, oSnapshot.csn);
+		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
@@ -2353,13 +2353,13 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_tables_rel_meta_lock(tbl);
 	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 	{
-		int			ctid_off;
+		int			ctid_idx_off;
 		OTableIndex *index;
 
-		ctid_off = o_table->has_primary ? 0 : 1;
+		ctid_idx_off = o_table->has_primary ? 0 : 1;
 		index = &o_table->indices[ix_num];
 
-		o_indices_update(o_table, ix_num + ctid_off, oxid, oSnapshot.csn);
+		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
@@ -2894,10 +2894,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							int			field_num;
-							int			ctid_off;
+							int			ctid_idx_off;
 							OTableIndex *index;
 
-							ctid_off = o_table->has_primary ? 0 : 1;
+							ctid_idx_off = o_table->has_primary ? 0 : 1;
 							index = &o_table->indices[ix_num];
 
 							for (field_num = 0; field_num < index->nkeyfields;
@@ -2910,7 +2910,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								if (index->type == oIndexPrimary || has_field)
 								{
 									o_indices_update(o_table,
-													 ix_num + ctid_off,
+													 ix_num + ctid_idx_off,
 													 oxid, oSnapshot.csn);
 									o_invalidate_oids(index->oids);
 									o_add_invalidate_undo_item(
