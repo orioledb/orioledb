@@ -242,6 +242,17 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 						IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
 						int			col;
 						bool		member = false;
+						int			ix_num = InvalidIndexNumber;
+
+						/* Don't add additional pkey fields to bridged indices */
+						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+						{
+							if (o_table->indices[ix_num].oids.reloid == index->indexoid)
+								break;
+						}
+
+						if (ix_num == InvalidIndexNumber || ix_num == o_table->nindices)
+							continue;
 
 						for (col = 0; col < index->ncolumns; col++)
 						{

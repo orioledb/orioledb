@@ -148,7 +148,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
-	attnum = primary->fields[0].tableAttnum;
+	attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, primary, 1);
 	attr = &primary->leafTupdesc->attrs[attnum - 1];
 	if (onlyPkey)
 		attnum = 1;
