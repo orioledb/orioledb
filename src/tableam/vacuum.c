@@ -1083,7 +1083,7 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 			tuple_can_be_vaccumed = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
 			if (enable_rewind)
 			{
-				CommitSeqNo	csn = oxid_get_csn(XACT_INFO_GET_OXID(tupHdr->xactInfo));
+				CommitSeqNo	csn = oxid_get_csn(XACT_INFO_GET_OXID(tupHdr->xactInfo), true);
 
 				tuple_can_be_vaccumed = tuple_can_be_vaccumed && !csn_is_retained_for_rewind(csn);
 			}

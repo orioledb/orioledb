@@ -433,9 +433,10 @@ set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr)
 
 /*
  * Read csn of given xid from xidmap.
+ * If getRawCsn is true outputs raw csn, otherwise clears COMMITSEQNO_RETAINED_FOR_REWIND flag.
  */
 static void
-map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
+map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr, bool getRawCsn)
 {
 	OXidMapItem mapItem = {0};
 
@@ -454,7 +455,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 
 	/* Optimisticly try to read csn and/or xlog ptr from circular buffer */
 	if (outCsn)
-		*outCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn) & (~COMMITSEQNO_RETAINED_FOR_REWIND);
+		*outCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn) & (getRawCsn ? UINT64_MAX : (~COMMITSEQNO_RETAINED_FOR_REWIND));
 	if (outPtr)
 		*outPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();
@@ -488,7 +489,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr)
 	}
 
 	if (outCsn)
-		*outCsn = pg_atomic_read_u64(&mapItem.csn) & (~COMMITSEQNO_RETAINED_FOR_REWIND);
+		*outCsn = pg_atomic_read_u64(&mapItem.csn) & (getRawCsn ? UINT64_MAX : (~COMMITSEQNO_RETAINED_FOR_REWIND));
 	if (outPtr)
 		*outPtr = pg_atomic_read_u64(&mapItem.commitPtr);
 }
@@ -499,7 +500,7 @@ clear_rewind_oxid(OXid oxid)
 	XLogRecPtr	xlogPtr;
 	CommitSeqNo csn;
 
-	map_oxid(oxid, &csn, &xlogPtr);
+	map_oxid(oxid, &csn, &xlogPtr, false);
 /* 	elog(LOG, "csn unset from rewind %lu -> %lu", csn | COMMITSEQNO_RETAINED_FOR_REWIND, csn); */
 	set_oxid_csn(oxid, csn);
 }
@@ -622,7 +623,7 @@ wait_for_oxid(OXid oxid)
 	VirtualTransactionId vxid;
 	bool		result;
 
-	map_oxid(oxid, &csn, NULL);
+	map_oxid(oxid, &csn, NULL, false);
 
 	if (!COMMITSEQNO_IS_SPECIAL(csn))
 		return true;
@@ -662,7 +663,7 @@ oxid_notify(OXid oxid)
 	VirtualTransactionId vxid;
 	int			procnum;
 
-	map_oxid(oxid, &csn, NULL);
+	map_oxid(oxid, &csn, NULL, false);
 
 	if (!COMMITSEQNO_IS_SPECIAL(csn))
 		return;
@@ -1189,7 +1190,7 @@ advance_run_xmin(OXid oxid)
 											  &run_xmin, run_xmin + 1))
 		{
 			run_xmin++;
-			map_oxid(run_xmin, &csn, NULL);
+			map_oxid(run_xmin, &csn, NULL, false);
 			if (COMMITSEQNO_IS_SPECIAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
 				break;
 		}
@@ -1267,9 +1268,10 @@ current_oxid_abort(void)
 /*
  * Gets csn for given oxid.  Wrapper over map_oxid_csn(), which loops
  * till "committing bit" is not set.
+ * If getRawCsn is true outputs raw csn, otherwise clears COMMITSEQNO_RETAINED_FOR_REWIND flag.
  */
 CommitSeqNo
-oxid_get_csn(OXid oxid)
+oxid_get_csn(OXid oxid, bool getRawCsn)
 {
 	CommitSeqNo csn;
 	SpinDelayStatus status;
@@ -1284,7 +1286,7 @@ oxid_get_csn(OXid oxid)
 		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
 			return COMMITSEQNO_FROZEN;
 
-		map_oxid(oxid, &csn, NULL);
+		map_oxid(oxid, &csn, NULL, getRawCsn);
 		if (COMMITSEQNO_IS_SPECIAL(csn) &&
 			COMMITSEQNO_GET_STATUS(csn) & COMMITSEQNO_STATUS_CSN_COMMITTING)
 			perform_spin_delay(&status);
@@ -1320,7 +1322,7 @@ oxid_get_xlog_ptr(OXid oxid)
 		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
 			return COMMITSEQNO_FROZEN;
 
-		map_oxid(oxid, NULL, &ptr);
+		map_oxid(oxid, NULL, &ptr, false);
 		if (XLOG_PTR_IS_SPECIAL(ptr) &&
 			XLOG_PTR_GET_STATUS(ptr) & XLOG_PTR_COMMITTING)
 			perform_spin_delay(&status);
@@ -1368,7 +1370,7 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 			return;
 		}
 
-		map_oxid(oxid, outCsn, outPtr);
+		map_oxid(oxid, outCsn, outPtr, false);
 
 		if (outCsn &&
 			(!COMMITSEQNO_IS_SPECIAL(*outCsn) ||
@@ -1428,7 +1430,7 @@ oxid_get_procnum(OXid oxid)
 {
 	CommitSeqNo csn;
 
-	map_oxid(oxid, &csn, NULL);
+	map_oxid(oxid, &csn, NULL, false);
 
 	if (COMMITSEQNO_IS_SPECIAL(csn))
 		return COMMITSEQNO_GET_PROCNUM(csn);
@@ -1464,7 +1466,7 @@ xid_is_finished(OXid xid)
 	if (xid < xmin)
 		return true;
 
-	csn = oxid_get_csn(xid);
+	csn = oxid_get_csn(xid, false);
 
 	return COMMITSEQNO_IS_COMMITTED(csn);
 }
@@ -1488,7 +1490,7 @@ xid_is_finished_for_everybody(OXid xid)
 	if (xid < xmin)
 		return true;
 
-	csn = oxid_get_csn(xid);
+	csn = oxid_get_csn(xid, false);
 
 	return COMMITSEQNO_IS_COMMITTED(csn);
 }

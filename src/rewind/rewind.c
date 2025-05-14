@@ -469,7 +469,7 @@ add_to_rewind_buffer(OXid oxid)
 	rewindItem = &rewindBuffer[rewindMeta->addPos % rewind_circular_buffer_size];
 
 	Assert(rewindItem->oxid == InvalidOXid);
-	Assert(csn_is_retained_for_rewind(oxid_get_csn(oxid)));
+	Assert(csn_is_retained_for_rewind(oxid_get_csn(oxid, true)));
 
 	rewindItem->timestamp = GetCurrentTimestamp();
 	rewindItem->oxid = oxid;

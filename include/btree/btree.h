@@ -330,7 +330,7 @@ typedef enum RowLockMode
 #define	XACT_INFO_IS_LOCK_ONLY(xactInfo) \
 	((xactInfo) & XACT_INFO_LOCK_ONLY_BIT)
 #define XACT_INFO_MAP_CSN(xactInfo) \
-	(oxid_get_csn(XACT_INFO_GET_OXID((xactInfo))))
+	(oxid_get_csn(XACT_INFO_GET_OXID((xactInfo)), false))
 #define XACT_INFO_GET_OXID(xactInfo) \
 	((xactInfo) & XACT_INFO_LOCK_OXID_MASK)
 #define XACT_INFO_OXID_EQ(xactInfo, oxid) \

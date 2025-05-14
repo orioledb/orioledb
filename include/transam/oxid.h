@@ -88,7 +88,7 @@ extern void current_oxid_precommit(void);
 extern void current_oxid_xlog_precommit(void);
 extern void current_oxid_commit(CommitSeqNo csn);
 extern void current_oxid_abort(void);
-extern CommitSeqNo oxid_get_csn(OXid oxid);
+extern CommitSeqNo oxid_get_csn(OXid oxid, bool getRawCsn);
 extern XLogRecPtr oxid_get_xlog_ptr(OXid oxid);
 extern void oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 								CommitSeqNo *outCsn, XLogRecPtr *outPtr);
