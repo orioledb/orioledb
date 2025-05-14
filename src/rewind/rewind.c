@@ -278,6 +278,9 @@ rewind_worker_main(Datum main_arg)
 											   rewindItem->oxid, false, NULL,
 											   true);
 					Assert(!UndoLocationIsValid(location));
+#ifdef USE_ASSERT_CHECKING
+					Assert(pg_atomic_read_u64(&undoMeta->minRewindRetainLocation) <= rewindItem->minRetainLocation[i]);
+#endif
 					pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 				}
 
@@ -466,6 +469,7 @@ add_to_rewind_buffer(OXid oxid)
 	rewindItem = &rewindBuffer[rewindMeta->addPos % rewind_circular_buffer_size];
 
 	Assert(rewindItem->oxid == InvalidOXid);
+	Assert(csn_is_retained_for_rewind(oxid_get_csn(oxid)));
 
 	rewindItem->timestamp = GetCurrentTimestamp();
 	rewindItem->oxid = oxid;
