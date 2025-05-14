@@ -105,7 +105,7 @@ double		regular_block_undo_circular_buffer_fraction;
 double		system_undo_circular_buffer_fraction;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
-Size		rewind_circular_buffer_size = 0;
+Size		rewind_circular_buffer_size;
 uint32		rewind_buffers_count;
 bool		remove_old_checkpoint_files = true;
 bool		skip_unmodified_trees = true;
