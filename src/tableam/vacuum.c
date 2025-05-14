@@ -1076,10 +1076,20 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 			OTuple		tup;
 			ItemPointer iptr;
 			bool		isnull;
+			bool 		tuple_can_be_vaccumed;
 
 			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, p, &loc);
+
+			tuple_can_be_vaccumed = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
+			if (enable_rewind)
+			{
+				CommitSeqNo	csn = oxid_get_csn(XACT_INFO_GET_OXID(tupHdr->xactInfo));
+
+				tuple_can_be_vaccumed = tuple_can_be_vaccumed && !csn_is_retained_for_rewind(csn);
+			}
+
 			if (tupHdr->deleted != BTreeLeafTupleNonDeleted &&
-				XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo))
+				tuple_can_be_vaccumed)
 			{
 				Assert(tupHdr->deleted == BTreeLeafTupleDeleted);
 
