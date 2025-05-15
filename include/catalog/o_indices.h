@@ -55,11 +55,11 @@ typedef struct
 	/*
 	 * Fields above are stored in SYS_TREES_O_INDICES and
 	 * serialized/deserialized by serialize_o_index()/deserialize_o_index().
-	 * Fields below are also storied in SYS_TREES_O_INDICES, but they are
+	 * Fields below are also stored in SYS_TREES_O_INDICES, but they are
 	 * palloc'ed by deserialize_o_index().
 	 *
-	 * Be careful while adding new fields in order to not break backward
-	 * compatibility.
+	 * Be careful while adding new fields in order to not break binary
+	 * backward compatibility of the database.
 	 */
 
 	OTableField *leafTableFields;

@@ -44,7 +44,7 @@
 #endif
 
 #define ORIOLEDB_VERSION "OrioleDB public beta 10"
-#define ORIOLEDB_BINARY_VERSION 5
+#define ORIOLEDB_BINARY_VERSION 6
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
