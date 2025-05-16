@@ -1097,6 +1097,7 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 
 			ExplainOpenGroup("Plans", "Plans", false, es);
 			ec.ancestors = list_copy(ancestors);
+			ec.ancestors = lcons(node->ss.ps.plan, ec.ancestors);
 			ec.es = es;
 			ec.ocstate = ocstate;
 			ec.descr = descr;
