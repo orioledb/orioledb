@@ -46,7 +46,7 @@ static void o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 struct OClass
 {
 	OSysCacheKey1 key;
-	uint16			data_version;
+	uint16		data_version;
 	Oid			reltype;
 	int			natts;
 	FormData_pg_attribute *attrs;
