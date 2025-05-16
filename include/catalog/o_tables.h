@@ -98,6 +98,7 @@ typedef struct
 	bool		has_primary;
 	char		persistence;
 	uint8		fillfactor;
+	uint16		data_version;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */

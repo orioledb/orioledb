@@ -657,6 +657,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->toast_compress = InvalidOCompress;
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
+	o_table->data_version = ORIOLEDB_DATA_VERSION;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -1677,6 +1678,7 @@ serialize_o_table(OTable *o_table, int *size)
 	StringInfoData str;
 	int			i;
 
+	Assert(o_table->data_version == ORIOLEDB_DATA_VERSION);
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_table,
 						   offsetof(OTable, indices));
@@ -1754,6 +1756,7 @@ deserialize_o_table(Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_table, ptr, len);
 	ptr += len;
+	Assert(o_table->data_version == ORIOLEDB_DATA_VERSION);
 
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
