@@ -584,6 +584,41 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_update_delete ORDER BY v1;
 SELECT * FROM o_test_toast_update_delete ORDER BY v1;
 COMMIT;
 
+CREATE TABLE o_test_ctid_toast_truncate (
+       id integer NOT NULL,
+       val text NOT NULL
+) USING orioledb;
+
+CREATE TEMPORARY VIEW o_test_ctid_toast_truncate_toast_oids AS
+  SELECT index_reloid, index_relnode, index_type FROM orioledb_index
+    WHERE table_reloid = 'o_test_ctid_toast_truncate'::regclass AND index_type = 'toast';
+CREATE TEMP TABLE o_test_ctid_toast_truncate_old_toast_oids AS
+	SELECT * FROM o_test_ctid_toast_truncate_toast_oids;
+
+-- not existed means it uses new toast relnode, created in transaction
+CREATE TEMPORARY VIEW o_test_ctid_toast_truncate_check_toast_oids AS
+  SELECT nto.index_type, oto.index_relnode IS NOT NULL existed
+    FROM o_test_ctid_toast_truncate_old_toast_oids oto
+    RIGHT JOIN o_test_ctid_toast_truncate_toast_oids nto
+		ON oto.index_relnode = nto.index_relnode;
+
+INSERT INTO o_test_ctid_toast_truncate VALUES (1, (SELECT generate_string(1, 10000)));
+begin;
+SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+truncate o_test_ctid_toast_truncate;
+SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+INSERT INTO o_test_ctid_toast_truncate VALUES (1, (SELECT generate_string(1, 10000)));
+ROLLBACK;
+SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+
+begin;
+SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+truncate o_test_ctid_toast_truncate;
+SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+INSERT INTO o_test_ctid_toast_truncate VALUES (1, (SELECT generate_string(1, 10000)));
+COMMIT;
+SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast CASCADE;
