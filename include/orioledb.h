@@ -49,6 +49,13 @@
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
+/* A sub-version in the same ORIOLEDB_BINARY_VERSION. Same
+ * ORIOLEDB_DATA_VERSION clusters are compatible without conversion.
+ * For different ORIOLEDB_DATA_VERSION conversion is done at the
+ * reading/deserialization of system tables structures without using
+ * any conversion tools.
+ */
+#define ORIOLEDB_DATA_VERSION	1
 
 /*
  * perform_page_split() removes a key data from first right page downlink.

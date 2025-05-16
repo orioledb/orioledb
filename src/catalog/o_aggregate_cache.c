@@ -33,6 +33,7 @@ static OSysCache *aggregate_cache = NULL;
 struct OAggregate
 {
 	OSysCacheKey1 key;
+	uint16		data_version;
 	regproc		aggfinalfn;
 	regproc		aggserialfn;
 	regproc		aggdeserialfn;
@@ -113,6 +114,7 @@ o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 		*entry_ptr = (Pointer) o_agg;
 	}
 
+	o_agg->data_version = ORIOLEDB_DATA_VERSION;
 	o_agg->aggfinalfn = aggform->aggfinalfn;
 	o_agg->aggserialfn = aggform->aggserialfn;
 	o_agg->aggdeserialfn = aggform->aggdeserialfn;
@@ -173,6 +175,7 @@ o_aggregate_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	OAggregate *o_agg = (OAggregate *) entry;
 
+	Assert(o_agg->data_version == ORIOLEDB_DATA_VERSION);
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_agg,
 						   offsetof(OAggregate, agginitval));
@@ -198,6 +201,7 @@ o_aggregate_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 	Assert((ptr - data) + len <= length);
 	memcpy(o_agg, ptr, len);
 	ptr += len;
+	Assert(o_agg->data_version == ORIOLEDB_DATA_VERSION);
 
 	if (o_agg->has_initval)
 		o_agg->agginitval = o_deserialize_string(&ptr);

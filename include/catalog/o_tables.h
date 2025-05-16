@@ -70,6 +70,7 @@ typedef struct
 	/* number of index fields */
 	uint8		nkeyfields;
 	uint8		fillfactor;
+	uint16		data_version;
 	OTableIndexField fields[INDEX_MAX_KEYS];
 	uint8		nexprfields;
 	OTableField *exprfields;
@@ -98,6 +99,7 @@ typedef struct
 	bool		has_primary;
 	char		persistence;
 	uint8		fillfactor;
+	uint16		data_version;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */

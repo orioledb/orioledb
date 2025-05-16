@@ -25,6 +25,7 @@ typedef struct
 	ORelOids	tableOids;
 	char		table_persistence;
 	uint8		fillfactor;
+	uint16		data_version;
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
