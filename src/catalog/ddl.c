@@ -2161,6 +2161,44 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 		if (!closed)
 			relation_close(ind, AccessShareLock);
 	}
+
+	if (primary)
+	{
+		ORelOids	oids;
+		OTable	   *updated_o_table;
+
+		/*
+		 * Partial reimplementation of assign_new_oids just for toast, because
+		 * it isn't called for tables without pkeys here, but it should
+		 */
+
+		ORelOidsSetFromRel(oids, rel);
+		updated_o_table = o_tables_get(oids);
+		Assert(updated_o_table != NULL);
+
+		if (!updated_o_table->has_primary)
+		{
+			Oid			toast_relid;
+			Relation	toast_rel;
+			OSnapshot	oSnapshot;
+			OXid		oxid;
+
+			toast_relid = rel->rd_rel->reltoastrelid;
+			toast_rel = table_open(toast_relid, AccessExclusiveLock);
+			RelationSetNewRelfilenode(toast_rel, toast_rel->rd_rel->relpersistence);
+			ORelOidsSetFromRel(updated_o_table->toast_oids, toast_rel);
+			table_close(toast_rel, AccessExclusiveLock);
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+			o_tables_table_meta_lock(updated_o_table);
+			o_tables_update(updated_o_table, oxid, oSnapshot.csn);
+			o_tables_after_update(updated_o_table, oxid, oSnapshot.csn);
+			o_tables_table_meta_unlock(updated_o_table, InvalidOid);
+			recreate_table_descr_by_oids(updated_o_table->oids);
+			orioledb_free_rd_amcache(rel);
+		}
+		o_table_free(updated_o_table);
+	}
+
 }
 
 static void
@@ -3052,6 +3090,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					CommandCounterIncrement();
 					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
 
+					/*
+					 * Redifinig primary key here to not do rebuild after
+					 * rewrite_table
+					 */
 					redefine_indices(tbl, new_o_table, true);
 
 					o_table_free(new_o_table);
