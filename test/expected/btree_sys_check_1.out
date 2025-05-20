@@ -69,6 +69,12 @@ NOTICE:  drop cascades to column key2 of table o_test_sys_caches
 DROP TABLE o_test_sys_caches;
 DROP TYPE o_enum;
 DROP TYPE custom_type;
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
 CHECKPOINT;
 -- SYS_TREES_SHARED_ROOT_INFO
 SELECT regexp_replace(

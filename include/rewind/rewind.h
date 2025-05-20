@@ -51,6 +51,8 @@ typedef struct
 								 * checkpoint. */
 	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
 	uint64		freeSpace;		/* Free space in a circular buffer */
+	bool		skipCheck;		/* Skip timestamp-based check of items to
+								 * process */
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX

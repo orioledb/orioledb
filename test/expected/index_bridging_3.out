@@ -1569,6 +1569,12 @@ CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
 NOTICE:  index bridging is enabled for orioledb table 'o_briging_vacuum_test'
 DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
 DELETE FROM o_briging_vacuum_test;
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
 VACUUM o_briging_vacuum_test;
 SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
  id | val | p 

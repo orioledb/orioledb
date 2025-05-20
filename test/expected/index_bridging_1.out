@@ -1575,6 +1575,12 @@ ERROR:  function gist_index_content(unknown) does not exist
 LINE 1: SELECT * FROM gist_index_content('o_briging_vacuum_test_p_id...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
 VACUUM o_briging_vacuum_test;
 SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
  id | val | p 

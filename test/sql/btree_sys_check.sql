@@ -60,6 +60,8 @@ DROP TABLE o_test_sys_caches;
 DROP TYPE o_enum;
 DROP TYPE custom_type;
 
+SELECT orioledb_rewind_sync();
+
 CHECKPOINT;
 
 -- SYS_TREES_SHARED_ROOT_INFO

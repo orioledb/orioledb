@@ -49,6 +49,8 @@ static OBuffersDesc rewindBuffersDesc = {
 	.bufferCtlTrancheName = "rewindBuffersCtlTranche"
 };
 
+PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
+
 Size
 rewind_shmem_needs(void)
 {
@@ -64,6 +66,26 @@ rewind_shmem_needs(void)
 	size = add_size(size, o_buffers_shmem_needs(&rewindBuffersDesc));
 
 	return size;
+}
+
+Datum
+orioledb_rewind_sync(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+		PG_RETURN_VOID();
+
+	PG_TRY();
+	{
+		rewindMeta->skipCheck = true;
+		while (rewindMeta->completePos != rewindMeta->addPos)
+			pg_usleep(100000);
+	}
+	PG_FINALLY();
+	{
+		rewindMeta->skipCheck = false;
+	}
+	PG_END_TRY();
+	PG_RETURN_VOID();
 }
 
 static void
@@ -259,7 +281,8 @@ rewind_worker_main(Datum main_arg)
 				rewindItem = &rewindBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				Assert(rewindItem->oxid != InvalidOXid);
 
-				if (!TimestampDifferenceExceeds(rewindItem->timestamp,
+				if (!rewindMeta->skipCheck &&
+					!TimestampDifferenceExceeds(rewindItem->timestamp,
 												GetCurrentTimestamp(),
 												rewind_max_period))
 				{
@@ -275,8 +298,8 @@ rewind_worker_main(Datum main_arg)
 					UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
 
 					location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation,
-											   rewindItem->oxid, false, NULL,
-											   true);
+														rewindItem->oxid, false, NULL,
+														true);
 					Assert(!UndoLocationIsValid(location));
 #ifdef USE_ASSERT_CHECKING
 					Assert(pg_atomic_read_u64(&undoMeta->minRewindRetainLocation) <= rewindItem->minRetainLocation[i]);

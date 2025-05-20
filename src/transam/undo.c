@@ -663,15 +663,15 @@ walk_undo_range(UndoLogType undoType,
 
 UndoLocation
 walk_undo_range_with_buf(UndoLogType undoType,
-			 UndoLocation location, UndoLocation toLoc,
-			 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
-			 bool changeCountsValid)
+						 UndoLocation location, UndoLocation toLoc,
+						 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+						 bool changeCountsValid)
 {
 	UndoItemBuf buf;
 
 	init_undo_item_buf(&buf);
 	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, abort_val,
-				   onCommitLocation, changeCountsValid);
+							   onCommitLocation, changeCountsValid);
 	free_undo_item_buf(&buf);
 	return location;
 }
@@ -742,8 +742,8 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
 		location = walk_undo_range_with_buf(undoType, location, InvalidUndoLocation,
-								   oxid, false, NULL,
-								   changeCountsValid);
+											oxid, false, NULL,
+											changeCountsValid);
 		Assert(!UndoLocationIsValid(location));
 		newOnCommitLocation = InvalidUndoLocation;
 	}
@@ -756,9 +756,9 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 		location = walk_undo_range_with_buf(undoType, location,
-								   toLocation ? toLocation->location : InvalidUndoLocation,
-								   oxid, true, &newOnCommitLocation,
-								   changeCountsValid);
+											toLocation ? toLocation->location : InvalidUndoLocation,
+											oxid, true, &newOnCommitLocation,
+											changeCountsValid);
 	}
 
 	/*
