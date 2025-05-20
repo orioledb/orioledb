@@ -38,7 +38,7 @@ typedef struct
 
 typedef struct
 {
-	uint64		addPos;			/* Added to circular buffer */
+	pg_atomic_uint64	addPos;			/* Added to circular buffer */
 	uint64		completePos;	/* Removed from circular buffer */
 	uint64		evictPos;		/* Evict/restore position. Evict - left,
 								 * restore - right */
@@ -50,9 +50,9 @@ typedef struct
 								 * point for writing rewindItem-s into
 								 * checkpoint. */
 	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
-	uint64		freeSpace;		/* Free space in a circular buffer */
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
+	LWLock		evictLock;		/* Lock to evict page from circular buffer */
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX
@@ -113,6 +113,7 @@ typedef struct
  * Stage 2 (shift last page part by one page left)
  *                   E 	     A 	        C
  * |----------|------====|===       |   ------|
+ *
  */
 
 
