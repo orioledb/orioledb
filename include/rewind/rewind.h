@@ -13,11 +13,15 @@
 #ifndef __REWIND_WORKER_H__
 #define __REWIND_WORKER_H__
 
+#include "c.h"
 #include "utils/o_buffers.h"
+
+#include "access/transam.h"
 
 #define REWIND_FILE_SIZE (0x1000000)
 #define REWIND_BUFFERS_TAG (0)
 
+extern TransactionId orioledb_vacuum_horizon_hook(void);
 extern void register_rewind_worker(void);
 extern bool is_rewind_worker(void);
 PGDLLEXPORT void rewind_worker_main(Datum);
@@ -29,8 +33,10 @@ extern void add_to_rewind_buffer(OXid oxid);
 typedef struct
 {
 	OXid		oxid;
+	TransactionId xid; /* regular transaction id if any */
 	uint64		onCommitUndoLocation[UndoLogsCount];
 	uint64		minRetainLocation[UndoLogsCount];
+	FullTransactionId oldestConsideredRunningXid;
 	TimestampTz timestamp;
 } RewindItem;
 
@@ -53,6 +59,7 @@ typedef struct
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
 	LWLock		evictLock;		/* Lock to evict page from circular buffer */
+	pg_atomic_uint64 oldestConsideredRunningXid;
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX

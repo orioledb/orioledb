@@ -21,6 +21,7 @@
 #include "utils/stopevent.h"
 #include "rewind/rewind.h"
 
+#include "access/transam.h"
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/bgwriter.h"
@@ -88,6 +89,12 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+TransactionId
+orioledb_vacuum_horizon_hook(void)
+{
+	return XidFromFullTransactionId(rewindMeta->oldestConsideredRunningXid);
+}
+
 static void
 cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 {
@@ -113,6 +120,45 @@ cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 		(void) unlink(curFileName);
 		fileNum++;
 	}
+}
+
+/*
+ * Convert a 32 bit transaction id into 64 bit transaction id, by assuming it
+ * is within MaxTransactionId / 2 of XidFromFullTransactionId(rel).
+ *
+ * Be very careful about when to use this function. It can only safely be used
+ * when there is a guarantee that xid is within MaxTransactionId / 2 xids of
+ * rel. That e.g. can be guaranteed if the caller assures a snapshot is
+ * held by the backend and xid is from a table (where vacuum/freezing ensures
+ * the xid has to be within that range), or if xid is from the procarray and
+ * prevents xid wraparound that way.
+ */
+static inline FullTransactionId
+FullXidRelativeTo(FullTransactionId rel, TransactionId xid)
+{
+	TransactionId rel_xid = XidFromFullTransactionId(rel);
+
+	Assert(TransactionIdIsValid(xid));
+	Assert(TransactionIdIsValid(rel_xid));
+
+	/* not guaranteed to find issues, but likely to catch mistakes */
+	AssertTransactionIdInAllowableRange(xid);
+
+	return FullTransactionIdFromU64(U64FromFullTransactionId(rel)
+									+ (int32) (xid - rel_xid));
+}
+
+static FullTransactionId
+GetOldestFullTransactionIdConsideredRunning(void)
+{
+	TransactionId oldestConsideredRunningXid;
+	FullTransactionId latestCompletedXid;
+
+	oldestConsideredRunningXid = GetOldestTransactionIdConsideredRunning();
+	LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+	latestCompletedXid = TransamVariables->latestCompletedXid;
+	LWLockRelease(ProcArrayLock);
+	return FullXidRelativeTo(latestCompletedXid, oldestConsideredRunningXid);
 }
 
 void
@@ -151,6 +197,8 @@ rewind_init_shmem(Pointer ptr, bool found)
 			pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, pg_atomic_read_u64(&undoMeta->minProcRetainLocation));
 		}
 
+
+
 		/* rewindMeta->rewindMapTrancheId = LWLockNewTrancheId(); */
 
 		/*
@@ -164,6 +212,8 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->evictPos = InvalidRewindPos;
 		rewindMeta->completePos = 0;
 		rewindMeta->oldCleanedFileNum = 0;
+		pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
+							InvalidTransactionId);
 
 		/* Rewind buffers are not persistent */
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
@@ -386,6 +436,8 @@ rewind_worker_main(Datum main_arg)
 #endif
 					pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 				}
+				pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
+									rewindItem->oldestConsideredRunningXid.value);
 
 				/* Clear the item from the circular buffer */
 				rewindItem->oxid = InvalidOXid;
@@ -531,6 +583,8 @@ add_to_rewind_buffer(OXid oxid)
 
 	rewindItem->timestamp = GetCurrentTimestamp();
 	rewindItem->oxid = oxid;
+	rewindItem->xid = GetCurrentTransactionIdIfAny();
+	rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{

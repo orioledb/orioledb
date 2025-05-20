@@ -45,6 +45,7 @@
 #include "workers/bgwriter.h"
 #include "rewind/rewind.h"
 
+#include "access/heapam.h"
 #include "access/table.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_enum.h"
@@ -1008,6 +1009,8 @@ _PG_init(void)
 	prev_base_init_startup_hook = base_init_startup_hook;
 	base_init_startup_hook = o_base_init_startup_hook;
 	IndexAMRoutineHook = orioledb_indexam_routine_hook;
+	if (enable_rewind)
+		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }
