@@ -1481,12 +1481,22 @@ xid_is_finished_for_everybody(OXid xid)
 	if (xid == BootstrapTransactionId)
 		return true;
 
-	xmin = pg_atomic_read_u64(&xid_meta->runXmin);
+	if (!enable_rewind)
+	{
+		xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 
-	if (xid < xmin)
-		return true;
+		if (xid < xmin)
+			return true;
 
-	csn = oxid_get_csn(xid, false);
+		csn = oxid_get_csn(xid, false);
+	}
+	else
+	{
+		csn = oxid_get_csn(xid, true);
+
+		if (csn_is_retained_for_rewind(csn))
+			return false;
+	}
 
 	return COMMITSEQNO_IS_COMMITTED(csn);
 }
