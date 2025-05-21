@@ -39,6 +39,8 @@ ORDER BY c.relname;
 DROP TABLE IF EXISTS o_test_child;
 DROP TABLE IF EXISTS o_test;
 
+SELECT orioledb_rewind_sync();
+
 CREATE TYPE o_enum AS ENUM ('a', 'b', 'c');
 ALTER TYPE o_enum ADD VALUE 'd';
 ALTER TYPE o_enum RENAME VALUE 'd' TO 'e';
