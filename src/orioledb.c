@@ -142,6 +142,7 @@ char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
 bool		enable_rewind = false;
 int			rewind_max_period = 0;
+int		rewind_max_xacts = 0;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -836,6 +837,18 @@ _PG_init(void)
 							86400,
 							PGC_POSTMASTER,
 							GUC_UNIT_S,
+							NULL,
+							NULL,
+							NULL);
+	DefineCustomIntVariable("orioledb.rewind_max_xacts",
+							"Maximum number of xacts retained for orioledb rewind.",
+							NULL,
+							&rewind_max_xacts,
+							84600,
+							1,
+							INT_MAX,
+							PGC_POSTMASTER,
+							0,
 							NULL,
 							NULL,
 							NULL);

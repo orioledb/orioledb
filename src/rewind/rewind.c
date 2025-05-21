@@ -109,7 +109,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind %ld s exceeds rewind_max_period %ld s", msecs_requested, rewind_max_period)),
+				 errmsg("Requested rewind %ld s exceeds rewind_max_period %ld s", rewind_time, rewind_max_period)),
 				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %ld s back", rewind_max_period));
 	}
 
