@@ -51,6 +51,7 @@ static OBuffersDesc rewindBuffersDesc = {
 };
 
 PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
+PG_FUNCTION_INFO_V1(orioledb_rewind);
 
 Size
 rewind_shmem_needs(void)
@@ -87,6 +88,114 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	}
 	PG_END_TRY();
 	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_rewind(PG_FUNCTION_ARGS)
+{
+	TimestampTz	currentTime;
+	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
+	int		i = 0;
+
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+	else if (rewind_time > rewind_max_period)
+	{
+
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Requested rewind %ld s exceeds rewind_max_period %ld s", msecs_requested, rewind_max_period)),
+				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %ld s back", rewind_max_period));
+	}
+
+	/* Disable adding new transactions to rewind buffer by rewind worker */
+	rewindMeta->rewindInProgressRequested = true;
+	while (!rewindMeta->rewindInProgressStarted)
+		pg_usleep(10000L);
+
+	/* Terminate all other backends */
+	LWLockAcquire(ProcArrayLock, LW_SHARED);
+	for (i = 0; i < procArray->numProcs; i++)
+	{
+		if (proc == MyProc)
+			continue;
+
+		if (proc->pid == 0)
+			ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE),
+						errmsg("database is being used by prepared transactions",
+/// TODO Maybe use TerminateOtherDBBackends(Oid databaseId)
+
+	LWLockRelease(ProcArrayLock);
+
+	currentTime = GetCurrentTimestamp();
+
+	while (true)
+	{
+		if (rewindMeta->readPos < rewindMeta->writePos)
+		{
+			pos = pg_atomic_read_u64(&rewindMeta->addPos);
+
+			if (pos > rewindMeta->evictPos)
+			{
+				/* Read from circular buffer backwards */
+				pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
+				rewindItem = &rewindBuffer[rewindMeta->pos % rewind_circular_buffer_size];
+			}
+			else
+			{
+				/* Read from disk buffer backwards */
+				if (rewindMeta->writePos % REWIND_DISK_BUFFER_LENGTH == 0);
+				{
+					o_buffers_read(&rewindBuffersDesc,
+						   (Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
+						   rewindMeta->writePos - REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
+						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+				}
+				rewindItem = &tmpbuf[(rewindMeta->writePos % REWIND_DISK_BUFFER_LENGTH) - 1];
+				rewindMeta->writePos--;
+			}
+		}
+		else
+		{
+			/* Read  from circular buffer backwards*/
+			pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
+			rewindItem = &rewindBuffer[rewindMeta->pos % rewind_circular_buffer_size];
+		}
+
+		if (TimestampDifferenceExceeds(rewindItem.timestamp, currentTime, rewind_time * 1000))
+		{
+			/* Rewind complete */
+			break;
+		}
+
+		Assert(rewindItem->oxid != InvalidOXid);
+
+		/* Rewind current rewind item */
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			location = walk_undo_range_with_buf((UndoLogType) i,
+				rewindItem->undoLocation[i],
+				toLocation ? toLocation->location : InvalidUndoLocation,
+				rewindItem->oxid, true, &rewindItem->onCommitLocation, //unused ?
+				changeCountsValid);
+		}
+		clear_rewind_oxid(rewindItem->oxid);
+
+		/* Clear the item from the circular buffer */
+		rewindItem->oxid = InvalidOXid;
+
+
+		/* Buffer finished. Unlikely case when rewind_time equals rewind_max_period */
+		if (pos = rewindMeta->completePos)
+			break;
+	}
+
+	// Restart Postgres
 }
 
 TransactionId
@@ -402,6 +511,14 @@ rewind_worker_main(Datum main_arg)
 				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 				int			i;
 
+				if (rewindMeta->rewindInProgressRequested)
+				{
+					/* Rewind has started. Quit rewind worker */
+					shutdown_requested = true;
+					rewindMeta->rewindInProgressStarted = true;
+					break;
+				}
+
 				if (rewindMeta->completePos == pg_atomic_read_u64(&rewindMeta->addPos))
 				{
 					/* All are already fixed, do nothing */
@@ -414,7 +531,7 @@ rewind_worker_main(Datum main_arg)
 				if (!rewindMeta->skipCheck &&
 					!TimestampDifferenceExceeds(rewindItem->timestamp,
 												GetCurrentTimestamp(),
-												rewind_max_period))
+												rewind_max_period * 1000))
 				{
 					/* Too early, do nothing */
 					break;
@@ -589,11 +706,11 @@ add_to_rewind_buffer(OXid oxid)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
 		UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
-
 		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
 		rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 		elog(LOG, "%lu %d %lu", oxid, i, rewindItem->onCommitUndoLocation[i]);
+		rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
 		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 	}
 }

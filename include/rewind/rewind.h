@@ -35,6 +35,7 @@ typedef struct
 	OXid		oxid;
 	TransactionId xid;			/* regular transaction id if any */
 	uint64		onCommitUndoLocation[UndoLogsCount];
+	uint64		undoLocation[UndoLogsCount];
 	uint64		minRetainLocation[UndoLogsCount];
 	FullTransactionId oldestConsideredRunningXid;
 	TimestampTz timestamp;
@@ -60,6 +61,8 @@ typedef struct
 								 * process */
 	LWLock		evictLock;		/* Lock to evict page from circular buffer */
 	pg_atomic_uint64 oldestConsideredRunningXid;
+	bool 		rewindInProgressRequested;
+	bool		rewindInProgressStarted;
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX
