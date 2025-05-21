@@ -669,6 +669,8 @@ walk_undo_range_with_buf(UndoLogType undoType,
 {
 	UndoItemBuf buf;
 
+	ASAN_UNPOISON_MEMORY_REGION(&buf, sizeof(buf));
+
 	init_undo_item_buf(&buf);
 	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, abort_val,
 							   onCommitLocation, changeCountsValid);
