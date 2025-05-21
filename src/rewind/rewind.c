@@ -156,7 +156,7 @@ GetOldestFullTransactionIdConsideredRunning(void)
 
 	oldestConsideredRunningXid = GetOldestTransactionIdConsideredRunning();
 	LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
-	latestCompletedXid = TransamVariables->latestCompletedXid;
+	latestCompletedXid = TRANSAM_VARIABLES->latestCompletedXid;
 	LWLockRelease(ProcArrayLock);
 	return FullXidRelativeTo(latestCompletedXid, oldestConsideredRunningXid);
 }
