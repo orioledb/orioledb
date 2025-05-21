@@ -33,7 +33,7 @@ extern void add_to_rewind_buffer(OXid oxid);
 typedef struct
 {
 	OXid		oxid;
-	TransactionId xid; /* regular transaction id if any */
+	TransactionId xid;			/* regular transaction id if any */
 	uint64		onCommitUndoLocation[UndoLogsCount];
 	uint64		minRetainLocation[UndoLogsCount];
 	FullTransactionId oldestConsideredRunningXid;
@@ -44,7 +44,7 @@ typedef struct
 
 typedef struct
 {
-	pg_atomic_uint64	addPos;			/* Added to circular buffer */
+	pg_atomic_uint64 addPos;	/* Added to circular buffer */
 	uint64		completePos;	/* Removed from circular buffer */
 	uint64		evictPos;		/* Evict/restore position. Evict - left,
 								 * restore - right */

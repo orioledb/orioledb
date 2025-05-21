@@ -268,12 +268,13 @@ restore_evicted_rewind_page(void)
 	int			length_to_end;
 	uint64		currentCleanFileNum;
 	int			itemsPerFile;
-	uint64			curAddPos;
+	uint64		curAddPos;
 
 	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
+
 	/*
-	 * Stage 1. Shift last page part in a ring buffer have
-	 * a page-sized space in a circular buffer before it
+	 * Stage 1. Shift last page part in a ring buffer have a page-sized space
+	 * in a circular buffer before it
 	 */
 	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, REWIND_DISK_BUFFER_LENGTH);
 
@@ -287,9 +288,8 @@ restore_evicted_rewind_page(void)
 	}
 
 	/*
-	 * Stage 2. Restore oldest written buffer page to a
-	 * clean space before the last page in a circular
-	 * buffer
+	 * Stage 2. Restore oldest written buffer page to a clean space before the
+	 * last page in a circular buffer
 	 */
 	start = rewindMeta->evictPos % rewind_circular_buffer_size;
 	length_to_end = rewind_circular_buffer_size - start;
@@ -297,20 +297,20 @@ restore_evicted_rewind_page(void)
 	if (length_to_end <= REWIND_DISK_BUFFER_LENGTH)
 	{
 		o_buffers_read(&rewindBuffersDesc,
-				   (Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
-				   rewindMeta->readPos * sizeof(RewindItem),
-				   length_to_end * sizeof(RewindItem));
+					   (Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
+					   rewindMeta->readPos * sizeof(RewindItem),
+					   length_to_end * sizeof(RewindItem));
 		o_buffers_read(&rewindBuffersDesc,
-				   (Pointer) &rewindBuffer[0], REWIND_BUFFERS_TAG,
-				   (rewindMeta->readPos + length_to_end) * sizeof(RewindItem),
-				   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+					   (Pointer) &rewindBuffer[0], REWIND_BUFFERS_TAG,
+					   (rewindMeta->readPos + length_to_end) * sizeof(RewindItem),
+					   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
 	}
 	else
 	{
 		o_buffers_read(&rewindBuffersDesc,
-				   (Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
-				   rewindMeta->readPos * sizeof(RewindItem),
-				   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+					   (Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
+					   rewindMeta->readPos * sizeof(RewindItem),
+					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 	}
 
 #ifdef USE_ASSERT_CHECKING
@@ -329,9 +329,9 @@ restore_evicted_rewind_page(void)
 	if (currentCleanFileNum > rewindMeta->oldCleanedFileNum)
 	{
 		o_buffers_unlink_files_range(&rewindBuffersDesc,
-								 REWIND_BUFFERS_TAG,
-								 rewindMeta->oldCleanedFileNum,
-								 currentCleanFileNum);
+									 REWIND_BUFFERS_TAG,
+									 rewindMeta->oldCleanedFileNum,
+									 currentCleanFileNum);
 		rewindMeta->oldCleanedFileNum = currentCleanFileNum;
 	}
 }
@@ -449,10 +449,10 @@ rewind_worker_main(Datum main_arg)
 				 */
 				if (rewindMeta->readPos < rewindMeta->writePos)
 				{
-					int freeSpace;
+					int			freeSpace;
 
 					freeSpace = rewind_circular_buffer_size -
-					((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
+						((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
 
 					Assert(freeSpace <= REWIND_DISK_BUFFER_LENGTH);
 
@@ -479,8 +479,8 @@ rewind_worker_main(Datum main_arg)
 static void
 evict_rewind_page(void)
 {
-	uint64			pos;
-	uint64			curAddPos;
+	uint64		pos;
+	uint64		curAddPos;
 	int			start;
 	int			length_to_end;
 	int			oldEvictPos;
@@ -557,18 +557,18 @@ add_to_rewind_buffer(OXid oxid)
 {
 	RewindItem *rewindItem;
 	int			i;
-	uint64			curAddPos;
-	int 			freeSpace;
+	uint64		curAddPos;
+	int			freeSpace;
 
 	freeSpace = rewind_circular_buffer_size -
 		((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
-	Assert(freeSpace >=0);
+	Assert(freeSpace >= 0);
 
 	while (freeSpace == 0)
 	{
 		evict_rewind_page();
 		freeSpace = rewind_circular_buffer_size -
-		((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
+			((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
 	}
 
 	/* Fill entry in a circular buffer. */
@@ -612,6 +612,7 @@ checkpoint_write_rewind_xids(void)
 	uint64		curAddPos;
 
 	curAddPos = pg_atomic_read_u64(&rewindMeta->addPos);
+
 	/*
 	 * Start from the last non-completed position not written to checkpoint
 	 * yet

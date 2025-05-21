@@ -558,8 +558,8 @@ apply_xids_branches(void)
 				Assert(!UndoLocationIsValid(stack->undoStack.branchLocation));
 				Assert(!UndoLocationIsValid(stack->undoStack.subxactLocation));
 				location = walk_undo_range_with_buf((UndoLogType) ((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
-										   stack->undoStack.onCommitLocation,
-										   InvalidUndoLocation, recovery_oxid, false, NULL, true);
+													stack->undoStack.onCommitLocation,
+													InvalidUndoLocation, recovery_oxid, false, NULL, true);
 				/* NB rewindItem->oxid is not used in recovery */
 				Assert(!UndoLocationIsValid(location));
 			}
