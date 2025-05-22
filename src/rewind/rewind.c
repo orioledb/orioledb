@@ -96,6 +96,12 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	TimestampTz	currentTime;
 	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
 	int		i = 0;
+	int		retry;
+	int 		nbackends;
+	int		nprepared;
+	int		rewind_time = PG_GETARG_INT32(0);
+	uint64		pos;
+	RewindItem     *rewindItem;
 
 	if (!enable_rewind)
 	{
@@ -109,29 +115,49 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind %ld s exceeds rewind_max_period %ld s", rewind_time, rewind_max_period)),
-				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %ld s back", rewind_max_period));
+				 errmsg("Requested rewind %d s exceeds rewind_max_period %d s", rewind_time, rewind_max_period)),
+				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
 	}
+
+	CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
+	if (nprepared > 0)
+		ereport(ERROR,
+                                (errcode(ERRCODE_INTERNAL_ERROR),
+                                 errmsg("Can't rewind due to prepared transactions in the cluster")));
+
+	/* XXX disable new transactions committing ? */
 
 	/* Disable adding new transactions to rewind buffer by rewind worker */
 	rewindMeta->rewindInProgressRequested = true;
+	retry = 0;
 	while (!rewindMeta->rewindInProgressStarted)
-		pg_usleep(10000L);
-
-	/* Terminate all other backends */
-	LWLockAcquire(ProcArrayLock, LW_SHARED);
-	for (i = 0; i < procArray->numProcs; i++)
 	{
-		if (proc == MyProc)
-			continue;
+		pg_usleep(10000L);
+		retry++;
+		if (retry >= 1000)
+			/* We don't know the state of rewind worker so we can't rewind or continue. */
+			ereport(FATAL,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Rewind worker couldn't stop in 100s, aborting rewind")));
+	}
+	/* Terminate all other backends */
+	retry = 0;
+	TerminateOtherDBBackends(InvalidOid);
+	while (CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
+	{
+		pg_usleep(1000000L);
+		retry++;
+		if (retry >= 100)
+			/*
+			 * Rewind worker already stopped and come transactions could be not in the buffer
+			 * so we can't continue.
+			 */
+			ereport(FATAL,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Backends couldn't stop in 100s, aborting rewind")));
+	}
 
-		if (proc->pid == 0)
-			ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE),
-						errmsg("database is being used by prepared transactions",
-/// TODO Maybe use TerminateOtherDBBackends(Oid databaseId)
-
-	LWLockRelease(ProcArrayLock);
-
+	/* Do actual rewind */
 	currentTime = GetCurrentTimestamp();
 
 	while (true)
@@ -144,12 +170,12 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 			{
 				/* Read from circular buffer backwards */
 				pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
-				rewindItem = &rewindBuffer[rewindMeta->pos % rewind_circular_buffer_size];
+				rewindItem = &rewindBuffer[pos % rewind_circular_buffer_size];
 			}
 			else
 			{
 				/* Read from disk buffer backwards */
-				if (rewindMeta->writePos % REWIND_DISK_BUFFER_LENGTH == 0);
+				if (rewindMeta->writePos % REWIND_DISK_BUFFER_LENGTH == 0)
 				{
 					o_buffers_read(&rewindBuffersDesc,
 						   (Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
@@ -164,10 +190,10 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		{
 			/* Read  from circular buffer backwards*/
 			pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
-			rewindItem = &rewindBuffer[rewindMeta->pos % rewind_circular_buffer_size];
+			rewindItem = &rewindBuffer[pos % rewind_circular_buffer_size];
 		}
 
-		if (TimestampDifferenceExceeds(rewindItem.timestamp, currentTime, rewind_time * 1000))
+		if (TimestampDifferenceExceeds(rewindItem->timestamp, currentTime, rewind_time * 1000))
 		{
 			/* Rewind complete */
 			break;
@@ -178,24 +204,32 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		/* Rewind current rewind item */
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
+			UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
+
 			location = walk_undo_range_with_buf((UndoLogType) i,
 				rewindItem->undoLocation[i],
-				toLocation ? toLocation->location : InvalidUndoLocation,
-				rewindItem->oxid, true, &rewindItem->onCommitLocation, //unused ?
-				changeCountsValid);
+				InvalidUndoLocation,
+				rewindItem->oxid, true, &rewindItem->onCommitUndoLocation[i],
+				true);
+			Assert(!UndoLocationIsValid(location));
 		}
-		clear_rewind_oxid(rewindItem->oxid);
+
+		Assert(csn_is_retained_for_rewind(oxid_get_csn(rewindItem->oxid, true)));
+		set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
+		
+		/* Abort transactions for non-orioledb tables */ 
+		TransactionIdAbortTree(XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), 0, NULL);
 
 		/* Clear the item from the circular buffer */
-		rewindItem->oxid = InvalidOXid;
-
+		rewindItem->oxid = InvalidOXid;	
 
 		/* Buffer finished. Unlikely case when rewind_time equals rewind_max_period */
-		if (pos = rewindMeta->completePos)
+		if (pos == rewindMeta->completePos)
 			break;
 	}
 
-	// Restart Postgres
+	/* Restart Postgres */
+	(void) kill(PostmasterPid, SIGTERM);
 }
 
 TransactionId
