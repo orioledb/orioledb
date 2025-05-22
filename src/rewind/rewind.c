@@ -103,12 +103,15 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	uint64		pos;
 	RewindItem     *rewindItem;
 
+	elog(WARNING, "Rewind requested, for %d s", rewind_time);
+
 	if (!enable_rewind)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				  errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+		PG_RETURN_VOID();
 	}
 	else if (rewind_time > rewind_max_period)
 	{
@@ -117,6 +120,12 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("Requested rewind %d s exceeds rewind_max_period %d s", rewind_time, rewind_max_period)),
 				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
+		PG_RETURN_VOID();
+	}
+	else if (rewind_time == 0)
+	{
+		elog(WARNING, "Zero rewind requested, do nothing");
+		PG_RETURN_VOID();
 	}
 
 	CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
@@ -143,8 +152,11 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	/* Terminate all other backends */
 	retry = 0;
 	TerminateOtherDBBackends(InvalidOid);
-	while (CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
+	while(true)
 	{
+		(void) CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
+		if (nbackends <= 2) /* Autovaccum launcher and worker are not terminated by TerminateOtherDBBackends */
+			break;
 		pg_usleep(1000000L);
 		retry++;
 		if (retry >= 100)
@@ -228,6 +240,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 			break;
 	}
 
+	elog(WARNING, "Rewind complete, for %d s", rewind_time);
 	/* Restart Postgres */
 	(void) kill(PostmasterPid, SIGTERM);
 	PG_RETURN_VOID();
