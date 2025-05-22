@@ -725,6 +725,12 @@ add_to_rewind_buffer(OXid oxid)
 	uint64		curAddPos;
 	int			freeSpace;
 
+	if (rewindMeta->rewindInProgressRequested)
+	{
+		elog(WARNING, "Adding to rewind queue blocked by rewind");
+		return;
+	}
+
 	freeSpace = rewind_circular_buffer_size -
 		((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
 	Assert(freeSpace >= 0);
