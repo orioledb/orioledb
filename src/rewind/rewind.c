@@ -230,6 +230,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 
 	/* Restart Postgres */
 	(void) kill(PostmasterPid, SIGTERM);
+	PG_RETURN_VOID();
 }
 
 TransactionId
