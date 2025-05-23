@@ -1,1 +1,40 @@
-skjdf
+CREATE SCHEMA rewind;
+SET SESSION search_path = 'rewind';
+CREATE EXTENSION orioledb;
+\set VERBOSITY terse
+\set VERBOSITY default
+CREATE table heap_table (i int) USING heap;
+CREATE TABLE o_test_rewind (i int) USING orioledb;
+INSERT INTO heap_table VALUES (1);
+INSERT INTO o_test_rewind VALUES (1);
+INSERT INTO o_test_rewind VALUES (2);
+INSERT INTO o_test_rewind VALUES (3);
+INSERT INTO o_test_rewind VALUES (4);
+INSERT INTO o_test_rewind VALUES (5);
+-- Should fail
+select orioledb_rewind(600);
+WARNING:  Rewind requested, for 600 s
+ERROR:  Requested rewind 600 s exceeds rewind_max_period 500 s
+DETAIL:  increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than 500 s back
+select orioledb_rewind(0);
+WARNING:  Rewind requested, for 0 s
+WARNING:  Zero rewind requested, do nothing
+ orioledb_rewind 
+-----------------
+ 
+(1 row)
+
+BEGIN;
+INSERT INTO heap_table VALUES (2);
+PREPARE TRANSACTION 'prep';
+ROLLBACK;
+WARNING:  there is no transaction in progress
+select orioledb_rewind(10);
+WARNING:  Rewind requested, for 10 s
+ERROR:  Can't rewind due to prepared transactions in the cluster
+COMMIT PREPARED 'prep';
+DROP TABLE heap_table;
+DROP TABLE o_test_rewind;
+DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA rewind CASCADE;
+RESET search_path;
