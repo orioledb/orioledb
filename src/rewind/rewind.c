@@ -172,13 +172,14 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	/* Do actual rewind */
 	currentTime = GetCurrentTimestamp();
 
+	pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
 	while (true)
 	{
 		if (rewindMeta->readPos < rewindMeta->writePos)
 		{
 			pos = pg_atomic_read_u64(&rewindMeta->addPos);
 
-			if (pos > rewindMeta->evictPos)
+			if (pos >= rewindMeta->evictPos)
 			{
 				/* Read from circular buffer backwards */
 				pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
@@ -218,6 +219,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		{
 			UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
+			elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i]);
 			location = walk_undo_range_with_buf((UndoLogType) i,
 				rewindItem->undoLocation[i],
 				InvalidUndoLocation,
@@ -763,7 +765,7 @@ add_to_rewind_buffer(OXid oxid)
 		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
 		rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		elog(LOG, "%lu %d %lu", oxid, i, rewindItem->onCommitUndoLocation[i]);
+		elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i]);
 		rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
 		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 	}
