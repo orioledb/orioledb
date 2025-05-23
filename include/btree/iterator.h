@@ -52,7 +52,7 @@ extern void o_btree_iterator_set_callback(BTreeIterator *it,
 										  TupleFetchCallback callback,
 										  void *arg);
 extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
-									 CommitSeqNo *tuple_csn,
+									 CommitSeqNo *tupleCsn,
 									 void *end, BTreeKeyType endType,
 									 bool endIsIncluded,
 									 BTreeLocationHint *hint);

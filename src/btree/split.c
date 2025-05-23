@@ -170,7 +170,7 @@ split_item_interator_get(SplitItemIterator *it)
 }
 
 /*
- * Find the location for B-tree page split.  This function take into accouint
+ * Find the location for B-tree page split.  This function take into account
  * insertion of new tuple or replacement of existing one.  It tries to keep
  * as close as possible to `targetLocation`, or if `targetLocation == 0` close
  * to `spaceRatio`.  Also, this function takes advantage of reclaiming unused
@@ -371,14 +371,16 @@ btree_get_split_left_count(BTreeDescr *desc, OInMemoryBlkno blkno,
  * it is under processing by the checkpointer worker.
  */
 void
-perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_blkno,
+perform_page_split(OInMemoryBlkno blkno, OInMemoryBlkno new_blkno,
+				   BTreePageLocator *pageContext,
 				   OffsetNumber left_count, OTuple splitkey,
-				   LocationIndex splitkey_len, OffsetNumber *offset, bool *place_right,
+				   LocationIndex splitkey_size, OffsetNumber *offset, bool *place_right,
 				   Pointer tupleheader, OTuple tuple, LocationIndex tuplesize,
 				   bool replace, CommitSeqNo csn, UndoLocation undoLoc)
 {
-	Page		left_page = O_GET_IN_MEMORY_PAGE(blkno),
+	Page		left_page = pageContext->page,
 				right_page = O_GET_IN_MEMORY_PAGE(new_blkno);
+	BTreeDescr *desc = pageContext->treeDesc;
 	BTreePageHeader *left_header = (BTreePageHeader *) left_page,
 			   *right_header = (BTreePageHeader *) right_page;
 	bool		leaf = O_PAGE_IS(left_page, LEAF);
@@ -490,8 +492,8 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 	}
 	else
 	{
-		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(left_page);
-		BTREE_PAGE_GET_HIKEY(hikey, left_page);
+		hikey = btree_get_hikey(pageContext);
+		hikeySize = btree_get_hikey_size(pageContext, hikey);
 	}
 
 	btree_page_reorg(desc, right_page, &items[left_count], count - left_count,
@@ -520,7 +522,7 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno, OInMemoryBlkno new_bl
 	left_header->flags &= ~(O_BTREE_FLAG_RIGHTMOST);
 
 	btree_page_reorg(desc, left_page, &items[0], left_count,
-					 splitkey_len, splitkey, NULL);
+					 splitkey_size, splitkey, NULL);
 
 	o_btree_page_calculate_statistics(desc, left_page);
 	o_btree_page_calculate_statistics(desc, right_page);

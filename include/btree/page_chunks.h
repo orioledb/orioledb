@@ -13,6 +13,7 @@
 #ifndef __BTREE_PAGE_CHUNKS_H__
 #define __BTREE_PAGE_CHUNKS_H__
 
+#include "btree/chunk_ops.h"
 #include "btree/page_contents.h"
 
 typedef enum BTreeItemPageFitType
@@ -30,7 +31,8 @@ typedef struct
 	bool		newItem;
 } BTreePageItem;
 
-extern bool partial_load_chunk(PartialPageState *partial, Page img,
+extern bool partial_load_chunk(BTreePageLocator *pageContext,
+							   PartialPageState *partial,
 							   OffsetNumber chunkOffset);
 extern BTreeItemPageFitType page_locator_fits_item(BTreeDescr *desc,
 												   Page p,
@@ -66,8 +68,9 @@ extern void page_split_chunk_if_needed(BTreeDescr *desc, Page p,
 extern void btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 							 OffsetNumber count, LocationIndex hikeySize,
 							 OTuple hikey, BTreePageItemLocator *newLoc);
-extern void split_page_by_chunks(BTreeDescr *desc, Page p);
-extern bool page_locator_find_real_item(Page p, PartialPageState *partial,
+extern void split_page_by_chunks(BTreePageLocator *pageContext);
+extern bool page_locator_find_real_item(BTreePageLocator *pageContext,
+										PartialPageState *partial,
 										BTreePageItemLocator *locator);
 extern OffsetNumber page_locator_get_offset(Page p, BTreePageItemLocator *locator);
 

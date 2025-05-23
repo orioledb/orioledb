@@ -13,6 +13,7 @@
 #ifndef __BTREE_UNDO_H__
 #define __BTREE_UNDO_H__
 
+#include "btree/chunk_ops.h"
 #include "btree/page_contents.h"
 
 /*
@@ -97,10 +98,11 @@ extern BTreeLeafTuphdr *make_undo_record(BTreeDescr *desc, OTuple tuple,
 										 OInMemoryBlkno blkno, uint32 pageChangeCount,
 										 UndoLocation *undoLocation);
 
-extern void get_page_from_undo(BTreeDescr *desc, UndoLocation undo_loc, Pointer key,
-							   BTreeKeyType kind, Pointer dest,
-							   bool *is_left, bool *is_right, OFixedKey *lokey,
-							   OFixedKey *page_lokey, OTuple *page_hikey);
+extern void get_page_from_undo(BTreePageLocator *destPageContext,
+							   UndoLocation undoLocation, Pointer key,
+							   BTreeKeyType kind, bool *is_left, bool *is_right,
+							   OFixedKey *lokey, OFixedKey *page_lokey,
+							   OTuple *page_hikey);
 extern UndoLocation page_add_image_to_undo(BTreeDescr *desc, Pointer p,
 										   CommitSeqNo imageCsn,
 										   OTuple *splitKey, LocationIndex splitKeyLen);

@@ -77,6 +77,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 			   *cur_tup = NULL;
 	FileExtent	result;
 	OBTreeFindPageContext context;
+	BTreePageLocator pageContext;
 	Page		p = NULL;
 	bool		old_enable_stopevents;
 	bool		found = false,
@@ -112,6 +113,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 
 	init_page_find_context(&context, len_off_tree, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+	btree_page_locator_init(&pageContext, len_off_tree);
 
 	/* try to find a free extent */
 	while (!found && !end)
@@ -119,7 +121,10 @@ get_extent(BTreeDescr *desc, uint16 len)
 		tmpTup.data = (Pointer) &tup;
 		tmpTup.formatFlags = 0;
 		(void) find_page(&context, (Pointer) &tmpTup, BTreeKeyLeafTuple, 0);
+
 		p = O_GET_IN_MEMORY_PAGE(context.items[context.index].blkno);
+		btree_page_context_set(&pageContext, p);
+
 		loc = &context.items[context.index].locator;
 
 		while (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
@@ -152,7 +157,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 			{
 				OTuple		hikey;
 
-				BTREE_PAGE_GET_HIKEY(hikey, p);
+				hikey = btree_get_hikey(&pageContext);
 				cur_tup = (FreeTreeTuple *) hikey.data;
 				if (!EXTENTS_IX_EQ(*cur_tup, tup))
 				{
@@ -173,6 +178,8 @@ get_extent(BTreeDescr *desc, uint16 len)
 
 	if (!found)
 	{
+		btree_page_context_release(&pageContext);
+		release_page_find_context(&context);
 		/* free extent not founded, increase file length */
 		result.len = len;
 		if (use_device)
@@ -253,6 +260,9 @@ get_extent(BTreeDescr *desc, uint16 len)
 				 tup.extent.offset, tup.extent.length);
 		}
 	}
+
+	btree_page_context_release(&pageContext);
+	release_page_find_context(&context);
 
 	result.off = deleted_tup.extent.offset;
 	result.len = len;

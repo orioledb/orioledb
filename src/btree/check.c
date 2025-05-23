@@ -70,6 +70,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 {
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	BTreeCheckStatus status;
+	BTreePageLocator pageContext;
 	ExtentsArray free_extents;
 	uint64		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength[0]);	/* Fix for S3 mode */
 	bool		is_compressed = OCompressIsValid(desc->compress);
@@ -85,10 +86,15 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	status.hasError = false;
 	init_page_find_context(&status.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
-	result = get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
+	btree_page_locator_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, O_GET_IN_MEMORY_PAGE(desc->rootInfo.rootPageBlkno));
+
+	result = get_checkpoint_number(desc->rootInfo.rootPageBlkno, &pageContext,
 								   &checkpoint_number, &copy_blkno);
 	if (!result)
 	{
+		btree_page_context_release(&pageContext);
+		release_page_find_context(&status.context);
 		elog(NOTICE, "Tree is under checkpoint now");
 		return false;
 	}
@@ -98,23 +104,39 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	check_walk_btree(&status, desc->rootInfo.rootPageBlkno, OInvalidInMemoryBlkno);
 
 	if (status.hasError)
+	{
+		btree_page_context_release(&pageContext);
+		release_page_find_context(&status.context);
 		return false;
+	}
 
 	if (desc->storageType != BTreeStoragePersistence)
+	{
+		btree_page_context_release(&pageContext);
+		release_page_find_context(&status.context);
 		return true;
+	}
 
 	/* get free file extents */
 	get_free_extents(desc, &free_extents, force_file_check,
 					 checkpoint_number - 1);
 
 	if (status.hasError)
+	{
+		btree_page_context_release(&pageContext);
+		release_page_find_context(&status.context);
 		return false;
+	}
 
 	/* check extents */
 	status.hasError = !check_extents(&status.busy, &free_extents);
 
 	if (status.hasError)
+	{
+		btree_page_context_release(&pageContext);
+		release_page_find_context(&status.context);
 		return false;
+	}
 
 	if (data_file_len > status.busy.blocksCount + free_extents.blocksCount)
 	{
@@ -209,6 +231,9 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 			pfree(tmp_extents.extents);
 		}
 	}
+
+	btree_page_context_release(&pageContext);
+	release_page_find_context(&status.context);
 
 	return !status.hasError;
 }
@@ -683,5 +708,6 @@ check_btree_compression(BTreeDescr *desc, BTreeCompressStats *stats, OCompress l
 
 	btree_check_compression_recursive(desc, stats, lvl, &context, desc->rootInfo.rootPageBlkno);
 
+	release_page_find_context(&context);
 	o_tables_rel_unlock_extended(&desc->oids, AccessShareLock, recovery);
 }

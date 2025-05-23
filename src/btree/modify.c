@@ -20,6 +20,7 @@
 #include "btree/merge.h"
 #include "btree/modify.h"
 #include "btree/page_chunks.h"
+#include "btree/stopevent.h"
 #include "btree/undo.h"
 #include "catalog/o_tables.h"
 #include "recovery/recovery.h"
@@ -657,11 +658,15 @@ o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 	OInMemoryBlkno blkno;
 	BTreePageItemLocator loc;
 	Page		page;
+	BTreePageLocator pageContext;
 	bool		applyResult;
 
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
 	loc = pageFindContext->items[pageFindContext->index].locator;
+
 	page = O_GET_IN_MEMORY_PAGE(blkno);
+	btree_page_locator_init(&pageContext, desc);
+	btree_page_context_set(&pageContext, page);
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);
@@ -673,10 +678,12 @@ o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 
 	if (!applyResult)
 	{
-		btree_page_search(desc, page, context->key,
+		btree_page_search(&pageContext, context->key,
 						  context->keyType, NULL, &loc);
 		pageFindContext->items[pageFindContext->index].locator = loc;
 	}
+
+	btree_page_context_release(&pageContext);
 
 	return applyResult;
 }
@@ -981,6 +988,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	OBTreeFindPageContext pageFindContext;
 	int			pageReserveKind;
 	Jsonb	   *params = NULL;
+	OBTreeModifyResult result;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1011,26 +1019,33 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	else
 		(void) find_page(&pageFindContext, key, keyType, 0);
 
-	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
-								   key, keyType, opOxid, opCsn,
-								   lockMode, deleted, pageReserveKind,
-								   callbackInfo);
+	result = o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
+									 key, keyType, opOxid, opCsn,
+									 lockMode, deleted, pageReserveKind,
+									 callbackInfo);
+
+	release_page_find_context(&pageFindContext);
+
+	return result;
 }
 
 static bool
-page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
+page_unique_check(BTreePageLocator *pageContext, BTreePageItemLocator *locator,
 				  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo)
 {
-	(void) page_locator_find_real_item(p, NULL, locator);
+	BTreeDescr *desc = pageContext->treeDesc;
+	Page		page = pageContext->page;
 
-	while (BTREE_PAGE_LOCATOR_IS_VALID(p, locator))
+	(void) page_locator_find_real_item(pageContext, NULL, locator);
+
+	while (BTREE_PAGE_LOCATOR_IS_VALID(page, locator))
 	{
 		int			cmp;
 		OTuple		tuple;
 		BTreeLeafTuphdr *pageTuphdr,
 					tuphdr;
 
-		BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, p, locator);
+		BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, page, locator);
 		cmp = o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple,
 						  key, BTreeKeyUniqueUpperBound);
 		if (cmp > 0)
@@ -1042,7 +1057,7 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 		{
 			if (tuphdr.deleted != BTreeLeafTupleNonDeleted)
 			{
-				BTREE_PAGE_LOCATOR_NEXT(p, locator);
+				BTREE_PAGE_LOCATOR_NEXT(page, locator);
 				continue;
 			}
 			*xactInfo = tuphdr.xactInfo;
@@ -1059,27 +1074,25 @@ static bool
 slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
 					  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo)
 {
-	Page		p;
 	OFixedKey	hikey_buf;
 
 	btree_find_context_from_modify_to_read(pageFindContext,
 										   key, BTreeKeyUniqueLowerBound, 0);
-
-	p = pageFindContext->img;
 
 	while (true)
 	{
 		int			cmp;
 		OTuple		hikey;
 
-		if (page_unique_check(desc, p, &pageFindContext->items[pageFindContext->index].locator,
+		if (page_unique_check(&pageFindContext->pageContext,
+							  &pageFindContext->items[pageFindContext->index].locator,
 							  key, opOxid, xactInfo))
 			return true;
 
-		if (O_PAGE_IS(p, RIGHTMOST))
+		if (O_PAGE_IS(pageFindContext->pageContext.page, RIGHTMOST))
 			break;
 
-		BTREE_PAGE_GET_HIKEY(hikey, p);
+		hikey = btree_get_hikey(&pageFindContext->pageContext);
 
 		cmp = o_btree_cmp(desc, &hikey, BTreeKeyNonLeafKey,
 						  key, BTreeKeyUniqueUpperBound);
@@ -1093,7 +1106,7 @@ slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
 		 * unique key.  So, we can't just start from the beginning, but have
 		 * to find the right position on the page.
 		 */
-		btree_page_search(desc, p, key, BTreeKeyUniqueLowerBound,
+		btree_page_search(&pageFindContext->pageContext, key, BTreeKeyUniqueLowerBound,
 						  NULL, &pageFindContext->items[pageFindContext->index].locator);
 	}
 	return false;
@@ -1110,6 +1123,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	int			pageReserveKind;
 	bool		fastpath;
 	Page		p;
+	BTreePageLocator pageContext;
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
 	LWLock	   *uniqueLock;
@@ -1142,12 +1156,16 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	else
 		(void) find_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0);
 
+	btree_page_locator_init(&pageContext, desc);
+
 retry:
 
 	fastpath = false;
 	blkno = pageFindContext.items[pageFindContext.index].blkno;
 	pageChangeCount = pageFindContext.items[pageFindContext.index].pageChangeCount;
 	p = O_GET_IN_MEMORY_PAGE(blkno);
+	btree_page_context_set(&pageContext, p);
+
 	if (O_PAGE_IS(p, RIGHTMOST))
 	{
 		fastpath = true;
@@ -1156,7 +1174,7 @@ retry:
 	{
 		OTuple		hikey;
 
-		BTREE_PAGE_GET_HIKEY(hikey, p);
+		hikey = btree_get_hikey(&pageContext);
 		fastpath = (o_btree_cmp(desc, &hikey, BTreeKeyNonLeafKey,
 								key, BTreeKeyUniqueUpperBound) >= 0);
 	}
@@ -1185,7 +1203,7 @@ retry:
 	{
 		OTupleXactInfo xactInfo;
 
-		if (page_unique_check(desc, p, &pageFindContext.items[pageFindContext.index].locator,
+		if (page_unique_check(&pageContext, &pageFindContext.items[pageFindContext.index].locator,
 							  key, opOxid, &xactInfo))
 		{
 			OTuple		curTuple;
@@ -1211,6 +1229,8 @@ retry:
 					 */
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
+				btree_page_context_release(&pageContext);
+				release_page_find_context(&pageFindContext);
 				unlock_page(blkno);
 				LWLockRelease(uniqueLock);
 				return OBTreeModifyResultFound;
@@ -1229,6 +1249,8 @@ retry:
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
+						btree_page_context_release(&pageContext);
+						release_page_find_context(&pageFindContext);
 						unlock_page(blkno);
 						return OBTreeModifyResultFound;
 					}
@@ -1247,7 +1269,7 @@ retry:
 			 * be within the page, but can not match current offset, because
 			 * we've searched for BTreeUniqueMinBound.
 			 */
-			btree_page_search(desc, p, key, BTreeKeyBound,
+			btree_page_search(&pageContext, key, BTreeKeyBound,
 							  NULL, &pageFindContext.items[pageFindContext.index].locator);
 		}
 	}
@@ -1271,6 +1293,8 @@ retry:
 			BTreeLeafTuphdr *tuphdr;
 
 			p = O_GET_IN_MEMORY_PAGE(pageFindContext.items[pageFindContext.index].blkno);
+			btree_page_context_set(&pageContext, p);
+
 			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, p, loc);
 			if (XACT_INFO_OXID_EQ(xactInfo, opOxid) || XACT_INFO_IS_FINISHED(xactInfo))
 			{
@@ -1289,6 +1313,8 @@ retry:
 					 */
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
+				btree_page_context_release(&pageContext);
+				release_page_find_context(&pageFindContext);
 				LWLockRelease(uniqueLock);
 				return OBTreeModifyResultFound;
 			}
@@ -1306,7 +1332,11 @@ retry:
 														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
+					{
+						btree_page_context_release(&pageContext);
+						release_page_find_context(&pageFindContext);
 						return OBTreeModifyResultFound;
+					}
 				}
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
@@ -1328,6 +1358,8 @@ retry:
 									 BTreeLeafTupleNonDeleted, pageReserveKind,
 									 callbackInfo);
 
+	btree_page_context_release(&pageContext);
+	release_page_find_context(&pageFindContext);
 	LWLockRelease(uniqueLock);
 	return result;
 }

@@ -1589,6 +1589,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
 	{
+		release_page_find_context(&context);
 		unlock_page(context.items[context.index].blkno);
 		return;
 	}
@@ -1599,6 +1600,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 					&bound, BTreeKeyBound,
 					&tuple, BTreeKeyLeafTuple) != 0)
 	{
+		release_page_find_context(&context);
 		unlock_page(context.items[context.index].blkno);
 		return;
 	}
@@ -1608,6 +1610,8 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 	page_locator_delete_item(p, &item->locator);
 	MARK_DIRTY(&bridge->desc, item->blkno);
 	END_CRIT_SECTION();
+
+	release_page_find_context(&context);
 	unlock_page(context.items[context.index].blkno);
 }
 

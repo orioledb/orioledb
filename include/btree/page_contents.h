@@ -307,7 +307,7 @@ typedef struct
 #define RIGHTLINK_GET_CHANGECOUNT(rightLink) (DOWNLINK_GET_IN_MEMORY_CHANGECOUNT((rightLink)))
 
 /* Tuple and key max sizes */
-#define O_BTREE_MAX_TUPLE_SIZE MAXALIGN_DOWN((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / 3 - sizeof(LocationIndex) - BTreeLeafTuphdrSize)
+#define O_BTREE_MAX_TUPLE_SIZE MAXALIGN_DOWN(((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / 3) - sizeof(LocationIndex) - BTreeLeafTuphdrSize)
 #define O_BTREE_MAX_KEY_SIZE	O_BTREE_MAX_TUPLE_SIZE
 
 typedef struct
@@ -345,19 +345,21 @@ typedef enum ReadPageResult
 	ReadPageResultFailed
 } ReadPageResult;
 
-extern bool o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
-							  uint32 pageChangeCount, Page img, CommitSeqNo csn,
+typedef struct BTreePageLocator BTreePageLocator;
+
+extern bool o_btree_read_page(BTreePageLocator *destPageContext, OInMemoryBlkno blkno,
+							  uint32 pageChangeCount, CommitSeqNo csn,
 							  void *key, BTreeKeyType keyType,
 							  OFixedKey *lokey, PartialPageState *partial,
 							  UndoLocation *undoLocation, CommitSeqNo *readCsn);
-extern ReadPageResult o_btree_try_read_page(BTreeDescr *desc,
+extern ReadPageResult o_btree_try_read_page(BTreePageLocator *destPageContext,
 											OInMemoryBlkno blkno,
-											uint32 pageChangeCount, Page img,
+											uint32 pageChangeCount,
 											CommitSeqNo csn,
 											Pointer key, BTreeKeyType keyType,
 											PartialPageState *partial,
 											CommitSeqNo *readCsn);
-extern UndoLocation read_page_from_undo(BTreeDescr *desc, Page img,
+extern UndoLocation read_page_from_undo(BTreePageLocator *destPageContext,
 										UndoLocation undo_loc,
 										CommitSeqNo csn, void *key,
 										BTreeKeyType keyType, OFixedKey *lokey);
@@ -372,8 +374,6 @@ extern void put_page_image(OInMemoryBlkno blkno, Page img);
 extern void page_cut_first_key(Page node);
 
 typedef struct ItemPointerData ItemPointerData;
-extern ItemPointerData btree_ctid_get_and_inc(BTreeDescr *desc);
-extern void btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid);
 
 extern void copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src);
 extern void copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src);
@@ -387,8 +387,6 @@ extern void copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst,
 								 OTuple src);
 extern void copy_fixed_shmem_page_key(BTreeDescr *desc, OFixedShmemKey *dst,
 									  Page p, BTreePageItemLocator *loc);
-extern void copy_fixed_shmem_hikey(BTreeDescr *desc, OFixedShmemKey *dst,
-								   Page p);
 extern void clear_fixed_shmem_key(OFixedShmemKey *dst);
 extern OTuple fixed_shmem_key_get_tuple(OFixedShmemKey *src);
 extern void copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src);
@@ -396,7 +394,6 @@ extern void copy_from_fixed_shmem_key(OFixedKey *dst, OFixedShmemKey *src);
 extern OTuple page_get_hikey(Page p);
 extern int	page_get_hikey_size(Page p);
 extern void page_set_hikey_flags(Page p, uint8 flags);
-extern bool page_fits_hikey(Page p, LocationIndex newHikeySize);
 extern void page_resize_hikey(Page p, LocationIndex newHikeySize);
 extern void btree_page_update_max_key_len(BTreeDescr *desc, Page p);
 

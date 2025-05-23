@@ -20,6 +20,91 @@
 
 const BTreeChunkOps BTreeHiKeyChunkOps;
 
+static inline uint16 htc_get_item_size(BTreeChunkDesc *chunk,
+									   OffsetNumber itemOffset);
+
+/*
+ * Hikey utility functions.
+ */
+
+OTuple
+btree_get_hikey(BTreePageLocator *pageLocator)
+{
+	BTreeChunkDesc *chunk;
+	OTuple		tuple;
+	bool		isCopy;
+
+	Assert(!O_PAGE_IS(pageLocator->page, RIGHTMOST));
+
+	chunk = &pageLocator->hikeyChunk;
+
+	Assert(chunk->chunkItemsCount > 0);
+
+	chunk->ops->read_tuple(chunk, NULL, NULL, chunk->chunkItemsCount - 1,
+						   NULL, &tuple, &isCopy);
+	Assert(!isCopy);
+
+	return tuple;
+}
+
+uint16
+btree_get_hikey_size(BTreePageLocator *pageLocator, OTuple tuple)
+{
+	return o_btree_len(pageLocator->hikeyChunk.treeDesc, tuple,
+					   pageLocator->hikeyChunk.ops->itemLengthType);
+}
+
+void
+btree_copy_fixed_hikey(BTreePageLocator *pageLocator, OFixedKey *dst)
+{
+	OTuple		src;
+
+	src = btree_get_hikey(pageLocator);
+	copy_fixed_key(pageLocator->treeDesc, dst, src);
+}
+
+void
+btree_copy_fixed_shmem_hikey(BTreePageLocator *pageLocator, OFixedShmemKey *dst)
+{
+	OTuple		src;
+
+	src = btree_get_hikey(pageLocator);
+	copy_fixed_shmem_key(pageLocator->treeDesc, dst, src);
+}
+
+OTuple
+btree_read_hikey(BTreePageLocator *pageLocator, OffsetNumber itemOffset)
+{
+	OTuple		tuple;
+	bool		isCopy;
+
+	pageLocator->hikeyChunk.ops->read_tuple(&pageLocator->hikeyChunk, NULL, NULL,
+											itemOffset, NULL, &tuple, &isCopy);
+	Assert(!isCopy);
+
+	return tuple;
+}
+
+bool
+btree_fits_hikey(BTreePageLocator *pageLocator, LocationIndex newHikeySize)
+{
+	BTreePageHeader *header = (BTreePageHeader *) pageLocator->page;
+	LocationIndex dataShift,
+				hikeyLocation,
+				dataLocation;
+
+	Assert(newHikeySize == MAXALIGN(newHikeySize));
+	Assert(header->chunksCount == 1);
+
+	hikeyLocation = SHORT_GET_LOCATION(header->chunkDesc[0].hikeyShortLocation);
+	dataLocation = SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation);
+	if (hikeyLocation + newHikeySize <= dataLocation)
+		return true;
+
+	dataShift = hikeyLocation + newHikeySize - dataLocation;
+	return (header->dataSize + dataShift <= ORIOLEDB_BLCKSZ);
+}
+
 /*
  * Implementation of hikey chunks.
  */

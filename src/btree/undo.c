@@ -18,6 +18,7 @@
 #include "btree/io.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
+#include "btree/stopevent.h"
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
@@ -414,9 +415,12 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	o_set_syscache_hooks();
 	found = refind_page(&context, (Pointer) &tuple, keyType, 0, item->blkno,
 						item->pageChangeCount);
+
 	o_unset_syscache_hooks();
 	if (!found)
 	{
+		release_page_find_context(&context);
+
 		/*
 		 * BTree can be already deleted and cleaned by
 		 * btree_relnode_undo_callback().
@@ -440,6 +444,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 
 	if (cmp != 0)
 	{
+		release_page_find_context(&context);
+
 		/*
 		 * We can't find the required key.  This might happend if operation
 		 * was already "undone" earlier.
@@ -454,6 +460,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 
 	if (!XACT_INFO_OXID_EQ(nonLockTupHdr.xactInfo, oxid))
 	{
+		release_page_find_context(&context);
+
 		/*
 		 * The key is found, but it doesn't belong to our transaction.  Again,
 		 * this might happend if operation was already "undone" earlier.
@@ -482,6 +490,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	}
 	else
 		unlock_page(blkno);
+
+	release_page_find_context(&context);
 }
 
 /*
@@ -504,6 +514,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 	OBTreeFindPageContext context;
 	UndoLocation tuphdrUndoLocation,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
+	bool		found;
 
 	Assert(abort);
 
@@ -523,11 +534,16 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 
 	o_btree_load_shmem(desc);
 	init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
+
 	if (!changeCountsValid)
 		item->pageChangeCount = InvalidOPageChangeCount;
 
-	if (!refind_page(&context, (Pointer) &key, BTreeKeyNonLeafKey, 0, item->blkno, item->pageChangeCount))
+	found = refind_page(&context, (Pointer) &key, BTreeKeyNonLeafKey, 0, item->blkno, item->pageChangeCount);
+
+	if (!found)
 	{
+		release_page_find_context(&context);
+
 		/*
 		 * BTree can be already deleted and cleaned by
 		 * btree_relnode_undo_callback().
@@ -551,6 +567,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 
 	if (cmp != 0)
 	{
+		release_page_find_context(&context);
 		/* Row already gone. Nothing to do. */
 		unlock_page(blkno);
 		return;
@@ -616,6 +633,8 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 		tuphdrUndoLocation = undoLocation;
 		undoLocation = tuphdr.undoLocation;
 	}
+
+	release_page_find_context(&context);
 	unlock_page(blkno);
 }
 
@@ -965,11 +984,12 @@ read_hikey_from_undo(UndoLogType undoType, UndoLocation location,
  * Finds page image in undoLocation.
  */
 void
-get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
-				   BTreeKeyType kind, Pointer dest,
+get_page_from_undo(BTreePageLocator *destPageContext, UndoLocation undoLocation,
+				   Pointer key, BTreeKeyType kind,
 				   bool *is_left, bool *is_right, OFixedKey *lokey,
 				   OFixedKey *page_lokey, OTuple *page_hikey)
 {
+	BTreeDescr *desc = destPageContext->treeDesc;
 	UndoPageImageHeader header = {UndoPageImageInvalid, 0, 0};
 	int			cmp,
 				cmp_expected;
@@ -997,7 +1017,10 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 			*is_left = true;
 		if (is_right != NULL)
 			*is_right = true;
-		undo_read(undoType, left_loc, ORIOLEDB_BLCKSZ, dest);
+
+		undo_read(undoType, left_loc, ORIOLEDB_BLCKSZ, destPageContext->page);
+		btree_page_context_invalidate(destPageContext);
+
 		if (page_lokey && header.type == UndoPageImageSplit)
 		{
 			bool		set_page_lokey = false;
@@ -1006,9 +1029,9 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 			{
 				set_page_lokey = true;
 			}
-			else if (!O_PAGE_IS(dest, RIGHTMOST))
+			else if (!O_PAGE_IS(destPageContext->page, RIGHTMOST))
 			{
-				BTREE_PAGE_GET_HIKEY(hikey, dest);
+				hikey = btree_get_hikey(destPageContext);
 				cmp = o_btree_cmp(desc, page_hikey, BTreeKeyNonLeafKey, &hikey, BTreeKeyNonLeafKey);
 				Assert(cmp <= 0);
 				if (cmp == 0)
@@ -1040,17 +1063,21 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		case BTreeKeyNone:
 			if (is_left != NULL)
 				*is_left = true;
-			undo_read(undoType, left_loc, ORIOLEDB_BLCKSZ, dest);
+			undo_read(undoType, left_loc, ORIOLEDB_BLCKSZ, destPageContext->page);
+			btree_page_context_invalidate(destPageContext);
 			break;
 		case BTreeKeyRightmost:
 			if (is_right != NULL)
 				*is_right = true;
 			if (lokey != NULL)
 			{
-				read_hikey_from_undo(undoType, left_loc, dest, &loc);
-				copy_fixed_hikey(desc, lokey, dest);
+				read_hikey_from_undo(undoType, left_loc, destPageContext->page, &loc);
+				btree_page_context_invalidate(destPageContext);
+
+				btree_copy_fixed_hikey(destPageContext, lokey);
 			}
-			undo_read(undoType, right_loc, ORIOLEDB_BLCKSZ, dest);
+			undo_read(undoType, right_loc, ORIOLEDB_BLCKSZ, destPageContext->page);
+			btree_page_context_invalidate(destPageContext);
 			break;
 		case BTreeKeyLeafTuple:
 		case BTreeKeyNonLeafKey:
@@ -1058,11 +1085,13 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		case BTreeKeyPageHiKey:
 			Assert(key != NULL);
 
-			read_hikey_from_undo(undoType, left_loc, dest, &loc);
+			read_hikey_from_undo(undoType, left_loc, destPageContext->page, &loc);
+			btree_page_context_invalidate(destPageContext);
 
 			cmp_expected = kind == BTreeKeyPageHiKey ? 1 : 0;
 			kind = kind == BTreeKeyPageHiKey ? BTreeKeyNonLeafKey : kind;
-			BTREE_PAGE_GET_HIKEY(hikey, dest);
+
+			hikey = btree_get_hikey(destPageContext);
 
 			cmp = o_btree_cmp(desc, key, kind, &hikey, BTreeKeyNonLeafKey);
 
@@ -1071,14 +1100,19 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				if (is_right != NULL)
 					*is_right = true;
 				if (lokey != NULL)
-					copy_fixed_hikey(desc, lokey, dest);
-				undo_read(undoType, right_loc, ORIOLEDB_BLCKSZ, dest);
+					btree_copy_fixed_hikey(destPageContext, lokey);
+
+				undo_read(undoType, right_loc, ORIOLEDB_BLCKSZ, destPageContext->page);
+				btree_page_context_invalidate(destPageContext);
 			}
 			else
 			{
 				if (is_left != NULL)
 					*is_left = true;
-				undo_read(undoType, left_loc + loc, ORIOLEDB_BLCKSZ - loc, dest + loc);
+
+				undo_read(undoType, left_loc + loc, ORIOLEDB_BLCKSZ - loc,
+						  destPageContext->page + loc);
+				btree_page_context_invalidate(destPageContext);
 			}
 			break;
 		default:

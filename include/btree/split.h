@@ -16,8 +16,8 @@
 #include "btree.h"
 #include "btree/find.h"
 
-extern void perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
-							   OInMemoryBlkno new_blkno,
+extern void perform_page_split(OInMemoryBlkno blkno, OInMemoryBlkno new_blkno,
+							   BTreePageLocator *pageContext,
 							   OffsetNumber left_count, OTuple splitkey,
 							   LocationIndex splitkey_size,
 							   OffsetNumber *offset, bool *place_right,
