@@ -727,7 +727,7 @@ add_to_rewind_buffer(OXid oxid)
 
 	if (rewindMeta->rewindInProgressRequested)
 	{
-		elog(WARNING, "Adding to rewind queue blocked by rewind");
+		elog(WARNING, "Adding to rewind queue is blocked by rewind");
 		return;
 	}
 
@@ -781,6 +781,12 @@ checkpoint_write_rewind_xids(void)
 	uint64		start;
 	uint64		finish1;
 	uint64		curAddPos;
+
+	if (rewindMeta->rewindInProgressRequested)
+	{
+		elog(WARNING, "Adding to rewind queue to checkpoint is blocked by rewind");
+		return;
+	}
 
 	curAddPos = pg_atomic_read_u64(&rewindMeta->addPos);
 
