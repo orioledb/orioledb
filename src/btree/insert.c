@@ -260,6 +260,7 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	iitem.context = &context;
 	copy_fixed_hikey(desc, &key, p);
 	START_CRIT_SECTION();
+	page_block_reads(left_blkno);
 	header->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
 
 	/*
@@ -344,6 +345,7 @@ o_btree_insert_stack_push_split_item(BTreeInsertStackItem *insert_item,
 
 	/* Removes broken flag and unlock page. */
 	START_CRIT_SECTION();
+	page_block_reads(left_blkno);
 	header->flags &= ~O_BTREE_FLAG_BROKEN_SPLIT;
 	btree_register_inprogress_split(left_blkno);
 	END_CRIT_SECTION();

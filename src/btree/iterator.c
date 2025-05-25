@@ -759,7 +759,6 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 	OBTreeFindPageContext *context = &it->context;
 	Page		img = context->img,
 				hImg = it->undoIt.image;
-	BTreePageHeader *header = (BTreePageHeader *) img;
 	BTreeDescr *desc = context->desc;
 	OFixedKey	key_buf;
 
@@ -769,6 +768,7 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 	while (!BTREE_PAGE_LOCATOR_IS_VALID(img, &context->items[context->index].locator))
 	{
 		bool		step_result;
+		BTreePageHeader *header;
 
 		if (IS_LAST_PAGE(img, it))
 			return false;
@@ -780,6 +780,8 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 
 		if (!step_result)
 			return false;
+
+		header = (BTreePageHeader *) context->img;
 
 		if (it->combinedResult && header->csn >= it->oSnapshot.csn)
 		{

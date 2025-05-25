@@ -10,8 +10,6 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "c.h"
-#include "lib/ilist.h"
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -20,6 +18,7 @@
 #include "btree/insert.h"
 #include "btree/io.h"
 #include "btree/page_chunks.h"
+#include "lib/ilist.h"
 #include "tableam/descr.h"
 #include "utils/dsa.h"
 #include "utils/palloc.h"
@@ -1443,6 +1442,8 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 						 uint32 pageChangeCount, bool parent, void *key,
 						 BTreeKeyType keyType)
 {
+	bool		keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
+	OFixedKey  *lokey = keep_lokey ? &context->undoLokey : NULL;
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 	Pointer		pagePtr;
 	OPageCacheEntry *entry;
@@ -1458,6 +1459,10 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	pagePtr = entry->data;
 	header = (BTreePageHeader *) pagePtr;
 
+	BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
+	if (lokey)
+		clear_fixed_key(lokey);
+
 	if (O_PAGE_IS(pagePtr, LEAF) &&
 		COMMITSEQNO_IS_NORMAL(context->csn) &&
 		header->csn >= context->csn)
@@ -1466,17 +1471,20 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 		read_page_from_undo(context->desc, pagePtr,
 							header->undoLocation, context->csn,
-							key, keyType, NULL);
+							key, keyType, lokey);
 
 		header = (BTreePageHeader *) pagePtr;
 		header->o_header.pageChangeCount = pageChangeCount;
+		context->imgUndoLoc = header->undoLocation;
 		if (readCsn)
 			*readCsn = header->csn;
 
 		unpin_local_cache(entry);
+		return true;
 	}
 	else
 	{
+		context->imgUndoLoc = InvalidUndoLocation;
 		if (readCsn)
 			*readCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	}
@@ -1497,6 +1505,10 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 		context->parentImgEntry = entry;
 		context->parentImg = pagePtr;
 	}
+
+	if (lokey && !O_TUPLE_IS_NULL(lokey->tuple))
+		BTREE_PAGE_FIND_SET(context, LOKEY_UNDO);
+
 	//elog(LOG, "YES %u %u", blkno, PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
 	return true;
 }
@@ -1518,7 +1530,11 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 	if (local_cache_size_guc > 0 &&
 		btree_find_page_in_cache(context, blkno, pageChangeCount, parent, key, keyType))
+	{
+		if (partial)
+			partial->isPartial = false;
 		return true;
+	}
 
 	pagePtr = set_page_ptr(context, parent);
 
@@ -1553,7 +1569,11 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 	if (local_cache_size_guc > 0 &&
 		btree_find_page_in_cache(context, blkno, pageChangeCount, parent, key, keyType))
+	{
+		if (partial)
+			partial->isPartial = false;
 		return true;
+	}
 
 	pagePtr = set_page_ptr(context, parent);
 
