@@ -918,15 +918,17 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 		}
 		else
 		{
+			bool	useParentImg = (intCxt->pagePtr == context->parentImg);
 			if (!btree_find_read_page(context, intCxt->blkno,
 									  RIGHTLINK_GET_CHANGECOUNT(rightlink),
-									  (intCxt->pagePtr == context->parentImg),
+									  useParentImg,
 									  intCxt->key,
 									  intCxt->keyType,
 									  intCxt->partial))
 				return true;
 			Assert(RIGHTLINK_GET_CHANGECOUNT(rightlink) ==
 				   O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr));
+			intCxt->pagePtr = useParentImg ? context->parentImg : context->img;
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
 		}
 		if (!O_PAGE_IS(intCxt->pagePtr, RIGHTMOST))
