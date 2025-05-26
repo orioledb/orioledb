@@ -49,6 +49,7 @@ static OBuffersDesc rewindBuffersDesc = {
 	.groupCtlTrancheName = "rewindBuffersGroupCtlTranche",
 	.bufferCtlTrancheName = "rewindBuffersCtlTranche"
 };
+static FullTransactionId GetOldestFullTransactionIdConsideredRunning(void);
 
 PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
 PG_FUNCTION_INFO_V1(orioledb_rewind);
@@ -136,6 +137,8 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 
 	/* XXX disable new transactions committing ? */
 
+	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
+	elog(WARNING, "Rewind started, for %d s", rewind_time);
 	/* Disable adding new transactions to rewind buffer by rewind worker */
 	rewindMeta->rewindInProgressRequested = true;
 	retry = 0;
@@ -179,7 +182,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		{
 			pos = pg_atomic_read_u64(&rewindMeta->addPos);
 
-			if (pos >= rewindMeta->evictPos)
+			if (rewindMeta->evictPos != InvalidRewindPos && pos >= rewindMeta->evictPos)
 			{
 				/* Read from circular buffer backwards */
 				pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
@@ -219,7 +222,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		{
 			UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
-			elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i]);
+			elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %lu, cur xid %lu", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), XidFromFullTransactionId(GetOldestFullTransactionIdConsideredRunning()));
 			location = walk_undo_range_with_buf((UndoLogType) i,
 				rewindItem->undoLocation[i],
 				InvalidUndoLocation,
@@ -230,7 +233,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 
 		Assert(csn_is_retained_for_rewind(oxid_get_csn(rewindItem->oxid, true)));
 		set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
-		
+
 		/* Abort transactions for non-orioledb tables */ 
 		TransactionIdAbortTree(XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), 0, NULL);
 
@@ -356,14 +359,8 @@ rewind_init_shmem(Pointer ptr, bool found)
 			pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, pg_atomic_read_u64(&undoMeta->minProcRetainLocation));
 		}
 
-
-
-		/* rewindMeta->rewindMapTrancheId = LWLockNewTrancheId(); */
-
-		/*
-		 * LWLockInitialize(&rewindMeta->xidMapWriteLock,
-		 * rewindMeta->rewindMapTrancheId);
-		 */
+		rewindMeta->rewindEvictTrancheId = LWLockNewTrancheId();
+		LWLockInitialize(&rewindMeta->evictLock, rewindMeta->rewindEvictTrancheId);
 
 		rewindMeta->readPos = 0;
 		rewindMeta->writePos = 0;
@@ -377,6 +374,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		/* Rewind buffers are not persistent */
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
 	}
+	LWLockRegisterTranche(rewindMeta->rewindEvictTrancheId, "RewindEvictTranche");
 }
 
 /*
@@ -478,6 +476,9 @@ restore_evicted_rewind_page(void)
 #endif
 	rewindMeta->evictPos += REWIND_DISK_BUFFER_LENGTH;
 	rewindMeta->readPos += REWIND_DISK_BUFFER_LENGTH;
+
+	if (rewindMeta->readPos == rewindMeta->writePos)
+		rewindMeta->evictPos = InvalidRewindPos;
 
 	LWLockRelease(&rewindMeta->evictLock);
 
@@ -765,7 +766,7 @@ add_to_rewind_buffer(OXid oxid)
 		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
 		rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i]);
+		elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest running xid %lu", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid));
 		rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
 		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 	}

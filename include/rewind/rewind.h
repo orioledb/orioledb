@@ -59,6 +59,7 @@ typedef struct
 	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
+	int		rewindEvictTrancheId;
 	LWLock		evictLock;		/* Lock to evict page from circular buffer */
 	pg_atomic_uint64 oldestConsideredRunningXid;
 	bool 		rewindInProgressRequested;
