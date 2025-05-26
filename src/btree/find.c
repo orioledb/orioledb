@@ -265,6 +265,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 			else
 			{
 				pfree(entry->data);
+				entry->data = NULL;
 				entry->blkno = OInvalidInMemoryBlkno;
 				return NULL;
 			}
