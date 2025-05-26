@@ -25,6 +25,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
@@ -155,11 +156,12 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	/* Terminate all other backends */
 	retry = 0;
 	TerminateOtherDBBackends(InvalidOid);
-	while(true)
+	while(CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
 	{
-		(void) CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
-		if (nbackends <= 2) /* Autovaccum launcher and worker are not terminated by TerminateOtherDBBackends */
+		if (AutoVacuumingActive() && nbackends <= 1)
 			break;
+
+		elog(WARNING, "%u backends left", nbackends);
 		pg_usleep(1000000L);
 		retry++;
 		if (retry >= 100)
