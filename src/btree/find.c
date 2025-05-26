@@ -1566,7 +1566,7 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 						 BTreeKeyType keyType, PartialPageState *partial)
 {
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
-	bool		success;
+	ReadPageResult result;
 	Pointer		pagePtr;
 
 	if (local_cache_size_guc > 0 &&
@@ -1574,16 +1574,16 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	{
 		if (partial)
 			partial->isPartial = false;
-		return true;
+		return ReadPageResultOK;
 	}
 
 	pagePtr = set_page_ptr(context, parent);
 
-	success = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
+	result = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
 									pagePtr, context->csn,
 									key, keyType, partial, readCsn);
 
-	return success;
+	return result;
 }
 
 void
