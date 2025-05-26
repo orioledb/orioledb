@@ -92,90 +92,13 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-Datum
-orioledb_rewind(PG_FUNCTION_ARGS)
+static void
+do_rewind(int rewind_time, TimestampTz rewindStartTime)
 {
-	TimestampTz	currentTime;
-	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
-	int		i = 0;
-	int		retry;
-	int 		nbackends;
-	int		nprepared;
-	int		rewind_time = PG_GETARG_INT32(0);
-	uint64		pos;
+	int	i = 0;
 	RewindItem     *rewindItem;
-
-	elog(WARNING, "Rewind requested, for %d s", rewind_time);
-
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-		PG_RETURN_VOID();
-	}
-	else if (rewind_time > rewind_max_period)
-	{
-
-		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind %d s exceeds rewind_max_period %d s", rewind_time, rewind_max_period)),
-				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
-		PG_RETURN_VOID();
-	}
-	else if (rewind_time == 0)
-	{
-		elog(WARNING, "Zero rewind requested, do nothing");
-		PG_RETURN_VOID();
-	}
-
-	CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
-	if (nprepared > 0)
-		ereport(ERROR,
-                                (errcode(ERRCODE_INTERNAL_ERROR),
-                                 errmsg("Can't rewind due to prepared transactions in the cluster")));
-
-	/* XXX disable new transactions committing ? */
-
-	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
-	elog(WARNING, "Rewind started, for %d s", rewind_time);
-	/* Disable adding new transactions to rewind buffer by rewind worker */
-	rewindMeta->rewindInProgressRequested = true;
-	retry = 0;
-	while (!rewindMeta->rewindInProgressStarted)
-	{
-		pg_usleep(10000L);
-		retry++;
-		if (retry >= 1000)
-			/* We don't know the state of rewind worker so we can't rewind or continue. */
-			ereport(FATAL,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Rewind worker couldn't stop in 100s, aborting rewind")));
-	}
-	/* Terminate all other backends */
-	retry = 0;
-	TerminateOtherDBBackends(InvalidOid);
-	while(CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
-	{
-		if (AutoVacuumingActive() && nbackends <= 1)
-			break;
-
-		elog(WARNING, "%u backends left", nbackends);
-		pg_usleep(1000000L);
-		retry++;
-		if (retry >= 100)
-			/*
-			 * Rewind worker already stopped and come transactions could be not in the buffer
-			 * so we can't continue.
-			 */
-			ereport(FATAL,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Backends couldn't stop in 100s, aborting rewind")));
-	}
-
-	/* Do actual rewind */
-	currentTime = GetCurrentTimestamp();
+	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
+	uint64		pos;
 
 	pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
 	while (true)
@@ -211,10 +134,10 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 			rewindItem = &rewindBuffer[pos % rewind_circular_buffer_size];
 		}
 
-		if (TimestampDifferenceExceeds(rewindItem->timestamp, currentTime, rewind_time * 1000))
+		if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000))
 		{
 			/* Rewind complete */
-			break;
+			return;
 		}
 
 		Assert(rewindItem->oxid != InvalidOXid);
@@ -224,7 +147,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		{
 			UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
-			elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %lu, cur xid %lu", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), XidFromFullTransactionId(GetOldestFullTransactionIdConsideredRunning()));
+			elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), XidFromFullTransactionId(GetOldestFullTransactionIdConsideredRunning()));
 			location = walk_undo_range_with_buf((UndoLogType) i,
 				rewindItem->undoLocation[i],
 				InvalidUndoLocation,
@@ -236,16 +159,103 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 		Assert(csn_is_retained_for_rewind(oxid_get_csn(rewindItem->oxid, true)));
 		set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
 
-		/* Abort transactions for non-orioledb tables */ 
+		/* Abort transactions for non-orioledb tables */
 		TransactionIdAbortTree(XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), 0, NULL);
 
 		/* Clear the item from the circular buffer */
-		rewindItem->oxid = InvalidOXid;	
+		rewindItem->oxid = InvalidOXid;
 
 		/* Buffer finished. Unlikely case when rewind_time equals rewind_max_period */
 		if (pos == rewindMeta->completePos)
-			break;
+			return;
 	}
+}
+
+
+Datum
+orioledb_rewind(PG_FUNCTION_ARGS)
+{
+	TimestampTz	rewindStartTime;
+	int		retry;
+	int 		nbackends;
+	int		nprepared;
+	int		rewind_time = PG_GETARG_INT32(0);
+
+	elog(WARNING, "Rewind requested, for %d s", rewind_time);
+
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+		PG_RETURN_VOID();
+	}
+	else if (rewind_time > rewind_max_period)
+	{
+
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Requested rewind %d s exceeds rewind_max_period %d s", rewind_time, rewind_max_period)),
+				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
+		PG_RETURN_VOID();
+	}
+	else if (rewind_time == 0)
+	{
+		elog(WARNING, "Zero rewind requested, do nothing");
+		PG_RETURN_VOID();
+	}
+
+	CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
+	if (nprepared > 0)
+		ereport(ERROR,
+                                (errcode(ERRCODE_INTERNAL_ERROR),
+                                 errmsg("Can't rewind due to prepared transactions in the cluster")));
+
+	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
+
+	/* Disable adding new transactions to rewind buffer by rewind worker */
+	rewindMeta->rewindWorkerStopRequested = true;
+	retry = 0;
+	while (!rewindMeta->rewindWorkerStopped)
+	{
+		pg_usleep(10000L);
+		retry++;
+		if (retry >= 1000)
+			/* We don't know the state of rewind worker so we can't rewind or continue. */
+			ereport(FATAL,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Rewind worker couldn't stop in 100s, aborting rewind")));
+	}
+
+	rewindStartTime = GetCurrentTimestamp();
+	elog(WARNING, "Rewind started, for %d s", rewind_time);
+
+	/* Terminate all other backends */
+	retry = 0;
+	TerminateOtherDBBackends(InvalidOid);
+	while(CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
+	{
+		if (AutoVacuumingActive() && nbackends <= 1)
+			break;
+
+		elog(WARNING, "%u backends left", nbackends);
+		pg_usleep(1000000L);
+		retry++;
+		if (retry >= 100)
+			/*
+			 * Rewind worker already stopped and come transactions could be not in the buffer
+			 * so we can't continue.
+			 */
+			ereport(FATAL,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Backends couldn't stop in 100s, aborting rewind")));
+	}
+
+	rewindMeta->addToRewindQueueDisabled = true;
+
+	/* All good. Do actual rewind */
+	do_rewind(rewind_time, rewindStartTime);
 
 	elog(WARNING, "Rewind complete, for %d s", rewind_time);
 	/* Restart Postgres */
@@ -564,11 +574,11 @@ rewind_worker_main(Datum main_arg)
 				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 				int			i;
 
-				if (rewindMeta->rewindInProgressRequested)
+				if (rewindMeta->rewindWorkerStopRequested)
 				{
 					/* Rewind has started. Quit rewind worker */
 					shutdown_requested = true;
-					rewindMeta->rewindInProgressStarted = true;
+					rewindMeta->rewindWorkerStopped = true;
 					break;
 				}
 
@@ -730,7 +740,7 @@ add_to_rewind_buffer(OXid oxid)
 	uint64		curAddPos;
 	int			freeSpace;
 
-	if (rewindMeta->rewindInProgressRequested)
+	if (rewindMeta->addToRewindQueueDisabled)
 	{
 		elog(WARNING, "Adding to rewind queue is blocked by rewind");
 		return;
@@ -768,7 +778,7 @@ add_to_rewind_buffer(OXid oxid)
 		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
 		rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest running xid %lu", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid));
+		elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest running xid %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid));
 		rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
 		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
 	}
@@ -787,7 +797,7 @@ checkpoint_write_rewind_xids(void)
 	uint64		finish1;
 	uint64		curAddPos;
 
-	if (rewindMeta->rewindInProgressRequested)
+	if (rewindMeta->addToRewindQueueDisabled)
 	{
 		elog(WARNING, "Adding to rewind queue to checkpoint is blocked by rewind");
 		return;

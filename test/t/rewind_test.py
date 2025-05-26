@@ -43,19 +43,20 @@ class RewindTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind(20);\n")
-		time.sleep(3);
+		time.sleep(1)
 
 #		node.stop(['-m', 'immediate'])
-		time.sleep(3);
+		node.is_started = False
+#		time.sleep(3)
 		node.start()
-		time.sleep(3);
+#		time.sleep(3)
 
 		self.assertEqual(
 		    str(
 		        node.execute(
 		            'postgres',
 		            'SELECT * FROM o_test;')),
-		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val'),")
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
 		node.stop()
 
 
@@ -96,17 +97,24 @@ class RewindTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind(20);\n")
-		time.sleep(3);
+		time.sleep(3)
 
 #		node.stop(['-m', 'immediate'])
-		time.sleep(3);
+		node.is_started = False
+#		time.sleep(3);
 		node.start()
-		time.sleep(3);
+#		time.sleep(3);
 
 		self.assertEqual(
 		    str(
 		        node.execute(
 		            'postgres',
 		            'SELECT * FROM o_test;')),
-		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val'),")
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+		self.assertEqual(
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test_heap;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
 		node.stop()

@@ -62,8 +62,9 @@ typedef struct
 	int		rewindEvictTrancheId;
 	LWLock		evictLock;		/* Lock to evict page from circular buffer */
 	pg_atomic_uint64 oldestConsideredRunningXid;
-	bool 		rewindInProgressRequested;
-	bool		rewindInProgressStarted;
+	bool 		rewindWorkerStopRequested;
+	bool		rewindWorkerStopped;
+	bool 		addToRewindQueueDisabled;
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX
