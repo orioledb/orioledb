@@ -53,7 +53,7 @@ struct OPageCacheEntry
 #define O_PAGE_CACHE_BUCKET_SIZE	(4)
 #define MAX_NUM_ACCESSES (10)
 #define CACHE_NUM_ACCESSES (5)
-#define CACHE_N_TRIES (11)
+#define CACHE_N_TRIES (31)
 
 typedef struct
 {
