@@ -1315,6 +1315,7 @@ undo_xact_callback(XactEvent event, void *arg)
 	bool		isParallelWorker;
 	int			i;
 
+	elog(WARNING, "UNDO XACT CALLBACK");
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
 						MyProc->lockGroupLeader != MyProc) ||
 		IsInParallelMode();
@@ -1335,6 +1336,12 @@ undo_xact_callback(XactEvent event, void *arg)
 			reset_cur_undo_locations();
 			orioledb_reset_xmin_hook();
 			oxid_needs_wal_flush = false;
+		}
+
+		if (enable_rewind && event == XACT_EVENT_COMMIT)
+		{
+			 elog(WARNING, "ADD_TO_REWIND_BUFFER_HEAP");
+                         add_to_rewind_buffer(oxid);
 		}
 	}
 	else
@@ -1379,8 +1386,10 @@ undo_xact_callback(XactEvent event, void *arg)
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
 				if (enable_rewind)
+				{
+					elog(WARNING, "ADD_TO_REWIND_BUFFER");
 					add_to_rewind_buffer(oxid);
-
+				}
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 
