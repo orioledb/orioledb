@@ -73,6 +73,7 @@ typedef struct sql_func_data
 struct OProc
 {
 	OSysCacheKey1 key;
+	uint16		data_version;
 	Oid			rettype;		/* actual return type */
 	bool		strict;			/* T if function is "strict" */
 	bool		retset;			/* T if function returns a set */
@@ -211,6 +212,7 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		*entry_ptr = (Pointer) o_proc;
 	}
 
+	o_proc->data_version = ORIOLEDB_DATA_VERSION;
 	o_proc->rettype = procform->prorettype;
 	o_proc->strict = procform->proisstrict;
 	o_proc->retset = procform->proretset;
@@ -319,6 +321,7 @@ o_proc_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	OProc	   *o_proc = (OProc *) entry;
 
+	Assert(o_proc->data_version == ORIOLEDB_DATA_VERSION);
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_proc,
 						   offsetof(OProc, proname));
@@ -379,6 +382,7 @@ o_proc_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_proc, ptr, len);
 	ptr += len;
+	Assert(o_proc->data_version == ORIOLEDB_DATA_VERSION);
 
 	o_proc->cxt = AllocSetContextCreate(mcxt, "o_proc mcxt",
 										ALLOCSET_DEFAULT_SIZES);

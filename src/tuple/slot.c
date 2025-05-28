@@ -474,7 +474,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 					tuple_size;
 		bytea	   *result;
 		OTableDescr *descr = oslot->descr;
-		OIndexDescr *id;
+		OIndexDescr *primary;
 		int			ctid_off;
 		OTuple		tuple;
 		ORowIdAddendumNonCtid addNonCtid;
@@ -492,10 +492,10 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 			return (Datum) 0;
 		}
 
-		id = GET_PRIMARY(descr);
-		ctid_off = id->primaryIsCtid ? 1 : 0;
+		primary = GET_PRIMARY(descr);
+		ctid_off = primary->primaryIsCtid ? 1 : 0;
 
-		if (id->primaryIsCtid)
+		if (primary->primaryIsCtid)
 		{
 			ORowIdAddendumCtid addCtid;
 
@@ -507,7 +507,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 			result_size = MAXALIGN(VARHDRSZ) +
 				MAXALIGN(sizeof(ORowIdAddendumCtid)) +
 				MAXALIGN(sizeof(ItemPointerData));
-			if (id->bridging)
+			if (primary->bridging)
 				result_size += MAXALIGN(sizeof(ItemPointerData));
 			result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 			SET_VARSIZE(result, result_size);
@@ -515,7 +515,7 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 			memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 			ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 			memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
-			if (id->bridging)
+			if (primary->bridging)
 			{
 				ptr += MAXALIGN(sizeof(ItemPointerData));
 				memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
@@ -529,25 +529,25 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		 * General-case primary key: prepend tuple with maxaligned hint.
 		 */
 		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (id->bridging)
+		if (primary->bridging)
 			result_size += MAXALIGN(sizeof(ItemPointerData));
-		tts_orioledb_getsomeattrs(slot, id->maxTableAttnum - ctid_off);
-		tts_orioledb_get_index_values(slot, id, values, isnulls, false);
-		tuple_size = o_new_tuple_size(id->nonLeafTupdesc,
-									  &id->nonLeafSpec,
+		tts_orioledb_getsomeattrs(slot, primary->maxTableAttnum - ctid_off);
+		tts_orioledb_get_index_values(slot, primary, values, isnulls, false);
+		tuple_size = o_new_tuple_size(primary->nonLeafTupdesc,
+									  &primary->nonLeafSpec,
 									  NULL, NULL, oslot->version,
 									  values, isnulls, NULL);
 		result_size += MAXALIGN(tuple_size);
 		result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(result, result_size);
 		ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
-		if (id->bridging)
+		if (primary->bridging)
 			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
 
 		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (id->bridging)
+		if (primary->bridging)
 			tuple.data += MAXALIGN(sizeof(ItemPointerData));
-		o_tuple_fill(id->nonLeafTupdesc, &id->nonLeafSpec,
+		o_tuple_fill(primary->nonLeafTupdesc, &primary->nonLeafSpec,
 					 &tuple, tuple_size, NULL, NULL, oslot->version, values, isnulls, NULL);
 
 		addNonCtid.csn = oslot->csn;
@@ -1237,6 +1237,10 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 
 	primaryIsCtid = GET_PRIMARY(descr)->primaryIsCtid;
 	ctid_off = primaryIsCtid ? 1 : 0;
+
+	if (GET_PRIMARY(descr)->bridging)
+		ctid_off++;
+
 	slot_getallattrs(slot);
 
 	/* temporary, pointers to TupleDesc attributes */
@@ -1515,6 +1519,9 @@ tts_orioledb_insert_toast_values(TupleTableSlot *slot,
 	bool		result = true;
 	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
+	if (GET_PRIMARY(descr)->bridging)
+		ctid_off++;
+
 	if (oslot->to_toast == NULL)
 		return true;
 
@@ -1556,6 +1563,9 @@ tts_orioledb_toast_sort_add(TupleTableSlot *slot,
 	int			i;
 	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
+	if (GET_PRIMARY(descr)->bridging)
+		ctid_off++;
+
 	if (oslot->to_toast == NULL)
 		return;
 
@@ -1591,7 +1601,7 @@ tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 	bool		result = true;
 	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
 
-	if (descr->bridge)
+	if (GET_PRIMARY(descr)->bridging)
 		ctid_off++;
 
 	slot_getallattrs(slot);

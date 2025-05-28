@@ -1108,6 +1108,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 #if PG_VERSION_NUM >= 170000
 	o_database_cache_set_default_locale_provider();
 #endif
+	o_database_cache_set_lc_collate();
 
 	memset(&control, 0, sizeof(control));
 

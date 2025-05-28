@@ -148,7 +148,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
-	attnum = primary->fields[0].tableAttnum;
+	attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, primary, 1);
 	attr = &primary->leafTupdesc->attrs[attnum - 1];
 	if (onlyPkey)
 		attnum = 1;
@@ -236,6 +236,8 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 		BTScanOpaque so = (BTScanOpaque) ostate.scandesc.opaque;
 
 		_bt_preprocess_keys(&ostate.scandesc);
+		if (!so->qual_ok)
+			return nTuples;
 		if (so->numArrayKeys)
 			_bt_start_array_keys(&ostate.scandesc, ForwardScanDirection);
 		ostate.curKeyRange.empty = true;
@@ -358,10 +360,29 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				BitmapIndexScanState *node;
 				Instrumentation *instrument;
 				OBTOptions *options;
+				ExprContext *econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
 
 				node = (BitmapIndexScanState *) planstate;
 				instrument = node->ss.ps.instrument;
 				options = (OBTOptions *) node->biss_RelationDesc->rd_options;
+
+				if (node->biss_NumRuntimeKeys != 0)
+					ExecIndexEvalRuntimeKeys(econtext,
+											 node->biss_RuntimeKeys,
+											 node->biss_NumRuntimeKeys);
+				if (node->biss_NumArrayKeys != 0)
+					node->biss_RuntimeKeysReady =
+						ExecIndexEvalArrayKeys(econtext,
+											   node->biss_ArrayKeys,
+											   node->biss_NumArrayKeys);
+				else
+					node->biss_RuntimeKeysReady = true;
+
+				/* reset index scan */
+				if (node->biss_RuntimeKeysReady)
+					index_rescan(node->biss_ScanDesc,
+								 node->biss_ScanKeys, node->biss_NumScanKeys,
+								 NULL, 0);
 
 				if (instrument)
 					InstrStartNode(instrument);

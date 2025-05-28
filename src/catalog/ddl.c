@@ -80,6 +80,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
+#include "partitioning/partdesc.h"
 #include "pgstat.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -107,6 +108,7 @@ UndoLocation saved_undo_location[(int) UndoLogsCount] =
 };
 static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
+List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 static ORelOids saved_oids;
@@ -1279,6 +1281,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
 		List	   *relids = NIL;
+		List	   *rels = NIL;
 		ListCell   *cell;
 
 		/*
@@ -1301,16 +1304,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			/* open the relation, we already hold a lock on it */
 			rel = table_open(myrelid, NoLock);
-			if (is_orioledb_rel(rel))
-			{
-				redefine_pkey_for_rel(rel);
-			}
 
+			rels = lappend(rels, rel);
 			relids = lappend_oid(relids, myrelid);
 
 			if (recurse)
 			{
-				Relation	child_rel;
 				ListCell   *child;
 				List	   *children;
 
@@ -1324,14 +1323,44 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						continue;
 
 					/* find_all_inheritors already got lock */
-					child_rel = table_open(childrelid, NoLock);
-					if (is_orioledb_rel(child_rel))
-					{
-						redefine_pkey_for_rel(child_rel);
-					}
-					table_close(child_rel, lockmode);
+					rel = table_open(childrelid, NoLock);
+					rels = lappend(rels, rel);
+					relids = lappend_oid(relids, childrelid);
 				}
 			}
+		}
+
+		if (tstmt->behavior == DROP_CASCADE)
+		{
+			for (;;)
+			{
+				List	   *newrelids;
+
+				newrelids = heap_truncate_find_FKs(relids);
+				if (newrelids == NIL)
+					break;		/* nothing else to add */
+
+				foreach(cell, newrelids)
+				{
+					Oid			relid = lfirst_oid(cell);
+					Relation	rel;
+
+					rel = table_open(relid, AccessExclusiveLock);
+					rels = lappend(rels, rel);
+					relids = lappend_oid(relids, relid);
+				}
+			}
+		}
+
+		foreach(cell, rels)
+		{
+			Relation	rel = (Relation) lfirst(cell);
+
+			if (is_orioledb_rel(rel))
+			{
+				redefine_pkey_for_rel(rel);
+			}
+
 			table_close(rel, NoLock);
 		}
 	}
@@ -1341,6 +1370,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		{
 			list_free_deep(reindex_list);
 			reindex_list = NIL;
+		}
+	}
+	else if (IsA(pstmt->utilityStmt, DropStmt))
+	{
+		if (partition_drop_index_list)
+		{
+			list_free(partition_drop_index_list);
+			partition_drop_index_list = NIL;
 		}
 	}
 }
@@ -2161,6 +2198,44 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 		if (!closed)
 			relation_close(ind, AccessShareLock);
 	}
+
+	if (primary)
+	{
+		ORelOids	oids;
+		OTable	   *updated_o_table;
+
+		/*
+		 * Partial reimplementation of assign_new_oids just for toast, because
+		 * it isn't called for tables without pkeys here, but it should
+		 */
+
+		ORelOidsSetFromRel(oids, rel);
+		updated_o_table = o_tables_get(oids);
+		Assert(updated_o_table != NULL);
+
+		if (!updated_o_table->has_primary)
+		{
+			Oid			toast_relid;
+			Relation	toast_rel;
+			OSnapshot	oSnapshot;
+			OXid		oxid;
+
+			toast_relid = rel->rd_rel->reltoastrelid;
+			toast_rel = table_open(toast_relid, AccessExclusiveLock);
+			RelationSetNewRelfilenode(toast_rel, toast_rel->rd_rel->relpersistence);
+			ORelOidsSetFromRel(updated_o_table->toast_oids, toast_rel);
+			table_close(toast_rel, AccessExclusiveLock);
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+			o_tables_table_meta_lock(updated_o_table);
+			o_tables_update(updated_o_table, oxid, oSnapshot.csn);
+			o_tables_after_update(updated_o_table, oxid, oSnapshot.csn);
+			o_tables_table_meta_unlock(updated_o_table, InvalidOid);
+			recreate_table_descr_by_oids(updated_o_table->oids);
+			orioledb_free_rd_amcache(rel);
+		}
+		o_table_free(updated_o_table);
+	}
+
 }
 
 static void
@@ -2282,7 +2357,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
 	o_table->index_bridging = true;
-	assign_new_oids(o_table, tbl);
+	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	o_table->primary_init_nfields = o_table->nfields + 1;
@@ -2298,13 +2373,13 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	o_tables_rel_meta_lock(tbl);
 	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 	{
-		int			ctid_off;
+		int			ctid_idx_off;
 		OTableIndex *index;
 
-		ctid_off = o_table->has_primary ? 0 : 1;
+		ctid_idx_off = o_table->has_primary ? 0 : 1;
 		index = &o_table->indices[ix_num];
 
-		o_indices_update(o_table, ix_num + ctid_off, oxid, oSnapshot.csn);
+		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
@@ -2337,7 +2412,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_table->bridge_oids.datoid = InvalidOid;
 	o_table->bridge_oids.reloid = InvalidOid;
 	o_table->bridge_oids.relnode = InvalidOid;
-	assign_new_oids(o_table, tbl);
+	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	o_table->primary_init_nfields = o_table->nfields - 1;
@@ -2353,13 +2428,13 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	o_tables_rel_meta_lock(tbl);
 	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 	{
-		int			ctid_off;
+		int			ctid_idx_off;
 		OTableIndex *index;
 
-		ctid_off = o_table->has_primary ? 0 : 1;
+		ctid_idx_off = o_table->has_primary ? 0 : 1;
 		index = &o_table->indices[ix_num];
 
-		o_indices_update(o_table, ix_num + ctid_off, oxid, oSnapshot.csn);
+		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
@@ -2422,10 +2497,18 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				(subId == 0) && is_orioledb_rel(rel) &&
 				!OidIsValid(rel->rd_rel->relrewrite))
 			{
+				ListCell   *lc;
 				ORelOids	oids;
 
 				ORelOidsSetFromRel(oids, rel);
 				Assert(relation_get_descr(rel) != NULL);
+				foreach(lc, partition_drop_index_list)
+				{
+					List	   *drop_oids = (List *) lfirst(lc);
+
+					if (lsecond_oid(drop_oids) == rel->rd_rel->oid)
+						partition_drop_index_list = foreach_delete_current(partition_drop_index_list, lc);
+				}
 				drop_table(oids);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
@@ -2515,6 +2598,123 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				CommandCounterIncrement();
 				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
 											   (Pointer) &arg);
+			}
+			else if ((rel->rd_rel->relkind == RELKIND_INDEX) &&
+					 (drop_arg->dropflags & PERFORM_DELETION_OF_RELATION))
+			{
+				Relation	tbl = relation_open(rel->rd_index->indrelid,
+												AccessShareLock);
+
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+					is_orioledb_rel(tbl))
+				{
+					/*
+					 * TODO: probably better way would be to add hook to
+					 * findDependentObjects and filter partition index
+					 * dependencies there, but for now
+					 * PERFORM_DELETION_OF_RELATION passed for partiton index
+					 * dependency and I'm not sure how to properly filter out
+					 * only this kind of dependency and do not touch behaviour
+					 * that not drops indices during table drop to not rebuild
+					 * them
+					 */
+
+					Relation	depRel;
+					ObjectAddress object;
+					ScanKeyData key[2];
+					int			nkeys;
+					SysScanDesc scan;
+					HeapTuple	tup;
+
+					depRel = table_open(DependRelationId, RowExclusiveLock);
+
+					object.classId = classId;
+					object.objectId = objectId;
+					object.objectSubId = subId;
+
+					ScanKeyInit(&key[0],
+								Anum_pg_depend_classid,
+								BTEqualStrategyNumber, F_OIDEQ,
+								ObjectIdGetDatum(object.classId));
+					ScanKeyInit(&key[1],
+								Anum_pg_depend_objid,
+								BTEqualStrategyNumber, F_OIDEQ,
+								ObjectIdGetDatum(object.objectId));
+					nkeys = 2;
+
+					scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, nkeys, key);
+
+					while (HeapTupleIsValid(tup = systable_getnext(scan)))
+					{
+						Form_pg_depend foundDep = (Form_pg_depend) GETSTRUCT(tup);
+
+						if (foundDep->deptype == DEPENDENCY_PARTITION_PRI ||
+							foundDep->deptype == DEPENDENCY_PARTITION_SEC)
+						{
+							partition_drop_index_list = list_append_unique(partition_drop_index_list,
+																		   list_make2_oid(rel->rd_rel->oid,
+																						  rel->rd_index->indrelid));
+							break;
+						}
+					}
+
+					systable_endscan(scan);
+
+					table_close(depRel, RowExclusiveLock);
+				}
+				relation_close(tbl, AccessShareLock);
+			}
+			else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX)
+			{
+				ListCell   *lc;
+				Relation	tbl = relation_open(rel->rd_index->indrelid,
+												AccessShareLock);
+
+				/*
+				 * We don't have secondary index dependencies at this moment
+				 * so we are passing them in partition_drop_index_list from
+				 * before
+				 */
+				if (partition_drop_index_list != NIL)
+				{
+					foreach(lc, partition_drop_index_list)
+					{
+						List	   *oids = (List *) lfirst(lc);
+						Relation	part_tbl = relation_open(lsecond_oid(oids), AccessShareLock);
+						OIndexNumber ix_num;
+						OTableDescr *descr;
+						int			i;
+
+						Assert((part_tbl->rd_rel->relkind == RELKIND_RELATION ||
+								part_tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+							   is_orioledb_rel(part_tbl));
+
+						descr = relation_get_descr(part_tbl);
+						Assert(descr != NULL);
+
+						ix_num = InvalidIndexNumber;
+						for (i = 0; i < descr->nIndices; i++)
+						{
+							if (descr->indices[i]->oids.reloid == linitial_oid(oids))
+							{
+								ix_num = i;
+								break;
+							}
+						}
+						if (ix_num != InvalidIndexNumber)
+						{
+							if (descr->indices[ix_num]->primaryIsCtid)
+								ix_num--;
+
+							o_index_drop(part_tbl, ix_num);
+						}
+						relation_close(part_tbl, AccessShareLock);
+					}
+					list_free(partition_drop_index_list);
+					partition_drop_index_list = NIL;
+				}
+				relation_close(tbl, AccessShareLock);
 			}
 			if (is_open)
 				relation_close(rel, AccessShareLock);
@@ -2894,10 +3094,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							int			field_num;
-							int			ctid_off;
+							int			ctid_idx_off;
 							OTableIndex *index;
 
-							ctid_off = o_table->has_primary ? 0 : 1;
+							ctid_idx_off = o_table->has_primary ? 0 : 1;
 							index = &o_table->indices[ix_num];
 
 							for (field_num = 0; field_num < index->nkeyfields;
@@ -2910,7 +3110,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								if (index->type == oIndexPrimary || has_field)
 								{
 									o_indices_update(o_table,
-													 ix_num + ctid_off,
+													 ix_num + ctid_idx_off,
 													 oxid, oSnapshot.csn);
 									o_invalidate_oids(index->oids);
 									o_add_invalidate_undo_item(
@@ -3052,6 +3252,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					CommandCounterIncrement();
 					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
 
+					/*
+					 * Redifinig primary key here to not do rebuild after
+					 * rewrite_table
+					 */
 					redefine_indices(tbl, new_o_table, true);
 
 					o_table_free(new_o_table);
@@ -3336,6 +3540,11 @@ o_ddl_cleanup(void)
 	{
 		list_free_deep(drop_index_list);
 		drop_index_list = NIL;
+	}
+	if (partition_drop_index_list)
+	{
+		list_free(partition_drop_index_list);
+		partition_drop_index_list = NIL;
 	}
 	if (reindex_list)
 	{

@@ -657,6 +657,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->toast_compress = InvalidOCompress;
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
+	o_table->data_version = ORIOLEDB_DATA_VERSION;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -1165,9 +1166,8 @@ o_table_free(OTable *table)
 	pfree(table);
 }
 
-static bool
-o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
-					   bool update_indices)
+bool
+o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 {
 	OTableChunkKey key;
 	OTable	   *old_table;
@@ -1184,8 +1184,7 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 
 	systrees_modify_start();
 	old_table = o_tables_get(table->oids);
-	if (update_indices)
-		o_tables_oids_indexes(old_table, table, oxid, csn);
+	o_tables_oids_indexes(old_table, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
@@ -1196,18 +1195,6 @@ o_tables_update_common(OTable *table, OXid oxid, CommitSeqNo csn,
 	o_table_free(old_table);
 
 	return result;
-}
-
-bool
-o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
-{
-	return o_tables_update_common(table, oxid, csn, true);
-}
-
-bool
-o_tables_update_without_oids_indexes(OTable *table, OXid oxid, CommitSeqNo csn)
-{
-	return o_tables_update_common(table, oxid, csn, false);
 }
 
 void
@@ -1677,6 +1664,7 @@ serialize_o_table(OTable *o_table, int *size)
 	StringInfoData str;
 	int			i;
 
+	Assert(o_table->data_version == ORIOLEDB_DATA_VERSION);
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_table,
 						   offsetof(OTable, indices));
@@ -1754,6 +1742,7 @@ deserialize_o_table(Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_table, ptr, len);
 	ptr += len;
+	Assert(o_table->data_version == ORIOLEDB_DATA_VERSION);
 
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
@@ -1848,7 +1837,7 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
 }
 
 void
-o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
+o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, bool drop_pkey)
 {
 	Relation	toastRel,
 				indexRel;
@@ -1872,9 +1861,17 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode)
 
 	for (i = 0; i < oTable->nindices; i++)
 	{
-		indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
-		ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
-		relation_close(indexRel, AccessShareLock);
+		/*
+		 * There is a memmove in drop_primary_index, and also when dropping
+		 * pkey for partition tables it calls this function after removing
+		 * index from system catalogs
+		 */
+		if (!drop_pkey || oTable->indices[i].type != oIndexPrimary)
+		{
+			indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
+			ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
+			relation_close(indexRel, AccessShareLock);
+		}
 	}
 }
 

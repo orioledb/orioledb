@@ -1020,13 +1020,13 @@ static void
 o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 {
 	OIndexNumber cur_ix,
-				ctid_off = 0;
+				ctid_idx_off = 0;
 
 	descr->nIndices = table->nindices;
 	if (!table->has_primary)
 	{
 		descr->nIndices++;
-		ctid_off = 1;
+		ctid_idx_off = 1;
 	}
 
 	descr->indices = (OIndexDescr **) palloc0(sizeof(OIndexDescr *) * descr->nIndices);
@@ -1042,8 +1042,8 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 		}
 		else
 		{
-			ixOids = table->indices[cur_ix - ctid_off].oids;
-			ixType = table->indices[cur_ix - ctid_off].type;
+			ixOids = table->indices[cur_ix - ctid_idx_off].oids;
+			ixType = table->indices[cur_ix - ctid_idx_off].type;
 		}
 
 		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false);

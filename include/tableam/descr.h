@@ -133,6 +133,11 @@ struct OIndexDescr
 	 * on ctid (no primary key is explicitly defined).
 	 */
 	bool		primaryIsCtid;
+
+	/*
+	 * Indicates that bridging enabled for table: i.e. there is bridge_ctid
+	 * column in pkey and also bridge index
+	 */
 	bool		bridging;
 
 	uint8		fillfactor;

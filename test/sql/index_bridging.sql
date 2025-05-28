@@ -5,6 +5,37 @@ CREATE EXTENSION orioledb;
 CREATE EXTENSION pageinspect;
 \set VERBOSITY default
 
+CREATE FUNCTION btree_index_content(index name)
+	RETURNS TABLE (ctid tid, htid tid, tids tid[]) AS $$
+	SELECT ctid, htid, tids FROM
+			generate_series(2,
+							(pg_relation_size(index::regclass) /
+							current_setting('block_size')::BIGINT)) p,
+			LATERAL bt_page_items(index, p - 1)
+		ORDER BY ctid
+$$ LANGUAGE SQL;
+
+CREATE FUNCTION hash_index_content(index name) RETURNS TABLE (ctid tid) AS $$
+	SELECT ctid FROM
+		generate_series(2,
+						(pg_relation_size(index::regclass) /
+						 current_setting('block_size')::BIGINT)) p,
+		LATERAL hash_page_type(get_raw_page(index, p - 1)) pt,
+		LATERAL hash_page_items(get_raw_page(index, p - 1))
+		WHERE pt = 'bucket'
+		ORDER BY ctid
+$$ LANGUAGE SQL;
+
+CREATE FUNCTION gist_index_content(index name)
+	RETURNS TABLE (ctid tid, keys text) AS $$
+	SELECT ctid, keys FROM
+			generate_series(1,
+							(pg_relation_size(index::regclass) /
+							current_setting('block_size')::BIGINT)) p,
+			LATERAL gist_page_items(get_raw_page(index, p - 1), index::regclass)
+		ORDER BY ctid
+$$ LANGUAGE SQL;
+
 CREATE TABLE o_test_ix_ams (
 	i int NOT NULL,
 	j int4[],
@@ -27,22 +58,12 @@ SELECT * FROM o_test_ix_ams;
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
 CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
 \d+ o_test_ix_ams
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -55,13 +76,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 INSERT INTO o_test_ix_ams VALUES (10, ARRAY[20,30], point(40, 50), 60, 70);
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -80,13 +96,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_ix_ams;
 SELECT * FROM o_test_ix_ams;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -102,13 +113,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_ix_ams;
 SELECT * FROM o_test_ix_ams;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -125,12 +131,8 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_ix_ams;
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
+
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -148,13 +150,8 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_ix_ams;
 SELECT * FROM o_test_ix_ams;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -165,13 +162,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
 ALTER TABLE o_test_ix_ams ADD COLUMN k int;
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -185,13 +177,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 UPDATE o_test_ix_ams SET p = point(i * 40 + 1, i * 5);
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -205,12 +192,8 @@ UPDATE o_test_ix_ams SET j = j/2 + 1000;
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
 -- Rows with new bridging_ctid now not stored in o_test_ix_ams_ix1
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
+
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -220,13 +203,8 @@ COMMIT;
 
 -- After reindex new rows should be visible
 REINDEX INDEX o_test_ix_ams_ix1;
+SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix1'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix1', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -237,13 +215,8 @@ COMMIT;
 CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (orioledb_index = off, deduplicate_items = off);
 
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
+SELECT * FROM btree_index_content('o_test_ix_ams_ix2');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -256,13 +229,8 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 INSERT INTO o_test_ix_ams VALUES (1000, 2000, point(4000, 5000), 6000, 7000, 8000);
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
+SELECT * FROM btree_index_content('o_test_ix_ams_ix2');
 
-SELECT ctid, htid, tids FROM
-		 generate_series(1,
-						 (SELECT relpages - 1 FROM pg_class
-							 WHERE oid = 'o_test_ix_ams_ix2'::regclass)) p,
-		 LATERAL bt_page_items('o_test_ix_ams_ix2', p)
-	ORDER BY ctid;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -278,7 +246,7 @@ CREATE INDEX o_test_ix_ams_hash_ix ON o_test_ix_ams USING hash (k);
 \d+ o_test_ix_ams
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 
-SELECT * FROM hash_page_items(get_raw_page('o_test_ix_ams_hash_ix', 1));
+SELECT * FROM hash_index_content('o_test_ix_ams_hash_ix');
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -330,7 +298,7 @@ COMMIT;
 
 CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 
-SELECT * FROM gist_page_items(get_raw_page('o_test_ix_ams_ix4', 0), 'o_test_ix_ams_ix4');
+SELECT * FROM gist_index_content('o_test_ix_ams_ix4');
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
@@ -342,11 +310,15 @@ CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) U
 INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
 SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
 CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
+SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
 DELETE FROM o_briging_vacuum_test;
+SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
 VACUUM o_briging_vacuum_test;
 SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
 SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_page_items(get_raw_page('o_briging_vacuum_test_p_idx', 0), 'o_briging_vacuum_test_p_idx');
+SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
 DROP TABLE o_briging_vacuum_test;
 
 
@@ -584,6 +556,119 @@ alter table o_test_toastable_offset set (index_bridging=on);
 insert into o_test_toastable_offset values (4,6,'X',11);
 insert into o_test_toastable_offset values (1,3,'Y',12);
 delete from o_test_toastable_offset;
+
+CREATE TABLE o_test_bridged_hash_btree_bitmap_scans (
+	id integer NOT NULL,
+	t text NOT NULL,
+	v int4[],
+	PRIMARY KEY(id)
+) USING orioledb;
+SELECT orioledb_tbl_indices('o_test_bridged_hash_btree_bitmap_scans'::regclass, true);
+CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix1
+	ON o_test_bridged_hash_btree_bitmap_scans USING hash (t);
+CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix2
+	ON o_test_bridged_hash_btree_bitmap_scans USING hash (v);
+CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix3
+	ON o_test_bridged_hash_btree_bitmap_scans USING btree (v) WITH (orioledb_index = off);
+SELECT orioledb_tbl_indices('o_test_bridged_hash_btree_bitmap_scans'::regclass, true);
+
+INSERT INTO o_test_bridged_hash_btree_bitmap_scans VALUES (1, 'D', ARRAY[47,16]);
+INSERT INTO o_test_bridged_hash_btree_bitmap_scans VALUES (2, 'A', ARRAY[48,17]);
+INSERT INTO o_test_bridged_hash_btree_bitmap_scans VALUES (3, 'C', ARRAY[49,18]);
+INSERT INTO o_test_bridged_hash_btree_bitmap_scans VALUES (4, 'F', ARRAY[50,19]);
+INSERT INTO o_test_bridged_hash_btree_bitmap_scans VALUES (5, 'B', ARRAY[51,20]);
+
+SELECT orioledb_tbl_structure('o_test_bridged_hash_btree_bitmap_scans'::regclass, 'nue');
+SELECT * FROM hash_index_content('o_test_bridged_hash_btree_bitmap_scans_ix1');
+SELECT * FROM hash_index_content('o_test_bridged_hash_btree_bitmap_scans_ix2');
+SELECT * FROM btree_index_content('o_test_bridged_hash_btree_bitmap_scans_ix3');
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bridged_hash_btree_bitmap_scans
+		WHERE v = ARRAY[48, 17] OR v = ARRAY[49, 18];
+SELECT * FROM o_test_bridged_hash_btree_bitmap_scans
+	WHERE v = ARRAY[48, 17] OR v = ARRAY[49, 18];
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bridged_hash_btree_bitmap_scans WHERE t = 'C';
+SELECT * FROM o_test_bridged_hash_btree_bitmap_scans WHERE t = 'C';
+COMMIT;
+
+CREATE TABLE o_test_bridged_index_only_scan (
+       id integer NOT NULL,
+	   id2 integer,
+       t text NOT NULL,
+       PRIMARY KEY(id)
+) USING orioledb;
+SELECT orioledb_tbl_indices('o_test_bridged_index_only_scan'::regclass, true);
+CREATE INDEX o_test_bridged_index_only_scan_ix1 ON o_test_bridged_index_only_scan USING btree (t) WITH (orioledb_index = off);
+CREATE INDEX o_test_bridged_index_only_scan_ix2 ON o_test_bridged_index_only_scan USING btree (id2) WITH (orioledb_index = off);
+SELECT orioledb_tbl_indices('o_test_bridged_index_only_scan'::regclass, true);
+
+INSERT INTO o_test_bridged_index_only_scan VALUES (1, 56, 'x');
+INSERT INTO o_test_bridged_index_only_scan VALUES (2, 27, repeat('x', 2600));
+
+CREATE INDEX o_test_bridged_index_only_scan_ix1 ON o_test_bridged_index_only_scan USING btree (t) WITH (orioledb_index = off);
+SELECT orioledb_tbl_structure('o_test_bridged_index_only_scan'::regclass, 'nue');
+SELECT * FROM btree_index_content('o_test_bridged_index_only_scan_ix1');
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridged_index_only_scan ORDER BY t;
+SELECT * FROM o_test_bridged_index_only_scan ORDER BY t;
+SET LOCAL enable_bitmapscan = off;
+EXPLAIN (COSTS OFF)
+	SELECT t FROM o_test_bridged_index_only_scan WHERE t = 'x';
+SELECT t FROM o_test_bridged_index_only_scan WHERE t = 'x';
+COMMIT;
+
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+	AS $$
+		SELECT substr(string_agg(
+						substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+				''), 1, length)
+		FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+
+CREATE TABLE o_test_toast_with_bridged (
+	id integer NOT NULL,
+	t text NOT NULL,
+	id2 integer
+) USING orioledb;
+SELECT orioledb_tbl_indices('o_test_toast_with_bridged'::regclass, true);
+CREATE INDEX o_test_toast_with_bridged_ix1 ON o_test_toast_with_bridged USING btree (id) WITH (orioledb_index = off);
+SELECT orioledb_tbl_indices('o_test_toast_with_bridged'::regclass, true);
+
+INSERT INTO o_test_toast_with_bridged VALUES (1, 'x', 10);
+INSERT INTO o_test_toast_with_bridged VALUES (2, repeat('x', 2600), 78);
+
+INSERT INTO o_test_toast_with_bridged VALUES (3, generate_string(1, 2690), 66);
+INSERT INTO o_test_toast_with_bridged VALUES (4, generate_string(2, 2690), 56);
+INSERT INTO o_test_toast_with_bridged VALUES (5, generate_string(3, 2690), 12);
+
+SELECT orioledb_tbl_structure('o_test_toast_with_bridged'::regclass, 'nue');
+SELECT * FROM btree_index_content('o_test_toast_with_bridged_ix1');
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_with_bridged ORDER BY id;
+SELECT * FROM o_test_toast_with_bridged ORDER BY id;
+COMMIT;
+
+UPDATE o_test_toast_with_bridged SET t = generate_string(5, 2690) WHERE id = 4;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_with_bridged ORDER BY id;
+SELECT * FROM o_test_toast_with_bridged ORDER BY id;
+COMMIT;
+
+DELETE FROM o_test_toast_with_bridged WHERE id BETWEEN 2 AND 4;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_with_bridged ORDER BY id;
+SELECT * FROM o_test_toast_with_bridged ORDER BY id;
+COMMIT;
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;

@@ -98,6 +98,7 @@ typedef struct
 	bool		has_primary;
 	char		persistence;
 	uint8		fillfactor;
+	uint16		data_version;
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
@@ -157,10 +158,6 @@ extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);
 
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
-
-/* Updates OTable description in o_tables list without indices processing */
-extern bool o_tables_update_without_oids_indexes(OTable *table, OXid oxid,
-												 CommitSeqNo csn);
 
 /* Invalidates descriptors after o_tables_update */
 void		o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
@@ -229,7 +226,8 @@ o_tables_rel_unlock(ORelOids *oids, int lockmode)
 }
 
 extern void o_table_fill_oids(OTable *oTable, Relation rel,
-							  const RelFileNode *newrnode);
+							  const RelFileNode *newrnode,
+							  bool drop_pkey);
 extern Datum o_eval_default(OTable *o_table, Relation rel,
 							Node *expr, TupleTableSlot *scantuple,
 							bool byval, int16 typlen, bool *isNull);

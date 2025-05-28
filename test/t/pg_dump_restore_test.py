@@ -32,12 +32,12 @@ class PgDumpRestoreTest(BaseTest):
 			CREATE TABLE pg_dump_restore_table (
 				key integer NOT NULL,
 				payload text,
-				hash integer GENERATED ALWAYS AS (key % 2) STORED,
+				hash integer GENERATED ALWAYS AS (mod(key, 2)) STORED,
 				PRIMARY KEY(key)
 			) USING orioledb;
 			CREATE INDEX ON pg_dump_restore_table (payload);
 			INSERT INTO pg_dump_restore_table
-			SELECT i, '*' || i || repeat('*', i % 5) FROM generate_series(1, 10) AS i;
+			SELECT i, '*' || i || repeat('*', mod(i, 5)) FROM generate_series(1, 10) AS i;
 			""")
 		node.dump("pg_dump_restore")
 
@@ -91,11 +91,11 @@ class PgDumpRestoreTest(BaseTest):
 			CREATE TABLE pg_dump_restore_table (
 				key integer NOT NULL,
 				payload text,
-				hash integer GENERATED ALWAYS AS (key % 2) STORED,
+				hash integer GENERATED ALWAYS AS (mod(key, 2)) STORED,
 				PRIMARY KEY(key)
 			) USING orioledb WITH (compress = 11, toast_compress = 13, fillfactor = 70);
 			INSERT INTO pg_dump_restore_table
-			SELECT i, '*' || i || repeat('*', i % 5) FROM generate_series(1, 10) AS i;
+			SELECT i, '*' || i || repeat('*', mod(i, 5)) FROM generate_series(1, 10) AS i;
 			""")
 		node.dump("pg_dump_restore")
 
@@ -136,11 +136,11 @@ class PgDumpRestoreTest(BaseTest):
 			CREATE TABLE pg_dump_restore_table (
 				key integer NOT NULL,
 				payload text,
-				hash integer GENERATED ALWAYS AS (key % 2) STORED,
+				hash integer GENERATED ALWAYS AS (mod(key, 2)) STORED,
 				PRIMARY KEY(key)
 			) USING orioledb WITH (index_bridging);
 			INSERT INTO pg_dump_restore_table
-			SELECT i, '*' || i || repeat('*', i % 5) FROM generate_series(1, 10) AS i;
+			SELECT i, '*' || i || repeat('*', mod(i, 5)) FROM generate_series(1, 10) AS i;
 			""")
 		node.dump("pg_dump_restore")
 
