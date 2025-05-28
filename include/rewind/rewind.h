@@ -30,8 +30,18 @@ extern void rewind_init_shmem(Pointer buf, bool found);
 extern void checkpoint_write_rewind_xids(void);
 extern void add_to_rewind_buffer(OXid oxid);
 
-typedef struct
+#define EMPTY_ITEM_TAG (0)
+#define REWIND_ITEM_TAG (1)
+#define SUBXIDS_ITEM_TAG (2)
+
+#define SUBXIDS_PER_ITEM	(23)
+
+/* RewindItem and SubxidsItem should have same size to be castable to each other */
+/* Empty RewindItem and SubxidsItem have invalid oxid and tag */
+typedef	struct RewindItem
 {
+	uint8		tag;
+	int 		nsubxids;
 	OXid		oxid;
 	TransactionId xid;			/* regular transaction id if any */
 	uint64		onCommitUndoLocation[UndoLogsCount];
@@ -40,6 +50,14 @@ typedef struct
 	FullTransactionId oldestConsideredRunningXid;
 	TimestampTz timestamp;
 } RewindItem;
+
+typedef struct SubxidsItem
+{
+	uint8           tag;
+	OXid            oxid;	/* Redundant, for debug */
+	TransactionId   subxids[SUBXIDS_PER_ITEM];
+	int 		unused;
+} SubxidsItem;
 
 #define REWIND_DISK_BUFFER_LENGTH (ORIOLEDB_BLCKSZ / sizeof(RewindItem))
 

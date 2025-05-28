@@ -99,6 +99,12 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 	RewindItem     *rewindItem;
 	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
 	uint64		pos;
+	int		nsubxids = 0;
+	int 		subxids_count = 0;
+	bool		subxid_only = false;
+	TransactionId  *subxids;
+	TransactionId	xid = InvalidTransactionId;
+	OXid		oxid = InvalidOXid;
 
 	pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
 	while (true)
@@ -134,43 +140,86 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 			rewindItem = &rewindBuffer[pos % rewind_circular_buffer_size];
 		}
 
-		if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000))
-		{
-			/* Rewind complete */
-			return;
-		}
-
 		Assert(rewindItem->oxid != InvalidOXid);
 
-		/* Rewind current rewind item */
-		for (i = 0; i < (int) UndoLogsCount; i++)
+		if (subxid_only)
 		{
-			UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
+			SubxidsItem *subxidsItem = (SubxidsItem *) rewindItem;
 
-			elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), XidFromFullTransactionId(GetOldestFullTransactionIdConsideredRunning()));
-			location = walk_undo_range_with_buf((UndoLogType) i,
-				rewindItem->undoLocation[i],
-				InvalidUndoLocation,
-				rewindItem->oxid, true, &rewindItem->onCommitUndoLocation[i],
-				true);
-			Assert(!UndoLocationIsValid(location));
+			Assert(subxidsItem->tag == SUBXIDS_ITEM_TAG);
+			Assert(subxidsItem->tag == oxid);
+
+			while (true)
+			{
+				subxids[subxids_count] = subxidsItem->subxids[subxids_count % SUBXIDS_PER_ITEM];
+				subxids_count++;
+
+				elog(LOG, "Rewinding SubXid: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count, nsubxids, subxids[subxids_count]);
+
+				if (subxids_count == nsubxids)
+				{
+					subxid_only = false;
+					TransactionIdAbortTree(xid, nsubxids, subxids);
+					nsubxids = 0;
+					pfree(subxids);
+					break;
+				}
+
+				if (subxids_count % SUBXIDS_PER_ITEM == 0)
+					break; /* Read next rewindItem only with subxids */
+			}
 		}
+		else
+		{
+			Assert(rewindItem->tag == REWIND_ITEM_TAG);
+			oxid = rewindItem -> oxid;
+			nsubxids = rewindItem->nsubxids;
+			xid = rewindItem->xid;
 
-		Assert(csn_is_retained_for_rewind(oxid_get_csn(rewindItem->oxid, true)));
-		set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
 
-		/* Abort transactions for non-orioledb tables */
-		TransactionIdAbortTree(XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), 0, NULL);
+			if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000))
+			{
+				/* Rewind complete */
+				return;
+			}
+
+			/* Rewind current rewind item */
+			for (i = 0; i < (int) UndoLogsCount; i++)
+			{
+				UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
+
+				elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), xid, nsubxids);
+				location = walk_undo_range_with_buf((UndoLogType) i,
+					rewindItem->undoLocation[i],
+					InvalidUndoLocation,
+					rewindItem->oxid, true, &rewindItem->onCommitUndoLocation[i],
+					true);
+				Assert(!UndoLocationIsValid(location));
+			}
+
+			Assert(csn_is_retained_for_rewind(oxid_get_csn(rewindItem->oxid, true)));
+			set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
+
+			/* Abort transactions for non-orioledb tables */
+			if (nsubxids)
+			{
+				subxid_only = true;
+				subxids_count = 0;
+				subxids = palloc(sizeof(TransactionId) * nsubxids);
+			}
+			else
+				TransactionIdAbortTree(xid, 0, NULL);
+		}
 
 		/* Clear the item from the circular buffer */
 		rewindItem->oxid = InvalidOXid;
+		rewindItem->tag = EMPTY_ITEM_TAG;
 
 		/* Buffer finished. Unlikely case when rewind_time equals rewind_max_period */
 		if (pos == rewindMeta->completePos)
 			return;
 	}
 }
-
 
 Datum
 orioledb_rewind(PG_FUNCTION_ARGS)
@@ -341,6 +390,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 	if (!enable_rewind)
 		return;
 
+	Assert(sizeof(struct RewindItem) == sizeof(struct SubxidsItem));
 	rewindMeta = (RewindMeta *) ptr;
 	ptr += MAXALIGN(sizeof(RewindMeta));
 	rewindBuffer = (RewindItem *) ptr;
@@ -356,6 +406,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		for (i = 0; i < rewind_circular_buffer_size; i++)
 		{
 			rewindBuffer[i].oxid = InvalidOXid;
+			rewindBuffer[i].tag = EMPTY_ITEM_TAG;
 			rewindBuffer[i].timestamp = 0;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 			{
@@ -453,6 +504,7 @@ restore_evicted_rewind_page(void)
 		int			dst = (pos + REWIND_DISK_BUFFER_LENGTH) % rewind_circular_buffer_size;
 
 		Assert(rewindBuffer[dst].oxid == InvalidOXid);
+		Assert(rewindBuffer[dst].tag == EMPTY_ITEM_TAG);
 		memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
 	}
 
@@ -484,7 +536,10 @@ restore_evicted_rewind_page(void)
 
 #ifdef USE_ASSERT_CHECKING
 	for (uint64 pos = start; pos < start + REWIND_DISK_BUFFER_LENGTH; pos++)
+	{
 		Assert(rewindBuffer[pos % rewind_circular_buffer_size].oxid != InvalidOXid);
+		Assert(rewindBuffer[pos % rewind_circular_buffer_size].tag != EMPTY_ITEM_TAG);
+	}
 #endif
 	rewindMeta->evictPos += REWIND_DISK_BUFFER_LENGTH;
 	rewindMeta->readPos += REWIND_DISK_BUFFER_LENGTH;
@@ -590,37 +645,42 @@ rewind_worker_main(Datum main_arg)
 
 				rewindItem = &rewindBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				Assert(rewindItem->oxid != InvalidOXid);
+				Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
-				if (!rewindMeta->skipCheck &&
-					!TimestampDifferenceExceeds(rewindItem->timestamp,
+				if (rewindItem->tag == REWIND_ITEM_TAG)
+				{
+					if (!rewindMeta->skipCheck &&
+						!TimestampDifferenceExceeds(rewindItem->timestamp,
 												GetCurrentTimestamp(),
 												rewind_max_period * 1000))
-				{
-					/* Too early, do nothing */
-					break;
-				}
+					{
+						/* Too early, do nothing */
+						break;
+					}
 
-				/* Fix current rewind item */
+					/* Fix current rewind item */
 
-				clear_rewind_oxid(rewindItem->oxid);
-				for (i = 0; i < (int) UndoLogsCount; i++)
-				{
-					UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
+					clear_rewind_oxid(rewindItem->oxid);
+					for (i = 0; i < (int) UndoLogsCount; i++)
+					{
+						UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
 
-					location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation,
+						location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation,
 														rewindItem->oxid, false, NULL,
 														true);
-					Assert(!UndoLocationIsValid(location));
+						Assert(!UndoLocationIsValid(location));
 #ifdef USE_ASSERT_CHECKING
-					Assert(pg_atomic_read_u64(&undoMeta->minRewindRetainLocation) <= rewindItem->minRetainLocation[i]);
+						Assert(pg_atomic_read_u64(&undoMeta->minRewindRetainLocation) <= rewindItem->minRetainLocation[i]);
 #endif
-					pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
+						pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
+					}
+					pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
+										rewindItem->oldestConsideredRunningXid.value);
 				}
-				pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
-									rewindItem->oldestConsideredRunningXid.value);
 
 				/* Clear the item from the circular buffer */
 				rewindItem->oxid = InvalidOXid;
+				rewindItem->tag = EMPTY_ITEM_TAG;
 				rewindMeta->completePos++;
 
 				/*
@@ -710,6 +770,7 @@ evict_rewind_page(void)
 		for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + REWIND_DISK_BUFFER_LENGTH; pos++)
 		{
 			rewindBuffer[(pos % rewind_circular_buffer_size)].oxid = InvalidOXid;
+			rewindBuffer[(pos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
 		}
 
 		/* Stage 2. Shift last page part by one page left */
@@ -720,6 +781,7 @@ evict_rewind_page(void)
 
 			memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
 			rewindBuffer[src].oxid = InvalidOXid;
+			rewindBuffer[src].tag = EMPTY_ITEM_TAG;
 		}
 
 		/*
@@ -739,12 +801,19 @@ add_to_rewind_buffer(OXid oxid)
 	int			i;
 	uint64		curAddPos;
 	int			freeSpace;
+	TransactionId	*subxids;
+	TransactionId	xid = InvalidTransactionId;
+	int		nsubxids = 0;
+	bool 		subxid_only = false;
+	int		subxids_count = 0;
 
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
 		elog(WARNING, "Adding to rewind queue is blocked by rewind");
 		return;
 	}
+
+next_subxids_item:
 
 	freeSpace = rewind_circular_buffer_size -
 		((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
@@ -757,31 +826,76 @@ add_to_rewind_buffer(OXid oxid)
 			((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
 	}
 
-	/* Fill entry in a circular buffer. */
 	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, 1);
 	Assert(curAddPos <= rewindMeta->completePos + rewind_circular_buffer_size -
-		   (rewindMeta->writePos - rewindMeta->readPos));
+			   (rewindMeta->writePos - rewindMeta->readPos));
 
 	rewindItem = &rewindBuffer[curAddPos % rewind_circular_buffer_size];
-
 	Assert(rewindItem->oxid == InvalidOXid);
-	Assert(csn_is_retained_for_rewind(oxid_get_csn(oxid, true)));
+	Assert(rewindItem->tag == EMPTY_ITEM_TAG);
 
-	rewindItem->timestamp = GetCurrentTimestamp();
-	rewindItem->oxid = oxid;
-	rewindItem->xid = GetCurrentTransactionIdIfAny();
-	rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
-
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	if (subxid_only)
 	{
-		UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
-		UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
+		/* Fill subxids entry in a circular buffer. */
+		SubxidsItem *subxidsItem = (SubxidsItem *) rewindItem;
 
-		rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest running xid %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid));
-		rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
-		rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
+		subxidsItem->tag = SUBXIDS_ITEM_TAG;
+		subxidsItem->oxid = oxid;
+		while (true)
+		{
+			elog(LOG, "Add SubXid to buffer: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count,nsubxids, subxids[subxids_count]);
+			subxidsItem->subxids[subxids_count % SUBXIDS_PER_ITEM] = subxids[subxids_count];
+			subxids_count++;
+			if (subxids_count == nsubxids)
+			{
+				subxid_only = false;
+				nsubxids = 0;
+				return;
+			}
+
+			if (subxids_count % SUBXIDS_PER_ITEM == 0)
+				goto next_subxids_item; /* Write next rewindItem only with subxids */
+		}
 	}
+	else
+	{
+		/* Fill rewind entry in a circular buffer. */
+
+		Assert(csn_is_retained_for_rewind(oxid_get_csn(oxid, true)));
+
+		/* NB both will give InvalidTransactionId. Use GetRunningTransactionData (?) */
+		Assert(GetCurrentTransactionIdIfAny() == GetTopTransactionIdIfAny());
+
+		xid = GetCurrentTransactionIdIfAny();
+		nsubxids = xactGetCommittedChildren(&subxids);
+
+		rewindItem->timestamp = GetCurrentTimestamp();
+		rewindItem->tag = REWIND_ITEM_TAG;
+		rewindItem->oxid = oxid;
+		rewindItem->xid = xid;
+		rewindItem->nsubxids = nsubxids;
+		rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
+
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
+			UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
+
+			rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+			elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest running xid %u cur xid %u nsubxids %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), xid, nsubxids);
+			rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
+			rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
+		}
+
+		if (nsubxids)
+		{
+			subxid_only = true;
+			subxids_count = 0;
+			goto next_subxids_item; /* Write first rewindItem only with subxids */
+		}
+	}
+
+
 }
 
 /*
