@@ -953,6 +953,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetIdentity:
 						case AT_SetNotNull:
 						case AT_SetRelOptions:
+						case AT_EnableRule:
+						case AT_EnableAlwaysRule:
+						case AT_EnableReplicaRule:
+						case AT_DisableRule:
 							break;
 						default:
 							ereport(ERROR,
