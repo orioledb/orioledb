@@ -1314,8 +1314,11 @@ undo_xact_callback(XactEvent event, void *arg)
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	bool		isParallelWorker;
 	int			i;
+	TransactionId   xid1 = InvalidTransactionId;
+	int             nsubxids = 0;
+	TransactionId   *subxids = NULL;
 
-	elog(WARNING, "UNDO XACT CALLBACK");
+	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
 						MyProc->lockGroupLeader != MyProc) ||
 		IsInParallelMode();
@@ -1329,6 +1332,9 @@ undo_xact_callback(XactEvent event, void *arg)
 	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
 		seq_scans_cleanup();
 
+	if (enable_rewind && event == XACT_EVENT_PRE_COMMIT)
+		save_precommit_xid_subxids();
+
 	if (!OXidIsValid(oxid) || isParallelWorker)
 	{
 		if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
@@ -1340,8 +1346,13 @@ undo_xact_callback(XactEvent event, void *arg)
 
 		if (enable_rewind && event == XACT_EVENT_COMMIT)
 		{
-			 elog(WARNING, "ADD_TO_REWIND_BUFFER_HEAP");
-                         add_to_rewind_buffer(oxid);
+			xid1 = get_precommit_xid_subxids(&nsubxids, &subxids);
+			if (TransactionIdIsValid(xid1))
+			{
+				elog(LOG, "ADD_TO_REWIND_BUFFER_HEAP");
+				add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
+				reset_precommit_xid_subxids();
+			}
 		}
 	}
 	else
@@ -1387,8 +1398,11 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				if (enable_rewind)
 				{
-					elog(WARNING, "ADD_TO_REWIND_BUFFER");
-					add_to_rewind_buffer(oxid);
+					elog(LOG, "ADD_TO_REWIND_BUFFER_ORIOLE");
+					xid1 = get_precommit_xid_subxids(&nsubxids, &subxids);
+
+					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
+					reset_precommit_xid_subxids();
 				}
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);

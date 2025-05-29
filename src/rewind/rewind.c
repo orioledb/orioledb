@@ -193,7 +193,7 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 				{
 					UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
-					elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), xid, nsubxids);
+					elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u, nsubxids %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), xid, nsubxids);
 					location = walk_undo_range_with_buf((UndoLogType) i,
 						rewindItem->undoLocation[i],
 						InvalidUndoLocation,
@@ -238,7 +238,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	int		nprepared;
 	int		rewind_time = PG_GETARG_INT32(0);
 
-	elog(WARNING, "Rewind requested, for %d s", rewind_time);
+	elog(LOG, "Rewind requested, for %d s", rewind_time);
 
 	if (!enable_rewind)
 	{
@@ -286,7 +286,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	}
 
 	rewindStartTime = GetCurrentTimestamp();
-	elog(WARNING, "Rewind started, for %d s", rewind_time);
+	elog(LOG, "Rewind started, for %d s", rewind_time);
 
 	/* Terminate all other backends */
 	retry = 0;
@@ -314,7 +314,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	/* All good. Do actual rewind */
 	do_rewind(rewind_time, rewindStartTime);
 
-	elog(WARNING, "Rewind complete, for %d s", rewind_time);
+	elog(LOG, "Rewind complete, for %d s", rewind_time);
 	/* Restart Postgres */
 	(void) kill(PostmasterPid, SIGTERM);
 	PG_RETURN_VOID();
@@ -797,15 +797,52 @@ evict_rewind_page(void)
 }
 
 void
-add_to_rewind_buffer(OXid oxid)
+reset_precommit_xid_subxids(void)
+{
+	rewindMeta->precommit_xid = InvalidTransactionId;
+	rewindMeta->precommit_nsubxids = 0;
+	rewindMeta->precommit_subxids = NULL;
+}
+
+void
+save_precommit_xid_subxids(void)
+{
+	TransactionId	xid1 = InvalidTransactionId;
+        TransactionId	xid2 = InvalidTransactionId;
+
+	xid1 = GetTopTransactionIdIfAny();
+        xid2 = GetCurrentTransactionIdIfAny();
+        elog(LOG, "PRE-COMMIT top xid %u, cur xid %u", xid1, xid2);
+
+	if (TransactionIdIsValid(xid1))
+	{
+		rewindMeta->precommit_xid = xid1;
+                rewindMeta->precommit_nsubxids = xactGetCommittedChildren(&rewindMeta->precommit_subxids);
+        }
+}
+
+TransactionId
+get_precommit_xid_subxids(int *nsubxids, TransactionId **subxids)
+{
+	TransactionId   xid1 = rewindMeta->precommit_xid;
+
+	if (TransactionIdIsValid(xid1))
+	{
+		*nsubxids = rewindMeta->precommit_nsubxids;
+		*subxids = rewindMeta->precommit_subxids;
+	}
+
+	return xid1;
+}
+
+
+void
+add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *subxids)
 {
 	RewindItem *rewindItem;
 	int			i;
 	uint64		curAddPos;
 	int			freeSpace;
-	TransactionId	*subxids;
-	TransactionId	xid = InvalidTransactionId;
-	int		nsubxids = 0;
 	bool 		subxid_only = false;
 	int		subxids_count = 0;
 
@@ -863,10 +900,10 @@ next_subxids_item:
 		/* Fill rewind entry in a circular buffer. */
 
 		/* NB both will give InvalidTransactionId. Use GetRunningTransactionData (?) */
-		Assert(GetCurrentTransactionIdIfAny() == GetTopTransactionIdIfAny());
+//		Assert(GetCurrentTransactionIdIfAny() == GetTopTransactionIdIfAny());
 
-		xid = GetCurrentTransactionIdIfAny();
-		nsubxids = xactGetCommittedChildren(&subxids);
+//		xid = GetCurrentTransactionIdIfAny();
+//		nsubxids = xactGetCommittedChildren(&subxids);
 
 		rewindItem->timestamp = GetCurrentTimestamp();
 		rewindItem->tag = REWIND_ITEM_TAG;

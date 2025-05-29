@@ -28,7 +28,10 @@ PGDLLEXPORT void rewind_worker_main(Datum);
 extern Size rewind_shmem_needs(void);
 extern void rewind_init_shmem(Pointer buf, bool found);
 extern void checkpoint_write_rewind_xids(void);
-extern void add_to_rewind_buffer(OXid oxid);
+extern void add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *subxids);
+extern void save_precommit_xid_subxids(void);
+extern TransactionId get_precommit_xid_subxids(int *nsubxids, TransactionId **subxids);
+extern void reset_precommit_xid_subxids(void);
 
 #define EMPTY_ITEM_TAG (0)
 #define REWIND_ITEM_TAG (1)
@@ -83,6 +86,11 @@ typedef struct
 	bool 		rewindWorkerStopRequested;
 	bool		rewindWorkerStopped;
 	bool 		addToRewindQueueDisabled;
+
+	/* Temporary storage for heap info between pre-commit and commit */
+	TransactionId	precommit_xid;
+	int		precommit_nsubxids;
+	TransactionId  *precommit_subxids;
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX
