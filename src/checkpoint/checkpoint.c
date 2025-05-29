@@ -1321,6 +1321,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);
 
+	if (STOPEVENTS_ENABLED())
+		STOPEVENT(STOPEVENT_CHECKPOINT_BEFORE_POST_PROCESS, NULL);
+
 	/*
 	 * Now we can free extents for compressed indices
 	 */
@@ -1375,6 +1378,11 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 					id = o_fetch_index_descr(item->oids, item->type,
 											 true, NULL);
+					if (id == NULL)
+					{
+						/* table might be deleted */
+						continue;
+					}
 					desc = &id->desc;
 				}
 
