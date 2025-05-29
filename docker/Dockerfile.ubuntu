@@ -14,7 +14,7 @@ ARG PG_MAJOR=17
 ENV PG_MAJOR=${PG_MAJOR}
 
 # set compiler: [ clang gcc ]
-ARG BUILD_CC_COMPILER=clang
+ARG BUILD_CC_COMPILER=clang-14
 ENV BUILD_CC_COMPILER=${BUILD_CC_COMPILER}
 
 # Enable debug mode and preserve the build environments for debugging.
@@ -25,7 +25,7 @@ ENV DEBUG_MODE=${DEBUG_MODE}
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
 # Reference: https://github.com/docker-library/postgres/pull/1077
-ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
+ARG DOCKER_PG_LLVM_DEPS="llvm-dev-14 clang-14"
 ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
 
 # explicitly set user/group IDs
