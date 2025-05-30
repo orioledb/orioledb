@@ -13,7 +13,12 @@
 #ifndef __BTREE_PRINT_H__
 #define __BTREE_PRINT_H__
 
-#include "btree.h"
+#include "fmgr.h"
+
+#include "btree/btree.h"
+#include "tuple/format.h"
+
+#include "access/tupdesc.h"
 
 typedef enum
 {
@@ -46,5 +51,9 @@ extern void o_print_btree_pages(BTreeDescr *desc, StringInfo outbuf,
 								PrintFunc tuplePrintFunc,
 								Pointer printArg,
 								BTreePrintOptions *options, int depth);
+
+extern void o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
+						  FmgrInfo *outputFns, StringInfo buf, OTuple tup,
+						  Datum *values, bool *nulls, bool printVersion);
 
 #endif							/* __BTREE_PRINT_H__ */

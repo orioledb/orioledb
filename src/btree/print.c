@@ -19,6 +19,7 @@
 #include "btree/page_chunks.h"
 #include "btree/print.h"
 #include "btree/undo.h"
+#include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/format.h"
@@ -877,4 +878,49 @@ ladd_unique_undo(List *list, UndoLogType undoType, UndoLocation location)
 	Assert(insertAt >= 0);
 	list = list_insert_nth(list, insertAt, copyLoc);
 	return list;
+}
+
+void
+o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
+			  FmgrInfo *outputFns, StringInfo buf, OTuple tup,
+			  Datum *values, bool *nulls, bool printVersion)
+{
+	Form_pg_attribute atti;
+	int			attnum,
+				i;
+
+	appendStringInfo(buf, "(");
+
+	if (printVersion)
+		appendStringInfo(buf, "(%u) ", o_tuple_get_version(tup));
+
+	for (i = 0; i < tupDesc->natts; i++)
+	{
+		if (i > 0)
+			appendStringInfo(buf, ", ");
+		attnum = i + 1;
+		values[i] = o_fastgetattr(tup, attnum, tupDesc, spec, &nulls[i]);
+		if (nulls[i])
+		{
+			appendStringInfo(buf, "null");
+		}
+		else
+		{
+			atti = TupleDescAttr(tupDesc, i);
+			if (!atti->attbyval && atti->attlen && !nulls[i])
+			{
+				Pointer		p = DatumGetPointer(values[i]);
+
+				if (IS_TOAST_POINTER(p))
+				{
+					appendStringInfo(buf, "TOASTed");
+					continue;
+				}
+			}
+			appendStringInfo(buf, "'%s'",
+							 OutputFunctionCall(&outputFns[i], values[i]));
+		}
+	}
+
+	appendStringInfo(buf, ")");
 }
