@@ -37,6 +37,47 @@ static void reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
  * Load chunk to the partial page.
  */
 bool
+partial_load_hikeys_chunk(PartialPageState *partial, Page img)
+{
+	uint32		imgState,
+				srcState;
+	Page		src = partial->src;
+	LocationIndex chunkBegin,
+				chunkEnd;
+	BTreePageHeader *header = (BTreePageHeader *) img;
+
+	if (!partial->isPartial || partial->hikeysChunkIsLoaded)
+		return true;
+
+	chunkBegin = offsetof(BTreePageHeader, chunkDesc);
+	chunkEnd = header->hikeysEnd;
+
+	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
+	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
+
+	memcpy((Pointer) img + chunkBegin,
+		   (Pointer) src + chunkBegin,
+		   chunkEnd - chunkBegin);
+
+	pg_read_barrier();
+
+	imgState = pg_atomic_read_u32(&(O_PAGE_HEADER(img)->state));
+	srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
+		return false;
+
+	if (O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
+		return false;
+
+	partial->hikeysChunkIsLoaded = true;
+	return true;
+}
+
+/*
+ * Load chunk to the partial page.
+ */
+bool
 partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset)
 {
 	uint32		imgState,

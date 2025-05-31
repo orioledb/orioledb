@@ -85,7 +85,8 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
  */
 static inline ReadPageResult
 try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
-			  PartialPageState *partial, CommitSeqNo *readCsn)
+			  PartialPageState *partial, bool loadHikeysChunk,
+			  CommitSeqNo *readCsn)
 {
 	UsageCountMap *ucm;
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -102,16 +103,17 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 	if (partial)
 	{
 		BTreePageHeader *header = (BTreePageHeader *) p;
-		LocationIndex hikeysEnd = header->hikeysEnd;
+		LocationIndex hikeysEnd = loadHikeysChunk ? header->hikeysEnd : offsetof(BTreePageHeader, chunkDesc);
 
 		pg_read_barrier();
 
-		if (hikeysEnd >= sizeof(BTreePageHeader) && hikeysEnd < ORIOLEDB_BLCKSZ)
+		if (!loadHikeysChunk || (hikeysEnd >= sizeof(BTreePageHeader) && hikeysEnd < ORIOLEDB_BLCKSZ))
 			memcpy(dest, p, hikeysEnd);
 		else
 			hiKeysEndOK = false;
 
 		partial->isPartial = true;
+		partial->hikeysChunkIsLoaded = loadHikeysChunk;
 		partial->src = p;
 		memset(&partial->chunkIsLoaded, 0, sizeof(bool) * BTREE_PAGE_MAX_CHUNKS);
 	}
@@ -146,14 +148,15 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
  */
 static inline bool
 copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
-		  PartialPageState *partial, CommitSeqNo *readCsn)
+		  PartialPageState *partial, bool loadHikeysChunk,
+		  CommitSeqNo *readCsn)
 {
 	while (true)
 	{
 		ReadPageResult result;
 
 		result = try_copy_page(blkno, pageChangeCount, dest,
-							   partial, readCsn);
+							   partial, loadHikeysChunk, readCsn);
 
 		if (result == ReadPageResultOK)
 			return true;
@@ -173,7 +176,8 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 				  uint32 pageChangeCount, Page img,
 				  CommitSeqNo csn, void *key, BTreeKeyType keyType,
 				  OFixedKey *lokey, PartialPageState *partial,
-				  UndoLocation *undoLocation, CommitSeqNo *readCsn)
+				  bool loadHikeysChunk, UndoLocation *undoLocation,
+				  CommitSeqNo *readCsn)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
@@ -227,7 +231,8 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 		return true;
 	}
 
-	if (!copy_page(blkno, pageChangeCount, img, partial, readCsn))
+	if (!copy_page(blkno, pageChangeCount, img, partial,
+				   loadHikeysChunk, readCsn))
 		return false;
 	header = (BTreePageHeader *) img;
 
@@ -261,7 +266,8 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 ReadPageResult
 o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount, Page img,
 					  CommitSeqNo csn, Pointer key, BTreeKeyType keyType,
-					  PartialPageState *partial, CommitSeqNo *readCsn)
+					  PartialPageState *partial, bool loadHikeysChunk,
+					  CommitSeqNo *readCsn)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
@@ -293,7 +299,8 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 		return ReadPageResultOK;
 	}
 
-	result = try_copy_page(blkno, pageChangeCount, img, partial, readCsn);
+	result = try_copy_page(blkno, pageChangeCount, img, partial,
+						   loadHikeysChunk, readCsn);
 	if (result != ReadPageResultOK)
 		return result;
 

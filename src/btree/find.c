@@ -25,6 +25,7 @@
 #include "utils/stopevent.h"
 
 #include "access/transam.h"
+#include <stdbool.h>
 
 typedef struct
 {
@@ -71,12 +72,14 @@ static void step_upward_level(OBTreeFindPageInternalContext *intCxt);
 static bool btree_find_read_page(OBTreeFindPageContext *context,
 								 OInMemoryBlkno blkno, uint32 pageChangeCount,
 								 bool parent, void *key, BTreeKeyType keyType,
-								 PartialPageState *partial);
+								 PartialPageState *partial,
+								 bool loadHikeysChunk);
 static bool btree_find_try_read_page(OBTreeFindPageContext *context,
 									 OInMemoryBlkno blkno,
 									 uint32 pageChangeCount, bool parent,
 									 void *key, BTreeKeyType keyType,
-									 PartialPageState *partial);
+									 PartialPageState *partial,
+									 bool loadHikeysChunk);
 
 static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 													Pointer key,
@@ -358,6 +361,27 @@ free_page_find_context(OBTreeFindPageContext *context)
 		unpin_local_cache(context->parentImgEntry);
 }
 
+static bool
+can_do_fastpath_find_downlink(OBTreeFindPageContext *context)
+{
+	BTreeDescr *desc = context->desc;
+	OIndexDescr *id;
+
+	if (!BTREE_PAGE_FIND_IS(context, FETCH) ||
+		IS_SYS_TREE_OIDS(desc->oids))
+		return false;
+
+	id = (OIndexDescr *) desc->arg;
+
+	if (id->nonLeafTupdesc->natts != 1 ||
+		id->nonLeafTupdesc->attrs[0].atttypid != INT4OID ||
+		id->nonLeafSpec.natts != 1 ||
+		id->nonLeafSpec.len != 4)
+		return false;
+
+	return true;
+}
+
 typedef enum
 {
 	OBTreeFindDownlinkOK,
@@ -376,6 +400,12 @@ find_downlink(OBTreeFindPageInternalContext *intCxt,
 	void	   *key = intCxt->key;
 	BTreeKeyType keyType = intCxt->keyType;
 	bool		itemFound = true;
+
+	if (intCxt->partial && !intCxt->partial->hikeysChunkIsLoaded)
+	{
+		if (!partial_load_hikeys_chunk(intCxt->partial, intCxt->pagePtr))
+			return OBTreeFindDownlinkRetry;
+	}
 
 	/*
 	 * BTreeKeyNone requests leftmost page.  Otherwise, consider following the
@@ -491,6 +521,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				keepLokeyFlag = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY),
 				downlinkLocationFlag = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	bool		shmemIsReloaded = false;
+	bool		canFastpathDownlink = can_do_fastpath_find_downlink(context);
 	Jsonb	   *params = NULL;
 
 	memset(&intCxt, 0, sizeof(intCxt));
@@ -531,9 +562,12 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		bool		itemFound = true;
 		bool		wrongChangeCount = false;
 		Pointer		p;
+		bool		fastPathDownlink;
 
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		level = PAGE_GET_LEVEL(p);
+
+		fastPathDownlink = canFastpathDownlink && !needLock && (level > targetLevel);
 
 		intCxt.partial = NULL;
 		if (!imageFlag || level > 0)
@@ -581,6 +615,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				{
 					useParentImg = false;
 					intCxt.partial = NULL;
+					Assert(!fastPathDownlink);
 				}
 				else
 				{
@@ -606,7 +641,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 												  intCxt.pageChangeCount,
 												  useParentImg,
 												  key, keyType,
-												  intCxt.partial);
+												  intCxt.partial,
+												  !fastPathDownlink);
 				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (result == ReadPageResultWrongPageChangeCount)
 				{
@@ -624,7 +660,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				result = btree_find_read_page(context, intCxt.blkno,
 											  intCxt.pageChangeCount,
 											  useParentImg, key, keyType,
-											  intCxt.partial);
+											  intCxt.partial,
+											  !fastPathDownlink);
 				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (!result)
 				{
@@ -698,7 +735,6 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			continue;
 		}
 
-
 		if (context->index > 0 && (wrongChangeCount ||
 								   intCxt.pageChangeCount != O_PAGE_GET_CHANGE_COUNT(intCxt.pagePtr)))
 		{
@@ -735,8 +771,6 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 		}
 
-		level = PAGE_GET_LEVEL(intCxt.pagePtr);
-
 		if (level > targetLevel || downlinkLocationFlag)
 		{
 			OBTreeFindDownlinkResult result;
@@ -751,6 +785,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		}
 		else
 		{
+			Assert(!fastPathDownlink);
 			/*
 			 * BTreeKeyNone requests leftmost page.  Otherwise, consider
 			 * following the rightlink.
@@ -1028,7 +1063,8 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 									  useParentImg,
 									  intCxt->key,
 									  intCxt->keyType,
-									  intCxt->partial))
+									  intCxt->partial,
+									  true))
 				return true;
 			Assert(RIGHTLINK_GET_CHANGECOUNT(rightlink) ==
 				   O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr));
@@ -1136,7 +1172,8 @@ retry:
 									   false,
 									   key,
 									   keyType,
-									   intCxt.partial);
+									   intCxt.partial,
+									   true);
 		img = context->img;
 
 		intCxt.haveLock = false;
@@ -1294,7 +1331,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			item->pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(tuphdr->downlink);
 
 			success = btree_find_read_page(context, item->blkno, item->pageChangeCount,
-										   false, &hikey->tuple, BTreeKeyNonLeafKey, NULL);
+										   false, &hikey->tuple, BTreeKeyNonLeafKey, NULL,
+										   true);
 			if (success &&
 				PAGE_GET_LEVEL(context->img) == level)
 			{
@@ -1406,7 +1444,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 												   false,
 												   NULL,
 												   BTreeKeyRightmost,
-												   NULL);
+												   NULL,
+												   true);
 
 					if (success &&
 						context->imgUndoLoc != InvalidUndoLocation &&
@@ -1632,7 +1671,8 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 static bool
 btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 					 uint32 pageChangeCount, bool parent, void *key,
-					 BTreeKeyType keyType, PartialPageState *partial)
+					 BTreeKeyType keyType, PartialPageState *partial,
+					 bool loadHikeysChunk)
 {
 	bool		keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
 	OFixedKey  *lokey = keep_lokey ? &context->undoLokey : NULL;
@@ -1656,7 +1696,8 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 	success = o_btree_read_page(context->desc, blkno, pageChangeCount, pagePtr,
 								context->csn, key, keyType, lokey,
-								partial, &context->imgUndoLoc, readCsn);
+								partial, loadHikeysChunk, &context->imgUndoLoc,
+								readCsn);
 
 	if (!success)
 		return false;
@@ -1673,7 +1714,8 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 static bool
 btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 						 uint32 pageChangeCount, bool parent, void *key,
-						 BTreeKeyType keyType, PartialPageState *partial)
+						 BTreeKeyType keyType, PartialPageState *partial,
+						 bool loadHikeysChunk)
 {
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 	ReadPageResult result;
@@ -1691,7 +1733,8 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 	result = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
 								   pagePtr, context->csn,
-								   key, keyType, partial, readCsn);
+								   key, keyType, partial, loadHikeysChunk,
+								   readCsn);
 
 	return result;
 }
@@ -1716,7 +1759,8 @@ btree_find_context_from_modify_to_read(OBTreeFindPageContext *context,
 								   false,
 								   key,
 								   keyType,
-								   NULL);
+								   NULL,
+								   true);
 
 	if (!success)
 	{

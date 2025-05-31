@@ -867,6 +867,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 											   NULL,
 											   BTreeKeyNone,
 											   NULL,
+											   true,
 											   NULL);
 
 				if (result == ReadPageResultOK)
