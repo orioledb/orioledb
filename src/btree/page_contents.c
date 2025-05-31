@@ -275,7 +275,7 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 	/* Check pointer to page-level undo item */
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
-		UndoLocation	undoLoc;
+		UndoLocation undoLoc;
 
 		pg_read_barrier();
 		undoLoc = header->undoLocation;
