@@ -57,7 +57,7 @@ struct OPageCacheEntry
 
 typedef struct
 {
-	OPageCacheEntry	(*entries)[O_PAGE_CACHE_BUCKET_SIZE];
+	OPageCacheEntry (*entries)[O_PAGE_CACHE_BUCKET_SIZE];
 	dlist_head	recentPagesHead;
 	int			numCachedPages;
 	int			maxNumCachedPages;
@@ -86,7 +86,8 @@ static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 void
 init_local_page_cache(void)
 {
-	int		i, j;
+	int			i,
+				j;
 
 	cache.mcxt = AllocSetContextCreate(TopMemoryContext,
 									   "OrioleDB local page cache memory context",
@@ -107,7 +108,8 @@ init_local_page_cache(void)
 void
 local_page_cache_check_no_pins(void)
 {
-	int		i, j;
+	int			i,
+				j;
 
 	for (i = 0; i < cache.maxNumCachedPages; i++)
 	{
@@ -119,18 +121,21 @@ local_page_cache_check_no_pins(void)
 static OPageCacheEntry *
 search_local_cache(OInMemoryBlkno blkno)
 {
-	Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
+	Pointer		page = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
-	int		i, j;
+	int			i,
+				j;
 
 	i = blkno % cache.maxNumCachedPages;
 
 	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
 	{
 		OPageCacheEntry *entry = &cache.entries[i][j];
+
 		if (entry->blkno == blkno)
 		{
 			uint32		state;
+
 			state = pg_atomic_read_u32(&header->state);
 
 			if (entry->pageChangeCount == header->pageChangeCount &&
@@ -140,6 +145,7 @@ search_local_cache(OInMemoryBlkno blkno)
 				if (entry->data)
 				{
 					OrioleDBPageHeader *dataHeader = (OrioleDBPageHeader *) entry->data;
+
 					Assert((pg_atomic_read_u32(&dataHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK) == entry->changeCount);
 					Assert(dataHeader->pageChangeCount == entry->pageChangeCount);
 				}
@@ -168,7 +174,9 @@ search_local_cache(OInMemoryBlkno blkno)
 static OPageCacheEntry *
 local_cache_find_victim(OInMemoryBlkno blkno)
 {
-	int		i, j, victim = -1;
+	int			i,
+				j,
+				victim = -1;
 
 	i = blkno % cache.maxNumCachedPages;
 
@@ -201,7 +209,7 @@ local_cache_find_victim(OInMemoryBlkno blkno)
 static OPageCacheEntry *
 search_pin_local_cache(OInMemoryBlkno blkno)
 {
-	Pointer page = O_GET_IN_MEMORY_PAGE(blkno);
+	Pointer		page = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
 	OPageCacheEntry *entry;
 	static int	ntries = 0;
@@ -218,13 +226,13 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 		{
 			dlist_move_head(&cache.recentPagesHead, &entry->node);
 			entry->pinCount++;
-			//elog(LOG, "fetch from cache level %u", PAGE_GET_LEVEL(page));
+			/* elog(LOG, "fetch from cache level %u", PAGE_GET_LEVEL(page)); */
 			return entry;
 		}
 
 		if (!entry->data && entry->numAccesses >= CACHE_NUM_ACCESSES)
 		{
-			uint32	state;
+			uint32		state;
 
 			entry->data = (Pointer) MemoryContextAllocZero(cache.mcxt,
 														   ORIOLEDB_BLCKSZ);
@@ -239,6 +247,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 				!O_PAGE_STATE_READ_IS_BLOCKED(state))
 			{
 				OrioleDBPageHeader *dataHeader = (OrioleDBPageHeader *) entry->data;
+
 				Assert((pg_atomic_read_u32(&dataHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK) == entry->changeCount);
 				Assert(dataHeader->pageChangeCount == entry->pageChangeCount);
 
@@ -460,7 +469,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		}
 		else
 		{
-			bool	useParentImg = false;
+			bool		useParentImg = false;
+
 			if (imageFlag)
 			{
 				/*
@@ -919,7 +929,8 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 		}
 		else
 		{
-			bool	useParentImg = (intCxt->pagePtr == context->parentImg);
+			bool		useParentImg = (intCxt->pagePtr == context->parentImg);
+
 			if (!btree_find_read_page(context, intCxt->blkno,
 									  RIGHTLINK_GET_CHANGECOUNT(rightlink),
 									  useParentImg,
@@ -1455,7 +1466,10 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	entry = search_pin_local_cache(blkno);
 	if (!entry)
 	{
-		//elog(LOG, "NO %u %u", blkno, PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
+		/*
+		 * elog(LOG, "NO %u %u", blkno,
+		 * PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
+		 */
 		return false;
 	}
 
@@ -1512,7 +1526,10 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	if (lokey && !O_TUPLE_IS_NULL(lokey->tuple))
 		BTREE_PAGE_FIND_SET(context, LOKEY_UNDO);
 
-	//elog(LOG, "YES %u %u", blkno, PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
+	/*
+	 * elog(LOG, "YES %u %u", blkno,
+	 * PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
+	 */
 	return true;
 }
 
@@ -1581,8 +1598,8 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	pagePtr = set_page_ptr(context, parent);
 
 	result = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
-									pagePtr, context->csn,
-									key, keyType, partial, readCsn);
+								   pagePtr, context->csn,
+								   key, keyType, partial, readCsn);
 
 	return result;
 }
