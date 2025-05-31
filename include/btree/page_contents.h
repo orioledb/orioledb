@@ -345,13 +345,15 @@ extern bool o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 							  uint32 pageChangeCount, Page img, CommitSeqNo csn,
 							  void *key, BTreeKeyType keyType,
 							  OFixedKey *lokey, PartialPageState *partial,
-							  UndoLocation *undoLocation, CommitSeqNo *readCsn);
+							  bool loadHikeysChunk, UndoLocation *undoLocation,
+							  CommitSeqNo *readCsn);
 extern ReadPageResult o_btree_try_read_page(BTreeDescr *desc,
 											OInMemoryBlkno blkno,
 											uint32 pageChangeCount, Page img,
 											CommitSeqNo csn,
 											Pointer key, BTreeKeyType keyType,
 											PartialPageState *partial,
+											bool loadHikeysChunk,
 											CommitSeqNo *readCsn);
 extern UndoLocation read_page_from_undo(BTreeDescr *desc, Page img,
 										UndoLocation undo_loc,

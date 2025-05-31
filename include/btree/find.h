@@ -27,6 +27,7 @@ struct PartialPageState
 {
 	Page		src;
 	bool		isPartial;
+	bool		hikeysChunkIsLoaded;
 	bool		chunkIsLoaded[BTREE_PAGE_MAX_CHUNKS];
 };
 
