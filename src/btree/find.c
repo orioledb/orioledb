@@ -18,8 +18,10 @@
 #include "btree/insert.h"
 #include "btree/io.h"
 #include "btree/page_chunks.h"
+#include "catalog/pg_opclass_d.h"
 #include "lib/ilist.h"
 #include "tableam/descr.h"
+#include "tableam/key_range.h"
 #include "utils/dsa.h"
 #include "utils/palloc.h"
 #include "utils/stopevent.h"
@@ -376,7 +378,8 @@ can_do_fastpath_find_downlink(OBTreeFindPageContext *context)
 	if (id->nonLeafTupdesc->natts != 1 ||
 		id->nonLeafTupdesc->attrs[0].atttypid != INT4OID ||
 		id->nonLeafSpec.natts != 1 ||
-		id->nonLeafSpec.len != 4)
+		id->nonLeafSpec.len != 4 ||
+		id->fields[0].opclass != INT4_BTREE_OPS_OID)
 		return false;
 
 	return true;
@@ -386,12 +389,304 @@ typedef enum
 {
 	OBTreeFindDownlinkOK,
 	OBTreeFindDownlinkRetry,
-	OBTreeFindDownlinkFailure
+	OBTreeFindDownlinkFailure,
+	OBTreeFindDownlinkSlowpath
 } OBTreeFindDownlinkResult;
+
+static Datum
+find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType *keyType,
+					  bool *inclusive)
+{
+	TupleDesc	tupdesc;
+	OTupleFixedFormatSpec *spec;
+	OIndexDescr *id;
+	int		attnum;
+	Datum	value;
+	bool	isnull;
+	OTuple *tuple;
+
+	Assert(!IS_SYS_TREE_OIDS(desc->oids));
+
+	id = (OIndexDescr *) desc->arg;
+	*inclusive = false;
+
+	if (*keyType == BTreeKeyNone ||
+		*keyType == BTreeKeyRightmost)
+		return (Datum) 0;
+
+	if (*keyType == BTreeKeyBound ||
+		*keyType == BTreeKeyUniqueLowerBound ||
+		*keyType == BTreeKeyUniqueUpperBound)
+	{
+		OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
+		uint8		flags = bound->keys[0].flags;
+
+		if (flags & O_VALUE_BOUND_UNBOUNDED)
+		{
+			*keyType = (flags & O_VALUE_BOUND_LOWER) ? BTreeKeyUniqueLowerBound : BTreeKeyUniqueUpperBound;
+			return (Datum) 0;
+		}
+
+		/*if (!(flags & O_VALUE_BOUND_INCLUSIVE))
+			*inclusive = false;*/
+		return bound->keys[0].value;
+	}
+
+	Assert(*keyType == BTreeKeyLeafTuple ||
+		   *keyType == BTreeKeyNonLeafKey ||
+		   *keyType == BTreeKeyPageHiKey);
+
+	if (*keyType == BTreeKeyPageHiKey)
+	{
+		*inclusive = true;
+		*keyType = BTreeKeyNonLeafKey;
+	}
+
+	if (*keyType == BTreeKeyLeafTuple)
+	{
+		tupdesc = id->leafTupdesc;
+		spec = &id->leafSpec;
+	}
+	else
+	{
+		tupdesc = id->nonLeafTupdesc;
+		spec = &id->nonLeafSpec;
+	}
+
+	tuple = (OTuple *) key;
+	attnum = OIndexKeyAttnumToTupleAttnum(*keyType, id, 1);
+	value = o_fastgetattr(*tuple, attnum, tupdesc, spec, &isnull);
+
+	if (isnull)
+		return id->fields[0].nullfirst ? -1 : 1;
+
+	return value;
+}
+
+static int
+find_int_index(Pointer p, int stride, int count, int32 key)
+{
+	int		i;
+
+	for (i = 0; i < count; i++)
+	{
+		int32	value = *((int32 *) p);
+
+		if (value >= key)
+			return i;
+
+		p += stride;
+	}
+	return count;
+}
+
+static int
+find_int_index_nextkey(Pointer p, int stride, int count, int32 key)
+{
+	int		i;
+
+	for (i = 0; i < count; i++)
+	{
+		int32	value = *((int32 *) p);
+
+		if (value > key)
+			return i;
+
+		p += stride;
+	}
+	return count;
+}
+
+
+static OBTreeFindDownlinkResult
+fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
+					   BTreePageItemLocator *loc,
+					   BTreeNonLeafTuphdr **tuphdrPtr)
+{
+	BTreePageHeader *imgHdr = (BTreePageHeader *) intCxt->pagePtr;
+	BTreePageHeader *hdr = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(intCxt->blkno);
+	int32		value;
+	void		*key = intCxt->key;
+	BTreeKeyType keyType = intCxt->keyType;
+	bool		inclusive;
+	int			count;
+	int			offset;
+	int			chunkIndex;
+	int			itemIndex;
+	BTreePageChunk *chunk;
+	int			chunkSize,
+				chunkItemsCount;
+	Pointer		base;
+	static BTreeNonLeafTuphdr tuphdr;
+
+	value = DatumGetInt32(find_downlink_get_key(intCxt->context->desc,
+												key, &keyType, &inclusive));
+
+	count = O_PAGE_IS(intCxt->pagePtr, RIGHTMOST) ? imgHdr->chunksCount - 1 : imgHdr->chunksCount;
+
+	offset = SHORT_GET_LOCATION(hdr->chunkDesc[0].hikeyShortLocation);
+
+	pg_read_barrier();
+
+	if (imgHdr->hikeysEnd - offset != count * (MAXALIGN(sizeof(BTreeNonLeafTuphdr))))
+		return OBTreeFindDownlinkSlowpath;
+
+	base = (Pointer) hdr + offset;
+	if (inclusive)
+		chunkIndex = find_int_index(base,
+								MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
+								count,
+								value);
+	else
+		chunkIndex = find_int_index_nextkey(base,
+									   MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
+									   count,
+									   value);
+
+	pg_read_barrier();
+
+	/* Possible we need to visit the rightlink */
+	if (chunkIndex >= count)
+		return OBTreeFindDownlinkSlowpath;
+
+	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
+		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
+		return OBTreeFindDownlinkRetry;
+
+	chunk = (BTreePageChunk *) ((Pointer) hdr + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation));
+	if (chunkIndex < imgHdr->chunksCount - 1)
+	{
+		chunkSize = SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex + 1].shortLocation) - SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation);
+		chunkItemsCount = hdr->chunkDesc[chunkIndex + 1].offset - hdr->chunkDesc[chunkIndex].offset;
+	}
+	else
+	{
+		chunkSize = imgHdr->dataSize - SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation);
+		chunkItemsCount = imgHdr->itemsCount - hdr->chunkDesc[chunkIndex].offset;
+	}
+
+	pg_read_barrier();
+
+	if (chunkIndex == 0)
+	{
+		count = chunkItemsCount - 1;
+		base = (Pointer) chunk + MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) + MAXALIGN(sizeof(BTreeNonLeafTuphdr));
+	}
+	else
+	{
+		count = chunkItemsCount;
+		base = (Pointer) chunk + MAXALIGN(sizeof(LocationIndex) * chunkItemsCount);
+	}
+
+	if (chunkSize != MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) +
+		MAXALIGN(sizeof(BTreeNonLeafTuphdr)) * chunkItemsCount +
+		MAXALIGN(sizeof(int32)) * count)
+		return OBTreeFindDownlinkSlowpath;
+
+	if (inclusive)
+		itemIndex = find_int_index(base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
+								MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32)),
+								count,
+								value);
+	else
+		itemIndex = find_int_index_nextkey(base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
+									   MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32)),
+									   count,
+									   value);
+
+	pg_read_barrier();
+
+	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
+		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
+		return OBTreeFindDownlinkRetry;
+
+	if (chunkIndex == 0)
+	{
+		if (itemIndex == 0)
+			tuphdr = *((BTreeNonLeafTuphdr *) (base - MAXALIGN(sizeof(BTreeNonLeafTuphdr))));
+		else
+			tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32))) * (itemIndex - 1)));
+		*tuphdrPtr = &tuphdr;
+		loc->chunk = chunk;
+		loc->chunkItemsCount = chunkItemsCount;
+		loc->chunkSize = chunkSize;
+		loc->itemOffset = itemIndex;
+		loc->chunkOffset = chunkIndex;
+	}
+	else
+	{
+		if (itemIndex > 0)
+		{
+			tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32))) * (itemIndex - 1)));
+			*tuphdrPtr = &tuphdr;
+			loc->chunk = chunk;
+			loc->chunkItemsCount = chunkItemsCount;
+			loc->chunkSize = chunkSize;
+			loc->itemOffset = itemIndex;
+			loc->chunkOffset = chunkIndex;
+		}
+		else
+		{
+			chunkIndex--;
+			chunk = (BTreePageChunk *) ((Pointer) hdr + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation));
+			if (chunkIndex < imgHdr->chunksCount - 1)
+			{
+				chunkSize = SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex + 1].shortLocation) - SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation);
+				chunkItemsCount = hdr->chunkDesc[chunkIndex + 1].offset - hdr->chunkDesc[chunkIndex].offset;
+			}
+			else
+			{
+				chunkSize = imgHdr->dataSize - SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation);
+				chunkItemsCount = imgHdr->itemsCount - hdr->chunkDesc[chunkIndex].offset;
+			}
+
+			pg_read_barrier();
+
+			if (chunkIndex == 0)
+			{
+				count = chunkItemsCount - 1;
+				base = (Pointer) chunk + MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) + MAXALIGN(sizeof(BTreeNonLeafTuphdr));
+			}
+			else
+			{
+				count = chunkItemsCount;
+				base = (Pointer) chunk + MAXALIGN(sizeof(LocationIndex) * chunkItemsCount);
+			}
+
+			if (chunkSize != MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) +
+				MAXALIGN(sizeof(BTreeNonLeafTuphdr)) * chunkItemsCount +
+				MAXALIGN(sizeof(int32)) * count)
+				return OBTreeFindDownlinkSlowpath;
+
+			itemIndex = chunkItemsCount - 1;
+
+			if (chunkIndex == 0 && itemIndex == 0)
+				tuphdr = *((BTreeNonLeafTuphdr *) (base - MAXALIGN(sizeof(BTreeNonLeafTuphdr))));
+			else
+				tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32))) * (count - 1)));
+			*tuphdrPtr = &tuphdr;
+
+			loc->chunk = chunk;
+			loc->chunkItemsCount = chunkItemsCount;
+			loc->chunkSize = chunkSize;
+			loc->itemOffset = itemIndex;
+			loc->chunkOffset = chunkIndex;
+		}
+	}
+
+	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
+		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
+		return OBTreeFindDownlinkRetry;
+
+	/* elog(LOG, "fast path %u %u, ", loc->chunkOffset, loc->itemOffset); */
+
+	return OBTreeFindDownlinkOK;
+}
 
 static OBTreeFindDownlinkResult
 find_downlink(OBTreeFindPageInternalContext *intCxt,
 			  int level,
+			  bool fastPathDownlink,
 			  BTreePageItemLocator *loc,
 			  BTreeNonLeafTuphdr **tuphdr)
 {
@@ -400,6 +695,16 @@ find_downlink(OBTreeFindPageInternalContext *intCxt,
 	void	   *key = intCxt->key;
 	BTreeKeyType keyType = intCxt->keyType;
 	bool		itemFound = true;
+
+	if (fastPathDownlink)
+	{
+		OBTreeFindDownlinkResult result;
+
+		result = fastpath_find_downlink(intCxt, loc, tuphdr);
+
+		if (result != OBTreeFindDownlinkSlowpath)
+			return result;
+	}
 
 	if (intCxt->partial && !intCxt->partial->hikeysChunkIsLoaded)
 	{
@@ -775,7 +1080,10 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			OBTreeFindDownlinkResult result;
 
-			result = find_downlink(&intCxt, level, &loc, &noneLeafHdr);
+			result = find_downlink(&intCxt, level, fastPathDownlink,
+								   &loc, &noneLeafHdr);
+
+			Assert(result != OBTreeFindDownlinkSlowpath);
 
 			if (result == OBTreeFindDownlinkFailure)
 				return false;
