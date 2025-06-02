@@ -11,60 +11,16 @@ on:
         default: ""
 
 jobs:
+  cache_layers:
+    name: Cache Docker image parts
+    uses: ./.github/workflows/docker_reusable.yml
+    with:
+      caching_layers: true
+
   push_to_registry:
-    strategy:
-      fail-fast: true
-      matrix:
-        postgres: [16, 17]
-        compiler: [clang]
-        distr: [alpine, ubuntu]
-        include:
-          - distr-version: 3.21
-            distr: alpine
-          - distr-version: noble
-            distr: ubuntu
-
+    needs:
+      - cache_layers
     name: Push Docker image to Docker Hub
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: orioledb/orioledb
-          tags: ${{ github.event.inputs.tags }}
-          flavor: |
-            latest=auto
-            prefix=
-            suffix=${{ contains(github.ref, 's3') && '-s3' || '' }}-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ${{ matrix.distr == 'ubuntu' && './docker/Dockerfile.ubuntu' || './docker/Dockerfile' }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
-            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
-            PG_MAJOR=${{ matrix.postgres }}
-            BUILD_CC_COMPILER=${{ matrix.compiler }}
-            DOCKER_PG_LLVM_DEPS=llvm-dev clang
+    uses: ./.github/workflows/docker_reusable.yml
+    with:
+      pushing: true
