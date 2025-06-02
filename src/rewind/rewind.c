@@ -107,7 +107,9 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 	int		nsubxids = 0;
 	int 		subxids_count = 0;
 	bool		got_all_subxids = false;
+#ifdef USE_ASSERT_CHECKING
 	bool 		started_subxids = false;
+#endif
 	TransactionId   *subxids;
 	TransactionId	xid = InvalidTransactionId;
 	OXid		oxid = InvalidOXid;
@@ -163,7 +165,9 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 			{
 				/* First subxids item (As we read backwards so it's last written one) */
 				Assert(!started_subxids);
+#ifdef USE_ASSERT_CHECKING
 				started_subxids = true;
+#endif
 				nsubxids = subxidsItem->nsubxids;
 				oxid = subxidsItem->oxid;
 				subxids_count = nsubxids;
@@ -243,7 +247,10 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 					TransactionIdAbortTree(rewindItem->xid, nsubxids, subxids);
 
 					got_all_subxids = false;
+
+#ifdef USE_ASSERT_CHECKING
 					started_subxids = false;
+#endif
 					pfree(subxids);
 					nsubxids = 0;
 				}
