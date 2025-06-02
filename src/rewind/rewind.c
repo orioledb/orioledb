@@ -208,7 +208,12 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 
 			if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000))
 			{
+				long secs;
+				int  usecs;
+
+				TimestampDifference(rewindItem->timestamp, rewindStartTime, &secs, &usecs);
 				/* Rewind complete */
+				ereport(LOG, errmsg("orioledb rewind completed. Last remaining transaction is %ld.%d seconds back", secs, usecs/1000));
 				return;
 			}
 			
