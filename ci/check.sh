@@ -22,6 +22,8 @@ if [ $CHECK_TYPE = "valgrind_1" ]; then
 	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "valgrind_2" ]; then
 	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_2 -j $(nproc) || status=$?
+elif [ $CHECK_TYPE = "valgrind_3" ]; then
+	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_3 -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "sanitize" ]; then
 	UBSAN_OPTIONS="log_path=$PWD/ubsan.log" \
 	ASAN_OPTIONS=$(cat <<-END
