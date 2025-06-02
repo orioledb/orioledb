@@ -52,6 +52,11 @@ static OBuffersDesc rewindBuffersDesc = {
 };
 static FullTransactionId GetOldestFullTransactionIdConsideredRunning(void);
 
+/* Temporary storage for heap info between pre-commit and commit in a backend */
+static TransactionId   precommit_xid;
+static int             precommit_nsubxids;
+static TransactionId  *precommit_subxids;
+
 PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
 PG_FUNCTION_INFO_V1(orioledb_rewind);
 
@@ -101,8 +106,9 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 	uint64		pos;
 	int		nsubxids = 0;
 	int 		subxids_count = 0;
-	bool		subxid_only = false;
-	TransactionId  *subxids;
+	bool		got_all_subxids = false;
+	bool 		started_subxids = false;
+	TransactionId   *subxids;
 	TransactionId	xid = InvalidTransactionId;
 	OXid		oxid = InvalidOXid;
 
@@ -142,41 +148,59 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
-		if (subxid_only)
+		/*
+		 * Gather subxids from subxids items (may be multiple). As we read backwards, we don't yet
+		 * have filled respective rewindItem.
+		 */
+		if (rewindItem->tag == SUBXIDS_ITEM_TAG)
 		{
 			SubxidsItem *subxidsItem = (SubxidsItem *) rewindItem;
 
-			Assert(subxidsItem->tag == SUBXIDS_ITEM_TAG);
-			Assert(subxidsItem->tag == oxid);
+			Assert(!got_all_subxids);
+			Assert(subxidsItem->nsubxids);
+
+			if (nsubxids == 0)
+			{
+				/* First subxids item (As we read backwards so it's last written one) */
+				Assert(!started_subxids);
+				started_subxids = true;
+				nsubxids = subxidsItem->nsubxids;
+				oxid = subxidsItem->oxid;
+				subxids_count = nsubxids;
+				subxids = palloc0(nsubxids * sizeof(TransactionId));
+			}
+			else
+			{
+				Assert(started_subxids);
+				/*
+				 * subxidsItem->nsubxids for every subxidsItem contains the same sum of
+				 * of subxids for a rewindItem (not just the number of subxids in a current subxidsItem.
+				 */
+				Assert(subxidsItem->nsubxids == nsubxids);
+				Assert(subxidsItem->oxid == oxid);
+			}
 
 			while (true)
 			{
+				subxids_count--;
 				subxids[subxids_count] = subxidsItem->subxids[subxids_count % SUBXIDS_PER_ITEM];
-				subxids_count++;
 
-				elog(LOG, "Rewinding SubXid: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count, nsubxids, subxids[subxids_count]);
+				elog(LOG, "Rewinding SubXid: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count + 1, nsubxids, subxids[subxids_count]);
 
-				if (subxids_count == nsubxids)
+				if (subxids_count == 0)
 				{
-					subxid_only = false;
-					TransactionIdAbortTree(xid, nsubxids, subxids);
-					nsubxids = 0;
-					pfree(subxids);
+					got_all_subxids = true;
 					break;
 				}
-
-				if (subxids_count % SUBXIDS_PER_ITEM == 0)
-					break; /* Read next rewindItem only with subxids */
+				else if ((subxids_count % SUBXIDS_PER_ITEM) == 0)
+					break; /* Read next subxids item (As we read backwards so it's previous written one) */
 			}
 		}
 		else
 		{
 			Assert(rewindItem->tag == REWIND_ITEM_TAG);
-			oxid = rewindItem -> oxid;
-			nsubxids = rewindItem->nsubxids;
-			xid = rewindItem->xid;
 
-			Assert (oxid != InvalidOXid || xid != InvalidTransactionId);
+			Assert (rewindItem->oxid != InvalidOXid || rewindItem->xid != InvalidTransactionId);
 
 			if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000))
 			{
@@ -187,13 +211,13 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 			/* Rewind current rewind item */
 
 			/* Undo orioledb transaction */
-			if (oxid != InvalidOXid)
+			if (rewindItem->oxid != InvalidOXid)
 			{
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
 					UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
-					elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u, nsubxids %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), xid, nsubxids);
+					elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u, nsubxids %u", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->xid, rewindItem->nsubxids);
 					location = walk_undo_range_with_buf((UndoLogType) i,
 						rewindItem->undoLocation[i],
 						InvalidUndoLocation,
@@ -207,17 +231,27 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 			}
 
 			/* Abort transaction for non-orioledb tables */
-			if (xid != InvalidTransactionId)
+			if (rewindItem->xid != InvalidTransactionId)
 			{
-				if (nsubxids)
+				Assert((started_subxids && got_all_subxids) || (!started_subxids && !got_all_subxids));
+				if (got_all_subxids)
 				{
-					subxid_only = true;
-					subxids_count = 0;
-					subxids = palloc(sizeof(TransactionId) * nsubxids);
+					Assert(nsubxids);
+					Assert(rewindItem->nsubxids == nsubxids);
+					Assert(rewindItem->oxid == oxid);
+
+					TransactionIdAbortTree(rewindItem->xid, nsubxids, subxids);
+
+					got_all_subxids = false;
+					started_subxids = false;
+					pfree(subxids);
+					nsubxids = 0;
 				}
 				else
-					TransactionIdAbortTree(xid, 0, NULL);
+					TransactionIdAbortTree(rewindItem->xid, 0, NULL);
 			}
+			else
+				Assert (!started_subxids && !got_all_subxids && nsubxids == 0);
 		}
 
 		/* Clear the item from the circular buffer */
@@ -799,9 +833,9 @@ evict_rewind_page(void)
 void
 reset_precommit_xid_subxids(void)
 {
-	rewindMeta->precommit_xid = InvalidTransactionId;
-	rewindMeta->precommit_nsubxids = 0;
-	rewindMeta->precommit_subxids = NULL;
+	precommit_xid = InvalidTransactionId;
+	precommit_nsubxids = 0;
+	precommit_subxids = NULL;
 }
 
 void
@@ -814,25 +848,26 @@ save_precommit_xid_subxids(void)
         xid2 = GetCurrentTransactionIdIfAny();
         elog(LOG, "PRE-COMMIT top xid %u, cur xid %u", xid1, xid2);
 
+	/* Don't overwrite existing precommit_xid with zero. */
 	if (TransactionIdIsValid(xid1))
 	{
-		rewindMeta->precommit_xid = xid1;
-                rewindMeta->precommit_nsubxids = xactGetCommittedChildren(&rewindMeta->precommit_subxids);
+		Assert(precommit_xid == InvalidTransactionId);
+
+		precommit_xid = xid1;
+                precommit_nsubxids = xactGetCommittedChildren(&precommit_subxids);
         }
 }
 
 TransactionId
 get_precommit_xid_subxids(int *nsubxids, TransactionId **subxids)
 {
-	TransactionId   xid1 = rewindMeta->precommit_xid;
-
-	if (TransactionIdIsValid(xid1))
+	if (TransactionIdIsValid(precommit_xid))
 	{
-		*nsubxids = rewindMeta->precommit_nsubxids;
-		*subxids = rewindMeta->precommit_subxids;
+		*nsubxids = precommit_nsubxids;
+		*subxids = precommit_subxids;
 	}
 
-	return xid1;
+	return precommit_xid;
 }
 
 
@@ -877,11 +912,14 @@ next_subxids_item:
 		/* Fill subxids entry in a circular buffer. */
 		SubxidsItem *subxidsItem = (SubxidsItem *) rewindItem;
 
+		Assert (xid != InvalidTransactionId);
+		Assert (nsubxids > 0);
 		subxidsItem->tag = SUBXIDS_ITEM_TAG;
 		subxidsItem->oxid = oxid;
+		subxidsItem->nsubxids = nsubxids;
 		while (true)
 		{
-			elog(LOG, "Add SubXid to buffer: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count,nsubxids, subxids[subxids_count]);
+			elog(LOG, "Add SubXid to buffer: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count + 1, nsubxids, subxids[subxids_count]);
 			subxidsItem->subxids[subxids_count % SUBXIDS_PER_ITEM] = subxids[subxids_count];
 			subxids_count++;
 			if (subxids_count == nsubxids)
@@ -898,13 +936,6 @@ next_subxids_item:
 	else
 	{
 		/* Fill rewind entry in a circular buffer. */
-
-		/* NB both will give InvalidTransactionId. Use GetRunningTransactionData (?) */
-//		Assert(GetCurrentTransactionIdIfAny() == GetTopTransactionIdIfAny());
-
-//		xid = GetCurrentTransactionIdIfAny();
-//		nsubxids = xactGetCommittedChildren(&subxids);
-
 		rewindItem->timestamp = GetCurrentTimestamp();
 		rewindItem->tag = REWIND_ITEM_TAG;
 		rewindItem->oxid = oxid;
@@ -932,6 +963,7 @@ next_subxids_item:
 
 		if (nsubxids)
 		{
+			Assert(xid != InvalidTransactionId);
 			subxid_only = true;
 			subxids_count = 0;
 			goto next_subxids_item; /* Write first rewindItem only with subxids */

@@ -57,9 +57,9 @@ typedef	struct RewindItem
 typedef struct SubxidsItem
 {
 	uint8           tag;
+	int		nsubxids;
 	OXid            oxid;	/* Redundant, for debug */
 	TransactionId   subxids[SUBXIDS_PER_ITEM];
-	int 		unused;
 } SubxidsItem;
 
 #define REWIND_DISK_BUFFER_LENGTH (ORIOLEDB_BLCKSZ / sizeof(RewindItem))
@@ -87,10 +87,6 @@ typedef struct
 	bool		rewindWorkerStopped;
 	bool 		addToRewindQueueDisabled;
 
-	/* Temporary storage for heap info between pre-commit and commit */
-	TransactionId	precommit_xid;
-	int		precommit_nsubxids;
-	TransactionId  *precommit_subxids;
 } RewindMeta;
 
 #define InvalidRewindPos UINT64_MAX
