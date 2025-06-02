@@ -1,0 +1,87 @@
+# Deduplicated docker parts to change matrix in single place
+
+on:
+  workflow_call:
+    inputs:
+      caching_layers:
+        required: false
+        type: boolean
+        default: false
+      pushing:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  docker:
+    strategy:
+      fail-fast: true
+      matrix:
+        postgres: [16, 17]
+        compiler: [clang]
+        distr: [alpine, ubuntu]
+        cpu: [amd64, arm64]
+        include:
+          - distr-version: 3.21
+            distr: alpine
+          - distr-version: noble
+            distr: ubuntu
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: ${{ matrix.cpu == 'arm64' }}
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Log in to Docker Hub
+        if: ${{ inputs.pushing }}
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: orioledb/orioledb
+          tags: ${{ github.event.inputs.tags }}
+          flavor: |
+            latest=auto
+            prefix=
+            suffix=${{ contains(github.ref, 's3') && '-s3' || '' }}-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
+
+      - name: Modify Dockerfiles
+        shell: bash
+        run: |
+          if [ ${{ inputs.caching_layers }} == 'true' ]; then
+            sed '/^# REMOVE_WHEN_CACHING BEGIN$/,/^# REMOVE_WHEN_CACHING END$/d' docker/Dockerfile >${{ runner.temp }}/Dockerfile
+            sed '/^# REMOVE_WHEN_CACHING BEGIN$/,/^# REMOVE_WHEN_CACHING END$/d' docker/Dockerfile.ubuntu >${{ runner.temp }}/Dockerfile.ubuntu
+          else
+            cp docker/Dockerfile ${{ runner.temp }}/Dockerfile
+            cp docker/Dockerfile.ubuntu ${{ runner.temp }}/Dockerfile.ubuntu
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ format(matrix.distr == 'ubuntu' && '{0}/Dockerfile.ubuntu' || '{0}/Dockerfile', runner.temp) }}
+          platforms: linux/${{ matrix.cpu }}
+          push: ${{ inputs.pushing }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr-version || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr-version || '' }}
+            PG_MAJOR=${{ matrix.postgres }}
+            BUILD_CC_COMPILER=${{ matrix.compiler }}
+            DOCKER_PG_LLVM_DEPS=llvm-dev clang
+          cache-to: ${{ inputs.caching_layers && format('type=gha,scope={0}-{1}-pg{2}-{3}-{4},mode=max', github.ref_name, github.sha, matrix.postgres, matrix.distr, matrix.cpu) || '' }}
+          cache-from: ${{ !inputs.caching_layers && format('type=gha,scope={0}-{1}-pg{2}-{3}-{4}', github.ref_name, github.sha, matrix.postgres, matrix.distr, matrix.cpu) || '' }}
