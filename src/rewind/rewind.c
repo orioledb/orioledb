@@ -110,7 +110,7 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 #ifdef USE_ASSERT_CHECKING
 	bool 		started_subxids = false;
 #endif
-	TransactionId   *subxids;
+	TransactionId   *subxids = NULL;
 	TransactionId	xid = InvalidTransactionId;
 	OXid		oxid = InvalidOXid;
 
