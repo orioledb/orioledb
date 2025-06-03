@@ -146,7 +146,7 @@ struct OIndexDescr
 	int			nFields;
 	int			nKeyFields;
 	int			nIncludedFields;
-	OIndexField fields[INDEX_MAX_KEYS];
+	OIndexField *fields;
 
 	/*
 	 * Attnums for primary key values in the secondary index tuples. We may

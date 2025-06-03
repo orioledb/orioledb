@@ -846,6 +846,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	ListCell   *lc;
 	MemoryContext mcxt,
 				old_mcxt;
+	int			n_max_fields;
 
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
@@ -932,6 +933,11 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	descr->nUniqueFields = oIndex->nUniqueFields;
 	descr->nFields = oIndex->nNonLeafFields;
 
+	n_max_fields = Max(oIndex->nLeafFields, oIndex->nNonLeafFields);
+	mcxt = OGetIndexContext(descr);
+	descr->fields = (OIndexField *) MemoryContextAllocZero(mcxt,
+														   sizeof(OIndexField) * n_max_fields);
+
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
 	for (i = 0; i < oIndex->nLeafFields; i++)
@@ -986,7 +992,6 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 										   iField->opclass);
 	}
 
-	mcxt = OGetIndexContext(descr);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	descr->predicate = list_copy_deep(oIndex->predicate);
 	if (descr->predicate)
