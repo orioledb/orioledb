@@ -398,8 +398,8 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 	TupleDesc	tupdesc;
 	OTupleFixedFormatSpec *spec;
 	OIndexDescr *id;
-	OTuple *tuple;
-	int		i;
+	OTuple	   *tuple;
+	int			i;
 
 	Assert(!IS_SYS_TREE_OIDS(desc->oids));
 
@@ -421,7 +421,7 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 		keyType == BTreeKeyUniqueLowerBound ||
 		keyType == BTreeKeyUniqueUpperBound)
 	{
-		int		i;
+		int			i;
 
 		for (i = 0; i < numValues; i++)
 		{
@@ -464,8 +464,8 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 
 	for (i = 0; i < numValues; i++)
 	{
-		bool	isnull;
-		int		attnum;
+		bool		isnull;
+		int			attnum;
 
 		attnum = OIndexKeyAttnumToTupleAttnum(keyType, id, i + 1);
 		values[i] = o_fastgetattr(*tuple, attnum, tupdesc, spec, &isnull);
@@ -480,13 +480,13 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 static void
 int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
-	int		i;
-	bool	lowerSet = false;
-	int32	key = DatumGetInt32(keyDatum);
+	int			i;
+	bool		lowerSet = false;
+	int32		key = DatumGetInt32(keyDatum);
 
-	for (i = *lower; i <  *upper; i++)
+	for (i = *lower; i < *upper; i++)
 	{
-		int32	value = *((int32 *) p);
+		int32		value = *((int32 *) p);
 
 		if (value == key && !lowerSet)
 		{
@@ -509,13 +509,13 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 static void
 int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
-	int		i;
-	bool	lowerSet = false;
-	int64	key = DatumGetInt32(keyDatum);
+	int			i;
+	bool		lowerSet = false;
+	int64		key = DatumGetInt32(keyDatum);
 
-	for (i = *lower; i <  *upper; i++)
+	for (i = *lower; i < *upper; i++)
 	{
-		int64	value = *((int64 *) p);
+		int64		value = *((int64 *) p);
 
 		if (value == key && !lowerSet)
 		{
@@ -538,13 +538,13 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 static void
 oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
-	int		i;
-	bool	lowerSet = false;
-	Oid		key = DatumGetInt32(keyDatum);
+	int			i;
+	bool		lowerSet = false;
+	Oid			key = DatumGetInt32(keyDatum);
 
-	for (i = *lower; i <  *upper; i++)
+	for (i = *lower; i < *upper; i++)
 	{
-		Oid		value = *((Oid *) p);
+		Oid			value = *((Oid *) p);
 
 		if (value == key && !lowerSet)
 		{
@@ -567,13 +567,13 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 static void
 float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
-	int		i;
-	bool	lowerSet = false;
-	float8	key = DatumGetInt32(keyDatum);
+	int			i;
+	bool		lowerSet = false;
+	float8		key = DatumGetInt32(keyDatum);
 
-	for (i = *lower; i <  *upper; i++)
+	for (i = *lower; i < *upper; i++)
 	{
-		float8	value = *((float8 *) p);
+		float8		value = *((float8 *) p);
 
 		if (value == key && !lowerSet)
 		{
@@ -595,10 +595,10 @@ float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 
 typedef struct
 {
-	Oid		typeid;
-	Oid		opcid;
-	int		typlen;
-	int		align;
+	Oid			typeid;
+	Oid			opcid;
+	int			typlen;
+	int			align;
 	ArraySearchFunc func;
 } ArraySearchDesc;
 
@@ -612,7 +612,7 @@ ArraySearchDesc arraySearchDescs[] = {
 static ArraySearchDesc *
 find_array_search_desc_by_typeid(Oid typeid)
 {
-	int		i;
+	int			i;
 
 	for (i = 0; i < sizeof(arraySearchDescs) / sizeof(ArraySearchDesc); i++)
 	{
@@ -629,8 +629,8 @@ can_fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	OBTreeFindPageContext *context = intCxt->context;
 	BTreeDescr *desc = context->desc;
 	OIndexDescr *id;
-	int		i;
-	int		offset;
+	int			i;
+	int			offset;
 
 	if (!BTREE_PAGE_FIND_IS(context, FETCH) ||
 		IS_SYS_TREE_OIDS(desc->oids))
@@ -708,12 +708,12 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	base = (Pointer) hdr + offset;
 	lower = 0;
 	upper = count;
-	for (i = 0 ; lower < upper && i < meta->numKeys; i++)
+	for (i = 0; lower < upper && i < meta->numKeys; i++)
 	{
 		if (meta->flags[i] == 0)
-			meta->funcs[i](base + meta->offsets[i],
-						   meta->length, &lower, &upper,
-						   meta->values[i]);
+			meta->funcs[i] (base + meta->offsets[i],
+							meta->length, &lower, &upper,
+							meta->values[i]);
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF)
 			upper = lower;
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF)
@@ -764,12 +764,12 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 	lower = 0;
 	upper = count;
-	for (i = 0 ; lower < upper && i < meta->numKeys; i++)
+	for (i = 0; lower < upper && i < meta->numKeys; i++)
 	{
 		if (meta->flags[i] == 0)
-			meta->funcs[i](base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->offsets[i],
-						   MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length,
-						   &lower, &upper, meta->values[i]);
+			meta->funcs[i] (base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->offsets[i],
+							MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length,
+							&lower, &upper, meta->values[i]);
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF)
 			upper = lower;
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF)
@@ -885,7 +885,7 @@ find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		OBTreeFindDownlinkResult result;
 
-		result = fastpath_find_downlink(intCxt,meta,  loc, tuphdr);
+		result = fastpath_find_downlink(intCxt, meta, loc, tuphdr);
 
 		if (result != OBTreeFindDownlinkSlowpath)
 			return result;
@@ -1281,6 +1281,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		else
 		{
 			Assert(!fastPathDownlink);
+
 			/*
 			 * BTreeKeyNone requests leftmost page.  Otherwise, consider
 			 * following the rightlink.
