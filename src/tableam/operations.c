@@ -188,7 +188,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 
 		for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
 		{
-			AttrNumber	attnum = GET_PRIMARY(descr)->fields[i].tableAttnum - 1;
+			AttrNumber	attnum = GET_PRIMARY(descr)->tableAttnums[i] - 1;
 
 			values[i + 1] = slot->tts_values[attnum];
 			isnull[i + 1] = slot->tts_isnull[attnum];

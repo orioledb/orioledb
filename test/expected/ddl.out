@@ -1425,8 +1425,52 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE o_test_plpgsql_default (
     val_1 int DEFAULT LENGTH(o_test_plpgsql_default_func(6))
 ) USING orioledb;
+CREATE TABLE test_35_columns (
+  gid serial,
+  col1 varchar(1),
+  col2 varchar(1),
+  col3 varchar(1),
+  col4 varchar(1),
+  col5 varchar(1),
+  col6 varchar(1),
+  col7 varchar(1),
+  col8 varchar(1),
+  col9 varchar(1),
+  col10 varchar(1),
+  col11 varchar(1),
+  col12 varchar(1),
+  col13 varchar(1),
+  col14 varchar(1),
+  col15 varchar(1),
+  col16 varchar(1),
+  col17 varchar(1),
+  col18 varchar(1),
+  col19 varchar(1),
+  col20 varchar(1),
+  col21 varchar(1),
+  col22 varchar(1),
+  col23 varchar(1),
+  col24 varchar(1),
+  col25 varchar(1),
+  col26 varchar(1),
+  col27 varchar(1),
+  col28 varchar(1),
+  col29 varchar(1),
+  col30 varchar(1),
+  col31 varchar(1),
+  col32 varchar(1),
+  col33 varchar(1),
+  col34 varchar(1)
+) using orioledb;
+INSERT INTO test_35_columns (col27, col10) VALUES ('A', 'J');
+SELECT gid, col10, col15, col27, col33, col34 FROM test_35_columns;
+ gid | col10 | col15 | col27 | col33 | col34 
+-----+-------+-------+-------+-------+-------
+   1 | J     |       | A     |       | 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 21 other objects
+NOTICE:  drop cascades to 22 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1448,6 +1492,7 @@ drop cascades to table o_test_included_ix_name
 drop cascades to table o_test_add_pkey_empty_index
 drop cascades to table o_test_empty
 drop cascades to table o_test_plpgsql_default
+drop cascades to table test_35_columns
 DROP SCHEMA ddl CASCADE;
 NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)

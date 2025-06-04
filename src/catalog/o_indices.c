@@ -846,7 +846,6 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	ListCell   *lc;
 	MemoryContext mcxt,
 				old_mcxt;
-	int			n_max_fields;
 
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
@@ -933,16 +932,15 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	descr->nUniqueFields = oIndex->nUniqueFields;
 	descr->nFields = oIndex->nNonLeafFields;
 
-	n_max_fields = Max(oIndex->nLeafFields, oIndex->nNonLeafFields);
 	mcxt = OGetIndexContext(descr);
 	descr->fields = (OIndexField *) MemoryContextAllocZero(mcxt,
-														   sizeof(OIndexField) * n_max_fields);
+														   sizeof(OIndexField) * descr->nFields);
+	descr->tableAttnums = (AttrNumber *) MemoryContextAllocZero(mcxt, sizeof(AttrNumber) * oIndex->nLeafFields);
 
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
 	for (i = 0; i < oIndex->nLeafFields; i++)
 	{
-		OIndexField *field = &descr->fields[i];
 		OTableIndexField *iField = &oIndex->leafFields[i];
 		int			attnum = iField->attnum;
 
@@ -961,7 +959,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 			attnum += oIndex->primaryIsCtid ? 2 : 1;
 		}
 
-		field->tableAttnum = attnum;
+		descr->tableAttnums[i] = attnum;
 		maxTableAttnum = Max(maxTableAttnum, attnum);
 	}
 
@@ -1021,13 +1019,13 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	o_unset_syscache_hooks();
 	if (oIndex->indexType == oIndexPrimary)
 	{
-		descr->tbl_attnums = palloc0(sizeof(AttrNumberMap) * descr->nFields);
+		descr->pk_tbl_field_map = palloc0(sizeof(AttrNumberMap) * descr->nFields);
 		for (i = 0; i < descr->nFields; i++)
 		{
-			descr->tbl_attnums[i].key = descr->fields[i].tableAttnum - 1;
-			descr->tbl_attnums[i].value = i;
+			descr->pk_tbl_field_map[i].key = descr->tableAttnums[i] - 1;
+			descr->pk_tbl_field_map[i].value = i;
 		}
-		pg_qsort(descr->tbl_attnums, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
+		pg_qsort(descr->pk_tbl_field_map, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
 	}
 	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();

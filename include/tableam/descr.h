@@ -68,12 +68,6 @@ typedef struct
 	bool		nullfirst;
 
 	/*
-	 * Attribute number in table tupdesc.  Counts from 1.  Ctid counts as the
-	 * first column if used.
-	 */
-	AttrNumber	tableAttnum;
-
-	/*
 	 * A cached comparator to compare inputtype values according to opfamily
 	 * and opclass.
 	 */
@@ -160,10 +154,16 @@ struct OIndexDescr
 	/* Compression rate used in this index */
 	OCompress	compress;
 
-	/* The maximal value of tableAttnum among the fields[] */
+	/*
+	 * Attribute numbers of fields in table tupdesc.  Counts from 1.  Ctid
+	 * counts as the first column if used.
+	 */
+	AttrNumber *tableAttnums;
+	/* The maximal value in tableAttnums */
 	int			maxTableAttnum;
 
-	AttrNumberMap *tbl_attnums;
+	/* Used in getsomeattrs to reorder fields during index only scan of pkey  */
+	AttrNumberMap *pk_tbl_field_map;
 
 	/* tupdesc and slots needed for indexam operations */
 	TupleDesc	itupdesc;
@@ -172,10 +172,25 @@ struct OIndexDescr
 	TupleTableSlot *new_leaf_slot;
 };
 
-#define OIndexKeyAttnumToTupleAttnum(keyType, idx, attnum) \
-	((keyType) == BTreeKeyLeafTuple && (idx)->desc.type == oIndexPrimary ? \
-	 idx->fields[(attnum) - 1].tableAttnum + (idx->bridging && !idx->primaryIsCtid ? 1 : 0) : \
-	 (attnum))
+/*
+ * ItemPointerGetOffsetNumber
+ *		As above, but verifies that the item pointer looks valid.
+ */
+static inline OffsetNumber
+OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
+{
+	if (keyType == BTreeKeyLeafTuple && idx->desc.type == oIndexPrimary)
+	{
+		Assert((attnum - 1) < idx->leafTupdesc->natts);
+		return idx->tableAttnums[attnum - 1] + (idx->bridging && !idx->primaryIsCtid ? 1 : 0);
+	}
+	else
+	{
+		Assert((keyType == BTreeKeyLeafTuple && attnum <= idx->leafTupdesc->natts) ||
+			   (keyType == BTreeKeyNonLeafKey && attnum <= idx->nFields));
+		return attnum;
+	}
+}
 
 #define OGetIndexContext(index) \
 	((index)->index_mctx ? \
