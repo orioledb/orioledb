@@ -936,6 +936,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	descr->fields = (OIndexField *) MemoryContextAllocZero(mcxt,
 														   sizeof(OIndexField) * descr->nFields);
 	descr->tableAttnums = (AttrNumber *) MemoryContextAllocZero(mcxt, sizeof(AttrNumber) * oIndex->nLeafFields);
+	descr->pk_comparators = (OComparator **) MemoryContextAllocZero(mcxt, sizeof(OComparator *) * oIndex->nPrimaryFields);
 
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
@@ -988,6 +989,21 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		if (add_opclass)
 			oFillFieldOpClassAndComparator(field, oIndex->tableOids.datoid,
 										   iField->opclass);
+	}
+
+	for (i = 0; i < oIndex->nPrimaryFields; i++)
+	{
+		OIndexField temp_field = {0};
+		AttrNumber	attnum = oIndex->primaryFieldsAttnums[i] - 1;
+		OTableIndexField *iField = &oIndex->leafFields[attnum];
+
+		temp_field.collation = TupleDescAttr(descr->leafTupdesc, i)->attcollation;
+		if (OidIsValid(iField->collation))
+			temp_field.collation = iField->collation;
+
+		oFillFieldOpClassAndComparator(&temp_field, oIndex->tableOids.datoid,
+									   iField->opclass);
+		descr->pk_comparators[i] = temp_field.comparator;
 	}
 
 	old_mcxt = MemoryContextSwitchTo(mcxt);

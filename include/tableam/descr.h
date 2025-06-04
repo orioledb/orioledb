@@ -165,6 +165,9 @@ struct OIndexDescr
 	/* Used in getsomeattrs to reorder fields during index only scan of pkey  */
 	AttrNumberMap *pk_tbl_field_map;
 
+	/* Cached comparators used to fill key for pkey tuple search */
+	OComparator **pk_comparators;
+
 	/* tupdesc and slots needed for indexam operations */
 	TupleDesc	itupdesc;
 	TupleTableSlot *index_slot;

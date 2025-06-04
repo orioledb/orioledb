@@ -547,7 +547,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
-		bound->keys[i].comparator = id->fields[pk_from + i].comparator;
+		bound->keys[i].comparator = id->pk_comparators[i];
 	}
 }
 
