@@ -363,27 +363,24 @@ free_page_find_context(OBTreeFindPageContext *context)
 		unpin_local_cache(context->parentImgEntry);
 }
 
-static bool
-can_do_fastpath_find_downlink(OBTreeFindPageContext *context)
+#define FASTPATH_FIND_DOWNLINK_MAX_KEYS (4)
+#define FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF (1)
+#define FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF (2)
+
+typedef void (*ArraySearchFunc) (Pointer p, int stride,
+								 int *lower, int *upper, Datum keyDatum);
+
+typedef struct
 {
-	BTreeDescr *desc = context->desc;
-	OIndexDescr *id;
-
-	if (!BTREE_PAGE_FIND_IS(context, FETCH) ||
-		IS_SYS_TREE_OIDS(desc->oids))
-		return false;
-
-	id = (OIndexDescr *) desc->arg;
-
-	if (id->nonLeafTupdesc->natts != 1 ||
-		id->nonLeafTupdesc->attrs[0].atttypid != INT4OID ||
-		id->nonLeafSpec.natts != 1 ||
-		id->nonLeafSpec.len != 4 ||
-		id->fields[0].opclass != INT4_BTREE_OPS_OID)
-		return false;
-
-	return true;
-}
+	bool		enabled;
+	bool		inclusive;
+	int			numKeys;
+	int			length;
+	Datum		offsets[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	ArraySearchFunc funcs[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	Datum		values[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	uint8		flags[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+} FastpathFindDownlinkMeta;
 
 typedef enum
 {
@@ -393,56 +390,66 @@ typedef enum
 	OBTreeFindDownlinkSlowpath
 } OBTreeFindDownlinkResult;
 
-static Datum
-find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType *keyType,
-					  bool *inclusive)
+static void
+find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
+					  bool *inclusive, int numValues,
+					  Datum *values, uint8 *flags)
 {
 	TupleDesc	tupdesc;
 	OTupleFixedFormatSpec *spec;
 	OIndexDescr *id;
-	int		attnum;
-	Datum	value;
-	bool	isnull;
 	OTuple *tuple;
+	int		i;
 
 	Assert(!IS_SYS_TREE_OIDS(desc->oids));
 
 	id = (OIndexDescr *) desc->arg;
 	*inclusive = false;
 
-	if (*keyType == BTreeKeyNone ||
-		*keyType == BTreeKeyRightmost)
-		return (Datum) 0;
-
-	if (*keyType == BTreeKeyBound ||
-		*keyType == BTreeKeyUniqueLowerBound ||
-		*keyType == BTreeKeyUniqueUpperBound)
+	if (keyType == BTreeKeyNone ||
+		keyType == BTreeKeyRightmost)
 	{
-		OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
-		uint8		flags = bound->keys[0].flags;
-
-		if (flags & O_VALUE_BOUND_UNBOUNDED)
+		for (i = 0; i < numValues; i++)
 		{
-			*keyType = (flags & O_VALUE_BOUND_LOWER) ? BTreeKeyUniqueLowerBound : BTreeKeyUniqueUpperBound;
-			return (Datum) 0;
+			flags[i] = (keyType == BTreeKeyNone) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+			values[i] = (Datum) 0;
 		}
-
-		/*if (!(flags & O_VALUE_BOUND_INCLUSIVE))
-			*inclusive = false;*/
-		return bound->keys[0].value;
+		return;
 	}
 
-	Assert(*keyType == BTreeKeyLeafTuple ||
-		   *keyType == BTreeKeyNonLeafKey ||
-		   *keyType == BTreeKeyPageHiKey);
-
-	if (*keyType == BTreeKeyPageHiKey)
+	if (keyType == BTreeKeyBound ||
+		keyType == BTreeKeyUniqueLowerBound ||
+		keyType == BTreeKeyUniqueUpperBound)
 	{
-		*inclusive = true;
-		*keyType = BTreeKeyNonLeafKey;
+		int		i;
+
+		for (i = 0; i < numValues; i++)
+		{
+			OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
+			uint8		f = bound->keys[i].flags;
+
+			if (f & O_VALUE_BOUND_UNBOUNDED)
+			{
+				flags[i] = (f & O_VALUE_BOUND_LOWER) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+				values[i] = (Datum) 0;
+			}
+			else
+			{
+				flags[i] = 0;
+				values[i] = bound->keys[i].value;
+			}
+		}
+		return;
 	}
 
-	if (*keyType == BTreeKeyLeafTuple)
+	Assert(keyType == BTreeKeyLeafTuple ||
+		   keyType == BTreeKeyNonLeafKey ||
+		   keyType == BTreeKeyPageHiKey);
+
+	if (keyType == BTreeKeyPageHiKey)
+		*inclusive = true;
+
+	if (keyType == BTreeKeyLeafTuple)
 	{
 		tupdesc = id->leafTupdesc;
 		spec = &id->leafSpec;
@@ -454,62 +461,232 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType *keyType,
 	}
 
 	tuple = (OTuple *) key;
-	attnum = OIndexKeyAttnumToTupleAttnum(*keyType, id, 1);
-	value = o_fastgetattr(*tuple, attnum, tupdesc, spec, &isnull);
 
-	if (isnull)
-		return id->fields[0].nullfirst ? -1 : 1;
+	for (i = 0; i < numValues; i++)
+	{
+		bool	isnull;
+		int		attnum;
 
-	return value;
+		attnum = OIndexKeyAttnumToTupleAttnum(keyType, id, i + 1);
+		values[i] = o_fastgetattr(*tuple, attnum, tupdesc, spec, &isnull);
+
+		if (isnull)
+			flags[i] = (id->fields[i].nullfirst) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+		else
+			flags[i] = 0;
+	}
 }
 
-static int
-find_int_index(Pointer p, int stride, int count, int32 key)
+static void
+int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
 	int		i;
+	bool	lowerSet = false;
+	int32	key = DatumGetInt32(keyDatum);
 
-	for (i = 0; i < count; i++)
+	for (i = *lower; i <  *upper; i++)
 	{
 		int32	value = *((int32 *) p);
 
-		if (value >= key)
-			return i;
+		if (value == key && !lowerSet)
+		{
+			*lower = i;
+			lowerSet = true;
+		}
+		else if (value > key)
+		{
+			if (!lowerSet)
+				*lower = i;
+			*upper = i;
+			return;
+		}
 
 		p += stride;
 	}
-	return count;
+	*lower = *upper;
 }
 
-static int
-find_int_index_nextkey(Pointer p, int stride, int count, int32 key)
+static void
+int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+{
+	int		i;
+	bool	lowerSet = false;
+	int64	key = DatumGetInt32(keyDatum);
+
+	for (i = *lower; i <  *upper; i++)
+	{
+		int64	value = *((int64 *) p);
+
+		if (value == key && !lowerSet)
+		{
+			*lower = i;
+			lowerSet = true;
+		}
+		else if (value > key)
+		{
+			if (!lowerSet)
+				*lower = i;
+			*upper = i;
+			return;
+		}
+
+		p += stride;
+	}
+	*lower = *upper;
+}
+
+static void
+oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+{
+	int		i;
+	bool	lowerSet = false;
+	Oid		key = DatumGetInt32(keyDatum);
+
+	for (i = *lower; i <  *upper; i++)
+	{
+		Oid		value = *((Oid *) p);
+
+		if (value == key && !lowerSet)
+		{
+			*lower = i;
+			lowerSet = true;
+		}
+		else if (value > key)
+		{
+			if (!lowerSet)
+				*lower = i;
+			*upper = i;
+			return;
+		}
+
+		p += stride;
+	}
+	*lower = *upper;
+}
+
+static void
+float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+{
+	int		i;
+	bool	lowerSet = false;
+	float8	key = DatumGetInt32(keyDatum);
+
+	for (i = *lower; i <  *upper; i++)
+	{
+		float8	value = *((float8 *) p);
+
+		if (value == key && !lowerSet)
+		{
+			*lower = i;
+			lowerSet = true;
+		}
+		else if (value > key)
+		{
+			if (!lowerSet)
+				*lower = i;
+			*upper = i;
+			return;
+		}
+
+		p += stride;
+	}
+	*lower = *upper;
+}
+
+typedef struct
+{
+	Oid		typeid;
+	Oid		opcid;
+	int		typlen;
+	int		align;
+	ArraySearchFunc func;
+} ArraySearchDesc;
+
+ArraySearchDesc arraySearchDescs[] = {
+	{OIDOID, OID_BTREE_OPS_OID, sizeof(Oid), ALIGNOF_INT, oid_array_search},
+	{INT4OID, INT4_BTREE_OPS_OID, sizeof(int32), ALIGNOF_INT, int4_array_search},
+	{INT8OID, INT8_BTREE_OPS_OID, sizeof(int64), ALIGNOF_DOUBLE, int8_array_search},
+	{FLOAT8OID, FLOAT8_BTREE_OPS_OID, sizeof(float8), ALIGNOF_DOUBLE, float8_array_search},
+};
+
+static ArraySearchDesc *
+find_array_search_desc_by_typeid(Oid typeid)
 {
 	int		i;
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < sizeof(arraySearchDescs) / sizeof(ArraySearchDesc); i++)
 	{
-		int32	value = *((int32 *) p);
-
-		if (value > key)
-			return i;
-
-		p += stride;
+		if (arraySearchDescs[i].typeid == typeid)
+			return &arraySearchDescs[i];
 	}
-	return count;
+	return NULL;
 }
 
+static void
+can_fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
+						   FastpathFindDownlinkMeta *meta)
+{
+	OBTreeFindPageContext *context = intCxt->context;
+	BTreeDescr *desc = context->desc;
+	OIndexDescr *id;
+	int		i;
+	int		offset;
+
+	if (!BTREE_PAGE_FIND_IS(context, FETCH) ||
+		IS_SYS_TREE_OIDS(desc->oids))
+	{
+		meta->enabled = false;
+		return;
+	}
+
+	id = (OIndexDescr *) desc->arg;
+
+	if (id->nonLeafTupdesc->natts >= FASTPATH_FIND_DOWNLINK_MAX_KEYS ||
+		id->nonLeafSpec.natts != id->nonLeafTupdesc->natts)
+	{
+		meta->enabled = false;
+		return;
+	}
+
+	meta->numKeys = id->nonLeafSpec.natts;
+
+	offset = 0;
+	for (i = 0; i < meta->numKeys; i++)
+	{
+		ArraySearchDesc *desc = find_array_search_desc_by_typeid(id->nonLeafTupdesc->attrs[0].atttypid);
+
+		if (!desc)
+		{
+			meta->enabled = false;
+			return;
+		}
+
+		offset = TYPEALIGN(desc->align, offset);
+		meta->funcs[i] = desc->func;
+		meta->offsets[i] = offset;
+
+		offset += desc->typlen;
+	}
+
+	find_downlink_get_key(context->desc, intCxt->key, intCxt->keyType,
+						  &meta->inclusive, meta->numKeys,
+						  meta->values, meta->flags);
+	meta->enabled = true;
+	meta->length = MAXALIGN(id->nonLeafSpec.len);
+}
 
 static OBTreeFindDownlinkResult
 fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
+					   FastpathFindDownlinkMeta *meta,
 					   BTreePageItemLocator *loc,
 					   BTreeNonLeafTuphdr **tuphdrPtr)
 {
 	BTreePageHeader *imgHdr = (BTreePageHeader *) intCxt->pagePtr;
 	BTreePageHeader *hdr = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(intCxt->blkno);
-	int32		value;
-	void		*key = intCxt->key;
-	BTreeKeyType keyType = intCxt->keyType;
-	bool		inclusive;
+	int			lower;
+	int			upper;
 	int			count;
+	int			i;
 	int			offset;
 	int			chunkIndex;
 	int			itemIndex;
@@ -519,29 +696,31 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	Pointer		base;
 	static BTreeNonLeafTuphdr tuphdr;
 
-	value = DatumGetInt32(find_downlink_get_key(intCxt->context->desc,
-												key, &keyType, &inclusive));
-
 	count = O_PAGE_IS(intCxt->pagePtr, RIGHTMOST) ? imgHdr->chunksCount - 1 : imgHdr->chunksCount;
 
 	offset = SHORT_GET_LOCATION(hdr->chunkDesc[0].hikeyShortLocation);
 
 	pg_read_barrier();
 
-	if (imgHdr->hikeysEnd - offset != count * (MAXALIGN(sizeof(BTreeNonLeafTuphdr))))
+	if (imgHdr->hikeysEnd - offset != count * meta->length)
 		return OBTreeFindDownlinkSlowpath;
 
 	base = (Pointer) hdr + offset;
-	if (inclusive)
-		chunkIndex = find_int_index(base,
-								MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
-								count,
-								value);
-	else
-		chunkIndex = find_int_index_nextkey(base,
-									   MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
-									   count,
-									   value);
+	lower = 0;
+	upper = count;
+	for (i = 0 ; lower < upper && i < meta->numKeys; i++)
+	{
+		if (meta->flags[i] == 0)
+			meta->funcs[i](base + meta->offsets[i],
+						   meta->length, &lower, &upper,
+						   meta->values[i]);
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF)
+			upper = lower;
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF)
+			lower = upper;
+	}
+
+	chunkIndex = meta->inclusive ? lower : upper;
 
 	pg_read_barrier();
 
@@ -583,16 +762,21 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		MAXALIGN(sizeof(int32)) * count)
 		return OBTreeFindDownlinkSlowpath;
 
-	if (inclusive)
-		itemIndex = find_int_index(base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
-								MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32)),
-								count,
-								value);
-	else
-		itemIndex = find_int_index_nextkey(base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)),
-									   MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32)),
-									   count,
-									   value);
+	lower = 0;
+	upper = count;
+	for (i = 0 ; lower < upper && i < meta->numKeys; i++)
+	{
+		if (meta->flags[i] == 0)
+			meta->funcs[i](base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->offsets[i],
+						   MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length,
+						   &lower, &upper, meta->values[i]);
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF)
+			upper = lower;
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF)
+			lower = upper;
+	}
+
+	itemIndex = meta->inclusive ? lower : upper;
 
 	pg_read_barrier();
 
@@ -685,6 +869,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 static OBTreeFindDownlinkResult
 find_downlink(OBTreeFindPageInternalContext *intCxt,
+			  FastpathFindDownlinkMeta *meta,
 			  int level,
 			  bool fastPathDownlink,
 			  BTreePageItemLocator *loc,
@@ -700,7 +885,7 @@ find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		OBTreeFindDownlinkResult result;
 
-		result = fastpath_find_downlink(intCxt, loc, tuphdr);
+		result = fastpath_find_downlink(intCxt,meta,  loc, tuphdr);
 
 		if (result != OBTreeFindDownlinkSlowpath)
 			return result;
@@ -826,7 +1011,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				keepLokeyFlag = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY),
 				downlinkLocationFlag = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	bool		shmemIsReloaded = false;
-	bool		canFastpathDownlink = can_do_fastpath_find_downlink(context);
+	FastpathFindDownlinkMeta fastpathMeta;
 	Jsonb	   *params = NULL;
 
 	memset(&intCxt, 0, sizeof(intCxt));
@@ -835,6 +1020,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.key = key;
 	intCxt.keyType = keyType;
 	intCxt.targetLevel = targetLevel;
+
+	can_fastpath_find_downlink(&intCxt, &fastpathMeta);
 
 	/*
 	 * See description of the function.
@@ -872,7 +1059,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		level = PAGE_GET_LEVEL(p);
 
-		fastPathDownlink = canFastpathDownlink && !needLock && (level > targetLevel);
+		fastPathDownlink = fastpathMeta.enabled && !needLock && (level > targetLevel);
 
 		intCxt.partial = NULL;
 		if (!imageFlag || level > 0)
@@ -1080,8 +1267,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			OBTreeFindDownlinkResult result;
 
-			result = find_downlink(&intCxt, level, fastPathDownlink,
-								   &loc, &noneLeafHdr);
+			result = find_downlink(&intCxt, &fastpathMeta, level,
+								   fastPathDownlink, &loc, &noneLeafHdr);
 
 			Assert(result != OBTreeFindDownlinkSlowpath);
 
