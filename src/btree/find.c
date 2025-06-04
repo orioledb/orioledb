@@ -150,7 +150,7 @@ search_local_cache(OInMemoryBlkno blkno)
 			{
 				if (entry->data)
 				{
-					OrioleDBPageHeader *dataHeader = (OrioleDBPageHeader *) entry->data;
+					OrioleDBPageHeader *dataHeader PG_USED_FOR_ASSERTS_ONLY = (OrioleDBPageHeader *) entry->data;
 
 					Assert((pg_atomic_read_u32(&dataHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK) == entry->changeCount);
 					Assert(dataHeader->pageChangeCount == entry->pageChangeCount);
@@ -254,7 +254,7 @@ search_pin_local_cache(OInMemoryBlkno blkno)
 				entry->changeCount == (state & PAGE_STATE_CHANGE_COUNT_MASK) &&
 				!O_PAGE_STATE_READ_IS_BLOCKED(state))
 			{
-				OrioleDBPageHeader *dataHeader = (OrioleDBPageHeader *) entry->data;
+				OrioleDBPageHeader *dataHeader PG_USED_FOR_ASSERTS_ONLY = (OrioleDBPageHeader *) entry->data;
 
 				Assert((pg_atomic_read_u32(&dataHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK) == entry->changeCount);
 				Assert(dataHeader->pageChangeCount == entry->pageChangeCount);
