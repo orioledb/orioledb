@@ -59,6 +59,13 @@ static TransactionId  *precommit_subxids;
 
 PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
 PG_FUNCTION_INFO_V1(orioledb_rewind);
+PG_FUNCTION_INFO_V1(orioledb_rewind_to_xid);
+PG_FUNCTION_INFO_V1(orioledb_current_oxid);
+
+/* User-available */
+#define	REWIND_MODE_TIME (0)
+/* Modes below allowed only in debug functions under IS_DEV */
+#define	REWIND_MODE_XID	(1)
 
 Size
 rewind_shmem_needs(void)
@@ -97,8 +104,14 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+Datum
+orioledb_current_oxid(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_DATUM(get_current_oxid());
+}
+
 static void
-do_rewind(int rewind_time, TimestampTz rewindStartTime)
+do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTime, OXid rewind_oxid, TransactionId rewind_xid)
 {
 	int	i = 0;
 	RewindItem     *rewindItem;
@@ -206,14 +219,17 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 
 			Assert (rewindItem->oxid != InvalidOXid || rewindItem->xid != InvalidTransactionId);
 
-			if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000))
+			if ((rewind_mode == REWIND_MODE_TIME && TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000)) ||
+			(rewind_mode == REWIND_MODE_XID &&
+			  ( (rewind_xid != InvalidTransactionId && rewindItem->xid != InvalidTransactionId && rewindItem->xid < rewind_xid) ||
+			    (rewind_oxid != InvalidOXid && rewindItem->oxid != InvalidOXid && rewindItem->oxid < rewind_oxid) )))
 			{
 				long secs;
 				int  usecs;
 
 				TimestampDifference(rewindItem->timestamp, rewindStartTime, &secs, &usecs);
 				/* Rewind complete */
-				ereport(LOG, errmsg("orioledb rewind completed. Last remaining transaction is %ld.%d seconds back", secs, usecs/1000));
+				ereport(LOG, errmsg("orioledb rewind completed. Last remaining transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs/1000));
 				return;
 			}
 			
@@ -269,22 +285,30 @@ do_rewind(int rewind_time, TimestampTz rewindStartTime)
 		/* Clear the item from the circular buffer */
 		rewindItem->tag = EMPTY_ITEM_TAG;
 
-		/* Buffer finished. Unlikely case when rewind_time equals rewind_max_period */
+		/*
+		 * Buffer finished. Unlikely case when rewind_time equals rewind_max_period.
+		 * In REWIND_MODE_XID debug mode this is possible when rewind is requested
+		 * for XID earlier than retained.
+		 */
 		if (pos == rewindMeta->completePos)
+		{
+			long secs;
+			int  usecs;
+
+			TimestampDifference(rewindItem->timestamp, rewindStartTime, &secs, &usecs);
+			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs/1000));
 			return;
+		}
 	}
 }
 
-Datum
-orioledb_rewind(PG_FUNCTION_ARGS)
+static void
+orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid)
 {
 	TimestampTz	rewindStartTime;
 	int		retry;
 	int 		nbackends;
 	int		nprepared;
-	int		rewind_time = PG_GETARG_INT32(0);
-
-	elog(LOG, "Rewind requested, for %d s", rewind_time);
 
 	if (!enable_rewind)
 	{
@@ -292,21 +316,57 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				  errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-		PG_RETURN_VOID();
+		return;
 	}
-	else if (rewind_time > rewind_max_period)
-	{
 
-		ereport(ERROR,
+	if (rewind_mode == REWIND_MODE_TIME)
+	{
+		elog(LOG, "Rewind requested, for %d s", rewind_time);
+
+		if (rewind_time > rewind_max_period)
+		{
+			ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("Requested rewind %d s exceeds rewind_max_period %d s", rewind_time, rewind_max_period)),
 				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
-		PG_RETURN_VOID();
+			return;
+		}
+		else if (rewind_time == 0)
+		{
+			elog(WARNING, "Zero rewind requested, do nothing");
+			return;
+		}
 	}
-	else if (rewind_time == 0)
+	else if (rewind_mode == REWIND_MODE_XID)
 	{
-		elog(WARNING, "Zero rewind requested, do nothing");
-		PG_RETURN_VOID();
+		TransactionId oldest = XidFromFullTransactionId(rewindMeta->oldestConsideredRunningXid);
+
+		elog(LOG, "Rewind requested, to Xid %u, OXid %lu", rewind_xid, rewind_oxid);
+
+		if (rewind_xid == InvalidTransactionId && rewind_oxid == InvalidOXid)
+		{
+			elog(ERROR, "Neither rewind XID nor OXid are valid");
+			return;
+		}
+
+		if (rewind_xid != InvalidTransactionId)
+		{
+			if (rewind_xid >= (TransactionId) GetTopTransactionId())
+				elog(WARNING, "Rewind XID is not in the past. Rewind will be based only on rewind OXid");
+			else if (rewind_xid < oldest)
+			{
+				elog(WARNING, "Rewind XID is older than saved for rewind. Rewind to oldest possible XID %u", oldest);
+				rewind_xid = oldest;
+			}
+		}
+
+		if (rewind_oxid == InvalidOXid)
+		{
+			if (!xid_is_finished_for_everybody(rewind_oxid))
+			{
+				elog(WARNING, "Rewind OXid is not in the past. Rewind will be based only on rewind XID");
+			}
+		}
 	}
 
 	CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
@@ -358,11 +418,30 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 	rewindMeta->addToRewindQueueDisabled = true;
 
 	/* All good. Do actual rewind */
-	do_rewind(rewind_time, rewindStartTime);
+	do_rewind(rewind_mode, rewind_time, rewindStartTime, rewind_oxid, rewind_xid);
 
 	elog(LOG, "Rewind complete, for %d s", rewind_time);
 	/* Restart Postgres */
 	(void) kill(PostmasterPid, SIGTERM);
+	return;
+}
+
+Datum
+orioledb_rewind(PG_FUNCTION_ARGS)
+{
+	int	rewind_time = PG_GETARG_INT32(0);
+
+	orioledb_rewind_internal(REWIND_MODE_TIME, rewind_time, InvalidOXid, InvalidTransactionId);
+	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_rewind_to_xid(PG_FUNCTION_ARGS)
+{
+	TransactionId xid = PG_GETARG_INT32(0);
+	OXid oxid = PG_GETARG_INT64(1);
+
+	orioledb_rewind_internal(REWIND_MODE_XID, 0, oxid, xid);
 	PG_RETURN_VOID();
 }
 

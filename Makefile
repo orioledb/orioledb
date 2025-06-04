@@ -148,7 +148,8 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_subtrans \
 				  table_lock_test \
 				  uniq
-TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
+TESTGRESCHECKS_PART_1 = test/t/rewind_xid_test.py \
+						test/t/checkpointer_test.py \
 						test/t/correlation_test.py \
 						test/t/eviction_bgwriter_test.py \
 						test/t/eviction_compression_test.py \
