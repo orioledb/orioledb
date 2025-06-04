@@ -1560,10 +1560,10 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 									  intCxt->partial,
 									  true))
 				return true;
-			Assert(RIGHTLINK_GET_CHANGECOUNT(rightlink) ==
-				   O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr));
 			intCxt->pagePtr = useParentImg ? context->parentImg : context->img;
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
+			Assert(RIGHTLINK_GET_CHANGECOUNT(rightlink) ==
+				   O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr));
 		}
 		if (!O_PAGE_IS(intCxt->pagePtr, RIGHTMOST))
 			BTREE_PAGE_GET_HIKEY(pageHiKey, intCxt->pagePtr);
