@@ -421,8 +421,6 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 		keyType == BTreeKeyUniqueLowerBound ||
 		keyType == BTreeKeyUniqueUpperBound)
 	{
-		int			i;
-
 		for (i = 0; i < numValues; i++)
 		{
 			OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
