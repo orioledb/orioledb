@@ -165,6 +165,7 @@ o_sys_caches_init(void)
 	o_collation_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_database_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_multirange_cache_init(sys_cache_cxt, sys_cache_fastcache);
+	o_tablespace_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	orioledb_setup_syscache_hooks();
 }
 

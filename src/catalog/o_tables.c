@@ -35,6 +35,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_tablespace_d.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "executor/execExpr.h"
@@ -641,7 +642,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 
 OTable *
 o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
-					   uint8 fillfactor)
+					   uint8 fillfactor, Oid tablespace)
 {
 	OTable	   *o_table;
 	int			i;
@@ -651,6 +652,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 	o_table->fields = palloc0(o_table->nfields * sizeof(OTableField));
 	o_table->oids = oids;
+	o_table->tablespace = tablespace;
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
 	o_table->default_compress = InvalidOCompress;
 	o_table->primary_compress = InvalidOCompress;
@@ -1697,6 +1699,8 @@ serialize_o_table(OTable *o_table, int *size)
 		appendBinaryStringInfo(&str, buf_start, field_size);
 	}
 
+	appendBinaryStringInfo(&str, (Pointer) &o_table->tablespace, sizeof(Oid));
+
 	*size = str.len;
 	return str.data;
 }
@@ -1742,7 +1746,6 @@ deserialize_o_table(Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_table, ptr, len);
 	ptr += len;
-	Assert(o_table->data_version == ORIOLEDB_DATA_VERSION);
 
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
@@ -1775,6 +1778,16 @@ deserialize_o_table(Pointer data, Size length)
 		miss->am_value = datumRestore(&ptr, &isnull);
 	}
 	MemoryContextSwitchTo(oldcxt);
+
+	if (o_table->data_version >= 2)
+	{
+		len = sizeof(Oid);
+		Assert((ptr - data) + len <= length);
+		memcpy(&o_table->tablespace, ptr, len);
+		ptr += len;
+	}
+	else
+		o_table->tablespace = DEFAULTTABLESPACE_OID;
 
 	Assert(ptr - data == length);
 	return o_table;

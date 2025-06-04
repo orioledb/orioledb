@@ -76,6 +76,7 @@ typedef struct
 	List	   *expressions;	/* list of Expr */
 	char	   *predicate_str;
 	List	   *predicate;		/* list of Expr */
+	Oid			tablespace;
 	MemoryContext index_mctx;
 } OTableIndex;
 
@@ -102,6 +103,7 @@ typedef struct
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
+	Oid			tablespace;
 	uint32		version;		/* not serialized in serialize_o_table */
 	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
 } OTable;
@@ -118,7 +120,8 @@ extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 
 /* Creates and fills OTable. */
 extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
-									  char relpersistence, uint8 fillfactor);
+									  char relpersistence, uint8 fillfactor,
+									  Oid tablespace);
 
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,
