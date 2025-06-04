@@ -889,7 +889,9 @@ find_downlink(OBTreeFindPageInternalContext *intCxt,
 			return result;
 	}
 
-	if (intCxt->partial && !intCxt->partial->hikeysChunkIsLoaded)
+	if (intCxt->partial &&
+		intCxt->partial->isPartial &&
+		!intCxt->partial->hikeysChunkIsLoaded)
 	{
 		if (!partial_load_hikeys_chunk(intCxt->partial, intCxt->pagePtr))
 			return OBTreeFindDownlinkRetry;
