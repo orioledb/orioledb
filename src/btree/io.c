@@ -27,6 +27,7 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
+#include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "s3/headers.h"
 #include "s3/worker.h"
@@ -212,42 +213,46 @@ typedef struct
 char *
 btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum)
 {
-	o_check_init_db_dir(datoid);
+	char	   *result;
+	char	   *db_prefix;
+
+	o_get_prefixes_for_relnode(datoid, relnode, NULL, &db_prefix);
 
 	if (orioledb_s3_mode)
 	{
 		if (segno == 0)
-			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u-%u",
-							datoid,
-							relnode,
-							chkpNum);
+			result = psprintf("%s/%u-%u",
+							  db_prefix,
+							  relnode,
+							  chkpNum);
 		else
-			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u.%u-%u",
-							datoid,
-							relnode,
-							segno,
-							chkpNum);
+			result = psprintf("%s/%u.%u-%u",
+							  db_prefix,
+							  relnode,
+							  segno,
+							  chkpNum);
 	}
 	else
 	{
 		if (segno == 0)
-			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
-							datoid,
-							relnode);
+			result = psprintf("%s/%u",
+							  db_prefix,
+							  relnode);
 		else
-			return psprintf(ORIOLEDB_DATA_DIR "/%u/%u.%u",
-							datoid,
-							relnode,
-							segno);
+			result = psprintf("%s/%u.%u",
+							  db_prefix,
+							  relnode,
+							  segno);
 	}
+
+	pfree(db_prefix);
+	return result;
 }
 
 char *
 btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 {
 	int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
-
-	o_check_init_db_dir(desc->oids.datoid);
 
 	return btree_filename(desc->oids.datoid,
 						  desc->oids.relnode,
