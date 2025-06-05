@@ -23,6 +23,7 @@
 #include "tableam/descr.h"
 #include "tableam/key_range.h"
 #include "utils/dsa.h"
+#include "utils/memdebug.h"
 #include "utils/palloc.h"
 #include "utils/stopevent.h"
 
@@ -2103,6 +2104,7 @@ btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	}
 
 	pagePtr = entry->data;
+	VALGRIND_CHECK_MEM_IS_DEFINED(pagePtr, ORIOLEDB_BLCKSZ);
 	header = (BTreePageHeader *) pagePtr;
 
 	BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
