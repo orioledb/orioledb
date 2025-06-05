@@ -278,7 +278,7 @@ class RewindXidTest(BaseTest):
 
 		for i in range(1, 25, 4):
 			node.safe_psql(
-			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
+			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -298,7 +298,7 @@ class RewindXidTest(BaseTest):
 		i = 25
 
 		node.safe_psql(
-		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
+		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -310,7 +310,7 @@ class RewindXidTest(BaseTest):
 
 		for i in range(29, 80, 4):
 			node.safe_psql(
-			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
+			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
