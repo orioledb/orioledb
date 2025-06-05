@@ -110,6 +110,17 @@ COMMIT;
 CREATE TEMP TABLE o_tmp_1 () USING orioledb
     ON COMMIT DELETE ROWS;
 
+CREATE TEMP TABLE o_tmp_2 (val_1 int) USING orioledb
+    ON COMMIT DELETE ROWS;
+CREATE INDEX ON o_tmp_2(bit_length(''));
+BEGIN;
+INSERT INTO o_tmp_2 VALUES (1);
+INSERT INTO o_tmp_2 VALUES (2);
+SELECT * FROM o_tmp_2;
+COMMIT;
+SELECT * FROM o_tmp_2;
+DROP TABLE o_tmp_2;
+
 CREATE TABLE o_test_1 USING orioledb
     AS SELECT * FROM generate_series(1, 1000, 1);
 
