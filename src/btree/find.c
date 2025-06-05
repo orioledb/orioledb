@@ -630,6 +630,8 @@ can_fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	int			i;
 	int			offset;
 
+	ASAN_UNPOISON_MEMORY_REGION(meta, sizeof(*meta));
+
 	if (!BTREE_PAGE_FIND_IS(context, FETCH) ||
 		IS_SYS_TREE_OIDS(desc->oids))
 	{
