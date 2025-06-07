@@ -1905,7 +1905,6 @@ drop_primary_index(Relation rel, OTable *o_table)
 
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
-	elog(WARNING, "assign_new_oids CALL 1");
 	assign_new_oids(o_table, rel, true);
 
 	memmove(&o_table->indices[0],

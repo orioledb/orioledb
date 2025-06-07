@@ -141,7 +141,7 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum : i + 1;
+		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] : i + 1;
 
 		Assert(attnum > 0);
 		values[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
@@ -196,7 +196,7 @@ o_create_key_tuple(BTreeDescr *desc, OTuple tuple, Pointer data,
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->fields[i].tableAttnum + ctid_off : i + 1;
+		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] + ctid_off : i + 1;
 
 		Assert(attnum > 0);
 		key[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
@@ -342,7 +342,7 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 		int			attnum;
 
 		if (idx->desc.type == oIndexPrimary)
-			attnum = idx->fields[i].tableAttnum + ctid_off;
+			attnum = idx->tableAttnums[i] + ctid_off;
 		else
 			attnum = i + 1;
 
@@ -547,7 +547,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
-		bound->keys[i].comparator = id->fields[pk_from + i].comparator;
+		bound->keys[i].comparator = id->pk_comparators[i];
 	}
 }
 

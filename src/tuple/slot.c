@@ -122,7 +122,7 @@ tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr)
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = id->fields[i].tableAttnum;
+		int			attnum = id->tableAttnums[i];
 
 		if (attnum == 1 && ctid_off == 1)
 		{
@@ -315,11 +315,11 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			if (index_order)
 			{
 				if (cur_tbl_attnum >= idx->nFields ||
-					attnum != idx->tbl_attnums[cur_tbl_attnum].key)
+					attnum != idx->pk_tbl_field_map[cur_tbl_attnum].key)
 					res_attnum = -2;
 				else
 				{
-					res_attnum = idx->tbl_attnums[cur_tbl_attnum].value;
+					res_attnum = idx->pk_tbl_field_map[cur_tbl_attnum].value;
 					cur_tbl_attnum++;
 				}
 			}
@@ -1010,7 +1010,7 @@ tts_orioledb_get_index_values(TupleTableSlot *slot, OIndexDescr *idx,
 
 	for (i = 0; i < natts; i++)
 	{
-		int			attnum = idx->fields[i].tableAttnum;
+		int			attnum = idx->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
 			values[i] = get_tbl_att(slot, attnum, idx->primaryIsCtid,
@@ -1082,7 +1082,7 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		int			attnum;
 		Oid			typid;
 
-		attnum = idx->fields[i].tableAttnum;
+		attnum = idx->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
 			value = get_tbl_att(slot, attnum, idx->primaryIsCtid,
@@ -1121,7 +1121,7 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 	{
 		Datum		value;
 		bool		isnull;
-		int			attnum = id->fields[i].tableAttnum;
+		int			attnum = id->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
 			value = get_tbl_att(slot, attnum, id->primaryIsCtid,
