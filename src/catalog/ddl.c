@@ -1760,6 +1760,9 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	if (!only_fillfactor)
 	{
 		o_table->toast_oids = toastOids;
+		o_tablespace_cache_add_relnode(o_table->toast_oids.datoid,
+									   o_table->toast_oids.relnode,
+									   o_table->tablespace);
 	}
 
 	if (options)
@@ -2235,6 +2238,9 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 			toast_rel = table_open(toast_relid, AccessExclusiveLock);
 			RelationSetNewRelfilenode(toast_rel, toast_rel->rd_rel->relpersistence);
 			ORelOidsSetFromRel(updated_o_table->toast_oids, toast_rel);
+			o_tablespace_cache_add_relnode(updated_o_table->toast_oids.datoid,
+										   updated_o_table->toast_oids.relnode,
+										   updated_o_table->tablespace);
 			table_close(toast_rel, AccessExclusiveLock);
 			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 			o_tables_table_meta_lock(updated_o_table);
@@ -2469,40 +2475,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
 {
 	Relation	rel;
-
-	if (access != OAT_FUNCTION_EXECUTE && access != OAT_NAMESPACE_SEARCH)
-	{
-		StringInfo str = makeStringInfo();
-		appendStringInfo(str, "OAT: %s: %s(%d) %u %d",
-			access == OAT_DROP ? "DROP" :
-			access == OAT_TRUNCATE ? "TRUNCATE" :
-			access == OAT_POST_CREATE ? "POST CREATE" :
-			access == OAT_POST_ALTER ? "POST ALTER" :
-			"OTHER",
-			classId == 1259 ? "pg_class" :
-			classId == 2615 ? "pg_namespace" :
-			classId == 3079 ? "pg_extension" :
-			classId == 1255 ? "pg_proc" :
-			classId == 2601 ? "pg_am" :
-			classId == 1262 ? "pg_database" :
-			classId == 2964 ? "pg_db_role_setting" :
-			classId == 1247 ? "pg_type" :
-			classId == 2618 ? "pg_rewrite" :
-			classId == 2606 ? "pg_constraint" :
-			"other",
-			classId, objectId, subId);
-		if (classId == 1259)
-		{
-			rel = relation_open(objectId, AccessShareLock);
-			appendStringInfo(str, ": %s: %c: %u %u",
-								rel->rd_rel->relname.data, rel->rd_rel->relkind,
-								rel->rd_rel->oid, rel->rd_locator.relNumber);
-			relation_close(rel, AccessShareLock);
-		}
-		elog(WARNING, "%s", str->data);
-		pfree(str->data);
-		pfree(str);
-	}
 
 	if (access == OAT_POST_CREATE && classId == ExtensionRelationId)
 	{
@@ -3229,22 +3201,30 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 						}
 						Assert(ix_num < o_table->nindices);
-						ereport(WARNING, (errmsg("ix_num: %d", ix_num), errbacktrace()));
-						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-						o_tables_rel_meta_lock(tbl);
-						o_tables_update(o_table, oxid, oSnapshot.csn);
-						o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
-						o_tables_rel_meta_unlock(tbl, InvalidOid);
-						o_invalidate_oids(idx_oids);
-						o_add_invalidate_undo_item(idx_oids,
-												   O_INVALIDATE_OIDS_ON_ABORT);
-						if (!ORelOidsIsEqual(idx_oids, table_oids))
+						if (o_table->indices[ix_num].tablespace == rel->rd_rel->reltablespace)
 						{
-							o_invalidate_oids(table_oids);
-							o_add_invalidate_undo_item(table_oids,
-													   O_INVALIDATE_OIDS_ON_ABORT);
+							fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+							o_tables_rel_meta_lock(tbl);
+							o_tables_update(o_table, oxid, oSnapshot.csn);
+							o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
+							o_tables_rel_meta_unlock(tbl, InvalidOid);
+							o_invalidate_oids(idx_oids);
+							o_add_invalidate_undo_item(idx_oids,
+													O_INVALIDATE_OIDS_ON_ABORT);
+							if (!ORelOidsIsEqual(idx_oids, table_oids))
+							{
+								o_invalidate_oids(table_oids);
+								o_add_invalidate_undo_item(table_oids,
+														O_INVALIDATE_OIDS_ON_ABORT);
+							}
+							o_table_free(o_table);
 						}
-						o_table_free(o_table);
+						else
+						{
+							o_index_drop(tbl, ix_num);
+							o_table_free(o_table);
+							o_define_index(tbl, rel, InvalidOid, false, InvalidIndexNumber, false, NULL);
+						}
 					}
 					else if (rel->rd_options)
 					{

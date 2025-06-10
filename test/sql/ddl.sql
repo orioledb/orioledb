@@ -3,7 +3,6 @@ SET SESSION search_path = 'ddl';
 CREATE EXTENSION orioledb;
 
 \echo :HIDE_TABLEAM
--- TODO: Remove all HIDE_TABLEAM usages
 \set HIDE_TABLEAM off
 SET default_table_access_method = 'orioledb';
 
@@ -68,7 +67,7 @@ SHOW default_table_access_method;
 SET SESSION search_path = 'ddl';
 
 CREATE TABLE atable AS VALUES (1), (2);
-CREATE UNIQUE INDEX anindex ON atable(column1);
+CREATE UNIQUE INDEX anindex ON atable(column1 DESC);
 \d+ atable
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
 INSERT INTO atable VALUES(3);
@@ -133,7 +132,6 @@ SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable_pk'::regclass;
 BEGIN;
 SET LOCAL enable_seqscan = off;
--- TODO: Fix usage of previous oid
 EXPLAIN SELECT * FROM atable ORDER BY column1;
 SELECT * FROM atable ORDER BY column1;
 COMMIT;
@@ -142,40 +140,38 @@ SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 ALTER TABLE atable DROP CONSTRAINT atable_pk;
 SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 BEGIN;
+-- EXPLAIN SELECT * FROM atable;
+-- SELECT * FROM atable;
 SET LOCAL enable_seqscan = off;
 EXPLAIN SELECT * FROM atable ORDER BY column1;
 SELECT * FROM atable ORDER BY column1;
 COMMIT;
+SELECT orioledb_tbl_structure('atable'::regclass);
 
--- TODO: Add support for moving indices between tablespaces
-
--- TODO: Put whole databases to tablespace
--- TODO: Delete from cache when table or index deleted; add test for this to types_test.py
--- TODO: check that every usage of ORIOLEDB_DATA_DIR now uses tablespace
-
--- TODO: Uncomment; solve segfault
 SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
 ALTER INDEX anindex SET TABLESPACE regress_tblspace;
 SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
 BEGIN;
+EXPLAIN SELECT * FROM atable;
+SELECT * FROM atable;
 SET LOCAL enable_seqscan = off;
--- TODO: Fix usage of previous oid
 EXPLAIN SELECT * FROM atable ORDER BY column1;
 SELECT * FROM atable ORDER BY column1;
 COMMIT;
--- \d+ atable
--- SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
--- INSERT INTO atable VALUES(7);
--- TABLE atable;
--- BEGIN;
--- SET LOCAL enable_seqscan = off;
--- EXPLAIN SELECT * FROM atable ORDER BY column1;
--- SELECT * FROM atable ORDER BY column1;
--- COMMIT;
+SELECT orioledb_tbl_structure('atable'::regclass);
+\d+ atable
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
+INSERT INTO atable VALUES(7);
+TABLE atable;
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN SELECT * FROM atable ORDER BY column1;
+SELECT * FROM atable ORDER BY column1;
+COMMIT;
 
--- TODO: Uncomment
--- DROP DATABASE tblspace_test_db;
--- TODO: Remove
+DROP DATABASE tblspace_test_db;
+-- TODO: Delete from cache when table or index deleted; add test for this to types_test.py
+-- TODO: Add tablespaces support to recovery_cleanup_old_files, iterate_files
 \set HIDE_TABLEAM on
