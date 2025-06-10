@@ -839,6 +839,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
 			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
 			o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+			o_tablespace_cache_delete(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);

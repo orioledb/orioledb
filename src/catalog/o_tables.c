@@ -1658,6 +1658,7 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	if (o_table_index->predicate)
 		o_serialize_string(o_table_index->predicate_str, str);
 	o_serialize_node((Node *) o_table_index->expressions, str);
+	appendBinaryStringInfo(str, (Pointer) &o_table_index->tablespace, sizeof(Oid));
 }
 
 Pointer
@@ -1728,6 +1729,11 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 	if (o_table_index->predicate)
 		o_table_index->predicate_str = o_deserialize_string(ptr);
 	o_table_index->expressions = (List *) o_deserialize_node(ptr);
+
+	len = sizeof(Oid);
+	memcpy(&o_table_index->tablespace, *ptr, len);
+	*ptr += len;
+
 	MemoryContextSwitchTo(old_mcxt);
 }
 
