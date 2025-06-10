@@ -1864,6 +1864,10 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	{
 		toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
 		ORelOidsSetFromRel(oTable->toast_oids, toastRel);
+
+		o_tablespace_cache_add_relnode(oTable->toast_oids.datoid,
+									   oTable->toast_oids.relnode,
+									   oTable->tablespace);
 		table_close(toastRel, AccessShareLock);
 	}
 	else
@@ -1883,6 +1887,9 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 		{
 			indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
 			ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
+			o_tablespace_cache_add_relnode(oTable->indices[i].oids.datoid,
+										   oTable->indices[i].oids.relnode,
+										   oTable->indices[i].tablespace);
 			relation_close(indexRel, AccessShareLock);
 		}
 	}

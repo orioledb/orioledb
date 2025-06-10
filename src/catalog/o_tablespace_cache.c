@@ -156,8 +156,10 @@ o_get_prefixes_for_relnode(Oid datoid, Oid relnode, char **prefix, char **db_pre
 		OTablespace	   *o_tablespace = NULL;
 		o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 		o_tablespace = o_tablespace_cache_search(datoid, relnode, cur_lsn, tablespace_cache->nkeys);
-		Assert(o_tablespace);
-		tablespace = o_tablespace->tablespace;
+		if (o_tablespace)
+			tablespace = o_tablespace->tablespace;
+		else
+			tablespace = DEFAULTTABLESPACE_OID;
 	}
 
 	o_get_prefixes_for_tablespace(datoid, tablespace, prefix, db_prefix);
@@ -168,6 +170,18 @@ o_tablespace_cache_add_relnode(Oid datoid, Oid relnode, Oid tablespace)
 {
 	OTablespaceArg	arg = {.tablespace = tablespace};
 	XLogRecPtr	cur_lsn;
+
+	if ((!OidIsValid(tablespace) && MyDatabaseTableSpace == DEFAULTTABLESPACE_OID) ||
+		tablespace == DEFAULTTABLESPACE_OID)
+	{
+		char			   *prefix;
+		char			   *db_prefix;
+
+		o_get_prefixes_for_tablespace(datoid, DEFAULTTABLESPACE_OID, &prefix, &db_prefix);
+		o_verify_dir_exists_or_create(prefix, NULL, NULL);
+		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+		return;
+	}
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 	o_tablespace_cache_add_if_needed(datoid, relnode, cur_lsn, (Pointer) &arg);

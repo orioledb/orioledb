@@ -3002,14 +3002,13 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 	struct dirent *file;
 	DIR		   *dir;
 	char	   *filename;
-	char	   *dirname;
 	bool		first_file_deleted = false;
+	char	   *db_prefix;
 
-	dirname = psprintf(ORIOLEDB_DATA_DIR "/%u", datoid);
+	o_get_prefixes_for_relnode(datoid, relnode, NULL, &db_prefix);
 
-	dir = opendir(dirname);
+	dir = opendir(db_prefix);
 
-	pfree(dirname);
 	if (dir == NULL)
 		return false;
 
@@ -3035,8 +3034,7 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 			{
 				if (!orioledb_s3_mode && !first_file_deleted)
 				{
-					filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%u",
-										datoid, relnode);
+					filename = psprintf("%s/%u", db_prefix, relnode);
 					callback(filename, 0, NULL, arg);
 					pfree(filename);
 					first_file_deleted = true;
@@ -3044,8 +3042,7 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 
 				if (file_segno != 0 || file_ext_p != NULL)
 				{
-					filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%s",
-										datoid, file->d_name);
+					filename = psprintf("%s/%s", db_prefix, file->d_name);
 					callback(filename, file_segno, file_ext_p, arg);
 					pfree(filename);
 				}
@@ -3054,6 +3051,7 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 	}
 
 	closedir(dir);
+	pfree(db_prefix);
 	return true;
 }
 
