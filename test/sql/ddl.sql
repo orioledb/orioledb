@@ -68,6 +68,11 @@ SET SESSION search_path = 'ddl';
 
 CREATE TABLE atable AS VALUES (1), (2);
 CREATE UNIQUE INDEX anindex ON atable(column1 DESC);
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
+SELECT orioledb_sys_tree_structure(1);
+SELECT orioledb_sys_tree_structure(2);
+SELECT orioledb_sys_tree_structure(3);
 \d+ atable
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
 INSERT INTO atable VALUES(3);
@@ -151,6 +156,11 @@ SELECT orioledb_tbl_structure('atable'::regclass);
 SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
 ALTER INDEX anindex SET TABLESPACE regress_tblspace;
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
+SELECT orioledb_sys_tree_structure(1);
+SELECT orioledb_sys_tree_structure(2);
+SELECT orioledb_sys_tree_structure(3);
 SELECT orioledb_tbl_indices('atable'::regclass, true, true);
 SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
 BEGIN;
@@ -170,6 +180,42 @@ SET LOCAL enable_seqscan = off;
 EXPLAIN SELECT * FROM atable ORDER BY column1;
 SELECT * FROM atable ORDER BY column1;
 COMMIT;
+
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
+SELECT orioledb_sys_tree_structure(1);
+SELECT orioledb_sys_tree_structure(2);
+SELECT orioledb_sys_tree_structure(3);
+ALTER INDEX anindex SET TABLESPACE pg_default;
+SELECT orioledb_tbl_indices('atable'::regclass, true, true);
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable'::regclass;
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'anindex'::regclass;
+SELECT orioledb_sys_tree_structure(23);
+SELECT orioledb_sys_tree_structure(1);
+SELECT orioledb_sys_tree_structure(2);
+SELECT orioledb_sys_tree_structure(3);
+
+CREATE INDEX atable_ix2 ON atable(column1) TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('atable'::regclass, true, true);
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable_ix2'::regclass;
+SELECT orioledb_sys_tree_structure(23);
+
+ALTER INDEX atable_ix2 SET TABLESPACE pg_default;
+SELECT orioledb_tbl_indices('atable'::regclass, true, true);
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable_ix2'::regclass;
+SELECT orioledb_sys_tree_structure(23);
+
+ALTER INDEX atable_ix2 SET TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('atable'::regclass, true, true);
+SELECT oid, relname, relfilenode, reltablespace FROM pg_class pc WHERE oid = 'atable_ix2'::regclass;
+SELECT orioledb_sys_tree_structure(23);
+
+DROP INDEX atable_ix2;
+SELECT orioledb_tbl_indices('atable'::regclass, true, true);
+SELECT orioledb_sys_tree_structure(23);
+
+DROP TABLE atable;
+SELECT orioledb_sys_tree_structure(23);
 
 DROP DATABASE tblspace_test_db;
 -- TODO: Delete from cache when table or index deleted; add test for this to types_test.py

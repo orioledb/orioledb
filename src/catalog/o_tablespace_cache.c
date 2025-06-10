@@ -74,7 +74,6 @@ o_tablespace_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg
 	else
 		o_tablespace->tablespace = MyDatabaseTableSpace;
 
-	elog(WARNING, "o_tablespace_cache_fill_entry: %u %u %u", key->common.datoid, DatumGetObjectId(key->keys[0]), o_tablespace->tablespace);
 	o_get_prefixes_for_tablespace(key->common.datoid, o_tablespace->tablespace, &prefix, &db_prefix);
 	o_verify_dir_exists_or_create(prefix, NULL, NULL);
 	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
