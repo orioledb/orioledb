@@ -132,27 +132,6 @@ o_get_prefixes_for_relnode(Oid datoid, Oid relnode, char **prefix, char **db_pre
 
 	if (datoid != SYS_TREES_DATOID)
 	{
-		extern void init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg);
-		VarChar    *optionsArg = cstring_to_text("bUCKSivo");
-		BTreePrintOptions printOptions = {0};
-		StringInfoData buf;
-		BTreeDescr *desc = get_sys_tree(SYS_TREES_TABLESPACE_CACHE);
-
-		init_print_options(&printOptions, optionsArg);
-
-		initStringInfo(&buf);
-		o_print_btree_pages(desc, &buf,
-							sys_tree_key_print(desc),
-							sys_tree_tup_print(desc),
-							NULL, &printOptions, 32);
-
-		elog(WARNING, "TREE:\n%s", buf.data);
-		pfree(buf.data);
-	}
-	elog(WARNING, "o_get_prefixes_for_relnode: %u %u", datoid, relnode);
-
-	if (datoid != SYS_TREES_DATOID)
-	{
 		OTablespace	   *o_tablespace = NULL;
 		o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 		o_tablespace = o_tablespace_cache_search(datoid, relnode, cur_lsn, tablespace_cache->nkeys);

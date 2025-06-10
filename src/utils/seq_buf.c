@@ -152,7 +152,6 @@ get_seq_buf_filename(SeqBufTag *tag)
 	/* this format is used by recovery_cleanup_old_files() */
 	result = psprintf("%s/%u-%u.%s", db_prefix, tag->relnode, tag->num, typename);
 	pfree(db_prefix);
-	elog(WARNING, "result: %s", result);
 	return result;
 }
 
