@@ -5,10 +5,54 @@ CREATE EXTENSION orioledb;
 \echo :HIDE_TABLEAM
 \set HIDE_TABLEAM off
 SET default_table_access_method = 'orioledb';
+-- SET default_table_access_method = 'heap';
 
 SET allow_in_place_tablespaces = true;
 -- CREATE TABLESPACE regress_tblspace LOCATION '';
 CREATE TABLESPACE regress_tblspace LOCATION '/Users/birhburh/projects/orioledb/tblspc';
+
+-- CREATE TABLE atable AS VALUES (1), (2);
+-- EXPLAIN SELECT * FROM atable;
+-- SELECT * FROM atable;
+-- CREATE MATERIALIZED VIEW amv AS SELECT * FROM atable;
+
+CREATE SEQUENCE amv_seq;
+
+CREATE MATERIALIZED VIEW amv (order_id, item_id, quantity, price)
+	AS (VALUES (100, 1, 'a', nextval('amv_seq'::regclass)),
+			   (100, 3, 'b', nextval('amv_seq'::regclass)))
+	WITH NO DATA;
+SELECT * FROM amv;
+
+REFRESH MATERIALIZED VIEW amv;
+SELECT * FROM amv;
+SELECT orioledb_tbl_structure('amv'::regclass);
+
+DROP MATERIALIZED VIEW amv;
+DROP SEQUENCE amv_seq;
+
+CREATE SEQUENCE amv_seq;
+CREATE MATERIALIZED VIEW amv (order_id, item_id, quantity, price)
+	AS (VALUES (100, 1, 'a', nextval('amv_seq'::regclass)),
+			   (100, 3, 'b', nextval('amv_seq'::regclass)));
+SELECT * FROM amv;
+SELECT orioledb_tbl_structure('amv'::regclass);
+
+REFRESH MATERIALIZED VIEW amv WITH NO DATA;
+SELECT * FROM amv;
+SELECT orioledb_tbl_structure('amv'::regclass);
+
+REFRESH MATERIALIZED VIEW amv WITH DATA;
+SELECT * FROM amv;
+SELECT orioledb_tbl_structure('amv'::regclass);
+
+ALTER MATERIALIZED VIEW amv SET TABLESPACE regress_tblspace;
+SELECT * FROM amv;
+SELECT orioledb_tbl_structure('amv'::regclass);
+
+REFRESH MATERIALIZED VIEW amv WITH DATA;
+SELECT * FROM amv;
+SELECT orioledb_tbl_structure('amv'::regclass);
 
 CREATE DATABASE tblspace_test_db TABLESPACE regress_tblspace;
 
@@ -218,6 +262,7 @@ DROP TABLE atable;
 SELECT orioledb_sys_tree_structure(23);
 
 DROP DATABASE tblspace_test_db;
+SELECT orioledb_sys_tree_structure(23);
 -- TODO: Delete from cache when table or index deleted; add test for this to types_test.py
 -- TODO: Add tablespaces support to recovery_cleanup_old_files, iterate_files
 \set HIDE_TABLEAM on
