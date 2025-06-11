@@ -1194,7 +1194,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		{
 			bool		is_matview = (into->viewQuery != NULL);
 
-			if (is_matview && into->accessMethod && strcmp(into->accessMethod, "orioledb") == 0)
+			if (is_matview &&
+				((into->accessMethod && strcmp(into->accessMethod, "orioledb") == 0) ||
+				 (!into->accessMethod && strcmp(default_table_access_method, "orioledb") == 0)))
 			{
 				Query	   *query = castNode(Query, stmt->query);
 				ObjectAddress address;
@@ -1203,6 +1205,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 				address = create_ctas_nodata(query->targetList, into);
 
+				/*
+				 * We cannot just use rel->rd_rules in access hook,
+				 * because it recalculates expression two times if it
+				 * executes postgreses code, even if it skips insertion to
+				 * table
+				 */
 				savedDataQuery = (Query *) copyObject(into->viewQuery);
 				RefreshMatViewByOid(address.objectId, true, false,
 									queryString, NULL, qc);
@@ -2857,12 +2865,28 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				if (!OidIsValid(rel->rd_rel->relrewrite))
 				{
+					if (rel->rd_rel->relkind == RELKIND_MATVIEW)
+					{
+						elog(WARNING, "relhasrules 0: %c",
+								rel->rd_rel->relhasrules ? 'Y' : 'N');
+						if (rel->rd_rel->relhasrules)
+							elog(WARNING, "rd_rules->rules[0 of %d]: %s",
+									rel->rd_rules->numLocks, nodeToString(rel->rd_rules->rules[0]->actions));
+					}
 					create_o_table_for_rel(rel);
 				}
 				else
 				{
 					Relation	old_rel = relation_open(rel->rd_rel->relrewrite, AccessShareLock);
 
+					if (rel->rd_rel->relkind == RELKIND_MATVIEW)
+					{
+						elog(WARNING, "relhasrules 1: %c",
+								rel->rd_rel->relhasrules ? 'Y' : 'N');
+						if (rel->rd_rel->relhasrules)
+							elog(WARNING, "rd_rules->rules[0 of %d]: %s",
+									rel->rd_rules->numLocks, nodeToString(rel->rd_rules->rules[0]->actions));
+					}
 					o_saved_relrewrite = rel->rd_rel->relrewrite;
 					ORelOidsSetFromRel(saved_oids, old_rel);
 					relation_close(old_rel, AccessShareLock);
@@ -2878,7 +2902,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
 												'_') + 1);
 
-				tbl = table_open(tbl_oid, AccessShareLock);
+				tbl = try_table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
 					set_toast_oids_and_options(tbl, rel, false, false);
@@ -3318,6 +3342,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							rewrite_table(tbl, old_o_table, new_o_table);
 							break;
 						case RELKIND_MATVIEW:
+							o_saved_relrewrite = InvalidOid;
 							if (savedDataQuery != NULL)
 								rewrite_matview(tbl, old_o_table, new_o_table);
 							o_drop_table(old_o_table->oids);
@@ -3346,7 +3371,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 												'_') + 1);
 				CommandCounterIncrement();
 
-				tbl = table_open(tbl_oid, AccessShareLock);
+				tbl = try_table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
 					ORelOids	oids;
@@ -3394,12 +3419,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						switch (tbl->rd_rel->relkind)
 						{
 							case RELKIND_RELATION:
+							case RELKIND_MATVIEW:
+								/* for matview we just copy data to not recalculate expressions */
 								Assert(alter_type_exprs == NIL);
 								rewrite_table(tbl, old_o_table, new_o_table);
-								break;
-							case RELKIND_MATVIEW:
-								rewrite_matview(tbl, old_o_table, new_o_table);
-								o_drop_table(old_o_table->oids);
 								break;
 							default:
 								Assert(false);
