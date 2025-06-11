@@ -1225,10 +1225,28 @@ SELECT * FROM o_test_custom_opclass ORDER BY rec_val;
 (10 rows)
 
 RESET enable_seqscan;
+CREATE TABLE o_test_call_cmp_func_in_abort(
+	val_1 int
+)USING orioledb;
+CREATE FUNCTION o_tccfia_cmp(a int, b int) RETURNS int AS $$
+	SELECT 134;
+$$ LANGUAGE SQL IMMUTABLE;
+CREATE OPERATOR FAMILY o_tccfia_fam USING btree;
+CREATE OPERATOR CLASS o_tccfia_opclass FOR TYPE int
+	USING btree FAMILY o_tccfia_fam
+	AS OPERATOR 1 <^, OPERATOR 3 =^,
+	   FUNCTION 1 o_tccfia_cmp(int, int);
+BEGIN;
+CREATE INDEX int_val_ix_s_i ON
+	o_test_call_cmp_func_in_abort(val_1 o_tccfia_opclass);
+INSERT INTO o_test_call_cmp_func_in_abort SELECT generate_series(1,10);
+ROLLBACK;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to table o_test_custom_opclass
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table o_test_custom_opclass
+drop cascades to table o_test_call_cmp_func_in_abort
 DROP SCHEMA opclass CASCADE;
-NOTICE:  drop cascades to 50 other objects
+NOTICE:  drop cascades to 52 other objects
 DETAIL:  drop cascades to function cmp_is_valid_prepare(regproc)
 drop cascades to function cmp_is_valid(regproc)
 drop cascades to function my_int_cmp_p_i(integer,integer)
@@ -1279,4 +1297,6 @@ drop cascades to function my_rec_gt(my_record,my_record)
 drop cascades to operator #<#(my_record,my_record)
 drop cascades to operator #=#(my_record,my_record)
 drop cascades to operator #>#(my_record,my_record)
+drop cascades to function o_tccfia_cmp(integer,integer)
+drop cascades to operator family o_tccfia_fam for access method btree
 RESET search_path;
