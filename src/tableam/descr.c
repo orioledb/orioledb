@@ -34,6 +34,7 @@
 #include "access/nbtree.h"
 #include "catalog/pg_opfamily.h"
 #include "common/hashfn.h"
+#include "executor/functions.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "parser/parse_coerce.h"
@@ -1383,6 +1384,9 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 	{
 		Datum		cmp;
 
+		/* FIX: There should be a better way */
+		if (o_is_syscache_hooks_set() && comparator->finfo.fn_addr == fmgr_sql)
+			comparator->finfo.fn_addr = o_fmgr_sql;
 		cmp = FunctionCall2Coll(&comparator->finfo, comparator->key.collation,
 								left, right);
 		ret = DatumGetInt32(cmp);
