@@ -1395,6 +1395,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			partition_drop_index_list = NIL;
 		}
 	}
+	else if (IsA(pstmt->utilityStmt, AlterTableStmt))
+	{
+		if (alter_type_exprs)
+		{
+			list_free(alter_type_exprs);
+			alter_type_exprs = NIL;
+		}
+	}
 }
 
 static void
@@ -2056,8 +2064,6 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	int			primary_init_nfields = old_o_table->primary_init_nfields;
-
-	elog(WARNING, "rewrite_table");
 
 	if (!old_o_table->has_primary)
 		primary_init_nfields--;
@@ -2865,28 +2871,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				if (!OidIsValid(rel->rd_rel->relrewrite))
 				{
-					if (rel->rd_rel->relkind == RELKIND_MATVIEW)
-					{
-						elog(WARNING, "relhasrules 0: %c",
-								rel->rd_rel->relhasrules ? 'Y' : 'N');
-						if (rel->rd_rel->relhasrules)
-							elog(WARNING, "rd_rules->rules[0 of %d]: %s",
-									rel->rd_rules->numLocks, nodeToString(rel->rd_rules->rules[0]->actions));
-					}
 					create_o_table_for_rel(rel);
 				}
 				else
 				{
 					Relation	old_rel = relation_open(rel->rd_rel->relrewrite, AccessShareLock);
 
-					if (rel->rd_rel->relkind == RELKIND_MATVIEW)
-					{
-						elog(WARNING, "relhasrules 1: %c",
-								rel->rd_rel->relhasrules ? 'Y' : 'N');
-						if (rel->rd_rel->relhasrules)
-							elog(WARNING, "rd_rules->rules[0 of %d]: %s",
-									rel->rd_rules->numLocks, nodeToString(rel->rd_rules->rules[0]->actions));
-					}
 					o_saved_relrewrite = rel->rd_rel->relrewrite;
 					ORelOidsSetFromRel(saved_oids, old_rel);
 					relation_close(old_rel, AccessShareLock);
