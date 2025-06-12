@@ -1182,7 +1182,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		}
 
 		/* Re-try the page level has been changed */
-		if (level != PAGE_GET_LEVEL(intCxt.pagePtr))
+		if (!wrongChangeCount && level != PAGE_GET_LEVEL(intCxt.pagePtr))
 		{
 			if (intCxt.haveLock)
 			{
@@ -1192,7 +1192,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			continue;
 		}
 
-		if (STOPEVENTS_ENABLED())
+		if (!wrongChangeCount && STOPEVENTS_ENABLED())
 		{
 			params = btree_page_stopevent_params(desc, intCxt.pagePtr);
 			STOPEVENT(STOPEVENT_PAGE_READ, params);
