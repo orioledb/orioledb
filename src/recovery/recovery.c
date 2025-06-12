@@ -2436,6 +2436,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
 					ORelOidsSetInvalid(invalid_oids);
+					recovery_oidxshared->isrebuild = false;
 					recovery_send_oids(oids, ix_num, new_o_table->version, invalid_oids, 0, nindices, true);
 				}
 				else
