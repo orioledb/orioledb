@@ -2894,6 +2894,8 @@ delay_if_queued_for_idxbuild(void)
 		HASH_SEQ_STATUS hash_seq;
 		RecoveryIdxBuildQueueState *cur;
 
+		HandleStartupProcInterrupts();
+
 		/* Remove hash entries for completed indexes */
 		hash_seq_init(&hash_seq, idxbuild_oids_hash);
 		while ((cur = (RecoveryIdxBuildQueueState *) hash_seq_search(&hash_seq)) != NULL)
@@ -2906,7 +2908,13 @@ delay_if_queued_for_idxbuild(void)
 		if (hash_get_num_entries(idxbuild_oids_hash) == 0)
 			break;
 
-		ConditionVariableSleep(&recovery_oidxshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+		/*
+		 * We wait on a condition variable that will wake us as soon as the
+		 * pause ends, but we use a timeout so we can check the
+		 * HandleStartupProcInterrupts() periodically too.
+		 */
+		ConditionVariableTimedSleep(&recovery_oidxshared->recoverycv, 1000,
+									WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
 	}
 	ConditionVariableCancelSleep();
 }
@@ -2923,6 +2931,8 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 	 */
 	while (true)
 	{
+		HandleStartupProcInterrupts();
+
 		SpinLockAcquire(&recovery_oidxshared->mutex);
 		hash_elem = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
 															   &oids,
@@ -2948,7 +2958,14 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 		{
 			/* Wait until next index build is completed and repeat hash search */
 			SpinLockRelease(&recovery_oidxshared->mutex);
-			ConditionVariableSleep(&recovery_oidxshared->recoverycv, WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+
+			/*
+			 * We wait on a condition variable that will wake us as soon as
+			 * the pause ends, but we use a timeout so we can check the
+			 * HandleStartupProcInterrupts() periodically too.
+			 */
+			ConditionVariableTimedSleep(&recovery_oidxshared->recoverycv, 1000,
+										WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
 		}
 	}
 	ConditionVariableCancelSleep();
