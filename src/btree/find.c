@@ -422,9 +422,11 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 		keyType == BTreeKeyUniqueLowerBound ||
 		keyType == BTreeKeyUniqueUpperBound)
 	{
+		OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
+
+		Assert(numValues <= bound->nkeys);
 		for (i = 0; i < numValues; i++)
 		{
-			OBTreeKeyBound *bound = (OBTreeKeyBound *) key;
 			uint8		f = bound->keys[i].flags;
 
 			if (f & O_VALUE_BOUND_UNBOUNDED)
@@ -649,7 +651,13 @@ can_fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		return;
 	}
 
-	meta->numKeys = id->nonLeafSpec.natts;
+	if (intCxt->keyType == BTreeKeyUniqueLowerBound ||
+		intCxt->keyType == BTreeKeyUniqueUpperBound)
+		meta->numKeys = id->nUniqueFields;
+	else if (id->desc.type != oIndexToast && id->desc.type != oIndexBridge)
+		meta->numKeys = id->nKeyFields;
+	else
+		meta->numKeys = id->nonLeafSpec.natts;
 
 	offset = 0;
 	for (i = 0; i < meta->numKeys; i++)
