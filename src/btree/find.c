@@ -485,6 +485,8 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 	bool		lowerSet = false;
 	int32		key = DatumGetInt32(keyDatum);
 
+	p += *lower * stride;
+
 	for (i = *lower; i < *upper; i++)
 	{
 		int32		value = *((int32 *) p);
@@ -513,6 +515,8 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 	int			i;
 	bool		lowerSet = false;
 	int64		key = DatumGetInt32(keyDatum);
+
+	p += *lower * stride;
 
 	for (i = *lower; i < *upper; i++)
 	{
@@ -543,6 +547,8 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 	bool		lowerSet = false;
 	Oid			key = DatumGetInt32(keyDatum);
 
+	p += *lower * stride;
+
 	for (i = *lower; i < *upper; i++)
 	{
 		Oid			value = *((Oid *) p);
@@ -571,6 +577,8 @@ float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 	int			i;
 	bool		lowerSet = false;
 	float8		key = DatumGetInt32(keyDatum);
+
+	p += *lower * stride;
 
 	for (i = *lower; i < *upper; i++)
 	{
