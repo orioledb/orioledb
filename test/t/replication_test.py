@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 
-from .base_test import BaseTest
+from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent
 
 
 class ReplicationTest(BaseTest):
@@ -265,6 +265,53 @@ class ReplicationTest(BaseTest):
 					""")
 					con1.commit()
 					self.catchup_orioledb(replica)
+
+	def test_replica_truncate_checkpointer_punch_holes(self):
+		with self.node as master:
+			self.node.append_conf("log_min_messages = notice")
+			self.node.append_conf("orioledb.undo_buffers = 256MB")
+			master.start()
+
+			# create a backup
+			with self.getReplica() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+				    CREATE TABLE IF NOT EXISTS o_test (
+				    	key integer NOT NULL
+				    ) USING orioledb;
+				""")
+				replica.append_conf("log_min_messages = notice")
+				replica.append_conf("orioledb.enable_stopevents = true")
+				replica.start()
+
+				master.execute(
+				    "INSERT INTO o_test (SELECT id FROM generate_series(1, 1000, 1) id);"
+				)
+
+				# wait for synchronization
+				self.catchup_orioledb(replica)
+
+				con1 = replica.connect()
+				con2 = replica.connect()
+
+				con2.execute(
+				    "SELECT pg_stopevent_set('checkpoint_before_post_process', 'true');"
+				)
+				master.execute("CHECKPOINT")
+				t1 = ThreadQueryExecutor(con1, "CHECKPOINT;")
+
+				t1.start()
+				wait_checkpointer_stopevent(replica)
+
+				master.execute("TRUNCATE o_test;")
+				self.catchup_orioledb(replica)
+
+				con2.execute(
+				    "SELECT pg_stopevent_reset('checkpoint_before_post_process');"
+				)
+				t1.join()
+
+				self.assertEqual(con2.execute("TABLE o_test"), [])
 
 	def test_replication_non_root_eviction(self):
 		with self.node as master:

@@ -932,11 +932,16 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	descr->nUniqueFields = oIndex->nUniqueFields;
 	descr->nFields = oIndex->nNonLeafFields;
 
+	mcxt = OGetIndexContext(descr);
+	descr->fields = (OIndexField *) MemoryContextAllocZero(mcxt,
+														   sizeof(OIndexField) * descr->nFields);
+	descr->tableAttnums = (AttrNumber *) MemoryContextAllocZero(mcxt, sizeof(AttrNumber) * oIndex->nLeafFields);
+	descr->pk_comparators = (OComparator **) MemoryContextAllocZero(mcxt, sizeof(OComparator *) * oIndex->nPrimaryFields);
+
 	descr->nKeyFields = oIndex->nKeyFields;
 	descr->nIncludedFields = oIndex->nIncludedFields;
 	for (i = 0; i < oIndex->nLeafFields; i++)
 	{
-		OIndexField *field = &descr->fields[i];
 		OTableIndexField *iField = &oIndex->leafFields[i];
 		int			attnum = iField->attnum;
 
@@ -955,7 +960,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 			attnum += oIndex->primaryIsCtid ? 2 : 1;
 		}
 
-		field->tableAttnum = attnum;
+		descr->tableAttnums[i] = attnum;
 		maxTableAttnum = Max(maxTableAttnum, attnum);
 	}
 
@@ -986,7 +991,21 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 										   iField->opclass);
 	}
 
-	mcxt = OGetIndexContext(descr);
+	for (i = 0; i < oIndex->nPrimaryFields; i++)
+	{
+		OIndexField temp_field = {0};
+		AttrNumber	attnum = oIndex->primaryFieldsAttnums[i] - 1;
+		OTableIndexField *iField = &oIndex->leafFields[attnum];
+
+		temp_field.collation = TupleDescAttr(descr->leafTupdesc, i)->attcollation;
+		if (OidIsValid(iField->collation))
+			temp_field.collation = iField->collation;
+
+		oFillFieldOpClassAndComparator(&temp_field, oIndex->tableOids.datoid,
+									   iField->opclass);
+		descr->pk_comparators[i] = temp_field.comparator;
+	}
+
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	descr->predicate = list_copy_deep(oIndex->predicate);
 	if (descr->predicate)
@@ -1016,13 +1035,13 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	o_unset_syscache_hooks();
 	if (oIndex->indexType == oIndexPrimary)
 	{
-		descr->tbl_attnums = palloc0(sizeof(AttrNumberMap) * descr->nFields);
+		descr->pk_tbl_field_map = palloc0(sizeof(AttrNumberMap) * descr->nFields);
 		for (i = 0; i < descr->nFields; i++)
 		{
-			descr->tbl_attnums[i].key = descr->fields[i].tableAttnum - 1;
-			descr->tbl_attnums[i].value = i;
+			descr->pk_tbl_field_map[i].key = descr->tableAttnums[i] - 1;
+			descr->pk_tbl_field_map[i].value = i;
 		}
-		pg_qsort(descr->tbl_attnums, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
+		pg_qsort(descr->pk_tbl_field_map, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
 	}
 	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();

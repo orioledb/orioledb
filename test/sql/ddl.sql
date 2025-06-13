@@ -493,6 +493,47 @@ CREATE TABLE o_test_plpgsql_default (
     val_1 int DEFAULT LENGTH(o_test_plpgsql_default_func(6))
 ) USING orioledb;
 
+CREATE TABLE test_35_columns (
+  gid serial,
+  col1 varchar(1),
+  col2 varchar(1),
+  col3 varchar(1),
+  col4 varchar(1),
+  col5 varchar(1),
+  col6 varchar(1),
+  col7 varchar(1),
+  col8 varchar(1),
+  col9 varchar(1),
+  col10 varchar(1),
+  col11 varchar(1),
+  col12 varchar(1),
+  col13 varchar(1),
+  col14 varchar(1),
+  col15 varchar(1),
+  col16 varchar(1),
+  col17 varchar(1),
+  col18 varchar(1),
+  col19 varchar(1),
+  col20 varchar(1),
+  col21 varchar(1),
+  col22 varchar(1),
+  col23 varchar(1),
+  col24 varchar(1),
+  col25 varchar(1),
+  col26 varchar(1),
+  col27 varchar(1),
+  col28 varchar(1),
+  col29 varchar(1),
+  col30 varchar(1),
+  col31 varchar(1),
+  col32 varchar(1),
+  col33 varchar(1),
+  col34 varchar(1)
+) using orioledb;
+
+INSERT INTO test_35_columns (col27, col10) VALUES ('A', 'J');
+SELECT gid, col10, col15, col27, col33, col34 FROM test_35_columns;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;

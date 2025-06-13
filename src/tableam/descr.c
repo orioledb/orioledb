@@ -1077,7 +1077,7 @@ is_pk_attnum(OTableDescr *tableDescr, AttrNumber attnum)
 
 	for (i = 0; i < pk->nFields; i++)
 	{
-		if (attnum == pk->fields[i].tableAttnum)
+		if (attnum == pk->tableAttnums[i])
 			return true;
 	}
 	return false;

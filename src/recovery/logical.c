@@ -54,7 +54,7 @@ tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
 	{
 		int			attnum;
 
-		attnum = idx->fields[i].tableAttnum - 1;
+		attnum = idx->tableAttnums[i] - 1;
 		if (attnum >= 0)
 		{
 			dstSlot->tts_values[i] = srcSlot->tts_values[i];
