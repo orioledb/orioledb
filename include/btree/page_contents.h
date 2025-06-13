@@ -92,6 +92,10 @@ typedef struct
 
 struct BTreePageItemLocator
 {
+	/*
+	 * TODO: BTreeChunkDesc type field should be added here instead of
+	 * "chunk", "chunkSize", "chunkItemsCount" fields.
+	 */
 	OffsetNumber chunkOffset;
 	OffsetNumber itemOffset;
 	OffsetNumber chunkItemsCount;
