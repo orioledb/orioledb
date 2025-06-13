@@ -1032,6 +1032,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.keyType = keyType;
 	intCxt.targetLevel = targetLevel;
 
+
+	ASAN_UNPOISON_MEMORY_REGION(&fastpathMeta, sizeof(fastpathMeta));
 	if (STOPEVENTS_ENABLED())
 		fastpathMeta.enabled = false;
 	else
