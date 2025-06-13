@@ -1032,7 +1032,10 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.keyType = keyType;
 	intCxt.targetLevel = targetLevel;
 
-	can_fastpath_find_downlink(&intCxt, &fastpathMeta);
+	if (STOPEVENTS_ENABLED())
+		fastpathMeta.enabled = false;
+	else
+		can_fastpath_find_downlink(&intCxt, &fastpathMeta);
 
 	/*
 	 * See description of the function.
