@@ -125,6 +125,9 @@ extern void remove_redundant_row_locks(BTreeLeafTuphdr *tuphdr_ptr,
 									   UndoLocation savepointUndoLocation);
 extern UndoLocation find_non_lock_only_undo_record(UndoLogType undoType,
 												   BTreeLeafTuphdr *tuphdr);
+extern void reset_command_undo_locations(void);
+extern UndoLocation command_get_undo_location(CommandId cid);
+extern UndoLocation last_command_get_undo_location(void);
 extern void modify_undo_callback(UndoLogType undoType,
 								 UndoLocation location,
 								 UndoStackItem *baseItem,

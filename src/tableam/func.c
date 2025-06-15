@@ -321,7 +321,10 @@ orioledb_tbl_structure(PG_FUNCTION_ARGS)
 	text	   *result;
 	int			treen;
 	StringInfoData buf;
-	BTreePrintOptions printOptions = {0};
+	BTreePrintOptions printOptions;
+
+	ASAN_UNPOISON_MEMORY_REGION(&printOptions, sizeof(printOptions));
+	MemSet(&printOptions, 0, sizeof(printOptions));
 
 	orioledb_check_shmem();
 

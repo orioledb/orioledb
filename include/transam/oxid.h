@@ -47,6 +47,9 @@ typedef struct OSnapshot
 	CommitSeqNo csn;
 	XLogRecPtr	xlogptr;
 	XLogRecPtr	xmin;
+	CommandId	cid;
+	UndoLocation cidUndoLocation;	/* Cached location of first undo record
+									 * for cid */
 } OSnapshot;
 
 extern OSnapshot o_in_progress_snapshot;
@@ -57,6 +60,8 @@ extern OSnapshot o_non_deleted_snapshot;
 		(o_snapshot)->xmin = (snapshot)->csnSnapshotData.xmin; \
 		(o_snapshot)->csn = (snapshot)->csnSnapshotData.snapshotcsn; \
 		(o_snapshot)->xlogptr = (snapshot)->csnSnapshotData.xlogptr; \
+		(o_snapshot)->cid = (snapshot)->curcid; \
+		(o_snapshot)->cidUndoLocation = MaxUndoLocation; \
 	} while (false)
 
 #define O_LOAD_SNAPSHOT_CSN(o_snapshot, csnValue) \
@@ -64,6 +69,8 @@ extern OSnapshot o_non_deleted_snapshot;
 		(o_snapshot)->xmin = 0; \
 		(o_snapshot)->csn = (csnValue); \
 		(o_snapshot)->xlogptr = InvalidXLogRecPtr; \
+		(o_snapshot)->cid = 0; \
+		(o_snapshot)->cidUndoLocation = MaxUndoLocation; \
 	} while (false)
 
 #define XLOG_PTR_ALIGN(ptr) ((ptr) + ((ptr) & 1))
