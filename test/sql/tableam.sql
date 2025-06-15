@@ -910,6 +910,15 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
 SELECT val_1, length(val_2) = val_1,
 	   val_2 = repeat('x', val_1) FROM o_test_split_rightmost;
 
+-- Test cid in snapshot used in cursor
+BEGIN;
+CREATE TEMP TABLE o_test_cursor_snapshot (val_1 int) USING orioledb;
+INSERT INTO o_test_cursor_snapshot VALUES (1), (2), (3);
+DECLARE c CURSOR FOR SELECT * FROM o_test_cursor_snapshot;
+DELETE FROM o_test_cursor_snapshot;
+FETCH ALL FROM c;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

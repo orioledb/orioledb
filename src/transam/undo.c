@@ -10,6 +10,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "c.h"
 #include "postgres.h"
 
 #include <unistd.h>
@@ -36,6 +37,7 @@
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
+
 
 #define GET_UNDO_REC(undoType, loc) (o_undo_buffers[(int) (undoType)] + \
 	(loc) % o_undo_circular_sizes[(int) (undoType)])
@@ -148,6 +150,27 @@ static OBuffersDesc undoBuffersDesc =
 
 static bool wait_for_reserved_location(UndoLogType undoType,
 									   UndoLocation undoLocationToWait);
+
+/*
+ * A sorted array comprising a map from CommandId to the UndoLocation of the
+ * first undo record for that command.  It is used to determine visibility
+ * within the same transaction and to detect "self-updated" tuples.  That is
+ * a bit tricky, assuming PostgreSQL can switch execution between commands.
+ * However, that could only happen for "subcommands," such as trigger
+ * execution.  However, the execution of a command finishes after all of its
+ * subcommands, so a comparison of undo positions should be fine for checking
+ * if the given change belongs to some of the previous commands.
+ */
+typedef struct
+{
+	CommandId	cid;
+	UndoLocation undoLocation;
+} CommandIdInfo;
+
+static CommandIdInfo commandInfosStatic[16];
+static CommandIdInfo *commandInfos = commandInfosStatic;
+static int	commandIndex = -1,
+			commandInfosLength = lengthof(commandInfosStatic);
 
 Size
 undo_shmem_needs(void)
@@ -1313,6 +1336,7 @@ undo_xact_callback(XactEvent event, void *arg)
 		{
 			reset_cur_undo_locations();
 			orioledb_reset_xmin_hook();
+			reset_command_undo_locations();
 			oxid_needs_wal_flush = false;
 		}
 	}
@@ -1359,6 +1383,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 				wal_after_commit();
 				reset_cur_undo_locations();
+				reset_command_undo_locations();
 				oxid_needs_wal_flush = false;
 				break;
 			case XACT_EVENT_ABORT:
@@ -1368,6 +1393,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
 				reset_cur_undo_locations();
+				reset_command_undo_locations();
 				current_oxid_abort();
 				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 				oxid_needs_wal_flush = false;
@@ -1402,9 +1428,6 @@ undo_xact_callback(XactEvent event, void *arg)
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			free_retained_undo_location((UndoLogType) i);
-
-		for (i = 0; i < (int) UndoLogsCount; i++)
-			saved_undo_location[i] = InvalidUndoLocation;
 	}
 
 	if (event == XACT_EVENT_COMMIT && isParallelWorker)
@@ -1601,16 +1624,12 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
 			update_subxact_undo_location_on_commit(parentSubid);
-			for (i = 0; i < (int) UndoLogsCount; i++)
-				saved_undo_location[i] = InvalidUndoLocation;
 			break;
 		case SUBXACT_EVENT_ABORT_SUB:
 			for (i = 0; i < (int) UndoLogsCount; i++)
 				rollback_to_savepoint((UndoLogType) i, UndoStackFull,
 									  parentSubid, true);
 			add_rollback_to_savepoint_wal_record(parentSubid);
-			for (i = 0; i < (int) UndoLogsCount; i++)
-				saved_undo_location[i] = InvalidUndoLocation;
 
 			/*
 			 * It might happen that we've released some row-level locks.  Some
@@ -1982,4 +2001,92 @@ o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 {
 	Assert(abort);
 	return;
+}
+
+void
+reset_command_undo_locations(void)
+{
+	commandIndex = -1;
+	if (commandInfos != commandInfosStatic)
+		pfree(commandInfos);
+	commandInfos = commandInfosStatic;
+	commandInfosLength = lengthof(commandInfosStatic);
+}
+
+/*
+ * Return the undo location for the first entry of commandInfos whose cid is
+ * greater than or equal to the requested `cid`.
+ *
+ * If every stored `cid` is smaller than the requested one,
+ * `MaxUndoLocation` is returned.
+ */
+UndoLocation
+command_get_undo_location(CommandId cid)
+{
+	int			lo = 0;			/* left bound (inclusive)  */
+	int			hi = commandIndex;	/* right bound (inclusive) */
+	int			pos = commandIndex + 1; /* “not found” sentinel    */
+
+	/* No commands have been saved yet */
+	if (commandIndex < 0)
+		return MaxUndoLocation;
+
+	while (lo <= hi)
+	{
+		int			mid = lo + ((hi - lo) >> 1);
+
+		if (commandInfos[mid].cid >= cid)
+		{
+			/*
+			 * Keep the candidate and search to the left to find the first
+			 * element >= cid
+			 */
+			pos = mid;
+			hi = mid - 1;
+		}
+		else
+		{
+			/* The current cid is smaller; search the right half */
+			lo = mid + 1;
+		}
+	}
+
+	/* cid is larger than any stored value: return the sentinel */
+	if (pos > commandIndex)
+		return MaxUndoLocation;
+
+	return commandInfos[pos].undoLocation;
+}
+
+UndoLocation
+last_command_get_undo_location(void)
+{
+	return command_get_undo_location(GetCurrentCommandId(false));
+}
+
+void
+update_command_undo_location(CommandId commandId, UndoLocation undoLocation)
+{
+	if (commandIndex < 0 || commandInfos[commandIndex].cid != commandId)
+	{
+		commandIndex++;
+		if (commandIndex >= commandInfosLength)
+		{
+			if (commandInfos == commandInfosStatic)
+			{
+				commandInfosLength = 2 * lengthof(commandInfosStatic);
+				commandInfos = MemoryContextAlloc(TopMemoryContext,
+												  sizeof(*commandInfos) * commandInfosLength);
+				memcpy(commandInfos, commandInfosStatic, sizeof(commandInfosStatic));
+			}
+			else
+			{
+				commandInfosLength *= 2;
+				commandInfos = repalloc(commandInfos, sizeof(*commandInfos) * commandInfosLength);
+			}
+		}
+		Assert(commandIndex < commandInfosLength);
+		commandInfos[commandIndex].cid = commandId;
+		commandInfos[commandIndex].undoLocation = undoLocation;
+	}
 }

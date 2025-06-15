@@ -88,6 +88,7 @@ typedef uint32 OInMemoryBlkno;
 /* Undo log location */
 typedef uint64 UndoLocation;
 #define	InvalidUndoLocation		UINT64CONST(0x2000000000000000)
+#define	MaxUndoLocation			UINT64CONST(0x1FFFFFFFFFFFFFFE)
 #define	UndoLocationValueMask	UINT64CONST(0x1FFFFFFFFFFFFFFF)
 #define UndoLocationIsValid(loc)	(((loc) & InvalidUndoLocation) == 0)
 #define UndoLocationGetValue(loc)	((loc) & UndoLocationValueMask)
@@ -433,7 +434,6 @@ typedef struct OTableDescr OTableDescr;
 typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
-extern UndoLocation saved_undo_location[(int) UndoLogsCount];
 extern List *reindex_list;
 extern IndexBuildResult o_pkey_result;
 
