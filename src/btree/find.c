@@ -823,7 +823,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 			loc->chunk = chunk;
 			loc->chunkItemsCount = chunkItemsCount;
 			loc->chunkSize = chunkSize;
-			loc->itemOffset = itemIndex;
+			loc->itemOffset = itemIndex - 1;
 			loc->chunkOffset = chunkIndex;
 		}
 		else
