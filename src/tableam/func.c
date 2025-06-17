@@ -58,51 +58,6 @@ PG_FUNCTION_INFO_V1(orioledb_tree_stat);
 extern void log_btree(BTreeDescr *desc);
 
 static void
-o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
-			  FmgrInfo *outputFns, StringInfo buf, OTuple tup,
-			  Datum *values, bool *nulls, bool printVersion)
-{
-	Form_pg_attribute atti;
-	int			attnum,
-				i;
-
-	appendStringInfo(buf, "(");
-
-	if (printVersion)
-		appendStringInfo(buf, "(%u) ", o_tuple_get_version(tup));
-
-	for (i = 0; i < tupDesc->natts; i++)
-	{
-		if (i > 0)
-			appendStringInfo(buf, ", ");
-		attnum = i + 1;
-		values[i] = o_fastgetattr(tup, attnum, tupDesc, spec, &nulls[i]);
-		if (nulls[i])
-		{
-			appendStringInfo(buf, "null");
-		}
-		else
-		{
-			atti = TupleDescAttr(tupDesc, i);
-			if (!atti->attbyval && atti->attlen && !nulls[i])
-			{
-				Pointer		p = DatumGetPointer(values[i]);
-
-				if (IS_TOAST_POINTER(p))
-				{
-					appendStringInfo(buf, "TOASTed");
-					continue;
-				}
-			}
-			appendStringInfo(buf, "'%s'",
-							 OutputFunctionCall(&outputFns[i], values[i]));
-		}
-	}
-
-	appendStringInfo(buf, ")");
-}
-
-static void
 idx_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 {
 	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
