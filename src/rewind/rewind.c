@@ -217,12 +217,12 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTime, OXid re
 		{
 			Assert(rewindItem->tag == REWIND_ITEM_TAG);
 
-			Assert (rewindItem->oxid != InvalidOXid || rewindItem->xid != InvalidTransactionId);
+			Assert (OXidIsValid(rewindItem->oxid) || TransactionIdIsValid(rewindItem->xid));
 
 			if ((rewind_mode == REWIND_MODE_TIME && TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000)) ||
 			(rewind_mode == REWIND_MODE_XID &&
-			  ( (rewind_xid != InvalidTransactionId && rewindItem->xid != InvalidTransactionId && rewindItem->xid < rewind_xid) ||
-			    (rewind_oxid != InvalidOXid && rewindItem->oxid != InvalidOXid && rewindItem->oxid < rewind_oxid) )))
+			  ( (OXidIsValid(rewind_xid) && TransactionIdIsValid(rewindItem->xid) && TransactionIdPrecedes(rewindItem->xid, rewind_xid)) ||
+			    (OXidIsValid(rewind_oxid) && OXidIsValid(rewindItem->oxid) && rewindItem->oxid < rewind_oxid) )))
 			{
 				long secs;
 				int  usecs;
@@ -236,7 +236,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTime, OXid re
 			/* Rewind current rewind item */
 
 			/* Undo orioledb transaction */
-			if (rewindItem->oxid != InvalidOXid)
+			if (OXidIsValid(rewindItem->oxid))
 			{
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
@@ -256,7 +256,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTime, OXid re
 			}
 
 			/* Abort transaction for non-orioledb tables */
-			if (rewindItem->xid != InvalidTransactionId)
+			if (TransactionIdIsValid(rewindItem->xid))
 			{
 				Assert((started_subxids && got_all_subxids) || (!started_subxids && !got_all_subxids));
 				if (got_all_subxids)
@@ -343,24 +343,24 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 
 		elog(LOG, "Rewind requested, to Xid %u, OXid %lu", rewind_xid, rewind_oxid);
 
-		if (rewind_xid == InvalidTransactionId && rewind_oxid == InvalidOXid)
+		if (!TransactionIdIsValid(rewind_xid) && !OXidIsValid(rewind_oxid))
 		{
 			elog(ERROR, "Neither rewind XID nor OXid are valid");
 			return;
 		}
 
-		if (rewind_xid != InvalidTransactionId)
+		if (TransactionIdIsValid(rewind_xid))
 		{
-			if (rewind_xid >= (TransactionId) GetTopTransactionId())
+			if (TransactionIdFollowsOrEquals(rewind_xid, (TransactionId) GetTopTransactionId()))
 				elog(WARNING, "Rewind XID is not in the past. Rewind will be based only on rewind OXid");
-			else if (rewind_xid < oldest)
+			else if (TransactionIdPrecedes(rewind_xid, oldest))
 			{
 				elog(WARNING, "Rewind XID is older than saved for rewind. Rewind to oldest possible XID %u", oldest);
 				rewind_xid = oldest;
 			}
 		}
 
-		if (rewind_oxid == InvalidOXid)
+		if (!OXidIsValid(rewind_oxid))
 		{
 			if (!xid_is_finished_for_everybody(rewind_oxid))
 			{
@@ -788,7 +788,7 @@ rewind_worker_main(Datum main_arg)
 						break;
 					}
 
-					if (rewindItem->oxid != InvalidOXid)
+					if (OXidIsValid(rewindItem->oxid))
 					{
 						/* Fix current oriole rewind item */
 
@@ -942,7 +942,7 @@ save_precommit_xid_subxids(void)
 	/* Don't overwrite existing precommit_xid with zero. */
 	if (TransactionIdIsValid(xid1))
 	{
-		Assert(precommit_xid == InvalidTransactionId);
+		Assert(!TransactionIdIsValid(precommit_xid));
 
 		precommit_xid = xid1;
                 precommit_nsubxids = xactGetCommittedChildren(&precommit_subxids);
@@ -1003,7 +1003,7 @@ next_subxids_item:
 		/* Fill subxids entry in a circular buffer. */
 		SubxidsItem *subxidsItem = (SubxidsItem *) rewindItem;
 
-		Assert (xid != InvalidTransactionId);
+		Assert (TransactionIdIsValid(xid));
 		Assert (nsubxids > 0);
 		subxidsItem->tag = SUBXIDS_ITEM_TAG;
 		subxidsItem->oxid = oxid;
@@ -1034,9 +1034,9 @@ next_subxids_item:
 		rewindItem->nsubxids = nsubxids;
 		rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
 
-		Assert (oxid != InvalidOXid || xid != InvalidTransactionId);
+		Assert (OXidIsValid(oxid) || TransactionIdIsValid(xid));
 
-		if(oxid != InvalidOXid)
+		if (OXidIsValid(oxid))
 		{
 			Assert(csn_is_retained_for_rewind(oxid_get_csn(oxid, true)));
 
@@ -1054,7 +1054,7 @@ next_subxids_item:
 
 		if (nsubxids)
 		{
-			Assert(xid != InvalidTransactionId);
+			Assert(TransactionIdIsValid(xid));
 			subxid_only = true;
 			subxids_count = 0;
 			goto next_subxids_item; /* Write first rewindItem only with subxids */
