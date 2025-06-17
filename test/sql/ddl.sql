@@ -2,18 +2,11 @@ CREATE SCHEMA ddl;
 SET SESSION search_path = 'ddl';
 CREATE EXTENSION orioledb;
 
--- TODO: Move some of matview tests to createas probably
--- TODO: Move tablespace tests to separate file probably
--- TODO: Or having postgres tests is enough
-
-\echo :HIDE_TABLEAM
-\set HIDE_TABLEAM off
 SET default_table_access_method = 'orioledb';
 -- SET default_table_access_method = 'heap';
 
 SET allow_in_place_tablespaces = true;
--- CREATE TABLESPACE regress_tblspace LOCATION '';
-CREATE TABLESPACE regress_tblspace LOCATION '/Users/birhburh/projects/orioledb/tblspc'; -- TODO: Remove absolute path
+CREATE TABLESPACE regress_tblspace LOCATION '';
 
 -- CREATE TABLE atable AS VALUES (1), (2);
 -- EXPLAIN SELECT * FROM atable;
@@ -275,9 +268,13 @@ ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_def
 ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
 ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default;
 
+-- TODO: Move some of matview tests to createas probably
+-- TODO: Move tablespace tests to separate file probably
+-- TODO: Or having postgres tests is enough
+
 -- TODO: Delete from cache when table or index deleted; add test for this to types_test.py
 -- TODO: Add recovery tests; probably same as last item
+
 -- TODO: Add tablespaces support to recovery_cleanup_old_files, iterate_files
 -- TODO: DROP TABLESPACE regress_tblspace_renamed;
 -- TODO: REINDEX (TABLESPACE; also make CONCURRENTLY work but throw a warning that it uses simple one
-\set HIDE_TABLEAM on

@@ -309,6 +309,9 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				if (recovery_header->type & RECOVERY_MODIFY_OIDS)
 				{
+					char			   *prefix;
+					char			   *db_prefix;
+
 					memcpy(&oids, data + data_pos, sizeof(ORelOids));
 					data_pos += sizeof(ORelOids);
 					ix_type = *(data + data_pos);
@@ -331,6 +334,10 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 														 false,
 														 NULL);
 					}
+					o_get_prefixes_for_relnode(indexDescr->oids.datoid,
+											   indexDescr->oids.relnode, &prefix, &db_prefix);
+					o_verify_dir_exists_or_create(prefix, NULL, NULL);
+					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 				}
 
 				if (type == RecoveryMsgTypeBridgeErase)
