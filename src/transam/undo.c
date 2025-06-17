@@ -2059,9 +2059,19 @@ command_get_undo_location(CommandId cid)
 }
 
 UndoLocation
-last_command_get_undo_location(void)
+current_command_get_undo_location(void)
 {
-	return command_get_undo_location(GetCurrentCommandId(false));
+	CommandId	cid = GetCurrentCommandId(false);
+
+	if (commandIndex < 0 || commandInfos[commandIndex].cid != cid)
+	{
+		UndoLocation loc;
+
+		(void) get_undo_record(UndoLogRegular, &loc, MAXIMUM_ALIGNOF);
+		update_command_undo_location(cid, loc);
+	}
+
+	return command_get_undo_location(cid);
 }
 
 void

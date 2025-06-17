@@ -276,7 +276,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.waitCallback = NULL,
 		.modifyDeletedCallback = o_insert_callback,
 		.modifyCallback = NULL,
-		.needsUndoForSelfCreated = true,
+		.needsUndoForSelfCreated = false,
 		.arg = slot
 	};
 
