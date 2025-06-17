@@ -221,7 +221,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTime, OXid re
 
 			if ((rewind_mode == REWIND_MODE_TIME && TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTime, rewind_time * 1000)) ||
 			(rewind_mode == REWIND_MODE_XID &&
-			  ( (OXidIsValid(rewind_xid) && TransactionIdIsValid(rewindItem->xid) && TransactionIdPrecedes(rewindItem->xid, rewind_xid)) ||
+			  ( (TransactionIdIsValid(rewind_xid) && TransactionIdIsValid(rewindItem->xid) && TransactionIdPrecedes(rewindItem->xid, rewind_xid)) ||
 			    (OXidIsValid(rewind_oxid) && OXidIsValid(rewindItem->oxid) && rewindItem->oxid < rewind_oxid) )))
 			{
 				long secs;
