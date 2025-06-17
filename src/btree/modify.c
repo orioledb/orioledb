@@ -690,7 +690,17 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	int			tuplen;
 
 	if (context->undoIsReserved && context->needsUndo)
+	{
 		o_btree_modify_add_undo_record(context);
+	}
+	else if (!context->needsUndo)
+	{
+		BTreeLeafTuphdr *leafTuphdr = &context->leafTuphdr;
+
+		leafTuphdr->undoLocation = InvalidUndoLocation;
+		if (desc->undoType == UndoLogRegular)
+			leafTuphdr->undoLocation |= current_command_get_undo_location();
+	}
 
 	tuplen = o_btree_len(desc, context->tuple, OTupleLength);
 	Assert(tuplen <= O_BTREE_MAX_TUPLE_SIZE);
@@ -747,7 +757,10 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								BTreeOperationInsert, blkno,
 								O_PAGE_GET_CHANGE_COUNT(page),
 								&undoLocation);
-		leafTuphdr->undoLocation = InvalidUndoLocation | last_command_get_undo_location();
+
+		leafTuphdr->undoLocation = InvalidUndoLocation;
+		if (desc->undoType == UndoLogRegular)
+			leafTuphdr->undoLocation |= current_command_get_undo_location();
 	}
 }
 

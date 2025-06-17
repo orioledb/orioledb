@@ -229,7 +229,7 @@ reserve_undo_size(UndoLogType type, Size size)
 
 extern void reset_command_undo_locations(void);
 extern UndoLocation command_get_undo_location(CommandId cid);
-extern UndoLocation last_command_get_undo_location(void);
+extern UndoLocation current_command_get_undo_location(void);
 extern void update_command_undo_location(CommandId commandId,
 										 UndoLocation undoLocation);
 
