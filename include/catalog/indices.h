@@ -110,7 +110,6 @@ typedef struct oIdxShared
 	/* Index build queue positions */
 	uint32		new_position;
 	uint32		completed_position;
-	OXid		recovery_oxid;
 	Size		o_table_size;
 	Size		old_o_table_size;
 	bool		isrebuild;
