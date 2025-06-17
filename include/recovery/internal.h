@@ -102,6 +102,7 @@ typedef struct
 	uint32		o_table_version;
 	uint32		old_o_table_version;
 	uint32		current_position;
+	bool		isrebuild;
 } RecoveryOidsMsgIdxBuild;
 
 typedef struct
