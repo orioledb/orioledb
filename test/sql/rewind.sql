@@ -16,15 +16,15 @@ INSERT INTO o_test_rewind VALUES (4);
 INSERT INTO o_test_rewind VALUES (5);
 
 -- Should fail
-select orioledb_rewind(600);
-select orioledb_rewind(0);
+select orioledb_rewind_by_time(600);
+select orioledb_rewind_by_time(0);
 
 BEGIN;
 INSERT INTO heap_table VALUES (2);
 PREPARE TRANSACTION 'prep';
 ROLLBACK;
 
-select orioledb_rewind(10);
+select orioledb_rewind_by_time(10);
 
 COMMIT PREPARED 'prep';
 

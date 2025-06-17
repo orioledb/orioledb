@@ -49,7 +49,7 @@ class RewindTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind(19);\n")
+		               "select orioledb_rewind_by_time(19);\n")
 		time.sleep(1)
 
 		node.is_started = False
@@ -95,7 +95,7 @@ class RewindTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind(19);\n")
+		               "select orioledb_rewind_by_time(19);\n")
 
 		time.sleep(1)
 		node.is_started = False
@@ -152,7 +152,7 @@ class RewindTest(BaseTest):
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind(19);\n")
+		               "select orioledb_rewind_by_time(19);\n")
 
 		time.sleep(1)
 		node.is_started = False
@@ -214,7 +214,7 @@ class RewindTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind(19);\n")
+		               "select orioledb_rewind_by_time(19);\n")
 		time.sleep(1)
 
 		node.is_started = False
@@ -296,7 +296,7 @@ class RewindTest(BaseTest):
 			    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind(19);\n")
+		               "select orioledb_rewind_by_time(19);\n")
 
 		time.sleep(1)
 		node.is_started = False

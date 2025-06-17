@@ -58,8 +58,8 @@ static int             precommit_nsubxids;
 static TransactionId  *precommit_subxids;
 
 PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
-PG_FUNCTION_INFO_V1(orioledb_rewind);
-PG_FUNCTION_INFO_V1(orioledb_rewind_to_xid);
+PG_FUNCTION_INFO_V1(orioledb_rewind_by_time);
+PG_FUNCTION_INFO_V1(orioledb_rewind_to_transaction);
 PG_FUNCTION_INFO_V1(orioledb_current_oxid);
 
 /* User-available */
@@ -427,7 +427,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 }
 
 Datum
-orioledb_rewind(PG_FUNCTION_ARGS)
+orioledb_rewind_by_time(PG_FUNCTION_ARGS)
 {
 	int	rewind_time = PG_GETARG_INT32(0);
 
@@ -436,7 +436,7 @@ orioledb_rewind(PG_FUNCTION_ARGS)
 }
 
 Datum
-orioledb_rewind_to_xid(PG_FUNCTION_ARGS)
+orioledb_rewind_to_transaction(PG_FUNCTION_ARGS)
 {
 	TransactionId xid = PG_GETARG_INT32(0);
 	OXid oxid = PG_GETARG_INT64(1);

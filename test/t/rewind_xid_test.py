@@ -53,7 +53,7 @@ class RewindXidTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_xid(%d,%ld);\n" % (invalidxid, oxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (invalidxid, oxid))
 		time.sleep(1)
 
 		node.is_started = False
@@ -103,7 +103,7 @@ class RewindXidTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_xid(%d,%ld);\n" % (xid,invalidoxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,invalidoxid))
 		time.sleep(1)
 		node.is_started = False
 		node.start()
@@ -164,7 +164,7 @@ class RewindXidTest(BaseTest):
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_xid(%d,%ld);\n" % (xid,invalidoxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,invalidoxid))
 
 		time.sleep(10)
 		node.is_started = False
@@ -232,7 +232,7 @@ class RewindXidTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_xid(%d,%ld);\n" % (xid,oxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
 		time.sleep(1)
 
 		node.is_started = False
@@ -321,7 +321,7 @@ class RewindXidTest(BaseTest):
 			    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_xid(%d,%ld);\n" % (xid,oxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
 
 		time.sleep(50)
 		node.is_started = False
