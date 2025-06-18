@@ -12,3 +12,8 @@ CREATE FUNCTION orioledb_rewind_by_time(rewind_time int)
 RETURNS void
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_rewind_to_timestamp(rewind_timestamp TimestampTz)
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
