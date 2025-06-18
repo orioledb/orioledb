@@ -370,7 +370,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						   *old_o_table = NULL;
 
 				Assert(ORelOidsIsValid(msg->oids));
-				recovery_oxid = msg->recovery_oxid;
+				recovery_oxid = msg->oxid;
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);

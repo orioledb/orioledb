@@ -2293,7 +2293,7 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 		SpinLockAcquire(&recovery_oidxshared->mutex);
 		recovery_oidxshared->new_position++;
 		msg->isrebuild = isrebuild;
-		msg->recovery_oxid = recovery_oxid;
+		msg->oxid = recovery_oxid;
 		state->position = recovery_oidxshared->new_position;
 		SpinLockRelease(&recovery_oidxshared->mutex);
 
