@@ -1806,13 +1806,6 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 							"support compression options")));
 		}
 
-		if (OCompressIsValid(compress))
-		{
-			if (!OCompressIsValid(primary_compress))
-				primary_compress = compress;
-			if (!OCompressIsValid(toast_compress))
-				toast_compress = compress;
-		}
 		o_table->default_compress = compress;
 		o_table->toast_compress = toast_compress;
 		o_table->primary_compress = primary_compress;
