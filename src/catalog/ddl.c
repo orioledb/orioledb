@@ -1195,10 +1195,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				address = create_ctas_nodata(query->targetList, into);
 
 				/*
-				 * We cannot just use rel->rd_rules in access hook,
-				 * because it recalculates expression two times if it
-				 * executes postgreses code, even if it skips insertion to
-				 * table
+				 * We cannot just use rel->rd_rules in access hook, because it
+				 * recalculates expression two times if it executes postgreses
+				 * code, even if it skips insertion to table
 				 */
 				savedDataQuery = (Query *) copyObject(into->viewQuery);
 				RefreshMatViewByOid(address.objectId, true, false,
@@ -3173,12 +3172,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							o_tables_rel_meta_unlock(tbl, InvalidOid);
 							o_invalidate_oids(idx_oids);
 							o_add_invalidate_undo_item(idx_oids,
-													O_INVALIDATE_OIDS_ON_ABORT);
+													   O_INVALIDATE_OIDS_ON_ABORT);
 							if (!ORelOidsIsEqual(idx_oids, table_oids))
 							{
 								o_invalidate_oids(table_oids);
 								o_add_invalidate_undo_item(table_oids,
-														O_INVALIDATE_OIDS_ON_ABORT);
+														   O_INVALIDATE_OIDS_ON_ABORT);
 							}
 							o_table_free(o_table);
 						}
@@ -3359,7 +3358,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						{
 							case RELKIND_RELATION:
 							case RELKIND_MATVIEW:
-								/* for matview we just copy data to not recalculate expressions */
+
+								/*
+								 * for matview we just copy data to not
+								 * recalculate expressions
+								 */
 								Assert(alter_type_exprs == NIL);
 								rewrite_table(tbl, old_o_table, new_o_table);
 								break;

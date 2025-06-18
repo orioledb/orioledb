@@ -77,10 +77,12 @@ class TypesTest(BaseTest):
 
 		enum_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
 		enumoid_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.safe_psql('postgres', "DROP TABLE o_holidays;")
 		node.safe_psql('postgres', "DROP TYPE o_happiness;")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
 		node.stop(['-m', 'immediate'])
@@ -88,9 +90,11 @@ class TypesTest(BaseTest):
 		node.start()
 		# deleted records in o_enum_cache physically deleted during checkpoint
 		# performed after recovery
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 4)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
 		node.stop()
+		raise 0
 
 	def test_enum_cache_namedata_in_key(self):
 		enum_amount = 0
@@ -674,11 +678,13 @@ class TypesTest(BaseTest):
 		self.assertEqual([(3,), (8,), (15,), (94,)],
 		                 con2.execute("SELECT * FROM foo ORDER BY i;"))
 		con2.close()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(23, 'bUCKSivo');").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
 		node.safe_psql("""
 			DROP INDEX foo_ix2;
 			DROP INDEX foo_ix3;
 		""")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(23, 'bUCKSivo');").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
 		node.stop(['-m', 'immediate'])
 
@@ -689,5 +695,7 @@ class TypesTest(BaseTest):
 		self.assertEqual([(3,), (8,), (15,), (94,)],
 		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 		con3.close()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(23, 'bUCKSivo');").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
 		node.stop()
+		raise 0

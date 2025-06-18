@@ -803,6 +803,8 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 	BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
 	OSysCacheBound bound = {.nkeys = sys_cache->nkeys};
 
+	elog(WARNING, "o_sys_cache_update: %d", sys_cache->sys_tree_num);
+
 	sys_cache_key = (OSysCacheKey *) updated_entry;
 	bound.key = sys_cache_key;
 
@@ -824,6 +826,8 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 									RowLockNoKeyUpdate, NULL,
 									&callbackInfo) ==
 				OBTreeModifyResultUpdated;
+
+			elog(WARNING, "result: %c", result ? 'Y' : 'N');
 			if (result)
 				o_wal_update(desc, tup);
 		}
@@ -932,9 +936,30 @@ o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 	Pointer		entry;
 	OSysCacheKey *sys_cache_key;
 
+	if (sys_cache->sys_tree_num == SYS_TREES_ENUM_CACHE ||
+		sys_cache->sys_tree_num == SYS_TREES_TABLESPACE_CACHE)
+	{
+		VarChar    *optionsArg = cstring_to_text("");
+		BTreePrintOptions printOptions = {0};
+		StringInfoData buf;
+		BTreeDescr *desc = get_sys_tree(sys_cache->sys_tree_num);
+
+		init_print_options(&printOptions, optionsArg);
+
+		initStringInfo(&buf);
+		o_print_btree_pages(desc, &buf,
+							sys_tree_key_print(desc),
+							sys_tree_tup_print(desc),
+							NULL, &printOptions, 32);
+
+		elog(WARNING, "TREE:\n%s", buf.data);
+		pfree(buf.data);
+	}
+	elog(WARNING, "o_sys_cache_delete: %d", sys_cache->sys_tree_num);
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
 
+	elog(WARNING, "entry: %p", entry);
 	if (entry == NULL)
 		return false;
 
@@ -1027,6 +1052,8 @@ o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo)
 {
 	HASH_SEQ_STATUS hash_seq;
 	OCacheIdMapEntry *entry;
+
+	elog(WARNING, "o_sys_caches_delete_by_lsn");
 
 	hash_seq_init(&hash_seq, sys_caches);
 	while ((entry = (OCacheIdMapEntry *) hash_seq_search(&hash_seq)) != NULL)

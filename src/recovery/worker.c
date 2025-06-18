@@ -309,8 +309,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				if (recovery_header->type & RECOVERY_MODIFY_OIDS)
 				{
-					char			   *prefix;
-					char			   *db_prefix;
+					char	   *prefix;
+					char	   *db_prefix;
 
 					memcpy(&oids, data + data_pos, sizeof(ORelOids));
 					data_pos += sizeof(ORelOids);

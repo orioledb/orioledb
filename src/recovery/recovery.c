@@ -2280,7 +2280,7 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 			if (rllen >= sizeof(targetpath))
 				ereport(ERROR,
 						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						errmsg("symbolic link \"%s\" target is too long",
+						 errmsg("symbolic link \"%s\" target is too long",
 								file->d_name)));
 			targetpath[rllen] = '\0';
 
@@ -2707,8 +2707,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			if (sys_tree_num == -1)
 			{
-				char			   *prefix;
-				char			   *db_prefix;
+				char	   *prefix;
+				char	   *db_prefix;
+
 				o_get_prefixes_for_relnode(cur_oids.datoid, cur_oids.reloid,
 										   &prefix, &db_prefix);
 				o_verify_dir_exists_or_create(prefix, NULL, NULL);
@@ -2831,6 +2832,14 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			tuple.tuple.formatFlags = *ptr;
 			ptr++;
 
+			if (sys_tree_num > 0)
+				elog(WARNING, "WAL_REC_MODIFY: %d: %s",
+					 sys_tree_num,
+					 rec_type == WAL_REC_INSERT ? "WAL_REC_INSERT" :
+					 rec_type == WAL_REC_UPDATE ? "WAL_REC_UPDATE" :
+					 rec_type == WAL_REC_DELETE ? "WAL_REC_DELETE" :
+					 "WRONG");
+
 			memcpy(&length, ptr, sizeof(OffsetNumber));
 			ptr += sizeof(OffsetNumber);
 
@@ -2876,9 +2885,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				}
 				else if (sys_tree_num == SYS_TREES_TABLESPACE_CACHE && success)
 				{
-					OSysCacheKey1	key;
-					char			   *prefix;
-					char			   *db_prefix;
+					OSysCacheKey1 key;
+					char	   *prefix;
+					char	   *db_prefix;
 
 					memcpy(&key, ptr, sizeof(OSysCacheKey1));
 					o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),

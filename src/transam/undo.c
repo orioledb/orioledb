@@ -1748,6 +1748,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 {
 	OXid		oxid = get_current_oxid_if_any();
 
+	elog(WARNING, "finish_autonomous_transaction: oxid: %lu", oxid);
 	if (OXidIsValid(oxid))
 	{
 		CommitSeqNo csn;
