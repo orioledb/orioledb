@@ -776,7 +776,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 	if (chunkSize != MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) +
 		MAXALIGN(sizeof(BTreeNonLeafTuphdr)) * chunkItemsCount +
-		MAXALIGN(sizeof(int32)) * count)
+		meta->length * count)
 		return OBTreeFindDownlinkSlowpath;
 
 	lower = 0;
@@ -806,7 +806,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		if (itemIndex == 0)
 			tuphdr = *((BTreeNonLeafTuphdr *) (base - MAXALIGN(sizeof(BTreeNonLeafTuphdr))));
 		else
-			tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32))) * (itemIndex - 1)));
+			tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length) * (itemIndex - 1)));
 		*tuphdrPtr = &tuphdr;
 		loc->chunk = chunk;
 		loc->chunkItemsCount = chunkItemsCount;
@@ -818,7 +818,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (itemIndex > 0)
 		{
-			tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32))) * (itemIndex - 1)));
+			tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length) * (itemIndex - 1)));
 			*tuphdrPtr = &tuphdr;
 			loc->chunk = chunk;
 			loc->chunkItemsCount = chunkItemsCount;
@@ -856,7 +856,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 			if (chunkSize != MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) +
 				MAXALIGN(sizeof(BTreeNonLeafTuphdr)) * chunkItemsCount +
-				MAXALIGN(sizeof(int32)) * count)
+				meta->length * count)
 				return OBTreeFindDownlinkSlowpath;
 
 			itemIndex = chunkItemsCount - 1;
@@ -864,7 +864,7 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 			if (chunkIndex == 0 && itemIndex == 0)
 				tuphdr = *((BTreeNonLeafTuphdr *) (base - MAXALIGN(sizeof(BTreeNonLeafTuphdr))));
 			else
-				tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + MAXALIGN(sizeof(int32))) * (count - 1)));
+				tuphdr = *((BTreeNonLeafTuphdr *) (base + (MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length) * (count - 1)));
 			*tuphdrPtr = &tuphdr;
 
 			loc->chunk = chunk;
