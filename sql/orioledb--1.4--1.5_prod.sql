@@ -26,3 +26,13 @@ CREATE FUNCTION orioledb_current_oxid()
 RETURNS bigint
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_rewind_queue_length()
+RETURNS bigint
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+--CREATE FUNCTION orioledb_rewind_queue_age()
+--RETURNS bigint
+--AS 'MODULE_PATHNAME'
+--VOLATILE LANGUAGE C;
