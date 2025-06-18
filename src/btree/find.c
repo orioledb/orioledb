@@ -506,7 +506,8 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 
 		p += stride;
 	}
-	*lower = *upper;
+	if (!lowerSet)
+		*lower = *upper;
 }
 
 static void
@@ -537,7 +538,8 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 
 		p += stride;
 	}
-	*lower = *upper;
+	if (!lowerSet)
+		*lower = *upper;
 }
 
 static void
@@ -568,7 +570,8 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 
 		p += stride;
 	}
-	*lower = *upper;
+	if (!lowerSet)
+		*lower = *upper;
 }
 
 static void
@@ -599,7 +602,8 @@ float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 
 		p += stride;
 	}
-	*lower = *upper;
+	if (!lowerSet)
+		*lower = *upper;
 }
 
 typedef struct
