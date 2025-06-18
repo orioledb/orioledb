@@ -299,9 +299,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 		rewindItem->tag = EMPTY_ITEM_TAG;
 
 		/*
-		 * Buffer finished. Unlikely case when rewind_time equals rewind_max_period.
-		 * In REWIND_MODE_XID debug mode this is possible when rewind is requested
-		 * for XID earlier than retained.
+		 * Buffer finished (rewind was requested for all rewind buffer)
 		 */
 		if (pos == rewindMeta->completePos)
 		{
@@ -318,6 +316,11 @@ rewind_complete:
 	return;
 }
 
+/*
+ *  Check rewind conditions for sanity, disable adding new transactions to a rewind buffer,
+ *  terminate all other backends, do actual rewind, then shutdown postgres.
+ *  NB: starting up Postgres after rewind is not possible from backend, it needs to be done externally.
+ */
 static void
 orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp)
 {
@@ -339,12 +342,12 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	{
 		elog(LOG, "Rewind requested, for %d s", rewind_time);
 
-		if (rewind_time > rewind_max_period)
+		if (rewind_time > rewind_max_time)
 		{
 			ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind %d s exceeds rewind_max_period %d s", rewind_time, rewind_max_period)),
-				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
+				 errmsg("Requested rewind %d s exceeds rewind_max_time %d s", rewind_time, rewind_max_time)),
+				 errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
 			return;
 		}
 		else if (rewind_time == 0)
@@ -376,7 +379,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			}
 		}
 
-		if (!OXidIsValid(rewind_oxid))
+		if (OXidIsValid(rewind_oxid))
 		{
 			if (!xid_is_finished_for_everybody(rewind_oxid))
 			{
@@ -397,12 +400,12 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			elog(WARNING, "Zero rewind requested, do nothing");
 			return;
 		}
-		else if(TimestampDifferenceExceeds(rewind_timestamp, GetCurrentTimestamp(), rewind_max_period * 1000))
+		else if(TimestampDifferenceExceeds(rewind_timestamp, GetCurrentTimestamp(), rewind_max_time * 1000))
 		{
 			ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind to timestamp %ld exceeds rewind_max_period %d s", rewind_timestamp, rewind_max_period)),
-				 errdetail("increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than %d s back", rewind_max_period));
+				 errmsg("Requested rewind to timestamp %ld exceeds rewind_max_time %d s", rewind_timestamp, rewind_max_time)),
+				 errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
 			return;
 		}
 	}
@@ -468,6 +471,8 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	(void) kill(PostmasterPid, SIGTERM);
 	return;
 }
+
+/* Interface functions */
 
 Datum
 orioledb_rewind_by_time(PG_FUNCTION_ARGS)
@@ -834,7 +839,7 @@ rewind_worker_main(Datum main_arg)
 					if (!rewindMeta->skipCheck &&
 						!TimestampDifferenceExceeds(rewindItem->timestamp,
 												GetCurrentTimestamp(),
-												rewind_max_period * 1000))
+												rewind_max_time * 1000))
 					{
 						/* Too early, do nothing */
 						break;

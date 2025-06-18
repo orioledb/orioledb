@@ -20,7 +20,7 @@ class RewindTest(BaseTest):
 	def test_rewind_oriole(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.rewind_max_period = 100\n"
+		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
 		    "orioledb.enable_rewind = true\n")
 		node.start()
 
@@ -66,7 +66,7 @@ class RewindTest(BaseTest):
 	def test_rewind_heap(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.rewind_max_period = 100\n"
+		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
 		    "orioledb.enable_rewind = true\n")
 		node.start()
 
@@ -112,7 +112,7 @@ class RewindTest(BaseTest):
 	def test_rewind_heap_subxids(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.rewind_max_period = 100\n"
+		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
 		    "orioledb.enable_rewind = true\n")
 		node.start()
 
@@ -170,7 +170,7 @@ class RewindTest(BaseTest):
 	def test_rewind_oriole_heap(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.rewind_max_period = 100\n"
+		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
 		    "orioledb.enable_rewind = true\n")
 		node.start()
 
@@ -237,7 +237,7 @@ class RewindTest(BaseTest):
 	def test_rewind_oriole_heap_subxids(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.rewind_max_period = 100\n"
+		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
 		    "orioledb.enable_rewind = true\n")
 		node.start()
 

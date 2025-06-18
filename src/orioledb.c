@@ -141,8 +141,8 @@ char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
 bool		enable_rewind = false;
-int			rewind_max_period = 0;
-int		rewind_max_xacts = 0;
+int			rewind_max_time = 0;
+int		rewind_max_transactions = 0;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -828,10 +828,10 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
-	DefineCustomIntVariable("orioledb.rewind_max_period",
+	DefineCustomIntVariable("orioledb.rewind_max_time",
 							"Sets the maximum time to hold information for OrioleDB rewind.",
 							NULL,
-							&rewind_max_period,
+							&rewind_max_time,
 							500,
 							1,
 							86400,
@@ -840,10 +840,10 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
-	DefineCustomIntVariable("orioledb.rewind_max_xacts",
+	DefineCustomIntVariable("orioledb.rewind_max_transactions",
 							"Maximum number of xacts retained for orioledb rewind.",
 							NULL,
-							&rewind_max_xacts,
+							&rewind_max_transactions,
 							84600,
 							1,
 							INT_MAX,

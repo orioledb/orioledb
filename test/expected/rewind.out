@@ -13,8 +13,8 @@ INSERT INTO o_test_rewind VALUES (4);
 INSERT INTO o_test_rewind VALUES (5);
 -- Should fail
 select orioledb_rewind_by_time(600);
-ERROR:  Requested rewind 600 s exceeds rewind_max_period 500 s
-DETAIL:  increase orioledb.rewind_max_period in PostgreSQL config file or request rewind less than 500 s back
+ERROR:  Requested rewind 600 s exceeds rewind_max_time 500 s
+DETAIL:  increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than 500 s back
 select orioledb_rewind_by_time(0);
 WARNING:  Zero rewind requested, do nothing
  orioledb_rewind_by_time 

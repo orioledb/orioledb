@@ -349,8 +349,8 @@ extern char *s3_accesskey;
 extern char *s3_secretkey;
 extern char *s3_cainfo;
 extern bool enable_rewind;
-extern int	rewind_max_period;
-extern int	rewind_max_xacts;
+extern int	rewind_max_time;
+extern int	rewind_max_transactions;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MYPROCNUMBER >= 0 && \
