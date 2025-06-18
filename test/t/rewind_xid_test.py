@@ -90,7 +90,7 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select txid_current();\n'))[0]
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
 		invalidoxid = 9223372036854775807
@@ -141,7 +141,7 @@ class RewindXidTest(BaseTest):
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
 
-		a, *b = (node.execute('postgres', 'select txid_current();\n'))[0]
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
 		invalidoxid = 9223372036854775807
@@ -216,7 +216,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
-		a, *b = (node.execute('postgres', 'select txid_current();\n'))[0]
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
 		time.sleep(1)
@@ -291,7 +291,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
-		a, *b = (node.execute('postgres', 'select txid_current();\n'))[0]
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
 		time.sleep(1)
