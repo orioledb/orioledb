@@ -323,7 +323,7 @@ class RewindXidTest(BaseTest):
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
 
-		time.sleep(50)
+		time.sleep(100)
 		node.is_started = False
 		node.start()
 
