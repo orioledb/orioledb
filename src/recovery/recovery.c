@@ -2264,7 +2264,7 @@ void
 recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 				   ORelOids old_oids, uint32 old_o_table_version,	/* Non-zero only for
 																	 * rebuild */
-				   int nindices, bool send_to_leader)
+				   int nindices, bool send_to_leader, bool isrebuild)
 {
 	RecoveryOidsMsgIdxBuild *msg;
 	int			i;
@@ -2292,11 +2292,12 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 
 		SpinLockAcquire(&recovery_oidxshared->mutex);
 		recovery_oidxshared->new_position++;
+		msg->isrebuild = isrebuild;
+		msg->oxid = recovery_oxid;
 		state->position = recovery_oidxshared->new_position;
 		SpinLockRelease(&recovery_oidxshared->mutex);
 
 		msg->current_position = state->position;
-		recovery_oidxshared->recovery_oxid = recovery_oxid;
 		worker_send_msg(index_build_leader, (Pointer) msg, sizeof(RecoveryOidsMsgIdxBuild));
 		worker_queue_flush(index_build_leader);
 	}
@@ -2400,8 +2401,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					{
 						Assert(new_o_table->nindices == nindices);
 						/* Send recovery message to become a leader */
-						recovery_oidxshared->isrebuild = true;
-						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version, old_o_table->oids, old_o_table->version, nindices, true);
+						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version, old_o_table->oids, old_o_table->version, nindices, true, true);
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
@@ -2436,7 +2436,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
 					ORelOidsSetInvalid(invalid_oids);
-					recovery_send_oids(oids, ix_num, new_o_table->version, invalid_oids, 0, nindices, true);
+					recovery_send_oids(oids, ix_num, new_o_table->version, invalid_oids, 0, nindices, true, false);
 				}
 				else
 					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, NULL);
@@ -2465,10 +2465,9 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					if (!*recovery_single_process)
 					{
 						/* Send recovery message to become a leader */
-						recovery_oidxshared->isrebuild = true;
 						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version,
 										   old_o_table->oids, old_o_table->version,
-										   nindices, true);
+										   nindices, true, true);
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,

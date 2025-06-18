@@ -370,11 +370,11 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						   *old_o_table = NULL;
 
 				Assert(ORelOidsIsValid(msg->oids));
-				recovery_oxid = recovery_oidxshared->recovery_oxid;
+				recovery_oxid = msg->oxid;
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
-				if (recovery_oidxshared->isrebuild)
+				if (msg->isrebuild)
 				{
 					Assert(ORelOidsIsValid(msg->old_oids));
 					old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
@@ -390,8 +390,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					Assert(id == index_build_leader);
 					o_fill_tmp_table_descr(o_descr, o_table);
 
-					Assert((recovery_oidxshared->isrebuild && msg->ix_num == InvalidIndexNumber) || (!recovery_oidxshared->isrebuild && msg->ix_num != InvalidIndexNumber));
-					if (recovery_oidxshared->isrebuild)
+					Assert((msg->isrebuild && msg->ix_num == InvalidIndexNumber) || (!msg->isrebuild && msg->ix_num != InvalidIndexNumber));
+					if (msg->isrebuild)
 					{
 						old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
 						o_fill_tmp_table_descr(old_o_descr, old_o_table);
@@ -413,7 +413,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
 					o_free_tmp_table_descr(o_descr);
 					pfree(o_descr);
-					if (recovery_oidxshared->isrebuild)
+					if (msg->isrebuild)
 					{
 						o_free_tmp_table_descr(old_o_descr);
 						pfree(old_o_descr);
@@ -428,7 +428,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
 				pfree(o_table);
-				if (recovery_oidxshared->isrebuild)
+				if (msg->isrebuild)
 				{
 					pfree(old_o_table);
 				}
