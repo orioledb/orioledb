@@ -473,6 +473,43 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	return;
 }
 
+/*
+ * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
+ * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
+ */
+static inline uint64
+rewind_queue_length(void)
+{
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
+	return pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos;
+}
+
+/*
+ * Access to a rewindMeta without a lock.
+ * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
+ */
+static inline uint64
+rewind_evicted_length(void)
+{
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
+	return rewindMeta->writePos - rewindMeta->readPos;
+}
+
+
 /* Interface functions */
 
 Datum
@@ -506,17 +543,7 @@ orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
 Datum
 orioledb_rewind_queue_length(PG_FUNCTION_ARGS)
 {
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-		PG_RETURN_VOID();
-	}
-
-	PG_RETURN_UINT64((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) +
-			(rewindMeta->writePos - rewindMeta->readPos));
+	PG_RETURN_UINT64(rewind_queue_length());
 }
 
 /* NB: Disabled because of too complicated logic for convenience function.
@@ -881,12 +908,12 @@ rewind_worker_main(Datum main_arg)
 
 				if (rewindItem->tag == REWIND_ITEM_TAG)
 				{
-					if (!rewindMeta->skipCheck &&
-						!TimestampDifferenceExceeds(rewindItem->timestamp,
-												GetCurrentTimestamp(),
-												rewind_max_time * 1000))
+					bool queue_exceeds_age = TimestampDifferenceExceeds(rewindItem->timestamp, GetCurrentTimestamp(), rewind_max_time * 1000);
+					bool queue_exceeds_length = rewind_queue_length() > rewind_max_transactions;
+
+					if (!rewindMeta->skipCheck && !queue_exceeds_age && !queue_exceeds_length)
 					{
-						/* Too early, do nothing */
+						/* Too early to fix the oldest item in the queue. Wait and check again. */
 						break;
 					}
 
@@ -925,8 +952,7 @@ rewind_worker_main(Datum main_arg)
 				{
 					int			freeSpace;
 
-					freeSpace = rewind_circular_buffer_size -
-						((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
+					freeSpace = rewind_circular_buffer_size - rewind_queue_length() - rewind_evicted_length();
 
 					Assert(freeSpace <= REWIND_DISK_BUFFER_LENGTH);
 
@@ -1085,15 +1111,13 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 
 next_subxids_item:
 
-	freeSpace = rewind_circular_buffer_size -
-		((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
+	freeSpace = rewind_circular_buffer_size - rewind_queue_length() - rewind_evicted_length();
 	Assert(freeSpace >= 0);
 
 	while (freeSpace == 0)
 	{
 		evict_rewind_page();
-		freeSpace = rewind_circular_buffer_size -
-			((pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos) - (rewindMeta->writePos - rewindMeta->readPos));
+		freeSpace = rewind_circular_buffer_size - rewind_queue_length_internal() - rewind_evicted_length();
 	}
 
 	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, 1);

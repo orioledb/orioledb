@@ -841,7 +841,7 @@ _PG_init(void)
 							NULL,
 							NULL);
 	DefineCustomIntVariable("orioledb.rewind_max_transactions",
-							"Maximum number of xacts retained for orioledb rewind.",
+							"Maximum number of xacts (Orioledb + heap) retained for orioledb rewind.",
 							NULL,
 							&rewind_max_transactions,
 							84600,
