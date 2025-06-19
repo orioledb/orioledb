@@ -63,6 +63,7 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_to_timestamp);
 PG_FUNCTION_INFO_V1(orioledb_rewind_to_transaction);
 PG_FUNCTION_INFO_V1(orioledb_current_oxid);
 PG_FUNCTION_INFO_V1(orioledb_rewind_queue_length);
+PG_FUNCTION_INFO_V1(orioledb_rewind_evicted_length);
 
 /* User-available */
 #define REWIND_MODE_UNKNOWN (0)
@@ -545,6 +546,13 @@ orioledb_rewind_queue_length(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_UINT64(rewind_queue_length());
 }
+
+Datum
+orioledb_rewind_evicted_length(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_UINT64(rewind_evicted_length());
+}
+
 
 /* NB: Disabled because of too complicated logic for convenience function.
 Datum
@@ -1117,7 +1125,7 @@ next_subxids_item:
 	while (freeSpace == 0)
 	{
 		evict_rewind_page();
-		freeSpace = rewind_circular_buffer_size - rewind_queue_length_internal() - rewind_evicted_length();
+		freeSpace = rewind_circular_buffer_size - rewind_queue_length() - rewind_evicted_length();
 	}
 
 	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, 1);
