@@ -779,7 +779,15 @@ orioledb_relation_set_new_filenode(Relation rel,
 		o_tables_table_meta_lock(new_o_table);
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-		o_tables_drop_by_oids(old_oids, oxid, oSnapshot.csn);
+
+		/*
+		 * COMMITSEQNO_INPROGRESS because there might be already commited
+		 * concurrent truncate before function start and old_oids will be
+		 * pointing to a not existed before this transaction table and will
+		 * not be visible otherwise. There should not be concurrent access to
+		 * old table during delete below, because of held locks
+		 */
+		o_tables_drop_by_oids(old_oids, oxid, COMMITSEQNO_INPROGRESS);
 		o_tables_add(new_o_table, oxid, oSnapshot.csn);
 		o_tables_table_meta_unlock(new_o_table, old_o_table->oids.relnode);
 		o_table_free(new_o_table);
