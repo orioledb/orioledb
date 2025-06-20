@@ -66,14 +66,10 @@ typedef struct SubxidsItem
 
 typedef struct
 {
-	pg_atomic_uint64 addPos;	/* Added to circular buffer */
-	uint64		completePos;	/* Removed from circular buffer */
-	uint64		evictPos;		/* Evict/restore position. Evict - left,
-								 * restore - right */
-	uint64		writePos;		/* Written to disk buffers. Increments by
-								 * bufferLength only */
-	uint64		readPos;		/* Read from disk buffer. Increments by
-								 * bufferLength only */
+	pg_atomic_uint64 addPos;	/* Next adding position */
+	uint64		completePos;	/* Next complete position */
+	uint64		evictPos;	/* Next evict position. Increments by bufferLength only */
+	uint64		restorePos;	/* Next restore after eviction position. Increments by bufferLength only */
 	uint64		checkpointPos;	/* Already included into checkpoint. Start
 								 * point for writing rewindItem-s into
 								 * checkpoint. */

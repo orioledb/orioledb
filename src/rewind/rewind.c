@@ -40,7 +40,8 @@
 
 static volatile sig_atomic_t shutdown_requested = false;
 int			RewindHorizonCheckDelay = 1000; /* Time between checking in ms */
-static RewindItem *rewindBuffer = NULL;
+static RewindItem *rewindAddBuffer = NULL;
+static RewindItem *rewindCompleteBuffer = NULL;
 static RewindMeta *rewindMeta = NULL;
 static bool rewindWorker = false;
 
@@ -134,38 +135,32 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 	long		secs;
 	int		usecs;
 
-	pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
+
 	while (true)
 	{
-		if (rewindMeta->readPos < rewindMeta->writePos)
+		/* Decrement before, as addPos was a next element to add. */
+		pos = pg_atomic_sub_fetch_u64(&rewindMeta->addPos, 1);
+		if (pos >= rewindMeta->evictPos) /* At evictPos is the next element to be evicted. It's actually still in rewindAddBuffer */
 		{
-			pos = pg_atomic_read_u64(&rewindMeta->addPos);
-
-			if (rewindMeta->evictPos != InvalidRewindPos && pos >= rewindMeta->evictPos)
+			rewindItem = &rewindAddBuffer[pos % rewind_circular_buffer_size];
+		}
+		else if (pos >= rewindMeta->restorePos) /* At restorePos is the next element to be restored. It's actually in disk buffer */
+		{
+			if (i == 0)
 			{
-				/* Read from circular buffer backwards */
-				pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
-				rewindItem = &rewindBuffer[pos % rewind_circular_buffer_size];
+				o_buffers_read(&rewindBuffersDesc, 
+						(Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
+						rewindMeta->evictPos - REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
+						REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+				i = REWIND_DISK_BUFFER_LENGTH - 1;
+				rewindMeta->evictPos -= REWIND_DISK_BUFFER_LENGTH;
 			}
-			else
-			{
-				/* Read from disk buffer backwards */
-				if (rewindMeta->writePos % REWIND_DISK_BUFFER_LENGTH == 0)
-				{
-					o_buffers_read(&rewindBuffersDesc,
-						   (Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
-						   rewindMeta->writePos - REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
-						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
-				}
-				rewindItem = &tmpbuf[(rewindMeta->writePos % REWIND_DISK_BUFFER_LENGTH) - 1];
-				rewindMeta->writePos--;
-			}
+			rewindItem = &tmpbuf[i];
+			i--;
 		}
 		else
 		{
-			/* Read  from circular buffer backwards*/
-			pos = pg_atomic_fetch_sub_u64(&rewindMeta->addPos, 1);
-			rewindItem = &rewindBuffer[pos % rewind_circular_buffer_size];
+			rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
 		}
 
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
@@ -474,45 +469,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	return;
 }
 
-/*
- * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
- * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
- */
-static inline uint64
-rewind_queue_length(void)
-{
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-	}
-
-	return pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos;
-}
-
-/*
- * Access to a rewindMeta without a lock.
- * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
- */
-static inline uint64
-rewind_evicted_length(void)
-{
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-	}
-
-	return rewindMeta->writePos - rewindMeta->readPos;
-}
-
-
 /* Interface functions */
-
 Datum
 orioledb_rewind_by_time(PG_FUNCTION_ARGS)
 {
@@ -541,16 +498,36 @@ orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
         PG_RETURN_VOID();
 }
 
+/*
+ * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
+ * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
+ */
 Datum
 orioledb_rewind_queue_length(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_UINT64(rewind_queue_length());
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
+	PG_RETURN_UINT64(pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos);
 }
 
 Datum
 orioledb_rewind_evicted_length(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_UINT64(rewind_evicted_length());
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
+	PG_RETURN_UINT64(rewindMeta->evictPos - rewindMeta->restorePos);
 }
 
 
@@ -663,7 +640,9 @@ rewind_init_shmem(Pointer ptr, bool found)
 	Assert(sizeof(struct RewindItem) == sizeof(struct SubxidsItem));
 	rewindMeta = (RewindMeta *) ptr;
 	ptr += MAXALIGN(sizeof(RewindMeta));
-	rewindBuffer = (RewindItem *) ptr;
+	rewindAddBuffer = (RewindItem *) ptr;
+	ptr += rewind_circular_buffer_size * sizeof(RewindItem);
+	rewindCompleteBuffer = (RewindItem *) ptr;
 	ptr += rewind_circular_buffer_size * sizeof(RewindItem);
 	o_buffers_shmem_init(&rewindBuffersDesc, ptr, found);
 	ptr += o_buffers_shmem_needs(&rewindBuffersDesc);
@@ -675,13 +654,19 @@ rewind_init_shmem(Pointer ptr, bool found)
 
 		for (i = 0; i < rewind_circular_buffer_size; i++)
 		{
-			rewindBuffer[i].oxid = InvalidOXid;
-			rewindBuffer[i].tag = EMPTY_ITEM_TAG;
-			rewindBuffer[i].timestamp = 0;
+			rewindAddBuffer[i].oxid = InvalidOXid;
+			rewindAddBuffer[i].tag = EMPTY_ITEM_TAG;
+			rewindAddBuffer[i].timestamp = 0;
+			rewindCompleteBuffer[i].oxid = InvalidOXid;
+			rewindCompleteBuffer[i].tag = EMPTY_ITEM_TAG;
+			rewindCompleteBuffer[i].timestamp = 0;
+
 			for (j = 0; j < (int) UndoLogsCount; j++)
 			{
-				rewindBuffer[i].onCommitUndoLocation[j] = InvalidUndoLocation;
-				rewindBuffer[i].minRetainLocation[j] = 0;
+				rewindAddBuffer[i].onCommitUndoLocation[j] = InvalidUndoLocation;
+				rewindAddBuffer[i].minRetainLocation[j] = 0;
+				rewindCompleteBuffer[i].onCommitUndoLocation[j] = InvalidUndoLocation;
+				rewindCompleteBuffer[i].minRetainLocation[j] = 0;
 			}
 		}
 
@@ -695,11 +680,11 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->rewindEvictTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&rewindMeta->evictLock, rewindMeta->rewindEvictTrancheId);
 
-		rewindMeta->readPos = 0;
-		rewindMeta->writePos = 0;
 		pg_atomic_init_u64(&rewindMeta->addPos, 0);
-		rewindMeta->evictPos = InvalidRewindPos;
 		rewindMeta->completePos = 0;
+		rewindMeta->evictPos = 0;
+		rewindMeta->restorePos = 0;
+		rewindMeta->checkpointPos = 0;
 		rewindMeta->oldCleanedFileNum = 0;
 		pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 							InvalidTransactionId);
@@ -758,68 +743,46 @@ restore_evicted_rewind_page(void)
 	int			length_to_end;
 	uint64		currentCleanFileNum;
 	int			itemsPerFile;
-	uint64		curAddPos;
 
 	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
 
-	/*
-	 * Stage 1. Shift last page part in a ring buffer have a page-sized space
-	 * in a circular buffer before it
-	 */
-	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, REWIND_DISK_BUFFER_LENGTH);
-
-	for (uint64 pos = rewindMeta->evictPos; pos < curAddPos; pos++)
-	{
-		int			src = pos % rewind_circular_buffer_size;
-		int			dst = (pos + REWIND_DISK_BUFFER_LENGTH) % rewind_circular_buffer_size;
-
-		Assert(rewindBuffer[dst].tag == EMPTY_ITEM_TAG);
-		memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
-	}
-
-	/*
-	 * Stage 2. Restore oldest written buffer page to a clean space before the
-	 * last page in a circular buffer
-	 */
-	start = rewindMeta->evictPos % rewind_circular_buffer_size;
+	start = rewindMeta->restorePos % rewind_circular_buffer_size;
 	length_to_end = rewind_circular_buffer_size - start;
 
 	if (length_to_end <= REWIND_DISK_BUFFER_LENGTH)
 	{
 		o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
-					   rewindMeta->readPos * sizeof(RewindItem),
+					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
+					   rewindMeta->restorePos * sizeof(RewindItem),
 					   length_to_end * sizeof(RewindItem));
 		o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &rewindBuffer[0], REWIND_BUFFERS_TAG,
-					   (rewindMeta->readPos + length_to_end) * sizeof(RewindItem),
+					   (Pointer) &rewindCompleteBuffer[0], REWIND_BUFFERS_TAG,
+					   (rewindMeta->restorePos + length_to_end) * sizeof(RewindItem),
 					   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
 	}
 	else
 	{
 		o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &rewindBuffer[start], REWIND_BUFFERS_TAG,
-					   rewindMeta->readPos * sizeof(RewindItem),
+					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
+					   rewindMeta->restorePos * sizeof(RewindItem),
 					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 	}
 
 #ifdef USE_ASSERT_CHECKING
 	for (uint64 pos = start; pos < start + REWIND_DISK_BUFFER_LENGTH; pos++)
 	{
-		Assert(rewindBuffer[pos % rewind_circular_buffer_size].tag != EMPTY_ITEM_TAG);
+		Assert(rewindCompleteBuffer[pos % rewind_circular_buffer_size].tag != EMPTY_ITEM_TAG);
 	}
 #endif
-	rewindMeta->evictPos += REWIND_DISK_BUFFER_LENGTH;
-	rewindMeta->readPos += REWIND_DISK_BUFFER_LENGTH;
 
-	if (rewindMeta->readPos == rewindMeta->writePos)
-		rewindMeta->evictPos = InvalidRewindPos;
+	rewindMeta->restorePos += REWIND_DISK_BUFFER_LENGTH;
+	Assert(rewindMeta->restorePos <= rewindMeta->evictPos);
 
 	LWLockRelease(&rewindMeta->evictLock);
 
 	/* Clean old buffer files if needed. No lock. */
 	itemsPerFile = REWIND_FILE_SIZE / sizeof(RewindItem);
-	currentCleanFileNum = rewindMeta->readPos / itemsPerFile;
+	currentCleanFileNum = rewindMeta->restorePos / itemsPerFile;
 
 	if (currentCleanFileNum > rewindMeta->oldCleanedFileNum)
 	{
@@ -892,7 +855,7 @@ rewind_worker_main(Datum main_arg)
 
 /* 			elog(LOG, "Rewind worker came to check"); */
 
-			while (true)
+			while (rewindMeta->completePos < pg_atomic_read_u64(&rewindMeta->addPos))
 			{
 				uint64		location PG_USED_FOR_ASSERTS_ONLY;
 				int			i;
@@ -905,19 +868,21 @@ rewind_worker_main(Datum main_arg)
 					break;
 				}
 
-				if (rewindMeta->completePos == pg_atomic_read_u64(&rewindMeta->addPos))
+				if (rewindMeta->completePos < rewindMeta->restorePos)
+					/* Read from rewindCompleteBuffer */
+					rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
+				else
 				{
-					/* All are already fixed, do nothing */
-					break;
+					/* rewindCompleteBuffer is empty. Read from rewindAddBuffer */
+					Assert(rewindMeta->restorePos == rewindMeta->evictPos);
+					rewindItem = &rewindAddBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				}
-
-				rewindItem = &rewindBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
 				if (rewindItem->tag == REWIND_ITEM_TAG)
 				{
 					bool queue_exceeds_age = TimestampDifferenceExceeds(rewindItem->timestamp, GetCurrentTimestamp(), rewind_max_time * 1000);
-					bool queue_exceeds_length = rewind_queue_length() > rewind_max_transactions;
+					bool queue_exceeds_length = pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos > rewind_max_transactions;
 
 					if (!rewindMeta->skipCheck && !queue_exceeds_age && !queue_exceeds_length)
 					{
@@ -952,21 +917,8 @@ rewind_worker_main(Datum main_arg)
 				rewindItem->tag = EMPTY_ITEM_TAG;
 				rewindMeta->completePos++;
 
-				/*
-				 * Restore extent from disk (Operation 5 described in
-				 * rewind/rewind.h)
-				 */
-				if (rewindMeta->readPos < rewindMeta->writePos)
-				{
-					int			freeSpace;
-
-					freeSpace = rewind_circular_buffer_size - rewind_queue_length() - rewind_evicted_length();
-
-					Assert(freeSpace <= REWIND_DISK_BUFFER_LENGTH);
-
-					if (freeSpace == REWIND_DISK_BUFFER_LENGTH)
-						restore_evicted_rewind_page();
-				}
+				if (rewindMeta->restorePos < rewindMeta->evictPos && rewind_circular_buffer_size - (rewindMeta->restorePos - rewindMeta->completePos) >= REWIND_DISK_BUFFER_LENGTH)
+					restore_evicted_rewind_page();
 			}
 			ResetLatch(MyLatch);
 		}
@@ -981,81 +933,72 @@ rewind_worker_main(Datum main_arg)
 }
 
 /*
- * Evict page from a ring buffer to disk. (Operation 8 described in
- * rewind/rewind.h). Needs exclusive lock against concurrent eviction.
+ * Evict page from a ring buffer to disk. Takes exclusive lock against concurrent eviction.
  */
 static void
-evict_rewind_page(void)
+evict_rewind_items(void)
 {
 	uint64		pos;
-	uint64		curAddPos;
 	int			start;
 	int			length_to_end;
-	int			oldEvictPos;
 
 	if (LWLockAcquireOrWait(&rewindMeta->evictLock, LW_EXCLUSIVE))
 	{
-		curAddPos = pg_atomic_read_u64(&rewindMeta->addPos);
+		Assert(rewindMeta->restorePos <= rewindMeta->evictPos);
 
-		if (rewindMeta->evictPos == InvalidRewindPos)
-			rewindMeta->evictPos = curAddPos;
-
-		/*
-		 * Stage 1. Shift evictPos and write REWIND_DISK_BUFFER_LENGTH number
-		 * of records to disk
-		 */
-		oldEvictPos = rewindMeta->evictPos;
-		rewindMeta->evictPos -= REWIND_DISK_BUFFER_LENGTH;
-
-		start = (rewindMeta->evictPos % rewind_circular_buffer_size);
-		length_to_end = rewind_circular_buffer_size - start;
-
-		if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
+		if (rewindMeta->restorePos == rewindMeta->evictPos)
 		{
-			o_buffers_write(&rewindBuffersDesc,
-							(Pointer) &rewindBuffer[start],
-							REWIND_BUFFERS_TAG,
-							rewindMeta->writePos * sizeof(RewindItem),
-							length_to_end * sizeof(RewindItem));
+			/* Fast path: move to rewindCompleteBuffer */
+			while (rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size && rewindMeta->evictPos < pg_atomic_read_u64(&rewindMeta->addPos))
+			{
+				Assert(rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
+				Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
-			o_buffers_write(&rewindBuffersDesc,
-							(Pointer) &rewindBuffer[0],
-							REWIND_BUFFERS_TAG,
-							(rewindMeta->writePos + length_to_end) * sizeof(RewindItem),
-							(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+				memcpy(&rewindCompleteBuffer[rewindMeta->restorePos % rewind_circular_buffer_size], &rewindAddBuffer[rewindMeta->evictPos % rewind_circular_buffer_size], sizeof(RewindItem));
+				rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
+				rewindMeta->evictPos++;
+				rewindMeta->restorePos++;
+			}
 		}
 		else
 		{
-			o_buffers_write(&rewindBuffersDesc,
-							(Pointer) &rewindBuffer[start],
+			/* Evict to disk buffers */
+			start = (rewindMeta->evictPos % rewind_circular_buffer_size);
+			length_to_end = rewind_circular_buffer_size - start;
+
+			if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
+			{
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindAddBuffer[start],
 							REWIND_BUFFERS_TAG,
-							rewindMeta->writePos * sizeof(RewindItem),
+							rewindMeta->evictPos * sizeof(RewindItem),
+							length_to_end * sizeof(RewindItem));
+
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindAddBuffer[0],
+							REWIND_BUFFERS_TAG,
+							(rewindMeta->evictPos + length_to_end) * sizeof(RewindItem),
+							(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+			}
+			else
+			{
+				o_buffers_write(&rewindBuffersDesc,
+							(Pointer) &rewindAddBuffer[start],
+							REWIND_BUFFERS_TAG,
+							rewindMeta->evictPos * sizeof(RewindItem),
 							REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
-		}
-		rewindMeta->writePos += REWIND_DISK_BUFFER_LENGTH;
+			}
 
-		/* Clean written items from ring buffer */
-		for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + REWIND_DISK_BUFFER_LENGTH; pos++)
-		{
-			rewindBuffer[(pos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
-		}
+			/* Clean written items from ring buffer */
+			for (pos = rewindMeta->evictPos; pos < rewindMeta->evictPos + REWIND_DISK_BUFFER_LENGTH; pos++)
+			{
+				rewindAddBuffer[(pos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
+			}
 
-		/* Stage 2. Shift last page part by one page left */
-		for (pos = oldEvictPos; pos < curAddPos; pos++)
-		{
-			int			src = pos % rewind_circular_buffer_size;
-			int			dst = (pos - REWIND_DISK_BUFFER_LENGTH) % rewind_circular_buffer_size;
-
-			memmove(&rewindBuffer[dst], &rewindBuffer[src], sizeof(RewindItem));
-			rewindBuffer[src].tag = EMPTY_ITEM_TAG;
+			rewindMeta->evictPos += REWIND_DISK_BUFFER_LENGTH;
 		}
 
-		/*
-		 * Continue to add from the beginning of last clean page in ring
-		 * buffer
-		 */
-		pg_atomic_fetch_sub_u64(&rewindMeta->addPos, REWIND_DISK_BUFFER_LENGTH);
-
+		Assert(rewindMeta->evictPos <= pg_atomic_read_u64(&rewindMeta->addPos));
 		LWLockRelease(&rewindMeta->evictLock);
 	}
 }
@@ -1107,7 +1050,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	RewindItem *rewindItem;
 	int			i;
 	uint64		curAddPos;
-	int			freeSpace;
+	int			freeAddSpace;
 	bool 		subxid_only = false;
 	int		subxids_count = 0;
 
@@ -1119,20 +1062,17 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 
 next_subxids_item:
 
-	freeSpace = rewind_circular_buffer_size - rewind_queue_length() - rewind_evicted_length();
-	Assert(freeSpace >= 0);
+	freeAddSpace = rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->evictPos); 
+	Assert(freeAddSpace >= 0);
 
-	while (freeSpace == 0)
-	{
-		evict_rewind_page();
-		freeSpace = rewind_circular_buffer_size - rewind_queue_length() - rewind_evicted_length();
-	}
+	if (freeAddSpace < REWIND_DISK_BUFFER_LENGTH * 4)
+		evict_rewind_items();
 
+	LWLockAcquire(&rewindMeta->evictLock, LW_SHARED);//
 	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, 1);
-	Assert(curAddPos <= rewindMeta->completePos + rewind_circular_buffer_size -
-			   (rewindMeta->writePos - rewindMeta->readPos));
+	LWLockRelease(&rewindMeta->evictLock);//
 
-	rewindItem = &rewindBuffer[curAddPos % rewind_circular_buffer_size];
+	rewindItem = &rewindAddBuffer[curAddPos % rewind_circular_buffer_size];
 	Assert(rewindItem->tag == EMPTY_ITEM_TAG);
 
 	if (subxid_only)
@@ -1197,8 +1137,6 @@ next_subxids_item:
 			goto next_subxids_item; /* Write first rewindItem only with subxids */
 		}
 	}
-
-
 }
 
 /*
@@ -1209,10 +1147,6 @@ void
 checkpoint_write_rewind_xids(void)
 {
 	int			i;
-	uint64		pos;
-	uint64		start;
-	uint64		finish1;
-	uint64		curAddPos;
 
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
@@ -1220,39 +1154,33 @@ checkpoint_write_rewind_xids(void)
 		return;
 	}
 
-	curAddPos = pg_atomic_read_u64(&rewindMeta->addPos);
-
 	/*
 	 * Start from the last non-completed position not written to checkpoint
 	 * yet
 	 */
-	if (rewindMeta->checkpointPos == InvalidRewindPos)
-		rewindMeta->checkpointPos = rewindMeta->completePos;
-
-	start = Max(rewindMeta->completePos, rewindMeta->checkpointPos);
-	finish1 = (rewindMeta->evictPos == InvalidRewindPos) ? curAddPos : rewindMeta->evictPos;
+	rewindMeta->checkpointPos = Max(rewindMeta->completePos, rewindMeta->checkpointPos);
 
 	/*
 	 * Write rewind records from in-memory rewind buffer (before evicted
 	 * records)
 	 */
-	for (pos = start; pos < finish1; pos++)
-		checkpoint_write_rewind_item(&rewindBuffer[pos % rewind_circular_buffer_size]);
+	for (; rewindMeta->checkpointPos < rewindMeta->restorePos; rewindMeta->checkpointPos++)
+		checkpoint_write_rewind_item(&rewindCompleteBuffer[rewindMeta->checkpointPos % rewind_circular_buffer_size]);
 
 	/* Write rewind records from on-disk buffer if they exist */
-	for (pos = rewindMeta->readPos; pos < rewindMeta->writePos; pos += REWIND_DISK_BUFFER_LENGTH)
+	for (; rewindMeta->checkpointPos < rewindMeta->evictPos; rewindMeta->checkpointPos += REWIND_DISK_BUFFER_LENGTH)
 	{
 		RewindItem	buffer[REWIND_DISK_BUFFER_LENGTH];
 
 		o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
-					   rewindMeta->readPos * sizeof(RewindItem),
+					   rewindMeta->restorePos * sizeof(RewindItem),
 					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 
 		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
 		{
-			Assert(pos + i < rewindMeta->writePos);
-			checkpoint_write_rewind_item(&buffer[pos + i]);
+			Assert(rewindMeta->checkpointPos + i < rewindMeta->evictPos);
+			checkpoint_write_rewind_item(&buffer[rewindMeta->checkpointPos + i]);
 		}
 	}
 
@@ -1260,8 +1188,6 @@ checkpoint_write_rewind_xids(void)
 	 * Write rewind records from in-memory rewind buffer (after evicted
 	 * records if they exist)
 	 */
-	for (pos = finish1; pos < curAddPos; pos++)
-		checkpoint_write_rewind_item(&rewindBuffer[pos % rewind_circular_buffer_size]);
-
-	rewindMeta->checkpointPos = pos;
+	for (; rewindMeta->checkpointPos < pg_atomic_read_u64(&rewindMeta->addPos); rewindMeta->checkpointPos++)
+		checkpoint_write_rewind_item(&rewindAddBuffer[rewindMeta->checkpointPos % rewind_circular_buffer_size]);
 }
