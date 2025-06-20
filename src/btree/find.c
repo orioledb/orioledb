@@ -879,6 +879,8 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		}
 	}
 
+	pg_read_barrier();
+
 	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
 		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
 		return OBTreeFindDownlinkRetry;
