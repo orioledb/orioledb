@@ -478,36 +478,65 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 	}
 }
 
+/*
+ * int4_array_search
+ *     Binary-search version that narrows the second pass whenever the first
+ *     pass encounters a value > key.
+ */
 static void
 int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
-	int			i;
-	bool		lowerSet = false;
+	char	   *base = (char *) p;
 	int32		key = DatumGetInt32(keyDatum);
 
-	p += *lower * stride;
+	int			lo = *lower;	/* inclusive  */
+	int			hi = *upper;	/* exclusive  */
+	int			upper_hint = hi;	/* best "first > key" seen so far */
 
-	for (i = *lower; i < *upper; i++)
+	/* ------------------------------------------------------------------
+	 * Pass 1: locate the first element >= key (lower bound),
+	 *         while remembering the left-most element > key.
+	 * ------------------------------------------------------------------ */
+	while (lo < hi)
 	{
-		int32		value = *((int32 *) p);
+		int			mid = lo + ((hi - lo) >> 1);
+		int32		val = *((int32 *) (base + mid * stride));
 
-		if (value == key && !lowerSet)
+		if (val < key)
+			lo = mid + 1;
+		else
 		{
-			*lower = i;
-			lowerSet = true;
-		}
-		else if (value > key)
-		{
-			if (!lowerSet)
-				*lower = i;
-			*upper = i;
-			return;
-		}
+			hi = mid;			/* val >= key */
 
-		p += stride;
+			if (val > key && mid < upper_hint)
+				upper_hint = mid;	/* tighten the eventual upper bound */
+		}
 	}
-	if (!lowerSet)
-		*lower = *upper;
+	*lower = lo;				/* potential match / insertion point */
+
+	/* If the key is absent, we’re done. */
+	if (lo == *upper ||
+		*((int32 *) (base + lo * stride)) != key)
+	{
+		*upper = lo;
+		return;
+	}
+
+	/* ------------------------------------------------------------------
+	 * Pass 2: find first element  > key, searching only up to upper_hint.
+	 * ------------------------------------------------------------------ */
+	hi = upper_hint;
+	while (lo < hi)
+	{
+		int			mid = lo + ((hi - lo) >> 1);
+		int32		val = *((int32 *) (base + mid * stride));
+
+		if (val <= key)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	*upper = lo;				/* first element greater than key */
 }
 
 static void
