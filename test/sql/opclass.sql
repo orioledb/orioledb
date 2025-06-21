@@ -676,6 +676,30 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val;
 RESET enable_seqscan;
 
+CREATE TABLE o_test_call_cmp_func_in_abort(
+	val_1 int
+)USING orioledb;
+
+CREATE FUNCTION o_tccfia_cmp(a int, b int) RETURNS int AS $$
+	SELECT 134;
+$$ LANGUAGE SQL IMMUTABLE;
+
+CREATE OPERATOR FAMILY o_tccfia_fam USING btree;
+
+CREATE OPERATOR CLASS o_tccfia_opclass FOR TYPE int
+	USING btree FAMILY o_tccfia_fam
+	AS OPERATOR 1 <^, OPERATOR 3 =^,
+	   FUNCTION 1 o_tccfia_cmp(int, int);
+
+BEGIN;
+
+CREATE INDEX int_val_ix_s_i ON
+	o_test_call_cmp_func_in_abort(val_1 o_tccfia_opclass);
+
+INSERT INTO o_test_call_cmp_func_in_abort SELECT generate_series(1,10);
+
+ROLLBACK;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA opclass CASCADE;
 RESET search_path;
