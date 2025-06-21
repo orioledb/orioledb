@@ -20,7 +20,6 @@ jobs:
         postgres: [16, 17]
         compiler: [clang]
         distr: [alpine, ubuntu]
-        cpu: [amd64, arm64]
         include:
           - distr-version: 3.21
             distr: alpine
@@ -33,7 +32,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        if: ${{ matrix.cpu == 'arm64' }}
         uses: docker/setup-qemu-action@v1
 
       - name: Set up Docker Buildx
@@ -73,7 +71,7 @@ jobs:
         with:
           context: .
           file: ${{ format(matrix.distr == 'ubuntu' && '{0}/Dockerfile.ubuntu' || '{0}/Dockerfile', runner.temp) }}
-          platforms: linux/${{ matrix.cpu }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ inputs.pushing }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -83,5 +81,5 @@ jobs:
             PG_MAJOR=${{ matrix.postgres }}
             BUILD_CC_COMPILER=${{ matrix.compiler }}
             DOCKER_PG_LLVM_DEPS=llvm-dev clang
-          cache-to: ${{ inputs.caching_layers && format('type=gha,scope={0}-{1}-pg{2}-{3}-{4},mode=max', github.ref_name, github.sha, matrix.postgres, matrix.distr, matrix.cpu) || '' }}
-          cache-from: ${{ !inputs.caching_layers && format('type=gha,scope={0}-{1}-pg{2}-{3}-{4}', github.ref_name, github.sha, matrix.postgres, matrix.distr, matrix.cpu) || '' }}
+          cache-to: ${{ inputs.caching_layers && format('type=gha,scope={0}-{1}-pg{2}-{3},mode=max', github.ref_name, github.sha, matrix.postgres, matrix.distr) || '' }}
+          cache-from: ${{ !inputs.caching_layers && format('type=gha,scope={0}-{1}-pg{2}-{3}', github.ref_name, github.sha, matrix.postgres, matrix.distr) || '' }}
