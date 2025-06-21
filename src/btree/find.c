@@ -715,6 +715,8 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	int			chunkSize,
 				chunkItemsCount;
 	Pointer		base;
+	uint32		state;
+	uint32		imageChangeCount = pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK;
 	static BTreeNonLeafTuphdr tuphdr;
 
 	count = O_PAGE_IS(intCxt->pagePtr, RIGHTMOST) ? imgHdr->chunksCount - 1 : imgHdr->chunksCount;
@@ -749,8 +751,9 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	if (chunkIndex >= count)
 		return OBTreeFindDownlinkSlowpath;
 
-	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
-		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
+	state = pg_atomic_read_u32(&hdr->o_header.state);
+	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
+		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
 		return OBTreeFindDownlinkRetry;
 
 	chunk = (BTreePageChunk *) ((Pointer) hdr + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation));
@@ -801,8 +804,9 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 	pg_read_barrier();
 
-	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
-		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
+	state = pg_atomic_read_u32(&hdr->o_header.state);
+	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
+		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
 		return OBTreeFindDownlinkRetry;
 
 	if (chunkIndex == 0)
@@ -881,8 +885,9 @@ fastpath_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 	pg_read_barrier();
 
-	if ((pg_atomic_read_u32(&hdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK) !=
-		(pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK))
+	state = pg_atomic_read_u32(&hdr->o_header.state);
+	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
+		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
 		return OBTreeFindDownlinkRetry;
 
 	/* elog(LOG, "fast path %u %u, ", loc->chunkOffset, loc->itemOffset); */
