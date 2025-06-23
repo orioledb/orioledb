@@ -132,6 +132,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 	TransactionId   *subxids = NULL;
 	TransactionId	xid = InvalidTransactionId;
 	OXid		oxid = InvalidOXid;
+	CommitSeqNo	csn;
 	long		secs;
 	int		usecs;
 
@@ -261,8 +262,11 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 					Assert(!UndoLocationIsValid(location));
 				}
 
-			Assert(csn_is_retained_for_rewind(oxid_get_csn(rewindItem->oxid, true)));
-			set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
+#ifdef USE_ASSERT_CHECKING
+				csn = oxid_get_csn(rewindItem->oxid, true);	
+				Assert(csn_is_retained_for_rewind(csn));
+#endif
+				set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
 			}
 
 			/* Abort transaction for non-orioledb tables */
