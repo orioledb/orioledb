@@ -431,10 +431,142 @@ class RewindXidTest(BaseTest):
 		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val'), (6, '6val'), (7, '7val'), (8, '8val'), (9, '9val'), (10, '10val'), (11, '11val'), (12, '12val'), (13, '13val'), (14, '14val'), (15, '15val'), (16, '16val'), (17, '17val'), (18, '18val'), (19, '19val'), (20, '20val'), (21, '21val'), (22, '22val'), (23, '23val'), (24, '24val')]")
 		node.stop()
 
+	def test_rewind_xid_oriole_evict(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
+		    "orioledb.rewind_max_transactions 1000000\n"
+		    "orioledb.enable_rewind = true\n")
+		node.start()
+
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		for i in range(1, 6):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		oxid = int(a)
+		print(oxid)
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
+		xid = int(a)
+		print(xid)
+		time.sleep(1)
+
+		for i in range(6, 20000):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len, ev, len-ev)
+
+		node.safe_psql('postgres',
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
+		time.sleep(1)
+
+		node.is_started = False
+		node.start()
+
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len,ev,len-ev)
+
+		self.assertEqual(
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+
+		node.stop()
+
+	def test_rewind_xid_heap_evict(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
+		    "orioledb.rewind_max_transactions 1000000\n"
+		    "orioledb.enable_rewind = true\n")
+		node.start()
+
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		for i in range(1, 6):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		oxid = int(a)
+		print(oxid)
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
+		xid = int(a)
+		print(xid)
+		time.sleep(1)
+
+		for i in range(6, 20000):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len, ev, len-ev)
+
+		node.safe_psql('postgres',
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
+		time.sleep(1)
+
+		node.is_started = False
+		node.start()
+
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len,ev,len-ev)
+
+		self.assertEqual(
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test_heap;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+
+		node.stop()
+
 	def test_rewind_xid_evict(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
+		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
 		    "orioledb.rewind_max_transactions 1000000\n"
 		    "orioledb.enable_rewind = true\n")
 		node.start()
