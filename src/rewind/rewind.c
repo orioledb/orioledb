@@ -974,7 +974,7 @@ evict_rewind_items(void)
 			start = (rewindMeta->evictPos % rewind_circular_buffer_size);
 			length_to_end = rewind_circular_buffer_size - start;
 
-			elog(WARNING, "DISK_evict: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->evictPos));
+			elog(WARNING, "DISK_evict: A=%lu E=%lu C=%lu R=%lu freeAdd=%lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->evictPos));
 
 			if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 			{
