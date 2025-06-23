@@ -253,7 +253,8 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 				{
 					UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
-					elog(LOG, "Rewinding: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest run xid %u, cur xid %u, nsubxids %u", rewindItem->oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->xid, rewindItem->nsubxids);
+					elog(LOG, "Rewinding: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+
 					location = walk_undo_range_with_buf((UndoLogType) i,
 						rewindItem->undoLocation[i],
 						InvalidUndoLocation,
@@ -273,6 +274,8 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			if (TransactionIdIsValid(rewindItem->xid))
 			{
 				Assert((started_subxids && got_all_subxids) || (!started_subxids && !got_all_subxids));
+				elog(LOG, "Rewinding: oxid %lu xid %u oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+
 				if (got_all_subxids)
 				{
 					Assert(nsubxids);
@@ -904,6 +907,8 @@ rewind_worker_main(Datum main_arg)
 						{
 							UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
 
+							elog(LOG, "Completing: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+
 							location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation, rewindItem->oxid, false, NULL, true);
 							Assert(!UndoLocationIsValid(location));
 #ifdef USE_ASSERT_CHECKING
@@ -911,6 +916,10 @@ rewind_worker_main(Datum main_arg)
 #endif
 							pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 						}
+					}
+					else
+					{
+						elog(LOG, "Completing: oxid %lu xid %u oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 					}
 
 					pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
@@ -1123,7 +1132,6 @@ next_subxids_item:
 		rewindItem->xid = xid;
 		rewindItem->nsubxids = nsubxids;
 		rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
-
 		Assert (OXidIsValid(oxid) || TransactionIdIsValid(xid));
 
 		if (OXidIsValid(oxid))
@@ -1136,10 +1144,14 @@ next_subxids_item:
 				UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS((UndoLogType) i);
 
 				rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-				elog(LOG, "Add to buffer: oxid %lu logtype %d undo loc %lu oncommit loc %lu, oldest running xid %u cur xid %u nsubxids %u", oxid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), xid, nsubxids);
 				rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
 				rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
+				elog(LOG, "Add to buffer: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunningXid %u nsubxids %u", oxid, xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
 			}
+		}
+		else
+		{
+		elog(LOG, "Add to buffer: oxid %lu xid %u oldestRunningXid %u nsubxids %u", oxid, xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
 		}
 
 		if (nsubxids)
