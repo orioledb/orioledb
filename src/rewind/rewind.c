@@ -1037,7 +1037,7 @@ save_precommit_xid_subxids(void)
 
 	xid1 = GetTopTransactionIdIfAny();
         xid2 = GetCurrentTransactionIdIfAny();
-        elog(LOG, "PRE-COMMIT top xid %u, cur xid %u", xid1, xid2);
+        elog(DEBUG3, "PRE-COMMIT top xid %u, cur xid %u", xid1, xid2);
 
 	/* Don't overwrite existing precommit_xid with zero. */
 	if (TransactionIdIsValid(xid1))

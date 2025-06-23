@@ -647,9 +647,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
-		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
-		xid = int(a)
-		print(xid)
+		invalidxid = 0
 		time.sleep(1)
 
 		for i in range(6, 20000):
@@ -665,7 +663,7 @@ class RewindXidTest(BaseTest):
 		print(len, ev, len-ev)
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (invalidxid,oxid))
 		time.sleep(1)
 
 		node.is_started = False
@@ -710,9 +708,7 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
-		oxid = int(a)
-		print(oxid)
+		invalidoxid = 9223372036854775807
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
@@ -731,7 +727,7 @@ class RewindXidTest(BaseTest):
 		print(len, ev, len-ev)
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,invalidoxid))
 		time.sleep(1)
 
 		node.is_started = False

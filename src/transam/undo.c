@@ -1349,7 +1349,7 @@ undo_xact_callback(XactEvent event, void *arg)
 			xid1 = get_precommit_xid_subxids(&nsubxids, &subxids);
 			if (TransactionIdIsValid(xid1))
 			{
-				elog(LOG, "ADD_TO_REWIND_BUFFER_HEAP");
+				elog(DEBUG3, "ADD_TO_REWIND_BUFFER_HEAP");
 				add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
 				reset_precommit_xid_subxids();
 			}
@@ -1398,7 +1398,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				if (enable_rewind)
 				{
-					elog(LOG, "ADD_TO_REWIND_BUFFER_ORIOLE");
+					elog(DEBUG3, "ADD_TO_REWIND_BUFFER_ORIOLE");
 					xid1 = get_precommit_xid_subxids(&nsubxids, &subxids);
 
 					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
