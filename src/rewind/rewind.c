@@ -132,7 +132,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 	TransactionId   *subxids = NULL;
 	TransactionId	xid = InvalidTransactionId;
 	OXid		oxid = InvalidOXid;
-	CommitSeqNo	csn;
+	CommitSeqNo	csn PG_USED_FOR_ASSERTS_ONLY;
 	long		secs;
 	int		usecs;
 
