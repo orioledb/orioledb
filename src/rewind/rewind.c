@@ -382,7 +382,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 
 		if (OXidIsValid(rewind_oxid))
 		{
-			if (!xid_is_finished_for_everybody(rewind_oxid))
+			if (!xid_is_finished(rewind_oxid))
 			{
 				elog(WARNING, "Rewind OXid is not in the past. Rewind will be based only on rewind XID");
 			}
