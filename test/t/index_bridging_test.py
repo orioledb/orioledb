@@ -224,13 +224,7 @@ class IndexBridgingTest(BaseTest):
 
 		con1 = node.connect(autocommit=True)
 		con1.execute("""
-			SET log_error_verbosity = 'terse';
-		""")
-		con1.execute("""
 			VACUUM;
-		""")
-		con1.execute("""
-			RESET log_error_verbosity;
 		""")
 
 		plan = node.execute("""
