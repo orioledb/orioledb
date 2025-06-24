@@ -397,6 +397,14 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
+		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		oxid = int(a)
+		print(oxid)
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
+		xid = int(a)
+		print(xid)
+		time.sleep(1)
+
 		node.safe_psql(
 		    'postgres', "CREATE TABLE o_test_ddl (\n"
 		    "	id integer NOT NULL,\n"
@@ -410,14 +418,6 @@ class RewindXidTest(BaseTest):
 		    "	val text,\n"
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
-
-		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
-		oxid = int(a)
-		print(oxid)
-		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
-		xid = int(a)
-		print(xid)
-		time.sleep(1)
 
 		for i in range(6, 20):
 			node.safe_psql(
