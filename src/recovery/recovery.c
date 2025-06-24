@@ -2832,14 +2832,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			tuple.tuple.formatFlags = *ptr;
 			ptr++;
 
-			if (sys_tree_num > 0)
-				elog(WARNING, "WAL_REC_MODIFY: %d: %s",
-					 sys_tree_num,
-					 rec_type == WAL_REC_INSERT ? "WAL_REC_INSERT" :
-					 rec_type == WAL_REC_UPDATE ? "WAL_REC_UPDATE" :
-					 rec_type == WAL_REC_DELETE ? "WAL_REC_DELETE" :
-					 "WRONG");
-
 			memcpy(&length, ptr, sizeof(OffsetNumber));
 			ptr += sizeof(OffsetNumber);
 

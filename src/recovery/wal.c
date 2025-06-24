@@ -46,14 +46,6 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 	ORelOids	oids = desc->oids;
 	OIndexType	type = desc->type;
 
-	if (desc->oids.datoid == SYS_TREES_DATOID)
-		elog(WARNING, "add_modify_wal_record: %u: %s",
-			 desc->oids.reloid,
-			 rec_type == WAL_REC_INSERT ? "WAL_REC_INSERT" :
-			 rec_type == WAL_REC_UPDATE ? "WAL_REC_UPDATE" :
-			 rec_type == WAL_REC_DELETE ? "WAL_REC_DELETE" :
-			 "WRONG");
-
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
 		return;
@@ -156,7 +148,6 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 
 	Assert(!is_recovery_process());
 
-	elog(WARNING, "wal_commit: local_wal_has_material_changes: %c", local_wal_has_material_changes ? 'Y' : 'N');
 	if (!local_wal_has_material_changes)
 	{
 		local_wal_buffer_offset = 0;
@@ -471,10 +462,7 @@ log_logical_wal_container(Pointer ptr, int length)
 {
 	XLogBeginInsert();
 	XLogRegisterData(ptr, length);
-	XLogRecPtr	res = XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
-
-	elog(WARNING, "log_logical_wal_container: %X/%X", LSN_FORMAT_ARGS(res));
-	return res;
+	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 }
 
 /*

@@ -78,13 +78,25 @@ class TypesTest(BaseTest):
 		enum_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
 		enumoid_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
 		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
-		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
-		node.safe_psql('postgres', "DROP TABLE o_holidays;")
-		node.safe_psql('postgres', "DROP TYPE o_happiness;")
+
+		con = node.connect()
+		con.execute("DROP TYPE o_happiness CASCADE;")
 		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
-		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
-		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
+		con.rollback()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+
+		node.safe_psql("""
+			CREATE TABLE o_holidays2 (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_holidays2_ix1 ON o_holidays2(happiness);
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
@@ -93,6 +105,153 @@ class TypesTest(BaseTest):
 		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 4)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
+		print(node.safe_psql("SELECT orioledb_tbl_structure('o_holidays2'::regclass);").decode("utf-8"), flush=True)
+		self.assertEqual([(2, 'happy'), (8, 'ecstatic')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (6, 'sad');
+		""")
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (24, 'very happy');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		print(node.safe_psql("SELECT orioledb_tbl_structure('o_holidays2'::regclass);").decode("utf-8"), flush=True)
+		self.assertEqual([(2, 'happy'), (6, 'happy'), (8, 'ecstatic'), (24, 'very happy')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+		node.stop()
+		raise 0
+
+	def test_enum_index_recovery_2(self):
+		enum_amount = 0
+		enumoid_amount = 0
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy',
+											 'ecstatic');
+
+			CREATE TABLE o_holidays (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL,
+				PRIMARY KEY (happiness)
+			) USING orioledb;
+
+			ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
+		""")
+
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (4, 'sad');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (6, 'very happy');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+
+		enum_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+		enumoid_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+
+		con = node.connect()
+		con.execute("DROP TYPE o_happiness CASCADE;")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		con.rollback()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+
+		node.safe_psql("""
+			CREATE TABLE o_holidays2 (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_holidays2_ix1 ON o_holidays2(happiness);
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		# deleted records in o_enum_cache physically deleted during checkpoint
+		# performed after recovery
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 4)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
+		print(node.safe_psql("SELECT orioledb_tbl_structure('o_holidays2'::regclass);").decode("utf-8"), flush=True)
+		self.assertEqual([(2, 'happy'), (8, 'ecstatic')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (6, 'sad');
+		""")
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (24, 'very happy');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		print(node.safe_psql("SELECT orioledb_tbl_structure('o_holidays2'::regclass);").decode("utf-8"), flush=True)
+		self.assertEqual([(2, 'happy'), (6, 'happy'), (8, 'ecstatic'), (24, 'very happy')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+		node.stop()
+		raise 0
+
+	def test_enum_index_recovery_3(self):
+		enum_amount = 0
+		enumoid_amount = 0
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy',
+											 'ecstatic');
+			ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
+		""")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+
+		node.safe_psql("""
+			CREATE TABLE o_holidays2 (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_holidays2_ix1 ON o_holidays2(happiness);
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		# deleted records in o_enum_cache physically deleted during checkpoint
+		# performed after recovery
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		print(node.safe_psql("SELECT orioledb_tbl_structure('o_holidays2'::regclass);").decode("utf-8"), flush=True)
+		self.assertEqual([(2, 'happy'), (8, 'ecstatic')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (6, 'sad');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		print(node.safe_psql("SELECT orioledb_sys_tree_structure(5);").decode("utf-8"), flush=True)
+		print(node.safe_psql("SELECT orioledb_tbl_structure('o_holidays2'::regclass);").decode("utf-8"), flush=True)
+		self.assertEqual([(2, 'happy'), (6, 'sad'), (8, 'ecstatic')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
 		node.stop()
 		raise 0
 
