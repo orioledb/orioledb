@@ -700,7 +700,7 @@ class RewindXidTest(BaseTest):
 		    "	id integer NOT NULL,\n"
 		    "	val text,\n"
 		    "	PRIMARY KEY (id)\n"
-		    ") USING orioledb;\n")
+		    ") USING heap;\n")
 
 		for i in range(1, 6):
 			node.safe_psql(
