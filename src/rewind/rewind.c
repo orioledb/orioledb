@@ -76,7 +76,20 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_evicted_length);
 static inline
 void print_rewind_item(RewindItem *rewindItem, uint64 pos)
 {
-	elog(LOG, "P %lu T %u OX %lu X %u L0 %lu OCL0 %lu, MRL0 %lu, L1 %lu OCL1 %lu, MRL1 %lu L2 %lu OCL2 %lu, MRL2 %lu ORX %u NS %u", pos, rewindItem->tag, rewindItem->oxid, rewindItem->xid, rewindItem->undoLocation[0], rewindItem->onCommitUndoLocation[0], rewindItem->minRetainLocation[0], rewindItem->undoLocation[1], rewindItem->onCommitUndoLocation[1], rewindItem->minRetainLocation[1],rewindItem->undoLocation[2], rewindItem->onCommitUndoLocation[2], rewindItem->minRetainLocation[2], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+	/* To shorten output invalid values are printed as -1 */
+	int64 oxid = OXidIsValid (rewindItem->oxid) ? rewindItem->oxid : -1;
+	int64 undoLocation[3];
+	int64 onCommitUndoLocation[3];
+	int64 minRetainLocation[3];
+
+	for (int i = 0; i < 3; i++)
+	{
+		undoLocation[i] = (rewindItem->undoLocation[i] == InvalidUndoLocation) ? -1 : rewindItem->undoLocation[i];
+		onCommitUndoLocation[i] = (rewindItem->onCommitUndoLocation[i] == InvalidUndoLocation) ? -1 : rewindItem->onCommitUndoLocation[i];
+		minRetainLocation[i] = (rewindItem->minRetainLocation[i] == InvalidUndoLocation) ? -1 : rewindItem->minRetainLocation[i];
+	}
+
+	elog(LOG, "P %lu T %u OX %ld X %u L0 %ld OCL0 %ld, MRL0 %ld, L1 %ld OCL1 %ld, MRL1 %ld L2 %ld OCL2 %ld, MRL2 %ld ORX %u NS %u", pos, rewindItem->tag, oxid, rewindItem->xid, undoLocation[0], onCommitUndoLocation[0], minRetainLocation[0], undoLocation[1], onCommitUndoLocation[1], minRetainLocation[1], undoLocation[2], onCommitUndoLocation[2], minRetainLocation[2], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 }
 
 /*
@@ -117,13 +130,13 @@ void log_print_rewind_queue(void)
 
 		o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
-					   rewindMeta->restorePos * sizeof(RewindItem),
+					   pos * sizeof(RewindItem),
 					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 
 		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
 		{
 			Assert(pos + i < rewindMeta->evictPos);
-			print_rewind_item(&buffer[i], pos);
+			print_rewind_item(&buffer[i], pos + i);
 		}
 	}
 
@@ -200,10 +213,11 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 
 	log_print_rewind_queue();
 
+	/* Decrement before, as addPos was a next element to add. */
+	pos = pg_atomic_sub_fetch_u64(&rewindMeta->addPos, 1);
+
 	while (true)
 	{
-		/* Decrement before, as addPos was a next element to add. */
-		pos = pg_atomic_sub_fetch_u64(&rewindMeta->addPos, 1);
 		if (pos >= rewindMeta->evictPos) /* At evictPos is the next element to be evicted. It's actually still in rewindAddBuffer */
 		{
 			rewindItem = &rewindAddBuffer[pos % rewind_circular_buffer_size];
@@ -214,13 +228,12 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			{
 				o_buffers_read(&rewindBuffersDesc, 
 						(Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
-						rewindMeta->evictPos - REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
+						(pos - REWIND_DISK_BUFFER_LENGTH) * sizeof(RewindItem),
 						REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
-				i = REWIND_DISK_BUFFER_LENGTH - 1;
-				rewindMeta->evictPos -= REWIND_DISK_BUFFER_LENGTH;
+				i = REWIND_DISK_BUFFER_LENGTH;
 			}
-			rewindItem = &tmpbuf[i];
 			i--;
+			rewindItem = &tmpbuf[i];
 		}
 		else
 		{
@@ -374,6 +387,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs/1000));
 			return;
 		}
+		pos--;
 	}
 
 rewind_complete:
@@ -1266,7 +1280,7 @@ checkpoint_write_rewind_xids(void)
 
 		o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
-					   rewindMeta->restorePos * sizeof(RewindItem),
+					   rewindMeta->checkpointPos * sizeof(RewindItem),
 					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 
 		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
