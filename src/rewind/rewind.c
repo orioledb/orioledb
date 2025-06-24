@@ -73,6 +73,68 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_evicted_length);
 /* Modes below allowed only in debug functions under IS_DEV */
 #define	REWIND_MODE_XID	(3)
 
+static inline
+void print_rewind_item(RewindItem *rewindItem, uint64 pos)
+{
+	elog(LOG, "P %lu T %u OX %lu X %u L0 %lu OCL0 %lu, MRL0 %lu, L1 %lu OCL1 %lu, MRL1 %lu L2 %lu OCL2 %lu, MRL2 %lu ORX %u NS %u", pos, rewindItem->tag, rewindItem->oxid, rewindItem->xid, rewindItem->undoLocation[0], rewindItem->onCommitUndoLocation[0], rewindItem->minRetainLocation[0], rewindItem->undoLocation[1], rewindItem->onCommitUndoLocation[1], rewindItem->minRetainLocation[1],rewindItem->undoLocation[2], rewindItem->onCommitUndoLocation[2], rewindItem->minRetainLocation[2], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+}
+
+/*
+ * Write rewind records from circular in-memory rewind buffer and on-disk rewind buffer
+ * to xid buffer at checkpoint.
+ */
+static
+void log_print_rewind_queue(void)
+{
+	int			i;
+	uint64			pos;
+	uint64			curAddPos;
+	int 			freeAddSpace;
+
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+		return;
+	}
+
+	/* NB: addPos could be increased concurrently */
+	curAddPos = pg_atomic_read_u64(&rewindMeta->addPos);
+	freeAddSpace = rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos);
+
+	elog(LOG, "Print rewind queue: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
+
+	/* From completeBuffer if exists*/
+	for (pos = rewindMeta->completePos; pos < rewindMeta->restorePos; pos++)
+		print_rewind_item(&rewindCompleteBuffer[pos % rewind_circular_buffer_size], pos);
+
+	/* From on-disk buffer if they exist */
+	for (; pos < rewindMeta->evictPos; pos += REWIND_DISK_BUFFER_LENGTH)
+	{
+		RewindItem	buffer[REWIND_DISK_BUFFER_LENGTH];
+
+		o_buffers_read(&rewindBuffersDesc,
+					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
+					   rewindMeta->restorePos * sizeof(RewindItem),
+					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+
+		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
+		{
+			Assert(pos + i < rewindMeta->evictPos);
+			print_rewind_item(&buffer[i], pos);
+		}
+	}
+
+	/*
+	 * From in-memory rewind addBuffer (after evicted
+	 * records if they exist)
+	 */
+	for (; pos < curAddPos; pos++)
+		print_rewind_item(&rewindAddBuffer[pos % rewind_circular_buffer_size], pos);
+}
+
 Size
 rewind_shmem_needs(void)
 {
@@ -136,6 +198,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 	long		secs;
 	int		usecs;
 
+	log_print_rewind_queue();
 
 	while (true)
 	{
@@ -1174,6 +1237,9 @@ checkpoint_write_rewind_xids(void)
 {
 	int			i;
 
+	if (!enable_rewind)
+		return;
+
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
 		elog(WARNING, "Adding to rewind queue to checkpoint is blocked by rewind");
@@ -1206,7 +1272,7 @@ checkpoint_write_rewind_xids(void)
 		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
 		{
 			Assert(rewindMeta->checkpointPos + i < rewindMeta->evictPos);
-			checkpoint_write_rewind_item(&buffer[rewindMeta->checkpointPos + i]);
+			checkpoint_write_rewind_item(&buffer[i]);
 		}
 	}
 
@@ -1217,3 +1283,5 @@ checkpoint_write_rewind_xids(void)
 	for (; rewindMeta->checkpointPos < pg_atomic_read_u64(&rewindMeta->addPos); rewindMeta->checkpointPos++)
 		checkpoint_write_rewind_item(&rewindAddBuffer[rewindMeta->checkpointPos % rewind_circular_buffer_size]);
 }
+
+
