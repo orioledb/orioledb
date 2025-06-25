@@ -22,6 +22,7 @@
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "miscadmin.h"
+#include "rewind/rewind.h"
 #include "storage/lmgr.h"
 #include "storage/sinvaladt.h"
 #include "storage/procsignal.h"
@@ -873,6 +874,14 @@ advance_global_xmin(OXid newXid)
 
 		if (OXidIsValid(xmin) && xmin < globalXmin)
 			globalXmin = xmin;
+	}
+
+	if (enable_rewind)
+	{
+		OXid		rewindRunXmin = get_rewind_run_xmin();
+
+		if (OXidIsValid(rewindRunXmin) && rewindRunXmin < globalXmin)
+			globalXmin = rewindRunXmin;
 	}
 
 	prevGlobalXmin = pg_atomic_read_u64(&xid_meta->globalXmin);

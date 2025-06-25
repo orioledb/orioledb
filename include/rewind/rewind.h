@@ -32,6 +32,7 @@ extern void add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, Tra
 extern void save_precommit_xid_subxids(void);
 extern TransactionId get_precommit_xid_subxids(int *nsubxids, TransactionId **subxids);
 extern void reset_precommit_xid_subxids(void);
+extern OXid get_rewind_run_xmin(void);
 
 #define EMPTY_ITEM_TAG (0)
 #define REWIND_ITEM_TAG (1)
@@ -51,6 +52,7 @@ typedef	struct RewindItem
 	uint64		undoLocation[UndoLogsCount];
 	uint64		minRetainLocation[UndoLogsCount];
 	FullTransactionId oldestConsideredRunningXid;
+	OXid		runXmin;
 	TimestampTz timestamp;
 } RewindItem;
 
@@ -79,6 +81,7 @@ typedef struct
 	int		rewindEvictTrancheId;
 	LWLock		evictLock;		/* Lock to evict page from circular buffer */
 	pg_atomic_uint64 oldestConsideredRunningXid;
+	pg_atomic_uint64 runXmin;
 	bool 		rewindWorkerStopRequested;
 	bool		rewindWorkerStopped;
 	bool 		addToRewindQueueDisabled;
