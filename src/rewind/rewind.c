@@ -1217,6 +1217,21 @@ next_subxids_item:
 		rewindItem->nsubxids = nsubxids;
 		rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
 		rewindItem->runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
+
+		if (!OXidIsValid(pg_atomic_read_u64(&rewindMeta->runXmin)))
+		{
+			uint64	curValue = InvalidOXid;
+
+			(void) pg_atomic_compare_exchange_u64(&rewindMeta->runXmin, &curValue, rewindItem->runXmin);
+		}
+
+		if (pg_atomic_read_u64(&rewindMeta->oldestConsideredRunningXid) == InvalidTransactionId)
+		{
+			uint64	curValue = InvalidTransactionId;
+
+			(void) pg_atomic_compare_exchange_u64(&rewindMeta->oldestConsideredRunningXid, &curValue, rewindItem->oldestConsideredRunningXid.value);
+		}
+
 		Assert (OXidIsValid(oxid) || TransactionIdIsValid(xid));
 
 		if (OXidIsValid(oxid))
