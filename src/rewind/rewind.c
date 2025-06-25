@@ -15,7 +15,9 @@
 #include "orioledb.h"
 
 #include "btree/undo.h"
+#include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/dsa.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
 #include "utils/stopevent.h"
@@ -226,7 +228,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 		{
 			if (i == 0)
 			{
-				o_buffers_read(&rewindBuffersDesc, 
+				o_buffers_read(&rewindBuffersDesc,
 						(Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
 						(pos - REWIND_DISK_BUFFER_LENGTH) * sizeof(RewindItem),
 						REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
@@ -319,7 +321,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			{
 				elog(ERROR, "Unknown rewind mode");
 			}
-			
+
 			/* Rewind current rewind item */
 
 			/* Undo orioledb transaction */
@@ -340,7 +342,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 				}
 
 #ifdef USE_ASSERT_CHECKING
-				csn = oxid_get_csn(rewindItem->oxid, true);	
+				csn = oxid_get_csn(rewindItem->oxid, true);
 				Assert(csn_is_retained_for_rewind(csn));
 #endif
 				set_oxid_csn(rewindItem->oxid, COMMITSEQNO_ABORTED);
@@ -772,6 +774,8 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->oldCleanedFileNum = 0;
 		pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 							InvalidTransactionId);
+		pg_atomic_write_u64(&rewindMeta->runXmin,
+							InvalidOXid);
 
 		/* Rewind buffers are not persistent */
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
@@ -1001,6 +1005,8 @@ rewind_worker_main(Datum main_arg)
 
 					pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 										rewindItem->oldestConsideredRunningXid.value);
+					pg_atomic_write_u64(&rewindMeta->runXmin,
+										rewindItem->runXmin);
 				}
 
 				/* Clear the REWIND_ITEM or SUBXIDS_ITEM from the circular buffer */
@@ -1032,7 +1038,7 @@ evict_rewind_items(uint64 curAddPos)
 	int			length_to_end;
 
 //	if (LWLockAcquireOrWait(&rewindMeta->evictLock, LW_EXCLUSIVE))
-	
+
 	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
 
 	{
@@ -1161,7 +1167,7 @@ next_subxids_item:
 	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, 1);
 //	LWLockRelease(&rewindMeta->evictLock);//
 
-	freeAddSpace = rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos); 
+	freeAddSpace = rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos);
 	Assert(freeAddSpace >= 0);
 	elog(LOG, "add_to_rewind_buffer: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 
@@ -1210,6 +1216,7 @@ next_subxids_item:
 		rewindItem->xid = xid;
 		rewindItem->nsubxids = nsubxids;
 		rewindItem->oldestConsideredRunningXid = GetOldestFullTransactionIdConsideredRunning();
+		rewindItem->runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 		Assert (OXidIsValid(oxid) || TransactionIdIsValid(xid));
 
 		if (OXidIsValid(oxid))
@@ -1298,4 +1305,8 @@ checkpoint_write_rewind_xids(void)
 		checkpoint_write_rewind_item(&rewindAddBuffer[rewindMeta->checkpointPos % rewind_circular_buffer_size]);
 }
 
-
+OXid
+get_rewind_run_xmin(void)
+{
+	return pg_atomic_read_u64(&rewindMeta->runXmin);
+}
