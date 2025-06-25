@@ -118,9 +118,9 @@ OrioleDB implements block-level compression. Compression levels are integer valu
 
 The following options control the compression level of a table:
 
-- `compress` – compression level for all table data structures (value of `-1` disables compression for the table, non-specifying makes orioledb.default_compress to be used),
-- `primary_compress` – compression level for the table primary key (in case of `-1` it's inherited from `compress` value for the table if it's positive, otherwise `orioledb.default_primary_compress is used),
-- `toast_compress` – compression level for the table TOASTed values. (in case of `-1` it's inherited from `compress` value for the table if it's positive, otherwise `orioledb.default_toast_compress is used)
+- `compress` – compression level for all table data structures (value of `-1` disables compression for the table, non-specifying makes `orioledb.default_compress` to be used),
+- `primary_compress` – compression level for the table primary key (in case of `-1` it's inherited from `compress` value for the table if it's positive, otherwise `orioledb.default_primary_compress` is used),
+- `toast_compress` – compression level for the table TOASTed values. (in case of `-1` it's inherited from `compress` value for the table if it's positive, otherwise `orioledb.default_toast_compress` is used)
 
 Individual indexes also have the `compress` option, which controls the compression level of a particular index, overriding the value of the table `compress` option.
 
