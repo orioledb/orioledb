@@ -38,7 +38,7 @@ extern OXid get_rewind_run_xmin(void);
 #define REWIND_ITEM_TAG (1)
 #define SUBXIDS_ITEM_TAG (2)
 
-#define SUBXIDS_PER_ITEM	(23)
+#define SUBXIDS_PER_ITEM	(25)
 
 /* RewindItem and SubxidsItem should have same size to be castable to each other */
 /* Empty RewindItem and SubxidsItem have invalid oxid and tag */

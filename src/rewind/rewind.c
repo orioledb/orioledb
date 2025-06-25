@@ -774,8 +774,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->oldCleanedFileNum = 0;
 		pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 							InvalidTransactionId);
-		pg_atomic_write_u64(&rewindMeta->runXmin,
-							InvalidOXid);
+		pg_atomic_write_u64(&rewindMeta->runXmin, InvalidOXid);
 
 		/* Rewind buffers are not persistent */
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
