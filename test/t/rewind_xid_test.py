@@ -447,7 +447,7 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(
 		    str(
 		        node.execute(
-		            'postgres',
+                           'postgres',
 		            'SELECT * FROM o_test;')),
 		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
 		self.assertEqual(
@@ -456,44 +456,19 @@ class RewindXidTest(BaseTest):
 		            'postgres',
 		            'SELECT * FROM o_test_heap;')),
 		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
-#		self.assertEqual(
-#		    str(
-#		        node.execute(
-#		            'postgres',
-#		            'SELECT * FROM o_test_ddl;')),
-#		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
-#		self.assertEqual(
-#		    str(
-#		        node.execute(
-#		            'postgres',
-#		            'SELECT * FROM o_test_heap_ddl;')),
-#		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
-
-		a = node.execute('postgres', 'SELECT * FROM o_test_ddl;\n')
-		print(a)
 
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql(
 		            'postgres',
 		            'SELECT * FROM o_test_ddl;')
-		assert e.exception.message is not None
-		self.assertTrue(
-			self.stripErrorMsg(e.exception.message).startswith(
-			"ERROR:  relation"))
-		self.assertTrue(
-			self.stripErrorMsg(e.exception.message).endswith(
-			"does not exist"))
+		self.assertIn('ERROR:  relation "o_test_ddl" does not exist',
+		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql(
 		            'postgres',
 		            'SELECT * FROM o_test_heap_ddl;')
-		assert e.exception.message is not None
-		self.assertTrue(
-			self.stripErrorMsg(e.exception.message).startswith(
-			"ERROR:  relation"))
-		self.assertTrue(
-			self.stripErrorMsg(e.exception.message).endswith(
-			"does not exist"))
+		self.assertIn('ERROR:  relation "o_test_heap_ddl" does not exist',
+		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 		node.stop()
 
 	def test_rewind_xid_ddl_drop(self):

@@ -76,7 +76,7 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_evicted_length);
 #define	REWIND_MODE_XID	(3)
 
 static inline
-void print_rewind_item(RewindItem *rewindItem, uint64 pos)
+void print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
 {
 	/* To shorten output invalid values are printed as -1 */
 	int64 oxid = OXidIsValid (rewindItem->oxid) ? rewindItem->oxid : -1;
@@ -91,7 +91,7 @@ void print_rewind_item(RewindItem *rewindItem, uint64 pos)
 		minRetainLocation[i] = (rewindItem->minRetainLocation[i] == InvalidUndoLocation) ? -1 : rewindItem->minRetainLocation[i];
 	}
 
-	elog(LOG, "P %lu T %u OX %ld X %u L0 %ld OCL0 %ld, MRL0 %ld, L1 %ld OCL1 %ld, MRL1 %ld L2 %ld OCL2 %ld, MRL2 %ld ORX %u NS %u", pos, rewindItem->tag, oxid, rewindItem->xid, undoLocation[0], onCommitUndoLocation[0], minRetainLocation[0], undoLocation[1], onCommitUndoLocation[1], minRetainLocation[1], undoLocation[2], onCommitUndoLocation[2], minRetainLocation[2], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+	elog(LOG, "P %lu:%u T %u OX %ld X %u L0 %ld OCL0 %ld, MRL0 %ld, L1 %ld OCL1 %ld, MRL1 %ld L2 %ld OCL2 %ld, MRL2 %ld ORX %u NS %u", pos, source_buffer, rewindItem->tag, oxid, rewindItem->xid, undoLocation[0], onCommitUndoLocation[0], minRetainLocation[0], undoLocation[1], onCommitUndoLocation[1], minRetainLocation[1], undoLocation[2], onCommitUndoLocation[2], minRetainLocation[2], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 }
 
 /*
@@ -123,7 +123,7 @@ void log_print_rewind_queue(void)
 
 	/* From completeBuffer if exists*/
 	for (pos = rewindMeta->completePos; pos < rewindMeta->restorePos; pos++)
-		print_rewind_item(&rewindCompleteBuffer[pos % rewind_circular_buffer_size], pos);
+		print_rewind_item(&rewindCompleteBuffer[pos % rewind_circular_buffer_size], pos, 1);
 
 	/* From on-disk buffer if they exist */
 	for (; pos < rewindMeta->evictPos; pos += REWIND_DISK_BUFFER_LENGTH)
@@ -138,7 +138,7 @@ void log_print_rewind_queue(void)
 		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
 		{
 			Assert(pos + i < rewindMeta->evictPos);
-			print_rewind_item(&buffer[i], pos + i);
+			print_rewind_item(&buffer[i], pos + i, 2);
 		}
 	}
 
@@ -147,7 +147,7 @@ void log_print_rewind_queue(void)
 	 * records if they exist)
 	 */
 	for (; pos < curAddPos; pos++)
-		print_rewind_item(&rewindAddBuffer[pos % rewind_circular_buffer_size], pos);
+		print_rewind_item(&rewindAddBuffer[pos % rewind_circular_buffer_size], pos, 3);
 }
 
 Size
@@ -197,6 +197,7 @@ static void
 do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp)
 {
 	int	i = 0;
+	int 	k = 0;
 	RewindItem     *rewindItem;
 	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
 	uint64		pos;
@@ -212,6 +213,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 	CommitSeqNo	csn PG_USED_FOR_ASSERTS_ONLY;
 	long		secs;
 	int		usecs;
+	int		source_buffer;
 
 	log_print_rewind_queue();
 
@@ -223,24 +225,29 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 		if (pos >= rewindMeta->evictPos) /* At evictPos is the next element to be evicted. It's actually still in rewindAddBuffer */
 		{
 			rewindItem = &rewindAddBuffer[pos % rewind_circular_buffer_size];
+			source_buffer = 3;
 		}
 		else if (pos >= rewindMeta->restorePos) /* At restorePos is the next element to be restored. It's actually in disk buffer */
 		{
-			if (i == 0)
+			if (k == 0)
 			{
 				o_buffers_read(&rewindBuffersDesc,
 						(Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
-						(pos - REWIND_DISK_BUFFER_LENGTH) * sizeof(RewindItem),
+						(pos - REWIND_DISK_BUFFER_LENGTH + 1) * sizeof(RewindItem),
 						REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
-				i = REWIND_DISK_BUFFER_LENGTH;
+				k = REWIND_DISK_BUFFER_LENGTH;
 			}
-			i--;
-			rewindItem = &tmpbuf[i];
+			k--;
+			rewindItem = &tmpbuf[k];
+			source_buffer = 2;
 		}
 		else
 		{
 			rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
+			source_buffer = 1;
 		}
+		
+		elog(WARNING, "Rewind read elem: pos %lu:%u oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", pos,source_buffer, rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
@@ -549,6 +556,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	/* All good. Do actual rewind */
 	do_rewind(rewind_mode, rewind_time, rewindStartTimeStamp, rewind_oxid, rewind_xid, rewind_timestamp);
 
+	LWLockRelease(&rewindMeta->evictLock);
 	elog(LOG, "Rewind complete, for %d s", rewind_time);
 	/* Restart Postgres */
 	(void) kill(PostmasterPid, SIGTERM);
@@ -655,7 +663,7 @@ static void
 cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 {
 	char		curFileName[MAXPGPATH];
-	File		curFile;
+	int		curFile;
 	uint64		fileNum = 0;
 
 	Assert(OBuffersMaxTagIsValid(tag));
@@ -671,7 +679,7 @@ cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 		if (curFile < 0)
 			break;
 
-		FileClose(curFile);
+		close(curFile);
 
 		(void) unlink(curFileName);
 		fileNum++;
@@ -1099,6 +1107,10 @@ evict_rewind_items(uint64 curAddPos)
 		Assert(rewindMeta->evictPos <= curAddPos);
 		LWLockRelease(&rewindMeta->evictLock);
 	}
+	else
+	{
+		elog(WARNING, "evict_CONCURRENT_SKIPPED: A=%lu E=%lu C=%lu R=%lu freeAdd=%lu", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos));
+	}
 }
 
 void
@@ -1172,7 +1184,7 @@ next_subxids_item:
 	{
 		elog(LOG, "evict_rewind_items START: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 		evict_rewind_items(curAddPos);
-		elog(LOG, "evict_rewind_items STOP: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
+		elog(LOG, "evict_rewind_items STOP: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos));
 	}
 
 	rewindItem = &rewindAddBuffer[curAddPos % rewind_circular_buffer_size];
