@@ -13,6 +13,7 @@ EXTRA_CLEAN = include/utils/stopevents_defs.h \
 OBJS = src/btree/btree.o \
 	   src/btree/build.o \
 	   src/btree/check.o \
+	   src/btree/fastpath.o \
 	   src/btree/find.o \
 	   src/btree/insert.o \
 	   src/btree/io.o \
