@@ -13,17 +13,20 @@ The OrioleDB source code structure comprises various components including workfl
 orioledb
 |- .github
 |  |- workflows
-|  |  |- build.yml  -- build & test each commit
-|  |  |- docker.yml -- build docker images for each release
-|  |  |- rpm.yml    -- build CentOS 7 packages on demand
+|  |  |- check.yml      -- build & test each commit
+|  |  |- docker.yml     -- build docker images for each release
+|  |  |- dockertest.yml -- tests the docker images
+|  |  |- pgindent.yml   -- checks C-source code formatting
+|  |  |- rpm.yml        -- build CentOS 7 packages on demand
+|  |  |- static.yml     -- runs static analysis
 |  |- FUNDING.yml
 |
-|- ci  -- scripts used within build.yml workflow
+|- ci  -- scripts for building, testing, and CI automation
 |- doc -- documentation
 |- docker
 |  |- tests -- Docker images tests
-|  |- Dockerfile -- Alpine based Dockerfile used within docker.yml workflow
-|  |- Dockerfile.ubuntu -- Ubuntu based Dockerfile
+|  |- Dockerfile -- Alpine based Dockerfile used within docker.yml and dockertest.yml workflows
+|  |- Dockerfile.ubuntu -- Ubuntu based Dockerfile used within docker.yml and dockertest.yml workflows
 |  |- README.md -- Docker images tests documentation
 |  |- docker-entrypoint.sh -- entrypoint file for Docker images
 |  |- orioledb-config.sh -- Docker images tests configuration
@@ -103,10 +106,10 @@ OrioleDB has 3 groups of tests described below.
 
 OrioleDB uses GitHub CI. The CI workflows are described below.
 
-### `build.yml`
+### `check.yml`
 
 This workflow runs the following tests for each of the two compilers (gcc and
-clang) and each of the supported PostgreSQL major versions (13, 14, and 15).
+clang) and each of the supported PostgreSQL major versions (16 and 17).
 
 - `normal` -- run tests without asserts and without debug symbols.
 - `debug` -- run test with asserts and with debug symbols.
@@ -129,9 +132,17 @@ clang) and each of the supported PostgreSQL major versions (13, 14, and 15).
 ### `docker.yml`
 
 This workflow builds docker images for amd64 and arm64v8 architectures under
-Alpine Linux. This Dockerfile is slightly adjusted
+Alpine and Ubuntu Linux. This Dockerfile is slightly adjusted
 [PostgreSQL Dockerfile](https://github.com/docker-library/postgres).
 See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
+
+### `dockertest.yml`
+
+This workflow tests the Docker images. It runs on every push and pull request.
+
+### `pgindent.yml`
+
+This workflow checks the code formatting using `pgindent`. It runs on every push and pull request.
 
 ### `rpm.yml`
 
@@ -139,6 +150,10 @@ This workflow build RPM packages for CentOS 7 using specification from the
 [orioledb/pgrpms](https://github.com/orioledb/pgrpms) repository, a fork
 of [pgrpms](https://git.postgresql.org/gitweb/?p=pgrpms.git;a=summary)
 repository.
+
+### `static.yml`
+
+This workflow runs static analysis on the code. It runs on every push and pull request.
 
 ## Stop events
 
