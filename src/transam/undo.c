@@ -2000,7 +2000,6 @@ o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 					 bool abort, bool changeCountsValid)
 {
 	Assert(abort);
-	return;
 }
 
 void

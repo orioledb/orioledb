@@ -80,6 +80,9 @@ typedef struct oIdxLeader
 	/* parallel context itself */
 	ParallelContext *pcxt;
 
+	/* Recovery parallel context of recovery workers */
+	ParallelRecoveryContext *recoveryContext;
+
 	/*
 	 * nparticipanttuplesorts is the exact number of worker processes
 	 * successfully launched, plus one leader process if it participates as a
@@ -648,6 +651,8 @@ static void
 _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int request)
 {
 	ParallelContext *pcxt = NULL;
+	ParallelRecoveryContext *recoveryContext;
+	shm_toc_estimator *estimator;
 	int			scantuplesortstates;
 	Size		estbtshared;
 	Size		estsort = 0;
@@ -672,6 +677,29 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 
 	if (btspool->descr->bridge)
 		nallindices += 1;
+
+	elog(WARNING, "_o_index_begin_parallel: in_recovery %d", in_recovery);
+
+	/* Initialize parallel context */
+	if (!in_recovery)
+	{
+		/* TODO */
+	}
+	else
+	{
+		recoveryContext = CreateParallelRecoveryContext(*recovery_single_process ?
+														0 : (recovery_idx_pool_size_guc - 1));
+		estimator = &recoveryContext->estimator;
+	}
+
+	if (!in_recovery)
+	{
+		/* TODO */
+	}
+	else
+	{
+		InitializeParallelRecoveryDSM(recoveryContext);
+	}
 
 	if (!in_recovery)
 	{
@@ -796,6 +824,9 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 			sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *));
 			sharedsort[0] = recovery_sharedsort;
 		}
+
+		elog(WARNING, "_o_index_begin_parallel: recovery_single_process %d, recovery_idx_pool_size_guc %d, nrecoveryworkers %d",
+			 *recovery_single_process, recovery_idx_pool_size_guc, btshared->nrecoveryworkers);
 	}
 
 	Assert((buildstate->isrebuild && buildstate->ix_num == InvalidIndexNumber) || (!buildstate->isrebuild && buildstate->ix_num != InvalidIndexNumber));
@@ -817,6 +848,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	btshared->reltuples = 0.0;
 	memset(btshared->indtuples, 0, INDEX_MAX_KEYS * sizeof(double));
 	orioledb_parallelscan_initialize_inner((ParallelTableScanDesc) &(btshared->poscan));
+
+	elog(WARNING, "_o_index_begin_parallel: launch workers");
 
 	if (!in_recovery)
 	{
@@ -892,6 +925,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	btleader->sharedsort = sharedsort;
 	btleader->walusage = walusage;
 	btleader->bufferusage = bufferusage;
+
+	elog(WARNING, "_o_index_begin_parallel: _o_index_end_parallel");
 
 	/* If no workers were successfully launched, back out (do serial build) */
 	if (!in_recovery)
@@ -1349,8 +1384,6 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, Par
 	}
 	ExecDropSingleTupleTableSlot(primarySlot);
 	free_btree_seq_scan(sscan);
-
-	return;
 }
 
 void
@@ -1376,6 +1409,9 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	ctid = 1;
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
+
+	elog(WARNING, "build_secondary_index: ActiveSnapshotSet %d, in_dedicated_recovery_worker %d, max_parallel_maintenance_workers %d",
+		 ActiveSnapshotSet(), in_dedicated_recovery_worker, max_parallel_maintenance_workers);
 
 	/* Attempt to launch parallel worker scan when required */
 	// if (ActiveSnapshotSet() && (in_dedicated_recovery_worker || max_parallel_maintenance_workers > 0))

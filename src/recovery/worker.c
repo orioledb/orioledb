@@ -246,6 +246,41 @@ recovery_worker_main(Datum main_arg)
 	PG_END_TRY();
 }
 
+ParallelRecoveryContext *
+CreateParallelRecoveryContext(int nworkers)
+{
+	ParallelRecoveryContext *context;
+
+	context = palloc0(sizeof(ParallelRecoveryContext));
+	context->nworkers = nworkers;
+	shm_toc_initialize_estimator(&context->estimator);
+
+	return context;
+}
+
+void
+InitializeParallelRecoveryDSM(ParallelRecoveryContext *context)
+{
+	Size		segsize = 0;
+
+	segsize = shm_toc_estimate(&context->estimator);
+
+	if (context->nworkers > 0)
+		context->seg = dsm_create(segsize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
+	if (context->seg != NULL)
+		context->toc = shm_toc_create(O_PARALLEL_RECOVERY_MAGIC,
+									  dsm_segment_address(context->seg),
+									  segsize);
+	else
+	{
+		context->nworkers = 0;
+		context->private_memory = MemoryContextAlloc(TopMemoryContext, segsize);
+		context->toc = shm_toc_create(O_PARALLEL_RECOVERY_MAGIC,
+									  context->private_memory,
+									  segsize);
+	}
+}
+
 static inline void
 update_worker_ptr(int worker_id, XLogRecPtr ptr)
 {
@@ -371,6 +406,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = msg->oxid;
+				elog(WARNING, "recovery_queue_process: oids (%d, %d, %d), id %d",
+					 msg->oids.datoid, msg->oids.reloid, msg->oids.relnode, id);
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
@@ -382,6 +419,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					Assert(old_o_table->version == msg->old_o_table_version);
 				}
 
+				elog(WARNING, "recovery_queue_process: type %d, isrebuild %d",
+					 type, msg->isrebuild);
 				if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
 				{
 					OTableDescr *o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));

@@ -142,6 +142,17 @@ typedef struct
 	SubTransactionId parentSubId;
 } RecoveryMsgRollbackToSavepoint;
 
+typedef struct ParallelRecoveryContext
+{
+	int			nworkers;		/* Number of recovery workers except a leader */
+	shm_toc_estimator estimator;
+	dsm_segment *seg;
+	void	   *private_memory;
+	shm_toc	   *toc;
+} ParallelRecoveryContext;
+
+#define O_PARALLEL_RECOVERY_MAGIC 0xD42E9F13
+
 extern bool toast_consistent;
 extern pg_atomic_uint32 *worker_finish_count;
 extern pg_atomic_uint32 *idx_worker_finish_count;
@@ -158,8 +169,12 @@ extern pg_atomic_uint32 *after_recovery_cleaned;
 /*
  * Recovery master/workers functions.
  */
+
 extern BackgroundWorkerHandle *recovery_worker_register(int worker_id);
 PGDLLEXPORT void recovery_worker_main(Datum main_arg);
+
+extern ParallelRecoveryContext *CreateParallelRecoveryContext(int nworkers);
+extern void InitializeParallelRecoveryDSM(ParallelRecoveryContext *context);
 
 /*
  * Recovery utility.
