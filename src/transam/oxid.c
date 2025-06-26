@@ -72,8 +72,8 @@ XidMeta    *xid_meta;
 
 pg_atomic_uint32 *logicalXidsShmemMap;
 
-OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0};
-OSnapshot	o_non_deleted_snapshot = {COMMITSEQNO_NON_DELETED, InvalidXLogRecPtr, 0};
+OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0, 0};
+OSnapshot	o_non_deleted_snapshot = {COMMITSEQNO_NON_DELETED, InvalidXLogRecPtr, 0, 0};
 
 static OBuffersDesc buffersDesc = {
 	.singleFileSize = XID_FILE_SIZE,
@@ -1096,7 +1096,6 @@ parallel_worker_set_oxid(void)
 {
 	XidVXidMapElement *vxidElem;
 	ODBProcData *leaderProcData;
-	int			i;
 
 	Assert(MyProc->lockGroupLeader);
 
@@ -1104,8 +1103,6 @@ parallel_worker_set_oxid(void)
 	vxidElem = &leaderProcData->vxids[leaderProcData->autonomousNestingLevel];
 
 	curOxid = vxidElem->oxid;
-	for (i = 0; i < (int) UndoLogsCount; i++)
-		saved_undo_location[i] = InvalidUndoLocation;
 }
 
 void

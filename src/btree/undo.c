@@ -24,6 +24,8 @@
 #include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/memutils.h"
+#include "utils/palloc.h"
 #include "utils/stopevent.h"
 #include "utils/page_pool.h"
 
@@ -295,6 +297,7 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	LocationIndex tuplelen;
 	BTreeModifyUndoStackItem *item;
 	LocationIndex size;
+	CommandId	commandId;
 
 	if (action == BTreeOperationUpdate)
 	{
@@ -344,6 +347,13 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	add_new_undo_stack_item(desc->undoType, *undoLocation);
 
 	*undoLocation += offsetof(BTreeModifyUndoStackItem, tuphdr);
+
+	commandId = GetCurrentCommandId(false);
+	if (desc->undoType == UndoLogRegular &&
+		commandId != InvalidCommandId &&
+		!is_recovery_process())
+		update_command_undo_location(commandId, *undoLocation);
+
 	return &item->tuphdr;
 }
 

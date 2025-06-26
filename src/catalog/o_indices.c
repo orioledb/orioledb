@@ -1146,6 +1146,7 @@ bool
 o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 {
 	OIndex	   *oIndex;
+	OIndex	   *oIndexOld;
 	OIndexChunkKey key;
 	bool		result;
 	Pointer		data;
@@ -1153,12 +1154,17 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
+	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType);
+	if (oIndexOld)
+	{
+		oIndex->createOxid = oIndexOld->createOxid;
+		free_o_index(oIndexOld);
+	}
 	data = serialize_o_index(oIndex, &len);
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
 	free_o_index(oIndex);
-
 	systrees_modify_start();
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	result = generic_toast_update_optional_wal(&oIndicesToastAPI,

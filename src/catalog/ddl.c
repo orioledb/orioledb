@@ -100,12 +100,7 @@
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
-static ExecutorRun_hook_type prev_ExecutorRun_hook = NULL;
 
-UndoLocation saved_undo_location[(int) UndoLogsCount] =
-{
-	InvalidUndoLocation
-};
 static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
@@ -128,10 +123,6 @@ static void orioledb_utility_command(PlannedStmt *pstmt,
 static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 										Oid objectId, int subId, void *arg);
 
-static void orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
-									  ScanDirection direction,
-									  uint64 count,
-									  bool execute_once);
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
 static void o_find_collation_dependencies(Oid colloid);
@@ -143,8 +134,6 @@ orioledb_setup_ddl_hooks(void)
 {
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = orioledb_utility_command;
-	prev_ExecutorRun_hook = ExecutorRun_hook;
-	ExecutorRun_hook = orioledb_ExecutorRun_hook;
 	old_objectaccess_hook = object_access_hook;
 	object_access_hook = orioledb_object_access_hook;
 }
@@ -1686,46 +1675,6 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 		}
 	}
 	return rewrite;
-}
-
-static void
-orioledb_ExecutorRun_hook(QueryDesc *queryDesc,
-						  ScanDirection direction,
-						  uint64 count,
-						  bool execute_once)
-{
-	UndoLocation prevSavedLocation[(int) UndoLogsCount];
-	int			i;
-
-	for (i = 0; i < (int) UndoLogsCount; i++)
-	{
-		prevSavedLocation[i] = saved_undo_location[i];
-		saved_undo_location[i] = pg_atomic_read_u64(&get_undo_meta_by_type((UndoLogType) i)->lastUsedLocation);
-	}
-
-#ifdef USE_ASSERT_CHECKING
-	{
-		uint32		depth;
-		bool		top_level = isTopLevel;
-
-		isTopLevel = false;
-		depth = DatumGetUInt32(DirectFunctionCall1(pg_trigger_depth,
-												   (Datum) 0));
-		if (top_level && depth == 0)
-		{
-			for (i = 0; i < (int) UndoLogsCount; i++)
-				Assert(!UndoLocationIsValid(prevSavedLocation[i]));
-		}
-	}
-#endif
-
-	if (prev_ExecutorRun_hook)
-		(*prev_ExecutorRun_hook) (queryDesc, direction, count, execute_once);
-	else
-		standard_ExecutorRun(queryDesc, direction, count, execute_once);
-
-	for (i = 0; i < (int) UndoLogsCount; i++)
-		saved_undo_location[i] = prevSavedLocation[i];
 }
 
 static void

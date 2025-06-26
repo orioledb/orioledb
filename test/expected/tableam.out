@@ -4708,8 +4708,23 @@ SELECT val_1, length(val_2) = val_1,
    985 | t        | t
 (8 rows)
 
+-- Test cid in snapshot used in cursor
+BEGIN;
+CREATE TEMP TABLE o_test_cursor_snapshot (val_1 int) USING orioledb;
+INSERT INTO o_test_cursor_snapshot VALUES (1), (2), (3);
+DECLARE c CURSOR FOR SELECT * FROM o_test_cursor_snapshot;
+DELETE FROM o_test_cursor_snapshot;
+FETCH ALL FROM c;
+ val_1 
+-------
+     1
+     2
+     3
+(3 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 15 other objects
+NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to table o_tableam6
 drop cascades to table o_tableam_join1
 drop cascades to table o_tableam_cte_base
@@ -4723,6 +4738,7 @@ drop cascades to table o_tableam_explain_2
 drop cascades to table o_tableam_snapshot_check
 drop cascades to table o_ctid_test
 drop cascades to table o_test_split_rightmost
+drop cascades to table o_test_cursor_snapshot
 drop cascades to view db_o_tables
 drop cascades to view db_o_indices
 DROP SCHEMA tableam CASCADE;

@@ -487,6 +487,7 @@ generic_toast_sort_add(ToastAPI *api, void *key,
 
 		tup = api->createTuple(key, data, offset, chunknum, length, arg);
 		tuplesort_putotuple(sortstate, tup);
+		pfree(tup.data);
 
 		offset += length;
 		chunknum++;

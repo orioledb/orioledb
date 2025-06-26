@@ -441,7 +441,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 								RelationGetRelationName(rel),
 								false);
 
-	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes,
+	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes, cid,
 									 lockmode, lockedSlot);
 
 	return slot;
@@ -488,7 +488,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL, NULL);
 
-	mres = o_tbl_delete(relation, descr, &pkey, oxid,
+	mres = o_tbl_delete(relation, descr, &pkey, oxid, cid,
 						oSnapshot.csn, &hint, &marg);
 
 	if (mres.self_modified)
@@ -596,7 +596,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
 
-	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid,
+	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid, cid,
 						oSnapshot.csn, &hint, &marg, bridge_ctid);
 
 	if (mres.self_modified)
@@ -676,7 +676,7 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL, NULL);
 
-	res = o_tbl_lock(descr, &pkey, mode, oxid, &larg, &hint);
+	res = o_tbl_lock(descr, &pkey, mode, oxid, cid, &larg, &hint);
 
 	if (larg.modified)
 	{

@@ -873,7 +873,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 				}
 				recovery_send_oids(btspool->o_table->oids, buildstate->ix_num, btspool->o_table->version,
 								   btspool->old_o_table->oids, btspool->old_o_table->version,
-								   btspool->o_table->nindices, false);
+								   btspool->o_table->nindices, false, false);
 			}
 			else				/* Add secondary index */
 			{
@@ -882,7 +882,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 				tuplesort_initialize_shared(sharedsort[0], btshared->scantuplesortstates, NULL);
 				recovery_send_oids(btspool->o_table->oids, buildstate->ix_num, btspool->o_table->version,
 								   invalidOids, 0,
-								   btspool->o_table->nindices, false);
+								   btspool->o_table->nindices, false, false);
 			}
 		}
 		elog(DEBUG4, "Parallel index build uses %d recovery workers", btshared->nrecoveryworkers);
@@ -1652,6 +1652,7 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 			o_btree_check_size_of_tuple(o_tuple_size(newTup, &idx->leafSpec),
 										idx->name.data, true);
 			tuplesort_putotuple(sortstates[i], newTup);
+			pfree(newTup.data);
 		}
 
 		tts_orioledb_toast_sort_add(primarySlot, descr, sortstates[descr->nIndices]);
@@ -1661,6 +1662,7 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 			OTuple		newTup = tts_orioledb_make_secondary_tuple(primarySlot, descr->bridge, true);
 
 			tuplesort_putotuple(sortstates[descr->nIndices + 1], newTup);
+			pfree(newTup.data);
 		}
 
 		ExecClearTuple(primarySlot);

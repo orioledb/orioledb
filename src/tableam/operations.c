@@ -17,6 +17,7 @@
 #include "btree/btree.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
+#include "btree/undo.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "storage/itemptr.h"
@@ -275,7 +276,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.waitCallback = NULL,
 		.modifyDeletedCallback = o_insert_callback,
 		.modifyCallback = NULL,
-		.needsUndoForSelfCreated = true,
+		.needsUndoForSelfCreated = false,
 		.arg = slot
 	};
 
@@ -350,7 +351,8 @@ tuple_lock_mode_to_row_lock_mode(LockTupleMode mode)
 
 OBTreeModifyResult
 o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
-		   OXid oxid, OLockCallbackArg *larg, BTreeLocationHint *hint)
+		   OXid oxid, CommandId cid, OLockCallbackArg *larg,
+		   BTreeLocationHint *hint)
 {
 	RowLockMode lock_mode;
 	OBTreeModifyResult res;
@@ -378,7 +380,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 	larg->selfModified = COMMITSEQNO_IS_INPROGRESS(larg->csn) &&
 		(larg->oxid == get_current_oxid_if_any()) &&
 		UndoLocationIsValid(larg->tupUndoLocation) &&
-		(larg->tupUndoLocation >= saved_undo_location[UndoLogRegular]);
+		(larg->tupUndoLocation >= command_get_undo_location(cid));
 
 	return res;
 }
@@ -432,6 +434,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 						  OTableDescr *descr,
 						  TupleTableSlot *slot,
 						  List *arbiterIndexes,
+						  CommandId cid,
 						  LockTupleMode lockmode,
 						  TupleTableSlot *lockedSlot)
 {
@@ -545,7 +548,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				if (COMMITSEQNO_IS_INPROGRESS(ioc_arg.csn) &&
 					(ioc_arg.oxid == get_current_oxid_if_any()) &&
 					UndoLocationIsValid(ioc_arg.tupUndoLocation) &&
-					(ioc_arg.tupUndoLocation >= saved_undo_location[UndoLogRegular]))
+					(ioc_arg.tupUndoLocation >= command_get_undo_location(cid)))
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_CARDINALITY_VIOLATION),
@@ -613,7 +616,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			larg.deleted = BTreeLeafTupleNonDeleted;
 			larg.tupUndoLocation = InvalidUndoLocation;
 
-			lockResult = o_tbl_lock(descr, &key, lockmode, oxid, &larg, &hint);
+			lockResult = o_tbl_lock(descr, &key, lockmode, oxid, cid, &larg, &hint);
 
 			if (larg.selfModified)
 			{
@@ -661,7 +664,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 OTableModifyResult
 o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
-			 OBTreeKeyBound *oldPkey, Relation rel, OXid oxid,
+			 OBTreeKeyBound *oldPkey, Relation rel, OXid oxid, CommandId cid,
 			 CommitSeqNo csn, BTreeLocationHint *hint,
 			 OModifyCallbackArg *arg, ItemPointer bridge_ctid)
 {
@@ -821,7 +824,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	mres.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
 		(arg->oxid == get_current_oxid_if_any()) &&
 		UndoLocationIsValid(arg->tup_undo_location) &&
-		(arg->tup_undo_location >= saved_undo_location[UndoLogRegular]);
+		(arg->tup_undo_location >= command_get_undo_location(cid));
 	if (!mres.self_modified)
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)
@@ -908,8 +911,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 OTableModifyResult
 o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
-			 OXid oxid, CommitSeqNo csn, BTreeLocationHint *hint,
-			 OModifyCallbackArg *arg)
+			 OXid oxid, CommandId cid, CommitSeqNo csn,
+			 BTreeLocationHint *hint, OModifyCallbackArg *arg)
 {
 	OTableModifyResult result;
 
@@ -919,7 +922,7 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 	result.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
 		(arg->oxid == get_current_oxid_if_any()) &&
 		UndoLocationIsValid(arg->tup_undo_location) &&
-		(arg->tup_undo_location >= saved_undo_location[UndoLogRegular]);
+		(arg->tup_undo_location >= command_get_undo_location(cid));
 	if (!result.self_modified)
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)

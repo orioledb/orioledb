@@ -114,15 +114,15 @@ ALTER COLLATION REFRESH VERSION is also disabled for collations that used for fi
 
 ## Block-level data compression
 
-OrioleDB implements block-level compression. The following options control the compression level of a table:
+OrioleDB implements block-level compression. Compression levels are integer values from `-1` to `22`. Value of `-1` means no compression (default), values between 0 and 22 specified compression levels of zstd library.
 
-- `compress` – compression level for all table data structures,
-- `primary_compress` – compression level for the table primary key,
-- `toast_compress` – compression level for the table TOASTed values.
+The following options control the compression level of a table:
 
-Individual indexes also have the `compress` option, which controls the compression level of a particular index overriding the value of the table `compress` option.
+- `compress` – compression level for all table data structures (value of `-1` disables compression for the table, non-specifying makes `orioledb.default_compress` to be used),
+- `primary_compress` – compression level for the table primary key (in case of `-1` it's inherited from `compress` value for the table if it's positive, otherwise `orioledb.default_primary_compress` is used),
+- `toast_compress` – compression level for the table TOASTed values. (in case of `-1` it's inherited from `compress` value for the table if it's positive, otherwise `orioledb.default_toast_compress` is used)
 
-Each of the options above should have integer values from `-1` to `22`. The value of `-1` means no compression (default), values between 0 and 22 specified compression levels of zstd library.
+Individual indexes also have the `compress` option, which controls the compression level of a particular index, overriding the value of the table `compress` option.
 
 _Example_
 
@@ -141,7 +141,7 @@ CREATE INDEX compression_test_value1_idx ON compression_test(value1)
 CREATE INDEX compression_test_value2_idx ON compression_test(value2);
 ```
 
-In this example primary key of `compression_test` table is uncompressed, TOAST values are compressed with level of `10`, `compression_test_value1_idx` index is compressed with level of `22`, index `compression_test_value2_idx` is compressed with level of `5`.
+In this example primary key of `compression_test` table uses compression as specified by `orioledb.default_primary_compress` value, TOAST values are compressed with level of `10`, `compression_test_value1_idx` index is compressed with level of `22`, index `compression_test_value2_idx` is compressed with level of `5`.
 
 ## Current limitations
 
