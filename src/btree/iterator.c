@@ -511,6 +511,8 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 	BTreeDescr *desc = it->context.desc;
 	OTuple		result;
 
+	ASAN_UNPOISON_MEMORY_REGION(&result, sizeof(result));
+
 	result = o_btree_iterator_fetch_internal(it, tupleCsn);
 
 	if (!O_TUPLE_IS_NULL(result) && end != NULL)
