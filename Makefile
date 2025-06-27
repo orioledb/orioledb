@@ -145,6 +145,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_mix \
 				  rll_subtrans \
 				  table_lock_test \
+				  concurrent_truncate \
 				  uniq
 TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/correlation_test.py \

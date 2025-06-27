@@ -1,0 +1,37 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s2_begin s1_truncate s2_truncate s1_commit s1_truncate s2_truncate s2_commit s1_insert s2_insert s1_select s2_select
+step s1_begin: BEGIN;
+step s2_begin: BEGIN;
+step s1_truncate: TRUNCATE t;
+step s2_truncate: TRUNCATE t; <waiting ...>
+step s1_commit: COMMIT;
+step s2_truncate: <... completed>
+step s1_truncate: TRUNCATE t; <waiting ...>
+step s2_truncate: TRUNCATE t;
+step s2_commit: COMMIT;
+step s1_truncate: <... completed>
+step s1_insert: INSERT INTO t VALUES (6), (19), (40);
+step s2_insert: INSERT INTO t VALUES (79), (13), (22);
+step s1_select: SELECT * FROM t;
+ i
+--
+ 6
+19
+40
+79
+13
+22
+(6 rows)
+
+step s2_select: SELECT * FROM t;
+ i
+--
+ 6
+19
+40
+79
+13
+22
+(6 rows)
+
