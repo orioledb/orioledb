@@ -27,7 +27,7 @@
 #define index_build_first_worker (recovery_pool_size_guc + 1)
 #define index_build_last_worker  (recovery_pool_size_guc + recovery_idx_pool_size_guc - 1)
 #define index_build_workers 	 (recovery_idx_pool_size_guc - 1)
-#define recovery_parallel_indices_rebuild_limit  (recovery_parallel_indices_rebuild_limit_guc)
+// #define recovery_parallel_indices_rebuild_limit  (recovery_parallel_indices_rebuild_limit_guc)
 typedef struct BgWorkerHandle
 {
 	int			slot;
@@ -65,7 +65,7 @@ typedef struct oIdxShared
 	bool		isunique;
 	bool		isconcurrent;
 	int			scantuplesortstates;
-	int			nrecoveryworkers;
+	// int			nrecoveryworkers;
 
 	/*
 	 * workersdonecv is used to monitor the progress of workers.  All parallel
@@ -76,7 +76,7 @@ typedef struct oIdxShared
 	ConditionVariable workersdonecv;
 
 	/* recoverycv is used to coordinate index build queue in recovery */
-	ConditionVariable recoverycv;
+	ConditionVariable recoveryjoinedcv;
 
 	/*
 	 * mutex protects all fields before heapdesc.
@@ -108,8 +108,6 @@ typedef struct oIdxShared
 	OIndexNumber ix_num;
 	BgWorkerHandle *worker_handle;
 	/* Index build queue positions */
-	uint32		new_position;
-	uint32		completed_position;
 	Size		o_table_size;
 	Size		old_o_table_size;
 	bool		isrebuild;
@@ -117,8 +115,8 @@ typedef struct oIdxShared
 	/* old_o_table_serialized follows */
 } oIdxShared;
 
-extern oIdxShared *recovery_oidxshared;
-extern Sharedsort *recovery_sharedsort;
+// extern oIdxShared *recovery_oidxshared;
+// extern Sharedsort *recovery_sharedsort;
 
 extern void o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table);
 extern void o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,

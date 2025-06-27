@@ -281,6 +281,28 @@ InitializeParallelRecoveryDSM(ParallelRecoveryContext *context)
 	}
 }
 
+void
+DestroyParallelRecoveryContext(ParallelRecoveryContext *context)
+{
+	if (context->seg != NULL)
+	{
+		dsm_detach(context->seg);
+		context->seg = NULL;
+	}
+
+	/*
+	 * If this parallel context is actually in private memory rather than
+	 * shared memory, free that memory instead.
+	 */
+	if (context->private_memory != NULL)
+	{
+		pfree(context->private_memory);
+		context->private_memory = NULL;
+	}
+
+	pfree(context);
+}
+
 static inline void
 update_worker_ptr(int worker_id, XLogRecPtr ptr)
 {
@@ -446,10 +468,13 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					 * do their modify operations on this relation or to do
 					 * oxid update
 					 */
-					SpinLockAcquire(&recovery_oidxshared->mutex);
-					recovery_oidxshared->completed_position = msg->current_position;
-					SpinLockRelease(&recovery_oidxshared->mutex);
-					ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
+					// SpinLockAcquire(&recovery_oidxshared->mutex);
+					// recovery_oidxshared->completed_position = msg->current_position;
+					// SpinLockRelease(&recovery_oidxshared->mutex);
+					// ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
+					pg_atomic_write_u64(recovery_index_completed_pos, msg->current_position);
+					ConditionVariableBroadcast(recovery_index_cv);
+
 					o_free_tmp_table_descr(o_descr);
 					pfree(o_descr);
 					if (msg->isrebuild)

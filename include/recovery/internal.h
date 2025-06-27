@@ -101,7 +101,7 @@ typedef struct
 	OIndexNumber ix_num;
 	uint32		o_table_version;
 	uint32		old_o_table_version;
-	uint32		current_position;
+	uint64		current_position;
 	bool		isrebuild;
 	OXid		oxid;
 } RecoveryOidsMsgIdxBuild;
@@ -166,6 +166,10 @@ extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 extern bool *was_in_recovery;
 extern pg_atomic_uint32 *after_recovery_cleaned;
 
+extern pg_atomic_uint64 *recovery_index_next_pos;
+extern pg_atomic_uint64 *recovery_index_completed_pos;
+extern ConditionVariable *recovery_index_cv;
+
 /*
  * Recovery master/workers functions.
  */
@@ -175,6 +179,7 @@ PGDLLEXPORT void recovery_worker_main(Datum main_arg);
 
 extern ParallelRecoveryContext *CreateParallelRecoveryContext(int nworkers);
 extern void InitializeParallelRecoveryDSM(ParallelRecoveryContext *context);
+extern void DestroyParallelRecoveryContext(ParallelRecoveryContext *context);
 
 /*
  * Recovery utility.
