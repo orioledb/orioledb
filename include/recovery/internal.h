@@ -104,6 +104,7 @@ typedef struct
 	uint64		current_position;
 	bool		isrebuild;
 	OXid		oxid;
+	dsm_handle	seg_handle;
 } RecoveryOidsMsgIdxBuild;
 
 typedef struct

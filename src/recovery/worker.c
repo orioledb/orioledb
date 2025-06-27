@@ -476,11 +476,6 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						build_secondary_index(o_table, o_descr, msg->ix_num, true, NULL);
 					}
 
-					if (msg->isrebuild)
-					{
-
-					}
-
 					/*
 					 * Wake up the other recovery processes that may wait to
 					 * do their modify operations on this relation or to do
@@ -509,10 +504,30 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				}
 				else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
 				{
+					dsm_segment *seg;
+					shm_toc	   *toc;
+
 					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
 					/* participate as a worker in parallel index build */
 					// _o_index_parallel_build_inner(NULL, NULL, o_table, old_o_table);
-					_o_index_parallel_build_inner(NULL, NULL, NULL, NULL);
+
+					seg = dsm_attach(msg->seg_handle);
+					if (seg == NULL)
+						ereport(ERROR,
+								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								 errmsg("could not map dynamic shared memory segment")));
+
+					toc = shm_toc_attach(O_PARALLEL_RECOVERY_MAGIC,
+										 dsm_segment_address(seg));
+					if (toc == NULL)
+						ereport(ERROR,
+								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								 errmsg("invalid magic number in dynamic shared memory segment")));
+
+					_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+
+					/* TODO Handle ERROR? */
+					dsm_detach(seg);
 				}
 
 				data_pos += sizeof(RecoveryOidsMsgIdxBuild);

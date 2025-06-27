@@ -1046,7 +1046,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 				// }
 				recovery_send_oids(btspool->o_table->oids, buildstate->ix_num, btspool->o_table->version,
 								   btspool->old_o_table->oids, btspool->old_o_table->version,
-								   btspool->o_table->nindices, false, false);
+								   btspool->o_table->nindices, false, false,
+								   dsm_segment_handle(recoveryContext->seg));
 			}
 			else				/* Add secondary index */
 			{
@@ -1055,7 +1056,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 				// tuplesort_initialize_shared(sharedsort[0], btshared->scantuplesortstates, NULL);
 				recovery_send_oids(btspool->o_table->oids, buildstate->ix_num, btspool->o_table->version,
 								   invalidOids, 0,
-								   btspool->o_table->nindices, false, false);
+								   btspool->o_table->nindices, false, false,
+								   dsm_segment_handle(recoveryContext->seg));
 			}
 		}
 		elog(DEBUG4, "Parallel index build uses %d recovery workers", recoveryContext->nworkers);

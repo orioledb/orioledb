@@ -2284,7 +2284,8 @@ void
 recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 				   ORelOids old_oids, uint32 old_o_table_version,	/* Non-zero only for
 																	 * rebuild */
-				   int nindices, bool send_to_leader, bool isrebuild)
+				   int nindices, bool send_to_leader, bool isrebuild,
+				   dsm_handle seg_handle)
 {
 	RecoveryOidsMsgIdxBuild *msg;
 	int			i;
@@ -2301,6 +2302,7 @@ recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
 	msg->ix_num = ix_num;
 	msg->o_table_version = o_table_version;
 	msg->old_o_table_version = old_o_table_version;
+	msg->seg_handle = seg_handle;
 	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version) != NULL);
 
 	if (send_to_leader)
@@ -2433,7 +2435,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					{
 						Assert(new_o_table->nindices == nindices);
 						/* Send recovery message to become a leader */
-						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version, old_o_table->oids, old_o_table->version, nindices, true, true);
+						recovery_send_oids(oids, InvalidIndexNumber,
+										   new_o_table->version, old_o_table->oids,
+										   old_o_table->version, nindices,
+										   true, true, 0);
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
@@ -2468,7 +2473,9 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
 					ORelOidsSetInvalid(invalid_oids);
-					recovery_send_oids(oids, ix_num, new_o_table->version, invalid_oids, 0, nindices, true, false);
+					recovery_send_oids(oids, ix_num, new_o_table->version,
+									   invalid_oids, 0, nindices, true, false,
+									   0);
 				}
 				else
 					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, NULL);
@@ -2499,7 +2506,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 						/* Send recovery message to become a leader */
 						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version,
 										   old_o_table->oids, old_o_table->version,
-										   nindices, true, true);
+										   nindices, true, true, 0);
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
