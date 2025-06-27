@@ -356,29 +356,22 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	meta->length = MAXALIGN(id->nonLeafSpec.len);
 }
 
-OBTreeFindDownlinkResult
-fastpath_find_downlink(Pointer pagePtr,
-					   OInMemoryBlkno blkno,
-					   FastpathFindDownlinkMeta *meta,
-					   BTreePageItemLocator *loc,
-					   BTreeNonLeafTuphdr **tuphdrPtr)
+OBTreeFastPathFindResult
+fastpath_find_chunk(Pointer pagePtr,
+					OInMemoryBlkno blkno,
+					FastpathFindDownlinkMeta *meta,
+					int *chunkIndex)
 {
 	BTreePageHeader *imgHdr = (BTreePageHeader *) pagePtr;
 	BTreePageHeader *hdr = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(blkno);
+	int			i;
 	int			lower;
 	int			upper;
 	int			count;
-	int			i;
 	int			offset;
-	int			chunkIndex;
-	int			itemIndex;
-	BTreePageChunk *chunk;
-	int			chunkSize,
-				chunkItemsCount;
 	Pointer		base;
-	uint32		state;
 	uint32		imageChangeCount = pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK;
-	static BTreeNonLeafTuphdr tuphdr;
+	uint32		state;
 
 	count = O_PAGE_IS(pagePtr, RIGHTMOST) ? imgHdr->chunksCount - 1 : imgHdr->chunksCount;
 
@@ -387,7 +380,7 @@ fastpath_find_downlink(Pointer pagePtr,
 	pg_read_barrier();
 
 	if (imgHdr->hikeysEnd - offset != count * meta->length)
-		return OBTreeFindDownlinkSlowpath;
+		return OBTreeFastPathFindSlowpath;
 
 	base = (Pointer) hdr + offset;
 	lower = 0;
@@ -404,18 +397,50 @@ fastpath_find_downlink(Pointer pagePtr,
 			lower = upper;
 	}
 
-	chunkIndex = meta->inclusive ? lower : upper;
+	*chunkIndex = meta->inclusive ? lower : upper;
 
 	pg_read_barrier();
 
 	/* Possible we need to visit the rightlink */
-	if (chunkIndex >= count)
-		return OBTreeFindDownlinkSlowpath;
+	if (*chunkIndex >= count)
+		return OBTreeFastPathFindSlowpath;
 
 	state = pg_atomic_read_u32(&hdr->o_header.state);
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
 		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
-		return OBTreeFindDownlinkRetry;
+		return OBTreeFastPathFindRetry;
+
+	return OBTreeFastPathFindOK;
+}
+
+OBTreeFastPathFindResult
+fastpath_find_downlink(Pointer pagePtr,
+					   OInMemoryBlkno blkno,
+					   FastpathFindDownlinkMeta *meta,
+					   BTreePageItemLocator *loc,
+					   BTreeNonLeafTuphdr **tuphdrPtr)
+{
+	BTreePageHeader *imgHdr = (BTreePageHeader *) pagePtr;
+	BTreePageHeader *hdr = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(blkno);
+	int			lower;
+	int			upper;
+	int			count;
+	int			i;
+	int			chunkIndex;
+	int			itemIndex;
+	BTreePageChunk *chunk;
+	int			chunkSize,
+				chunkItemsCount;
+	Pointer		base;
+	uint32		state;
+	uint32		imageChangeCount = pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK;
+	OBTreeFastPathFindResult result;
+	static BTreeNonLeafTuphdr tuphdr;
+
+	result = fastpath_find_chunk(pagePtr, blkno, meta, &chunkIndex);
+
+	if (result != OBTreeFastPathFindOK)
+		return result;
 
 	chunk = (BTreePageChunk *) ((Pointer) hdr + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation));
 	if (chunkIndex < imgHdr->chunksCount - 1)
@@ -445,7 +470,7 @@ fastpath_find_downlink(Pointer pagePtr,
 	if (chunkSize != MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) +
 		MAXALIGN(sizeof(BTreeNonLeafTuphdr)) * chunkItemsCount +
 		meta->length * count)
-		return OBTreeFindDownlinkSlowpath;
+		return OBTreeFastPathFindSlowpath;
 
 	lower = 0;
 	upper = count;
@@ -468,7 +493,7 @@ fastpath_find_downlink(Pointer pagePtr,
 	state = pg_atomic_read_u32(&hdr->o_header.state);
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
 		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
-		return OBTreeFindDownlinkRetry;
+		return OBTreeFastPathFindRetry;
 
 	if (chunkIndex == 0)
 	{
@@ -526,7 +551,7 @@ fastpath_find_downlink(Pointer pagePtr,
 			if (chunkSize != MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) +
 				MAXALIGN(sizeof(BTreeNonLeafTuphdr)) * chunkItemsCount +
 				meta->length * count)
-				return OBTreeFindDownlinkSlowpath;
+				return OBTreeFastPathFindSlowpath;
 
 			itemIndex = chunkItemsCount - 1;
 
@@ -549,9 +574,9 @@ fastpath_find_downlink(Pointer pagePtr,
 	state = pg_atomic_read_u32(&hdr->o_header.state);
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
 		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
-		return OBTreeFindDownlinkRetry;
+		return OBTreeFastPathFindRetry;
 
 	/* elog(LOG, "fast path %u %u, ", loc->chunkOffset, loc->itemOffset); */
 
-	return OBTreeFindDownlinkOK;
+	return OBTreeFastPathFindOK;
 }

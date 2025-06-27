@@ -38,17 +38,21 @@ typedef struct
 
 typedef enum
 {
-	OBTreeFindDownlinkOK,
-	OBTreeFindDownlinkRetry,
-	OBTreeFindDownlinkFailure,
-	OBTreeFindDownlinkSlowpath
-} OBTreeFindDownlinkResult;
+	OBTreeFastPathFindOK,
+	OBTreeFastPathFindRetry,
+	OBTreeFastPathFindFailure,
+	OBTreeFastPathFindSlowpath
+} OBTreeFastPathFindResult;
 
 extern void can_fastpath_find_downlink(OBTreeFindPageContext *context,
 									   void *key,
 									   BTreeKeyType keyType,
 									   FastpathFindDownlinkMeta *meta);
-extern OBTreeFindDownlinkResult fastpath_find_downlink(Pointer pagePtr,
+extern OBTreeFastPathFindResult fastpath_find_chunk(Pointer pagePtr,
+													OInMemoryBlkno blkno,
+													FastpathFindDownlinkMeta *meta,
+													int *chunkIndex);
+extern OBTreeFastPathFindResult fastpath_find_downlink(Pointer pagePtr,
 													   OInMemoryBlkno blkno,
 													   FastpathFindDownlinkMeta *meta,
 													   BTreePageItemLocator *loc,

@@ -86,6 +86,10 @@ static bool btree_find_try_read_page(OBTreeFindPageContext *context,
 static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 													Pointer key,
 													BTreeKeyType keyType);
+static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
+									BTreeKeyType keyType,
+									PartialPageState *partial,
+									BTreePageItemLocator *locator);
 
 
 void
@@ -363,7 +367,7 @@ free_page_find_context(OBTreeFindPageContext *context)
 		unpin_local_cache(context->parentImgEntry);
 }
 
-static OBTreeFindDownlinkResult
+static OBTreeFastPathFindResult
 page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 				   FastpathFindDownlinkMeta *meta,
 				   int level,
@@ -379,12 +383,12 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 
 	if (fastPathDownlink)
 	{
-		OBTreeFindDownlinkResult result;
+		OBTreeFastPathFindResult result;
 
 		result = fastpath_find_downlink(intCxt->pagePtr, intCxt->blkno,
 										meta, loc, tuphdr);
 
-		if (result != OBTreeFindDownlinkSlowpath)
+		if (result != OBTreeFastPathFindSlowpath)
 			return result;
 	}
 
@@ -393,7 +397,7 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		!intCxt->partial->hikeysChunkIsLoaded)
 	{
 		if (!partial_load_hikeys_chunk(intCxt->partial, intCxt->pagePtr))
-			return OBTreeFindDownlinkRetry;
+			return OBTreeFastPathFindRetry;
 	}
 
 	/*
@@ -407,7 +411,7 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 			Assert(context->index > 0);
 			Assert(!intCxt->haveLock);
 			step_upward_level(intCxt);
-			return OBTreeFindDownlinkRetry;
+			return OBTreeFastPathFindRetry;
 		}
 	}
 
@@ -442,8 +446,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		{
 			Assert(!intCxt->haveLock);
 			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
-				return OBTreeFindDownlinkFailure;
-			return OBTreeFindDownlinkRetry;
+				return OBTreeFastPathFindFailure;
+			return OBTreeFastPathFindRetry;
 		}
 
 		if (BTREE_PAGE_FIND_IS(context, IMAGE) &&
@@ -457,17 +461,17 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 				!partial_load_chunk(intCxt->partial, intCxt->pagePtr, loc->chunkOffset - 1))
 			{
 				Assert(!intCxt->haveLock);
-				return OBTreeFindDownlinkRetry;
+				return OBTreeFastPathFindRetry;
 			}
 		}
 	}
 
 	*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
-	return OBTreeFindDownlinkOK;
+	return OBTreeFastPathFindOK;
 }
 
-static OBTreeFindDownlinkResult
+static OBTreeFastPathFindResult
 page_find_item(OBTreeFindPageInternalContext *intCxt,
 			   FastpathFindDownlinkMeta *meta,
 			   int level,
@@ -492,7 +496,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 			Assert(context->index > 0);
 			Assert(!intCxt->haveLock);
 			step_upward_level(intCxt);
-			return OBTreeFindDownlinkRetry;
+			return OBTreeFastPathFindRetry;
 		}
 	}
 
@@ -527,13 +531,13 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 		 */
 		Assert(!intCxt->haveLock);
 		if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
-			return OBTreeFindDownlinkFailure;
-		return OBTreeFindDownlinkRetry;
+			return OBTreeFastPathFindFailure;
+		return OBTreeFastPathFindRetry;
 	}
 	if (level > 0)
 		*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
-	return OBTreeFindDownlinkOK;
+	return OBTreeFastPathFindOK;
 }
 
 /*--
@@ -624,12 +628,13 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		OInMemoryBlkno parentBlkno;
 		bool		wrongChangeCount = false;
 		Pointer		p;
-		bool		fastPathDownlink;
+		bool		fastpath;
 
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		level = PAGE_GET_LEVEL(p);
 
-		fastPathDownlink = fastpathMeta.enabled && !needLock && (level > targetLevel);
+		fastpath = fastpathMeta.enabled && !needLock;
+		fastpath = fastpath && (keyType != BTreeKeyPageHiKey || level > 0);
 
 		intCxt.partial = NULL;
 		if (!imageFlag || level > 0)
@@ -677,7 +682,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				{
 					useParentImg = false;
 					intCxt.partial = NULL;
-					Assert(!fastPathDownlink);
+					Assert(!fastpath);
 				}
 				else
 				{
@@ -704,7 +709,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 												  useParentImg,
 												  key, keyType,
 												  intCxt.partial,
-												  !fastPathDownlink);
+												  !fastpath);
 				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (result == ReadPageResultWrongPageChangeCount)
 				{
@@ -723,7 +728,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 											  intCxt.pageChangeCount,
 											  useParentImg, key, keyType,
 											  intCxt.partial,
-											  !fastPathDownlink);
+											  !fastpath);
 				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (!result)
 				{
@@ -835,31 +840,29 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 		if (level > targetLevel || downlinkLocationFlag)
 		{
-			OBTreeFindDownlinkResult result;
+			OBTreeFastPathFindResult result;
 
 			result = page_find_downlink(&intCxt, &fastpathMeta, level,
-										fastPathDownlink, &loc, &nonLeafHdr);
+										fastpath, &loc, &nonLeafHdr);
 
-			Assert(result != OBTreeFindDownlinkSlowpath);
+			Assert(result != OBTreeFastPathFindSlowpath);
 
-			if (result == OBTreeFindDownlinkFailure)
+			if (result == OBTreeFastPathFindFailure)
 				return false;
-			else if (result == OBTreeFindDownlinkRetry)
+			else if (result == OBTreeFastPathFindRetry)
 				continue;
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
 		else
 		{
-			OBTreeFindDownlinkResult result;
-
-			Assert(!fastPathDownlink);
+			OBTreeFastPathFindResult result;
 
 			result = page_find_item(&intCxt, &fastpathMeta, level,
-									fastPathDownlink, &loc, &nonLeafHdr);
+									fastpath, &loc, &nonLeafHdr);
 
-			if (result == OBTreeFindDownlinkFailure)
+			if (result == OBTreeFastPathFindFailure)
 				return false;
-			else if (result == OBTreeFindDownlinkRetry)
+			else if (result == OBTreeFastPathFindRetry)
 				continue;
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
@@ -1834,16 +1837,8 @@ bool
 btree_page_search(BTreeDescr *desc, Page p, Pointer key, BTreeKeyType keyType,
 				  PartialPageState *partial, BTreePageItemLocator *locator)
 {
-	OffsetNumber mid,
-				low,
-				high,
-				chunkOffset;
-	bool		isLeaf = O_PAGE_IS(p, LEAF),
-				nextkey;
-	OBTreeKeyCmp cmpFunc = desc->ops->cmp;
-	BTreeKeyType midkind;
-	int			targetCmpVal,
-				result;
+	OffsetNumber chunkOffset;
+	bool		isLeaf = O_PAGE_IS(p, LEAF);
 
 	if (keyType == BTreeKeyPageHiKey && isLeaf)
 	{
@@ -1857,68 +1852,10 @@ btree_page_search(BTreeDescr *desc, Page p, Pointer key, BTreeKeyType keyType,
 
 	if (partial && !partial_load_chunk(partial, p, chunkOffset))
 		return false;
+
 	page_chunk_fill_locator(p, chunkOffset, locator);
 
-	midkind = isLeaf ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
-
-	if (locator->chunkItemsCount == 0)
-	{
-		locator->itemOffset = 0;
-		return true;
-	}
-
-	low = 0;
-	high = locator->chunkItemsCount - 1;
-	nextkey = (!isLeaf && keyType != BTreeKeyPageHiKey);
-
-	/* Shouldn't look for hikey on leafs, because we're already here */
-	Assert(!(isLeaf && keyType == BTreeKeyPageHiKey));
-
-	/*
-	 * Binary search to find the first key on the page >= `key`, or first page
-	 * key > `key` when nextkey is true.
-	 *
-	 * For nextkey=false (cmp=1), the loop invariant is: all slots before
-	 * `low` are < `key`, all slots at or after `high` are >= `key`.
-	 *
-	 * For nextkey=true (cmp=0), the loop invariant is: all slots before `low`
-	 * are <= `key`, all slots at or after `high` are > `key`.
-	 *
-	 * We can fall out when `high` == `low`.
-	 */
-	high++;						/* establish the loop invariant for high */
-
-	targetCmpVal = nextkey ? 0 : 1; /* a target value of cmpFunc() */
-
-	/*
-	 * Don't pass BTreeHiKey to comparison function, we've set nextkey flag
-	 * instead.
-	 */
-	if (keyType == BTreeKeyPageHiKey)
-		keyType = BTreeKeyNonLeafKey;
-
-	while (high > low)
-	{
-		mid = low + ((high - low) / 2);
-
-		if (!isLeaf && mid == 0 && locator->chunkOffset == 0)
-			result = 1;
-		else
-		{
-			OTuple		midTup;
-
-			locator->itemOffset = mid;
-			BTREE_PAGE_READ_TUPLE(midTup, p, locator);
-			result = cmpFunc(desc, key, keyType, &midTup, midkind);
-		}
-
-		if (result >= targetCmpVal)
-			low = mid + 1;
-		else
-			high = mid;
-	}
-
-	locator->itemOffset = low;
+	btree_page_search_items(desc, p, key, keyType, partial, locator);
 
 	return true;
 }
@@ -1977,4 +1914,81 @@ btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 	}
 
 	return low;
+}
+
+static void
+btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
+						BTreeKeyType keyType, PartialPageState *partial,
+						BTreePageItemLocator *locator)
+{
+	OffsetNumber mid,
+				low,
+				high;
+	bool		isLeaf = O_PAGE_IS(p, LEAF),
+				nextkey;
+	OBTreeKeyCmp cmpFunc = desc->ops->cmp;
+	BTreeKeyType midkind;
+	int			targetCmpVal,
+				result;
+
+	midkind = isLeaf ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
+
+	if (locator->chunkItemsCount == 0)
+	{
+		locator->itemOffset = 0;
+		return;
+	}
+
+	low = 0;
+	high = locator->chunkItemsCount - 1;
+	nextkey = (!isLeaf && keyType != BTreeKeyPageHiKey);
+
+	/* Shouldn't look for hikey on leafs, because we're already here */
+	Assert(!(isLeaf && keyType == BTreeKeyPageHiKey));
+
+	/*
+	 * Binary search to find the first key on the page >= `key`, or first page
+	 * key > `key` when nextkey is true.
+	 *
+	 * For nextkey=false (cmp=1), the loop invariant is: all slots before
+	 * `low` are < `key`, all slots at or after `high` are >= `key`.
+	 *
+	 * For nextkey=true (cmp=0), the loop invariant is: all slots before `low`
+	 * are <= `key`, all slots at or after `high` are > `key`.
+	 *
+	 * We can fall out when `high` == `low`.
+	 */
+	high++;						/* establish the loop invariant for high */
+
+	targetCmpVal = nextkey ? 0 : 1; /* a target value of cmpFunc() */
+
+	/*
+	 * Don't pass BTreeHiKey to comparison function, we've set nextkey flag
+	 * instead.
+	 */
+	if (keyType == BTreeKeyPageHiKey)
+		keyType = BTreeKeyNonLeafKey;
+
+	while (high > low)
+	{
+		mid = low + ((high - low) / 2);
+
+		if (!isLeaf && mid == 0 && locator->chunkOffset == 0)
+			result = 1;
+		else
+		{
+			OTuple		midTup;
+
+			locator->itemOffset = mid;
+			BTREE_PAGE_READ_TUPLE(midTup, p, locator);
+			result = cmpFunc(desc, key, keyType, &midTup, midkind);
+		}
+
+		if (result >= targetCmpVal)
+			low = mid + 1;
+		else
+			high = mid;
+	}
+
+	locator->itemOffset = low;
 }
