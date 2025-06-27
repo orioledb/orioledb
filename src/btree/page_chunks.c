@@ -90,6 +90,9 @@ partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset
 	if (!partial->isPartial || partial->chunkIsLoaded[chunkOffset])
 		return true;
 
+	if (!partial_load_hikeys_chunk(partial, img))
+		return false;
+
 	chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
 	if (chunkOffset + 1 < header->chunksCount)
 		chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);

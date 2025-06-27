@@ -364,12 +364,12 @@ free_page_find_context(OBTreeFindPageContext *context)
 }
 
 static OBTreeFindDownlinkResult
-find_downlink(OBTreeFindPageInternalContext *intCxt,
-			  FastpathFindDownlinkMeta *meta,
-			  int level,
-			  bool fastPathDownlink,
-			  BTreePageItemLocator *loc,
-			  BTreeNonLeafTuphdr **tuphdr)
+page_find_downlink(OBTreeFindPageInternalContext *intCxt,
+				   FastpathFindDownlinkMeta *meta,
+				   int level,
+				   bool fastPathDownlink,
+				   BTreePageItemLocator *loc,
+				   BTreeNonLeafTuphdr **tuphdr)
 {
 	OBTreeFindPageContext *context = intCxt->context;
 	BTreeDescr *desc = context->desc;
@@ -467,7 +467,74 @@ find_downlink(OBTreeFindPageInternalContext *intCxt,
 	return OBTreeFindDownlinkOK;
 }
 
+static OBTreeFindDownlinkResult
+page_find_item(OBTreeFindPageInternalContext *intCxt,
+			   FastpathFindDownlinkMeta *meta,
+			   int level,
+			   bool fastPathDownlink,
+			   BTreePageItemLocator *loc,
+			   BTreeNonLeafTuphdr **tuphdr)
+{
+	OBTreeFindPageContext *context = intCxt->context;
+	BTreeDescr *desc = context->desc;
+	void	   *key = intCxt->key;
+	BTreeKeyType keyType = intCxt->keyType;
+	bool		itemFound = true;
 
+	/*
+	 * BTreeKeyNone requests leftmost page.  Otherwise, consider following the
+	 * rightlink.
+	 */
+	if (keyType != BTreeKeyNone)
+	{
+		if (follow_rightlink(intCxt))
+		{
+			Assert(context->index > 0);
+			Assert(!intCxt->haveLock);
+			step_upward_level(intCxt);
+			return OBTreeFindDownlinkRetry;
+		}
+	}
+
+	/*
+	 * Choose the appropriate downlink for further search.
+	 */
+	if (keyType == BTreeKeyRightmost)
+		BTREE_PAGE_LOCATOR_LAST(intCxt->pagePtr, loc);
+	else if (keyType == BTreeKeyNone)
+		BTREE_PAGE_LOCATOR_FIRST(intCxt->pagePtr, loc);
+	else
+	{
+		Assert(key);
+		/* Have to do the binary search otherwise */
+		itemFound = btree_page_search(desc, intCxt->pagePtr,
+									  key, keyType,
+									  intCxt->partial, loc);
+		if (itemFound && !BTREE_PAGE_FIND_IS(context, MODIFY))
+			itemFound = page_locator_find_real_item(intCxt->pagePtr,
+													intCxt->partial,
+													loc);
+	}
+
+	if (intCxt->partial &&
+		(!itemFound || !partial_load_chunk(intCxt->partial,
+										   intCxt->pagePtr,
+										   loc->chunkOffset)))
+	{
+		/*
+		 * Can not read partial page, it happens if the pages was concurrently
+		 * changed. But it should not happen under the lock_page().
+		 */
+		Assert(!intCxt->haveLock);
+		if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
+			return OBTreeFindDownlinkFailure;
+		return OBTreeFindDownlinkRetry;
+	}
+	if (level > 0)
+		*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
+
+	return OBTreeFindDownlinkOK;
+}
 
 /*--
  * Locate page and location within it for given key
@@ -552,10 +619,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.pageChangeCount = desc->rootInfo.rootPageChangeCount;
 	while (true)
 	{
-		BTreeNonLeafTuphdr *noneLeafHdr = NULL;
+		BTreeNonLeafTuphdr *nonLeafHdr = NULL;
 		int			level;
 		OInMemoryBlkno parentBlkno;
-		bool		itemFound = true;
 		bool		wrongChangeCount = false;
 		Pointer		p;
 		bool		fastPathDownlink;
@@ -771,8 +837,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			OBTreeFindDownlinkResult result;
 
-			result = find_downlink(&intCxt, &fastpathMeta, level,
-								   fastPathDownlink, &loc, &noneLeafHdr);
+			result = page_find_downlink(&intCxt, &fastpathMeta, level,
+										fastPathDownlink, &loc, &nonLeafHdr);
 
 			Assert(result != OBTreeFindDownlinkSlowpath);
 
@@ -784,55 +850,18 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		}
 		else
 		{
+			OBTreeFindDownlinkResult result;
+
 			Assert(!fastPathDownlink);
 
-			/*
-			 * BTreeKeyNone requests leftmost page.  Otherwise, consider
-			 * following the rightlink.
-			 */
-			if (keyType != BTreeKeyNone)
-			{
-				if (follow_rightlink(&intCxt))
-				{
-					Assert(context->index > 0);
-					Assert(!intCxt.haveLock);
-					step_upward_level(&intCxt);
-					continue;
-				}
-				p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
-			}
+			result = page_find_item(&intCxt, &fastpathMeta, level,
+									fastPathDownlink, &loc, &nonLeafHdr);
 
-			/*
-			 * Choose the appropriate downlink for further search.
-			 */
-			if (keyType == BTreeKeyRightmost)
-				BTREE_PAGE_LOCATOR_LAST(intCxt.pagePtr, &loc);
-			else if (keyType == BTreeKeyNone)
-				BTREE_PAGE_LOCATOR_FIRST(intCxt.pagePtr, &loc);
-			else
-			{
-				Assert(key);
-				/* Have to do the binary search otherwise */
-				itemFound = btree_page_search(desc, intCxt.pagePtr, key, keyType,
-											  intCxt.partial, &loc);
-				if (itemFound && !modifyFlag)
-					itemFound = page_locator_find_real_item(intCxt.pagePtr, intCxt.partial, &loc);
-			}
-
-			if (intCxt.partial && (!itemFound || !partial_load_chunk(intCxt.partial, intCxt.pagePtr, loc.chunkOffset)))
-			{
-				/*
-				 * Can not read partial page, it happens if the pages was
-				 * concurrently changed. But it should not happen under the
-				 * lock_page().
-				 */
-				Assert(!intCxt.haveLock);
-				if (tryFlag)
-					return false;
+			if (result == OBTreeFindDownlinkFailure)
+				return false;
+			else if (result == OBTreeFindDownlinkRetry)
 				continue;
-			}
-			if (level > 0)
-				noneLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
+			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
 
 		/* Place new item to the context */
@@ -848,7 +877,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			OTuple		lokey;
 
-			Assert(noneLeafHdr);
+			Assert(nonLeafHdr);
 
 			BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, intCxt.pagePtr, &loc);
 			copy_fixed_key(context->desc, &context->lokey, lokey);
@@ -857,7 +886,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
 		}
 
-		if (level != targetLevel && (!imageFlag || level > targetLevel) && !noneLeafHdr)
+		if (level != targetLevel && (!imageFlag || level > targetLevel) && !nonLeafHdr)
 		{
 			Assert(tryFlag);
 			if (intCxt.haveLock)
@@ -902,11 +931,11 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 			return true;
 		}
-		else if (!noneLeafHdr)
+		else if (!nonLeafHdr)
 		{
 			Assert(false);		/* make clang static analyzer happy */
 		}
-		else if (DOWNLINK_IS_ON_DISK(noneLeafHdr->downlink))
+		else if (DOWNLINK_IS_ON_DISK(nonLeafHdr->downlink))
 		{
 			if (tryFlag)
 			{
@@ -924,7 +953,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				intCxt.blkno = context->items[context->index].blkno;
 				loc = context->items[context->index].locator;
 				intCxt.pagePtr = p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
-				noneLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
+				nonLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
 
 				if (level != PAGE_GET_LEVEL(p))
 				{
@@ -950,9 +979,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				continue;
 			}
 		}
-		else if (DOWNLINK_IS_IN_IO(noneLeafHdr->downlink))
+		else if (DOWNLINK_IS_IN_IO(nonLeafHdr->downlink))
 		{
-			int			ionum = DOWNLINK_GET_IO_LOCKNUM(noneLeafHdr->downlink);
+			int			ionum = DOWNLINK_GET_IO_LOCKNUM(nonLeafHdr->downlink);
 
 			if (intCxt.haveLock)
 			{
@@ -965,8 +994,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 		parentBlkno = intCxt.blkno;
 		context->index++;
-		intCxt.blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(noneLeafHdr->downlink);
-		intCxt.pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(noneLeafHdr->downlink);
+		intCxt.blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(nonLeafHdr->downlink);
+		intCxt.pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(nonLeafHdr->downlink);
 
 		if (STOPEVENTS_ENABLED())
 		{
