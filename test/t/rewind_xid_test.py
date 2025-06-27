@@ -28,6 +28,8 @@ class RewindXidTest(BaseTest):
 # DDL tests :
 # test_rewind_xid_ddl_create    // oriole+heap
 # test_rewind_xid_ddl_drop      // oriole+heap
+# test_rewind_xid_ddl_truncate  // oriole+heap
+# test_rewind_xid_ddl_rewrite   // oriole+heap
 
 # Evict tests:
 # test_rewind_xid_oriole_evict
@@ -592,6 +594,183 @@ class RewindXidTest(BaseTest):
 
 		node.stop()
 
+	def test_rewind_xid_ddl_truncate(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
+		    "orioledb.enable_rewind = true\n")
+		node.start()
+
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE o_test_ddl (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE o_test_heap_ddl (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
+
+
+		for i in range(1, 6):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		oxid = int(a)
+		print(oxid)
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
+		xid = int(a)
+		print(xid)
+		time.sleep(1)
+
+		node.safe_psql('postgres', "TRUNCATE TABLE o_test_ddl;")
+		node.safe_psql('postgres', "TRUNCATE TABLE o_test_heap_ddl;")
+
+		for i in range(6, 20):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		node.safe_psql('postgres',
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
+		time.sleep(1)
+
+		node.is_started = False
+		node.start()
+
+		self.assertEqual(
+		    str(
+		        node.execute(
+                           'postgres',
+		            'SELECT * FROM o_test_ddl;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+		self.assertEqual(
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test_heap_ddl;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+
+		node.stop()
+
+	def test_rewind_xid_ddl_rewrite(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
+		    "orioledb.enable_rewind = true\n")
+		node.start()
+
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE o_test_ddl (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE o_test_heap_ddl (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
+
+		for i in range(1, 6):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		oxid = int(a)
+		print(oxid)
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
+		xid = int(a)
+		print(xid)
+		time.sleep(1)
+
+		node.safe_psql('postgres', "ALTER TABLE o_test_ddl ALTER COLUMN id TYPE real;")
+		node.safe_psql('postgres', "ALTER TABLE o_test_heap_ddl ALTER COLUMN id TYPE real;")
+
+		for i in range(6, 11):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		self.assertEqual(
+		    str(
+		        node.execute(
+                           'postgres',
+		            'SELECT * FROM o_test_ddl;')),
+		    "[(1.0, '1val'), (2.0, '2val'), (3.0, '3val'), (4.0, '4val'), (5.0, '5val'), (6.0, '6val'), (7.0, '7val'), (8.0, '8val'), (9.0, '9val'), (10.0, '10val')]")
+		self.assertEqual(
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test_heap_ddl;')),
+		    "[(1.0, '1val'), (2.0, '2val'), (3.0, '3val'), (4.0, '4val'), (5.0, '5val'), (6.0, '6val'), (7.0, '7val'), (8.0, '8val'), (9.0, '9val'), (10.0, '10val')]")
+
+		for i in range(11, 20):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test_heap_ddl\n"
+			    "	VALUES (%d, %d || 'val');\n" %
+			    (i, i))
+
+		node.safe_psql('postgres',
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
+		time.sleep(1)
+
+		node.is_started = False
+		node.start()
+
+		self.assertEqual(
+		    str(
+		        node.execute(
+                           'postgres',
+		            'SELECT * FROM o_test_ddl;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+		self.assertEqual(
+		    str(
+		        node.execute(
+		            'postgres',
+		            'SELECT * FROM o_test_heap_ddl;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
+
+		node.stop()
 
 # Tests with eviction: large scale
 
