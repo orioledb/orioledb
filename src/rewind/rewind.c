@@ -1184,7 +1184,7 @@ next_subxids_item:
 	{
 		elog(LOG, "evict_rewind_items START: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 		evict_rewind_items(curAddPos);
-		elog(LOG, "evict_rewind_items STOP: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos));
+		elog(LOG, "evict_rewind_items STOP: A=%lu E=%lu C=%lu R=%lu freeAdd=%lu", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos));
 	}
 
 	rewindItem = &rewindAddBuffer[curAddPos % rewind_circular_buffer_size];
