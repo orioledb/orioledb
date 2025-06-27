@@ -423,30 +423,43 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					 type == RecoveryMsgTypeWorkerParallelIndexBuild)
 			{
 				RecoveryOidsMsgIdxBuild *msg = (RecoveryOidsMsgIdxBuild *) (data + data_pos);
-				OTable	   *o_table,
-						   *old_o_table = NULL;
+				// OTable	   *o_table,
+				// 		   *old_o_table = NULL;
 
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = msg->oxid;
 				elog(WARNING, "recovery_queue_process: oids (%d, %d, %d), id %d",
 					 msg->oids.datoid, msg->oids.reloid, msg->oids.relnode, id);
-				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
-				Assert(o_table);
-				Assert(o_table->version == msg->o_table_version);
-				if (msg->isrebuild)
-				{
-					Assert(ORelOidsIsValid(msg->old_oids));
-					old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
-					Assert(old_o_table);
-					Assert(old_o_table->version == msg->old_o_table_version);
-				}
+				// o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
+				// Assert(o_table);
+				// Assert(o_table->version == msg->o_table_version);
+				// if (msg->isrebuild)
+				// {
+				// 	Assert(ORelOidsIsValid(msg->old_oids));
+				// 	old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
+				// 	Assert(old_o_table);
+				// 	Assert(old_o_table->version == msg->old_o_table_version);
+				// }
 
 				elog(WARNING, "recovery_queue_process: type %d, isrebuild %d",
 					 type, msg->isrebuild);
 				if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
 				{
+					OTable	   *o_table,
+							   *old_o_table = NULL;
 					OTableDescr *o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
 					OTableDescr *old_o_descr = NULL;
+
+					o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
+					Assert(o_table);
+					Assert(o_table->version == msg->o_table_version);
+					if (msg->isrebuild)
+					{
+						Assert(ORelOidsIsValid(msg->old_oids));
+						old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
+						Assert(old_o_table);
+						Assert(old_o_table->version == msg->old_o_table_version);
+					}
 
 					Assert(id == index_build_leader);
 					o_fill_tmp_table_descr(o_descr, o_table);
@@ -461,6 +474,11 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					else
 					{
 						build_secondary_index(o_table, o_descr, msg->ix_num, true, NULL);
+					}
+
+					if (msg->isrebuild)
+					{
+
 					}
 
 					/*
@@ -482,20 +500,27 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 						o_free_tmp_table_descr(old_o_descr);
 						pfree(old_o_descr);
 					}
+
+					pfree(o_table);
+					if (msg->isrebuild)
+					{
+						pfree(old_o_table);
+					}
 				}
 				else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
 				{
 					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
 					/* participate as a worker in parallel index build */
-					_o_index_parallel_build_inner(NULL, NULL, o_table, old_o_table);
+					// _o_index_parallel_build_inner(NULL, NULL, o_table, old_o_table);
+					_o_index_parallel_build_inner(NULL, NULL, NULL, NULL);
 				}
 
 				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
-				pfree(o_table);
-				if (msg->isrebuild)
-				{
-					pfree(old_o_table);
-				}
+				// pfree(o_table);
+				// if (msg->isrebuild)
+				// {
+				// 	pfree(old_o_table);
+				// }
 			}
 			else if (type == RecoveryMsgTypeCommit)
 			{
