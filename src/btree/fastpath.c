@@ -108,65 +108,36 @@ find_downlink_get_key(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 	}
 }
 
-/*
- * int4_array_search
- *		Binary-search version that narrows the second pass whenever the first
- *		pass encounters a value > key.
- */
 static void
 int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
-	char	   *base = (char *) p;
+	int			i;
+	bool		lowerSet = false;
 	int32		key = DatumGetInt32(keyDatum);
 
-	int			lo = *lower;	/* inclusive  */
-	int			hi = *upper;	/* exclusive  */
-	int			upper_hint = hi;	/* best "first > key" seen so far */
+	p += *lower * stride;
 
-	/* ------------------------------------------------------------------
-	 * Pass 1: locate the first element >= key (lower bound),
-	 *		   while remembering the left-most element > key.
-	 * ------------------------------------------------------------------ */
-	while (lo < hi)
+	for (i = *lower; i < *upper; i++)
 	{
-		int			mid = lo + ((hi - lo) >> 1);
-		int32		val = *((int32 *) (base + mid * stride));
+		int32		value = *((int32 *) p);
 
-		if (val < key)
-			lo = mid + 1;
-		else
+		if (value == key && !lowerSet)
 		{
-			hi = mid;			/* val >= key */
-
-			if (val > key && mid < upper_hint)
-				upper_hint = mid;	/* tighten the eventual upper bound */
+			*lower = i;
+			lowerSet = true;
 		}
-	}
-	*lower = lo;				/* potential match / insertion point */
+		else if (value > key)
+		{
+			if (!lowerSet)
+				*lower = i;
+			*upper = i;
+			return;
+		}
 
-	/* If the key is absent, we’re done. */
-	if (lo == *upper ||
-		*((int32 *) (base + lo * stride)) != key)
-	{
-		*upper = lo;
-		return;
+		p += stride;
 	}
-
-	/* ------------------------------------------------------------------
-	 * Pass 2: find first element  > key, searching only up to upper_hint.
-	 * ------------------------------------------------------------------ */
-	hi = upper_hint;
-	while (lo < hi)
-	{
-		int			mid = lo + ((hi - lo) >> 1);
-		int32		val = *((int32 *) (base + mid * stride));
-
-		if (val <= key)
-			lo = mid + 1;
-		else
-			hi = mid;
-	}
-	*upper = lo;				/* first element greater than key */
+	if (!lowerSet)
+		*lower = *upper;
 }
 
 static void
