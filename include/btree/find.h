@@ -84,15 +84,12 @@ typedef struct
 #define BTREE_PAGE_FIND_UNSET(context, flag) ((context)->flags &= ~(BTREE_PAGE_FIND_##flag))
 #define BTREE_PAGE_FIND_IS(context, flag) (((context)->flags & BTREE_PAGE_FIND_##flag)? true : false)
 
-extern void init_local_page_cache(void);
-extern void local_page_cache_check_no_pins(void);
 extern bool btree_page_search(BTreeDescr *desc, Page p, Pointer key,
 							  BTreeKeyType keyType, PartialPageState *partial,
 							  BTreePageItemLocator *locator);
 extern void init_page_find_context(OBTreeFindPageContext *context,
 								   BTreeDescr *desc,
 								   CommitSeqNo csn, uint16 flags);
-extern void free_page_find_context(OBTreeFindPageContext *context);
 
 extern bool find_page(OBTreeFindPageContext *context, void *key,
 					  BTreeKeyType keyType, uint16 targetLevel);

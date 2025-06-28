@@ -390,7 +390,6 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 							   PPOOL_KIND_GET_MASK(context->pageReserveKind));
 	if (context->hwLockMode != NoLock)
 		LockRelease(&context->hwLockTag, context->hwLockMode, false);
-	free_page_find_context(pageFindContext);
 }
 
 static void

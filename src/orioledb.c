@@ -93,7 +93,6 @@ OrioleDBPageDesc *page_descs = NULL;
 static int	main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
-int			local_cache_size_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
@@ -329,19 +328,6 @@ _PG_init(void)
 							&undo_buffers_guc,
 							Max(128, 16 * max_procs),
 							16 * max_procs,
-							INT_MAX,
-							PGC_POSTMASTER,
-							GUC_UNIT_BLOCKS,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomIntVariable("orioledb.local_cache_size_guc",
-							"Size of local cache of recentrly used pages.",
-							NULL,
-							&local_cache_size_guc,
-							0,
-							0,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,
@@ -969,7 +955,6 @@ _PG_init(void)
 	IndexAMRoutineHook = orioledb_indexam_routine_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
-	init_local_page_cache();
 }
 
 static void

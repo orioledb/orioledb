@@ -495,7 +495,6 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 
 	Assert(!have_locked_pages());
-	free_page_find_context(&find_context);
 	return success;
 }
 

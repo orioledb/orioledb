@@ -180,7 +180,6 @@ get_extent(BTreeDescr *desc, uint16 len)
 		else
 			result.off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[0], len);
 		enable_stopevents = old_enable_stopevents;
-		free_page_find_context(&context);
 		return result;
 	}
 
@@ -259,7 +258,6 @@ get_extent(BTreeDescr *desc, uint16 len)
 	result.len = len;
 
 	enable_stopevents = old_enable_stopevents;
-	free_page_find_context(&context);
 	return result;
 }
 

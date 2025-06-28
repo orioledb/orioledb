@@ -177,13 +177,11 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 					result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
 					memcpy(result.data, curTuple.data, result_size);
 					result.formatFlags = curTuple.formatFlags;
-					free_page_find_context(&context);
 					return result;
 				}
 				else
 				{
 					O_TUPLE_SET_NULL(result);
-					free_page_find_context(&context);
 					return result;
 				}
 			}
@@ -208,14 +206,12 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 
 		if (cmp == 0)
 		{
-			free_page_find_context(&context);
 			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
 										out_csn, mcxt, cb, arg);
 		}
 	}
 
 	/* Tuple isn't found */
-	free_page_find_context(&context);
 	O_TUPLE_SET_NULL(result);
 	return result;
 }
@@ -561,7 +557,6 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 void
 btree_iterator_free(BTreeIterator *it)
 {
-	free_page_find_context(&it->context);
 	pfree(it);
 }
 

@@ -19,15 +19,10 @@
 #include "btree/insert.h"
 #include "btree/io.h"
 #include "btree/page_chunks.h"
-#include "lib/ilist.h"
 #include "tableam/descr.h"
-#include "utils/dsa.h"
-#include "utils/memdebug.h"
-#include "utils/palloc.h"
 #include "utils/stopevent.h"
 
 #include "access/transam.h"
-#include <stdbool.h>
 
 typedef struct
 {
@@ -41,33 +36,6 @@ typedef struct
 	PartialPageState *partial;
 	bool		haveLock;
 } OBTreeFindPageInternalContext;
-
-struct OPageCacheEntry
-{
-	dlist_node	node;
-	OInMemoryBlkno blkno;
-	uint32		changeCount;
-	uint32		pageChangeCount;
-	int			numAccesses;
-	int			pinCount;
-	Pointer		data;
-};
-
-#define O_PAGE_CACHE_BUCKET_SIZE	(4)
-#define MAX_NUM_ACCESSES (10)
-#define CACHE_NUM_ACCESSES (5)
-#define CACHE_N_TRIES (31)
-
-typedef struct
-{
-	OPageCacheEntry (*entries)[O_PAGE_CACHE_BUCKET_SIZE];
-	dlist_head	recentPagesHead;
-	int			numCachedPages;
-	int			maxNumCachedPages;
-	MemoryContext mcxt;
-} OPageCache;
-
-static OPageCache cache;
 
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
 static void step_upward_level(OBTreeFindPageInternalContext *intCxt);
@@ -90,252 +58,6 @@ static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
 									BTreeKeyType keyType,
 									BTreePageItemLocator *locator);
 
-
-void
-init_local_page_cache(void)
-{
-	int			i,
-				j;
-
-	cache.mcxt = AllocSetContextCreate(TopMemoryContext,
-									   "OrioleDB local page cache memory context",
-									   ALLOCSET_DEFAULT_SIZES);
-	cache.maxNumCachedPages = (((Size) local_cache_size_guc) * BLCKSZ) / ORIOLEDB_BLCKSZ;
-	cache.numCachedPages = 0;
-	cache.entries = (OPageCacheEntry (*)[O_PAGE_CACHE_BUCKET_SIZE]) MemoryContextAllocZero(cache.mcxt,
-																						   sizeof(OPageCacheEntry) * O_PAGE_CACHE_BUCKET_SIZE * cache.maxNumCachedPages);
-	dlist_init(&cache.recentPagesHead);
-
-	for (i = 0; i < cache.maxNumCachedPages; i++)
-	{
-		for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
-			cache.entries[i][j].blkno = OInvalidInMemoryBlkno;
-	}
-}
-
-void
-local_page_cache_check_no_pins(void)
-{
-	int			i,
-				j;
-
-	for (i = 0; i < cache.maxNumCachedPages; i++)
-	{
-		for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
-			Assert(cache.entries[i][j].pinCount == 0);
-	}
-}
-
-static OPageCacheEntry *
-search_local_cache(OInMemoryBlkno blkno)
-{
-	Pointer		page = O_GET_IN_MEMORY_PAGE(blkno);
-	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
-	int			i,
-				j;
-
-
-	i = blkno % cache.maxNumCachedPages;
-
-	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
-	{
-		OPageCacheEntry *entry = &cache.entries[i][j];
-
-		if (entry->blkno == blkno)
-		{
-			uint32		state;
-
-			state = pg_atomic_read_u32(&header->state);
-
-			if (entry->pageChangeCount == header->pageChangeCount &&
-				entry->changeCount == (state & PAGE_STATE_CHANGE_COUNT_MASK) &&
-				!O_PAGE_STATE_READ_IS_BLOCKED(state))
-			{
-				if (entry->data)
-				{
-					OrioleDBPageHeader *dataHeader PG_USED_FOR_ASSERTS_ONLY = (OrioleDBPageHeader *) entry->data;
-
-					Assert((pg_atomic_read_u32(&dataHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK) == entry->changeCount);
-					Assert(dataHeader->pageChangeCount == entry->pageChangeCount);
-				}
-				return entry;
-			}
-			else
-			{
-				entry->blkno = OInvalidInMemoryBlkno;
-				if (entry->data)
-				{
-					if (entry->pinCount <= 0)
-					{
-						pfree(entry->data);
-						entry->data = NULL;
-					}
-					dlist_delete_from(&cache.recentPagesHead, &entry->node);
-					cache.numCachedPages--;
-				}
-				return NULL;
-			}
-		}
-	}
-	return NULL;
-}
-
-static OPageCacheEntry *
-local_cache_find_victim(OInMemoryBlkno blkno)
-{
-	int			i,
-				j,
-				victim = -1;
-
-	i = blkno % cache.maxNumCachedPages;
-
-	/* First pass: search for OInvalidInMemoryBlkno */
-	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
-	{
-		OPageCacheEntry *entry = &cache.entries[i][j];
-
-		if (entry->pinCount > 0)
-			continue;
-
-		if (entry->blkno == OInvalidInMemoryBlkno)
-			return entry;
-	}
-
-	for (j = 0; j < O_PAGE_CACHE_BUCKET_SIZE; j++)
-	{
-		OPageCacheEntry *entry = &cache.entries[i][j];
-
-		if (entry->numAccesses > 0)
-			entry->numAccesses--;
-
-		if (entry->pinCount == 0 && entry->numAccesses == 0)
-			victim = j;
-	}
-
-	return (victim >= 0) ? &cache.entries[i][victim] : NULL;
-}
-
-static OPageCacheEntry *
-search_pin_local_cache(OInMemoryBlkno blkno)
-{
-	Pointer		page = O_GET_IN_MEMORY_PAGE(blkno);
-	OrioleDBPageHeader *header = (OrioleDBPageHeader *) page;
-	OPageCacheEntry *entry;
-	static int	ntries = 0;
-
-
-
-	entry = search_local_cache(blkno);
-
-	if (entry)
-	{
-		Assert(entry->blkno == blkno);
-		if (entry->numAccesses < MAX_NUM_ACCESSES)
-			entry->numAccesses++;
-
-		if (entry->data)
-		{
-			dlist_move_head(&cache.recentPagesHead, &entry->node);
-			entry->pinCount++;
-			/* elog(LOG, "fetch from cache level %u", PAGE_GET_LEVEL(page)); */
-			return entry;
-		}
-
-		if (!entry->data && entry->numAccesses >= CACHE_NUM_ACCESSES)
-		{
-			uint32		state;
-
-			entry->data = (Pointer) MemoryContextAllocZero(cache.mcxt,
-														   ORIOLEDB_BLCKSZ);
-			memcpy(entry->data, page, ORIOLEDB_BLCKSZ);
-
-			pg_read_barrier();
-
-			state = pg_atomic_read_u32(&header->state);
-
-			if (entry->pageChangeCount == header->pageChangeCount &&
-				entry->changeCount == (state & PAGE_STATE_CHANGE_COUNT_MASK) &&
-				!O_PAGE_STATE_READ_IS_BLOCKED(state))
-			{
-				OrioleDBPageHeader *dataHeader PG_USED_FOR_ASSERTS_ONLY = (OrioleDBPageHeader *) entry->data;
-
-				Assert((pg_atomic_read_u32(&dataHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK) == entry->changeCount);
-				Assert(dataHeader->pageChangeCount == entry->pageChangeCount);
-
-				dlist_push_head(&cache.recentPagesHead, &entry->node);
-				cache.numCachedPages++;
-				while (cache.numCachedPages >= cache.maxNumCachedPages)
-				{
-					OPageCacheEntry *oldEntry;
-
-					oldEntry = (OPageCacheEntry *) dlist_tail_node(&cache.recentPagesHead);
-					Assert(oldEntry->data);
-
-					if (oldEntry->pinCount > 0)
-						break;
-
-					pfree(oldEntry->data);
-					oldEntry->data = NULL;
-					dlist_delete_from(&cache.recentPagesHead, &oldEntry->node);
-					cache.numCachedPages--;
-				}
-				entry->pinCount++;
-				return entry;
-			}
-			else
-			{
-				pfree(entry->data);
-				entry->data = NULL;
-				entry->blkno = OInvalidInMemoryBlkno;
-				return NULL;
-			}
-		}
-		return NULL;
-	}
-
-	if ((ntries++) % CACHE_N_TRIES != 0)
-		return NULL;
-
-	entry = local_cache_find_victim(blkno);
-	if (!entry)
-		return NULL;
-	Assert(entry->pinCount == 0);
-	if (entry->data)
-	{
-		pfree(entry->data);
-		entry->data = NULL;
-		if (entry->blkno != OInvalidInMemoryBlkno)
-		{
-			dlist_delete_from(&cache.recentPagesHead, &entry->node);
-			cache.numCachedPages--;
-		}
-	}
-
-	entry->blkno = blkno;
-	entry->pageChangeCount = header->pageChangeCount;
-	entry->changeCount = (pg_atomic_read_u32(&header->state) & PAGE_STATE_CHANGE_COUNT_MASK);
-	entry->numAccesses = 1;
-
-	pg_read_barrier();
-
-	return NULL;
-}
-
-static void
-unpin_local_cache(OPageCacheEntry *entry)
-{
-	entry->pinCount--;
-	Assert(entry->pinCount >= 0);
-
-	if (entry->pinCount == 0 &&
-		entry->blkno == OInvalidInMemoryBlkno &&
-		entry->data)
-	{
-		pfree(entry->data);
-		entry->data = NULL;
-	}
-}
-
 /*
  * Initialize B-tree page find context.
  */
@@ -357,14 +79,7 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
-void
-free_page_find_context(OBTreeFindPageContext *context)
-{
-	if (context->imgEntry)
-		unpin_local_cache(context->imgEntry);
-	if (context->parentImgEntry)
-		unpin_local_cache(context->parentImgEntry);
-}
+
 
 static OBTreeFastPathFindResult
 page_find_downlink(OBTreeFindPageInternalContext *intCxt,
@@ -1684,102 +1399,15 @@ set_page_ptr(OBTreeFindPageContext *context, bool parent)
 
 	if (!parent)
 	{
-		if (context->imgEntry)
-			unpin_local_cache(context->imgEntry);
 		context->imgEntry = NULL;
 		pagePtr = context->img = context->imgData;
 	}
 	else
 	{
-		if (context->parentImgEntry)
-			unpin_local_cache(context->parentImgEntry);
 		context->parentImgEntry = NULL;
 		pagePtr = context->parentImg = context->parentImgData;
 	}
 	return pagePtr;
-}
-
-static bool
-btree_find_page_in_cache(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
-						 uint32 pageChangeCount, bool parent, void *key,
-						 BTreeKeyType keyType)
-{
-	bool		keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
-	OFixedKey  *lokey = keep_lokey ? &context->undoLokey : NULL;
-	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
-	Pointer		pagePtr;
-	OPageCacheEntry *entry;
-	BTreePageHeader *header;
-
-	entry = search_pin_local_cache(blkno);
-	if (!entry)
-	{
-		/*
-		 * elog(LOG, "NO %u %u", blkno,
-		 * PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
-		 */
-		return false;
-	}
-
-	pagePtr = entry->data;
-	VALGRIND_CHECK_MEM_IS_DEFINED(pagePtr, ORIOLEDB_BLCKSZ);
-	header = (BTreePageHeader *) pagePtr;
-
-	BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
-	if (lokey)
-		clear_fixed_key(lokey);
-
-	if (O_PAGE_IS(pagePtr, LEAF) &&
-		COMMITSEQNO_IS_NORMAL(context->csn) &&
-		header->csn >= context->csn)
-	{
-		pagePtr = set_page_ptr(context, parent);
-
-		read_page_from_undo(context->desc, pagePtr,
-							header->undoLocation, context->csn,
-							key, keyType, lokey);
-
-		header = (BTreePageHeader *) pagePtr;
-		header->o_header.pageChangeCount = pageChangeCount;
-		context->imgUndoLoc = header->undoLocation;
-		if (readCsn)
-			*readCsn = header->csn;
-
-		unpin_local_cache(entry);
-		return true;
-	}
-	else
-	{
-		context->imgUndoLoc = InvalidUndoLocation;
-		if (readCsn)
-			*readCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
-	}
-
-	if (!parent)
-	{
-		if (context->imgEntry)
-			unpin_local_cache(context->imgEntry);
-
-		context->imgEntry = entry;
-		context->img = pagePtr;
-	}
-	else
-	{
-		if (context->parentImgEntry)
-			unpin_local_cache(context->parentImgEntry);
-
-		context->parentImgEntry = entry;
-		context->parentImg = pagePtr;
-	}
-
-	if (lokey && !O_TUPLE_IS_NULL(lokey->tuple))
-		BTREE_PAGE_FIND_SET(context, LOKEY_UNDO);
-
-	/*
-	 * elog(LOG, "YES %u %u", blkno,
-	 * PAGE_GET_LEVEL(O_GET_IN_MEMORY_PAGE(blkno)));
-	 */
-	return true;
 }
 
 /*
@@ -1797,14 +1425,6 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 	bool		success;
 	Pointer		pagePtr;
-
-	if (local_cache_size_guc > 0 &&
-		btree_find_page_in_cache(context, blkno, pageChangeCount, parent, key, keyType))
-	{
-		if (partial)
-			partial->isPartial = false;
-		return true;
-	}
 
 	pagePtr = set_page_ptr(context, parent);
 
@@ -1838,14 +1458,6 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	CommitSeqNo *readCsn = BTREE_PAGE_FIND_IS(context, READ_CSN) ? &context->imgReadCsn : NULL;
 	ReadPageResult result;
 	Pointer		pagePtr;
-
-	if (local_cache_size_guc > 0 &&
-		btree_find_page_in_cache(context, blkno, pageChangeCount, parent, key, keyType))
-	{
-		if (partial)
-			partial->isPartial = false;
-		return ReadPageResultOK;
-	}
 
 	pagePtr = set_page_ptr(context, parent);
 
