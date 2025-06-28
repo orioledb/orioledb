@@ -98,14 +98,14 @@ partial_load_chunk(PartialPageState *partial, Page img,
 		if (chunkOffset + 1 < header->chunksCount)
 		{
 			if (loc)
-				loc->chunkItemsCount =  header->chunkDesc[chunkOffset + 1].offset -
+				loc->chunkItemsCount = header->chunkDesc[chunkOffset + 1].offset -
 					header->chunkDesc[chunkOffset].offset;
 			chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
 		}
 		else
 		{
 			if (loc)
-				loc->chunkItemsCount =  header->itemsCount -
+				loc->chunkItemsCount = header->itemsCount -
 					header->chunkDesc[chunkOffset].offset;
 			chunkEnd = header->dataSize;
 		}
@@ -117,14 +117,14 @@ partial_load_chunk(PartialPageState *partial, Page img,
 		if (chunkOffset + 1 < header->chunksCount)
 		{
 			if (loc)
-				loc->chunkItemsCount =  header->chunkDesc[chunkOffset + 1].offset -
+				loc->chunkItemsCount = header->chunkDesc[chunkOffset + 1].offset -
 					header->chunkDesc[chunkOffset].offset;
 			chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
 		}
 		else
 		{
 			if (loc)
-				loc->chunkItemsCount =  header->itemsCount -
+				loc->chunkItemsCount = header->itemsCount -
 					header->chunkDesc[chunkOffset].offset;
 			chunkEnd = header->dataSize;
 		}

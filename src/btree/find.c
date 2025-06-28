@@ -490,7 +490,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	if (fastpath)
 	{
 		OBTreeFastPathFindResult result;
-		int		chunkIndex;
+		int			chunkIndex;
 
 		Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
 
@@ -540,8 +540,9 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 		if (result == OBTreeFastPathFindRetry)
 		{
 			/*
-			 * Can not read partial page, it happens if the pages was concurrently
-			 * changed. But it should not happen under the lock_page().
+			 * Can not read partial page, it happens if the pages was
+			 * concurrently changed. But it should not happen under the
+			 * lock_page().
 			 */
 			Assert(!intCxt->haveLock);
 			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
