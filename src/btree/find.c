@@ -88,7 +88,6 @@ static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 													BTreeKeyType keyType);
 static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
 									BTreeKeyType keyType,
-									PartialPageState *partial,
 									BTreePageItemLocator *locator);
 
 
@@ -434,7 +433,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 			if (intCxt->partial)
 				itemFound = partial_load_chunk(intCxt->partial,
 											   intCxt->pagePtr,
-											   loc->chunkOffset);
+											   loc->chunkOffset,
+											   NULL);
 		}
 	}
 
@@ -442,7 +442,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (!itemFound || !partial_load_chunk(intCxt->partial,
 											  intCxt->pagePtr,
-											  loc->chunkOffset))
+											  loc->chunkOffset,
+											  NULL))
 		{
 			Assert(!intCxt->haveLock);
 			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
@@ -458,7 +459,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 			 * We may need to load another one tuple for a backward iteration.
 			 */
 			if (loc->itemOffset == 0 && loc->chunkOffset > 0 &&
-				!partial_load_chunk(intCxt->partial, intCxt->pagePtr, loc->chunkOffset - 1))
+				!partial_load_chunk(intCxt->partial, intCxt->pagePtr,
+									loc->chunkOffset - 1, NULL))
 			{
 				Assert(!intCxt->haveLock);
 				return OBTreeFastPathFindRetry;
@@ -475,7 +477,7 @@ static OBTreeFastPathFindResult
 page_find_item(OBTreeFindPageInternalContext *intCxt,
 			   FastpathFindDownlinkMeta *meta,
 			   int level,
-			   bool fastPathDownlink,
+			   bool fastpath,
 			   BTreePageItemLocator *loc,
 			   BTreeNonLeafTuphdr **tuphdr)
 {
@@ -484,6 +486,81 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	void	   *key = intCxt->key;
 	BTreeKeyType keyType = intCxt->keyType;
 	bool		itemFound = true;
+
+	if (fastpath)
+	{
+		OBTreeFastPathFindResult result;
+		int		chunkIndex;
+
+		Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
+
+		result = fastpath_find_chunk(intCxt->pagePtr,
+									 intCxt->blkno,
+									 meta,
+									 &chunkIndex);
+
+		if (result == OBTreeFastPathFindOK &&
+			!partial_load_chunk(intCxt->partial,
+								intCxt->pagePtr,
+								chunkIndex,
+								loc))
+			result = OBTreeFastPathFindRetry;
+
+		if (result == OBTreeFastPathFindOK)
+		{
+			if (keyType == BTreeKeyRightmost)
+			{
+				loc->itemOffset = loc->chunkItemsCount - 1;
+			}
+			else if (keyType == BTreeKeyNone)
+			{
+				loc->itemOffset = 0;
+			}
+			else
+			{
+				btree_page_search_items(desc, intCxt->pagePtr,
+										key, keyType, loc);
+			}
+
+			if (page_locator_find_real_item(intCxt->pagePtr,
+											intCxt->partial,
+											loc))
+			{
+				if (level > 0)
+					*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
+
+				return OBTreeFastPathFindOK;
+			}
+			else
+			{
+				result = OBTreeFastPathFindRetry;
+			}
+		}
+
+		if (result == OBTreeFastPathFindRetry)
+		{
+			/*
+			 * Can not read partial page, it happens if the pages was concurrently
+			 * changed. But it should not happen under the lock_page().
+			 */
+			Assert(!intCxt->haveLock);
+			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
+				return OBTreeFastPathFindFailure;
+		}
+		else if (result == OBTreeFastPathFindFailure)
+		{
+			return OBTreeFastPathFindFailure;
+		}
+		Assert(result == OBTreeFastPathFindSlowpath);
+	}
+
+	if (intCxt->partial &&
+		intCxt->partial->isPartial &&
+		!intCxt->partial->hikeysChunkIsLoaded)
+	{
+		if (!partial_load_hikeys_chunk(intCxt->partial, intCxt->pagePtr))
+			return OBTreeFastPathFindRetry;
+	}
 
 	/*
 	 * BTreeKeyNone requests leftmost page.  Otherwise, consider following the
@@ -523,7 +600,8 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	if (intCxt->partial &&
 		(!itemFound || !partial_load_chunk(intCxt->partial,
 										   intCxt->pagePtr,
-										   loc->chunkOffset)))
+										   loc->chunkOffset,
+										   NULL)))
 	{
 		/*
 		 * Can not read partial page, it happens if the pages was concurrently
@@ -534,6 +612,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 			return OBTreeFastPathFindFailure;
 		return OBTreeFastPathFindRetry;
 	}
+
 	if (level > 0)
 		*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
@@ -1261,7 +1340,8 @@ retry:
 				if (intCxt.partial)
 					item_found = partial_load_chunk(intCxt.partial,
 													intCxt.pagePtr,
-													loc.chunkOffset);
+													loc.chunkOffset,
+													NULL);
 			}
 			else if (!BTREE_PAGE_FIND_IS(context, MODIFY))
 				item_found = page_locator_find_real_item(intCxt.pagePtr,
@@ -1275,7 +1355,8 @@ retry:
 		if (!item_found)
 			goto retry;
 
-		if (!partial_load_chunk(intCxt.partial, intCxt.pagePtr, loc.chunkOffset))
+		if (!partial_load_chunk(intCxt.partial, intCxt.pagePtr,
+								loc.chunkOffset, NULL))
 			goto retry;
 	}
 
@@ -1343,7 +1424,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		BTreeNonLeafTuphdr *tuphdr = NULL;
 		bool		tup_loaded = true;
 
-		tup_loaded = partial_load_chunk(&context->partial, context->parentImg, loc.chunkOffset);
+		tup_loaded = partial_load_chunk(&context->partial, context->parentImg,
+										loc.chunkOffset, NULL);
 		if (tup_loaded)
 		{
 			BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, internalTuple, context->parentImg, &loc);
@@ -1453,7 +1535,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 				BTREE_PAGE_LOCATOR_PREV(context->parentImg, &loc);
 				next_lokey_loaded = partial_load_chunk(&context->partial,
 													   context->parentImg,
-													   loc.chunkOffset);
+													   loc.chunkOffset,
+													   NULL);
 			}
 
 			if (next_lokey_loaded && BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
@@ -1843,19 +1926,20 @@ btree_page_search(BTreeDescr *desc, Page p, Pointer key, BTreeKeyType keyType,
 	if (keyType == BTreeKeyPageHiKey && isLeaf)
 	{
 		BTREE_PAGE_LOCATOR_LAST(p, locator);
-		if (partial && !partial_load_chunk(partial, p, locator->chunkOffset))
+		if (partial && !partial_load_chunk(partial, p,
+										   locator->chunkOffset, NULL))
 			return false;
 		return true;
 	}
 
 	chunkOffset = btree_page_binary_search_chunks(desc, p, key, keyType);
 
-	if (partial && !partial_load_chunk(partial, p, chunkOffset))
+	if (partial && !partial_load_chunk(partial, p, chunkOffset, NULL))
 		return false;
 
 	page_chunk_fill_locator(p, chunkOffset, locator);
 
-	btree_page_search_items(desc, p, key, keyType, partial, locator);
+	btree_page_search_items(desc, p, key, keyType, locator);
 
 	return true;
 }
@@ -1918,8 +2002,7 @@ btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 
 static void
 btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
-						BTreeKeyType keyType, PartialPageState *partial,
-						BTreePageItemLocator *locator)
+						BTreeKeyType keyType, BTreePageItemLocator *locator)
 {
 	OffsetNumber mid,
 				low,

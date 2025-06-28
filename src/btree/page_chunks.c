@@ -78,26 +78,64 @@ partial_load_hikeys_chunk(PartialPageState *partial, Page img)
  * Load chunk to the partial page.
  */
 bool
-partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset)
+partial_load_chunk(PartialPageState *partial, Page img,
+				   OffsetNumber chunkOffset, BTreePageItemLocator *loc)
 {
-	uint32		imgState,
+	uint32		imgState = pg_atomic_read_u32(&(O_PAGE_HEADER(img)->state)),
 				srcState;
 	Page		src = partial->src;
 	LocationIndex chunkBegin,
 				chunkEnd;
-	BTreePageHeader *header = (BTreePageHeader *) img;
+	BTreePageHeader *header;
 
 	if (!partial->isPartial || partial->chunkIsLoaded[chunkOffset])
 		return true;
 
-	if (!partial_load_hikeys_chunk(partial, img))
-		return false;
-
-	chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
-	if (chunkOffset + 1 < header->chunksCount)
-		chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
+	if (partial->hikeysChunkIsLoaded)
+	{
+		header = (BTreePageHeader *) img;
+		chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
+		if (chunkOffset + 1 < header->chunksCount)
+		{
+			if (loc)
+				loc->chunkItemsCount =  header->chunkDesc[chunkOffset + 1].offset -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
+		}
+		else
+		{
+			if (loc)
+				loc->chunkItemsCount =  header->itemsCount -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = header->dataSize;
+		}
+	}
 	else
-		chunkEnd = header->dataSize;
+	{
+		header = (BTreePageHeader *) src;
+		chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
+		if (chunkOffset + 1 < header->chunksCount)
+		{
+			if (loc)
+				loc->chunkItemsCount =  header->chunkDesc[chunkOffset + 1].offset -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
+		}
+		else
+		{
+			if (loc)
+				loc->chunkItemsCount =  header->itemsCount -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = header->dataSize;
+		}
+
+		pg_read_barrier();
+
+		srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+		if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+			O_PAGE_STATE_READ_IS_BLOCKED(srcState))
+			return false;
+	}
 
 	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
 	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
@@ -108,7 +146,6 @@ partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset
 
 	pg_read_barrier();
 
-	imgState = pg_atomic_read_u32(&(O_PAGE_HEADER(img)->state));
 	srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
 	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
 		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
@@ -118,6 +155,12 @@ partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset
 		return false;
 
 	partial->chunkIsLoaded[chunkOffset] = true;
+	if (loc)
+	{
+		loc->chunkOffset = chunkOffset;
+		loc->itemOffset = 0;
+		loc->chunk = (BTreePageChunk *) ((Pointer) img + chunkBegin);
+	}
 	return true;
 }
 
@@ -1440,7 +1483,7 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 		offset = locator->itemOffset - locator->chunkItemsCount;
 		if (partial)
 		{
-			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1))
+			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1, NULL))
 				return false;
 		}
 		page_chunk_fill_locator(p, locator->chunkOffset + 1, locator);
