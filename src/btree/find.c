@@ -546,6 +546,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 			Assert(!intCxt->haveLock);
 			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
 				return OBTreeFastPathFindFailure;
+			return OBTreeFastPathFindRetry;
 		}
 		else if (result == OBTreeFastPathFindFailure)
 		{
