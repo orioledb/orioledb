@@ -18,6 +18,7 @@
 
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "catalog/storage.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -35,6 +36,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/lmgr.h"
+#include "storage/md.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
 
@@ -65,6 +67,11 @@ static void o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 								 UndoStackItem *baseItem,
 								 OXid oxid, bool abort,
 								 bool changeCountsValid);
+static void o_rewind_relfilenode_item_callback(UndoLogType undoType,
+											   UndoLocation location,
+											   UndoStackItem *baseItem,
+											   OXid oxid, bool abort,
+											   bool changeCountsValid);
 
 /*
  * Descriptor of undo item type.
@@ -75,6 +82,14 @@ typedef struct
 	bool		callOnCommit;	/* call the callback on commit */
 	UndoCallback callback;		/* callback to be called on transaction finish */
 } UndoItemTypeDescr;
+
+typedef struct
+{
+	OnCommitUndoStackItem header;
+	int			nCommitRels;
+	int			nAbortRels;
+	RelFileNode rels[FLEXIBLE_ARRAY_MEMBER];
+} RewindRelFileNodeUndoStackItem;
 
 UndoItemTypeDescr undoItemTypeDescrs[] = {
 	{
@@ -111,6 +126,11 @@ UndoItemTypeDescr undoItemTypeDescrs[] = {
 		.type = SubXactUndoItemType,
 		.callback = o_stub_item_callback,
 		.callOnCommit = false
+	},
+	{
+		.type = RewindRelFileNodeUndoItemType,
+		.callback = o_rewind_relfilenode_item_callback,
+		.callOnCommit = true
 	}
 };
 
@@ -1306,6 +1326,28 @@ orioledb_reset_xmin_hook(void)
 		pg_atomic_write_u64(&curProcData->xmin, xmin);
 }
 
+static void
+rewind_handle_pending_deletes(void)
+{
+	RelFileNode	*onCommitRels, *onAbortRels;
+	int		nOnCommitRels, nOnAbortRels;
+
+	nOnCommitRels = smgrGetPendingDeletes(true, &onCommitRels);
+	nOnAbortRels = smgrGetPendingDeletes(false, &onAbortRels);
+
+	if (nOnCommitRels + nOnAbortRels > 0)
+		o_add_rewind_relfilenode_undo_item(onCommitRels,
+										   onAbortRels,
+										   nOnCommitRels,
+										   nOnAbortRels);
+
+	if (onCommitRels)
+		pfree(onCommitRels);
+	if (onAbortRels)
+		pfree(onAbortRels);
+	PostPrepare_smgr();
+}
+
 void
 undo_xact_callback(XactEvent event, void *arg)
 {
@@ -1333,7 +1375,10 @@ undo_xact_callback(XactEvent event, void *arg)
 		seq_scans_cleanup();
 
 	if (enable_rewind && event == XACT_EVENT_PRE_COMMIT)
+	{
 		save_precommit_xid_subxids();
+		rewind_handle_pending_deletes();
+	}
 
 	if (!OXidIsValid(oxid) || isParallelWorker)
 	{
@@ -2032,4 +2077,49 @@ o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 {
 	Assert(abort);
 	return;
+}
+
+static void
+o_rewind_relfilenode_item_callback(UndoLogType undoType,
+								   UndoLocation location,
+								   UndoStackItem *baseItem,
+								   OXid oxid, bool abort,
+								   bool changeCountsValid)
+{
+	RewindRelFileNodeUndoStackItem *item = (RewindRelFileNodeUndoStackItem *) baseItem;
+
+	if (enable_rewind && !is_rewind_worker())
+		return;
+
+	if (!abort)
+		DropRelationFiles(item->rels, item->nCommitRels, false);
+	else
+		DropRelationFiles(&item->rels[item->nCommitRels], item->nAbortRels, false);
+}
+
+void
+o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
+								   int nOnCommit, int nOnAbort)
+{
+	LocationIndex size;
+	UndoLocation location;
+	RewindRelFileNodeUndoStackItem *item;
+
+	size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (nOnCommit + nOnAbort);
+	item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
+
+	item->header.base.type = RewindRelFileNodeUndoItemType;
+	item->header.base.itemSize = size;
+	item->header.base.indexType = oIndexPrimary;
+
+	item->nCommitRels = nOnCommit;
+	item->nAbortRels = nOnAbort;
+
+	memcpy(item->rels, onCommit, sizeof(RelFileNode) * nOnCommit);
+	memcpy(&item->rels[nOnCommit], onAbort, sizeof(RelFileNode) * nOnAbort);
+
+	add_new_undo_stack_item(UndoLogSystem, location);
+
+	release_undo_size(UndoLogSystem);
+
 }

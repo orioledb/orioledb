@@ -78,7 +78,8 @@ typedef enum
 	SysTreesLockUndoItemType,
 	InvalidateUndoItemType,
 	BranchUndoItemType,
-	SubXactUndoItemType
+	SubXactUndoItemType,
+	RewindRelFileNodeUndoItemType
 } UndoItemType;
 
 struct UndoStackItem
@@ -221,6 +222,9 @@ extern bool undo_type_has_retained_location(UndoLogType undoType);
 extern bool have_retained_undo_location(void);
 extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
 extern void orioledb_reset_xmin_hook(void);
+extern void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
+											   RelFileNode *onAbort,
+											   int nOnCommit, int nOnAbort);
 
 static inline void
 reserve_undo_size(UndoLogType type, Size size)
