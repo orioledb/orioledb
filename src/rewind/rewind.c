@@ -364,6 +364,8 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 				if (got_all_subxids)
 				{
 					Assert(nsubxids);
+					if (rewindItem->nsubxids != nsubxids)
+						elog(WARNING, "rewindItem->nsubxids %u, nsubxids %u", rewindItem->nsubxids, nsubxids);
 					Assert(rewindItem->nsubxids == nsubxids);
 					Assert(rewindItem->oxid == oxid);
 
@@ -969,6 +971,8 @@ rewind_worker_main(Datum main_arg)
 				else
 				{
 					/* rewindCompleteBuffer is empty. Read from rewindAddBuffer */
+					if (rewindMeta->restorePos != rewindMeta->evictPos)
+						elog(WARNING, "ADD POS %lu, EVICT POS %lu, RESTORE POS %lu, COMPLETE POS %lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->restorePos, rewindMeta->completePos);
 					Assert(rewindMeta->restorePos == rewindMeta->evictPos);
 					rewindItem = &rewindAddBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				}
