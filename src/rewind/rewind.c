@@ -247,7 +247,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			source_buffer = 1;
 		}
 		
-		elog(WARNING, "Rewind read elem: pos %lu:%u oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", pos,source_buffer, rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+		elog(WARNING, "Rewind read elem: pos %lu:%u oxid %lu xid %u oldestRunXid %u, nsubxids %u", pos, source_buffer, rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 

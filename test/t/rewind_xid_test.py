@@ -169,15 +169,7 @@ class RewindXidTest(BaseTest):
 		invalidoxid = 9223372036854775807
 		time.sleep(1)
 
-		i = 25
-		node.execute(
-		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); COMMIT;\n" %
-			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
-
-		for i in range(29, 80, 4):
+		for i in range(25, 80, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -316,20 +308,8 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		print(xid)
 		time.sleep(1)
-		i = 25
 
-		node.safe_psql(
-		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
-		    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
-
-		for i in range(29, 80, 4):
+		for i in range(25, 80, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1020,15 +1000,7 @@ class RewindXidTest(BaseTest):
 		invalidoxid = 9223372036854775807
 		time.sleep(1)
 
-		i = 25
-		node.execute(
-		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); COMMIT;\n" %
-			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
-
-		for i in range(29, 80000, 4):
+		for i in range(25, 80000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -1095,20 +1067,8 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		print(xid)
 		time.sleep(1)
-		i = 25
 
-		node.safe_psql(
-		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-		    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
-		    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
-
-		for i in range(29, 80000, 4):
+		for i in range(25, 80000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
