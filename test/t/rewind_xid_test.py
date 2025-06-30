@@ -43,7 +43,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -93,7 +94,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -142,7 +144,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -196,7 +199,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -269,7 +273,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -349,7 +354,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -457,7 +463,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -578,7 +585,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -656,7 +664,8 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -759,7 +768,8 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
 		    "orioledb.rewind_max_transactions 1000000\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -784,7 +794,7 @@ class RewindXidTest(BaseTest):
 		invalidxid = 0
 		time.sleep(1)
 
-		for i in range(6, 20000):
+		for i in range(6, 1700):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -823,7 +833,8 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
 		    "orioledb.rewind_max_transactions 1000000\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -848,7 +859,7 @@ class RewindXidTest(BaseTest):
 		print(xid)
 		time.sleep(1)
 
-		for i in range(6, 20000):
+		for i in range(6, 1700):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -887,7 +898,8 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
 		    "orioledb.rewind_max_transactions 1000000\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -925,7 +937,7 @@ class RewindXidTest(BaseTest):
 		print(xid)
 		time.sleep(1)
 
-		for i in range(6, 20000):
+		for i in range(6, 1700):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -972,8 +984,9 @@ class RewindXidTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
-			"orioledb.rewind_max_transactions 1000000\n"
-	        "orioledb.enable_rewind = true\n")
+		    "orioledb.rewind_max_transactions 1000000\n"
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -1000,7 +1013,7 @@ class RewindXidTest(BaseTest):
 		invalidoxid = 9223372036854775807
 		time.sleep(1)
 
-		for i in range(25, 80000, 4):
+		for i in range(25, 6800, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -1028,7 +1041,8 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
 		    "orioledb.rewind_max_transactions 1000000\n"
-		    "orioledb.enable_rewind = true\n")
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 8\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -1068,7 +1082,7 @@ class RewindXidTest(BaseTest):
 		print(xid)
 		time.sleep(1)
 
-		for i in range(25, 80000, 4):
+		for i in range(25, 6800, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
