@@ -1180,7 +1180,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		{
 			bool		is_matview = (into->viewQuery != NULL);
 
-			if (is_matview && into->accessMethod && strcmp(into->accessMethod, "orioledb") == 0)
+			if (is_matview &&
+				((into->accessMethod && strcmp(into->accessMethod, "orioledb") == 0) ||
+				 (!into->accessMethod && strcmp(default_table_access_method, "orioledb") == 0)))
 			{
 				Query	   *query = castNode(Query, stmt->query);
 				ObjectAddress address;
@@ -1189,6 +1191,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 				address = create_ctas_nodata(query->targetList, into);
 
+				/*
+				 * We cannot just use rel->rd_rules in access hook, because it
+				 * recalculates expression two times if it executes postgreses
+				 * code, even if it skips insertion to table
+				 */
 				savedDataQuery = (Query *) copyObject(into->viewQuery);
 				RefreshMatViewByOid(address.objectId, true, false,
 									queryString, NULL, qc);
@@ -2812,7 +2819,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
 												'_') + 1);
 
-				tbl = table_open(tbl_oid, AccessShareLock);
+				tbl = try_table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
 					set_toast_oids_and_options(tbl, rel, false, false);
@@ -3206,7 +3213,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
 
 					/*
-					 * Redifinig primary key here to not do rebuild after
+					 * Redefinig primary key here to not do rebuild after
 					 * rewrite_table
 					 */
 					redefine_indices(tbl, new_o_table, true);
@@ -3221,6 +3228,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							rewrite_table(tbl, old_o_table, new_o_table);
 							break;
 						case RELKIND_MATVIEW:
+							o_saved_relrewrite = InvalidOid;
 							if (savedDataQuery != NULL)
 								rewrite_matview(tbl, old_o_table, new_o_table);
 							drop_table(old_o_table->oids);
@@ -3249,8 +3257,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				/* This is faster than dependency scan */
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
 												'_') + 1);
+				CommandCounterIncrement();
 
-				tbl = table_open(tbl_oid, AccessShareLock);
+				tbl = try_table_open(tbl_oid, AccessShareLock);
 				if (tbl && is_orioledb_rel(tbl))
 				{
 					ORelOids	oids;
