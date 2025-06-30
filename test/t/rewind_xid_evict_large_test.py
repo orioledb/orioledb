@@ -81,12 +81,6 @@ class RewindXidTest(BaseTest):
 		node.is_started = False
 		node.start()
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len,ev,len-ev)
-
 		self.assertEqual(
 		    str(
 		        node.execute(
@@ -145,12 +139,6 @@ class RewindXidTest(BaseTest):
 
 		node.is_started = False
 		node.start()
-
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len,ev,len-ev)
 
 		self.assertEqual(
 		    str(
@@ -228,12 +216,6 @@ class RewindXidTest(BaseTest):
 		node.is_started = False
 		node.start()
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len,ev,len-ev)
-
 		self.assertEqual(
 		    str(
 		        node.execute(
@@ -289,16 +271,17 @@ class RewindXidTest(BaseTest):
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
 
-		node.safe_psql('postgres',
-		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,invalidoxid))
-		time.sleep(1)
-		node.is_started = False
-		node.start()
 		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
 		len = int(a)
 		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len,ev,len-ev)
+
+		node.safe_psql('postgres',
+		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,invalidoxid))
+		time.sleep(1)
+		node.is_started = False
+		node.start()
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -367,17 +350,18 @@ class RewindXidTest(BaseTest):
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
 
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len,ev,len-ev)
+
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid,oxid))
 
 		time.sleep(1)
 		node.is_started = False
 		node.start()
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len,ev,len-ev)
 
 		self.maxDiff = None
 		self.assertEqual(
