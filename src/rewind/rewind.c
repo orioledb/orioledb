@@ -1164,9 +1164,11 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	RewindItem *rewindItem;
 	int			i;
 	uint64		curAddPos;
+	uint64		startAddPos;
 	int			freeAddSpace;
 	bool 		subxid_only = false;
 	int		subxids_count = 0;
+	int		nitems;
 
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
@@ -1174,12 +1176,14 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 		return;
 	}
 
+	nitems = nsubxids ? 2 + (nsubxids / SUBXIDS_PER_ITEM) : 1;
+
+	startAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, nitems);
+
+	curAddPos = startAddPos;
+
 next_subxids_item:
-
-//	LWLockAcquire(&rewindMeta->evictLock, LW_SHARED);//
-	curAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPos, 1);
-//	LWLockRelease(&rewindMeta->evictLock);//
-
+	Assert(curAddPos < startAddPos + nitems);
 	freeAddSpace = rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos);
 	Assert(freeAddSpace >= 0);
 	elog(LOG, "add_to_rewind_buffer: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
@@ -1217,7 +1221,10 @@ next_subxids_item:
 			}
 
 			if (subxids_count % SUBXIDS_PER_ITEM == 0)
+			{
+				curAddPos++;
 				goto next_subxids_item; /* Write next rewindItem only with subxids */
+			}
 		}
 	}
 	else
@@ -1272,6 +1279,7 @@ next_subxids_item:
 			Assert(TransactionIdIsValid(xid));
 			subxid_only = true;
 			subxids_count = 0;
+			curAddPos++;
 			goto next_subxids_item; /* Write first rewindItem only with subxids */
 		}
 	}

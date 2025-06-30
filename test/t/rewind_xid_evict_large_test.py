@@ -25,6 +25,10 @@ class RewindXidTest(BaseTest):
 # test_rewind_xid_heap_evict_subxids
 # test_rewind_xid_evict_subxids // oriole+heap
 
+# Number of xids to rewind in each test should be more than (3*orioledb.rewind_buffers*(8192/sizeof(rewindItem)))
+# Multiplier of 3s mean AddBuffer + CompleteBuffer + DiskEvicted (more than each in-memory buffer).
+# 8192/sizeof(rewindItem) currently = 68
+
 # Tests with eviction: large scale (not suitable for valgrind)
 
 	def test_rewind_xid_oriole_evict(self):
@@ -290,6 +294,11 @@ class RewindXidTest(BaseTest):
 		time.sleep(1)
 		node.is_started = False
 		node.start()
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len,ev,len-ev)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -364,6 +373,11 @@ class RewindXidTest(BaseTest):
 		time.sleep(1)
 		node.is_started = False
 		node.start()
+		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		len = int(a)
+		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		ev = int(c)
+		print(len,ev,len-ev)
 
 		self.maxDiff = None
 		self.assertEqual(
