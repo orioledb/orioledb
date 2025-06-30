@@ -1188,7 +1188,7 @@ next_subxids_item:
 	Assert(freeAddSpace >= 0);
 	elog(LOG, "add_to_rewind_buffer: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 
-	if (freeAddSpace <= REWIND_DISK_BUFFER_LENGTH * 4)
+	if (freeAddSpace <= REWIND_DISK_BUFFER_LENGTH * 4 || (rewind_circular_buffer_size < REWIND_DISK_BUFFER_LENGTH * 16 && freeAddSpace <= REWIND_DISK_BUFFER_LENGTH))
 	{
 		elog(LOG, "evict_rewind_items START: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 		evict_rewind_items(curAddPos);
