@@ -202,7 +202,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	BTreeKeyType keyType = intCxt->keyType;
 	bool		itemFound = true;
 
-	if (fastpath)
+	if (fastpath && intCxt->partial->isPartial)
 	{
 		OBTreeFastPathFindResult result;
 		int			chunkIndex;
