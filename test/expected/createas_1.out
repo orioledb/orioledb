@@ -528,8 +528,41 @@ TABLE pg_test_refresh_matview_no_data;
         1
 (1 row)
 
+RESET enable_seqscan;
+-- TODO: Uncomment when tablespaces are implemented
+-- SET allow_in_place_tablespaces = true;
+-- CREATE TABLESPACE regress_tblspace LOCATION '';
+CREATE SEQUENCE o_test_mv_select_seq;
+CREATE TABLE o_test_mv_select_table USING orioledb
+	AS VALUES (nextval('o_test_mv_select_seq'::regclass)),
+			  (nextval('o_test_mv_select_seq'::regclass));
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_mv_select_table;
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on o_test_mv_select_table
+(1 row)
+
+SELECT * FROM o_test_mv_select_table;
+ column1 
+---------
+       1
+       2
+(2 rows)
+
+CREATE MATERIALIZED VIEW o_test_mv_select USING orioledb AS SELECT * FROM o_test_mv_select_table;
+-- TODO: Uncomment when tablespaces are implemented
+-- ALTER MATERIALIZED VIEW o_test_mv_select SET TABLESPACE regress_tblspace;
+SELECT * FROM o_test_mv_select;
+ column1 
+---------
+       1
+       2
+(2 rows)
+
+-- TODO: Uncomment when tablespaces are implemented
+-- DROP TABLESPACE regress_tblspace;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_create_as
 drop cascades to table o_test_create_as_less_atts
 drop cascades to table o_test_create_as_no_atts
@@ -539,10 +572,13 @@ drop cascades to table tbl_into
 drop cascades to table tbl_as_nodata
 drop cascades to table tbl_as_data
 drop cascades to materialized view o_test_matview
+drop cascades to table o_test_mv_select_table
+drop cascades to materialized view o_test_mv_select
 DROP SCHEMA createas CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to function query_to_text(text)
 drop cascades to sequence o_matview_seq
 drop cascades to table pg_test_refresh_tbl_instead_of_matview
 drop cascades to materialized view pg_test_refresh_matview_no_data
+drop cascades to sequence o_test_mv_select_seq
 RESET search_path;
