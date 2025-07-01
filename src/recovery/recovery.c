@@ -376,9 +376,6 @@ recovery_shmem_init(Pointer ptr, bool found)
 
 	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3));
 
-	// recovery_oidxshared = (oIdxShared *) ptr;
-	// ptr += CACHELINEALIGN(_o_index_parallel_estimate_shared(0));
-
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
 
@@ -2270,54 +2267,59 @@ clean_workers_oids(void)
 }
 
 void
-recovery_send_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
-				   ORelOids old_oids, uint32 old_o_table_version,	/* Non-zero only for
-																	 * rebuild */
-				   int nindices, bool send_to_leader, bool isrebuild,
-				   dsm_handle seg_handle)
+recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
+						  ORelOids old_oids, uint32 old_o_table_version,	/* Non-zero only for
+																			 * rebuild */
+						  bool isrebuild)
 {
-	RecoveryOidsMsgIdxBuild *msg;
-	int			i;
+	RecoveryMsgLeaderIdxBuild msg;
+	RecoveryIdxBuildQueueState *state;
 
 	Assert(!(*recovery_single_process));
 	Assert(ORelOidsIsValid(oids));
-	msg = palloc0(sizeof(RecoveryOidsMsgIdxBuild));
-	msg->header.type = send_to_leader ? RecoveryMsgTypeLeaderParallelIndexBuild : RecoveryMsgTypeWorkerParallelIndexBuild;
-	msg->oids = oids;
-	msg->old_oids = old_oids;
-	msg->ix_num = ix_num;
-	msg->o_table_version = o_table_version;
-	msg->old_o_table_version = old_o_table_version;
-	msg->seg_handle = seg_handle;
+
+	memset(&msg, 0, sizeof(msg));
+
+	msg.header.type = RecoveryMsgTypeLeaderParallelIndexBuild;
+	msg.oids = oids;
+	msg.old_oids = old_oids;
+	msg.ix_num = ix_num;
+	msg.o_table_version = o_table_version;
+	msg.old_o_table_version = old_o_table_version;
+
 	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version) != NULL);
 
-	if (send_to_leader)
+	/* Remember oids of index build added to a queue in a hash table */
+	state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
+													   &oids,
+													   HASH_ENTER,
+													   NULL);
+
+	state->position = pg_atomic_add_fetch_u64(recovery_index_next_pos, 1);
+	msg.isrebuild = isrebuild;
+	msg.oxid = recovery_oxid;
+	msg.current_position = state->position;
+
+	worker_send_msg(index_build_leader, (Pointer) &msg, sizeof(msg));
+	worker_queue_flush(index_build_leader);
+}
+
+void
+recovery_send_worker_oids(dsm_handle seg_handle)
+{
+	RecoveryMsgWorkerIdxBuild msg;
+
+	Assert(!(*recovery_single_process));
+
+	msg.header.type = RecoveryMsgTypeWorkerParallelIndexBuild;
+	msg.oxid = recovery_oxid;
+	msg.seg_handle = seg_handle;
+
+	for (int i = index_build_first_worker; i <= index_build_last_worker; i++)
 	{
-		RecoveryIdxBuildQueueState *state;
-
-		/* Remember oids of index build added to a queue in a hash table */
-		state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
-														   &oids,
-														   HASH_ENTER,
-														   NULL);
-
-		state->position = pg_atomic_add_fetch_u64(recovery_index_next_pos, 1);
-		msg->isrebuild = isrebuild;
-		msg->oxid = recovery_oxid;
-
-		msg->current_position = state->position;
-		worker_send_msg(index_build_leader, (Pointer) msg, sizeof(RecoveryOidsMsgIdxBuild));
-		worker_queue_flush(index_build_leader);
+		worker_send_msg(i, (Pointer) &msg, sizeof(msg));
+		worker_queue_flush(i);
 	}
-	else
-	{
-		for (i = index_build_first_worker; i <= index_build_last_worker; i++)
-		{
-			worker_send_msg(i, (Pointer) msg, sizeof(RecoveryOidsMsgIdxBuild));
-			worker_queue_flush(i);
-		}
-	}
-	pfree(msg);
 }
 
 static void
@@ -2409,9 +2411,11 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					{
 						Assert(new_o_table->nindices == nindices);
 						/* Send recovery message to become a leader */
-						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version,
-										   old_o_table->oids, old_o_table->version,
-										   nindices, true, true, 0);
+						recovery_send_leader_oids(oids, InvalidIndexNumber,
+												  new_o_table->version,
+												  old_o_table->oids,
+												  old_o_table->version,
+												  true);
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
@@ -2446,8 +2450,8 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
 					ORelOidsSetInvalid(invalid_oids);
-					recovery_send_oids(oids, ix_num, new_o_table->version,
-									   invalid_oids, 0, nindices, true, false, 0);
+					recovery_send_leader_oids(oids, ix_num, new_o_table->version,
+											  invalid_oids, 0, false);
 				}
 				else
 					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, NULL);
@@ -2476,9 +2480,11 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					if (!*recovery_single_process)
 					{
 						/* Send recovery message to become a leader */
-						recovery_send_oids(oids, InvalidIndexNumber, new_o_table->version,
-										   old_o_table->oids, old_o_table->version,
-										   nindices, true, true, 0);
+						recovery_send_leader_oids(oids, InvalidIndexNumber,
+												  new_o_table->version,
+												  old_o_table->oids,
+												  old_o_table->version,
+												  true);
 					}
 					else
 						rebuild_indices(old_o_table, old_descr,
