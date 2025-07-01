@@ -880,27 +880,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		btleader->nparticipanttuplesorts = btshared->scantuplesortstates;
 
 		if (recoveryContext->nworkers != 0)
-		{
-			if (buildstate->isrebuild)
-			{
-				recovery_send_oids(btspool->o_table->oids, buildstate->ix_num,
-								   btspool->o_table->version,
-								   btspool->old_o_table->oids, btspool->old_o_table->version,
-								   btspool->o_table->nindices,
-								   false, true,
-								   dsm_segment_handle(recoveryContext->seg));
-			}
-			else
-			{
-				ORelOids	invalidOids = {InvalidOid, InvalidOid, InvalidOid};
-
-				recovery_send_oids(btspool->o_table->oids, buildstate->ix_num,
-								   btspool->o_table->version,
-								   invalidOids, 0, btspool->o_table->nindices,
-								   false, false,
-								   dsm_segment_handle(recoveryContext->seg));
-			}
-		}
+			recovery_send_worker_oids(dsm_segment_handle(recoveryContext->seg));
 		elog(DEBUG4, "Parallel index build uses %d recovery workers", recoveryContext->nworkers);
 	}
 

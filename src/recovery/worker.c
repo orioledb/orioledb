@@ -331,8 +331,13 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 	int			tuple_len;
 	Size		data_size,
 				data_pos;
+	MemoryContext recovery_context;
 	bool		finished = false;
 	OXid		oxid;
+
+	recovery_context = AllocSetContextCreate(CurrentMemoryContext,
+											 "recovery worker context",
+											 ALLOCSET_DEFAULT_SIZES);
 
 	while (!finished)
 	{
@@ -419,100 +424,114 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					data_pos += tuple_len;
 				}
 			}
-			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild ||
-					 type == RecoveryMsgTypeWorkerParallelIndexBuild)
+			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
 			{
-				RecoveryOidsMsgIdxBuild *msg = (RecoveryOidsMsgIdxBuild *) (data + data_pos);
+				RecoveryMsgLeaderIdxBuild *msg = (RecoveryMsgLeaderIdxBuild *) (data + data_pos);
 				OTable	   *o_table,
 						   *old_o_table = NULL;
+				OTableDescr *o_descr;
+				OTableDescr *old_o_descr = NULL;
+				MemoryContext prev_context;
+
+				prev_context = MemoryContextSwitchTo(recovery_context);
+
+				o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
 
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = msg->oxid;
+
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
+
 				if (msg->isrebuild)
 				{
 					Assert(ORelOidsIsValid(msg->old_oids));
+
 					old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
 					Assert(old_o_table);
 					Assert(old_o_table->version == msg->old_o_table_version);
 				}
 
-				if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
-				{
-					OTableDescr *o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
-					OTableDescr *old_o_descr = NULL;
+				Assert(id == index_build_leader);
+				Assert((msg->isrebuild && msg->ix_num == InvalidIndexNumber) || (!msg->isrebuild && msg->ix_num != InvalidIndexNumber));
 
-					Assert(id == index_build_leader);
-					o_fill_tmp_table_descr(o_descr, o_table);
+				o_fill_tmp_table_descr(o_descr, o_table);
 
-					Assert((msg->isrebuild && msg->ix_num == InvalidIndexNumber) || (!msg->isrebuild && msg->ix_num != InvalidIndexNumber));
-					if (msg->isrebuild)
-					{
-						old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
-						o_fill_tmp_table_descr(old_o_descr, old_o_table);
-						rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true, NULL);
-					}
-					else
-					{
-						build_secondary_index(o_table, o_descr, msg->ix_num, true, NULL);
-					}
-
-					/*
-					 * Wake up the other recovery processes that may wait to
-					 * do their modify operations on this relation or to do
-					 * oxid update
-					 */
-					pg_atomic_monotonic_advance_u64(recovery_index_completed_pos, msg->current_position);
-					ConditionVariableBroadcast(recovery_index_cv);
-
-					o_free_tmp_table_descr(o_descr);
-					pfree(o_descr);
-					if (msg->isrebuild)
-					{
-						o_free_tmp_table_descr(old_o_descr);
-						pfree(old_o_descr);
-					}
-				}
-				else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
-				{
-					dsm_segment *seg;
-					shm_toc	   *toc;
-
-					Assert(msg->seg_handle != DSM_HANDLE_INVALID);
-					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
-
-					recovery_oxid = msg->oxid;
-
-					/*
-					 * Participate as a worker in parallel index build.
-					 */
-
-					seg = dsm_attach(msg->seg_handle);
-					if (seg == NULL)
-						ereport(ERROR,
-								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-								 errmsg("could not map dynamic shared memory segment")));
-
-					toc = shm_toc_attach(O_PARALLEL_RECOVERY_MAGIC,
-										 dsm_segment_address(seg));
-					if (toc == NULL)
-						ereport(ERROR,
-								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-								 errmsg("invalid magic number in dynamic shared memory segment")));
-
-					_o_index_parallel_build_inner(seg, toc, NULL, NULL);
-
-					dsm_detach(seg);
-				}
-
-				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
-				pfree(o_table);
 				if (msg->isrebuild)
 				{
-					pfree(old_o_table);
+					old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
+					o_fill_tmp_table_descr(old_o_descr, old_o_table);
+					rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true, NULL);
 				}
+				else
+				{
+					build_secondary_index(o_table, o_descr, msg->ix_num, true, NULL);
+				}
+
+				/*
+				 * Wake up the other recovery processes that may wait to do
+				 * their modify operations on this relation or to do oxid
+				 * update
+				 */
+#if PG_VERSION_NUM >= 170000
+				pg_atomic_monotonic_advance_u64(recovery_index_completed_pos,
+												msg->current_position);
+#else
+				pg_atomic_write_u64(recovery_index_completed_pos,
+									msg->current_position);
+#endif
+				ConditionVariableBroadcast(recovery_index_cv);
+
+				o_free_tmp_table_descr(o_descr);
+				if (msg->isrebuild)
+					o_free_tmp_table_descr(old_o_descr);
+
+				MemoryContextReset(recovery_context);
+				MemoryContextSwitchTo(prev_context);
+
+				data_pos += sizeof(RecoveryMsgLeaderIdxBuild);
+			}
+			else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
+			{
+				RecoveryMsgWorkerIdxBuild *msg = (RecoveryMsgWorkerIdxBuild *) (data + data_pos);
+				dsm_segment *seg;
+				shm_toc    *toc;
+				MemoryContext prev_context;
+
+				prev_context = MemoryContextSwitchTo(recovery_context);
+
+				Assert(msg->seg_handle != DSM_HANDLE_INVALID);
+
+				recovery_oxid = msg->oxid;
+
+				Assert(id >= index_build_first_worker && id <= index_build_last_worker);
+
+				/*
+				 * Participate as a worker in parallel index build.
+				 */
+
+				seg = dsm_attach(msg->seg_handle);
+				if (seg == NULL)
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("could not map dynamic shared memory segment")));
+
+				toc = shm_toc_attach(O_PARALLEL_RECOVERY_MAGIC,
+									 dsm_segment_address(seg));
+				if (toc == NULL)
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("invalid magic number in dynamic shared memory segment")));
+
+				_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+
+				dsm_detach(seg);
+
+				MemoryContextReset(recovery_context);
+				MemoryContextSwitchTo(prev_context);
+
+				data_pos += sizeof(RecoveryMsgWorkerIdxBuild);
 			}
 			else if (type == RecoveryMsgTypeCommit)
 			{
@@ -591,6 +610,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 	}
 	if (descr)
 		table_descr_dec_refcnt(descr);
+
+	MemoryContextDelete(recovery_context);
 }
 
 /*
