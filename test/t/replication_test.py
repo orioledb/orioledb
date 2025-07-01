@@ -961,6 +961,50 @@ class ReplicationTest(BaseTest):
 
 					replica.start()
 
+	def test_tablespace_replication(self):
+		with self.node as master:
+			master.start()
+
+			# create a backup
+			with self.getReplica().start() as replica:
+				master.execute("CREATE EXTENSION orioledb;")
+
+				con1 = master.connect(autocommit=True)
+				con1.execute("""
+					SET allow_in_place_tablespaces = true;
+				""")
+				con1.execute("""
+					CREATE TABLESPACE regress_tblspace LOCATION '';
+				""")
+				con1.close()
+
+				master.safe_psql("""
+					CREATE TABLE foo (
+						i int
+					) USING orioledb TABLESPACE regress_tblspace;
+					INSERT INTO foo VALUES (3), (8), (94), (15);
+				""")
+				master.safe_psql("""
+					CREATE INDEX foo_ix1 ON foo (i) TABLESPACE regress_tblspace;
+				""")
+
+				con2 = master.connect()
+				con2.execute("SET enable_seqscan = off;")
+				self.assertEqual([(3,), (8,), (15,), (94,)],
+								 con2.execute("SELECT * FROM foo ORDER BY i;"))
+				con2.close()
+
+				# wait for synchronization
+				self.catchup_orioledb(replica)
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
+
+				con3 = replica.connect()
+				con3.execute("SET enable_seqscan = off;")
+				self.assertEqual([(3,), (8,), (15,), (94,)],
+								 con3.execute("SELECT * FROM foo ORDER BY i;"))
+				con3.close()
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [

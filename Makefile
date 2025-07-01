@@ -45,6 +45,7 @@ OBJS = src/btree/btree.o \
 	   src/catalog/o_sys_cache.o \
 	   src/catalog/o_tables.o \
 	   src/catalog/o_type_cache.o \
+	   src/catalog/o_tablespace_cache.o \
 	   src/catalog/sys_trees.o \
 	   src/checkpoint/checkpoint.o \
 	   src/checkpoint/control.o \
@@ -121,6 +122,7 @@ REGRESSCHECKS = btree_sys_check \
 				subquery \
 				subtransactions \
 				tableam \
+				tablespace \
 				temp \
 				toast \
 				trigger \

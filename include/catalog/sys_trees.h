@@ -42,7 +42,8 @@
 #define SYS_TREES_EVICTED_DATA			(20)
 #define SYS_TREES_CHKP_NUM				(21)
 #define SYS_TREES_MULTIRANGE_CACHE		(22)
-#define SYS_TREES_NUM					(22)
+#define SYS_TREES_TABLESPACE_CACHE		(23)
+#define SYS_TREES_NUM					(23)
 
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)

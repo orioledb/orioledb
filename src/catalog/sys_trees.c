@@ -125,7 +125,6 @@ static void o_chkp_num_print(BTreeDescr *desc, StringInfo buf,
 static void o_evicted_data_print(BTreeDescr *desc, StringInfo buf,
 								 OTuple tup, Pointer arg);
 
-
 static SysTreeMeta sysTreesMeta[] =
 {
 	{							/* SYS_TREES_SHARED_ROOT_INFO */
@@ -400,7 +399,19 @@ static SysTreeMeta sysTreesMeta[] =
 		.undoLogType = UndoLogSystem,
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
-	}
+	},
+	{							/* SYS_TREES_TABLESPACE_CACHE */
+		.keyLength = sizeof(OSysCacheKey1),
+		.tupleLength = sizeof(OTablespace),
+		.cmpFunc = o_sys_cache_cmp,
+		.keyPrint = o_sys_cache_key_print,
+		.tupPrint = o_tablespace_cache_tup_print,
+		.keyToJsonb = o_sys_cache_key_to_jsonb,
+		.poolType = OPagePoolCatalog,
+		.undoLogType = UndoLogSystem,
+		.storageType = BTreeStoragePersistence,
+		.needs_undo = NULL
+	},
 };
 
 static SysTreeShmemHeader *sysTreesShmemHeaders = NULL;
