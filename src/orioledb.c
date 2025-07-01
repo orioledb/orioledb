@@ -197,7 +197,6 @@ static ShmemItem shmemItems[] = {
 static Size orioledb_memsize(void);
 static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
-static void verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
 static void orioledb_get_relation_info_hook(PlannerInfo *root,
@@ -262,9 +261,9 @@ _PG_init(void)
 	if (!process_shared_preload_libraries_in_progress)
 		return;
 
-	verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
-	verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
-	verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
+	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
+	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
+	o_verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
 
 	/* See InitializeMaxBackends(), InitProcGlobal() */
 	max_procs = MaxConnections + autovacuum_max_workers + 2 +
@@ -977,20 +976,6 @@ o_base_init_startup_hook(void)
 		prev_base_init_startup_hook();
 }
 
-void
-o_check_init_db_dir(Oid dbOid)
-{
-	static Oid	initializedOid = InvalidOid;
-
-	if (initializedOid == dbOid)
-		return;
-
-	verify_dir_exists_or_create(psprintf("%s/%u",
-										 ORIOLEDB_DATA_DIR,
-										 dbOid), NULL, NULL);
-	initializedOid = dbOid;
-}
-
 static Size
 o_proc_shmem_needs(void)
 {
@@ -1227,8 +1212,8 @@ o_check_dir(const char *dir)
 /*
  * Verify that the given directory exists. If it does not exist, it is created.
  */
-static void
-verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
+void
+o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 {
 	const char *errstr;
 

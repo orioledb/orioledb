@@ -55,7 +55,7 @@
  * reading/deserialization of system tables structures without using
  * any conversion tools.
  */
-#define ORIOLEDB_DATA_VERSION	1
+#define ORIOLEDB_DATA_VERSION	2
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
@@ -360,7 +360,6 @@ extern char *s3_cainfo;
 #define O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(blkno) \
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
-extern void o_check_init_db_dir(Oid dbOid);
 extern void orioledb_check_shmem(void);
 
 typedef int OCompress;
@@ -414,6 +413,7 @@ typedef enum OPagePoolType
 typedef struct OPagePool OPagePool;
 struct BTreeDescr;
 
+extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
 extern OPagePool *get_ppool(OPagePoolType type);
 extern OPagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
@@ -439,6 +439,7 @@ extern IndexBuildResult o_pkey_result;
 
 extern void orioledb_setup_ddl_hooks(void);
 extern void o_ddl_cleanup(void);
+extern void o_drop_table(ORelOids oids);
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;

@@ -377,7 +377,7 @@ index_build_params(OTableIndex *index)
  */
 void
 o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
-			   OIndexNumber old_ix_num, IndexBuildResult *result)
+			   OIndexNumber old_ix_num, bool set_tablespace, IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
@@ -392,6 +392,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	OIndexType	ix_type;
 	int16		indnatts;
 	int16		indnkeyatts;
+	Oid			tablespace;
 	OCompress	compress = InvalidOCompress;
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
@@ -427,6 +428,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
+	tablespace = index->rd_rel->reltablespace;
 
 	if (OidIsValid(indoid))
 		index_close(index, AccessShareLock);
@@ -549,6 +551,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
+	table_index->tablespace = tablespace;
 
 	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);
@@ -581,10 +584,19 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	if (!reuse_relnode && is_build)
 	{
 		if (table_index->type == oIndexPrimary)
-			rebuild_indices_insert_placeholders(descr);
-		else
+		{
+			if (!set_tablespace)
+			{
+				o_tablespace_cache_add_table(o_table);
+				rebuild_indices_insert_placeholders(descr);
+			}
+		}
+		else if (!set_tablespace)
+		{
+			o_tablespace_cache_add_relnode(table_index->oids.datoid, table_index->oids.relnode, tablespace);
 			o_insert_shared_root_placeholder(table_index->oids.datoid,
 											 table_index->oids.relnode);
+		}
 	}
 
 	if (reindex)
@@ -612,7 +624,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		else
 		{
 			Assert(!is_recovery_in_progress());
-			build_secondary_index(o_table, descr, ix_num, false, result);
+			build_secondary_index(o_table, descr, ix_num, false, set_tablespace, result);
 		}
 	}
 	else
@@ -1355,7 +1367,7 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, Par
 
 void
 build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
-					  bool in_dedicated_recovery_worker,
+					  bool in_dedicated_recovery_worker, bool set_tablespace,
 					  IndexBuildResult *result)
 {
 	Tuplesortstate **sortstates;
@@ -1449,8 +1461,9 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	o_tables_table_meta_lock(o_table);
 
 	btree_write_file_header(&idx->desc, &fileHeader);
-	o_drop_shared_root_info(idx->desc.oids.datoid,
-							idx->desc.oids.relnode);
+	if (!set_tablespace)
+		o_drop_shared_root_info(idx->desc.oids.datoid,
+								idx->desc.oids.relnode);
 
 	o_tables_table_meta_unlock(o_table, InvalidOid);
 
@@ -1920,6 +1933,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
+	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 

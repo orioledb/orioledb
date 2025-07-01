@@ -197,9 +197,8 @@ TABLE pg_test_refresh_matview_no_data;
 
 RESET enable_seqscan;
 
--- TODO: Uncomment when tablespaces are implemented
--- SET allow_in_place_tablespaces = true;
--- CREATE TABLESPACE regress_tblspace LOCATION '';
+SET allow_in_place_tablespaces = true;
+CREATE TABLESPACE regress_tblspace LOCATION '';
 
 CREATE SEQUENCE o_test_mv_select_seq;
 
@@ -209,12 +208,10 @@ CREATE TABLE o_test_mv_select_table USING orioledb
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_mv_select_table;
 SELECT * FROM o_test_mv_select_table;
 CREATE MATERIALIZED VIEW o_test_mv_select USING orioledb AS SELECT * FROM o_test_mv_select_table;
--- TODO: Uncomment when tablespaces are implemented
--- ALTER MATERIALIZED VIEW o_test_mv_select SET TABLESPACE regress_tblspace;
+ALTER MATERIALIZED VIEW o_test_mv_select SET TABLESPACE regress_tblspace;
 SELECT * FROM o_test_mv_select;
 
--- TODO: Uncomment when tablespaces are implemented
--- DROP TABLESPACE regress_tblspace;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA createas CASCADE;
+DROP TABLESPACE regress_tblspace;
 RESET search_path;

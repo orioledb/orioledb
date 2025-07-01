@@ -77,7 +77,8 @@ typedef enum
 	SysTreesLockUndoItemType,
 	InvalidateUndoItemType,
 	BranchUndoItemType,
-	SubXactUndoItemType
+	SubXactUndoItemType,
+	SysCacheDeleteUndoItemType
 } UndoItemType;
 
 struct UndoStackItem
