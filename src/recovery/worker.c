@@ -371,6 +371,9 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				if (recovery_header->type & RECOVERY_MODIFY_OIDS)
 				{
+					char	   *prefix;
+					char	   *db_prefix;
+
 					memcpy(&oids, data + data_pos, sizeof(ORelOids));
 					data_pos += sizeof(ORelOids);
 					ix_type = *(data + data_pos);
@@ -393,6 +396,11 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 														 false,
 														 NULL);
 					}
+					o_get_prefixes_for_relnode(indexDescr->oids.datoid,
+											   indexDescr->oids.relnode, &prefix, &db_prefix);
+					o_verify_dir_exists_or_create(prefix, NULL, NULL);
+					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+					pfree(db_prefix);
 				}
 
 				if (type == RecoveryMsgTypeBridgeErase)
@@ -432,6 +440,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				OTableDescr *o_descr;
 				OTableDescr *old_o_descr = NULL;
 				MemoryContext prev_context;
+				char	   *prefix;
+				char	   *db_prefix;
 
 				prev_context = MemoryContextSwitchTo(recovery_context);
 
@@ -443,6 +453,12 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
+
+				o_get_prefixes_for_relnode(msg->oids.datoid, msg->oids.relnode,
+										   &prefix, &db_prefix);
+				o_verify_dir_exists_or_create(prefix, NULL, NULL);
+				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+				pfree(db_prefix);
 
 				if (msg->isrebuild)
 				{
@@ -466,7 +482,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				}
 				else
 				{
-					build_secondary_index(o_table, o_descr, msg->ix_num, true, NULL);
+					build_secondary_index(o_table, o_descr, msg->ix_num, true, false, NULL);
 				}
 
 				/*

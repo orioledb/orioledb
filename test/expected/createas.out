@@ -529,9 +529,8 @@ TABLE pg_test_refresh_matview_no_data;
 (1 row)
 
 RESET enable_seqscan;
--- TODO: Uncomment when tablespaces are implemented
--- SET allow_in_place_tablespaces = true;
--- CREATE TABLESPACE regress_tblspace LOCATION '';
+SET allow_in_place_tablespaces = true;
+CREATE TABLESPACE regress_tblspace LOCATION '';
 CREATE SEQUENCE o_test_mv_select_seq;
 CREATE TABLE o_test_mv_select_table USING orioledb
 	AS VALUES (nextval('o_test_mv_select_seq'::regclass)),
@@ -550,8 +549,7 @@ SELECT * FROM o_test_mv_select_table;
 (2 rows)
 
 CREATE MATERIALIZED VIEW o_test_mv_select USING orioledb AS SELECT * FROM o_test_mv_select_table;
--- TODO: Uncomment when tablespaces are implemented
--- ALTER MATERIALIZED VIEW o_test_mv_select SET TABLESPACE regress_tblspace;
+ALTER MATERIALIZED VIEW o_test_mv_select SET TABLESPACE regress_tblspace;
 SELECT * FROM o_test_mv_select;
  column1 
 ---------
@@ -559,8 +557,6 @@ SELECT * FROM o_test_mv_select;
        2
 (2 rows)
 
--- TODO: Uncomment when tablespaces are implemented
--- DROP TABLESPACE regress_tblspace;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_create_as
@@ -581,4 +577,5 @@ drop cascades to sequence o_matview_seq
 drop cascades to table pg_test_refresh_tbl_instead_of_matview
 drop cascades to materialized view pg_test_refresh_matview_no_data
 drop cascades to sequence o_test_mv_select_seq
+DROP TABLESPACE regress_tblspace;
 RESET search_path;

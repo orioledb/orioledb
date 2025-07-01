@@ -20,6 +20,7 @@
 #include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/storage.h"
+#include "catalog/o_sys_cache.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -133,6 +134,11 @@ UndoItemTypeDescr undoItemTypeDescrs[] = {
 		.type = RewindRelFileNodeUndoItemType,
 		.callback = o_rewind_relfilenode_item_callback,
 		.callOnCommit = true
+	},
+	{
+		.type = SysCacheDeleteUndoItemType,
+		.callback = o_sys_cache_delete_callback,
+		.callOnCommit = false
 	}
 };
 
@@ -1793,7 +1799,6 @@ start_autonomous_transaction(OAutonomousTxState *state)
 {
 	int			i;
 
-	Assert(!is_recovery_process());
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
 	state->logicalXid = get_current_logical_xid();
@@ -1801,7 +1806,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
 
-	if (!local_wal_is_empty())
+	if (!is_recovery_process() && !local_wal_is_empty())
 		flush_local_wal(false);
 
 	oxid_needs_wal_flush = false;
@@ -1818,8 +1823,9 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	{
 		int			i;
 
-		wal_rollback(oxid,
-					 get_current_logical_xid());
+		if (!is_recovery_process())
+			wal_rollback(oxid,
+						 get_current_logical_xid());
 		current_oxid_abort();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			apply_undo_stack((UndoLogType) i, oxid, NULL, true);
@@ -1850,8 +1856,9 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		CommitSeqNo csn;
 		int			i;
 
-		wal_commit(oxid,
-				   get_current_logical_xid());
+		if (!is_recovery_process())
+			wal_commit(oxid,
+					   get_current_logical_xid());
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);

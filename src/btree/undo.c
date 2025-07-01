@@ -858,6 +858,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			{
 				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
 				o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+				o_tablespace_cache_delete(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 			}
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
@@ -869,6 +870,14 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (OidIsValid(remainRelnode))
 	{
 		ORelOids	oids = {datoid, reloid, remainRelnode};
+		char	   *prefix;
+		char	   *db_prefix;
+
+		o_get_prefixes_for_relnode(datoid, remainRelnode,
+								   &prefix, &db_prefix);
+		o_verify_dir_exists_or_create(prefix, NULL, NULL);
+		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+		pfree(db_prefix);
 
 		o_invalidate_oids(oids);
 	}

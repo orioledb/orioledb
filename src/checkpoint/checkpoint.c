@@ -5251,6 +5251,7 @@ tbl_data_exists(ORelOids *oids)
 	SharedRootInfoKey key;
 	OTuple		keyTuple;
 	OTuple		resultTuple;
+	char	   *db_prefix;
 
 	key.datoid = oids->datoid;
 	key.relnode = oids->relnode;
@@ -5267,10 +5268,13 @@ tbl_data_exists(ORelOids *oids)
 		return true;
 	}
 
+	o_get_prefixes_for_relnode(oids->datoid, oids->relnode, NULL, &db_prefix);
+
 	/* TODO: more smart check */
-	filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%u", oids->datoid, oids->relnode);
+	filename = psprintf("%s/%u", db_prefix, oids->relnode);
 	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
 	pfree(filename);
+	pfree(db_prefix);
 
 	if (file >= 0)
 	{

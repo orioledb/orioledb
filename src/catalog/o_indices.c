@@ -30,6 +30,7 @@
 #include "access/relation.h"
 #include "access/table.h"
 #include "catalog/pg_opclass_d.h"
+#include "catalog/pg_tablespace_d.h"
 #include "catalog/pg_type_d.h"
 #include "funcapi.h"
 #include "miscadmin.h"
@@ -191,6 +192,7 @@ make_ctid_o_index(OTable *table)
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
+	result->tablespace = table->tablespace;
 	result->nLeafFields = table->nfields + 1;
 	if (table->index_bridging)
 		result->nLeafFields++;
@@ -260,6 +262,7 @@ make_primary_o_index(OTable *table)
 	else
 		result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
+	result->tablespace = tableIndex->tablespace;
 	saved_nLeafFields = table->nfields;
 	result->nLeafFields = table->nfields;
 	if (table->index_bridging)
@@ -405,6 +408,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->bridging = table->index_bridging;
 	result->compress = tableIndex->compress;
 	result->fillfactor = tableIndex->fillfactor;
+	result->tablespace = tableIndex->tablespace;
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
@@ -464,6 +468,7 @@ make_toast_o_index(OTable *table)
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
 	result->fillfactor = HEAP_DEFAULT_FILLFACTOR;
+	result->tablespace = table->tablespace;
 	if (table->has_primary)
 	{
 		result->nLeafFields = primary->nfields;
@@ -645,6 +650,8 @@ serialize_o_index(OIndex *o_index, int *size)
 	o_serialize_node((Node *) o_index->expressions, &str);
 	o_serialize_node((Node *) o_index->duplicates, &str);
 
+	appendBinaryStringInfo(&str, (Pointer) &o_index->tablespace, sizeof(Oid));
+
 	*size = str.len;
 	return str.data;
 }
@@ -688,6 +695,16 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex->expressions = (List *) o_deserialize_node(&ptr);
 	oIndex->duplicates = (List *) o_deserialize_node(&ptr);
 	MemoryContextSwitchTo(old_mcxt);
+
+	if (oIndex->data_version >= 2)
+	{
+		len = sizeof(Oid);
+		Assert((ptr - data) + len <= length);
+		memcpy(&oIndex->tablespace, ptr, len);
+		ptr += len;
+	}
+	else
+		oIndex->tablespace = DEFAULTTABLESPACE_OID;
 
 	Assert((ptr - data) == length);
 

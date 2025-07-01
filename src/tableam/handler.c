@@ -17,6 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/scan.h"
 #include "btree/undo.h"
@@ -47,8 +48,10 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/storage.h"
+#include "catalog/storage_xlog.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
+#include "common/relpath.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "optimizer/optimizer.h"
@@ -773,7 +776,8 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		new_o_table = o_table_tableam_create(new_oids, tupdesc,
 											 rel->rd_rel->relpersistence,
-											 old_o_table->fillfactor);
+											 old_o_table->fillfactor,
+											 rel->rd_rel->reltablespace);
 		o_opclass_cache_add_table(new_o_table);
 		o_table_fill_oids(new_o_table, rel, newrnode, false);
 
@@ -870,9 +874,18 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 }
 
 static void
-orioledb_relation_copy_data(Relation rel, const RelFileNode *newrnode)
+orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	SMgrRelation dstrel;
+
+	/*
+	 * Code from heapam_relation_copy_data just to create storage and new
+	 * relfilenode
+	 */
+	FlushRelationBuffers(rel);
+	dstrel = RelationCreateStorage(*new_relfilenode, rel->rd_rel->relpersistence, true);
+	RelationDropStorage(rel);
+	smgrclose(dstrel);
 }
 
 static void

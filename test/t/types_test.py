@@ -637,3 +637,57 @@ class TypesTest(BaseTest):
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_test_1")[0][0], 1000)
 		node.stop()
+
+	def test_tablespace_recovery(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+
+		con1 = node.connect(autocommit=True)
+		con1.execute("""
+			SET allow_in_place_tablespaces = true;
+		""")
+		con1.execute("""
+			CREATE TABLESPACE regress_tblspace LOCATION '';
+		""")
+		con1.close()
+
+		node.safe_psql("""
+			CREATE TABLE foo (
+				i int
+			) USING orioledb TABLESPACE regress_tblspace;
+			INSERT INTO foo VALUES (3), (8), (94), (15);
+		""")
+		node.safe_psql("""
+			CREATE INDEX foo_ix1 ON foo (i) TABLESPACE regress_tblspace;
+		""")
+		node.safe_psql("""
+			CREATE INDEX foo_ix2 ON foo ((i + 1)) TABLESPACE regress_tblspace;
+			CREATE INDEX foo_ix3 ON foo ((i + 2)) TABLESPACE regress_tblspace;
+		""")
+
+		con2 = node.connect()
+		con2.execute("SET enable_seqscan = off;")
+
+		self.assertEqual([(3,), (8,), (15,), (94,)],
+		                 con2.execute("SELECT * FROM foo ORDER BY i;"))
+		con2.close()
+		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
+		node.safe_psql("""
+			DROP INDEX foo_ix2;
+			DROP INDEX foo_ix3;
+		""")
+		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		con3 = node.connect()
+		con3.execute("SET enable_seqscan = off;")
+
+		self.assertEqual([(3,), (8,), (15,), (94,)],
+		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
+		con3.close()
+		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
+		node.stop()
