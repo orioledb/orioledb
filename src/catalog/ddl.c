@@ -55,6 +55,7 @@
 #include "catalog/pg_namespace.h"
 #endif
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
 #include "catalog/toasting.h"
 #include "commands/createas.h"
@@ -98,6 +99,8 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 
+#include <sys/stat.h>
+
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
@@ -106,6 +109,7 @@ List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
+Oid			o_saved_reltablespace = InvalidOid;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
@@ -127,7 +131,7 @@ static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
 static void o_find_collation_dependencies(Oid colloid);
-static void redefine_indices(Relation rel, OTable *new_o_table, bool primary);
+static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 static void redefine_pkey_for_rel(Relation rel);
 
 void
@@ -888,6 +892,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 	in_rewrite = false;
 	o_saved_relrewrite = InvalidOid;
+	o_saved_reltablespace = InvalidOid;
 	savedDataQuery = NULL;
 	in_nontransactional_truncate = false;
 
@@ -957,6 +962,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_EnableAlwaysRule:
 						case AT_EnableReplicaRule:
 						case AT_DisableRule:
+						case AT_SetTableSpace:
 							break;
 						default:
 							ereport(ERROR,
@@ -1381,6 +1387,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			partition_drop_index_list = NIL;
 		}
 	}
+	else if (IsA(pstmt->utilityStmt, AlterTableStmt))
+	{
+		if (alter_type_exprs)
+		{
+			list_free(alter_type_exprs);
+			alter_type_exprs = NIL;
+		}
+	}
 }
 
 static void
@@ -1714,6 +1728,9 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	if (!only_fillfactor)
 	{
 		o_table->toast_oids = toastOids;
+		o_tablespace_cache_add_relnode(o_table->toast_oids.datoid,
+									   o_table->toast_oids.relnode,
+									   o_table->tablespace);
 	}
 
 	if (options)
@@ -1785,6 +1802,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 			o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
 															   rel->rd_rel->relpersistence);
 			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+			o_tablespace_cache_add_relnode(o_table->bridge_oids.datoid, o_table->bridge_oids.relnode, o_table->tablespace);
 		}
 	}
 	o_table->fillfactor = fillfactor;
@@ -1822,7 +1840,8 @@ create_o_table_for_rel(Relation rel)
 	o_tables_rel_meta_lock(rel);
 	o_table = o_table_tableam_create(oids, tupdesc,
 									 rel->rd_rel->relpersistence,
-									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR));
+									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
+									 rel->rd_rel->reltablespace);
 	o_opclass_cache_add_table(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
@@ -1904,8 +1923,8 @@ CreateOrioledbDestReceiver(Relation rel)
 	return (DestReceiver *) self;
 }
 
-static void
-drop_table(ORelOids oids)
+void
+o_drop_table(ORelOids oids)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
@@ -2118,11 +2137,11 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ExecDropSingleTupleTableSlot(new_slot);
 	free_btree_seq_scan(sscan);
 
-	drop_table(old_o_table->oids);
+	o_drop_table(old_o_table->oids);
 }
 
 static void
-redefine_indices(Relation rel, OTable *new_o_table, bool primary)
+redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace)
 {
 	ListCell   *index;
 
@@ -2152,7 +2171,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 			{
 				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 				relation_close(ind, AccessShareLock);
-				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, NULL);
+				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, set_tablespace, NULL);
 				closed = true;
 			}
 		}
@@ -2185,6 +2204,9 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary)
 			toast_rel = table_open(toast_relid, AccessExclusiveLock);
 			RelationSetNewRelfilenode(toast_rel, toast_rel->rd_rel->relpersistence);
 			ORelOidsSetFromRel(updated_o_table->toast_oids, toast_rel);
+			o_tablespace_cache_add_relnode(updated_o_table->toast_oids.datoid,
+										   updated_o_table->toast_oids.relnode,
+										   updated_o_table->tablespace);
 			table_close(toast_rel, AccessExclusiveLock);
 			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 			o_tables_table_meta_lock(updated_o_table);
@@ -2209,7 +2231,7 @@ redefine_pkey_for_rel(Relation rel)
 	o_table = o_tables_get(oids);
 	Assert(o_table != NULL);
 
-	redefine_indices(rel, o_table, true);
+	redefine_indices(rel, o_table, true, false);
 
 	o_table_free(o_table);
 }
@@ -2327,6 +2349,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
+	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
@@ -2382,6 +2405,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
+	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
@@ -2410,6 +2434,56 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 
 	o_table_free(old_o_table);
 	o_table_free(o_table);
+}
+
+static void
+cleanup_tablespace_dir(char *tablespace_path)
+{
+	DIR		   *dir;
+	struct dirent *file;
+
+	dir = opendir(tablespace_path);
+	if (dir == NULL)
+		return;
+
+	while (errno = 0, (file = readdir(dir)) != NULL)
+	{
+		Oid			dbOid;
+		char	   *dbDirName;
+
+		if (sscanf(file->d_name, "%u", &dbOid) != 1)
+			continue;
+
+		dbDirName = psprintf("%s/%u", tablespace_path, dbOid);
+
+		/* We assume that postgres throws it's own errors on not empty dirs */
+		if (rmdir(dbDirName) < 0 && errno != ENOTEMPTY)
+		{
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not remove orioledb db dir \"%s\": %m",
+							dbDirName)));
+		}
+		pfree(dbDirName);
+	}
+	fsync_fname_ext(tablespace_path, true, false, FATAL);
+
+	/* We assume that postgres throws it's own errors on not empty dirs */
+	if (rmdir(tablespace_path) < 0 && errno != ENOTEMPTY)
+	{
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not remove tablespace orioledb dir \"%s\": %m",
+						tablespace_path)));
+	}
+
+	/* We assume that postgres throws it's own errors on not empty dirs */
+	if (errno != 0 && errno != ENOTEMPTY)
+	{
+		ereport(ERROR, (errcode_for_file_access(),
+						errmsg("unable to clean up orioledb tablespace: %m")));
+	}
+	closedir(dir);
 }
 
 static void
@@ -2470,7 +2544,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					if (lsecond_oid(drop_oids) == rel->rd_rel->oid)
 						partition_drop_index_list = foreach_delete_current(partition_drop_index_list, lc);
 				}
-				drop_table(oids);
+				o_drop_table(oids);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -2914,7 +2988,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							relation_close(rel, AccessShareLock);
 							closed = true;
 							if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, &o_pkey_result);
+								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, false, &o_pkey_result);
 						}
 
 						if (add_bridging)
@@ -3145,21 +3219,30 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 						}
 						Assert(ix_num < o_table->nindices);
-						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-						o_tables_rel_meta_lock(tbl);
-						o_tables_update(o_table, oxid, oSnapshot.csn);
-						o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
-						o_tables_rel_meta_unlock(tbl, InvalidOid);
-						o_invalidate_oids(idx_oids);
-						o_add_invalidate_undo_item(idx_oids,
-												   O_INVALIDATE_OIDS_ON_ABORT);
-						if (!ORelOidsIsEqual(idx_oids, table_oids))
+						if (o_table->indices[ix_num].tablespace == rel->rd_rel->reltablespace)
 						{
-							o_invalidate_oids(table_oids);
-							o_add_invalidate_undo_item(table_oids,
+							fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+							o_tables_rel_meta_lock(tbl);
+							o_tables_update(o_table, oxid, oSnapshot.csn);
+							o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
+							o_tables_rel_meta_unlock(tbl, InvalidOid);
+							o_invalidate_oids(idx_oids);
+							o_add_invalidate_undo_item(idx_oids,
 													   O_INVALIDATE_OIDS_ON_ABORT);
+							if (!ORelOidsIsEqual(idx_oids, table_oids))
+							{
+								o_invalidate_oids(table_oids);
+								o_add_invalidate_undo_item(table_oids,
+														   O_INVALIDATE_OIDS_ON_ABORT);
+							}
+							o_table_free(o_table);
 						}
-						o_table_free(o_table);
+						else
+						{
+							o_index_drop(tbl, ix_num);
+							o_table_free(o_table);
+							o_define_index(tbl, rel, InvalidOid, false, InvalidIndexNumber, false, NULL);
+						}
 					}
 					else if (rel->rd_options)
 					{
@@ -3183,6 +3266,28 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					}
 				}
 				relation_close(tbl, AccessShareLock);
+			}
+			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+					 (subId == 0))
+			{
+				/*
+				 * We come here during "ALTER TABLE ... SET TABLESPACE" after
+				 * orioledb_relation_copy_data
+				 */
+				if (is_orioledb_rel(rel))
+				{
+					ORelOids	old_oids;
+					Oid			old_reltablespace = rel->rd_rel->reltablespace;
+
+					ORelOidsSetFromRel(old_oids, rel);
+					CommandCounterIncrement();
+					if (old_reltablespace != rel->rd_rel->reltablespace)
+					{
+						o_saved_reltablespace = old_reltablespace;
+						saved_oids = old_oids;
+					}
+				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
 					 OidIsValid(o_saved_relrewrite) &&
@@ -3219,7 +3324,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 * Redefinig primary key here to not do rebuild after
 					 * rewrite_table
 					 */
-					redefine_indices(tbl, new_o_table, true);
+					redefine_indices(tbl, new_o_table, true, false);
 
 					o_table_free(new_o_table);
 					new_o_table = o_tables_get(new_oids);
@@ -3234,14 +3339,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							o_saved_relrewrite = InvalidOid;
 							if (savedDataQuery != NULL)
 								rewrite_matview(tbl, old_o_table, new_o_table);
-							drop_table(old_o_table->oids);
+							o_drop_table(old_o_table->oids);
 							break;
 						default:
 							Assert(false);
 							break;
 					}
 
-					redefine_indices(tbl, new_o_table, false);
+					redefine_indices(tbl, new_o_table, false, false);
 
 					o_table_free(old_o_table);
 					o_table_free(new_o_table);
@@ -3254,8 +3359,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				Oid			tbl_oid;
 				Relation	tbl = NULL;
-
-				CommandCounterIncrement();
 
 				/* This is faster than dependency scan */
 				tbl_oid = pg_strtoint64(strrchr(rel->rd_rel->relname.data,
@@ -3271,60 +3374,125 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					uint8		new_fillfactor;
 					bool		new_index_bridging;
 
+					CommandCounterIncrement();
 					ORelOidsSetFromRel(oids, tbl);
-					descr = o_fetch_table_descr(oids);
-					Assert(descr);
-
-					if (options)
-						new_fillfactor = options->std_options.fillfactor;
-					else
-						new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
-
-					if (options)
-						new_index_bridging = options->index_bridging;
-					else
-						new_index_bridging = false;
-
-					if (GET_PRIMARY(descr)->bridging != new_index_bridging)
+					if (o_saved_reltablespace != rel->rd_rel->reltablespace)
 					{
-						OTable	   *o_table;
-						ORelOids	table_oids;
-						ListCell   *index;
-						bool		has_bridged = false;
+						/*
+						 * We come here during "ALTER TABLE ... SET
+						 * TABLESPACE"
+						 */
+						OTable	   *old_o_table,
+								   *new_o_table;
 
-						foreach(index, RelationGetIndexList(tbl))
+						Assert(ORelOidsIsValid(saved_oids));
+						old_o_table = o_tables_get(saved_oids);
+						Assert(old_o_table != NULL);
+
+						create_o_table_for_rel(tbl);
+
+						set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
+
+						new_o_table = o_tables_get(oids);
+						Assert(new_o_table != NULL);
+
+						relation_close(tbl, AccessShareLock);
+						CommandCounterIncrement();
+						tbl = relation_open(tbl_oid, AccessShareLock);
+
+						/*
+						 * Redefinig primary key here to not do rebuild after
+						 * rewrite_table
+						 */
+						redefine_indices(tbl, new_o_table, true, true);
+
+						o_table_free(new_o_table);
+						new_o_table = o_tables_get(oids);
+						Assert(new_o_table != NULL);
+
+						switch (tbl->rd_rel->relkind)
 						{
-							Oid			indexOid = lfirst_oid(index);
-							Relation	ind = relation_open(indexOid, AccessShareLock);
-							OBTOptions *options = (OBTOptions *) ind->rd_options;
+							case RELKIND_RELATION:
+							case RELKIND_MATVIEW:
 
-							if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
-								has_bridged = true;
-							relation_close(ind, AccessShareLock);
-							if (has_bridged)
+								/*
+								 * for matview we just copy data to not
+								 * recalculate expressions
+								 */
+								Assert(alter_type_exprs == NIL);
+								rewrite_table(tbl, old_o_table, new_o_table);
+								break;
+							default:
+								Assert(false);
 								break;
 						}
 
-						ORelOidsSetFromRel(table_oids, tbl);
-						o_table = o_tables_get(table_oids);
-						if (o_table == NULL)
-						{
-							elog(ERROR, "orioledb table %s not found",
-								 RelationGetRelationName(tbl));
-						}
+						redefine_indices(tbl, new_o_table, false, true);
 
-						if (!has_bridged)
-						{
-							if (new_index_bridging)
-								add_bridge_index(tbl, o_table, true, InvalidOid);
-							else
-								drop_bridge_index(tbl, o_table);
-						}
-						else
-							elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
+						o_table_free(old_o_table);
+						o_table_free(new_o_table);
+
+						o_saved_reltablespace = InvalidOid;
 					}
-					if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
-						set_toast_oids_and_options(tbl, rel, true, false);
+					else
+					{
+						/*
+						 * We come here during "ALTER TABLE ... SET <OPTION>"
+						 */
+						descr = o_fetch_table_descr(oids);
+						Assert(descr);
+
+						if (options)
+							new_fillfactor = options->std_options.fillfactor;
+						else
+							new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
+
+						if (options)
+							new_index_bridging = options->index_bridging;
+						else
+							new_index_bridging = false;
+
+						if (GET_PRIMARY(descr)->bridging != new_index_bridging)
+						{
+							OTable	   *o_table;
+							ORelOids	table_oids;
+							ListCell   *index;
+							bool		has_bridged = false;
+
+							foreach(index, RelationGetIndexList(tbl))
+							{
+								Oid			indexOid = lfirst_oid(index);
+								Relation	ind = relation_open(indexOid, AccessShareLock);
+								OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+								if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
+									has_bridged = true;
+								relation_close(ind, AccessShareLock);
+								if (has_bridged)
+									break;
+							}
+
+							ORelOidsSetFromRel(table_oids, tbl);
+							o_table = o_tables_get(table_oids);
+							if (o_table == NULL)
+							{
+								elog(ERROR, "orioledb table %s not found",
+									 RelationGetRelationName(tbl));
+							}
+
+							if (!has_bridged)
+							{
+								if (new_index_bridging)
+									add_bridge_index(tbl, o_table, true, InvalidOid);
+								else
+									drop_bridge_index(tbl, o_table);
+							}
+							else
+								elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
+						}
+						if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
+							set_toast_oids_and_options(tbl, rel, true, false);
+					}
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);
@@ -3409,6 +3577,67 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			o_invalidate_comparator_cache(o_opclass->opfamily,
 										  o_opclass->inputtype,
 										  o_opclass->inputtype);
+	}
+	else if (access == OAT_DROP && classId == TableSpaceRelationId)
+	{
+		DIR		   *dir;
+		char		path[MAXPGPATH];
+		char		targetpath[MAXPGPATH];
+		struct dirent *file;
+
+#define PG_TBLSPC "pg_tblspc"
+
+		dir = opendir(PG_TBLSPC);
+		while (errno = 0, (file = readdir(dir)) != NULL)
+		{
+			struct stat st;
+			int			rllen;
+
+			/* Skip special stuff */
+			if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
+				continue;
+
+			path[0] = '\0';
+			pg_snprintf(path, MAXPGPATH,
+						PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
+						file->d_name);
+			if (lstat(path, &st) < 0)
+			{
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not stat file \"%s\": %m",
+								file->d_name)));
+			}
+
+			if (!S_ISLNK(st.st_mode))
+			{
+				strncat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+				cleanup_tablespace_dir(path);
+			}
+			else
+			{
+				rllen = readlink(path, targetpath, sizeof(targetpath));
+				if (rllen < 0)
+					ereport(ERROR,
+							(errcode_for_file_access(),
+							 errmsg("could not read symbolic link \"%s\": %m",
+									path)));
+				if (rllen >= sizeof(targetpath))
+					ereport(ERROR,
+							(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+							 errmsg("symbolic link \"%s\" target is too long",
+									path)));
+				targetpath[rllen] = '\0';
+
+				path[0] = '\0';
+				pg_snprintf(path, MAXPGPATH,
+							"%s/" ORIOLEDB_DATA_DIR,
+							targetpath);
+				cleanup_tablespace_dir(path);
+			}
+		}
+		closedir(dir);
+#undef PG_TBLSPC
 	}
 
 	if (old_objectaccess_hook)

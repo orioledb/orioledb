@@ -54,6 +54,7 @@
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 /*
@@ -2070,8 +2071,8 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 	}
 }
 
-void
-recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
+static void
+cleanup_tablespace_old_files(char *path, uint32 chkp_num, bool before_recovery)
 {
 	DIR		   *dir,
 			   *dbDir;
@@ -2080,10 +2081,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 	char	   *filename;
 	char		ext[5];
 
-	if (!before_recovery && chkp_num == 0)
-		return;
 
-	dir = opendir(ORIOLEDB_DATA_DIR);
+	dir = opendir(path);
 	if (dir == NULL)
 		return;
 
@@ -2096,7 +2095,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 		if (sscanf(file->d_name, "%u", &dbOid) != 1)
 			continue;
 
-		dbDirName = psprintf(ORIOLEDB_DATA_DIR "/%u", dbOid);
+		dbDirName = psprintf("%s/%u", path, dbOid);
+
 		dbDir = opendir(dbDirName);
 		if (dbDir == NULL)
 		{
@@ -2199,7 +2199,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 
 			if (cleanup)
 			{
-				filename = psprintf(ORIOLEDB_DATA_DIR "/%u/%s", dbOid, dbFile->d_name);
+				filename = psprintf("%s/%u/%s", path, dbOid, dbFile->d_name);
+
 				if (unlink(filename) < 0)
 				{
 					ereport(FATAL,
@@ -2221,8 +2222,77 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 		ereport(ERROR, (errcode_for_file_access(),
 						errmsg("unable to clean up temporary files: %m")));
 	}
-
 	closedir(dir);
+}
+
+void
+recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
+{
+	DIR		   *dir;
+	char		path[MAXPGPATH];
+	char		targetpath[MAXPGPATH];
+	struct dirent *file;
+
+#define PG_TBLSPC "pg_tblspc"
+
+	if (!before_recovery && chkp_num == 0)
+		return;
+
+	path[0] = '\0';
+	strncat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
+	cleanup_tablespace_old_files(path, chkp_num, before_recovery);
+
+	dir = opendir(PG_TBLSPC);
+	while (errno = 0, (file = readdir(dir)) != NULL)
+	{
+		struct stat st;
+		int			rllen;
+
+		/* Skip special stuff */
+		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
+			continue;
+
+		path[0] = '\0';
+		pg_snprintf(path, MAXPGPATH,
+					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
+					file->d_name);
+		if (lstat(path, &st) < 0)
+		{
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not stat file \"%s\": %m",
+							file->d_name)));
+		}
+
+		if (!S_ISLNK(st.st_mode))
+		{
+			strncat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+			cleanup_tablespace_old_files(path, chkp_num, before_recovery);
+		}
+		else
+		{
+			rllen = readlink(path, targetpath, sizeof(targetpath));
+			if (rllen < 0)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not read symbolic link \"%s\": %m",
+								path)));
+			if (rllen >= sizeof(targetpath))
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("symbolic link \"%s\" target is too long",
+								path)));
+			targetpath[rllen] = '\0';
+
+			path[0] = '\0';
+			pg_snprintf(path, MAXPGPATH,
+						"%s/" ORIOLEDB_DATA_DIR,
+						targetpath);
+			cleanup_tablespace_old_files(path, chkp_num, before_recovery);
+		}
+	}
+	closedir(dir);
+#undef PG_TBLSPC
 }
 
 static ORelOids *
@@ -2439,7 +2509,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					recovery_send_oids(oids, ix_num, new_o_table->version, invalid_oids, 0, nindices, true, false);
 				}
 				else
-					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, NULL);
+					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, false, NULL);
 			}
 			o_free_tmp_table_descr(&tmp_descr);
 		}
@@ -2634,6 +2704,18 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
 												 false, NULL);
 			}
+
+			if (sys_tree_num == -1)
+			{
+				char	   *prefix;
+				char	   *db_prefix;
+
+				o_get_prefixes_for_relnode(cur_oids.datoid, cur_oids.relnode,
+										   &prefix, &db_prefix);
+				o_verify_dir_exists_or_create(prefix, NULL, NULL);
+				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+				pfree(db_prefix);
+			}
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{
@@ -2793,6 +2875,19 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						if (treeOids)
 							add_undo_create_relnode(tmp_oids, treeOids, 1);
 					}
+				}
+				else if (sys_tree_num == SYS_TREES_TABLESPACE_CACHE && success)
+				{
+					OSysCacheKey1 key;
+					char	   *prefix;
+					char	   *db_prefix;
+
+					memcpy(&key, ptr, sizeof(OSysCacheKey1));
+					o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
+											   &prefix, &db_prefix);
+					o_verify_dir_exists_or_create(prefix, NULL, NULL);
+					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+					pfree(db_prefix);
 				}
 			}
 

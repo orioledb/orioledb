@@ -165,6 +165,7 @@ o_sys_caches_init(void)
 	o_collation_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_database_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	o_multirange_cache_init(sys_cache_cxt, sys_cache_fastcache);
+	o_tablespace_cache_init(sys_cache_cxt, sys_cache_fastcache);
 	orioledb_setup_syscache_hooks();
 }
 
@@ -823,6 +824,7 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 									RowLockNoKeyUpdate, NULL,
 									&callbackInfo) ==
 				OBTreeModifyResultUpdated;
+
 			if (result)
 				o_wal_update(desc, tup);
 		}
@@ -925,22 +927,105 @@ o_sys_cache_update_if_needed(OSysCache *sys_cache, OSysCacheKey *key,
 	o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 }
 
-bool
-o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
+static bool
+update_deleted_value(OSysCache *sys_cache, OSysCacheKey *key, bool new_value)
 {
 	Pointer		entry;
 	OSysCacheKey *sys_cache_key;
 
 	o_sys_cache_set_datoid_lsn(&key->common.lsn, NULL);
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
-
 	if (entry == NULL)
 		return false;
-
 	sys_cache_key = (OSysCacheKey *) entry;
-	sys_cache_key->common.deleted = true;
-
+	sys_cache_key->common.deleted = new_value;
 	return o_sys_cache_update(sys_cache, entry);
+}
+
+typedef struct
+{
+	UndoStackItem header;
+	OSysCache  *sys_cache;
+	OSysCacheKey4 key;
+} SysCacheDeleteUndoStackItem;
+
+static void
+o_add_undo_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
+{
+	UndoLocation location;
+	SysCacheDeleteUndoStackItem *item;
+	LocationIndex additional_size = 0;
+	LocationIndex size;
+	int			i;
+	int			additional_offset = sizeof(OSysCacheKey4);
+
+	for (i = 0; i < sys_cache->nkeys; i++)
+	{
+		if (sys_cache->keytypes[i] == NAMEOID)
+			additional_size += sizeof(NameData);
+	}
+	size = sizeof(SysCacheDeleteUndoStackItem) + additional_size;
+	item = (SysCacheDeleteUndoStackItem *) get_undo_record_unreserved(UndoLogSystem,
+																	  &location,
+																	  MAXALIGN(size));
+	item->header.itemSize = size;
+	item->header.type = SysCacheDeleteUndoItemType;
+	item->header.indexType = oIndexPrimary;
+	item->sys_cache = sys_cache;
+	item->key.common = key->common;
+
+	for (i = 0; i < sys_cache->nkeys; i++)
+	{
+		switch (sys_cache->keytypes[i])
+		{
+			case NAMEOID:
+				{
+					Assert(!sys_cache->is_toast);
+
+					item->key.keys[i] = additional_offset;
+					memcpy(((Pointer) &item->key) + additional_offset,
+						   NameStr(*DatumGetName(key->keys[i])),
+						   sizeof(NameData));
+					additional_offset += sizeof(NameData);
+					item->key.common.dataLength += additional_offset;
+				}
+				break;
+
+			default:
+				item->key.keys[i] = key->keys[i];
+				break;
+		}
+	}
+
+	oxid_needs_wal_flush = true;
+	add_new_undo_stack_item(UndoLogSystem, location);
+	release_undo_size(UndoLogSystem);
+}
+
+void
+o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
+							UndoStackItem *baseItem, OXid oxid,
+							bool abort, bool changeCountsValid)
+{
+	bool		res PG_USED_FOR_ASSERTS_ONLY;
+	SysCacheDeleteUndoStackItem *item = (SysCacheDeleteUndoStackItem *) baseItem;
+
+	Assert(!is_recovery_in_progress());
+
+	res = update_deleted_value(item->sys_cache, (OSysCacheKey *) &item->key, false);
+	Assert(res);
+}
+
+bool
+o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
+{
+	bool		res;
+
+	res = update_deleted_value(sys_cache, key, true);
+
+	if (res)
+		o_add_undo_sys_cache_delete(sys_cache, key);
+	return res;
 }
 
 static void

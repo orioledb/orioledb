@@ -75,6 +75,7 @@ typedef struct
 	 * postgres
 	 */
 	List	   *duplicates;
+	Oid			tablespace;
 	MemoryContext index_mctx;
 } OIndex;
 

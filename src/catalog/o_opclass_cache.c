@@ -147,6 +147,9 @@ o_opclass_cache_add_table(OTable *o_table)
 	add_btree_opclass(datoid, GetDefaultOpClass(INT4OID, BTREE_AM_OID),
 					  cur_lsn);
 
+	o_tablespace_cache_add_datoid(datoid, MyDatabaseTableSpace);
+	o_tablespace_cache_add_relnode(datoid, o_table->oids.relnode, o_table->tablespace);
+
 	/*
 	 * Inserts opclass for default index if there is no unique index.
 	 */
@@ -172,6 +175,7 @@ o_opclass_cache_add_table(OTable *o_table)
 			add_btree_opclass(datoid, index->fields[cur_field].opclass,
 							  cur_lsn);
 		}
+		o_tablespace_cache_add_relnode(datoid, index->oids.relnode, index->tablespace);
 	}
 }
 

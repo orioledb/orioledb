@@ -26,6 +26,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
+#include "catalog/o_sys_cache.h"
 #include "utils/seq_buf.h"
 
 #include "pgstat.h"
@@ -134,10 +135,11 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 char *
 get_seq_buf_filename(SeqBufTag *tag)
 {
+	char	   *result;
 	char	   *typename;
+	char	   *db_prefix;
 
-	o_check_init_db_dir(tag->datoid);
-
+	o_get_prefixes_for_relnode(tag->datoid, tag->relnode, NULL, &db_prefix);
 	if (tag->type == 't')
 		typename = "tmp";
 	else if (tag->type == 'm')
@@ -148,8 +150,9 @@ get_seq_buf_filename(SeqBufTag *tag)
 		return NULL;
 	}
 	/* this format is used by recovery_cleanup_old_files() */
-	return psprintf(ORIOLEDB_DATA_DIR "/%u/%u-%u.%s", tag->datoid,
-					tag->relnode, tag->num, typename);
+	result = psprintf("%s/%u-%u.%s", db_prefix, tag->relnode, tag->num, typename);
+	pfree(db_prefix);
+	return result;
 }
 
 static bool
