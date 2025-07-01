@@ -25,8 +25,8 @@ class RewindXidTest(BaseTest):
 # test_rewind_xid_heap_evict_subxids
 # test_rewind_xid_evict_subxids // oriole+heap
 
-# Number of xids to rewind in each test should be more than (3*orioledb.rewind_buffers*(8192/sizeof(rewindItem)))
-# Multiplier of 3s mean AddBuffer + CompleteBuffer + DiskEvicted (more than each in-memory buffer).
+# Number of xids to rewind in each test should be more than (3/2)*orioledb.rewind_buffers*(8192/sizeof(rewindItem)))
+# Multiplier of (3/2) allows DiskEvicted to be more or equal to than each of in-memory buffers (addBuffer and completeBuffer).
 # 8192/sizeof(rewindItem) currently = 68
 
 # Tests with eviction: large scale (not suitable for valgrind)

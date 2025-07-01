@@ -388,7 +388,7 @@ _PG_init(void)
 							NULL,
 							&rewind_buffers_guc,
 							128,
-							3,
+							6,
 							INT_MAX,
 							PGC_POSTMASTER,
 							GUC_UNIT_BLOCKS,

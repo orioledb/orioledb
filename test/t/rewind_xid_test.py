@@ -38,7 +38,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -89,7 +89,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -139,7 +139,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -194,7 +194,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -268,7 +268,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -349,7 +349,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -458,7 +458,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -580,7 +580,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
@@ -659,7 +659,7 @@ class RewindXidTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
 		    "orioledb.enable_rewind = true\n"
-		    "orioledb.rewind_buffers = 3\n")
+		    "orioledb.rewind_buffers = 6\n")
 		node.start()
 
 		node.safe_psql('postgres',
