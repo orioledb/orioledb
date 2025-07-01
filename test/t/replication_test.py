@@ -731,7 +731,7 @@ class ReplicationTest(BaseTest):
 	def test_replication_table_rewrite(self):
 		node = self.node
 		node.append_conf('orioledb.recovery_pool_size = 1')
-		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.append_conf('orioledb.recovery_idx_pool_size = 3')
 		node.start()
 		with self.node as master:
 			with self.getReplica() as replica:

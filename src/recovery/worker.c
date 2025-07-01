@@ -246,6 +246,63 @@ recovery_worker_main(Datum main_arg)
 	PG_END_TRY();
 }
 
+ParallelRecoveryContext *
+CreateParallelRecoveryContext(int nworkers)
+{
+	ParallelRecoveryContext *context;
+
+	context = palloc0(sizeof(ParallelRecoveryContext));
+	context->nworkers = nworkers;
+	shm_toc_initialize_estimator(&context->estimator);
+
+	return context;
+}
+
+void
+InitializeParallelRecoveryDSM(ParallelRecoveryContext *context)
+{
+	Size		segsize = 0;
+
+	segsize = shm_toc_estimate(&context->estimator);
+
+	if (context->nworkers > 0)
+		context->seg = dsm_create(segsize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
+	if (context->seg != NULL)
+		context->toc = shm_toc_create(O_PARALLEL_RECOVERY_MAGIC,
+									  dsm_segment_address(context->seg),
+									  segsize);
+	else
+	{
+		context->nworkers = 0;
+		context->private_memory = MemoryContextAlloc(TopMemoryContext, segsize);
+		context->toc = shm_toc_create(O_PARALLEL_RECOVERY_MAGIC,
+									  context->private_memory,
+									  segsize);
+	}
+}
+
+void
+DestroyParallelRecoveryContext(ParallelRecoveryContext *context)
+{
+	if (context->seg != NULL)
+	{
+		dsm_detach(context->seg);
+		context->seg = NULL;
+	}
+
+	/*
+	 * If this parallel context is actually in private memory rather than
+	 * shared memory, free that memory instead.
+	 */
+	if (context->private_memory != NULL)
+	{
+		pfree(context->private_memory);
+		context->private_memory = NULL;
+	}
+
+	pfree(context);
+}
+
 static inline void
 update_worker_ptr(int worker_id, XLogRecPtr ptr)
 {
@@ -407,10 +464,9 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					 * do their modify operations on this relation or to do
 					 * oxid update
 					 */
-					SpinLockAcquire(&recovery_oidxshared->mutex);
-					recovery_oidxshared->completed_position = msg->current_position;
-					SpinLockRelease(&recovery_oidxshared->mutex);
-					ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
+					pg_atomic_monotonic_advance_u64(recovery_index_completed_pos, msg->current_position);
+					ConditionVariableBroadcast(recovery_index_cv);
+
 					o_free_tmp_table_descr(o_descr);
 					pfree(o_descr);
 					if (msg->isrebuild)
@@ -421,9 +477,34 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				}
 				else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
 				{
+					dsm_segment *seg;
+					shm_toc	   *toc;
+
+					Assert(msg->seg_handle != DSM_HANDLE_INVALID);
 					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
-					/* participate as a worker in parallel index build */
-					_o_index_parallel_build_inner(NULL, NULL, o_table, old_o_table);
+
+					recovery_oxid = msg->oxid;
+
+					/*
+					 * Participate as a worker in parallel index build.
+					 */
+
+					seg = dsm_attach(msg->seg_handle);
+					if (seg == NULL)
+						ereport(ERROR,
+								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								 errmsg("could not map dynamic shared memory segment")));
+
+					toc = shm_toc_attach(O_PARALLEL_RECOVERY_MAGIC,
+										 dsm_segment_address(seg));
+					if (toc == NULL)
+						ereport(ERROR,
+								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								 errmsg("invalid magic number in dynamic shared memory segment")));
+
+					_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+
+					dsm_detach(seg);
 				}
 
 				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
