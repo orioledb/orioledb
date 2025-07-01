@@ -79,7 +79,9 @@ typedef struct
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
 	int		rewindEvictTrancheId;
-	LWLock		evictLock;		/* Lock to evict page from circular buffer */
+	LWLock		rewindEvictLock;		/* Lock during evict/restore page from circular buffer against concurrent eviction */
+	int		rewindCheckpointTrancheId;
+	LWLock		rewindCheckpointLock;		/* Lock during checkpointing againts concurrent eviction */
 	pg_atomic_uint64 oldestConsideredRunningXid;
 	pg_atomic_uint64 runXmin;
 	bool 		rewindWorkerStopRequested;

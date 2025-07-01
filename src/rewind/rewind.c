@@ -513,7 +513,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
                                 (errcode(ERRCODE_INTERNAL_ERROR),
                                  errmsg("Can't rewind due to prepared transactions in the cluster")));
 
-	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
+	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_EXCLUSIVE);
 
 	/* Disable adding new transactions to rewind buffer by rewind worker */
 	rewindMeta->rewindWorkerStopRequested = true;
@@ -558,7 +558,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	/* All good. Do actual rewind */
 	do_rewind(rewind_mode, rewind_time, rewindStartTimeStamp, rewind_oxid, rewind_xid, rewind_timestamp);
 
-	LWLockRelease(&rewindMeta->evictLock);
+	LWLockRelease(&rewindMeta->rewindEvictLock);
 	elog(LOG, "Rewind complete, for %d s", rewind_time);
 	/* Restart Postgres */
 	(void) kill(PostmasterPid, SIGTERM);
@@ -774,8 +774,9 @@ rewind_init_shmem(Pointer ptr, bool found)
 		}
 
 		rewindMeta->rewindEvictTrancheId = LWLockNewTrancheId();
-		LWLockInitialize(&rewindMeta->evictLock, rewindMeta->rewindEvictTrancheId);
-
+		rewindMeta->rewindCheckpointTrancheId = LWLockNewTrancheId();
+		LWLockInitialize(&rewindMeta->rewindEvictLock, rewindMeta->rewindEvictTrancheId);
+		LWLockInitialize(&rewindMeta->rewindCheckpointLock, rewindMeta->rewindCheckpointTrancheId);
 		pg_atomic_init_u64(&rewindMeta->addPos, 0);
 		rewindMeta->completePos = 0;
 		rewindMeta->evictPos = 0;
@@ -827,11 +828,8 @@ is_rewind_worker(void)
 }
 
 /*
- * Restore page from disk to an empty space in circular in-memory buffer.
+ * Restore page from disk to an empty space in completeBuffer.
  * Takes an exclusive lock to avoid cocurrent page eviction.
- * Modifies externally visible rewindMeta->addPos before doing changes to
- * in-memory buffer so that concurrently inserted items don't affect a
- * region restoration region.
  */
 static void
 restore_evicted_rewind_page(void)
@@ -841,7 +839,7 @@ restore_evicted_rewind_page(void)
 	uint64		currentCleanFileNum;
 	int			itemsPerFile;
 
-	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
+	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_EXCLUSIVE);
 
 	start = rewindMeta->restorePos % rewind_circular_buffer_size;
 	length_to_end = rewind_circular_buffer_size - start;
@@ -875,7 +873,7 @@ restore_evicted_rewind_page(void)
 	rewindMeta->restorePos += REWIND_DISK_BUFFER_LENGTH;
 	Assert(rewindMeta->restorePos <= rewindMeta->evictPos);
 
-	LWLockRelease(&rewindMeta->evictLock);
+	LWLockRelease(&rewindMeta->rewindEvictLock);
 
 	/* Clean old buffer files if needed. No lock. */
 	itemsPerFile = REWIND_FILE_SIZE / sizeof(RewindItem);
@@ -1048,8 +1046,8 @@ evict_rewind_items(uint64 curAddPos)
 	int			start;
 	int			length_to_end;
 
-//	LWLockAcquire(&rewindMeta->evictLock, LW_EXCLUSIVE);
-	if (LWLockAcquireOrWait(&rewindMeta->evictLock, LW_EXCLUSIVE))
+	LWLockAcquire(&rewindMeta->rewindCheckpointLock, LW_SHARED);
+	if (LWLockAcquireOrWait(&rewindMeta->rewindEvictLock, LW_EXCLUSIVE))
 	{
 		Assert(rewindMeta->restorePos <= rewindMeta->evictPos);
 
@@ -1108,12 +1106,14 @@ evict_rewind_items(uint64 curAddPos)
 		}
 
 		Assert(rewindMeta->evictPos <= curAddPos);
-		LWLockRelease(&rewindMeta->evictLock);
+		LWLockRelease(&rewindMeta->rewindEvictLock);
 	}
 	else
 	{
 		elog(WARNING, "evict_CONCURRENT_SKIPPED: A=%lu E=%lu C=%lu R=%lu freeAdd=%lu", curAddPos, rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (curAddPos - rewindMeta->evictPos));
 	}
+
+	LWLockRelease(&rewindMeta->rewindCheckpointLock);
 }
 
 void
@@ -1291,7 +1291,8 @@ next_subxids_item:
 void
 checkpoint_write_rewind_xids(void)
 {
-	int			i;
+	bool            buffer_loaded = false;
+	RewindItem	buffer[REWIND_DISK_BUFFER_LENGTH];
 
 	if (!enable_rewind)
 		return;
@@ -1302,6 +1303,7 @@ checkpoint_write_rewind_xids(void)
 		return;
 	}
 
+	LWLockAcquire(&rewindMeta->rewindCheckpointLock, LW_EXCLUSIVE);	
 	/*
 	 * Start from the last non-completed position not written to checkpoint
 	 * yet
@@ -1316,20 +1318,25 @@ checkpoint_write_rewind_xids(void)
 		checkpoint_write_rewind_item(&rewindCompleteBuffer[rewindMeta->checkpointPos % rewind_circular_buffer_size]);
 
 	/* Write rewind records from on-disk buffer if they exist */
-	for (; rewindMeta->checkpointPos < rewindMeta->evictPos; rewindMeta->checkpointPos += REWIND_DISK_BUFFER_LENGTH)
+	while (rewindMeta->checkpointPos < rewindMeta->evictPos)
 	{
-		RewindItem	buffer[REWIND_DISK_BUFFER_LENGTH];
-
-		o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
-					   rewindMeta->checkpointPos * sizeof(RewindItem),
-					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
-
-		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
+		if(!buffer_loaded)
 		{
-			Assert(rewindMeta->checkpointPos + i < rewindMeta->evictPos);
-			checkpoint_write_rewind_item(&buffer[i]);
+			int		startbuf = rewindMeta->checkpointPos - (rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH);
+
+			o_buffers_read(&rewindBuffersDesc,
+					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
+					   startbuf * sizeof(RewindItem),
+					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+			buffer_loaded = true;
 		}
+
+		elog(WARNING, "CHECKPOINT FROM DISK: A=%lu E=%lu C=%lu R=%lu freeAdd=%lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->evictPos));
+
+		checkpoint_write_rewind_item(&buffer[rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH]);
+		rewindMeta->checkpointPos++;
+		if (rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH == 0)
+			buffer_loaded = false;
 	}
 
 	/*
@@ -1338,6 +1345,8 @@ checkpoint_write_rewind_xids(void)
 	 */
 	for (; rewindMeta->checkpointPos < pg_atomic_read_u64(&rewindMeta->addPos); rewindMeta->checkpointPos++)
 		checkpoint_write_rewind_item(&rewindAddBuffer[rewindMeta->checkpointPos % rewind_circular_buffer_size]);
+
+	LWLockRelease(&rewindMeta->rewindCheckpointLock);
 }
 
 OXid
