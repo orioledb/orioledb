@@ -68,7 +68,8 @@ typedef struct SubxidsItem
 
 typedef struct
 {
-	pg_atomic_uint64 addPos;	/* Next adding position */
+	pg_atomic_uint64 addPosReserved; /* Next adding position available for concurrent add process */
+	pg_atomic_uint64 addPosFilled;	 /* Position that is already added and it could be evicted */
 	uint64		completePos;	/* Next complete position */
 	uint64		evictPos;	/* Next evict position. Increments by bufferLength only */
 	uint64		restorePos;	/* Next restore after eviction position. Increments by bufferLength only */
