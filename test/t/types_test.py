@@ -92,6 +92,79 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
 		node.stop()
 
+	def test_enum_index_recovery_rollback(self):
+		enum_amount = 0
+		enumoid_amount = 0
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy',
+											 'ecstatic');
+
+			CREATE TABLE o_holidays (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL,
+				PRIMARY KEY (happiness)
+			) USING orioledb;
+
+			ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
+		""")
+
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (4, 'sad');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (6, 'very happy');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+
+		enum_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+		enumoid_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+
+		con = node.connect()
+		con.execute("DROP TYPE o_happiness CASCADE;")
+		con.rollback()
+
+		node.safe_psql("""
+			CREATE TABLE o_holidays2 (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_holidays2_ix1 ON o_holidays2(happiness);
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		# deleted records should not be removed after rollback
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
+		self.assertEqual([(2, 'happy'), (8, 'ecstatic')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (6, 'sad');
+		""")
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (24, 'very happy');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual([(2, 'happy'), (6, 'happy'), (8, 'ecstatic'), (24, 'very happy')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+		node.stop()
+		raise 0
+
 	def test_enum_cache_namedata_in_key(self):
 		enum_amount = 0
 		enumoid_amount = 0
