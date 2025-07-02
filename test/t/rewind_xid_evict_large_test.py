@@ -406,7 +406,9 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(oxid1)
-		invalidxid = 0
+		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
+		xid1 = int(a)
+		print(xid1)
 		time.sleep(1)
 
 		for i in range(5000, 5006):
@@ -428,7 +430,7 @@ class RewindXidTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (invalidxid,oxid1))
+		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
 		time.sleep(3)
 
 		for i in range(7500, 10000):

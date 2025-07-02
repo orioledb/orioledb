@@ -172,19 +172,30 @@ rewind_shmem_needs(void)
 Datum
 orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 {
+	RewindItem *rewindItem;
+
 	if (!enable_rewind)
                 PG_RETURN_VOID();
 
-	PG_RETURN_DATUM((&rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size])->oxid);
+	rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
+	Assert(rewindItem->tag != EMPTY_ITEM_TAG);
+	elog(WARNING, "COMPLETE OXID %lu XID %u", rewindItem->oxid, rewindItem->xid);
+	//Assert(OXidIsValid(rewindItem->oxid));
+	PG_RETURN_DATUM(rewindItem->oxid);
 }
 
 Datum
 orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 {
+	RewindItem *rewindItem;
+
 	if (!enable_rewind)
                 PG_RETURN_VOID();
 
-	PG_RETURN_DATUM((&rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size])->oxid);
+	rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
+	Assert(rewindItem->tag != EMPTY_ITEM_TAG);
+
+	PG_RETURN_DATUM(rewindItem->xid);
 }
 
 /* Testing functions included under IS_DEV (below) */
