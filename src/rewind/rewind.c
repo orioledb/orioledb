@@ -926,7 +926,7 @@ try_restore_evicted_rewind_page(void)
 	{
 		/* Try to move from rewindAddBuffer */
 		while (rewindMeta->restorePos == rewindMeta->evictPos &&
-				rewindMeta->restorePos > rewindMeta->completePos &&
+				rewindMeta->restorePos >= rewindMeta->completePos &&
 				rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size &&
 				rewindMeta->evictPos < pg_atomic_read_u64(&rewindMeta->addPos))
 		{
@@ -1030,17 +1030,13 @@ rewind_worker_main(Datum main_arg)
 					break;
 				}
 
-				if (rewindMeta->completePos < rewindMeta->restorePos)
-					/* Read from rewindCompleteBuffer */
-					rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
-				else
+				if (rewindMeta->completePos >= rewindMeta->restorePos)
 				{
-					/* rewindCompleteBuffer is empty. Read from rewindAddBuffer */
-					if (rewindMeta->restorePos != rewindMeta->evictPos)
-						elog(WARNING, "ADD POS %lu, EVICT POS %lu, RESTORE POS %lu, COMPLETE POS %lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->restorePos, rewindMeta->completePos);
-					Assert(rewindMeta->restorePos == rewindMeta->evictPos);
-					rewindItem = &rewindAddBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
+				        /* rewindCompleteBuffer is empty. Read from rewindAddBuffer */
+					try_restore_evicted_rewind_page();
 				}
+
+				rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
 				elog(DEBUG3, "force_complete_check 1: ADD POS %lu, EVICT POS %lu, RESTORE POS %lu, COMPLETE POS %lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->restorePos, rewindMeta->completePos);
