@@ -32,8 +32,6 @@ TABLE foo;
 CREATE SCHEMA tblspace_test_schema;
 SET SESSION search_path = 'tblspace_test_schema';
 CREATE EXTENSION orioledb;
-SET default_table_access_method = 'orioledb';
-SHOW default_table_access_method;
 
 CREATE TABLE foo_def (i int) USING orioledb TABLESPACE pg_default;
 \d+ foo_def
@@ -46,8 +44,6 @@ INSERT INTO foo VALUES(3);
 TABLE foo;
 
 \c regression
-SET default_table_access_method = 'orioledb';
-SHOW default_table_access_method;
 SET SESSION search_path = 'tablespace';
 
 CREATE TABLE atable USING orioledb AS VALUES (1), (2);
@@ -160,13 +156,14 @@ ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
 ALTER TABLESPACE regress_tblspace RENAME TO regress_tblspace_renamed;
 ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default;
 
+DROP TABLESPACE regress_tblspace_renamed;
+
 -- TODO: Add tablespaces support to iterate_files
 -- TODO: REINDEX (TABLESPACE; also make CONCURRENTLY work but throw a warning that it uses simple one
 -- TODO: Add test for symlinked tablespaces, probably
 -- \set cwd `echo "$PWD/tblspc"`
 -- CREATE TABLESPACE regress_tblspace LOCATION :'cwd';
 
-DROP TABLESPACE regress_tblspace_renamed;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tablespace CASCADE;
 RESET search_path;

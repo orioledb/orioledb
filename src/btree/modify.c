@@ -697,7 +697,8 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	{
 		BTreeLeafTuphdr *leafTuphdr = &context->leafTuphdr;
 
-		leafTuphdr->undoLocation = InvalidUndoLocation;
+		if (desc->undoType == UndoLogRegular)
+			leafTuphdr->undoLocation = InvalidUndoLocation;
 		if (desc->undoType == UndoLogRegular)
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
 	}
@@ -757,8 +758,8 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 								BTreeOperationInsert, blkno,
 								O_PAGE_GET_CHANGE_COUNT(page),
 								&undoLocation);
-
-		leafTuphdr->undoLocation = InvalidUndoLocation;
+		if (desc->undoType == UndoLogRegular)
+			leafTuphdr->undoLocation = InvalidUndoLocation;
 		if (desc->undoType == UndoLogRegular)
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
 	}
