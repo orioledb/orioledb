@@ -1104,7 +1104,7 @@ rewind_worker_main(Datum main_arg)
 				/* Clear the REWIND_ITEM or SUBXIDS_ITEM from the circular buffer */
 				rewindItem->tag = EMPTY_ITEM_TAG;
 				rewindMeta->completePos++;
-				Assert(rewindMeta->completePos < rewindMeta->restorePos);
+				Assert(rewindMeta->completePos <= rewindMeta->restorePos);
 				try_restore_evicted_rewind_page();
 			}
 			ResetLatch(MyLatch);
