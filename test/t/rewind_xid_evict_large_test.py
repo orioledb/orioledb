@@ -444,6 +444,8 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute('postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len, ev, len-ev)
+
+		time.sleep(1)
 		self.assertEqual(
 		    str(
 		        node.execute(

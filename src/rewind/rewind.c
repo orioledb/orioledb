@@ -1057,7 +1057,7 @@ rewind_worker_main(Datum main_arg)
 				{
 					bool queue_exceeds_age = TimestampDifferenceExceeds(rewindItem->timestamp, GetCurrentTimestamp(), rewind_max_time * 1000);
 					bool queue_exceeds_length = pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos > rewind_max_transactions;
-					bool force_complete;
+					bool force_complete = false;
 
 					if (OXidIsValid(rewindMeta->force_complete_oxid) || TransactionIdIsValid(rewindMeta->force_complete_xid))
 					{
