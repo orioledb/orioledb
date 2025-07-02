@@ -9,7 +9,7 @@ RETURNS void
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
--- Rewind to just before xid/oxid pair (remembered previously using pg_current_xact_id() and orioledb_current_oxid())
+-- Rewind to just before xid/oxid pair (remembered previously using pg_current_xact_id() and orioledb_get_current_oxid())
 CREATE FUNCTION orioledb_rewind_to_transaction(xid int, oxid bigint)
 RETURNS void
 AS 'MODULE_PATHNAME'
@@ -22,20 +22,32 @@ AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
 -- Get current oxid to remember it. This does the same for Oriole transactions that pg_current_xact_id() does for heap transaction
-CREATE FUNCTION orioledb_current_oxid()
+CREATE FUNCTION orioledb_get_current_oxid()
 RETURNS bigint
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_rewind_queue_length()
+CREATE FUNCTION orioledb_get_rewind_queue_length()
 RETURNS bigint
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
-CREATE FUNCTION orioledb_rewind_evicted_length()
+CREATE FUNCTION orioledb_get_rewind_evicted_length()
 RETURNS bigint
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+-- Get last non-complete xid and oxid still in the queue. Mainly intended for tests.
+CREATE FUNCTION orioledb_get_complete_oxid()
+RETURNS bigint
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_get_complete_xid()
+RETURNS int
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
 
 --CREATE FUNCTION orioledb_rewind_queue_age()
 --RETURNS bigint

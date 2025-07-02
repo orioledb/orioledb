@@ -60,19 +60,21 @@ static TransactionId   precommit_xid;
 static int             precommit_nsubxids;
 static TransactionId  *precommit_subxids;
 
-PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
 PG_FUNCTION_INFO_V1(orioledb_rewind_by_time);
 PG_FUNCTION_INFO_V1(orioledb_rewind_to_timestamp);
 PG_FUNCTION_INFO_V1(orioledb_rewind_to_transaction);
-PG_FUNCTION_INFO_V1(orioledb_current_oxid);
-PG_FUNCTION_INFO_V1(orioledb_rewind_queue_length);
-PG_FUNCTION_INFO_V1(orioledb_rewind_evicted_length);
+PG_FUNCTION_INFO_V1(orioledb_get_current_oxid);
+PG_FUNCTION_INFO_V1(orioledb_get_rewind_queue_length);
+PG_FUNCTION_INFO_V1(orioledb_get_rewind_evicted_length);
+PG_FUNCTION_INFO_V1(orioledb_get_complete_oxid);
+PG_FUNCTION_INFO_V1(orioledb_get_complete_xid);
+/* Functions only under IS_DEV: */
+PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
+PG_FUNCTION_INFO_V1(orioledb_rewind_set_complete);
 
-/* User-available */
 #define REWIND_MODE_UNKNOWN (0)
 #define	REWIND_MODE_TIME (1)
 #define REWIND_MODE_TIMESTAMP (2)
-/* Modes below allowed only in debug functions under IS_DEV */
 #define	REWIND_MODE_XID	(3)
 
 static inline
@@ -168,6 +170,39 @@ rewind_shmem_needs(void)
 }
 
 Datum
+orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+                PG_RETURN_VOID();
+
+	PG_RETURN_DATUM((&rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size])->oxid);
+}
+
+Datum
+orioledb_get_complete_xid(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+                PG_RETURN_VOID();
+
+	PG_RETURN_DATUM((&rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size])->oxid);
+}
+
+/* Testing functions included under IS_DEV (below) */
+Datum
+orioledb_rewind_set_complete(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+		PG_RETURN_VOID();
+
+	rewindMeta->force_complete_xid = PG_GETARG_INT32(0);
+	rewindMeta->force_complete_oxid = PG_GETARG_INT64(1);
+
+	elog(WARNING, "force_complete_xid %u force_complete_oxid %lu", rewindMeta->force_complete_xid, rewindMeta->force_complete_oxid);
+
+	PG_RETURN_VOID();
+}
+
+Datum
 orioledb_rewind_sync(PG_FUNCTION_ARGS)
 {
 	if (!enable_rewind)
@@ -186,9 +221,10 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	PG_END_TRY();
 	PG_RETURN_VOID();
 }
+/* Testing functions included under IS_DEV above */
 
 Datum
-orioledb_current_oxid(PG_FUNCTION_ARGS)
+orioledb_get_current_oxid(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_DATUM(get_current_oxid());
 }
@@ -599,7 +635,7 @@ orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
  * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
  */
 Datum
-orioledb_rewind_queue_length(PG_FUNCTION_ARGS)
+orioledb_get_rewind_queue_length(PG_FUNCTION_ARGS)
 {
 	if (!enable_rewind)
 	{
@@ -613,7 +649,7 @@ orioledb_rewind_queue_length(PG_FUNCTION_ARGS)
 }
 
 Datum
-orioledb_rewind_evicted_length(PG_FUNCTION_ARGS)
+orioledb_get_rewind_evicted_length(PG_FUNCTION_ARGS)
 {
 	if (!enable_rewind)
 	{
@@ -789,8 +825,11 @@ rewind_init_shmem(Pointer ptr, bool found)
 
 		/* Rewind buffers are not persistent */
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
+		rewindMeta->force_complete_xid = InvalidTransactionId;
+		rewindMeta->force_complete_oxid = InvalidOXid;
 	}
 	LWLockRegisterTranche(rewindMeta->rewindEvictTrancheId, "RewindEvictTranche");
+	LWLockRegisterTranche(rewindMeta->rewindCheckpointTrancheId, "RewindCheckpointTranche");
 }
 
 /*
@@ -832,7 +871,7 @@ is_rewind_worker(void)
  * Takes an exclusive lock to avoid cocurrent page eviction.
  */
 static void
-restore_evicted_rewind_page(void)
+try_restore_evicted_rewind_page(void)
 {
 	int			start;
 	int			length_to_end;
@@ -841,38 +880,66 @@ restore_evicted_rewind_page(void)
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_EXCLUSIVE);
 
-	start = rewindMeta->restorePos % rewind_circular_buffer_size;
-	length_to_end = rewind_circular_buffer_size - start;
-
-	if (length_to_end <= REWIND_DISK_BUFFER_LENGTH)
+	if (rewindMeta->restorePos < rewindMeta->evictPos && (rewind_circular_buffer_size - (rewindMeta->restorePos - rewindMeta->completePos) >= REWIND_DISK_BUFFER_LENGTH))
 	{
-		o_buffers_read(&rewindBuffersDesc,
+		/* Restore from disk by full pages */
+		start = rewindMeta->restorePos % rewind_circular_buffer_size;
+		length_to_end = rewind_circular_buffer_size - start;
+
+#ifdef USE_ASSERT_CHECKING
+		for (uint64 pos = start; pos < start + REWIND_DISK_BUFFER_LENGTH; pos++)
+		{
+			Assert(rewindCompleteBuffer[pos % rewind_circular_buffer_size].tag == EMPTY_ITEM_TAG);
+		}
+#endif
+
+		if (length_to_end <= REWIND_DISK_BUFFER_LENGTH)
+		{
+			o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
 					   rewindMeta->restorePos * sizeof(RewindItem),
 					   length_to_end * sizeof(RewindItem));
-		o_buffers_read(&rewindBuffersDesc,
+			o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &rewindCompleteBuffer[0], REWIND_BUFFERS_TAG,
 					   (rewindMeta->restorePos + length_to_end) * sizeof(RewindItem),
 					   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
-	}
-	else
-	{
-		o_buffers_read(&rewindBuffersDesc,
+		}
+		else
+		{
+			o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
 					   rewindMeta->restorePos * sizeof(RewindItem),
 					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
-	}
+		}
 
 #ifdef USE_ASSERT_CHECKING
-	for (uint64 pos = start; pos < start + REWIND_DISK_BUFFER_LENGTH; pos++)
-	{
-		Assert(rewindCompleteBuffer[pos % rewind_circular_buffer_size].tag != EMPTY_ITEM_TAG);
-	}
+		for (uint64 pos = start; pos < start + REWIND_DISK_BUFFER_LENGTH; pos++)
+		{
+			Assert(rewindCompleteBuffer[pos % rewind_circular_buffer_size].tag != EMPTY_ITEM_TAG);
+		}
 #endif
 
-	rewindMeta->restorePos += REWIND_DISK_BUFFER_LENGTH;
-	Assert(rewindMeta->restorePos <= rewindMeta->evictPos);
+		rewindMeta->restorePos += REWIND_DISK_BUFFER_LENGTH;
+		Assert(rewindMeta->restorePos <= rewindMeta->evictPos);
+	}
+	else
+	{
+		/* Try to move from rewindAddBuffer */
+		while (rewindMeta->restorePos == rewindMeta->evictPos &&
+				rewindMeta->restorePos > rewindMeta->completePos &&
+				rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size &&
+				rewindMeta->evictPos < pg_atomic_read_u64(&rewindMeta->addPos))
+		{
+				elog(DEBUG3, "FASTPATH_restore: A=%lu E=%lu C=%lu R=%lu freeAdd=%u", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->evictPos));
+				Assert(rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
+				Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
+				memcpy(&rewindCompleteBuffer[rewindMeta->restorePos % rewind_circular_buffer_size], &rewindAddBuffer[rewindMeta->evictPos % rewind_circular_buffer_size], sizeof(RewindItem));
+				rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
+				rewindMeta->evictPos++;
+				rewindMeta->restorePos++;
+		}
+	}
 	LWLockRelease(&rewindMeta->rewindEvictLock);
 
 	/* Clean old buffer files if needed. No lock. */
@@ -948,7 +1015,7 @@ rewind_worker_main(Datum main_arg)
 			if (rc & WL_POSTMASTER_DEATH)
 				shutdown_requested = true;
 
-/* 			elog(LOG, "Rewind worker came to check"); */
+ 			elog(DEBUG3, "Rewind worker came to check");
 
 			while (rewindMeta->completePos < pg_atomic_read_u64(&rewindMeta->addPos))
 			{
@@ -976,12 +1043,28 @@ rewind_worker_main(Datum main_arg)
 				}
 				Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
+				elog(DEBUG3, "force_complete_check 1: ADD POS %lu, EVICT POS %lu, RESTORE POS %lu, COMPLETE POS %lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->restorePos, rewindMeta->completePos);
+				elog(DEBUG3, "force_complete_check 2: tag: %u oxid %lu xid %u nsubxids %u force_complete_oxid %lu force_complete_xid %u", rewindItem->tag, rewindItem->oxid, rewindItem->xid, rewindItem->nsubxids, rewindMeta->force_complete_oxid, rewindMeta->force_complete_xid);
+
 				if (rewindItem->tag == REWIND_ITEM_TAG)
 				{
 					bool queue_exceeds_age = TimestampDifferenceExceeds(rewindItem->timestamp, GetCurrentTimestamp(), rewind_max_time * 1000);
 					bool queue_exceeds_length = pg_atomic_read_u64(&rewindMeta->addPos) - rewindMeta->completePos > rewind_max_transactions;
+					bool force_complete;
 
-					if (!rewindMeta->skipCheck && !queue_exceeds_age && !queue_exceeds_length)
+					if (OXidIsValid(rewindMeta->force_complete_oxid) || TransactionIdIsValid(rewindMeta->force_complete_xid))
+					{
+						elog(DEBUG3, "force_complete_check 3: ADD POS %lu, EVICT POS %lu, RESTORE POS %lu, COMPLETE POS %lu", pg_atomic_read_u64(&rewindMeta->addPos), rewindMeta->evictPos, rewindMeta->restorePos, rewindMeta->completePos);
+
+						if (OXidIsValid(rewindMeta->force_complete_oxid) && OXidIsValid(rewindItem->oxid) && rewindItem->oxid < rewindMeta->force_complete_oxid)
+							force_complete = true;
+						else if (TransactionIdIsValid(rewindMeta->force_complete_xid) && TransactionIdIsValid(rewindItem->xid) && TransactionIdPrecedes(rewindItem->xid, rewindMeta->force_complete_xid))
+							force_complete = true;
+						else
+							force_complete = false;
+					}
+
+					if (!rewindMeta->skipCheck && !queue_exceeds_age && !queue_exceeds_length && !force_complete)
 					{
 						/* Too early to fix the oldest item in the queue. Wait and check again. */
 						break;
@@ -1021,9 +1104,8 @@ rewind_worker_main(Datum main_arg)
 				/* Clear the REWIND_ITEM or SUBXIDS_ITEM from the circular buffer */
 				rewindItem->tag = EMPTY_ITEM_TAG;
 				rewindMeta->completePos++;
-
-				if (rewindMeta->restorePos < rewindMeta->evictPos && rewind_circular_buffer_size - (rewindMeta->restorePos - rewindMeta->completePos) >= REWIND_DISK_BUFFER_LENGTH)
-					restore_evicted_rewind_page();
+				Assert(rewindMeta->completePos < rewindMeta->restorePos);
+				try_restore_evicted_rewind_page();
 			}
 			ResetLatch(MyLatch);
 		}

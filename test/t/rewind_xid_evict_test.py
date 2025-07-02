@@ -55,7 +55,7 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
 		invalidxid = 0
@@ -67,9 +67,9 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
 		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		c, *b = (node.execute('postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len, ev, len-ev)
 
@@ -126,9 +126,9 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
 		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		c, *b = (node.execute('postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len, ev, len-ev)
 
@@ -184,7 +184,7 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
@@ -202,9 +202,9 @@ class RewindXidTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
 		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		c, *b = (node.execute('postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len,ev,len-ev)
 
@@ -270,9 +270,9 @@ class RewindXidTest(BaseTest):
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
 		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		c, *b = (node.execute('postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len,ev,len-ev)
 
@@ -329,7 +329,7 @@ class RewindXidTest(BaseTest):
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
 
-		a, *b = (node.execute('postgres', 'select orioledb_current_oxid();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
@@ -349,9 +349,9 @@ class RewindXidTest(BaseTest):
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
 
-		a, *b = (node.execute('postgres', 'select orioledb_rewind_queue_length();\n'))[0]
+		a, *b = (node.execute('postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
 		len = int(a)
-		c, *b = (node.execute('postgres', 'select orioledb_rewind_evicted_length();\n'))[0]
+		c, *b = (node.execute('postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		print(len,ev,len-ev)
 
