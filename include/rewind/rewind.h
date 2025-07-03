@@ -77,6 +77,7 @@ typedef struct
 								 * point for writing rewindItem-s into
 								 * checkpoint. */
 	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
+	int16		addInProgress;  /* Number of concurrent items being added at the moment */
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
 	int		rewindEvictTrancheId;

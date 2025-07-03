@@ -839,6 +839,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		LWLockInitialize(&rewindMeta->rewindCheckpointLock, rewindMeta->rewindCheckpointTrancheId);
 		pg_atomic_init_u64(&rewindMeta->addPosReserved, 0);
 		pg_atomic_init_u64(&rewindMeta->addPosFilled, 0);
+		rewindMeta->addInProgress = 0;
 		rewindMeta->completePos = 0;
 		rewindMeta->evictPos = 0;
 		rewindMeta->restorePos = 0;
@@ -1268,6 +1269,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	int			i;
 	uint64		curAddPos;
 	uint64		startAddPos;
+	uint64          reserved;
 	int			freeAddSpace;
 	bool 		subxid_only = false;
 	int		subxids_count = 0;
@@ -1281,6 +1283,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 
 	nitems = nsubxids ? 2 + (nsubxids / SUBXIDS_PER_ITEM) : 1;
 	startAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPosReserved, nitems);
+	rewindMeta->addInProgress += nitems;
 	freeAddSpace = rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->evictPos);
 	Assert(freeAddSpace >= 0);
 	elog(LOG, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%u", pg_atomic_read_u64(&rewindMeta->addPosFilled), pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
@@ -1385,7 +1388,25 @@ next_subxids_item:
 		}
 	}
 add_items_finished:
-	pg_atomic_fetch_add_u64(&rewindMeta->addPosFilled, nitems);
+	/*
+	 * Bump rewindMeta->addPosFilled if all concurrent in-progress inserters fimished.
+	 * If unlikely in-progress queue becomes too big, wait until all concurrent
+	 * in-progress inserters fimished.
+	 */
+	reserved = pg_atomic_read_u64(&rewindMeta->addPosReserved);
+	rewindMeta->addInProgress -= nitems;
+	Assert(rewindMeta->addInProgress >= 0);
+	if (rewindMeta->addInProgress == 0)
+	{
+		pg_atomic_write_u64(&rewindMeta->addPosFilled, reserved);
+	}
+	else if (rewindMeta->addInProgress > 20)
+	{
+		while(rewindMeta->addInProgress > 0)
+			pg_usleep(1000);
+
+		pg_atomic_write_u64(&rewindMeta->addPosFilled, reserved);
+	}
 }
 
 /*
