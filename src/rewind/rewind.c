@@ -175,18 +175,30 @@ orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 	RewindItem *rewindItem;
 	OXid	    oxid;
 	TransactionId	xid;
+	uint64          pos;
 
 	if (!enable_rewind)
                 PG_RETURN_VOID();
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
-	rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
-	Assert(rewindItem->tag != EMPTY_ITEM_TAG);
-	xid = rewindItem->xid;
-	oxid = rewindItem->oxid;
+	pos = rewindMeta->completePos;
+
+	while(true)
+	{
+		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
+		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
+		xid = rewindItem->xid;
+		oxid = rewindItem->oxid;
+
+		if(OXidIsValid(oxid))
+			break;
+
+		pos++;
+		if(pos >= rewindMeta->restorePos)
+			elog(ERROR, "Couldn't get oxid from completeBuffer");
+	}
 	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(WARNING, "COMPLETE OXID %lu XID %u", oxid, xid);
-	//Assert(OXidIsValid(rewindItem->oxid));
+	elog(DEBUG3, "COMPLETE OXID %lu XID %u", oxid, xid);
 	PG_RETURN_DATUM(rewindItem->oxid);
 }
 
@@ -196,18 +208,30 @@ orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 	RewindItem *rewindItem;
 	OXid	    oxid;
 	TransactionId	xid;
+	uint64		pos;
 
 	if (!enable_rewind)
                 PG_RETURN_VOID();
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
-	rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
-	Assert(rewindItem->tag != EMPTY_ITEM_TAG);
-	xid = rewindItem->xid;
-	oxid = rewindItem->oxid;
-	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(WARNING, "COMPLETE OXID %lu XID %u", oxid, xid);
+	pos = rewindMeta->completePos;
 
+	while(true)
+	{
+		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
+		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
+		xid = rewindItem->xid;
+		oxid = rewindItem->oxid;
+
+		if(TransactionIdIsValid(xid))
+			break;
+
+		pos++;
+		if(pos >= rewindMeta->restorePos)
+			elog(ERROR, "Couldn't get xid from completeBuffer");
+	}
+	LWLockRelease(&rewindMeta->rewindEvictLock);
+	elog(DEBUG3, "COMPLETE XID %lu XID %u", oxid, xid);
 	PG_RETURN_DATUM(rewindItem->xid);
 }
 
