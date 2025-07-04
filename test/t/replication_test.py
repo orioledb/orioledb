@@ -990,8 +990,8 @@ class ReplicationTest(BaseTest):
 
 				con2 = master.connect()
 				con2.execute("SET enable_seqscan = off;")
-				self.assertEqual([(3,), (8,), (15,), (94,)],
-								 con2.execute("SELECT * FROM foo ORDER BY i;"))
+				self.assertEqual([(3, ), (8, ), (15, ), (94, )],
+				                 con2.execute("SELECT * FROM foo ORDER BY i;"))
 				con2.close()
 
 				# wait for synchronization
@@ -1001,8 +1001,8 @@ class ReplicationTest(BaseTest):
 
 				con3 = replica.connect()
 				con3.execute("SET enable_seqscan = off;")
-				self.assertEqual([(3,), (8,), (15,), (94,)],
-								 con3.execute("SELECT * FROM foo ORDER BY i;"))
+				self.assertEqual([(3, ), (8, ), (15, ), (94, )],
+				                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 				con3.close()
 
 	def has_only_one_relnode(self, node):

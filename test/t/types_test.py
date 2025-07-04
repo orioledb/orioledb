@@ -148,7 +148,9 @@ class TypesTest(BaseTest):
 		# deleted records should not be removed after rollback
 		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
-		self.assertEqual([(2, 'happy'), (8, 'ecstatic')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+		self.assertEqual(
+		    [(2, 'happy'), (8, 'ecstatic')],
+		    node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
 
 		node.safe_psql("""
 			INSERT INTO o_holidays2(num_weeks, happiness)
@@ -161,7 +163,9 @@ class TypesTest(BaseTest):
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertEqual([(2, 'happy'), (6, 'happy'), (8, 'ecstatic'), (24, 'very happy')], node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+		self.assertEqual(
+		    [(2, 'happy'), (6, 'happy'), (8, 'ecstatic'), (24, 'very happy')],
+		    node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
 		node.stop()
 		raise 0
 
@@ -744,7 +748,7 @@ class TypesTest(BaseTest):
 		con2 = node.connect()
 		con2.execute("SET enable_seqscan = off;")
 
-		self.assertEqual([(3,), (8,), (15,), (94,)],
+		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
 		                 con2.execute("SELECT * FROM foo ORDER BY i;"))
 		con2.close()
 		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
@@ -759,7 +763,7 @@ class TypesTest(BaseTest):
 		con3 = node.connect()
 		con3.execute("SET enable_seqscan = off;")
 
-		self.assertEqual([(3,), (8,), (15,), (94,)],
+		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
 		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 		con3.close()
 		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
