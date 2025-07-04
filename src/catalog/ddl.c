@@ -1105,6 +1105,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	else if (IsA(pstmt->utilityStmt, ReindexStmt))
 	{
 		ReindexStmt *stmt = (ReindexStmt *) pstmt->utilityStmt;
+		char	   *tablespacename = NULL;
 		bool		concurrently = false;
 		ListCell   *lc;
 
@@ -1114,6 +1115,26 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (strcmp(opt->defname, "concurrently") == 0)
 				concurrently = defGetBoolean(opt);
+			else if (strcmp(opt->defname, "tablespace") == 0)
+				tablespacename = defGetString(opt);
+		}
+
+		if (tablespacename != NULL)
+		{
+			Oid tablespaceOid = get_tablespace_oid(tablespacename, false);
+
+			/* Check permissions except when moving to database's default */
+			if (OidIsValid(tablespaceOid) &&
+				tablespaceOid != MyDatabaseTableSpace)
+			{
+				AclResult	aclresult;
+
+				aclresult = object_aclcheck(TableSpaceRelationId, tablespaceOid,
+											GetUserId(), ACL_CREATE);
+				if (aclresult != ACLCHECK_OK)
+					aclcheck_error(aclresult, OBJECT_TABLESPACE,
+								get_tablespace_name(tablespaceOid));
+			}
 		}
 
 		switch (stmt->kind)
