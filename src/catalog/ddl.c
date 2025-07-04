@@ -100,6 +100,7 @@
 #include "utils/snapmgr.h"
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
@@ -491,17 +492,7 @@ get_all_vacuum_rels(int options)
 	return vacrels;
 }
 
-static void
-reindex_concurrently_not_supported(Relation tbl)
-{
-	ereport(ERROR,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("orioledb table \"%s\" does not support REINDEX CONCURRENTLY",
-					RelationGetRelationName(tbl))),
-			errdetail("REINDEX CONCURRENTLY is not supported for OrioleDB tables yet.  This will be implemented in future."));
-}
-
-static void
+static bool
 check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
 {
 	Oid			objectOid;
@@ -513,6 +504,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	MemoryContext old;
 	int			num_keys;
 	bool		concurrent_warning = false;
+	bool		has_orioledb = false;
 
 #if PG_VERSION_NUM < 160000
 	AssertArg(objectName);
@@ -713,7 +705,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			}
 
 			if (concurrently)
-				reindex_concurrently_not_supported(tbl);
+				has_orioledb = true;
 		}
 		relation_close(tbl, AccessShareLock);
 
@@ -723,6 +715,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	table_close(relationRelation, AccessShareLock);
 
 	MemoryContextDelete(private_context);
+	return has_orioledb;
 }
 
 #if PG_VERSION_NUM >= 170000
@@ -870,11 +863,12 @@ create_ctas_nodata(List *tlist, IntoClause *into)
 }
 #endif
 
-static void
+static bool
 ReindexPartitions(Oid relid, bool concurrently)
 {
 	List	   *inhoids;
 	ListCell   *lc;
+	bool		has_orioledb = false;
 
 	inhoids = find_all_inheritors(relid, ShareLock, NULL);
 
@@ -897,9 +891,30 @@ ReindexPartitions(Oid relid, bool concurrently)
 			   part_rel->rd_rel->relkind == RELKIND_RELATION);
 
 		if (concurrently)
-			reindex_concurrently_not_supported(part_rel);
+		{
+			if ((part_rel->rd_rel->relkind == RELKIND_RELATION ||
+				 part_rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+				is_orioledb_rel(part_rel))
+			{
+				has_orioledb = true;
+			}
+			else if (part_rel->rd_rel->relkind == RELKIND_INDEX)
+			{
+				Relation	tbl;
+
+				tbl = relation_open(part_rel->rd_index->indrelid, AccessShareLock);
+
+				if ((tbl->rd_rel->relkind == RELKIND_RELATION) &&
+					is_orioledb_rel(tbl))
+				{
+					has_orioledb = true;
+				}
+				relation_close(tbl, AccessShareLock);
+			}
+		}
 		relation_close(part_rel, AccessShareLock);
 	}
+	return has_orioledb;
 }
 
 static void
@@ -1107,6 +1122,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		ReindexStmt *stmt = (ReindexStmt *) pstmt->utilityStmt;
 		char	   *tablespacename = NULL;
 		bool		concurrently = false;
+		bool		has_orioledb = false;
 		ListCell   *lc;
 
 		foreach(lc, stmt->params)
@@ -1121,7 +1137,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		if (tablespacename != NULL)
 		{
-			Oid tablespaceOid = get_tablespace_oid(tablespacename, false);
+			Oid			tablespaceOid = get_tablespace_oid(tablespacename, false);
 
 			/* Check permissions except when moving to database's default */
 			if (OidIsValid(tablespaceOid) &&
@@ -1133,7 +1149,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 											GetUserId(), ACL_CREATE);
 				if (aclresult != ACLCHECK_OK)
 					aclcheck_error(aclresult, OBJECT_TABLESPACE,
-								get_tablespace_name(tablespaceOid));
+								   get_tablespace_name(tablespaceOid));
 			}
 		}
 
@@ -1150,7 +1166,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 					if (get_rel_relkind(indOid) == RELKIND_PARTITIONED_INDEX)
 					{
-						ReindexPartitions(indOid, concurrently);
+						has_orioledb = ReindexPartitions(indOid, concurrently);
 						break;
 					}
 
@@ -1167,7 +1183,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
 						reindex_list = list_append_unique(reindex_list, ix_name);
 						if (concurrently)
-							reindex_concurrently_not_supported(tbl);
+							has_orioledb = true;
 					}
 					relation_close(tbl, AccessShareLock);
 					relation_close(iRel, AccessShareLock);
@@ -1182,7 +1198,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 					if (get_rel_relkind(tblOid) == RELKIND_PARTITIONED_TABLE)
 					{
-						ReindexPartitions(tblOid, concurrently);
+						has_orioledb = ReindexPartitions(tblOid, concurrently);
 						break;
 					}
 					tbl = relation_open(tblOid, AccessShareLock);
@@ -1205,7 +1221,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							relation_close(ind, AccessShareLock);
 						}
 						if (concurrently)
-							reindex_concurrently_not_supported(tbl);
+							has_orioledb = true;
 					}
 					relation_close(tbl, AccessShareLock);
 				}
@@ -1214,12 +1230,24 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			case REINDEX_OBJECT_SYSTEM:
 			case REINDEX_OBJECT_DATABASE:
 				if (concurrently)
-					check_multiple_tables(stmt->name, stmt->kind, concurrently);
+					has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
 				break;
 			default:
 				elog(ERROR, "unrecognized object type: %d",
 					 (int) stmt->kind);
 				break;
+		}
+
+		if (has_orioledb && concurrently)
+		{
+			elog(WARNING, "Concurrent REINDEX not implemented for orioledb tables yet, using simple one");
+			foreach(lc, stmt->params)
+			{
+				DefElem    *opt = (DefElem *) lfirst(lc);
+
+				if (strcmp(opt->defname, "concurrently") == 0)
+					stmt->params = foreach_delete_current(stmt->params, lc);
+			}
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))

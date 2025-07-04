@@ -159,7 +159,6 @@ ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPAC
 DROP TABLESPACE regress_tblspace_renamed;
 
 -- TODO: Add tablespaces support to iterate_files
--- TODO: REINDEX (TABLESPACE; also make CONCURRENTLY work but throw a warning that it uses simple one
 -- TODO: Add test for symlinked tablespaces, probably
 -- \set cwd `echo "$PWD/tblspc"`
 -- CREATE TABLESPACE regress_tblspace LOCATION :'cwd';
