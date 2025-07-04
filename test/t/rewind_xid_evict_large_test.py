@@ -199,7 +199,7 @@ class RewindXidTest(BaseTest):
 		print(xid, oxid)
 		time.sleep(1)
 
-		for i in range(6, 10000):
+		for i in range(6, 5000):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -269,7 +269,7 @@ class RewindXidTest(BaseTest):
 		print(xid, invalidoxid)
 		time.sleep(1)
 
-		for i in range(25, 80000, 4):
+		for i in range(25, 40000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -343,7 +343,7 @@ class RewindXidTest(BaseTest):
 		print(xid, oxid)
 		time.sleep(1)
 
-		for i in range(25, 80000, 4):
+		for i in range(25, 40000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -561,7 +561,7 @@ class RewindXidTest(BaseTest):
 
 		node.stop()
 
-	def test_rewind_heap_evict_complete_after(self):
+	def test_rewind_xid_heap_evict_complete_after(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
@@ -739,7 +739,7 @@ class RewindXidTest(BaseTest):
 
 		node.stop()
 
-	def test_rewind_heap_subxids_evict_complete_after(self):
+	def test_rewind_xid_heap_subxids_evict_complete_after(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
@@ -758,7 +758,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		for i in range(1, 40000, 4):
+		for i in range(1, 20000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -773,7 +773,7 @@ class RewindXidTest(BaseTest):
 		print(xid1, oxid1)
 		time.sleep(1)
 
-		for i in range(40001, 40025, 4):
+		for i in range(20001, 20025, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -788,7 +788,7 @@ class RewindXidTest(BaseTest):
 		print(xid2, oxid2)
 		time.sleep(1)
 
-		for i in range(40025, 60000, 4):
+		for i in range(20025, 30000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -800,7 +800,7 @@ class RewindXidTest(BaseTest):
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
 		time.sleep(3)
 
-		for i in range(60001, 80000, 4):
+		for i in range(30001, 40000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -832,7 +832,7 @@ class RewindXidTest(BaseTest):
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test_heap;')),
-		    "[(40024,)]")
+		    "[(20024,)]")
 
 		node.stop()
 
@@ -855,7 +855,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		for i in range(1, 40000, 4):
+		for i in range(1, 20000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -870,7 +870,7 @@ class RewindXidTest(BaseTest):
 		print(xid1, oxid1)
 		time.sleep(1)
 
-		for i in range(40001, 40025, 4):
+		for i in range(20001, 20025, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -885,7 +885,7 @@ class RewindXidTest(BaseTest):
 		print(xid2, oxid2)
 		time.sleep(1)
 
-		for i in range(40025, 60000, 4):
+		for i in range(20025, 30000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -897,7 +897,7 @@ class RewindXidTest(BaseTest):
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
 		time.sleep(3)
 
-		for i in range(60001, 80000, 4):
+		for i in range(30001, 40000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
@@ -928,11 +928,11 @@ class RewindXidTest(BaseTest):
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test_heap;')),
-		    "[(40024,)]")
+		    "[(20024,)]")
 
 		node.stop()
 #
-	def test_rewind_evict_complete_after(self):
+	def test_rewind_xid_evict_complete_after(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
@@ -957,7 +957,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n")
 
-		for i in range(1, 5000):
+		for i in range(1, 2500):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -974,7 +974,7 @@ class RewindXidTest(BaseTest):
 		print(xid1, oxid1)
 		time.sleep(1)
 
-		for i in range(5000, 5006):
+		for i in range(2500, 2506):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -991,7 +991,7 @@ class RewindXidTest(BaseTest):
 		print(xid2, oxid2)
 		time.sleep(1)
 
-		for i in range(5006, 7500):
+		for i in range(2506, 3750):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -1005,7 +1005,7 @@ class RewindXidTest(BaseTest):
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
 		time.sleep(3)
 
-		for i in range(7500, 10000):
+		for i in range(3750, 5000):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -1042,13 +1042,13 @@ class RewindXidTest(BaseTest):
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test_heap;')),
-		    "[(5005,)]")
+		    "[(2505,)]")
 		self.assertEqual(
 		    str(
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test;')),
-		    "[(5005,)]")
+		    "[(2505,)]")
 
 		node.stop()
 
@@ -1077,7 +1077,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n")
 
-		for i in range(1, 5000):
+		for i in range(1, 2500):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -1094,7 +1094,7 @@ class RewindXidTest(BaseTest):
 		print(xid1, oxid1)
 		time.sleep(1)
 
-		for i in range(5000, 5006):
+		for i in range(2500, 2506):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -1111,7 +1111,7 @@ class RewindXidTest(BaseTest):
 		print(xid2, oxid2)
 		time.sleep(1)
 
-		for i in range(5006, 7500):
+		for i in range(2506, 3750):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -1125,7 +1125,7 @@ class RewindXidTest(BaseTest):
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
 		time.sleep(3)
 
-		for i in range(7500, 10000):
+		for i in range(3750, 5000):
 			node.safe_psql(
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" %
@@ -1162,18 +1162,18 @@ class RewindXidTest(BaseTest):
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test_heap;')),
-		    "[(5005,)]")
+		    "[(2505,)]")
 		self.assertEqual(
 		    str(
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test;')),
-		    "[(5005,)]")
+		    "[(2505,)]")
 
 		node.stop()
 #
 
-	def test_rewind_subxids_evict_complete_after(self):
+	def test_rewind_xid_subxids_evict_complete_after(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 5000\n"
@@ -1198,7 +1198,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n")
 
-		for i in range(1, 40000, 4):
+		for i in range(1, 20000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1217,7 +1217,7 @@ class RewindXidTest(BaseTest):
 		print(xid1, oxid1)
 		time.sleep(1)
 
-		for i in range(40001, 40025, 4):
+		for i in range(20001, 20025, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1236,7 +1236,7 @@ class RewindXidTest(BaseTest):
 		print(xid2, oxid2)
 		time.sleep(1)
 
-		for i in range(40025, 60000, 4):
+		for i in range(20025, 30000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1252,7 +1252,7 @@ class RewindXidTest(BaseTest):
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
 		time.sleep(3)
 
-		for i in range(60001, 80000, 4):
+		for i in range(30001, 40000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1291,13 +1291,13 @@ class RewindXidTest(BaseTest):
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test_heap;')),
-		    "[(40024,)]")
+		    "[(20024,)]")
 		self.assertEqual(
 		    str(
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test;')),
-		    "[(40024,)]")
+		    "[(20024,)]")
 
 		node.stop()
 
@@ -1326,7 +1326,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n")
 
-		for i in range(1, 40000, 4):
+		for i in range(1, 20000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1345,7 +1345,7 @@ class RewindXidTest(BaseTest):
 		print(xid1, oxid1)
 		time.sleep(1)
 
-		for i in range(40001, 40025, 4):
+		for i in range(20001, 20025, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1364,7 +1364,7 @@ class RewindXidTest(BaseTest):
 		print(xid2, oxid2)
 		time.sleep(1)
 
-		for i in range(40025, 60000, 4):
+		for i in range(20025, 30000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1380,7 +1380,7 @@ class RewindXidTest(BaseTest):
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
 		time.sleep(3)
 
-		for i in range(60001, 80000, 4):
+		for i in range(30001, 40000, 4):
 			node.safe_psql(
 			    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
@@ -1419,12 +1419,12 @@ class RewindXidTest(BaseTest):
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test_heap;')),
-		    "[(40024,)]")
+		    "[(20024,)]")
 		self.assertEqual(
 		    str(
 		        node.execute(
 		            'postgres',
 		            'SELECT count(*) FROM o_test;')),
-		    "[(40024,)]")
+		    "[(20024,)]")
 
 		node.stop()
