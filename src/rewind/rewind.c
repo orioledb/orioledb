@@ -77,6 +77,214 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_set_complete);
 #define REWIND_MODE_TIMESTAMP (2)
 #define	REWIND_MODE_XID	(3)
 
+static void orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp);
+
+/* Interface functions */
+
+/* OrioleDB analog of pg_current_xact_id() */
+Datum
+orioledb_get_current_oxid(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_DATUM(get_current_oxid());
+}
+
+Datum
+orioledb_rewind_by_time(PG_FUNCTION_ARGS)
+{
+	int	rewind_time = PG_GETARG_INT32(0);
+
+	orioledb_rewind_internal(REWIND_MODE_TIME, rewind_time, InvalidOXid, InvalidTransactionId, (TimestampTz) 0);
+	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_rewind_to_transaction(PG_FUNCTION_ARGS)
+{
+	TransactionId 	xid = PG_GETARG_INT32(0);
+	OXid 		oxid = PG_GETARG_INT64(1);
+
+	orioledb_rewind_internal(REWIND_MODE_XID, 0, oxid, xid, (TimestampTz) 0);
+	PG_RETURN_VOID();
+}
+
+Datum
+orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
+{
+        TimestampTz	rewind_timestamp = PG_GETARG_TIMESTAMPTZ(0);
+
+        orioledb_rewind_internal(REWIND_MODE_TIMESTAMP, 0, InvalidOXid, InvalidTransactionId, rewind_timestamp);
+        PG_RETURN_VOID();
+}
+
+/* Testing/convenience functions avaliable for the user */
+
+/*
+ * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
+ * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
+ */
+Datum
+orioledb_get_rewind_queue_length(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
+	PG_RETURN_UINT64(pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->completePos);
+}
+
+Datum
+orioledb_get_rewind_evicted_length(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
+	PG_RETURN_UINT64(rewindMeta->evictPos - rewindMeta->restorePos);
+}
+
+/* NB: Disabled because of too complicated logic for convenience function.
+Datum
+orioledb_rewind_queue_age(PG_FUNCTION_ARGS)
+{
+	RewindItem *rewindItem;
+	long	secs;
+	int	usecs;
+
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				  errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+		PG_RETURN_VOID();
+	}
+
+	pos = rewindMeta->completePos
+	while(rewindItem->tag == REWIND_ITEM_EMPTY)
+	{
+		rewindItem = &rewindBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
+	}
+
+	TimestampDifference(rewindItem->timestamp, GetCurrentTimestamp(), &secs, &usecs);
+	PG_RETURN_UINT64(secs);
+}
+*/
+
+/* Not safe against concurrent operations */
+Datum
+orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
+{
+	RewindItem *rewindItem;
+	OXid	    oxid;
+	TransactionId	xid;
+	uint64          pos;
+
+	if (!enable_rewind)
+                PG_RETURN_VOID();
+
+	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
+	pos = rewindMeta->completePos;
+
+	while(true)
+	{
+		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
+		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
+		xid = rewindItem->xid;
+		oxid = rewindItem->oxid;
+
+		if(OXidIsValid(oxid))
+			break;
+
+		pos++;
+		if(pos >= rewindMeta->restorePos)
+			elog(ERROR, "Couldn't get oxid from completeBuffer");
+	}
+	LWLockRelease(&rewindMeta->rewindEvictLock);
+	elog(DEBUG3, "COMPLETE OXID %lu XID %u", oxid, xid);
+	PG_RETURN_DATUM(rewindItem->oxid);
+}
+
+/* Not safe against concurrent operations */
+Datum
+orioledb_get_complete_xid(PG_FUNCTION_ARGS)
+{
+	RewindItem *rewindItem;
+	OXid	    oxid;
+	TransactionId	xid;
+	uint64		pos;
+
+	if (!enable_rewind)
+                PG_RETURN_VOID();
+
+	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
+	pos = rewindMeta->completePos;
+
+	while(true)
+	{
+		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
+		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
+		xid = rewindItem->xid;
+		oxid = rewindItem->oxid;
+
+		if(TransactionIdIsValid(xid))
+			break;
+
+		pos++;
+		if(pos >= rewindMeta->restorePos)
+			elog(ERROR, "Couldn't get xid from completeBuffer");
+	}
+	LWLockRelease(&rewindMeta->rewindEvictLock);
+	elog(DEBUG3, "COMPLETE XID %lu XID %u", oxid, xid);
+	PG_RETURN_DATUM(rewindItem->xid);
+}
+
+/* Testing functions included under IS_DEV */
+
+/* Set complete xid/oxid for testing queue complete operation */
+Datum
+orioledb_rewind_set_complete(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+		PG_RETURN_VOID();
+
+	rewindMeta->force_complete_xid = PG_GETARG_INT32(0);
+	rewindMeta->force_complete_oxid = PG_GETARG_INT64(1);
+
+	elog(WARNING, "force_complete_xid %u force_complete_oxid %lu", rewindMeta->force_complete_xid, rewindMeta->force_complete_oxid);
+
+	PG_RETURN_VOID();
+}
+
+/* Complete full rewind queue. For calling from regression tests */
+Datum
+orioledb_rewind_sync(PG_FUNCTION_ARGS)
+{
+	if (!enable_rewind)
+		PG_RETURN_VOID();
+
+	PG_TRY();
+	{
+		rewindMeta->skipCheck = true;
+		while (rewindMeta->completePos != pg_atomic_read_u64(&rewindMeta->addPosReserved))
+			pg_usleep(100000);
+	}
+	PG_FINALLY();
+	{
+		rewindMeta->skipCheck = false;
+	}
+	PG_END_TRY();
+	PG_RETURN_VOID();
+}
+/* Testing functions end */
+
 static inline
 void print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
 {
@@ -97,8 +305,9 @@ void print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
 }
 
 /*
- * Write rewind records from circular in-memory rewind buffer and on-disk rewind buffer
- * to xid buffer at checkpoint.
+ * Debug print all rewind records from circular in-memory rewind buffer and on-disk rewind buffer
+ * to log. Doesn't take any locks, so results are not warrantied with any concurrent operation
+ * on the queue. 
  */
 void log_print_rewind_queue(void)
 {
@@ -116,7 +325,6 @@ void log_print_rewind_queue(void)
 		return;
 	}
 
-	/* NB: addPosFilled could be increased concurrently */
 	curAddPosFilled = pg_atomic_read_u64(&rewindMeta->addPosFilled);
 	freeAddSpace = rewind_circular_buffer_size - (curAddPosFilled - rewindMeta->evictPos);
 
@@ -168,114 +376,7 @@ rewind_shmem_needs(void)
 	return size;
 }
 
-Datum
-orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
-{
-	RewindItem *rewindItem;
-	OXid	    oxid;
-	TransactionId	xid;
-	uint64          pos;
-
-	if (!enable_rewind)
-                PG_RETURN_VOID();
-
-	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
-	pos = rewindMeta->completePos;
-
-	while(true)
-	{
-		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
-		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
-		xid = rewindItem->xid;
-		oxid = rewindItem->oxid;
-
-		if(OXidIsValid(oxid))
-			break;
-
-		pos++;
-		if(pos >= rewindMeta->restorePos)
-			elog(ERROR, "Couldn't get oxid from completeBuffer");
-	}
-	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(DEBUG3, "COMPLETE OXID %lu XID %u", oxid, xid);
-	PG_RETURN_DATUM(rewindItem->oxid);
-}
-
-Datum
-orioledb_get_complete_xid(PG_FUNCTION_ARGS)
-{
-	RewindItem *rewindItem;
-	OXid	    oxid;
-	TransactionId	xid;
-	uint64		pos;
-
-	if (!enable_rewind)
-                PG_RETURN_VOID();
-
-	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
-	pos = rewindMeta->completePos;
-
-	while(true)
-	{
-		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
-		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
-		xid = rewindItem->xid;
-		oxid = rewindItem->oxid;
-
-		if(TransactionIdIsValid(xid))
-			break;
-
-		pos++;
-		if(pos >= rewindMeta->restorePos)
-			elog(ERROR, "Couldn't get xid from completeBuffer");
-	}
-	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(DEBUG3, "COMPLETE XID %lu XID %u", oxid, xid);
-	PG_RETURN_DATUM(rewindItem->xid);
-}
-
-/* Testing functions included under IS_DEV (below) */
-Datum
-orioledb_rewind_set_complete(PG_FUNCTION_ARGS)
-{
-	if (!enable_rewind)
-		PG_RETURN_VOID();
-
-	rewindMeta->force_complete_xid = PG_GETARG_INT32(0);
-	rewindMeta->force_complete_oxid = PG_GETARG_INT64(1);
-
-	elog(WARNING, "force_complete_xid %u force_complete_oxid %lu", rewindMeta->force_complete_xid, rewindMeta->force_complete_oxid);
-
-	PG_RETURN_VOID();
-}
-
-Datum
-orioledb_rewind_sync(PG_FUNCTION_ARGS)
-{
-	if (!enable_rewind)
-		PG_RETURN_VOID();
-
-	PG_TRY();
-	{
-		rewindMeta->skipCheck = true;
-		while (rewindMeta->completePos != pg_atomic_read_u64(&rewindMeta->addPosReserved))
-			pg_usleep(100000);
-	}
-	PG_FINALLY();
-	{
-		rewindMeta->skipCheck = false;
-	}
-	PG_END_TRY();
-	PG_RETURN_VOID();
-}
-/* Testing functions included under IS_DEV above */
-
-Datum
-orioledb_get_current_oxid(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_DATUM(get_current_oxid());
-}
-
+/* Perform actual rewind within one backend left */
 static void
 do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp)
 {
@@ -646,96 +747,6 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	(void) kill(PostmasterPid, SIGTERM);
 	return;
 }
-
-/* Interface functions */
-Datum
-orioledb_rewind_by_time(PG_FUNCTION_ARGS)
-{
-	int	rewind_time = PG_GETARG_INT32(0);
-
-	orioledb_rewind_internal(REWIND_MODE_TIME, rewind_time, InvalidOXid, InvalidTransactionId, (TimestampTz) 0);
-	PG_RETURN_VOID();
-}
-
-Datum
-orioledb_rewind_to_transaction(PG_FUNCTION_ARGS)
-{
-	TransactionId 	xid = PG_GETARG_INT32(0);
-	OXid 		oxid = PG_GETARG_INT64(1);
-
-	orioledb_rewind_internal(REWIND_MODE_XID, 0, oxid, xid, (TimestampTz) 0);
-	PG_RETURN_VOID();
-}
-
-Datum
-orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
-{
-        TimestampTz	rewind_timestamp = PG_GETARG_TIMESTAMPTZ(0);
-
-        orioledb_rewind_internal(REWIND_MODE_TIMESTAMP, 0, InvalidOXid, InvalidTransactionId, rewind_timestamp);
-        PG_RETURN_VOID();
-}
-
-/*
- * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
- * If precise value is needed getting rewindMeta lock is a responsibility of a caller.
- */
-Datum
-orioledb_get_rewind_queue_length(PG_FUNCTION_ARGS)
-{
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-	}
-
-	PG_RETURN_UINT64(pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->completePos);
-}
-
-Datum
-orioledb_get_rewind_evicted_length(PG_FUNCTION_ARGS)
-{
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-	}
-
-	PG_RETURN_UINT64(rewindMeta->evictPos - rewindMeta->restorePos);
-}
-
-
-/* NB: Disabled because of too complicated logic for convenience function.
-Datum
-orioledb_rewind_queue_age(PG_FUNCTION_ARGS)
-{
-	RewindItem *rewindItem;
-	long	secs;
-	int	usecs;
-
-	if (!enable_rewind)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
-				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-		PG_RETURN_VOID();
-	}
-
-	pos = rewindMeta->completePos
-	while(rewindItem->tag == REWIND_ITEM_EMPTY)
-	{
-		rewindItem = &rewindBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
-	}
-
-	TimestampDifference(rewindItem->timestamp, GetCurrentTimestamp(), &secs, &usecs);
-	PG_RETURN_UINT64(secs);
-}
-*/
 
 TransactionId
 orioledb_vacuum_horizon_hook(void)
