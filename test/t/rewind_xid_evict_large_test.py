@@ -67,7 +67,6 @@ class RewindXidTest(BaseTest):
 		oxid = int(a)
 		invalidxid = 0
 		print(0, oxid)
-		time.sleep(1)
 
 		for i in range(6, 10000):
 			node.safe_psql(
@@ -126,7 +125,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid, invalidoxid)
-		time.sleep(1)
 
 		for i in range(6, 10000):
 			node.safe_psql(
@@ -197,7 +195,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid, oxid)
-		time.sleep(1)
 
 		for i in range(6, 5000):
 			node.safe_psql(
@@ -267,7 +264,6 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		invalidoxid = 9223372036854775807
 		print(xid, invalidoxid)
-		time.sleep(1)
 
 		for i in range(25, 40000, 4):
 			node.safe_psql(
@@ -341,7 +337,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid, oxid)
-		time.sleep(1)
 
 		for i in range(25, 40000, 4):
 			node.safe_psql(
@@ -413,7 +408,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(5000, 5006):
 			node.safe_psql(
@@ -426,7 +420,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(5006, 7500):
 			node.safe_psql(
@@ -436,7 +429,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -450,7 +443,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_oxid()'))[0];
 		oxidc = int(a)
 		self.assertEqual(oxidc-oxid1, 0)
@@ -502,7 +494,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(5000, 5006):
 			node.safe_psql(
@@ -515,7 +506,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(5006, 7500):
 			node.safe_psql(
@@ -525,7 +515,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -539,7 +529,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_oxid()'))[0];
 		oxidc = int(a)
 		self.assertEqual(oxidc-oxid1, 7)
@@ -591,7 +580,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(5000, 5006):
 			node.safe_psql(
@@ -604,7 +592,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(5006, 7500):
 			node.safe_psql(
@@ -614,7 +601,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -628,7 +615,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 0)
@@ -680,7 +666,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(5000, 5006):
 			node.safe_psql(
@@ -693,7 +678,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(5006, 7500):
 			node.safe_psql(
@@ -703,7 +687,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -717,7 +701,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 7)
@@ -771,7 +754,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(20001, 20025, 4):
 			node.safe_psql(
@@ -786,7 +768,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(20025, 30000, 4):
 			node.safe_psql(
@@ -798,7 +779,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -814,7 +795,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 0)
@@ -868,7 +848,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(20001, 20025, 4):
 			node.safe_psql(
@@ -883,7 +862,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(20025, 30000, 4):
 			node.safe_psql(
@@ -895,7 +873,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -910,7 +888,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 25)
@@ -972,7 +949,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(2500, 2506):
 			node.safe_psql(
@@ -989,7 +965,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(2506, 3750):
 			node.safe_psql(
@@ -1003,7 +978,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(3750, 5000):
 			node.safe_psql(
@@ -1021,7 +996,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 0)
@@ -1092,7 +1066,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(2500, 2506):
 			node.safe_psql(
@@ -1109,7 +1082,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(2506, 3750):
 			node.safe_psql(
@@ -1123,7 +1095,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(3750, 5000):
 			node.safe_psql(
@@ -1141,7 +1113,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 7)
@@ -1215,7 +1186,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(20001, 20025, 4):
 			node.safe_psql(
@@ -1234,7 +1204,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(20025, 30000, 4):
 			node.safe_psql(
@@ -1250,7 +1219,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -1270,7 +1239,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 0)
@@ -1343,7 +1311,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid1 = int(a)
 		print(xid1, oxid1)
-		time.sleep(1)
 
 		for i in range(20001, 20025, 4):
 			node.safe_psql(
@@ -1362,7 +1329,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid2 = int(a)
 		print(xid2, oxid2)
-		time.sleep(1)
 
 		for i in range(20025, 30000, 4):
 			node.safe_psql(
@@ -1378,7 +1344,7 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(3)
+		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -1398,7 +1364,6 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		print(len, ev, len-ev)
 
-		time.sleep(1)
 		a, *b = (node.execute('postgres', 'SELECT orioledb_get_complete_xid()'))[0];
 		xidc = int(a)
 		self.assertEqual(xidc-xid1, 25)
