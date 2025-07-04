@@ -33,6 +33,7 @@ extern void save_precommit_xid_subxids(void);
 extern TransactionId get_precommit_xid_subxids(int *nsubxids, TransactionId **subxids);
 extern void reset_precommit_xid_subxids(void);
 extern OXid get_rewind_run_xmin(void);
+extern void log_print_rewind_queue(void);
 
 #define EMPTY_ITEM_TAG (0)
 #define REWIND_ITEM_TAG (1)
