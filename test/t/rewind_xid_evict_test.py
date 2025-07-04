@@ -59,7 +59,6 @@ class RewindXidTest(BaseTest):
 		oxid = int(a)
 		print(oxid)
 		invalidxid = 0
-		time.sleep(1)
 
 		for i in range(6, 650):
 			node.safe_psql(
@@ -118,7 +117,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		for i in range(6, 650):
 			node.safe_psql(
@@ -190,7 +188,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		for i in range(6, 650):
 			node.safe_psql(
@@ -260,7 +257,6 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		print(xid)
 		invalidoxid = 9223372036854775807
-		time.sleep(1)
 
 		for i in range(25, 2600, 4):
 			node.safe_psql(
@@ -335,7 +331,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		for i in range(25, 2600, 4):
 			node.safe_psql(

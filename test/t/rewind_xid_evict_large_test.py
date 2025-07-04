@@ -429,7 +429,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -515,7 +514,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -601,7 +599,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -687,7 +684,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(1)
 
 		for i in range(7500, 10000):
 			node.safe_psql(
@@ -779,7 +775,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -873,7 +868,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -978,7 +972,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(1)
 
 		for i in range(3750, 5000):
 			node.safe_psql(
@@ -1095,7 +1088,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(1)
 
 		for i in range(3750, 5000):
 			node.safe_psql(
@@ -1219,7 +1211,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1,oxid1))
-		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(
@@ -1344,7 +1335,6 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql('postgres',
 		               "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2,oxid2))
-		time.sleep(1)
 
 		for i in range(30001, 40000, 4):
 			node.safe_psql(

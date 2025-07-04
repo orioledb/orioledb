@@ -60,7 +60,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
 		print(oxid)
-		time.sleep(1)
 		invalidxid = 0
 
 		for i in range(6, 20):
@@ -112,7 +111,6 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		print(xid)
 		invalidoxid = 9223372036854775807
-		time.sleep(1)
 
 		for i in range(6, 20):
 			node.safe_psql(
@@ -164,7 +162,6 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		print(xid)
 		invalidoxid = 9223372036854775807
-		time.sleep(1)
 
 		for i in range(25, 80, 4):
 			node.safe_psql(
@@ -230,7 +227,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		for i in range(6, 20):
 			node.safe_psql(
@@ -306,7 +302,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		for i in range(25, 80, 4):
 			node.safe_psql(
@@ -385,7 +380,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		node.safe_psql(
 		    'postgres', "CREATE TABLE o_test_ddl (\n"
@@ -516,7 +510,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		for i in range(6, 20):
 			node.safe_psql(
@@ -617,7 +610,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		node.safe_psql('postgres', "TRUNCATE TABLE o_test_ddl;")
 		node.safe_psql('postgres', "TRUNCATE TABLE o_test_heap_ddl;")
@@ -695,7 +687,6 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		print(xid)
-		time.sleep(1)
 
 		node.safe_psql('postgres', "ALTER TABLE o_test_ddl ALTER COLUMN id TYPE real;")
 		node.safe_psql('postgres', "ALTER TABLE o_test_heap_ddl ALTER COLUMN id TYPE real;")

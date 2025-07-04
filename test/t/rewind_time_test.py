@@ -40,7 +40,7 @@ class RewindTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		time.sleep(20)
+		time.sleep(10)
 
 		for i in range(6, 20):
 			node.safe_psql(
@@ -49,7 +49,7 @@ class RewindTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_by_time(19);\n")
+		               "select orioledb_rewind_by_time(9);\n")
 		time.sleep(1)
 
 		node.is_started = False
@@ -86,7 +86,7 @@ class RewindTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		time.sleep(20)
+		time.sleep(10)
 
 		for i in range(6, 20):
 			node.safe_psql(
@@ -95,7 +95,7 @@ class RewindTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_by_time(19);\n")
+		               "select orioledb_rewind_by_time(9);\n")
 
 		time.sleep(1)
 		node.is_started = False
@@ -138,7 +138,7 @@ class RewindTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-		    "select pg_sleep(20);\n"
+		    "select pg_sleep(10);\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val'); COMMIT;\n" %
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
@@ -152,7 +152,7 @@ class RewindTest(BaseTest):
 			    (i, i, i+1, i+1, i+2, i+2, i+3, i+3))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_by_time(19);\n")
+		               "select orioledb_rewind_by_time(9);\n")
 
 		time.sleep(1)
 		node.is_started = False
@@ -201,7 +201,7 @@ class RewindTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" %
 			    (i, i))
 
-		time.sleep(20)
+		time.sleep(10)
 
 		for i in range(6, 20):
 			node.safe_psql(
@@ -214,7 +214,7 @@ class RewindTest(BaseTest):
 			    (i, i))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_by_time(19);\n")
+		               "select orioledb_rewind_by_time(9);\n")
 		time.sleep(1)
 
 		node.is_started = False
@@ -276,7 +276,7 @@ class RewindTest(BaseTest):
 		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-		    "SELECT pg_sleep(20);\n"
+		    "SELECT pg_sleep(10);\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
 		    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
 		    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
@@ -296,7 +296,7 @@ class RewindTest(BaseTest):
 			    (i, i, i, i, i+1, i+1, i+1, i+1, i+2, i+2, i+2, i+2 ,i+3, i+3, i+3, i+3))
 
 		node.safe_psql('postgres',
-		               "select orioledb_rewind_by_time(19);\n")
+		               "select orioledb_rewind_by_time(9);\n")
 
 		time.sleep(1)
 		node.is_started = False
