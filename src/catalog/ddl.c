@@ -871,6 +871,38 @@ create_ctas_nodata(List *tlist, IntoClause *into)
 #endif
 
 static void
+ReindexPartitions(Oid relid, bool concurrently)
+{
+	List	   *inhoids;
+	ListCell   *lc;
+
+	inhoids = find_all_inheritors(relid, ShareLock, NULL);
+
+	foreach(lc, inhoids)
+	{
+		Oid			partoid = lfirst_oid(lc);
+		Relation	part_rel = relation_open(partoid, AccessShareLock);
+
+		/*
+		 * This discards partitioned tables, partitioned indexes and foreign
+		 * tables.
+		 */
+		if (!RELKIND_HAS_STORAGE(part_rel->rd_rel->relkind))
+		{
+			relation_close(part_rel, AccessShareLock);
+			continue;
+		}
+
+		Assert(part_rel->rd_rel->relkind == RELKIND_INDEX ||
+			   part_rel->rd_rel->relkind == RELKIND_RELATION);
+
+		if (concurrently)
+			reindex_concurrently_not_supported(part_rel);
+		relation_close(part_rel, AccessShareLock);
+	}
+}
+
+static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
 						 bool readOnlyTree,
@@ -1095,6 +1127,12 @@ orioledb_utility_command(PlannedStmt *pstmt,
 								tbl;
 					OBTOptions *options;
 
+					if (get_rel_relkind(indOid) == RELKIND_PARTITIONED_INDEX)
+					{
+						ReindexPartitions(indOid, concurrently);
+						break;
+					}
+
 					iRel = index_open(indOid, AccessShareLock);
 					tbl = relation_open(iRel->rd_index->indrelid,
 										AccessShareLock);
@@ -1121,6 +1159,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 														  false);
 					Relation	tbl;
 
+					if (get_rel_relkind(tblOid) == RELKIND_PARTITIONED_TABLE)
+					{
+						ReindexPartitions(tblOid, concurrently);
+						break;
+					}
 					tbl = relation_open(tblOid, AccessShareLock);
 					if (is_orioledb_rel(tbl))
 					{
