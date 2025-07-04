@@ -943,7 +943,7 @@ try_restore_evicted_rewind_page(void)
 		}
 #endif
 
-		if (length_to_end <= REWIND_DISK_BUFFER_LENGTH)
+		if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 		{
 			o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
