@@ -18,6 +18,7 @@
 #include "catalog/o_sys_cache.h"
 
 #include "catalog/pg_tablespace_d.h"
+#include "common/relpath.h"
 #include "utils/syscache.h"
 
 static OSysCache *tablespace_cache = NULL;
