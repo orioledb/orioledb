@@ -30,6 +30,7 @@ typedef struct
 	bool		inclusive;
 	int			numKeys;
 	int			length;
+
 	Datum		offsets[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	ArraySearchFunc funcs[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	Datum		values[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
