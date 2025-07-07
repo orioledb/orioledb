@@ -32,6 +32,7 @@
 #include "utils/compress.h"
 #include "utils/planner.h"
 #include "utils/stopevent.h"
+#include "workers/interrupt.h"
 
 #include "access/genam.h"
 #include "access/relation.h"
@@ -675,6 +676,12 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	leaderparticipates = false;
 #endif
 
+	/*
+	 * Currently we expect that only client backends and recovery workers
+	 * build indexes in parallel.
+	 */
+	Assert(MyBackendType == B_BACKEND || in_recovery);
+
 	if (btspool->descr->bridge)
 		nallindices += 1;
 
@@ -927,8 +934,17 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	else
 	{
 		while (btshared->nrecoveryworkersjoined < btleader->nparticipanttuplesorts)
-			ConditionVariableSleep(&btshared->recoveryjoinedcv,
-								   WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+		{
+			o_worker_handle_interrupts();
+
+			/*
+			 * We wait on a condition variable that will wake us as soon as
+			 * the pause ends, but we use a timeout so we can check the
+			 * ShutdownRequestPending periodically too.
+			 */
+			ConditionVariableTimedSleep(&btshared->recoveryjoinedcv, 1000,
+										WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+		}
 
 		ConditionVariableCancelSleep();
 	}
@@ -990,6 +1006,13 @@ _o_index_parallel_heapscan(oIdxBuildState *buildstate)
 {
 	oIdxShared *btshared = buildstate->btleader->btshared;
 	int			nparticipanttuplesorts;
+	bool		in_recovery = is_recovery_in_progress();
+
+	/*
+	 * Currently we expect that only client backends and recovery workers
+	 * build indexes in parallel.
+	 */
+	Assert(MyBackendType == B_BACKEND || in_recovery);
 
 	nparticipanttuplesorts = buildstate->btleader->nparticipanttuplesorts;
 	for (;;)
@@ -1002,8 +1025,21 @@ _o_index_parallel_heapscan(oIdxBuildState *buildstate)
 		}
 		SpinLockRelease(&btshared->mutex);
 
-		ConditionVariableSleep(&btshared->workersdonecv,
-							   WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+		if (in_recovery)
+		{
+			o_worker_handle_interrupts();
+
+			/*
+			 * We wait on a condition variable that will wake us as soon as
+			 * the pause ends, but we use a timeout so we can check the
+			 * ShutdownRequestPending periodically too.
+			 */
+			ConditionVariableTimedSleep(&btshared->workersdonecv, 1000,
+										WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
+		}
+		else
+			ConditionVariableSleep(&btshared->workersdonecv,
+								   WAIT_EVENT_PARALLEL_CREATE_INDEX_SCAN);
 	}
 
 	ConditionVariableCancelSleep();

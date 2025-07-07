@@ -25,6 +25,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/interrupt.h"
 #include "storage/bufmgr.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
@@ -36,15 +37,7 @@
 
 #include "pgstat.h"
 
-static volatile sig_atomic_t shutdown_requested = false;
 bool		IsBGWriter = false;
-
-static void
-handle_sigterm(SIGNAL_ARGS)
-{
-	shutdown_requested = true;
-	SetLatch(MyLatch);
-}
 
 void
 register_bgwriter(void)
@@ -88,7 +81,7 @@ bgwriter_main(Datum main_arg)
 	SetProcessingMode(NormalProcessing);
 
 	/* catch SIGTERM signal for reason to not interupt background writing */
-	pqsignal(SIGTERM, handle_sigterm);
+	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	BackgroundWorkerUnblockSignals();
 
 	elog(LOG, "orioledb background writer started");
@@ -119,7 +112,7 @@ bgwriter_main(Datum main_arg)
 			UndoLocation writeInProgressLocation;
 			int			j;
 
-			if (shutdown_requested)
+			if (ShutdownRequestPending)
 				break;
 
 			/*
@@ -131,9 +124,9 @@ bgwriter_main(Datum main_arg)
 						   WAIT_EVENT_BGWRITER_MAIN);
 
 			if (rc & WL_POSTMASTER_DEATH)
-				shutdown_requested = true;
+				ShutdownRequestPending = true;
 
-			for (poolType = 0; poolType < OPagePoolTypesCount && !shutdown_requested; poolType++)
+			for (poolType = 0; poolType < OPagePoolTypesCount && !ShutdownRequestPending; poolType++)
 			{
 				pool = get_ppool(poolType);
 				need_eviction = ppool_free_pages_count(pool) < pool->size / 20;
@@ -145,13 +138,13 @@ bgwriter_main(Datum main_arg)
 
 					while (need_eviction || need_write)
 					{
-						ppool_run_clock(pool, need_eviction, &shutdown_requested);
+						ppool_run_clock(pool, need_eviction, &ShutdownRequestPending);
 						i++;
 
 						if (i >= bgwriter_lru_maxpages * (BLCKSZ / ORIOLEDB_BLCKSZ))
 							break;
 
-						if (shutdown_requested)
+						if (ShutdownRequestPending)
 							break;
 
 						need_eviction = ppool_free_pages_count(pool) < pool->size / 20;
@@ -162,7 +155,7 @@ bgwriter_main(Datum main_arg)
 					MemoryContextReset(TopTransactionContext);
 				}
 
-				if (!shutdown_requested && ucm_epoch_needs_shift(&pool->ucm))
+				if (!ShutdownRequestPending && ucm_epoch_needs_shift(&pool->ucm))
 				{
 					if (ucm_epoch_needs_shift(&pool->ucm))
 						ucm_epoch_shift(&pool->ucm);
