@@ -58,7 +58,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
-		print(oxid)
+		#		print(oxid)
 		invalidxid = 0
 
 		for i in range(6, 650):
@@ -72,7 +72,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		print(len, ev, len - ev)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -116,7 +116,7 @@ class RewindXidTest(BaseTest):
 		invalidoxid = 9223372036854775807
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
-		print(xid)
+		#		print(xid)
 
 		for i in range(6, 650):
 			node.safe_psql(
@@ -129,7 +129,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		print(len, ev, len - ev)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -183,10 +183,10 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
-		print(oxid)
+		#		print(oxid)
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
-		print(xid)
+		#		print(xid)
 
 		for i in range(6, 650):
 			node.safe_psql(
@@ -202,7 +202,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		print(len, ev, len - ev)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres',
@@ -252,7 +252,7 @@ class RewindXidTest(BaseTest):
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
-		print(xid)
+		#		print(xid)
 		invalidoxid = 9223372036854775807
 
 		for i in range(25, 2600, 4):
@@ -270,7 +270,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		print(len, ev, len - ev)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -329,10 +329,10 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'select orioledb_get_current_oxid();\n'))[0]
 		oxid = int(a)
-		print(oxid)
+		#		print(oxid)
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
-		print(xid)
+		#		print(xid)
 
 		for i in range(25, 2600, 4):
 			node.safe_psql(
@@ -354,7 +354,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		print(len, ev, len - ev)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres',
