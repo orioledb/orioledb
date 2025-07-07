@@ -80,6 +80,7 @@ OBJS = src/btree/btree.o \
 	   src/tuple/slot.o \
 	   src/tuple/sort.o \
 	   src/workers/bgwriter.o \
+	   src/workers/interrupt.o \
 	   src/utils/compress.o \
 	   src/utils/o_buffers.o \
 	   src/utils/page_pool.o \
