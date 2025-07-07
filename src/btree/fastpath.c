@@ -69,6 +69,10 @@ ArraySearchDesc arraySearchDescs[] = {
 	{TIDOID, InvalidOid, sizeof(ItemPointerData), ALIGNOF_SHORT, tid_array_search}
 };
 
+/*
+ * Checks if the "fast path" the navigation can be applied to the given search
+ * and fills *meta structure if so.
+ */
 void
 can_fastpath_find_downlink(OBTreeFindPageContext *context,
 						   void *key,
@@ -156,6 +160,9 @@ find_array_search_desc_by_typeid(Oid typeid)
 	return NULL;
 }
 
+/*
+ * Decompose search key into values for the "fast path" tree navigation.
+ */
 static bool
 find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 					   bool *inclusive, int numValues, Oid *types,
@@ -410,8 +417,6 @@ fastpath_find_downlink(Pointer pagePtr,
 		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
 		return OBTreeFastPathFindRetry;
 
-	/* elog(LOG, "fast path %u %u, ", loc->chunkOffset, loc->itemOffset); */
-
 	return OBTreeFastPathFindOK;
 }
 
@@ -472,7 +477,10 @@ fastpath_find_chunk(Pointer pagePtr,
 	return OBTreeFastPathFindOK;
 }
 
-
+/*
+ * Find the given value in the fixed-stride array of integers.  The functions
+ * below do the same for other datatypes.
+ */
 static void
 int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 {
