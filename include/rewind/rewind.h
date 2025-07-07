@@ -71,8 +71,8 @@ typedef struct
 {
 	pg_atomic_uint64 addPosReserved;	/* Next adding position available for
 										 * concurrent add process */
-	pg_atomic_uint64 addPosFilled;	/* Position that is already added and it
-									 * could be evicted */
+	pg_atomic_uint64 addPosFilledUpto;	/* First position that is not yet added and it
+									 * could not yet be evicted or read */
 	uint64		completePos;	/* Next complete position */
 	uint64		evictPos;		/* Next evict position. Increments by
 								 * bufferLength only */
@@ -82,8 +82,6 @@ typedef struct
 								 * point for writing rewindItem-s into
 								 * checkpoint. */
 	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
-	int16		addInProgress;	/* Number of concurrent items being added at
-								 * the moment */
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
 	int			rewindEvictTrancheId;
