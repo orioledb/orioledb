@@ -22,6 +22,7 @@
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "transam/undo.h"
+#include "tuple/format.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
@@ -216,6 +217,9 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 	ptr += BTreeNonLeafTuphdrSize;
 	memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
 	BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
+
+	if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+		root_header->chunkDesc[0].chunkKeysFixed = 0;
 
 	internal_header.downlink = MAKE_IN_MEMORY_DOWNLINK(left_blkno,
 													   O_PAGE_GET_CHANGE_COUNT(left_page));
@@ -615,6 +619,9 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			ptr += tupheaderlen;
 			memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
 			BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
+
+			if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+				header->chunkDesc[loc.chunkOffset].chunkKeysFixed = 0;
 
 			if (insert_item->left_blkno != OInvalidInMemoryBlkno)
 			{

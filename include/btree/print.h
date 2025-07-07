@@ -35,6 +35,7 @@ typedef struct
 	bool		printStateValue;
 	bool		printFileOffset;
 	bool		printFormatFlags;
+	bool		printFixedFlags;
 } BTreePrintOptions;
 
 /* Tuples and keys printing func */

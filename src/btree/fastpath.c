@@ -283,6 +283,9 @@ fastpath_find_downlink(Pointer pagePtr,
 	if (result != OBTreeFastPathFindOK)
 		return result;
 
+	if (!hdr->chunkDesc[chunkIndex].chunkKeysFixed)
+		return OBTreeFastPathFindSlowpath;
+
 	chunk = (BTreePageChunk *) ((Pointer) hdr + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation));
 	if (chunkIndex < imgHdr->chunksCount - 1)
 	{
@@ -364,6 +367,9 @@ fastpath_find_downlink(Pointer pagePtr,
 		else
 		{
 			chunkIndex--;
+			if (!hdr->chunkDesc[chunkIndex].chunkKeysFixed)
+				return OBTreeFastPathFindSlowpath;
+
 			chunk = (BTreePageChunk *) ((Pointer) hdr + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIndex].shortLocation));
 			if (chunkIndex < imgHdr->chunksCount - 1)
 			{
@@ -436,6 +442,9 @@ fastpath_find_chunk(Pointer pagePtr,
 	Pointer		base;
 	uint32		imageChangeCount = pg_atomic_read_u32(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK;
 	uint32		state;
+
+	if (!O_PAGE_IS(pagePtr, HIKEYS_FIXED))
+		return OBTreeFastPathFindSlowpath;
 
 	count = O_PAGE_IS(pagePtr, RIGHTMOST) ? imgHdr->chunksCount - 1 : imgHdr->chunksCount;
 

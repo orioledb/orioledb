@@ -798,6 +798,11 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 		BTreePageChunkDesc *chunk = &header->chunkDesc[i];
 		BTreePageChunk *chunkData;
 
+		if (!O_PAGE_IS(p, RIGHTMOST) || i < header->chunksCount - 1)
+		{
+			Assert((chunk->hikeyFlags & O_TUPLE_FLAGS_FIXED_FORMAT) || !(header->flags & O_BTREE_FLAG_HIKEYS_FIXED));
+		}
+
 		if (i > 0)
 		{
 			BTreePageChunkDesc *prevChunk = &header->chunkDesc[i - 1] PG_USED_FOR_ASSERTS_ONLY;
@@ -838,6 +843,10 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 
 		for (j = 0; j < itemsCount; j++)
 		{
+			if (!(i == 0 && j == 0 && !O_PAGE_IS(p, LEAF)))
+			{
+				Assert((ITEM_GET_FLAGS(chunkData->items[j]) & O_TUPLE_FLAGS_FIXED_FORMAT) || (chunk->chunkKeysFixed == 0));
+			}
 			Assert(ITEM_GET_OFFSET(chunkData->items[j]) >= MAXALIGN(sizeof(LocationIndex) * itemsCount));
 			Assert(ITEM_GET_OFFSET(chunkData->items[j]) <= chunkSize);
 			if (j > 0)
