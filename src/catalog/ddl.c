@@ -111,6 +111,7 @@ static bool in_rewrite = false;
 List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
+bool		o_in_add_column = false;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -2779,6 +2780,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_tables_rel_meta_unlock(rel, InvalidOid);
 
 					o_table_free(o_table);
+
+					o_in_add_column = true;
 				}
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
@@ -3502,4 +3505,6 @@ o_ddl_cleanup(void)
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
+	in_rewrite = false;
+	o_in_add_column = false;
 }
