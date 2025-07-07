@@ -71,8 +71,9 @@ typedef struct
 {
 	pg_atomic_uint64 addPosReserved;	/* Next adding position available for
 										 * concurrent add process */
-	pg_atomic_uint64 addPosFilledUpto;	/* First position that is not yet added and it
-									 * could not yet be evicted or read */
+	pg_atomic_uint64 addPosFilledUpto;	/* First position that is not yet
+										 * added and it could not yet be
+										 * evicted or read */
 	uint64		completePos;	/* Next complete position */
 	uint64		evictPos;		/* Next evict position. Increments by
 								 * bufferLength only */

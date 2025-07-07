@@ -1349,11 +1349,13 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	while (true)
 	{
 		/*
-		 * freeAddSpace is the free space in rewindAddBuffer presumind space needed the current
-		 * items for the current process nitems as already occupied. Space reserved by concurrent
-		 * processes later is not counted as occupied here. Concurrent processes will see
-		 * theit freeAddSpace under the same presumption for them and will use it for eviction in the
-		 * same way. So double eviction is possible and OK but very unlikely.
+		 * freeAddSpace is the free space in rewindAddBuffer presumind space
+		 * needed the current items for the current process nitems as already
+		 * occupied. Space reserved by concurrent processes later is not
+		 * counted as occupied here. Concurrent processes will see theit
+		 * freeAddSpace under the same presumption for them and will use it
+		 * for eviction in the same way. So double eviction is possible and OK
+		 * but very unlikely.
 		 */
 		freeAddSpace = rewind_circular_buffer_size - (startAddPos + nitems - rewindMeta->evictPos);
 		elog(DEBUG3, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%u", pg_atomic_read_u64(&rewindMeta->addPosFilledUpto), pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
@@ -1365,7 +1367,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 			elog(DEBUG3, "evict_rewind_items STOP: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu", pg_atomic_read_u64(&rewindMeta->addPosFilledUpto), pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->evictPos));
 		}
 
-		if(freeAddSpace >= 0)
+		if (freeAddSpace >= 0)
 			break;
 	}
 
@@ -1473,22 +1475,27 @@ next_subxids_item:
 	}
 add_items_finished:
 repeat_bump_filled_pos:
+
 	/*
-	 * Bump rewindMeta->addPosFilledUpto until the first item that was reserved by some concurrent
-	 * process but not filled yet. If unlikely in-progress queue becomes too big, wait until blocking
-	 * in-progress inserter completes insertion and eventually until the transient part of a queue
-	 * decreases under allowed threshold..
+	 * Bump rewindMeta->addPosFilledUpto until the first item that was
+	 * reserved by some concurrent process but not filled yet. If unlikely
+	 * in-progress queue becomes too big, wait until blocking in-progress
+	 * inserter completes insertion and eventually until the transient part of
+	 * a queue decreases under allowed threshold..
 	 */
 	pg_read_barrier();
 	reserved = pg_atomic_read_u64(&rewindMeta->addPosReserved);
-	filled =  pg_atomic_read_u64(&rewindMeta->addPosFilledUpto);
+	filled = pg_atomic_read_u64(&rewindMeta->addPosFilledUpto);
 	cur = filled;
 
-	while(cur < reserved)
+	while (cur < reserved)
 	{
 		if ((&rewindAddBuffer[cur % rewind_circular_buffer_size])->tag != EMPTY_ITEM_TAG)
 		{
-			/* Try to bump addPosFilledUpto. Skip to next if already bumped by concurrent process */
+			/*
+			 * Try to bump addPosFilledUpto. Skip to next if already bumped by
+			 * concurrent process
+			 */
 			cur++;
 			pg_atomic_compare_exchange_u64(&rewindMeta->addPosFilledUpto, &filled, cur);
 		}
@@ -1498,8 +1505,12 @@ repeat_bump_filled_pos:
 			break;
 		}
 	}
-	/* Still too many transient items in the queue, try to repeat bumping addPosFilledUpto */
-	if(reserved - filled > 20)
+
+	/*
+	 * Still too many transient items in the queue, try to repeat bumping
+	 * addPosFilledUpto
+	 */
+	if (reserved - filled > 20)
 		goto repeat_bump_filled_pos;
 }
 

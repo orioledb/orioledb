@@ -865,11 +865,14 @@ checkpoint_write_rewind_item(RewindItem *rewindItem)
 	int			i;
 
 	/* Don't write subxids item */
-	if(rewindItem->tag != REWIND_ITEM_TAG)
+	if (rewindItem->tag != REWIND_ITEM_TAG)
 		return;
 
-	/* Don't write rewind item for heap-only xact that doesn't contain undo locations */
-	if(!OXidIsValid(rewindItem->oxid))
+	/*
+	 * Don't write rewind item for heap-only xact that doesn't contain undo
+	 * locations
+	 */
+	if (!OXidIsValid(rewindItem->oxid))
 		return;
 
 	xidRec.oxid = rewindItem->oxid;

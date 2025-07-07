@@ -142,7 +142,7 @@ char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
 bool		enable_rewind = false;
 int			rewind_max_time = 0;
-int		rewind_max_transactions = 0;
+int			rewind_max_transactions = 0;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
