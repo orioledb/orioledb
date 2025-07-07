@@ -1340,7 +1340,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
 		elog(WARNING, "Adding to rewind queue is blocked by rewind");
-		return;
+		goto add_items_finished;
 	}
 
 	nitems = nsubxids ? 2 + (nsubxids / SUBXIDS_PER_ITEM) : 1;
