@@ -26,6 +26,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/interrupt.h"
 #include "storage/bufmgr.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
@@ -54,7 +55,6 @@ typedef struct S3WorkerCtl
 	pg_atomic_flag workersInProgress[FLEXIBLE_ARRAY_MEMBER];
 } S3WorkerCtl;
 
-static volatile sig_atomic_t shutdown_requested = false;
 static volatile S3TaskLocation *workers_locations = NULL;
 static S3FileChecksum *workers_file_checksums = NULL;
 
@@ -106,13 +106,6 @@ s3_workers_init_shmem(Pointer ptr, bool found)
 			pg_atomic_init_flag(&workers_ctl->workersInProgress[i]);
 		}
 	}
-}
-
-static void
-handle_sigterm(SIGNAL_ARGS)
-{
-	shutdown_requested = true;
-	SetLatch(MyLatch);
 }
 
 void
@@ -926,7 +919,7 @@ s3worker_main(Datum main_arg)
 	SetProcessingMode(NormalProcessing);
 
 	/* catch SIGTERM signal for reason to not interupt background writing */
-	pqsignal(SIGTERM, handle_sigterm);
+	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	BackgroundWorkerUnblockSignals();
 
 	elog(LOG, "orioledb s3 worker %d started", worker_num);
@@ -958,7 +951,7 @@ s3worker_main(Datum main_arg)
 		{
 			uint64		taskLocation;
 
-			if (shutdown_requested)
+			if (ShutdownRequestPending)
 				break;
 
 			/*
@@ -969,7 +962,7 @@ s3worker_main(Datum main_arg)
 						   WAIT_EVENT_BGWRITER_MAIN);
 
 			if (rc & WL_POSTMASTER_DEATH)
-				shutdown_requested = true;
+				ShutdownRequestPending = true;
 
 			/*
 			 * Task processing loop.  It might happend that error occurs and

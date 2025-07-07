@@ -37,6 +37,7 @@
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 #include "utils/syscache.h"
+#include "workers/interrupt.h"
 
 #include "access/hash.h"
 #include "access/xlog_internal.h"
@@ -2910,7 +2911,14 @@ delay_if_queued_for_idxbuild(void)
 		HASH_SEQ_STATUS hash_seq;
 		RecoveryIdxBuildQueueState *cur;
 
-		HandleStartupProcInterrupts();
+		/*
+		 * This function might be called by a startup process and by a
+		 * recovery worker, therefore check in which worker we are.
+		 */
+		if (AmStartupProcess())
+			HandleStartupProcInterrupts();
+		else
+			o_worker_handle_interrupts();
 
 		/* Remove hash entries for completed indexes */
 		hash_seq_init(&hash_seq, idxbuild_oids_hash);
@@ -2947,7 +2955,14 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 	 */
 	while (true)
 	{
-		HandleStartupProcInterrupts();
+		/*
+		 * This function might be called by a startup process and by a
+		 * recovery worker, therefore check in which worker we are.
+		 */
+		if (AmStartupProcess())
+			HandleStartupProcInterrupts();
+		else
+			o_worker_handle_interrupts();
 
 		hash_elem = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
 															   &oids,
