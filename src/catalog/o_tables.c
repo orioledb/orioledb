@@ -586,22 +586,32 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 	AttrMissing attrmiss_temp;
 	Node	   *defaultexpr;
 	AttrMissing *attrmiss = NULL;
+	bool		missingIsNull = true;
+	bool		has_domain_constraints = false;
 
 	if (field->hasdef)
 		defaultexpr = build_column_default(rel, fieldnum + 1);
 	else
 		defaultexpr = NULL;
 
-	if (!old_field->hasmissing && field->hasmissing)
+	has_domain_constraints = DomainHasConstraints(field->typid);
+	if (o_in_add_column &&
+		!field->generated &&
+		!has_domain_constraints &&
+		!contain_volatile_functions((Node *) defaultexpr))
 	{
-		bool		missingIsNull = true;
-
 		attrmiss_temp.am_value = o_eval_default(o_table, rel, defaultexpr, NULL,
 												field->byval, field->typlen,
 												&missingIsNull);
 		attrmiss_temp.am_present = true;
-		attrmiss = &attrmiss_temp;
+
+		if (!old_field->hasmissing && !missingIsNull)
+		{
+			attrmiss = &attrmiss_temp;
+			field->hasmissing = true;
+		}
 	}
+	o_in_add_column = false;
 
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
