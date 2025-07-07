@@ -26,9 +26,11 @@
 #include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
+#include "workers/interrupt.h"
 
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
+#include "postmaster/interrupt.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -168,13 +170,6 @@ recovery_worker_register(int worker_id)
 	return handle;
 }
 
-static void
-handle_sigterm(SIGNAL_ARGS)
-{
-	detached = true;
-	SetLatch(MyLatch);
-}
-
 /*
  * Recovery worker main function.
  */
@@ -199,7 +194,7 @@ recovery_worker_main(Datum main_arg)
 
 		ResetLatch(MyLatch);
 
-		pqsignal(SIGTERM, handle_sigterm);
+		pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 		BackgroundWorkerUnblockSignals();
 
 		shm_mq_set_receiver(GET_WORKER_QUEUE(id), MyProc);
@@ -207,10 +202,15 @@ recovery_worker_main(Datum main_arg)
 
 		my_ptr = pg_atomic_read_u64(&worker_ptrs[id].commitPtr);
 		recovery_queue_process(recovery_worker_queue, id);
+
+		/* Exit without calling recovery_finish() in case of interrupts */
+		o_worker_handle_interrupts();
+
+		/* In case of unexpected detach exit without calling recovery_finish() */
 		if (detached)
-		{
-			elog(ERROR, "orioledb recovery worker %d finished: unexpected detach from recovery messages queue.", id);
-		}
+			ereport(ERROR,
+					(errmsg("orioledb recovery worker %d finished: unexpected detach from recovery messages queue.",
+							id)));
 
 		shm_mq_detach(recovery_worker_queue);
 		recovery_worker_queue = NULL;
@@ -342,7 +342,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 	while (!finished)
 	{
 		data = recovery_queue_read(queue, &data_size, id);
-		if (detached)
+		if (detached || ShutdownRequestPending)
 			break;
 
 		Assert(data != NULL);
@@ -663,7 +663,7 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		{
 			break;
 		}
-		else if (read_result == SHM_MQ_DETACHED || detached)
+		else if (read_result == SHM_MQ_DETACHED || ShutdownRequestPending)
 		{
 			detached = true;
 			data = NULL;
@@ -701,7 +701,7 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 			update_recovery_undo_loc_flush(false, id);
 		}
 
-		if (!PostmasterIsAlive() || detached)
+		if (!PostmasterIsAlive() || ShutdownRequestPending)
 		{
 			detached = true;
 			data = NULL;
