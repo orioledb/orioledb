@@ -43,10 +43,10 @@ extern void log_print_rewind_queue(void);
 
 /* RewindItem and SubxidsItem should have same size to be castable to each other */
 /* Empty RewindItem and SubxidsItem have invalid oxid and tag */
-typedef	struct RewindItem
+typedef struct RewindItem
 {
 	uint8		tag;
-	int 		nsubxids;
+	int			nsubxids;
 	OXid		oxid;
 	TransactionId xid;			/* regular transaction id if any */
 	uint64		onCommitUndoLocation[UndoLogsCount];
@@ -59,38 +59,46 @@ typedef	struct RewindItem
 
 typedef struct SubxidsItem
 {
-	uint8           tag;
-	int		nsubxids;
-	OXid            oxid;	/* Redundant, for debug */
-	TransactionId   subxids[SUBXIDS_PER_ITEM];
+	uint8		tag;
+	int			nsubxids;
+	OXid		oxid;			/* Redundant, for debug */
+	TransactionId subxids[SUBXIDS_PER_ITEM];
 } SubxidsItem;
 
 #define REWIND_DISK_BUFFER_LENGTH (ORIOLEDB_BLCKSZ / sizeof(RewindItem))
 
 typedef struct
 {
-	pg_atomic_uint64 addPosReserved; /* Next adding position available for concurrent add process */
-	pg_atomic_uint64 addPosFilled;	 /* Position that is already added and it could be evicted */
+	pg_atomic_uint64 addPosReserved;	/* Next adding position available for
+										 * concurrent add process */
+	pg_atomic_uint64 addPosFilled;	/* Position that is already added and it
+									 * could be evicted */
 	uint64		completePos;	/* Next complete position */
-	uint64		evictPos;	/* Next evict position. Increments by bufferLength only */
-	uint64		restorePos;	/* Next restore after eviction position. Increments by bufferLength only */
+	uint64		evictPos;		/* Next evict position. Increments by
+								 * bufferLength only */
+	uint64		restorePos;		/* Next restore after eviction position.
+								 * Increments by bufferLength only */
 	uint64		checkpointPos;	/* Already included into checkpoint. Start
 								 * point for writing rewindItem-s into
 								 * checkpoint. */
 	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
-	int16		addInProgress;  /* Number of concurrent items being added at the moment */
+	int16		addInProgress;	/* Number of concurrent items being added at
+								 * the moment */
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
-	int		rewindEvictTrancheId;
-	LWLock		rewindEvictLock;		/* Lock during evict/restore page from circular buffer against concurrent eviction */
-	int		rewindCheckpointTrancheId;
-	LWLock		rewindCheckpointLock;		/* Lock during checkpointing againts concurrent eviction */
+	int			rewindEvictTrancheId;
+	LWLock		rewindEvictLock;	/* Lock during evict/restore page from
+									 * circular buffer against concurrent
+									 * eviction */
+	int			rewindCheckpointTrancheId;
+	LWLock		rewindCheckpointLock;	/* Lock during checkpointing againts
+										 * concurrent eviction */
 	pg_atomic_uint64 oldestConsideredRunningXid;
 	pg_atomic_uint64 runXmin;
-	bool 		rewindWorkerStopRequested;
+	bool		rewindWorkerStopRequested;
 	bool		rewindWorkerStopped;
-	bool 		addToRewindQueueDisabled;
-	TransactionId	force_complete_xid;
+	bool		addToRewindQueueDisabled;
+	TransactionId force_complete_xid;
 	OXid		force_complete_oxid;
 
 } RewindMeta;
@@ -131,7 +139,7 @@ typedef struct
  *
  *  Adding to addBuffer:
  *  (1) checks is the space enough, if not calls eviction first
- *  (2) reserves space to addind by incrementing AR 
+ *  (2) reserves space to addind by incrementing AR
  *  (3) adds items to the reserved space:
  *
  * Rewind queue items has two types
@@ -143,7 +151,7 @@ typedef struct
  *
  *  (4) pushes AF:
  *   - if all concurrent backends that incremented AR finished
- *   - if transient difference AR-AF becomes big (then transaction waits concurrent ones to complete) 
+ *   - if transient difference AR-AF becomes big (then transaction waits concurrent ones to complete)
  *
  * Eviction from addBuffer has two ways:
  * - fast: direct transfer from addBuffer to completeBuffer (in there is space for this)

@@ -1329,8 +1329,10 @@ orioledb_reset_xmin_hook(void)
 static void
 rewind_handle_pending_deletes(void)
 {
-	RelFileNode	*onCommitRels, *onAbortRels;
-	int		nOnCommitRels, nOnAbortRels;
+	RelFileNode *onCommitRels,
+			   *onAbortRels;
+	int			nOnCommitRels,
+				nOnAbortRels;
 
 	nOnCommitRels = smgrGetPendingDeletes(true, &onCommitRels);
 	nOnAbortRels = smgrGetPendingDeletes(false, &onAbortRels);
@@ -1356,9 +1358,9 @@ undo_xact_callback(XactEvent event, void *arg)
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	bool		isParallelWorker;
 	int			i;
-	TransactionId   xid1 = InvalidTransactionId;
-	int             nsubxids = 0;
-	TransactionId   *subxids = NULL;
+	TransactionId xid1 = InvalidTransactionId;
+	int			nsubxids = 0;
+	TransactionId *subxids = NULL;
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&

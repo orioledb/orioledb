@@ -56,9 +56,9 @@ static OBuffersDesc rewindBuffersDesc = {
 static FullTransactionId GetOldestFullTransactionIdConsideredRunning(void);
 
 /* Temporary storage for heap info between pre-commit and commit in a backend */
-static TransactionId   precommit_xid;
-static int             precommit_nsubxids;
-static TransactionId  *precommit_subxids;
+static TransactionId precommit_xid;
+static int	precommit_nsubxids;
+static TransactionId *precommit_subxids;
 
 PG_FUNCTION_INFO_V1(orioledb_rewind_by_time);
 PG_FUNCTION_INFO_V1(orioledb_rewind_to_timestamp);
@@ -91,7 +91,7 @@ orioledb_get_current_oxid(PG_FUNCTION_ARGS)
 Datum
 orioledb_rewind_by_time(PG_FUNCTION_ARGS)
 {
-	int	rewind_time = PG_GETARG_INT32(0);
+	int			rewind_time = PG_GETARG_INT32(0);
 
 	orioledb_rewind_internal(REWIND_MODE_TIME, rewind_time, InvalidOXid, InvalidTransactionId, (TimestampTz) 0);
 	PG_RETURN_VOID();
@@ -100,8 +100,8 @@ orioledb_rewind_by_time(PG_FUNCTION_ARGS)
 Datum
 orioledb_rewind_to_transaction(PG_FUNCTION_ARGS)
 {
-	TransactionId 	xid = PG_GETARG_INT32(0);
-	OXid 		oxid = PG_GETARG_INT64(1);
+	TransactionId xid = PG_GETARG_INT32(0);
+	OXid		oxid = PG_GETARG_INT64(1);
 
 	orioledb_rewind_internal(REWIND_MODE_XID, 0, oxid, xid, (TimestampTz) 0);
 	PG_RETURN_VOID();
@@ -110,10 +110,10 @@ orioledb_rewind_to_transaction(PG_FUNCTION_ARGS)
 Datum
 orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
 {
-        TimestampTz	rewind_timestamp = PG_GETARG_TIMESTAMPTZ(0);
+	TimestampTz rewind_timestamp = PG_GETARG_TIMESTAMPTZ(0);
 
-        orioledb_rewind_internal(REWIND_MODE_TIMESTAMP, 0, InvalidOXid, InvalidTransactionId, rewind_timestamp);
-        PG_RETURN_VOID();
+	orioledb_rewind_internal(REWIND_MODE_TIMESTAMP, 0, InvalidOXid, InvalidTransactionId, rewind_timestamp);
+	PG_RETURN_VOID();
 }
 
 /* Testing/convenience functions avaliable for the user */
@@ -129,7 +129,7 @@ orioledb_get_rewind_queue_length(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
+				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
 	}
 
@@ -143,7 +143,7 @@ orioledb_get_rewind_evicted_length(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
+				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
 	}
 
@@ -183,28 +183,28 @@ Datum
 orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 {
 	RewindItem *rewindItem;
-	OXid	    oxid;
-	TransactionId	xid;
-	uint64          pos;
+	OXid		oxid;
+	TransactionId xid;
+	uint64		pos;
 
 	if (!enable_rewind)
-                PG_RETURN_VOID();
+		PG_RETURN_VOID();
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
 	pos = rewindMeta->completePos;
 
-	while(true)
+	while (true)
 	{
 		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 		xid = rewindItem->xid;
 		oxid = rewindItem->oxid;
 
-		if(OXidIsValid(oxid))
+		if (OXidIsValid(oxid))
 			break;
 
 		pos++;
-		if(pos >= rewindMeta->restorePos)
+		if (pos >= rewindMeta->restorePos)
 			elog(ERROR, "Couldn't get oxid from completeBuffer");
 	}
 	LWLockRelease(&rewindMeta->rewindEvictLock);
@@ -217,28 +217,28 @@ Datum
 orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 {
 	RewindItem *rewindItem;
-	OXid	    oxid;
-	TransactionId	xid;
+	OXid		oxid;
+	TransactionId xid;
 	uint64		pos;
 
 	if (!enable_rewind)
-                PG_RETURN_VOID();
+		PG_RETURN_VOID();
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
 	pos = rewindMeta->completePos;
 
-	while(true)
+	while (true)
 	{
 		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 		xid = rewindItem->xid;
 		oxid = rewindItem->oxid;
 
-		if(TransactionIdIsValid(xid))
+		if (TransactionIdIsValid(xid))
 			break;
 
 		pos++;
-		if(pos >= rewindMeta->restorePos)
+		if (pos >= rewindMeta->restorePos)
 			elog(ERROR, "Couldn't get xid from completeBuffer");
 	}
 	LWLockRelease(&rewindMeta->rewindEvictLock);
@@ -283,16 +283,18 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	PG_END_TRY();
 	PG_RETURN_VOID();
 }
+
 /* Testing functions end */
 
 static inline
-void print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
+void
+print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
 {
 	/* To shorten output invalid values are printed as -1 */
-	int64 oxid = OXidIsValid (rewindItem->oxid) ? rewindItem->oxid : -1;
-	int64 undoLocation[3];
-	int64 onCommitUndoLocation[3];
-	int64 minRetainLocation[3];
+	int64		oxid = OXidIsValid(rewindItem->oxid) ? rewindItem->oxid : -1;
+	int64		undoLocation[3];
+	int64		onCommitUndoLocation[3];
+	int64		minRetainLocation[3];
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -307,20 +309,21 @@ void print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
 /*
  * Debug print all rewind records from circular in-memory rewind buffer and on-disk rewind buffer
  * to log. Doesn't take any locks, so results are not warrantied with any concurrent operation
- * on the queue. 
+ * on the queue.
  */
-void log_print_rewind_queue(void)
+void
+log_print_rewind_queue(void)
 {
 	int			i;
-	uint64			pos;
-	uint64			curAddPosFilled;
-	int 			freeAddSpace;
+	uint64		pos;
+	uint64		curAddPosFilled;
+	int			freeAddSpace;
 
 	if (!enable_rewind)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
+				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
 		return;
 	}
@@ -328,9 +331,9 @@ void log_print_rewind_queue(void)
 	curAddPosFilled = pg_atomic_read_u64(&rewindMeta->addPosFilled);
 	freeAddSpace = rewind_circular_buffer_size - (curAddPosFilled - rewindMeta->evictPos);
 
-	elog(LOG, "Print rewind queue: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPosFilled, pg_atomic_read_u64(&rewindMeta->addPosReserved) , rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
+	elog(LOG, "Print rewind queue: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPosFilled, pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 
-	/* From completeBuffer if exists*/
+	/* From completeBuffer if exists */
 	for (pos = rewindMeta->completePos; pos < rewindMeta->restorePos; pos++)
 		print_rewind_item(&rewindCompleteBuffer[pos % rewind_circular_buffer_size], pos, 1);
 
@@ -352,8 +355,7 @@ void log_print_rewind_queue(void)
 	}
 
 	/*
-	 * From in-memory rewind addBuffer (after evicted
-	 * records if they exist)
+	 * From in-memory rewind addBuffer (after evicted records if they exist)
 	 */
 	for (; pos < curAddPosFilled; pos++)
 		print_rewind_item(&rewindAddBuffer[pos % rewind_circular_buffer_size], pos, 3);
@@ -380,24 +382,24 @@ rewind_shmem_needs(void)
 static void
 do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp)
 {
-	int	i = 0;
-	int 	k = 0;
-	RewindItem     *rewindItem;
-	RewindItem 	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
+	int			i = 0;
+	int			k = 0;
+	RewindItem *rewindItem;
+	RewindItem	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
 	uint64		pos;
-	int		nsubxids = 0;
-	int 		subxids_count = 0;
+	int			nsubxids = 0;
+	int			subxids_count = 0;
 	bool		got_all_subxids = false;
 #ifdef USE_ASSERT_CHECKING
-	bool 		started_subxids = false;
+	bool		started_subxids = false;
 #endif
-	TransactionId   *subxids = NULL;
-	TransactionId	xid = InvalidTransactionId;
+	TransactionId *subxids = NULL;
+	TransactionId xid = InvalidTransactionId;
 	OXid		oxid = InvalidOXid;
-	CommitSeqNo	csn PG_USED_FOR_ASSERTS_ONLY;
+	CommitSeqNo csn PG_USED_FOR_ASSERTS_ONLY;
 	long		secs;
-	int		usecs;
-	int		source_buffer;
+	int			usecs;
+	int			source_buffer;
 
 #ifdef REWIND_DEBUG_MODE
 	log_print_rewind_queue();
@@ -407,19 +409,24 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 
 	while (true)
 	{
-		if (pos >= rewindMeta->evictPos) /* At evictPos is the next element to be evicted. It's actually still in rewindAddBuffer */
+		if (pos >= rewindMeta->evictPos)	/* At evictPos is the next element
+											 * to be evicted. It's actually
+											 * still in rewindAddBuffer */
 		{
 			rewindItem = &rewindAddBuffer[pos % rewind_circular_buffer_size];
 			source_buffer = 3;
 		}
-		else if (pos >= rewindMeta->restorePos) /* At restorePos is the next element to be restored. It's actually in disk buffer */
+		else if (pos >= rewindMeta->restorePos) /* At restorePos is the next
+												 * element to be restored.
+												 * It's actually in disk
+												 * buffer */
 		{
 			if (k == 0)
 			{
 				o_buffers_read(&rewindBuffersDesc,
-						(Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
-						(pos - REWIND_DISK_BUFFER_LENGTH + 1) * sizeof(RewindItem),
-						REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+							   (Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
+							   (pos - REWIND_DISK_BUFFER_LENGTH + 1) * sizeof(RewindItem),
+							   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 				k = REWIND_DISK_BUFFER_LENGTH;
 			}
 			k--;
@@ -431,14 +438,14 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
 			source_buffer = 1;
 		}
-		
+
 		elog(DEBUG3, "Rewind read elem: pos %lu:%u oxid %lu xid %u oldestRunXid %u, nsubxids %u", pos, source_buffer, rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
 		/*
-		 * Gather subxids from subxids items (may be multiple). As we read backwards, we don't yet
-		 * have filled respective rewindItem.
+		 * Gather subxids from subxids items (may be multiple). As we read
+		 * backwards, we don't yet have filled respective rewindItem.
 		 */
 		if (rewindItem->tag == SUBXIDS_ITEM_TAG)
 		{
@@ -449,7 +456,10 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 
 			if (nsubxids == 0)
 			{
-				/* First subxids item (As we read backwards so it's last written one) */
+				/*
+				 * First subxids item (As we read backwards so it's last
+				 * written one)
+				 */
 				Assert(!started_subxids);
 #ifdef USE_ASSERT_CHECKING
 				started_subxids = true;
@@ -462,9 +472,11 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			else
 			{
 				Assert(started_subxids);
+
 				/*
-				 * subxidsItem->nsubxids for every subxidsItem contains the same sum of
-				 * of subxids for a rewindItem (not just the number of subxids in a current subxidsItem.
+				 * subxidsItem->nsubxids for every subxidsItem contains the
+				 * same sum of of subxids for a rewindItem (not just the
+				 * number of subxids in a current subxidsItem.
 				 */
 				Assert(subxidsItem->nsubxids == nsubxids);
 				Assert(subxidsItem->oxid == oxid);
@@ -483,7 +495,8 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 					break;
 				}
 				else if ((subxids_count % SUBXIDS_PER_ITEM) == 0)
-					break; /* Read next subxids item (As we read backwards so it's previous written one) */
+					break;		/* Read next subxids item (As we read
+								 * backwards so it's previous written one) */
 			}
 		}
 		else
@@ -494,7 +507,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 
 			if (rewind_mode == REWIND_MODE_TIME)
 			{
-				if(TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTimeStamp, rewind_time * 1000))
+				if (TimestampDifferenceExceeds(rewindItem->timestamp, rewindStartTimeStamp, rewind_time * 1000))
 					goto rewind_complete;
 			}
 			else if (rewind_mode == REWIND_MODE_XID)
@@ -526,10 +539,10 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 					elog(DEBUG3, "Rewinding: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 
 					location = walk_undo_range_with_buf((UndoLogType) i,
-						rewindItem->undoLocation[i],
-						InvalidUndoLocation,
-						rewindItem->oxid, true, &rewindItem->onCommitUndoLocation[i],
-						true);
+														rewindItem->undoLocation[i],
+														InvalidUndoLocation,
+														rewindItem->oxid, true, &rewindItem->onCommitUndoLocation[i],
+														true);
 					Assert(!UndoLocationIsValid(location));
 				}
 
@@ -566,7 +579,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 					TransactionIdAbortTree(rewindItem->xid, 0, NULL);
 			}
 			else
-				Assert (!started_subxids && !got_all_subxids && nsubxids == 0);
+				Assert(!started_subxids && !got_all_subxids && nsubxids == 0);
 		}
 
 		/* Clear the item from the circular buffer */
@@ -578,7 +591,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 		if (pos == rewindMeta->completePos)
 		{
 			TimestampDifference(rewindItem->timestamp, rewindStartTimeStamp, &secs, &usecs);
-			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs/1000));
+			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000));
 			return;
 		}
 		pos--;
@@ -587,7 +600,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 rewind_complete:
 
 	TimestampDifference(rewindItem->timestamp, rewindStartTimeStamp, &secs, &usecs);
-	ereport(LOG, errmsg("orioledb rewind completed. Last remaining transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs/1000));
+	ereport(LOG, errmsg("orioledb rewind completed. Last remaining transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000));
 	return;
 }
 
@@ -599,16 +612,16 @@ rewind_complete:
 static void
 orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp)
 {
-	TimestampTz	rewindStartTimeStamp;
-	int		retry;
-	int 		nbackends;
-	int		nprepared;
+	TimestampTz rewindStartTimeStamp;
+	int			retry;
+	int			nbackends;
+	int			nprepared;
 
 	if (!enable_rewind)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				  errmsg("orioledb rewind mode is turned off")),
+				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
 		return;
 	}
@@ -620,9 +633,9 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		if (rewind_time > rewind_max_time)
 		{
 			ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind %d s exceeds rewind_max_time %d s", rewind_time, rewind_max_time)),
-				 errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Requested rewind %d s exceeds rewind_max_time %d s", rewind_time, rewind_max_time)),
+					errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
 			return;
 		}
 		else if (rewind_time == 0)
@@ -667,20 +680,21 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		elog(LOG, "Rewind requested, to timestamp %ld", rewind_timestamp);
 
 		/*
-		 * NB: these timestamp checks are from current time so they are little bit stricter than needed as
-		 * actual rewindStartTimeStamp is recorded little bit later, after stopping rewind worker.
+		 * NB: these timestamp checks are from current time so they are little
+		 * bit stricter than needed as actual rewindStartTimeStamp is recorded
+		 * little bit later, after stopping rewind worker.
 		 */
-		if(rewind_timestamp >= GetCurrentTimestamp())
+		if (rewind_timestamp >= GetCurrentTimestamp())
 		{
 			elog(WARNING, "Zero rewind requested, do nothing");
 			return;
 		}
-		else if(TimestampDifferenceExceeds(rewind_timestamp, GetCurrentTimestamp(), rewind_max_time * 1000))
+		else if (TimestampDifferenceExceeds(rewind_timestamp, GetCurrentTimestamp(), rewind_max_time * 1000))
 		{
 			ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Requested rewind to timestamp %ld exceeds rewind_max_time %d s", rewind_timestamp, rewind_max_time)),
-				 errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Requested rewind to timestamp %ld exceeds rewind_max_time %d s", rewind_timestamp, rewind_max_time)),
+					errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
 			return;
 		}
 	}
@@ -693,8 +707,8 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	CountOtherDBBackends(InvalidOid, &nbackends, &nprepared);
 	if (nprepared > 0)
 		ereport(ERROR,
-                                (errcode(ERRCODE_INTERNAL_ERROR),
-                                 errmsg("Can't rewind due to prepared transactions in the cluster")));
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Can't rewind due to prepared transactions in the cluster")));
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_EXCLUSIVE);
 
@@ -706,10 +720,14 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		pg_usleep(10000L);
 		retry++;
 		if (retry >= 1000)
-			/* We don't know the state of rewind worker so we can't rewind or continue. */
+
+			/*
+			 * We don't know the state of rewind worker so we can't rewind or
+			 * continue.
+			 */
 			ereport(FATAL,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Rewind worker couldn't stop in 100s, aborting rewind")));
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Rewind worker couldn't stop in 100s, aborting rewind")));
 	}
 
 	rewindStartTimeStamp = GetCurrentTimestamp();
@@ -718,7 +736,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	/* Terminate all other backends */
 	retry = 0;
 	TerminateOtherDBBackends(InvalidOid);
-	while(CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
+	while (CountOtherDBBackends(InvalidOid, &nbackends, &nprepared))
 	{
 		if (AutoVacuumingActive() && nbackends <= 1)
 			break;
@@ -727,13 +745,14 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		pg_usleep(1000000L);
 		retry++;
 		if (retry >= 100)
+
 			/*
-			 * Rewind worker already stopped and come transactions could be not in the buffer
-			 * so we can't continue.
+			 * Rewind worker already stopped and come transactions could be
+			 * not in the buffer so we can't continue.
 			 */
 			ereport(FATAL,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Backends couldn't stop in 100s, aborting rewind")));
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Backends couldn't stop in 100s, aborting rewind")));
 	}
 
 	rewindMeta->addToRewindQueueDisabled = true;
@@ -758,7 +777,7 @@ static void
 cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 {
 	char		curFileName[MAXPGPATH];
-	int		curFile;
+	int			curFile;
 	uint64		fileNum = 0;
 
 	Assert(OBuffersMaxTagIsValid(tag));
@@ -955,20 +974,20 @@ try_restore_evicted_rewind_page(void)
 		if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 		{
 			o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
-					   rewindMeta->restorePos * sizeof(RewindItem),
-					   length_to_end * sizeof(RewindItem));
+						   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
+						   rewindMeta->restorePos * sizeof(RewindItem),
+						   length_to_end * sizeof(RewindItem));
 			o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &rewindCompleteBuffer[0], REWIND_BUFFERS_TAG,
-					   (rewindMeta->restorePos + length_to_end) * sizeof(RewindItem),
-					   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+						   (Pointer) &rewindCompleteBuffer[0], REWIND_BUFFERS_TAG,
+						   (rewindMeta->restorePos + length_to_end) * sizeof(RewindItem),
+						   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
 		}
 		else
 		{
 			o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
-					   rewindMeta->restorePos * sizeof(RewindItem),
-					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+						   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
+						   rewindMeta->restorePos * sizeof(RewindItem),
+						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 		}
 
 #ifdef USE_ASSERT_CHECKING
@@ -985,18 +1004,18 @@ try_restore_evicted_rewind_page(void)
 	{
 		/* Try to restore from rewindAddBuffer */
 		while (rewindMeta->restorePos == rewindMeta->evictPos &&
-				rewindMeta->restorePos >= rewindMeta->completePos &&
-				rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size &&
-				rewindMeta->evictPos < pg_atomic_read_u64(&rewindMeta->addPosFilled))
+			   rewindMeta->restorePos >= rewindMeta->completePos &&
+			   rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size &&
+			   rewindMeta->evictPos < pg_atomic_read_u64(&rewindMeta->addPosFilled))
 		{
-				elog(DEBUG3, "FASTPATH_restore: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu", pg_atomic_read_u64(&rewindMeta->addPosFilled), pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->evictPos));
-				Assert(rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
-				Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
+			elog(DEBUG3, "FASTPATH_restore: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu", pg_atomic_read_u64(&rewindMeta->addPosFilled), pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->evictPos));
+			Assert(rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
+			Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
-				memcpy(&rewindCompleteBuffer[rewindMeta->restorePos % rewind_circular_buffer_size], &rewindAddBuffer[rewindMeta->evictPos % rewind_circular_buffer_size], sizeof(RewindItem));
-				rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
-				rewindMeta->evictPos++;
-				rewindMeta->restorePos++;
+			memcpy(&rewindCompleteBuffer[rewindMeta->restorePos % rewind_circular_buffer_size], &rewindAddBuffer[rewindMeta->evictPos % rewind_circular_buffer_size], sizeof(RewindItem));
+			rewindAddBuffer[(rewindMeta->evictPos % rewind_circular_buffer_size)].tag = EMPTY_ITEM_TAG;
+			rewindMeta->evictPos++;
+			rewindMeta->restorePos++;
 		}
 	}
 	LWLockRelease(&rewindMeta->rewindEvictLock);
@@ -1074,7 +1093,7 @@ rewind_worker_main(Datum main_arg)
 			if (rc & WL_POSTMASTER_DEATH)
 				shutdown_requested = true;
 
- 			elog(DEBUG3, "Rewind worker came to check");
+			elog(DEBUG3, "Rewind worker came to check");
 
 			while (rewindMeta->completePos < pg_atomic_read_u64(&rewindMeta->addPosFilled))
 			{
@@ -1091,7 +1110,10 @@ rewind_worker_main(Datum main_arg)
 
 				if (rewindMeta->completePos >= rewindMeta->restorePos)
 				{
-				        /* rewindCompleteBuffer is empty. Read from rewindAddBuffer */
+					/*
+					 * rewindCompleteBuffer is empty. Read from
+					 * rewindAddBuffer
+					 */
 					try_restore_evicted_rewind_page();
 				}
 
@@ -1102,9 +1124,9 @@ rewind_worker_main(Datum main_arg)
 
 				if (rewindItem->tag == REWIND_ITEM_TAG)
 				{
-					bool queue_exceeds_age = TimestampDifferenceExceeds(rewindItem->timestamp, GetCurrentTimestamp(), rewind_max_time * 1000);
-					bool queue_exceeds_length = pg_atomic_read_u64(&rewindMeta->addPosFilled) - rewindMeta->completePos > rewind_max_transactions;
-					bool force_complete;
+					bool		queue_exceeds_age = TimestampDifferenceExceeds(rewindItem->timestamp, GetCurrentTimestamp(), rewind_max_time * 1000);
+					bool		queue_exceeds_length = pg_atomic_read_u64(&rewindMeta->addPosFilled) - rewindMeta->completePos > rewind_max_transactions;
+					bool		force_complete;
 
 					if (OXidIsValid(rewindMeta->force_complete_oxid) || TransactionIdIsValid(rewindMeta->force_complete_xid))
 					{
@@ -1118,11 +1140,14 @@ rewind_worker_main(Datum main_arg)
 							force_complete = false;
 					}
 					else
-						force_complete = false;	
+						force_complete = false;
 
 					if (!rewindMeta->skipCheck && !queue_exceeds_age && !queue_exceeds_length && !force_complete)
 					{
-						/* Too early to fix the oldest item in the queue. Wait and check again. */
+						/*
+						 * Too early to fix the oldest item in the queue. Wait
+						 * and check again.
+						 */
 						break;
 					}
 
@@ -1157,7 +1182,10 @@ rewind_worker_main(Datum main_arg)
 										rewindItem->runXmin);
 				}
 
-				/* Clear the REWIND_ITEM or SUBXIDS_ITEM from the circular buffer */
+				/*
+				 * Clear the REWIND_ITEM or SUBXIDS_ITEM from the circular
+				 * buffer
+				 */
 				rewindItem->tag = EMPTY_ITEM_TAG;
 				rewindMeta->completePos++;
 				Assert(rewindMeta->completePos <= rewindMeta->restorePos);
@@ -1215,24 +1243,24 @@ evict_rewind_items(uint64 curAddPosFilled)
 			if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 			{
 				o_buffers_write(&rewindBuffersDesc,
-							(Pointer) &rewindAddBuffer[start],
-							REWIND_BUFFERS_TAG,
-							rewindMeta->evictPos * sizeof(RewindItem),
-							length_to_end * sizeof(RewindItem));
+								(Pointer) &rewindAddBuffer[start],
+								REWIND_BUFFERS_TAG,
+								rewindMeta->evictPos * sizeof(RewindItem),
+								length_to_end * sizeof(RewindItem));
 
 				o_buffers_write(&rewindBuffersDesc,
-							(Pointer) &rewindAddBuffer[0],
-							REWIND_BUFFERS_TAG,
-							(rewindMeta->evictPos + length_to_end) * sizeof(RewindItem),
-							(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+								(Pointer) &rewindAddBuffer[0],
+								REWIND_BUFFERS_TAG,
+								(rewindMeta->evictPos + length_to_end) * sizeof(RewindItem),
+								(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
 			}
 			else
 			{
 				o_buffers_write(&rewindBuffersDesc,
-							(Pointer) &rewindAddBuffer[start],
-							REWIND_BUFFERS_TAG,
-							rewindMeta->evictPos * sizeof(RewindItem),
-							REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+								(Pointer) &rewindAddBuffer[start],
+								REWIND_BUFFERS_TAG,
+								rewindMeta->evictPos * sizeof(RewindItem),
+								REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 			}
 
 			/* Clean written items from ring buffer */
@@ -1265,12 +1293,12 @@ reset_precommit_xid_subxids(void)
 void
 save_precommit_xid_subxids(void)
 {
-	TransactionId	xid1 = InvalidTransactionId;
-        TransactionId	xid2 = InvalidTransactionId;
+	TransactionId xid1 = InvalidTransactionId;
+	TransactionId xid2 = InvalidTransactionId;
 
 	xid1 = GetTopTransactionIdIfAny();
-        xid2 = GetCurrentTransactionIdIfAny();
-        elog(DEBUG3, "PRE-COMMIT top xid %u, cur xid %u", xid1, xid2);
+	xid2 = GetCurrentTransactionIdIfAny();
+	elog(DEBUG3, "PRE-COMMIT top xid %u, cur xid %u", xid1, xid2);
 
 	/* Don't overwrite existing precommit_xid with zero. */
 	if (TransactionIdIsValid(xid1))
@@ -1278,8 +1306,8 @@ save_precommit_xid_subxids(void)
 		Assert(!TransactionIdIsValid(precommit_xid));
 
 		precommit_xid = xid1;
-                precommit_nsubxids = xactGetCommittedChildren(&precommit_subxids);
-        }
+		precommit_nsubxids = xactGetCommittedChildren(&precommit_subxids);
+	}
 }
 
 TransactionId
@@ -1302,11 +1330,11 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	int			i;
 	uint64		curAddPos;
 	uint64		startAddPos;
-	uint64          reserved;
+	uint64		reserved;
 	int			freeAddSpace;
-	bool 		subxid_only = false;
-	int		subxids_count = 0;
-	int		nitems;
+	bool		subxid_only = false;
+	int			subxids_count = 0;
+	int			nitems;
 
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
@@ -1340,8 +1368,8 @@ next_subxids_item:
 		/* Fill subxids entry in a circular buffer. */
 		SubxidsItem *subxidsItem = (SubxidsItem *) rewindItem;
 
-		Assert (TransactionIdIsValid(xid));
-		Assert (nsubxids > 0);
+		Assert(TransactionIdIsValid(xid));
+		Assert(nsubxids > 0);
 		subxidsItem->tag = SUBXIDS_ITEM_TAG;
 		subxidsItem->oxid = oxid;
 		subxidsItem->nsubxids = nsubxids;
@@ -1360,7 +1388,8 @@ next_subxids_item:
 			if (subxids_count % SUBXIDS_PER_ITEM == 0)
 			{
 				curAddPos++;
-				goto next_subxids_item; /* Write next rewindItem only with subxids */
+				goto next_subxids_item; /* Write next rewindItem only with
+										 * subxids */
 			}
 		}
 	}
@@ -1377,19 +1406,19 @@ next_subxids_item:
 
 		if (!OXidIsValid(pg_atomic_read_u64(&rewindMeta->runXmin)))
 		{
-			uint64	curValue = InvalidOXid;
+			uint64		curValue = InvalidOXid;
 
 			(void) pg_atomic_compare_exchange_u64(&rewindMeta->runXmin, &curValue, rewindItem->runXmin);
 		}
 
 		if (pg_atomic_read_u64(&rewindMeta->oldestConsideredRunningXid) == InvalidTransactionId)
 		{
-			uint64	curValue = InvalidTransactionId;
+			uint64		curValue = InvalidTransactionId;
 
 			(void) pg_atomic_compare_exchange_u64(&rewindMeta->oldestConsideredRunningXid, &curValue, rewindItem->oldestConsideredRunningXid.value);
 		}
 
-		Assert (OXidIsValid(oxid) || TransactionIdIsValid(xid));
+		Assert(OXidIsValid(oxid) || TransactionIdIsValid(xid));
 
 		if (OXidIsValid(oxid))
 		{
@@ -1408,7 +1437,7 @@ next_subxids_item:
 		}
 		else
 		{
-		elog(DEBUG3, "Add to buffer: oxid %lu xid %u oldestRunningXid %u nsubxids %u", oxid, xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
+			elog(DEBUG3, "Add to buffer: oxid %lu xid %u oldestRunningXid %u nsubxids %u", oxid, xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
 		}
 
 		if (nsubxids)
@@ -1417,14 +1446,16 @@ next_subxids_item:
 			subxid_only = true;
 			subxids_count = 0;
 			curAddPos++;
-			goto next_subxids_item; /* Write first rewindItem only with subxids */
+			goto next_subxids_item; /* Write first rewindItem only with
+									 * subxids */
 		}
 	}
 add_items_finished:
+
 	/*
-	 * Bump rewindMeta->addPosFilled if all concurrent in-progress inserters fimished.
-	 * If unlikely in-progress queue becomes too big, wait until all concurrent
-	 * in-progress inserters fimished.
+	 * Bump rewindMeta->addPosFilled if all concurrent in-progress inserters
+	 * fimished. If unlikely in-progress queue becomes too big, wait until all
+	 * concurrent in-progress inserters fimished.
 	 */
 	reserved = pg_atomic_read_u64(&rewindMeta->addPosReserved);
 	rewindMeta->addInProgress -= nitems;
@@ -1435,7 +1466,7 @@ add_items_finished:
 	}
 	else if (rewindMeta->addInProgress > 20)
 	{
-		while(rewindMeta->addInProgress > 0)
+		while (rewindMeta->addInProgress > 0)
 			pg_usleep(1000);
 
 		pg_atomic_write_u64(&rewindMeta->addPosFilled, reserved);
@@ -1449,7 +1480,7 @@ add_items_finished:
 void
 checkpoint_write_rewind_xids(void)
 {
-	bool            buffer_loaded = false;
+	bool		buffer_loaded = false;
 	RewindItem	buffer[REWIND_DISK_BUFFER_LENGTH];
 
 	if (!enable_rewind)
@@ -1461,7 +1492,8 @@ checkpoint_write_rewind_xids(void)
 		return;
 	}
 
-	LWLockAcquire(&rewindMeta->rewindCheckpointLock, LW_EXCLUSIVE);	
+	LWLockAcquire(&rewindMeta->rewindCheckpointLock, LW_EXCLUSIVE);
+
 	/*
 	 * Start from the last non-completed position not written to checkpoint
 	 * yet
@@ -1478,14 +1510,14 @@ checkpoint_write_rewind_xids(void)
 	/* Write rewind records from on-disk buffer if they exist */
 	while (rewindMeta->checkpointPos < rewindMeta->evictPos)
 	{
-		if(!buffer_loaded)
+		if (!buffer_loaded)
 		{
-			int		startbuf = rewindMeta->checkpointPos - (rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH);
+			int			startbuf = rewindMeta->checkpointPos - (rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH);
 
 			o_buffers_read(&rewindBuffersDesc,
-					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
-					   startbuf * sizeof(RewindItem),
-					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+						   (Pointer) &buffer, REWIND_BUFFERS_TAG,
+						   startbuf * sizeof(RewindItem),
+						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
 			buffer_loaded = true;
 		}
 
