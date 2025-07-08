@@ -387,6 +387,10 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 	RewindItem *rewindItem;
 	RewindItem	tmpbuf[REWIND_DISK_BUFFER_LENGTH];
 	uint64		pos;
+	uint64		cur_read;
+	uint64		cur_write;
+	uint64		reserved;
+	uint64		filled;
 	int			nsubxids = 0;
 	int			subxids_count = 0;
 	bool		got_all_subxids = false;
@@ -404,6 +408,45 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 #ifdef REWIND_DEBUG_MODE
 	log_print_rewind_queue();
 #endif
+	/*
+	 * Bump rewindMeta->addPosFilledUpto compacting all filled entries between
+	 * addPosFilledUpto and addPosReserved and dropping non-filled ones
+	 */
+	pg_read_barrier();
+	reserved = pg_atomic_read_u64(&rewindMeta->addPosReserved);
+	filled = pg_atomic_read_u64(&rewindMeta->addPosFilledUpto);
+	cur_read = filled;
+	cur_write = filled;
+
+	while (cur_read < reserved)
+	{
+		if ((&rewindAddBuffer[cur_read % rewind_circular_buffer_size])->tag != EMPTY_ITEM_TAG)
+		{
+			if (cur_read != cur_write)
+			{
+				Assert(cur_write < cur_read);
+				memcpy(&rewindAddBuffer[cur_write % rewind_circular_buffer_size],
+				       &rewindAddBuffer[cur_read % rewind_circular_buffer_size],
+				       sizeof(RewindItem));
+				(&rewindAddBuffer[cur_read % rewind_circular_buffer_size])->tag = EMPTY_ITEM_TAG;
+			}
+
+			/*
+			 * Bump addPosFilledUpto.
+			 */
+			cur_read++;
+			cur_write++;
+
+			if (!pg_atomic_compare_exchange_u64(&rewindMeta->addPosFilledUpto, &filled, cur_write))
+				elog(ERROR, "Could not bump addPosFilledUpto");
+		}
+		else
+		{
+			/* Current item is not written yet */
+			cur_read++;
+		}
+	}
+
 	/* Decrement before, as addPosFilledUpto was a next element to add. */
 	pos = pg_atomic_sub_fetch_u64(&rewindMeta->addPosFilledUpto, 1);
 
