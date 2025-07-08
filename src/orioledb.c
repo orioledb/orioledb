@@ -90,7 +90,7 @@ Pointer		o_shared_buffers = NULL;
 OrioleDBPageDesc *page_descs = NULL;
 
 /* Custom GUC variables */
-int			main_buffers_guc;
+static int	main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
 int			max_procs;

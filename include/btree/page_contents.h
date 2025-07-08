@@ -64,7 +64,8 @@ typedef struct
 {
 	uint32		shortLocation:12,
 				offset:10,
-				hikeyShortLocation:8,
+				hikeyShortLocation:7,
+				chunkKeysFixed:1,
 				hikeyFlags:2;
 } BTreePageChunkDesc;
 
@@ -139,6 +140,7 @@ typedef struct
 #define O_BTREE_FLAG_LEAF				(0x0004)
 #define O_BTREE_FLAG_BROKEN_SPLIT		(0x0008)
 #define O_BTREE_FLAG_PRE_CLEANUP		(0x0010)
+#define O_BTREE_FLAG_HIKEYS_FIXED		(0x0020)
 #define O_BTREE_FLAGS_ROOT_INIT		(O_BTREE_FLAG_LEAF | O_BTREE_FLAG_RIGHTMOST | O_BTREE_FLAG_LEFTMOST)
 
 /* Check given property of B-tree page */
@@ -345,13 +347,15 @@ extern bool o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 							  uint32 pageChangeCount, Page img, CommitSeqNo csn,
 							  void *key, BTreeKeyType keyType,
 							  OFixedKey *lokey, PartialPageState *partial,
-							  UndoLocation *undoLocation, CommitSeqNo *readCsn);
+							  bool loadHikeysChunk, UndoLocation *undoLocation,
+							  CommitSeqNo *readCsn);
 extern ReadPageResult o_btree_try_read_page(BTreeDescr *desc,
 											OInMemoryBlkno blkno,
 											uint32 pageChangeCount, Page img,
 											CommitSeqNo csn,
 											Pointer key, BTreeKeyType keyType,
 											PartialPageState *partial,
+											bool loadHikeysChunk,
 											CommitSeqNo *readCsn);
 extern UndoLocation read_page_from_undo(BTreeDescr *desc, Page img,
 										UndoLocation undo_loc,

@@ -30,8 +30,10 @@ typedef struct
 	bool		newItem;
 } BTreePageItem;
 
+extern bool partial_load_hikeys_chunk(PartialPageState *partial, Page img);
 extern bool partial_load_chunk(PartialPageState *partial, Page img,
-							   OffsetNumber chunkOffset);
+							   OffsetNumber chunkOffset,
+							   BTreePageItemLocator *loc);
 extern BTreeItemPageFitType page_locator_fits_item(BTreeDescr *desc,
 												   Page p,
 												   BTreePageItemLocator *locator,

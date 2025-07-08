@@ -27,14 +27,21 @@ struct PartialPageState
 {
 	Page		src;
 	bool		isPartial;
+	bool		hikeysChunkIsLoaded;
 	bool		chunkIsLoaded[BTREE_PAGE_MAX_CHUNKS];
 };
+
+typedef struct OPageCacheEntry OPageCacheEntry;
 
 typedef struct
 {
 	BTreeDescr *desc;
-	char		img[ORIOLEDB_BLCKSZ];
-	char		parentImg[ORIOLEDB_BLCKSZ];
+	Pointer		img;
+	Pointer		parentImg;
+	OPageCacheEntry *imgEntry;
+	OPageCacheEntry *parentImgEntry;
+	char		imgData[ORIOLEDB_BLCKSZ];
+	char		parentImgData[ORIOLEDB_BLCKSZ];
 	PartialPageState partial;
 	CommitSeqNo csn;
 	CommitSeqNo imgReadCsn;

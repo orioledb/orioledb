@@ -2569,7 +2569,9 @@ retry:
 		unlock_page(blkno);
 
 		if (!is_root)
+		{
 			unlock_page(context.items[context.index].blkno);
+		}
 		return OWalkPageSkipped;
 	}
 

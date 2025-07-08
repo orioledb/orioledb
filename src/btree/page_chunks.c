@@ -21,6 +21,7 @@
 #include "btree/undo.h"
 #include "recovery/recovery.h"
 #include "transam/undo.h"
+#include "tuple/format.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
 
@@ -37,7 +38,7 @@ static void reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
  * Load chunk to the partial page.
  */
 bool
-partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset)
+partial_load_hikeys_chunk(PartialPageState *partial, Page img)
 {
 	uint32		imgState,
 				srcState;
@@ -46,14 +47,11 @@ partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset
 				chunkEnd;
 	BTreePageHeader *header = (BTreePageHeader *) img;
 
-	if (!partial->isPartial || partial->chunkIsLoaded[chunkOffset])
+	if (!partial->isPartial || partial->hikeysChunkIsLoaded)
 		return true;
 
-	chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
-	if (chunkOffset + 1 < header->chunksCount)
-		chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
-	else
-		chunkEnd = header->dataSize;
+	chunkBegin = offsetof(BTreePageHeader, chunkDesc);
+	chunkEnd = header->hikeysEnd;
 
 	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
 	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
@@ -73,7 +71,97 @@ partial_load_chunk(PartialPageState *partial, Page img, OffsetNumber chunkOffset
 	if (O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
 		return false;
 
+	partial->hikeysChunkIsLoaded = true;
+	return true;
+}
+
+/*
+ * Load chunk to the partial page.
+ */
+bool
+partial_load_chunk(PartialPageState *partial, Page img,
+				   OffsetNumber chunkOffset, BTreePageItemLocator *loc)
+{
+	uint32		imgState = pg_atomic_read_u32(&(O_PAGE_HEADER(img)->state)),
+				srcState;
+	Page		src = partial->src;
+	LocationIndex chunkBegin,
+				chunkEnd;
+	BTreePageHeader *header;
+
+	if (!partial->isPartial || partial->chunkIsLoaded[chunkOffset])
+		return true;
+
+	if (partial->hikeysChunkIsLoaded)
+	{
+		header = (BTreePageHeader *) img;
+		chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
+		if (chunkOffset + 1 < header->chunksCount)
+		{
+			if (loc)
+				loc->chunkItemsCount = header->chunkDesc[chunkOffset + 1].offset -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
+		}
+		else
+		{
+			if (loc)
+				loc->chunkItemsCount = header->itemsCount -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = header->dataSize;
+		}
+	}
+	else
+	{
+		header = (BTreePageHeader *) src;
+		chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
+		if (chunkOffset + 1 < header->chunksCount)
+		{
+			if (loc)
+				loc->chunkItemsCount = header->chunkDesc[chunkOffset + 1].offset -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[chunkOffset + 1].shortLocation);
+		}
+		else
+		{
+			if (loc)
+				loc->chunkItemsCount = header->itemsCount -
+					header->chunkDesc[chunkOffset].offset;
+			chunkEnd = header->dataSize;
+		}
+
+		pg_read_barrier();
+
+		srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+		if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+			O_PAGE_STATE_READ_IS_BLOCKED(srcState))
+			return false;
+	}
+
+	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
+	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
+
+	memcpy((Pointer) img + chunkBegin,
+		   (Pointer) src + chunkBegin,
+		   chunkEnd - chunkBegin);
+
+	pg_read_barrier();
+
+	srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
+		return false;
+
+	if (O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
+		return false;
+
 	partial->chunkIsLoaded[chunkOffset] = true;
+	if (loc)
+	{
+		loc->chunkOffset = chunkOffset;
+		loc->itemOffset = 0;
+		loc->chunk = (BTreePageChunk *) ((Pointer) img + chunkBegin);
+	}
 	return true;
 }
 
@@ -312,6 +400,9 @@ init_page_first_chunk(BTreeDescr *desc, Page p, LocationIndex hikeySize)
 
 	Assert(hikeySize == MAXALIGN(hikeySize));
 
+	if (hikeySize == 0)
+		header->flags |= O_BTREE_FLAG_HIKEYS_FIXED;
+
 	header->chunksCount = 1;
 	header->itemsCount = 0;
 
@@ -325,6 +416,7 @@ init_page_first_chunk(BTreeDescr *desc, Page p, LocationIndex hikeySize)
 	header->chunkDesc[0].shortLocation = LOCATION_GET_SHORT(header->dataSize);
 	header->chunkDesc[0].offset = 0;
 	header->chunkDesc[0].hikeyFlags = 0;
+	header->chunkDesc[0].chunkKeysFixed = 1;
 }
 
 void
@@ -697,10 +789,12 @@ page_merge_chunks(Page p, OffsetNumber index)
 	len2 = header->hikeysEnd - SHORT_GET_LOCATION(header->chunkDesc[index + 1].hikeyShortLocation);
 
 	header->chunkDesc[index].hikeyFlags = header->chunkDesc[index + 1].hikeyFlags;
+	header->chunkDesc[index].chunkKeysFixed &= header->chunkDesc[index + 1].chunkKeysFixed;
 	for (i = index + 2; i < header->chunksCount; i++)
 	{
 		header->chunkDesc[i - 1].offset = header->chunkDesc[i].offset;
 		header->chunkDesc[i - 1].hikeyFlags = header->chunkDesc[i].hikeyFlags;
+		header->chunkDesc[i - 1].chunkKeysFixed = header->chunkDesc[i].chunkKeysFixed;
 		header->chunkDesc[i - 1].hikeyShortLocation = header->chunkDesc[i].hikeyShortLocation - LOCATION_GET_SHORT(hikeyShift2);
 		header->chunkDesc[i - 1].shortLocation = header->chunkDesc[i].shortLocation - LOCATION_GET_SHORT(shift2);
 	}
@@ -718,6 +812,14 @@ page_merge_chunks(Page p, OffsetNumber index)
 
 	header->hikeysEnd -= hikeyShift2;
 	header->chunksCount--;
+
+	header->flags |= O_BTREE_FLAG_HIKEYS_FIXED;
+	for (i = 0; i < header->chunksCount; i++)
+	{
+		if (!(header->chunkDesc[i].hikeyFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+			header->flags &= ~O_BTREE_FLAG_HIKEYS_FIXED;
+	}
+
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 }
 
@@ -822,10 +924,13 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 				firstHikeyPtr,
 				hikeyPtr,
 				hikeyEndPtr;
+	bool		leftChunkKeysFixed = true,
+				rightChunkKeysFixed = true;
 	OffsetNumber i,
 				leftItemsCount,
 				rightItemsCount;
 	BTreePageHeader *header = (BTreePageHeader *) p;
+
 
 	Assert(hikeySize == MAXALIGN(hikeySize));
 
@@ -849,7 +954,11 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	rightItemsShift = ITEM_GET_OFFSET(locator->chunk->items[locator->itemOffset]) -
 		MAXALIGN(sizeof(LocationIndex) * rightItemsCount);
 	for (i = locator->itemOffset; i < locator->chunkItemsCount; i++)
+	{
+		if (!(ITEM_GET_FLAGS(locator->chunk->items[i]) & O_TUPLE_FLAGS_FIXED_FORMAT))
+			rightChunkKeysFixed = false;
 		tmpItems[i - locator->itemOffset] = locator->chunk->items[i] - rightItemsShift;
+	}
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(tmpItems, sizeof(tmpItems[0]) * rightItemsCount);
 
@@ -858,7 +967,11 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	 * items array.
 	 */
 	for (i = 0; i < locator->itemOffset; i++)
+	{
+		if (!(ITEM_GET_FLAGS(locator->chunk->items[i]) & O_TUPLE_FLAGS_FIXED_FORMAT))
+			leftChunkKeysFixed = false;
 		locator->chunk->items[i] -= leftItemsShift;
+	}
 	memmove(firstItemPtr - leftItemsShift,
 			firstItemPtr,
 			itemPtr - firstItemPtr);
@@ -909,6 +1022,7 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 		header->chunkDesc[i].hikeyShortLocation = header->chunkDesc[i - 1].hikeyShortLocation + LOCATION_GET_SHORT(hikeyShift);
 		header->chunkDesc[i].hikeyFlags = header->chunkDesc[i - 1].hikeyFlags;
 		header->chunkDesc[i].offset = header->chunkDesc[i - 1].offset;
+		header->chunkDesc[i].chunkKeysFixed = header->chunkDesc[i - 1].chunkKeysFixed;
 		header->chunkDesc[i].shortLocation = header->chunkDesc[i - 1].shortLocation + LOCATION_GET_SHORT(dataShift);
 	}
 
@@ -918,6 +1032,8 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	header->chunkDesc[i].offset = header->chunkDesc[i - 1].offset + leftItemsCount;
 	header->chunkDesc[i].shortLocation = LOCATION_GET_SHORT(rightChunkPtr - (Pointer) p);
 	header->chunkDesc[i].hikeyFlags = header->chunkDesc[i - 1].hikeyFlags;
+	header->chunkDesc[i].chunkKeysFixed = rightChunkKeysFixed ? 1 : 0;
+	header->chunkDesc[i - 1].chunkKeysFixed = leftChunkKeysFixed ? 1 : 0;
 	header->chunksCount++;
 	header->hikeysEnd += hikeyShift;
 	header->dataSize += dataShift;
@@ -1054,6 +1170,8 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 		   newHikey.fixedData,
 		   bestHiKeySize);
 	header->chunkDesc[chunkOffset].hikeyFlags = newHikey.tuple.formatFlags;
+	if (!(newHikey.tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+		header->flags &= ~O_BTREE_FLAG_HIKEYS_FIXED;
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 }
@@ -1134,6 +1252,8 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	Pointer		ptr,
 				hikeysPtr;
+	bool		chunkFixedKeys[BTREE_PAGE_MAX_CHUNKS];
+	bool		fixedKeys = true;
 	OffsetNumber chunkOffsets[BTREE_PAGE_MAX_CHUNKS + 1];
 	LocationIndex itemsArray[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			i,
@@ -1169,7 +1289,11 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	j = 1;
 	chunkDataSize = 0;
 	if (count >= 1)
+	{
 		chunkDataSize += items[0].size;
+		if (O_PAGE_IS(p, LEAF) && !(items[0].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
+			fixedKeys = false;
+	}
 	if (O_PAGE_IS(p, LEAF) && count > 0)
 		maxKeyLen = Max(maxKeyLen, item_get_key_size(desc, O_PAGE_IS(p, LEAF), &items[0]));
 
@@ -1190,6 +1314,8 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 		if (hikeySizeDiff > hikeysFreeSpaceLeft ||
 			dataSpaceDiff > dataFreeSpaceLeft)
 		{
+			if (!(items[i].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
+				fixedKeys = false;
 			chunkDataSize += items[i].size;
 			continue;
 		}
@@ -1201,14 +1327,19 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			hikeysFreeSpaceLeft -= hikeySizeDiff;
 			dataFreeSpaceLeft -= dataSpaceDiff;
 			chunkOffsets[j] = i;
+			chunkFixedKeys[j - 1] = fixedKeys;
+			fixedKeys = true;
 			chunkDataSize = 0;
 			j++;
 		}
 
+		if (!(items[i].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
+			fixedKeys = false;
 		chunkDataSize += items[i].size;
 	}
 	Assert(j <= BTREE_PAGE_MAX_CHUNKS);
 	chunkOffsets[j] = count;
+	chunkFixedKeys[j - 1] = fixedKeys;
 	chunksCount = j;
 
 	/* Calculate chunk items */
@@ -1259,6 +1390,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	/* Place chunks item arrays and fill chunk descs */
 	Assert(ptr == (Pointer) p + hikeysEnd);
 	hikeysPtr = (Pointer) p + MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * chunksCount);
+	fixedKeys = true;
 	for (j = 0; j < chunksCount; j++)
 	{
 		OffsetNumber chunkItemsCount;
@@ -1270,6 +1402,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 		chunk = (BTreePageChunk *) ptr;
 		header->chunkDesc[j].shortLocation = LOCATION_GET_SHORT(ptr - (Pointer) p);
 		header->chunkDesc[j].offset = chunkOffsets[j];
+		header->chunkDesc[j].chunkKeysFixed = chunkFixedKeys[j];
 		ptr += MAXALIGN(sizeof(LocationIndex) * chunkItemsCount);
 
 		for (i = chunkOffsets[j]; i < chunkOffsets[j + 1]; i++)
@@ -1319,6 +1452,8 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			}
 
 			chunkHikeySize = MAXALIGN(o_btree_len(desc, chunkHikeyTuple, OKeyLength));
+			if (!(chunkHikeyTuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+				fixedKeys = false;
 			if (chunkHikeyTuple.data != hikeysPtr)
 				memcpy(hikeysPtr, chunkHikeyTuple.data, chunkHikeySize);
 			header->chunkDesc[j - 1].hikeyFlags = chunkHikeyTuple.formatFlags;
@@ -1331,6 +1466,8 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	/* Place page hikey */
 	if (!isRightmost)
 	{
+		if (!(hikey.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+			fixedKeys = false;
 		memcpy(hikeysPtr, hikey.data, hikeySize);
 		if (hikeySize != MAXALIGN(hikeySize))
 			memset(hikeysPtr + hikeySize, 0, MAXALIGN(hikeySize) - hikeySize);
@@ -1346,6 +1483,9 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	}
 	header->hikeysEnd = hikeysPtr - (Pointer) p;
 	header->itemsCount = count;
+	header->flags |= O_BTREE_FLAG_HIKEYS_FIXED;
+	if (!fixedKeys)
+		header->flags &= ~O_BTREE_FLAG_HIKEYS_FIXED;
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 }
 
@@ -1396,7 +1536,7 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 		offset = locator->itemOffset - locator->chunkItemsCount;
 		if (partial)
 		{
-			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1))
+			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1, NULL))
 				return false;
 		}
 		page_chunk_fill_locator(p, locator->chunkOffset + 1, locator);

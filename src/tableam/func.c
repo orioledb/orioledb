@@ -174,6 +174,9 @@ init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg)
 			case 'f':
 				printOptions->printFormatFlags = true;
 				break;
+			case 'F':
+				printOptions->printFixedFlags = true;
+				break;
 			default:
 				ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 								(errmsg("invalid option '%c'", options[i]))));

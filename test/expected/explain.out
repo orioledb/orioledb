@@ -238,9 +238,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')

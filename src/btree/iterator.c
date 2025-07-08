@@ -121,8 +121,8 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 {
 	BTreePageItemLocator loc;
 	OBTreeFindPageContext context;
-	char	   *img = context.img;
-	BTreePageHeader *header = (BTreePageHeader *) img;
+	char	   *img;
+	BTreePageHeader *header;
 	bool		combinedResult = false;
 	OTuple		result;
 
@@ -140,6 +140,8 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		(void) find_page(&context, key, kind, 0);
 
 	loc = context.items[context.index].locator;
+	img = context.img;
+	header = (BTreePageHeader *) img;
 
 	/* Adjust hint if given */
 	if (hint)
@@ -203,8 +205,10 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 			*deleted = (tupHdr->deleted != BTreeLeafTupleNonDeleted);
 
 		if (cmp == 0)
+		{
 			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
 										out_csn, mcxt, cb, arg);
+		}
 	}
 
 	/* Tuple isn't found */
@@ -503,6 +507,8 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 	BTreeDescr *desc = it->context.desc;
 	OTuple		result;
 
+	ASAN_UNPOISON_MEMORY_REGION(&result, sizeof(result));
+
 	result = o_btree_iterator_fetch_internal(it, tupleCsn);
 
 	if (!O_TUPLE_IS_NULL(result) && end != NULL)
@@ -750,7 +756,6 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 	OBTreeFindPageContext *context = &it->context;
 	Page		img = context->img,
 				hImg = it->undoIt.image;
-	BTreePageHeader *header = (BTreePageHeader *) img;
 	BTreeDescr *desc = context->desc;
 	OFixedKey	key_buf;
 
@@ -760,6 +765,7 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 	while (!BTREE_PAGE_LOCATOR_IS_VALID(img, &context->items[context->index].locator))
 	{
 		bool		step_result;
+		BTreePageHeader *header;
 
 		if (IS_LAST_PAGE(img, it))
 			return false;
@@ -771,6 +777,8 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 
 		if (!step_result)
 			return false;
+
+		header = (BTreePageHeader *) context->img;
 
 		if (it->combinedResult && header->csn >= it->oSnapshot.csn)
 		{
