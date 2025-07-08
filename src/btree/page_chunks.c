@@ -1289,11 +1289,13 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	j = 1;
 	chunkDataSize = 0;
 	if (count >= 1)
+	{
 		chunkDataSize += items[0].size;
+		if (O_PAGE_IS(p, LEAF) && !(items[0].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
+			fixedKeys = false;
+	}
 	if (O_PAGE_IS(p, LEAF) && count > 0)
 		maxKeyLen = Max(maxKeyLen, item_get_key_size(desc, O_PAGE_IS(p, LEAF), &items[0]));
-	if (O_PAGE_IS(p, LEAF) && !(items[0].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
-		fixedKeys = false;
 
 	for (i = 1; i < count; i++)
 	{
