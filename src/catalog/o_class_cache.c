@@ -25,6 +25,8 @@
 #include "access/relation.h"
 #include "access/xlogrecovery.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_enum.h"
+#include "catalog/pg_range.h"
 #include "commands/defrem.h"
 #include "miscadmin.h"
 #include "utils/catcache.h"
@@ -227,4 +229,46 @@ o_class_cache_search_tupdesc(Oid cc_reloid)
 		result->tdrefcount = 0;
 	}
 	return result;
+}
+
+void
+o_class_cache_preload_for_column(Oid typoid)
+{
+	Oid			datoid;
+	XLogRecPtr	cur_lsn;
+	OClass	   *o_class PG_USED_FOR_ASSERTS_ONLY;
+	bool		found;
+	char		typtype;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+
+	found = o_type_cache_get_typtype(typoid, &typtype);
+
+	/* if not found this is probably an array type */
+	if (found)
+	{
+		o_class = o_class_cache_search(datoid, TypeRelationId, cur_lsn,
+									class_cache->nkeys);
+		Assert(o_class);
+		switch (typtype)
+		{
+			case TYPTYPE_RANGE:
+			case TYPTYPE_MULTIRANGE:
+				{
+					o_class = o_class_cache_search(datoid, RangeRelationId, cur_lsn,
+												class_cache->nkeys);
+					Assert(o_class);
+				}
+				break;
+			case TYPTYPE_ENUM:
+				{
+					o_class = o_class_cache_search(datoid, EnumRelationId, cur_lsn,
+												class_cache->nkeys);
+					Assert(o_class);
+				}
+				break;
+			default:
+				break;
+		}
+	}
 }

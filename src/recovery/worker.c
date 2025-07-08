@@ -692,6 +692,8 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
+		int			attnum;
+
 		isPrimary = (i == PrimaryIndexNumber);
 		id = descr->indices[i];
 
@@ -709,6 +711,12 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		cur_tuple = isPrimary ? tuple : stuple;
 
 		o_btree_load_shmem(&id->desc);
+		for (attnum = 0; attnum < id->nonLeafTupdesc->natts; attnum++)
+		{
+			FormData_pg_attribute attr = id->nonLeafTupdesc->attrs[attnum];
+
+			o_class_cache_preload_for_column(attr.atttypid);
+		}
 
 		if (isPrimary)
 		{

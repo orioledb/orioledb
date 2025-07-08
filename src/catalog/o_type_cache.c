@@ -178,8 +178,8 @@ o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid)
 	return typetup;
 }
 
-Oid
-o_type_cache_get_typrelid(Oid typeoid)
+bool
+o_type_cache_get_typtype(Oid typeoid, char *typtype)
 {
 	XLogRecPtr	cur_lsn;
 	Oid			datoid;
@@ -187,8 +187,13 @@ o_type_cache_get_typrelid(Oid typeoid)
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_type = o_type_cache_search(datoid, typeoid, cur_lsn, type_cache->nkeys);
-	Assert(o_type);
-	return o_type->typrelid;
+	if (o_type)
+	{
+		*typtype = o_type->typtype;
+		return true;
+	}
+	else
+		return false;
 }
 
 Oid

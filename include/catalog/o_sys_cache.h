@@ -475,6 +475,7 @@ typedef struct OClassArg
 
 O_SYS_CACHE_DECLS(class_cache, OClass, 1);
 extern TupleDesc o_class_cache_search_tupdesc(Oid cc_reloid);
+extern void o_class_cache_preload_for_column(Oid typoid);
 
 /* o_opclass_cache.c */
 typedef struct OOpclass
@@ -537,7 +538,6 @@ typedef struct OType
 } OType;
 
 O_SYS_CACHE_DECLS(type_cache, OType, 1);
-extern Oid	o_type_cache_get_typrelid(Oid typeoid);
 extern HeapTuple o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid);
 extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 								   char *typalign, char *typstorage,
@@ -545,6 +545,7 @@ extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 extern Oid	o_type_cache_default_opclass(Oid typeoid, Oid am_id);
 extern void o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
+extern bool	o_type_cache_get_typtype(Oid typeoid, char *typtype);
 
 /* o_aggregate_cache.c */
 typedef struct OAggregate OAggregate;
