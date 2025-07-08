@@ -1585,9 +1585,6 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 									   &scanEnd, NULL);
 	while (!scanEnd)
 	{
-		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
-										   &scanEnd, NULL);
-
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
 			tts_orioledb_store_tuple(slot, tuple, descr, COMMITSEQNO_INPROGRESS,
@@ -1637,6 +1634,8 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 		{
 			deadrows += 1;
 		}
+		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
+										   &scanEnd, NULL);
 	}
 	free_btree_seq_scan(scan);
 
