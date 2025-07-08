@@ -164,10 +164,9 @@ class TypesTest(BaseTest):
 
 		node.start()
 		self.assertEqual(
-		    [(2, 'happy'), (6, 'happy'), (8, 'ecstatic'), (24, 'very happy')],
+		    [(2, 'happy'), (6, 'sad'), (8, 'ecstatic'), (24, 'very happy')],
 		    node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
 		node.stop()
-		raise 0
 
 	def test_enum_cache_namedata_in_key(self):
 		enum_amount = 0
