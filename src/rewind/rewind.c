@@ -1386,7 +1386,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	uint64		reserved;
 	uint64		filled;
 	uint64		cur;
-	int			freeAddSpace;
+	int64		freeAddSpace;
 	bool		subxid_only = false;
 	int			subxids_count = 0;
 	int			nitems;
@@ -1411,7 +1411,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 		 * for eviction in the same way. So double eviction is possible and OK
 		 * but very unlikely.
 		 */
-		freeAddSpace = rewind_circular_buffer_size - (startAddPos + nitems - rewindMeta->evictPos);
+		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos + rewindMeta->evictPos - nitems);
 		elog(DEBUG3, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%u", pg_atomic_read_u64(&rewindMeta->addPosFilledUpto), pg_atomic_read_u64(&rewindMeta->addPosReserved), rewindMeta->evictPos, rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 
 		if (freeAddSpace <= REWIND_DISK_BUFFER_LENGTH * 4 || (rewind_circular_buffer_size < REWIND_DISK_BUFFER_LENGTH * 8 && freeAddSpace <= REWIND_DISK_BUFFER_LENGTH))
