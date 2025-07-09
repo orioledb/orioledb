@@ -3830,7 +3830,6 @@ o_ddl_cleanup(void)
 	{
 		list_free_deep(reindex_list);
 		reindex_list = NIL;
-		elog(WARNING, "reindex_list NIL IT 4: %s", nodeToString(reindex_list));
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
