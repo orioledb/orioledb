@@ -30,13 +30,13 @@ Parameters to limit retaining rewind data:
 
 After setting the GUC parameters above start the cluster. From this time rewind data will be stored into a temporary rewind buffer and could be used to rewind.
 
-To rewind run:
+[Full description of configuration parameters] (configuration.mdx#options-for-undo-based-rewind-experimental)
 
-`select orioledb_rewind_by_time(1000);` - this will rewind all transactions committed after 1000 seconds before present
-or
-`orioledb_rewind_to_timestamp(<timestamptz>);` this will rewind all transactions committed after specified timestamp
-or
-```
+To rewind run one of the queries:
+
+- `select orioledb_rewind_by_time(1000);`  -- rewind all transactions committed after 1000 seconds before present
+- `select orioledb_rewind_to_timestamp(<timestamptz>);` -- rewind all transactions committed after specified timestamp
+- ```
 select orioledb_get_current_oxid();
 
  orioledb_get_current_oxid
@@ -53,11 +53,11 @@ pg_current_xact_id
 
 orioledb_rewind_to_transaction(1750, 555);
 ```
-This will rewind a cluster to a previously acquires transaction state specified by a pair of `(xid, oxid)`
+This will rewind a cluster to a previously acquired transaction state specified by a pair of `(xid, oxid)`
 
-After rewind database shuts down. Start it again and get it in a requested working state in the past.
+After rewind database shuts down. Start it again and you'll get it in a requested working state in the past.
 
-Trying to rewind past time theshold will output error. Trying to rewind to xid/oxid past max_transactions treshold will rewind upto maximum number of transactions.
+Trying to rewind past time or xid theshold will output error. Trying to rewind to xid/oxid past max_transactions treshold will rewind upto maximum number of transactions.
 
 To check if you can rewind to a precise transaction:
 ```
@@ -74,7 +74,9 @@ select orioledb_get_complete_xid();
 ```
 You can rewind to a precise transaction oxid 555 xid 1750 as if both numbers are bigger than the oldest that are now stored in the rewind buffer (oxid 3 xid 738).
 
-As mentioned above rewind mode is currently experimental. The major limitations of this mode are the following.
+All configuration options for resind
+
+As mentioned above, rewind mode is currently experimental. The major limitations of this mode are the following.
 
 1. Undo-based rewind is limited to a cluster uptime. Rewind buffer is not persistent and you can not rewind past cluster start time.
 2. Starting database after rewind could not be done by the backend that invokes rewind. So database will be shut down after rewind and then the user should start it.

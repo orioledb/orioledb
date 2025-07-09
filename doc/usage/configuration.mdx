@@ -187,9 +187,9 @@ Maximum age in seconds from now of transaction after which it is completed and r
 | ----------- | ----- |
 | **Default** | 86400 |
 
-Maximum number of rewind transaction items that are stored for a rewind. Older items are completed and removed from the buffer sothis specifies maximum rewind age. If there are subtransactions they also occupy items in a rewind buffer.
+Maximum number of rewind transaction items that are stored for a rewind. Older rewind transaction items are completed and removed from the buffer so this specifies maximum rewind age. If there are subtransactions they also occupy rewind items in a rewind buffer.
 
-`orioledb.rewind_max_transactions` and `orioledb.rewind_max_time` work together so if a transaction is older than any of these thresholds it is completed and could not be rewound anymmore.
+`orioledb.rewind_max_transactions` and `orioledb.rewind_max_time` work together so if a transaction is older than any one of these thresholds it is past the rewind capability and could not be rewound to.
 
 ### `orioledb.rewind_buffers`
 
@@ -197,7 +197,7 @@ Maximum number of rewind transaction items that are stored for a rewind. Older i
 | ----------- | --- |
 | **Default** | 128 |
 
-Number of orioledb engine in-memory rewind buffers in blocks. Each block accommodate 68 rewind transaction items. If you have enogh memory set it near a value `orioledb.rewind_max_transactions` / 68 to have all rewind buffers in memory.
+Number of orioledb in-memory rewind buffers in blocks. Each block can ccommodate 68 rewind transaction items. If you have enough memory set it near a value `orioledb.rewind_max_transactions` / 68 to avoid writing rewind info to disk.
 
 ## Debugging options
 
