@@ -4,7 +4,7 @@ import time
 import re
 import shutil
 import signal
-from tempfile import mkdtemp, mkstemp
+from tempfile import mkstemp
 
 from unittest.mock import patch
 
@@ -489,8 +489,6 @@ class S3Test(S3BaseTest):
 		                 node.execute("SELECT * FROM o_test_1"))
 		node.stop(['--no-wait'])
 
-		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
-
 		while self.client.list_objects(Bucket=self.bucket_name,
 		                               Prefix='wal/') == []:
 			pass
@@ -498,9 +496,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test',
-		                           base_dir=new_temp_dir,
-		                           port=self.getBasePort() + 1) as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -549,8 +545,6 @@ class S3Test(S3BaseTest):
 		                 node.execute("SELECT * FROM o_test_1"))
 		node.stop(['--no-wait'])
 
-		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
-
 		wal_prefix = os.path.join(prefix, 'wal/')
 		while self.client.list_objects(Bucket=self.bucket_name,
 		                               Prefix=wal_prefix) == []:
@@ -559,9 +553,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test',
-		                           base_dir=new_temp_dir,
-		                           port=self.getBasePort() + 1) as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -609,8 +601,6 @@ class S3Test(S3BaseTest):
 		                 node.execute("SELECT * FROM o_test_1"))
 		node.stop(['--no-wait'])
 
-		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
-
 		wal_prefix = os.path.join(self.optional_prefix, 'wal/')
 		while self.client.list_objects(Bucket=self.bucket_name,
 		                               Prefix=wal_prefix) == []:
@@ -619,9 +609,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test',
-		                           base_dir=new_temp_dir,
-		                           port=self.getBasePort() + 1) as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -666,8 +654,6 @@ class S3Test(S3BaseTest):
 		                 node.execute("SELECT * FROM o_test_1"))
 		node.stop(['--no-wait'])
 
-		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
-
 		wal_prefix = os.path.join(self.optional_prefix, 'wal/')
 		while self.client.list_objects(Bucket=self.bucket_name,
 		                               Prefix=wal_prefix) == []:
@@ -676,9 +662,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test',
-		                           base_dir=new_temp_dir,
-		                           port=self.getBasePort() + 1) as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -722,8 +706,6 @@ class S3Test(S3BaseTest):
 		                 node.execute("SELECT * FROM o_test_1"))
 		node.stop(['--no-wait'])
 
-		new_temp_dir = mkdtemp(prefix=self.myName + '_tgsb_')
-
 		wal_prefix = os.path.join(self.optional_prefix, 'wal/')
 		while self.client.list_objects(Bucket=self.bucket_name,
 		                               Prefix=wal_prefix) == []:
@@ -732,9 +714,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with testgres.get_new_node('test',
-		                           base_dir=new_temp_dir,
-		                           port=self.getBasePort() + 1) as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 

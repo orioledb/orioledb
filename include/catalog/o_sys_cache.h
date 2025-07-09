@@ -545,7 +545,7 @@ extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 extern Oid	o_type_cache_default_opclass(Oid typeoid, Oid am_id);
 extern void o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
-extern bool	o_type_cache_get_typtype(Oid typeoid, char *typtype);
+extern bool o_type_cache_get_typtype(Oid typeoid, char *typtype);
 
 /* o_aggregate_cache.c */
 typedef struct OAggregate OAggregate;

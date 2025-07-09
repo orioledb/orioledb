@@ -248,7 +248,7 @@ o_class_cache_preload_for_column(Oid typoid)
 	if (found)
 	{
 		o_class = o_class_cache_search(datoid, TypeRelationId, cur_lsn,
-									class_cache->nkeys);
+									   class_cache->nkeys);
 		Assert(o_class);
 		switch (typtype)
 		{
@@ -256,14 +256,14 @@ o_class_cache_preload_for_column(Oid typoid)
 			case TYPTYPE_MULTIRANGE:
 				{
 					o_class = o_class_cache_search(datoid, RangeRelationId, cur_lsn,
-												class_cache->nkeys);
+												   class_cache->nkeys);
 					Assert(o_class);
 				}
 				break;
 			case TYPTYPE_ENUM:
 				{
 					o_class = o_class_cache_search(datoid, EnumRelationId, cur_lsn,
-												class_cache->nkeys);
+												   class_cache->nkeys);
 					Assert(o_class);
 				}
 				break;
