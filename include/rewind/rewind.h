@@ -97,6 +97,8 @@ typedef struct
 	bool		rewindWorkerStopRequested;
 	bool		rewindWorkerStopped;
 	bool		addToRewindQueueDisabled;
+	TransactionId complete_xid;
+	OXid		complete_oxid;
 	TransactionId force_complete_xid;
 	OXid		force_complete_oxid;
 
