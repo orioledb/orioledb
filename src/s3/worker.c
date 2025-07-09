@@ -16,6 +16,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
+#include "catalog/o_sys_cache.h"
 #include "s3/checksum.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
@@ -671,6 +672,14 @@ s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
 	S3TaskLocation location;
 	S3PartStatus status;
 	S3HeaderTag tag = {.datoid = datoid,.relnode = relnode,.checkpointNum = chkpNum,.segNum = segNum};
+	char	   *prefix;
+	char	   *db_prefix;
+
+	o_get_prefixes_for_relnode(datoid, relnode,
+							   &prefix, &db_prefix);
+	o_verify_dir_exists_or_create(prefix, NULL, NULL);
+	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+	pfree(db_prefix);
 
 	status = s3_header_mark_part_loading(tag, partNum);
 	if (status == S3PartStatusLoading)
