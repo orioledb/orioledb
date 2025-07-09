@@ -129,8 +129,11 @@ o_get_prefixes_for_relnode(Oid datoid, Oid relnode, char **prefix, char **db_pre
 {
 	XLogRecPtr	cur_lsn;
 	Oid			tablespace = DEFAULTTABLESPACE_OID;
+	bool		cache_inited = true;
 
-	if (datoid != SYS_TREES_DATOID)
+	cache_inited = get_sys_tree_no_init(SYS_TREES_TABLESPACE_CACHE) != NULL;
+
+	if (datoid != SYS_TREES_DATOID && cache_inited)
 	{
 		OTablespace *o_tablespace = NULL;
 
@@ -138,8 +141,6 @@ o_get_prefixes_for_relnode(Oid datoid, Oid relnode, char **prefix, char **db_pre
 		o_tablespace = o_tablespace_cache_search(datoid, relnode, cur_lsn, tablespace_cache->nkeys);
 		if (o_tablespace)
 			tablespace = o_tablespace->tablespace;
-		else
-			tablespace = DEFAULTTABLESPACE_OID;
 	}
 
 	o_get_prefixes_for_tablespace(datoid, tablespace, prefix, db_prefix);
