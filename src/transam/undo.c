@@ -777,9 +777,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		STOPEVENT(STOPEVENT_BEFORE_APPLY_UNDO, params);
 	}
 
-	ASAN_UNPOISON_MEMORY_REGION(&buf, sizeof(buf));
-	init_undo_item_buf(&buf);
-
 	if (!abortTrx)
 	{
 		/*
