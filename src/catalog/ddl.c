@@ -1234,6 +1234,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		if (has_orioledb && concurrently)
 		{
+			if (tablespacename != NULL)
+			{
+				Oid			tablespaceOid = get_tablespace_oid(tablespacename, false);
+
+				if (tablespaceOid == GLOBALTABLESPACE_OID)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot move non-shared relation to tablespace \"%s\"",
+									get_tablespace_name(tablespaceOid))));
+			}
+
 			elog(WARNING, "Concurrent REINDEX not implemented for orioledb tables yet, using simple one");
 			foreach(lc, stmt->params)
 			{
