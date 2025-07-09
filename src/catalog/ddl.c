@@ -501,7 +501,6 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	ScanKeyData scan_keys[1];
 	HeapTuple	tuple;
 	MemoryContext private_context;
-	MemoryContext old;
 	int			num_keys;
 	bool		concurrent_warning = false;
 	bool		has_orioledb = false;
@@ -681,9 +680,6 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			continue;
 		}
 
-		/* Save the list of relation OIDs in private context */
-		old = MemoryContextSwitchTo(private_context);
-
 		tbl = relation_open(relid, AccessShareLock);
 		if (is_orioledb_rel(tbl))
 		{
@@ -708,8 +704,6 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 				has_orioledb = true;
 		}
 		relation_close(tbl, AccessShareLock);
-
-		MemoryContextSwitchTo(old);
 	}
 	table_endscan(scan);
 	table_close(relationRelation, AccessShareLock);
@@ -1219,9 +1213,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 								reindex_list = list_append_unique(reindex_list, ix_name);
 							}
 							relation_close(ind, AccessShareLock);
+							if (concurrently)
+								has_orioledb = true;
 						}
-						if (concurrently)
-							has_orioledb = true;
 					}
 					relation_close(tbl, AccessShareLock);
 				}
@@ -3836,6 +3830,7 @@ o_ddl_cleanup(void)
 	{
 		list_free_deep(reindex_list);
 		reindex_list = NIL;
+		elog(WARNING, "reindex_list NIL IT 4: %s", nodeToString(reindex_list));
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;

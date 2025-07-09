@@ -42,43 +42,43 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertTrue(err.decode("utf-8").split("\n")[0].find("pg_test_1"))
 
-		# Error for orioledb tables
+		# Using simple reindex instead of concurrent for orioledb tables
 		_, _, err = node.psql("""
 			SET SESSION search_path = 'ddl';
 			REINDEX (VERBOSE) TABLE CONCURRENTLY o_test_1;
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" "
-		    "does not support REINDEX CONCURRENTLY")
+		    "WARNING:  Concurrent REINDEX not implemented for "
+		    "orioledb tables yet, using simple one")
 
-		# Error for orioledb indices
+		# Using simple reindex instead of concurrent for orioledb indices
 		_, _, err = node.psql("""
 			SET SESSION search_path = 'ddl';
 			REINDEX (VERBOSE) INDEX CONCURRENTLY o_ind_1;
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" "
-		    "does not support REINDEX CONCURRENTLY")
+		    "WARNING:  Concurrent REINDEX not implemented for "
+		    "orioledb tables yet, using simple one")
 
-		# Error for schema containing orioledb tables
+		# Using simple reindex instead of concurrent for schema containing orioledb tables
 		_, _, err = node.psql("""
 			REINDEX (VERBOSE) SCHEMA CONCURRENTLY ddl;
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" "
-		    "does not support REINDEX CONCURRENTLY")
+		    "WARNING:  Concurrent REINDEX not implemented for "
+		    "orioledb tables yet, using simple one")
 
-		# Error for database containing orioledb tables
+		# Using simple reindex instead of concurrent for database containing orioledb tables
 		_, _, err = node.psql("""
 			REINDEX (VERBOSE) DATABASE CONCURRENTLY postgres;
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" "
-		    "does not support REINDEX CONCURRENTLY")
+		    "WARNING:  Concurrent REINDEX not implemented for "
+		    "orioledb tables yet, using simple one")
 
 		node.stop()
 
