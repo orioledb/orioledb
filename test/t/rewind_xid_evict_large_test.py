@@ -448,7 +448,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_oxid()'))[0]
 		oxidc = int(a)
-		self.assertEqual(oxidc - oxid1, 0)
+		self.assertEqual(oxidc - oxid1, -1)
 
 		node.safe_psql(
 		    'postgres',
@@ -533,7 +533,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_oxid()'))[0]
 		oxidc = int(a)
-		self.assertEqual(oxidc - oxid1, 7)
+		self.assertEqual(oxidc - oxid1, 6)
 
 		node.safe_psql(
 		    'postgres',
@@ -618,7 +618,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_xid()'))[0]
 		xidc = int(a)
-		self.assertEqual(xidc - xid1, 0)
+		self.assertEqual(xidc - xid1, -1)
 
 		node.safe_psql(
 		    'postgres',
@@ -703,7 +703,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_xid()'))[0]
 		xidc = int(a)
-		self.assertEqual(xidc - xid1, 7)
+		self.assertEqual(xidc - xid1, 6)
 
 		node.safe_psql(
 		    'postgres',
@@ -804,7 +804,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_xid()'))[0]
 		xidc = int(a)
-		self.assertEqual(xidc - xid1, 0)
+		self.assertEqual(xidc - xid1, -4)
 
 		node.safe_psql(
 		    'postgres',
@@ -904,7 +904,7 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_xid()'))[0]
 		xidc = int(a)
-		self.assertEqual(xidc - xid1, 25)
+		self.assertEqual(xidc - xid1, 21)
 
 		node.safe_psql(
 		    'postgres',
@@ -1264,11 +1264,11 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_xid()'))[0]
 		xidc = int(a)
-		self.assertEqual(xidc - xid1, 0)
+		self.assertEqual(xidc - xid1, -4)
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_oxid()'))[0]
 		oxidc = int(a)
-		self.assertEqual(oxidc - oxid1, 0)
+		self.assertEqual(oxidc - oxid1, -1)
 
 		node.safe_psql(
 		    'postgres',
@@ -1398,11 +1398,11 @@ class RewindXidTest(BaseTest):
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_xid()'))[0]
 		xidc = int(a)
-		self.assertEqual(xidc - xid1, 25)
+		self.assertEqual(xidc - xid1, 21)
 		a, *b = (node.execute('postgres',
 		                      'SELECT orioledb_get_complete_oxid()'))[0]
 		oxidc = int(a)
-		self.assertEqual(oxidc - oxid1, 7)
+		self.assertEqual(oxidc - oxid1, 6)
 
 		node.safe_psql(
 		    'postgres',

@@ -182,68 +182,16 @@ orioledb_rewind_queue_age(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 {
-	RewindItem *rewindItem;
-	OXid		oxid;
-	TransactionId xid;
-	uint64		pos;
-
-	if (!enable_rewind)
-		PG_RETURN_VOID();
-
-	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
-	pos = rewindMeta->completePos;
-
-	while (true)
-	{
-		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
-		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
-		xid = rewindItem->xid;
-		oxid = rewindItem->oxid;
-
-		if (OXidIsValid(oxid))
-			break;
-
-		pos++;
-		if (pos >= rewindMeta->restorePos)
-			elog(ERROR, "Couldn't get oxid from completeBuffer");
-	}
-	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(DEBUG3, "COMPLETE OXID %lu XID %u", oxid, xid);
-	PG_RETURN_DATUM(rewindItem->oxid);
+	elog(DEBUG3, "COMPLETE OXID %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
+	PG_RETURN_DATUM(rewindMeta->complete_oxid);
 }
 
 /* Not safe against concurrent operations */
 Datum
 orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 {
-	RewindItem *rewindItem;
-	OXid		oxid;
-	TransactionId xid;
-	uint64		pos;
-
-	if (!enable_rewind)
-		PG_RETURN_VOID();
-
-	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_SHARED);
-	pos = rewindMeta->completePos;
-
-	while (true)
-	{
-		rewindItem = &rewindCompleteBuffer[pos % rewind_circular_buffer_size];
-		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
-		xid = rewindItem->xid;
-		oxid = rewindItem->oxid;
-
-		if (TransactionIdIsValid(xid))
-			break;
-
-		pos++;
-		if (pos >= rewindMeta->restorePos)
-			elog(ERROR, "Couldn't get xid from completeBuffer");
-	}
-	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(DEBUG3, "COMPLETE XID %lu XID %u", oxid, xid);
-	PG_RETURN_DATUM(rewindItem->xid);
+	elog(DEBUG3, "COMPLETE OXID %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
+	PG_RETURN_DATUM(rewindMeta->complete_xid);
 }
 
 /* Testing functions included under IS_DEV */
@@ -948,6 +896,8 @@ rewind_init_shmem(Pointer ptr, bool found)
 		cleanup_rewind_files(&rewindBuffersDesc, REWIND_BUFFERS_TAG);
 		rewindMeta->force_complete_xid = InvalidTransactionId;
 		rewindMeta->force_complete_oxid = InvalidOXid;
+		rewindMeta->complete_xid = InvalidTransactionId;
+		rewindMeta->complete_oxid = InvalidOXid;
 	}
 	LWLockRegisterTranche(rewindMeta->rewindEvictTrancheId, "RewindEvictTranche");
 	LWLockRegisterTranche(rewindMeta->rewindCheckpointTrancheId, "RewindCheckpointTranche");
@@ -1213,6 +1163,7 @@ rewind_worker_main(Datum main_arg)
 #endif
 							pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 						}
+						rewindMeta->complete_oxid = rewindItem->oxid;
 					}
 					else
 					{
@@ -1223,6 +1174,8 @@ rewind_worker_main(Datum main_arg)
 										rewindItem->oldestConsideredRunningXid.value);
 					pg_atomic_write_u64(&rewindMeta->runXmin,
 										rewindItem->runXmin);
+					if(TransactionIdIsValid(rewindItem->xid))
+						rewindMeta->complete_xid = rewindItem->xid;
 				}
 
 				/*
