@@ -534,19 +534,14 @@ class RewindXidTest(BaseTest):
 		                      'SELECT orioledb_get_complete_oxid()'))[0]
 		oxidc = int(a)
 		self.assertEqual(oxidc - oxid1, 6)
+		a, *b = (node.execute('postgres',
+		                      'SELECT pg_current_xact_id();'))[0]
+		xidc = int(a)
 
-		node.safe_psql(
-		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		time.sleep(1)
-
-		node.is_started = False
-		node.start()
-
-		self.maxDiff = None
-		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(5005,)]")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
+		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc - 1),
+		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
 
@@ -705,18 +700,10 @@ class RewindXidTest(BaseTest):
 		xidc = int(a)
 		self.assertEqual(xidc - xid1, 6)
 
-		node.safe_psql(
-		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		time.sleep(1)
-
-		node.is_started = False
-		node.start()
-
-		self.maxDiff = None
-		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(5005,)]")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
+		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc + 1),
+		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
 
@@ -906,18 +893,10 @@ class RewindXidTest(BaseTest):
 		xidc = int(a)
 		self.assertEqual(xidc - xid1, 21)
 
-		node.safe_psql(
-		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		time.sleep(1)
-
-		node.is_started = False
-		node.start()
-
-		self.maxDiff = None
-		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(20024,)]")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
+		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc + 4),
+		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
 
@@ -1404,20 +1383,9 @@ class RewindXidTest(BaseTest):
 		oxidc = int(a)
 		self.assertEqual(oxidc - oxid1, 6)
 
-		node.safe_psql(
-		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		time.sleep(1)
-
-		node.is_started = False
-		node.start()
-
-		self.maxDiff = None
-		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(20024,)]")
-		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(20024,)]")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
+		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc + 4),
+		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
