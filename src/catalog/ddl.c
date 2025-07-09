@@ -1241,7 +1241,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				if (tablespaceOid == GLOBALTABLESPACE_OID)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot move non-shared relation to tablespace \"%s\"",
+							 errmsg("cannot move non-shared relation to tablespace \"%s\"",
 									get_tablespace_name(tablespaceOid))));
 			}
 
