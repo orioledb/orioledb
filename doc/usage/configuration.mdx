@@ -163,6 +163,42 @@ Default block-level compression level for tables' TOASTed values.
 
 Display compression column in orioledb_table_description.
 
+## Options for undo-based rewind (experimental)
+
+### `orioledb.enable_rewind`
+
+|             |     |
+| ----------- |---- |
+| **Default** | off |
+
+Enable undo-based rewind.
+
+### `orioledb.rewind_max_time`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 500 |
+
+Maximum age in seconds from now of transaction after which it is completed and removed from buffer. It's a time limit for a rewind.
+
+### `orioledb.rewind_max_transactions`
+
+|             |       |
+| ----------- | ----- |
+| **Default** | 86400 |
+
+Maximum number of rewind transaction items that are stored for a rewind. Older items are completed and removed from the buffer sothis specifies maximum rewind age. If there are subtransactions they also occupy items in a rewind buffer.
+
+`orioledb.rewind_max_transactions` and `orioledb.rewind_max_time` work together so if a transaction is older than any of these thresholds it is completed and could not be rewound anymmore.
+
+### `orioledb.rewind_buffers`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 128 |
+
+Number of orioledb engine in-memory rewind buffers in blocks. Each block accommodate 68 rewind transaction items. If you have enogh memory set it near a value `orioledb.rewind_max_transactions` / 68 to have all rewind buffers in memory.
+
 ## Debugging options
 
 ### `orioledb.debug_disable_pools_limit`
