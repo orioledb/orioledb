@@ -37,7 +37,7 @@
 #include "utils/syscache.h"
 #include "utils/timeout.h"
 #include "checkpoint/checkpoint.h"
-
+#include <unistd.h>
 #include "pgstat.h"
 
 static volatile sig_atomic_t shutdown_requested = false;
