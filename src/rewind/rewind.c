@@ -627,12 +627,12 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("Requested rewind %d s exceeds rewind_max_time %d s", rewind_time, rewind_max_time)),
-					errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
+					errdetail("request rewind less than %d s back", rewind_max_time));
 			return;
 		}
-		else if (rewind_time == 0)
+		else if (rewind_time <= 0)
 		{
-			elog(WARNING, "Zero rewind requested, do nothing");
+			elog(WARNING, "Zero or negative rewind requested, do nothing");
 			return;
 		}
 	}
@@ -651,13 +651,22 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		if (TransactionIdIsValid(rewind_xid))
 		{
 			if (TransactionIdFollowsOrEquals(rewind_xid, (TransactionId) GetTopTransactionId()))
+			{
+				if (!OXidIsValid(rewind_oxid))
+				{
+					elog(ERROR, "Rewind XID %u is not in the past and OXis is invalid", rewind_xid);
+					return;
+				}
+
 				elog(WARNING, "Rewind XID is not in the past. Rewind will be based only on rewind OXid");
+			}
 			else if (TransactionIdPrecedes(rewind_xid, oldest))
 			{
 				ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Requested rewind to XID %u which is in the past from the eraliest retained", rewind_xid)),
-					errdetail("request rewind to XID more than %u", oldest));
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("Requested rewind to XID %u which is in the past from the eraliest retained", rewind_xid)),
+						errdetail("request rewind to XID more than %u", oldest));
+				return;
 			}
 		}
 
@@ -665,13 +674,28 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		{
 			if (!xid_is_finished(rewind_oxid))
 			{
+				if (!TransactionIdIsValid(rewind_xid))
+				{
+					elog(ERROR, "Rewind OXid %lu is not in the past and XID is invalid", rewind_oxid);
+					return;
+				}
+
 				elog(WARNING, "Rewind OXid is not in the past. Rewind will be based only on rewind XID");
 			}
-			else if(rewind_oxid <= rewindMeta->complete_oxid)
+			else if (rewind_oxid <= rewindMeta->complete_oxid)
+			{
 				ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Requested rewind to OXid %lu which is in the past from the eraliest retained", rewind_oxid)),
-					errdetail("request rewind to OXid more than %lu", rewindMeta->complete_oxid));
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("Requested rewind to OXid %lu which is in the past from the eraliest retained", rewind_oxid)),
+						errdetail("request rewind to OXid more than %lu", rewindMeta->complete_oxid));
+				return;
+			}
+		}
+
+		if (OXidIsValid(rewind_oxid) && TransactionIdIsValid(rewind_xid) && !xid_is_finished(rewind_oxid) && TransactionIdFollowsOrEquals(rewind_xid, (TransactionId) GetTopTransactionId()))
+		{
+			elog(ERROR, "Both rewind OXid %lu and XID %u are not in the past", rewind_oxid, rewind_xid);
+			return;
 		}
 	}
 	else if (rewind_mode == REWIND_MODE_TIMESTAMP)
@@ -693,7 +717,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("Requested rewind to timestamp %ld exceeds rewind_max_time %d s", rewind_timestamp, rewind_max_time)),
-					errdetail("increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than %d s back", rewind_max_time));
+					errdetail("request rewind less than %d s back", rewind_max_time));
 			return;
 		}
 	}
@@ -1181,7 +1205,7 @@ rewind_worker_main(Datum main_arg)
 										rewindItem->oldestConsideredRunningXid.value);
 					pg_atomic_write_u64(&rewindMeta->runXmin,
 										rewindItem->runXmin);
-					if(TransactionIdIsValid(rewindItem->xid))
+					if (TransactionIdIsValid(rewindItem->xid))
 						rewindMeta->complete_xid = rewindItem->xid;
 				}
 
@@ -1458,7 +1482,7 @@ next_subxids_item:
 				elog(DEBUG3, "Add to buffer: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunningXid %u nsubxids %u", oxid, xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
 			}
 
-			if(!OXidIsValid(rewindMeta->complete_oxid))
+			if (!OXidIsValid(rewindMeta->complete_oxid))
 				rewindMeta->complete_oxid = oxid;
 		}
 		else
@@ -1469,7 +1493,7 @@ next_subxids_item:
 		pg_write_barrier();
 		rewindItem->tag = REWIND_ITEM_TAG;
 
-		if(!TransactionIdIsValid(rewindMeta->complete_xid))
+		if (!TransactionIdIsValid(rewindMeta->complete_xid))
 			rewindMeta->complete_xid = xid;
 
 		if (nsubxids)

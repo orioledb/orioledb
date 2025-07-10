@@ -534,14 +534,18 @@ class RewindXidTest(BaseTest):
 		                      'SELECT orioledb_get_complete_oxid()'))[0]
 		oxidc = int(a)
 		self.assertEqual(oxidc - oxid1, 6)
-		a, *b = (node.execute('postgres',
-		                      'SELECT pg_current_xact_id();'))[0]
+		a, *b = (node.execute('postgres', 'SELECT pg_current_xact_id();'))[0]
 		xidc = int(a)
 
 		with self.assertRaises(QueryException) as e:
-			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc - 1),
-		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+			node.safe_psql(
+			    'postgres',
+			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+			    (xid1, oxid1))
+		self.assertIn(
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
+		    % (xid1, xidc - 1),
+		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
 
@@ -701,9 +705,14 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(xidc - xid1, 6)
 
 		with self.assertRaises(QueryException) as e:
-			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc + 1),
-		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+			node.safe_psql(
+			    'postgres',
+			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+			    (xid1, oxid1))
+		self.assertIn(
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
+		    % (xid1, xidc + 1),
+		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
 
@@ -894,9 +903,14 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(xidc - xid1, 21)
 
 		with self.assertRaises(QueryException) as e:
-			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc + 4),
-		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+			node.safe_psql(
+			    'postgres',
+			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+			    (xid1, oxid1))
+		self.assertIn(
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
+		    % (xid1, xidc + 4),
+		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
 
@@ -1384,8 +1398,13 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(oxidc - oxid1, 6)
 
 		with self.assertRaises(QueryException) as e:
-			node.safe_psql('postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1, oxid1))
-		self.assertIn('ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d' % (xid1, xidc + 4),
-		              self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+			node.safe_psql(
+			    'postgres',
+			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+			    (xid1, oxid1))
+		self.assertIn(
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
+		    % (xid1, xidc + 4),
+		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()

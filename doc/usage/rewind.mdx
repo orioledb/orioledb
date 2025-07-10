@@ -34,9 +34,11 @@ After setting the GUC parameters above start the cluster. From this time rewind 
 
 To rewind run one of the queries:
 
-- `select orioledb_rewind_by_time(1000);`  -- rewind all transactions committed after 1000 seconds before present
-- `select orioledb_rewind_to_timestamp(<timestamptz>);` -- rewind all transactions committed after specified timestamp
-- ```
+`select orioledb_rewind_by_time(1000);`  -- rewind all transactions committed after 1000 seconds before present
+
+`select orioledb_rewind_to_timestamp(<timestamptz>);` -- rewind all transactions committed after specified timestamp
+
+```
 select orioledb_get_current_oxid();
 
  orioledb_get_current_oxid
@@ -57,7 +59,7 @@ This will rewind a cluster to a previously acquired transaction state specified 
 
 After rewind database shuts down. Start it again and you'll get it in a requested working state in the past.
 
-Trying to rewind past time or xid theshold will output error. Trying to rewind to xid/oxid past max_transactions treshold will rewind upto maximum number of transactions.
+Trying to rewind past time or xid theshold will output an error. If one xid or oxid is in the future, rewind will be based on the other
 
 To check if you can rewind to a precise transaction:
 ```
