@@ -5,9 +5,9 @@ sidebar_label: Undo-based rewind
 
 # Undo-based rewind
 
-One of the features that OrioleDB provides is the ability to rewind database state to some point in the past. This is achieved by using undo log that records modifications for all ```orioledb``` tables. For heap tables this is used by delaying vaccuum, so that while the transaction is not past the rewind limit, all the tuples modifications are not cleaned from the heap table.
+OrioleDB provides the ability to rewind database state to a some point in the past. This is achieved by using the undo log that records modifications for all ```orioledb``` tables. For heap tables this is used by delaying vaccuum, so that while the transaction is not past the rewind boundary, the past versions of tuples are retained in the heap table, being invisible to the user.
 
-Undo-based rewind is faster than PITR based on applying WAL by external utility. But it doesn't prohibit the latter.
+Undo-based rewind is faster than PITR based on applying WAL or logical backup. But it doesn't prohibit the latter.
 
 :::warning[Experimental feature]
 
@@ -21,35 +21,36 @@ Undo-based rewind is an optional feature that can be enabled by setting the appr
 
 To use rewind functionality, the following parameters should be set before starting a cluster:
 
-- `orioledb.enable_rewind` -- whether to use rewind mode. It could be `on` and `off`. The default is `off`
+- `orioledb.enable_rewind = true`
 
-Parameters to limit retaining rewind data:
+Set parameters to limit retaining rewind data:
 
 - `orioledb.rewind_max_time` -- time in seconds to hold rewind information
 - `orioledb.rewind_max_transactions` -- overall number of OrioleDB and Heap transactions (including subtransactions) to hold for rewind
+- `orioledb.rewind_buffers` -- number of in-memory buffers to store rewind data
+
+[Full description of configuration parameters](configuration.mdx#options-for-undo-based-rewind-experimental)
 
 After setting the GUC parameters above start the cluster. From this time rewind data will be stored into a temporary rewind buffer and could be used to rewind.
 
-[Full description of configuration parameters] (configuration.mdx#options-for-undo-based-rewind-experimental)
-
-To rewind run one of the queries:
+To start rewind run one of the queries:
 
 `select orioledb_rewind_by_time(1000);`  -- rewind all transactions committed after 1000 seconds before present
 
 `select orioledb_rewind_to_timestamp(<timestamptz>);` -- rewind all transactions committed after specified timestamp
 
 ```
-select orioledb_get_current_oxid();
-
- orioledb_get_current_oxid
----------------------------
-                       555
-
 select pg_current_xact_id();
 
 pg_current_xact_id
 --------------------
                 1750
+
+select orioledb_get_current_oxid();
+
+ orioledb_get_current_oxid
+---------------------------
+                       555
 
 // Work with database normally add/modify/delete rows, tables etc.
 
@@ -59,28 +60,30 @@ This will rewind a cluster to a previously acquired transaction state specified 
 
 After rewind database shuts down. Start it again and you'll get it in a requested working state in the past.
 
-Trying to rewind past time or xid theshold will output an error. If one xid or oxid is in the future, rewind will be based on the other
+Trying to rewind past time or xid theshold will output an error. If xid or oxid is in the future, rewind will be based on the other one.
 
-To check if you can rewind to a precise transaction:
+To check if you can rewind to a transaction:
 ```
+select orioledb_get_complete_xid();
+ orioledb_get_complete_xid
+---------------------------
+                       738
+
 select orioledb_get_complete_oxid();
 
  orioledb_get_complete_oxid
 ----------------------------
                           3
-
-select orioledb_get_complete_xid();
- orioledb_get_complete_xid
----------------------------
-                       738
 ```
-You can rewind to a precise transaction oxid 555 xid 1750 as if both numbers are bigger than the oldest that are now stored in the rewind buffer (oxid 3 xid 738).
+You can rewind to a precise transaction oxid 555 xid 1750 as if both numbers are bigger than the oldest stored in the rewind buffer (oxid 3 xid 738).
 
-All configuration options for resind
+After rewind transactions that are past rewind point completely disappear. **There is no way to undo rewind, other than by restoring from a backup**, so it's wise to have a backup at the latest point of time before starting rewind. Particularly, if you use backups and rewind you need to be extra careful about what points of time you get backups at and not occasionally overwrite older backups (before doing rewind) with newer ones (after doing rewind).
+
+## Limitations
 
 As mentioned above, rewind mode is currently experimental. The major limitations of this mode are the following.
 
-1. Undo-based rewind is limited to a cluster uptime. Rewind buffer is not persistent and you can not rewind past cluster start time.
-2. Starting database after rewind could not be done by the backend that invokes rewind. So database will be shut down after rewind and then the user should start it.
-3. While undo-based rewind automatically supports `heap` tables in the cluster, with significant writes to `heap` tables the volume of old versions of tuples reserved for rewind may become big and cause bloat to heap tables. It's recommended to use rewind for clusters with most of the writes in the `orioledb` tables, and only occasional writes to `heap`.
+1. Undo-based rewind is limited to a cluster uptime. Rewind buffer is not persistent and you can not rewind past cluster start time. At cluster start time all transactions that were reserved to rewind are permanently fixed (completed).
+2. Starting database cluster after rewind could not be done by the backend that invokes rewind. So database will be shut down after rewind and then the user should start it.
+3. Undo-based rewind automatically supports `heap` tables in the cluster. Significant writes to `heap` tables will retain old versions of tuples reserved for rewind and cause bloat to heap tables. This bloat can not be removed by vacuum until the transaction is past the rewind retain boundary. It's recommended to use rewind for clusters with most of the writes in the `orioledb` tables, and only occasional writes to `heap`.
 
