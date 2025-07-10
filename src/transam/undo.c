@@ -363,7 +363,7 @@ update_min_undo_locations(UndoLogType undoType,
 
 	meta->minUndoLocationsChangeCount++;
 
-	minRetainLocation = Min(pg_atomic_read_u64(&meta->minRewindRetainLocation),
+	minRetainLocation = Min(pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation),
 							minRetainLocation);
 
 	Assert((meta->minUndoLocationsChangeCount & 1) == 0);
