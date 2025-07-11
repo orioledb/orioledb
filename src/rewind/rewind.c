@@ -182,7 +182,7 @@ orioledb_rewind_queue_age(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 {
-	elog(DEBUG3, "COMPLETE OXID %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
+	elog(DEBUG3, "COMPLETE OXid %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
 	PG_RETURN_DATUM(rewindMeta->complete_oxid);
 }
 
@@ -190,7 +190,7 @@ orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 {
-	elog(DEBUG3, "COMPLETE OXID %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
+	elog(DEBUG3, "COMPLETE OXid %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
 	PG_RETURN_DATUM(rewindMeta->complete_xid);
 }
 
@@ -583,7 +583,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 		if (pos == rewindMeta->completePos)
 		{
 			TimestampDifference(rewindItem->timestamp, rewindStartTimeStamp, &secs, &usecs);
-			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000));
+			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction XID %u, OXid %lu is %ld.%d seconds back at %s", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000, pstrdup(timestamptz_to_str(rewindItem->timestamp))));
 			return;
 		}
 		pos--;
@@ -592,7 +592,7 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 rewind_complete:
 
 	TimestampDifference(rewindItem->timestamp, rewindStartTimeStamp, &secs, &usecs);
-	ereport(LOG, errmsg("orioledb rewind completed. Last remaining transaction xid %u, oxid %lu is %ld.%d seconds back", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000));
+	ereport(LOG, errmsg("orioledb rewind completed. Last remaining item XID %u, OXid %lu is %ld.%d seconds back at %s", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000, pstrdup(timestamptz_to_str(rewindItem->timestamp))));
 	return;
 }
 
@@ -608,6 +608,9 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	int			retry;
 	int			nbackends;
 	int			nprepared;
+	long		secs;
+	int			usecs;
+
 
 	if (!enable_rewind)
 	{
@@ -622,6 +625,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	{
 		elog(LOG, "Rewind requested, for %d s", rewind_time);
 
+
 		if (rewind_time > rewind_max_time)
 		{
 			ereport(ERROR,
@@ -635,12 +639,21 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			elog(WARNING, "Zero or negative rewind requested, do nothing");
 			return;
 		}
+		else if (!TimestampDifferenceExceeds(rewindMeta->complete_timestamp, GetCurrentTimestamp(), rewind_time * 1000))
+		{
+			TimestampDifference(rewindMeta->complete_timestamp, GetCurrentTimestamp(), &secs, &usecs);
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Requested rewind to %d s which is in the past from the eraliest retained", rewind_time)),
+					errdetail("request rewind to less than %ld s", secs));
+			return;
+		}
 	}
 	else if (rewind_mode == REWIND_MODE_XID)
 	{
 		TransactionId oldest = XidFromFullTransactionId(rewindMeta->oldestConsideredRunningXid);
 
-		elog(LOG, "Rewind requested, to Xid %u, OXid %lu", rewind_xid, rewind_oxid);
+		elog(LOG, "Rewind requested, to XID %u, OXid %lu", rewind_xid, rewind_oxid);
 
 		if (!TransactionIdIsValid(rewind_xid) && !OXidIsValid(rewind_oxid))
 		{
@@ -654,7 +667,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			{
 				if (!OXidIsValid(rewind_oxid))
 				{
-					elog(ERROR, "Rewind XID %u is not in the past and OXis is invalid", rewind_xid);
+					elog(ERROR, "Rewind XID %u is not in the past and OXid is invalid", rewind_xid);
 					return;
 				}
 
@@ -720,6 +733,15 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 					errdetail("request rewind less than %d s back", rewind_max_time));
 			return;
 		}
+		else if (rewind_timestamp < rewindMeta->complete_timestamp)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Requested rewind to %s which is in the past from the eraliest retained", pstrdup(timestamptz_to_str(rewind_timestamp)))),
+					errdetail("request rewind to later than %s", pstrdup(timestamptz_to_str(rewindMeta->complete_timestamp))));
+			return;
+		}
+
 	}
 	else
 	{
@@ -929,6 +951,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->force_complete_oxid = InvalidOXid;
 		rewindMeta->complete_xid = InvalidTransactionId;
 		rewindMeta->complete_oxid = InvalidOXid;
+		rewindMeta->complete_timestamp = 0;
 	}
 	LWLockRegisterTranche(rewindMeta->rewindEvictTrancheId, "RewindEvictTranche");
 	LWLockRegisterTranche(rewindMeta->rewindCheckpointTrancheId, "RewindCheckpointTranche");
@@ -1207,6 +1230,9 @@ rewind_worker_main(Datum main_arg)
 										rewindItem->runXmin);
 					if (TransactionIdIsValid(rewindItem->xid))
 						rewindMeta->complete_xid = rewindItem->xid;
+
+					rewindMeta->complete_timestamp = rewindItem->timestamp;
+
 				}
 
 				/*
@@ -1495,6 +1521,8 @@ next_subxids_item:
 
 		if (!TransactionIdIsValid(rewindMeta->complete_xid))
 			rewindMeta->complete_xid = xid;
+		if (rewindMeta->complete_timestamp == 0)
+			rewindMeta->complete_timestamp = rewindItem->timestamp;
 
 		if (nsubxids)
 		{

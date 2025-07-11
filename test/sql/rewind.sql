@@ -24,7 +24,8 @@ INSERT INTO heap_table VALUES (2);
 PREPARE TRANSACTION 'prep';
 ROLLBACK;
 
-select orioledb_rewind_by_time(10);
+select pg_sleep(2);
+select orioledb_rewind_by_time(1);
 
 COMMIT PREPARED 'prep';
 

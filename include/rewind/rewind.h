@@ -99,6 +99,7 @@ typedef struct
 	bool		addToRewindQueueDisabled;
 	TransactionId complete_xid;
 	OXid		complete_oxid;
+	TimestampTz	complete_timestamp;
 	TransactionId force_complete_xid;
 	OXid		force_complete_oxid;
 

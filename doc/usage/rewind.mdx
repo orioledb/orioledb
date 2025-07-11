@@ -37,7 +37,7 @@ To start rewind run one of the queries:
 
 `select orioledb_rewind_by_time(1000);`  -- rewind all transactions committed after 1000 seconds before present
 
-`select orioledb_rewind_to_timestamp(<timestamptz>);` -- rewind all transactions committed after specified timestamp
+`select orioledb_rewind_to_timestamp('2024-12-18 10:59:54 GMT+4');` -- rewind all transactions committed after specified timestamp
 
 ```
 select pg_current_xact_id();

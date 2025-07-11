@@ -14,9 +14,9 @@ INSERT INTO o_test_rewind VALUES (5);
 -- Should fail
 select orioledb_rewind_by_time(600);
 ERROR:  Requested rewind 600 s exceeds rewind_max_time 500 s
-DETAIL:  increase orioledb.rewind_max_time in PostgreSQL config file or request rewind less than 500 s back
+DETAIL:  request rewind less than 500 s back
 select orioledb_rewind_by_time(0);
-WARNING:  Zero rewind requested, do nothing
+WARNING:  Zero or negative rewind requested, do nothing
  orioledb_rewind_by_time 
 -------------------------
  
@@ -27,7 +27,13 @@ INSERT INTO heap_table VALUES (2);
 PREPARE TRANSACTION 'prep';
 ROLLBACK;
 WARNING:  there is no transaction in progress
-select orioledb_rewind_by_time(10);
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select orioledb_rewind_by_time(1);
 ERROR:  Can't rewind due to prepared transactions in the cluster
 COMMIT PREPARED 'prep';
 DROP TABLE heap_table;
