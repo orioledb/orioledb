@@ -732,6 +732,7 @@ class ReplicationTest(BaseTest):
 		node = self.node
 		node.append_conf('orioledb.recovery_pool_size = 1')
 		node.append_conf('orioledb.recovery_idx_pool_size = 3')
+		node.append_conf('log_min_messages = DEBUG1')
 		node.start()
 		with self.node as master:
 			with self.getReplica() as replica:
@@ -756,6 +757,56 @@ class ReplicationTest(BaseTest):
 					con1.commit()
 
 					self.catchup_orioledb(replica)
+
+					with open(replica.pg_log_file) as f:
+						replica_log = f.readlines()
+
+						self.assertTrue(
+						    any("DEBUG:  parallel index build uses 2 recovery workers"
+						        in line for line in replica_log))
+						self.assertTrue(
+						    any("DEBUG:  worker joined parallel index build: table"
+						        in line for line in replica_log))
+						self.assertTrue(
+						    any("DEBUG:  parallel index build: table" in line
+						        for line in replica_log))
+
+	def test_replication_serial_index_build(self):
+		node = self.node
+		node.append_conf('orioledb.recovery_pool_size = 1')
+		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.append_conf('log_min_messages = DEBUG1')
+		node.start()
+		with self.node as master:
+			with self.getReplica() as replica:
+				replica.start()
+
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+
+						CREATE TABLE o_test_1 (
+							val_1 int
+						) USING orioledb;
+
+						CREATE UNIQUE INDEX ind_1
+							ON o_test_1 (val_1);
+					""")
+
+					con1.commit()
+					self.catchup_orioledb(replica)
+
+					with open(replica.pg_log_file) as f:
+						replica_log = f.readlines()
+
+						self.assertTrue(
+						    any("DEBUG:  serial index build: table" in line
+						        for line in replica_log))
+						self.assertFalse(
+						    any("DEBUG:  parallel index build: table" in line
+						        for line in replica_log))
 
 	def test_replication_temp_table_data_cleanup(self):
 		node = self.node

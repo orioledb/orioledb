@@ -880,6 +880,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		LaunchParallelWorkers(pcxt);
 		btleader->pcxt = pcxt;
 		btleader->nparticipanttuplesorts = leaderparticipates ? pcxt->nworkers_launched + 1 : pcxt->nworkers_launched;
+
+		elog(DEBUG1, "parallel index build launched %d workers", pcxt->nworkers_launched);
 	}
 	else
 	{
@@ -888,7 +890,8 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 
 		if (recoveryContext->nworkers != 0)
 			recovery_send_worker_oids(dsm_segment_handle(recoveryContext->seg));
-		elog(DEBUG4, "Parallel index build uses %d recovery workers", recoveryContext->nworkers);
+
+		elog(DEBUG1, "parallel index build uses %d recovery workers", recoveryContext->nworkers);
 	}
 
 	btleader->btshared = btshared;
@@ -899,7 +902,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	/* If no workers were successfully launched, back out (do serial build) */
 	if (!in_recovery)
 	{
-		if (btleader->nparticipanttuplesorts == 0)
+		if (pcxt->nworkers_launched == 0)
 		{
 			_o_index_end_parallel(btleader);
 			pfree(btleader);
@@ -1136,6 +1139,17 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 		btspool->old_o_table = deserialize_o_table(((Pointer) (&btshared->o_table_serialized)) + btshared->o_table_size,
 												   btshared->old_o_table_size);
 	}
+
+	if (btshared->isrebuild)
+		elog(DEBUG1, "worker joined parallel index rebuild: old table (%u, %u, %u), table (%u, %u, %u)",
+			 btspool->old_o_table->oids.datoid, btspool->old_o_table->oids.reloid,
+			 btspool->old_o_table->oids.relnode,
+			 btspool->o_table->oids.datoid, btspool->o_table->oids.reloid,
+			 btspool->o_table->oids.relnode);
+	else
+		elog(DEBUG1, "worker joined parallel index build: table (%u, %u, %u), ix_num %u",
+			 btspool->o_table->oids.datoid, btspool->o_table->oids.reloid,
+			 btspool->o_table->oids.relnode, btshared->ix_num);
 
 	btspool->isunique = btshared->isunique;
 	btspool->descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
@@ -1384,6 +1398,15 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 		_o_index_begin_parallel(&buildstate, false, max_parallel_maintenance_workers);
 	}
+
+	if (buildstate.btleader)
+		elog(DEBUG1, "parallel index build: table (%u, %u, %u), ix_num %u",
+			 o_table->oids.datoid, o_table->oids.reloid, o_table->oids.relnode,
+			 ix_num);
+	else
+		elog(DEBUG1, "serial index build: table (%u, %u, %u), ix_num %u",
+			 o_table->oids.datoid, o_table->oids.reloid, o_table->oids.relnode,
+			 ix_num);
 
 	/*
 	 * If parallel build requested and at least one worker process was
@@ -1725,6 +1748,15 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 		_o_index_begin_parallel(&buildstate, false, max_parallel_maintenance_workers);
 	}
+
+	if (buildstate.btleader)
+		elog(DEBUG1, "parallel index rebuild: old table (%u, %u, %u), table (%u, %u, %u)",
+			 old_o_table->oids.datoid, old_o_table->oids.reloid, old_o_table->oids.relnode,
+			 o_table->oids.datoid, o_table->oids.reloid, o_table->oids.relnode);
+	else
+		elog(DEBUG1, "serial index rebuild: old table (%u, %u, %u), table (%u, %u, %u)",
+			 old_o_table->oids.datoid, old_o_table->oids.reloid, old_o_table->oids.relnode,
+			 o_table->oids.datoid, o_table->oids.reloid, o_table->oids.relnode);
 
 	/*
 	 * If parallel build requested and at least one worker process was
