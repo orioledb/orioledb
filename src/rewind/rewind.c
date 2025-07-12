@@ -1239,7 +1239,8 @@ rewind_worker_main(Datum main_arg)
 #endif
 							pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 						}
-						rewindMeta->complete_oxid = rewindItem->oxid;
+						if (rewindItem->oxid > rewindMeta->complete_oxid)
+							rewindMeta->complete_oxid = rewindItem->oxid;
 					}
 					else
 					{
@@ -1250,11 +1251,12 @@ rewind_worker_main(Datum main_arg)
 										rewindItem->oldestConsideredRunningXid.value);
 					pg_atomic_write_u64(&rewindMeta->runXmin,
 										rewindItem->runXmin);
-					if (TransactionIdIsValid(rewindItem->xid))
+					if (TransactionIdIsValid(rewindItem->xid) &&
+						TransactionIdFollows(rewindItem->xid, rewindMeta->complete_xid))
 						rewindMeta->complete_xid = rewindItem->xid;
 
-					rewindMeta->complete_timestamp = rewindItem->timestamp;
-
+					if (rewindItem->timestamp > rewindMeta->complete_timestamp)
+						rewindMeta->complete_timestamp = rewindItem->timestamp;
 				}
 
 				/*
