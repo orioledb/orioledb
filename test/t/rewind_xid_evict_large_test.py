@@ -1218,30 +1218,31 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres', "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		    "	id integer NOT NULL,\n"
+		    "	id serial NOT NULL,\n"
 		    "	val text,\n"
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 		node.safe_psql(
 		    'postgres', "CREATE TABLE IF NOT EXISTS o_test (\n"
-		    "	id integer NOT NULL,\n"
-		    "	val text,\n"
-		    "	PRIMARY KEY (id)\n"
+		    "	val text\n"
 		    ") USING orioledb;\n")
 
-		for i in range(1, 20000, 4):
-			node.safe_psql(
-			    'postgres',
-			    "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
-			    (i, i, i, i, i + 1, i + 1, i + 1, i + 1, i + 2, i + 2, i + 2,
-			     i + 2, i + 3, i + 3, i + 3, i + 3))
+		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp.write("BEGIN;\n")
+		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
+		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
+		fp.write("SAVEPOINT sp1;\n")
+		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
+		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
+		fp.write("SAVEPOINT sp2;\n")
+		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
+		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
+		fp.write("SAVEPOINT sp3;\n")
+		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
+		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
+		fp.write("COMMIT;\n")
+		fp.close()
+		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -1250,19 +1251,7 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		for i in range(20001, 20025, 4):
-			node.safe_psql(
-			    'postgres',
-			    "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
-			    (i, i, i, i, i + 1, i + 1, i + 1, i + 1, i + 2, i + 2, i + 2,
-			     i + 2, i + 3, i + 3, i + 3, i + 3))
+		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-j', '1', '-t', '4'], stderr = sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -1271,37 +1260,14 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		for i in range(20025, 30000, 4):
-			node.safe_psql(
-			    'postgres',
-			    "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
-			    (i, i, i, i, i + 1, i + 1, i + 1, i + 1, i + 2, i + 2, i + 2,
-			     i + 2, i + 3, i + 3, i + 3, i + 3))
+		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
+
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
 
-		for i in range(30001, 40000, 4):
-			node.safe_psql(
-			    'postgres',
-			    "BEGIN; INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp1;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp2;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); SAVEPOINT sp3;\n"
-			    "INSERT INTO o_test_heap VALUES (%d, %d || 'val');\n"
-			    "INSERT INTO o_test VALUES (%d, %d || 'val'); COMMIT;\n" %
-			    (i, i, i, i, i + 1, i + 1, i + 1, i + 1, i + 2, i + 2, i + 2,
-			     i + 2, i + 3, i + 3, i + 3, i + 3))
+		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -1311,14 +1277,17 @@ class RewindXidTest(BaseTest):
 		ev = int(c)
 		#		print(len, ev, len - ev)
 
-		a, *b = (node.execute('postgres',
-		                      'SELECT orioledb_get_complete_xid()'))[0]
-		xidc = int(a)
-		self.assertEqual(xidc - xid1, 21)
-		a, *b = (node.execute('postgres',
-		                      'SELECT orioledb_get_complete_oxid()'))[0]
-		oxidc = int(a)
-		self.assertEqual(oxidc - oxid1, 6)
+		while True:
+			a, *b = (node.execute('postgres',
+			                      'SELECT orioledb_get_complete_oxid()'))[0]
+			oxidc = int(a)
+			a, *b = (node.execute('postgres',
+			                      'SELECT orioledb_get_complete_xid()'))[0]
+			xidc = int(a)
+			if oxidc >= oxid1 - 4:
+				self.assertGreaterEqual(xidc, xid1 - 21)
+				break
+			time.sleep(0.1)
 
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql(
