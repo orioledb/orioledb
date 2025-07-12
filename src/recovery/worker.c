@@ -474,13 +474,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				 * their modify operations on this relation or to do oxid
 				 * update
 				 */
-#if PG_VERSION_NUM >= 170000
-				pg_atomic_monotonic_advance_u64(recovery_index_completed_pos,
-												msg->current_position);
-#else
 				pg_atomic_write_u64(recovery_index_completed_pos,
 									msg->current_position);
-#endif
 				ConditionVariableBroadcast(recovery_index_cv);
 
 				o_free_tmp_table_descr(o_descr);

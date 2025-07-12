@@ -27,11 +27,6 @@
 #define index_build_first_worker (recovery_pool_size_guc + 1)
 #define index_build_last_worker  (recovery_pool_size_guc + recovery_idx_pool_size_guc - 1)
 #define index_build_workers 	 (recovery_idx_pool_size_guc - 1)
-typedef struct BgWorkerHandle
-{
-	int			slot;
-	uint64		generation;
-}			BgWorkerHandle;
 
 /*
  * Status record for spooling/sorting phase.
@@ -107,7 +102,7 @@ typedef struct oIdxShared
 	Size		o_table_size;
 	Size		old_o_table_size;
 	bool		isrebuild;
-	char		o_table_serialized[];
+	char		o_table_serialized[FLEXIBLE_ARRAY_MEMBER];
 	/* old_o_table_serialized follows */
 } oIdxShared;
 
