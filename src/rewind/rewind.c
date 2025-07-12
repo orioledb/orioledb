@@ -1458,7 +1458,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 		 * for eviction in the same way. So double eviction is possible and OK
 		 * but very unlikely.
 		 */
-		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos + pg_atomic_read_u64(&rewindMeta->evictPos) - nitems);
+		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos - pg_atomic_read_u64(&rewindMeta->evictPos) + nitems);
 		elog(DEBUG3, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
 			pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 			pg_atomic_read_u64(&rewindMeta->addPosReserved),
