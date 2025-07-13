@@ -1322,6 +1322,7 @@ evict_rewind_items(uint64 curAddPosFilled)
 				Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 				rewindMeta->restorePos++;
 			}
+			Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 		}
 		else if (pg_atomic_read_u64(&rewindMeta->evictPos) + REWIND_DISK_BUFFER_LENGTH < curAddPosFilled)
 		{
@@ -1368,11 +1369,10 @@ evict_rewind_items(uint64 curAddPosFilled)
 				pg_write_barrier();
 
 				pg_atomic_write_u64(&rewindMeta->evictPos, pg_atomic_read_u64(&rewindMeta->evictPos) + 1);
-				Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 			}
+			Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 		}
 
-		Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 		LWLockRelease(&rewindMeta->rewindEvictLock);
 	}
 	else
