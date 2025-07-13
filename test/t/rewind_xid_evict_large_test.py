@@ -68,10 +68,14 @@ class RewindXidTest(BaseTest):
 		invalidxid = 0
 		#		print(0, oxid)
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '2500'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '2500'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -91,8 +95,7 @@ class RewindXidTest(BaseTest):
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test;')),
-		    "[('1val',), ('2val',), ('3val',), ('4val',), ('5val',)]"
-		)
+		    "[('1val',), ('2val',), ('3val',), ('4val',), ('5val',)]")
 
 		node.stop()
 
@@ -125,10 +128,14 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		#		print(xid, invalidoxid)
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '2500'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '2500'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -192,11 +199,15 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		#		print(xid, oxid)
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -216,8 +227,7 @@ class RewindXidTest(BaseTest):
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test;')),
-		    "[('1val',), ('2val',), ('3val',), ('4val',), ('5val',)]"
-		)
+		    "[('1val',), ('2val',), ('3val',), ('4val',), ('5val',)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test_heap;')),
 		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]"
@@ -249,15 +259,15 @@ class RewindXidTest(BaseTest):
 			    "BEGIN; INSERT INTO o_test_heap (val) VALUES (%d || 'val'); SAVEPOINT sp1;\n"
 			    "INSERT INTO o_test_heap (val) VALUES (%d || 'val'); SAVEPOINT sp2;\n"
 			    "INSERT INTO o_test_heap (val) VALUES (%d || 'val'); SAVEPOINT sp3;\n"
-			    "INSERT INTO o_test_heap (val) VALUES (%d || 'val'); COMMIT;\n" %
-			    (i, i + 1, i + 2, i + 3))
+			    "INSERT INTO o_test_heap (val) VALUES (%d || 'val'); COMMIT;\n"
+			    % (i, i + 1, i + 2, i + 3))
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid = int(a)
 		invalidoxid = 9223372036854775807
 		#		print(xid, invalidoxid)
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("SAVEPOINT sp1;\n")
@@ -268,7 +278,11 @@ class RewindXidTest(BaseTest):
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("COMMIT;\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '2500'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '2500'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -336,7 +350,7 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		#		print(xid, oxid)
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
@@ -351,7 +365,11 @@ class RewindXidTest(BaseTest):
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.write("COMMIT;\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '2500'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '2500'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -399,11 +417,15 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.close()
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t', '1000'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t',
+		    '1000'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -412,7 +434,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t', '1'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t',
+		    '1'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -421,13 +447,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t', '499'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t',
+		    '499'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t', '500'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '5', '-j', '5', '-t',
+		    '500'
+		],
+		                       stderr=sys.stderr)
 
 		time.sleep(5)
 
@@ -478,11 +512,15 @@ class RewindXidTest(BaseTest):
 		    "	val text\n"
 		    ") USING orioledb;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.close()
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '5000'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '5000'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -491,7 +529,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '5'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '5'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -500,13 +542,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '2495'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '2495'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '2500'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '2500'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -515,7 +565,6 @@ class RewindXidTest(BaseTest):
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		#		print(len, ev, len - ev)
-
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -559,11 +608,15 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.close()
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -572,7 +625,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -581,13 +638,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '624'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '625'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -596,7 +661,6 @@ class RewindXidTest(BaseTest):
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
 		#		print(len, ev, len - ev)
-
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -639,11 +703,15 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.close()
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -652,7 +720,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -661,13 +733,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '624'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '625'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -716,7 +796,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("SAVEPOINT sp1;\n")
@@ -727,7 +807,11 @@ class RewindXidTest(BaseTest):
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("COMMIT;\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -736,7 +820,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -745,13 +833,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '624'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '625'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -803,7 +899,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("SAVEPOINT sp1;\n")
@@ -814,7 +910,11 @@ class RewindXidTest(BaseTest):
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("COMMIT;\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -823,7 +923,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-j', '1', '-t', '4'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-j', '1', '-t',
+		    '4'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -832,14 +936,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
-
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '624'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '625'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -1125,7 +1236,7 @@ class RewindXidTest(BaseTest):
 		    "	val text\n"
 		    ") USING orioledb;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
@@ -1140,7 +1251,11 @@ class RewindXidTest(BaseTest):
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("COMMIT;\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -1149,7 +1264,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -1158,13 +1277,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '624'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '625'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -1227,7 +1354,7 @@ class RewindXidTest(BaseTest):
 		    "	val text\n"
 		    ") USING orioledb;\n")
 
-		fp = tempfile.NamedTemporaryFile(mode = 'wt', delete_on_close = False)
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
@@ -1242,7 +1369,11 @@ class RewindXidTest(BaseTest):
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp.write("COMMIT;\n")
 		fp.close()
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '1250'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '1250'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid1 = int(a)
@@ -1251,7 +1382,11 @@ class RewindXidTest(BaseTest):
 		oxid1 = int(a)
 		#		print(xid1, oxid1)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-j', '1', '-t', '4'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-j', '1', '-t',
+		    '4'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute('postgres', 'select pg_current_xact_id();\n'))[0]
 		xid2 = int(a)
@@ -1260,14 +1395,21 @@ class RewindXidTest(BaseTest):
 		oxid2 = int(a)
 		#		print(xid2, oxid2)
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '624'], stderr = sys.stderr)
-
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '624'
+		],
+		                       stderr=sys.stderr)
 
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
 
-		node.pgbench_with_wait(options = ['-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t', '625'], stderr = sys.stderr)
+		node.pgbench_with_wait(options=[
+		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
+		    '625'
+		],
+		                       stderr=sys.stderr)
 
 		a, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]

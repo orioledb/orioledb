@@ -75,7 +75,7 @@ typedef struct
 										 * added and it could not yet be
 										 * evicted or read */
 	uint64		completePos;	/* Next complete position */
-	pg_atomic_uint64 evictPos;		/* Next evict position. Increments by
+	pg_atomic_uint64 evictPos;	/* Next evict position. Increments by
 								 * bufferLength only */
 	uint64		restorePos;		/* Next restore after eviction position.
 								 * Increments by bufferLength only */

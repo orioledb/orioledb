@@ -401,9 +401,11 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 
 	while (true)
 	{
-		if (pos >= pg_atomic_read_u64(&rewindMeta->evictPos))	/* At evictPos is the next element
-											 * to be evicted. It's actually
-											 * still in rewindAddBuffer */
+		if (pos >= pg_atomic_read_u64(&rewindMeta->evictPos))	/* At evictPos is the
+																 * next element to be
+																 * evicted. It's
+																 * actually still in
+																 * rewindAddBuffer */
 		{
 			rewindItem = &rewindAddBuffer[pos % rewind_circular_buffer_size];
 			source_buffer = 3;
@@ -1057,11 +1059,11 @@ try_restore_evicted_rewind_page(void)
 			   pg_atomic_read_u64(&rewindMeta->evictPos) < pg_atomic_read_u64(&rewindMeta->addPosFilledUpto))
 		{
 			elog(DEBUG3, "FASTPATH_restore: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-				pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-				pg_atomic_read_u64(&rewindMeta->addPosReserved),
-				pg_atomic_read_u64(&rewindMeta->evictPos),
-				rewindMeta->completePos, rewindMeta->restorePos,
-				rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+				 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+				 pg_atomic_read_u64(&rewindMeta->evictPos),
+				 rewindMeta->completePos, rewindMeta->restorePos,
+				 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 			Assert(rewindAddBuffer[(pg_atomic_read_u64(&rewindMeta->evictPos) % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
 			Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
@@ -1179,13 +1181,13 @@ rewind_worker_main(Datum main_arg)
 				Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
 				elog(DEBUG3, "force_complete_check 1: AF=%lu, AR=%lu, E=%lu, R=%lu, C=%lu tag: %u oxid %lu xid %u nsubxids %u force_complete_oxid %lu force_complete_xid %u",
-					pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-					pg_atomic_read_u64(&rewindMeta->addPosReserved),
-					pg_atomic_read_u64(&rewindMeta->evictPos),
-					rewindMeta->restorePos, rewindMeta->completePos,
-					rewindItem->tag, rewindItem->oxid, rewindItem->xid,
-					rewindItem->nsubxids, rewindMeta->force_complete_oxid,
-					rewindMeta->force_complete_xid);
+					 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+					 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+					 pg_atomic_read_u64(&rewindMeta->evictPos),
+					 rewindMeta->restorePos, rewindMeta->completePos,
+					 rewindItem->tag, rewindItem->oxid, rewindItem->xid,
+					 rewindItem->nsubxids, rewindMeta->force_complete_oxid,
+					 rewindMeta->force_complete_xid);
 
 				if (rewindItem->tag == REWIND_ITEM_TAG)
 				{
@@ -1196,10 +1198,10 @@ rewind_worker_main(Datum main_arg)
 					if (OXidIsValid(rewindMeta->force_complete_oxid) || TransactionIdIsValid(rewindMeta->force_complete_xid))
 					{
 						elog(DEBUG3, "force_complete_check 2: AF=%lu, AR=%lu, E=%lu, R=%lu, C=%lu",
-							pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-							pg_atomic_read_u64(&rewindMeta->addPosReserved),
-							pg_atomic_read_u64(&rewindMeta->evictPos),
-							rewindMeta->restorePos, rewindMeta->completePos);
+							 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+							 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+							 pg_atomic_read_u64(&rewindMeta->evictPos),
+							 rewindMeta->restorePos, rewindMeta->completePos);
 
 						if (OXidIsValid(rewindMeta->force_complete_oxid) && OXidIsValid(rewindItem->oxid) && rewindItem->oxid < rewindMeta->force_complete_oxid)
 							force_complete = true;
@@ -1303,11 +1305,11 @@ evict_rewind_items(uint64 curAddPosFilled)
 			while (rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size && pg_atomic_read_u64(&rewindMeta->evictPos) < curAddPosFilled)
 			{
 				elog(DEBUG3, "FASTPATH_evict: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-					curAddPosFilled,
-					pg_atomic_read_u64(&rewindMeta->addPosReserved),
-					pg_atomic_read_u64(&rewindMeta->evictPos),
-					rewindMeta->completePos, rewindMeta->restorePos,
-					rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+					 curAddPosFilled,
+					 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+					 pg_atomic_read_u64(&rewindMeta->evictPos),
+					 rewindMeta->completePos, rewindMeta->restorePos,
+					 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 				Assert(rewindAddBuffer[(pg_atomic_read_u64(&rewindMeta->evictPos) % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
 				Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
@@ -1327,12 +1329,12 @@ evict_rewind_items(uint64 curAddPosFilled)
 			length_to_end = rewind_circular_buffer_size - start;
 
 			elog(DEBUG3, "DISK_evict: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-				curAddPosFilled,
-				pg_atomic_read_u64(&rewindMeta->addPosReserved),
-				pg_atomic_read_u64(&rewindMeta->evictPos),
-				rewindMeta->completePos,
-				rewindMeta->restorePos,
-				rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+				 curAddPosFilled,
+				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+				 pg_atomic_read_u64(&rewindMeta->evictPos),
+				 rewindMeta->completePos,
+				 rewindMeta->restorePos,
+				 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 
 			if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 			{
@@ -1374,11 +1376,11 @@ evict_rewind_items(uint64 curAddPosFilled)
 	else
 	{
 		elog(DEBUG3, "evict_CONCURRENT_SKIPPED: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-			curAddPosFilled,
-			pg_atomic_read_u64(&rewindMeta->addPosReserved),
-			pg_atomic_read_u64(&rewindMeta->evictPos),
-			rewindMeta->completePos, rewindMeta->restorePos,
-			rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+			 curAddPosFilled,
+			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+			 pg_atomic_read_u64(&rewindMeta->evictPos),
+			 rewindMeta->completePos, rewindMeta->restorePos,
+			 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 	}
 
 	LWLockRelease(&rewindMeta->rewindCheckpointLock);
@@ -1462,27 +1464,27 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 		 */
 		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos - pg_atomic_read_u64(&rewindMeta->evictPos) + nitems);
 		elog(DEBUG3, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-			pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-			pg_atomic_read_u64(&rewindMeta->addPosReserved),
-			pg_atomic_read_u64(&rewindMeta->evictPos),
-			rewindMeta->completePos,
-			rewindMeta->restorePos,
-			freeAddSpace);
+			 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+			 pg_atomic_read_u64(&rewindMeta->evictPos),
+			 rewindMeta->completePos,
+			 rewindMeta->restorePos,
+			 freeAddSpace);
 
 		if (freeAddSpace <= REWIND_DISK_BUFFER_LENGTH * 4 || (rewind_circular_buffer_size < REWIND_DISK_BUFFER_LENGTH * 8 && freeAddSpace <= REWIND_DISK_BUFFER_LENGTH))
 		{
 			elog(DEBUG3, "evict_rewind_items START: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-				pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-				pg_atomic_read_u64(&rewindMeta->addPosReserved),
-				pg_atomic_read_u64(&rewindMeta->evictPos),
-				rewindMeta->completePos, rewindMeta->restorePos,
-				freeAddSpace);
+				 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+				 pg_atomic_read_u64(&rewindMeta->evictPos),
+				 rewindMeta->completePos, rewindMeta->restorePos,
+				 freeAddSpace);
 			evict_rewind_items(pg_atomic_read_u64(&rewindMeta->addPosFilledUpto));
 			elog(DEBUG3, "evict_rewind_items STOP: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-				pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-				pg_atomic_read_u64(&rewindMeta->addPosReserved),
-				pg_atomic_read_u64(&rewindMeta->evictPos), rewindMeta->completePos,
-				rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+				 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+				 pg_atomic_read_u64(&rewindMeta->evictPos), rewindMeta->completePos,
+				 rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 		}
 
 		if (freeAddSpace >= 0)
@@ -1688,12 +1690,12 @@ checkpoint_write_rewind_xids(void)
 		}
 
 		elog(DEBUG3, "CHECKPOINT FROM DISK: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
-			pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
-			pg_atomic_read_u64(&rewindMeta->addPosReserved),
-			pg_atomic_read_u64(&rewindMeta->evictPos),
-			rewindMeta->completePos,
-			rewindMeta->restorePos,
-			rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+			 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
+			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+			 pg_atomic_read_u64(&rewindMeta->evictPos),
+			 rewindMeta->completePos,
+			 rewindMeta->restorePos,
+			 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 
 		checkpoint_write_rewind_item(&buffer[rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH]);
 		rewindMeta->checkpointPos++;
