@@ -1319,6 +1319,7 @@ evict_rewind_items(uint64 curAddPosFilled)
 				pg_write_barrier();
 
 				pg_atomic_write_u64(&rewindMeta->evictPos, pg_atomic_read_u64(&rewindMeta->evictPos) + 1);
+				Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 				rewindMeta->restorePos++;
 			}
 		}
@@ -1367,6 +1368,7 @@ evict_rewind_items(uint64 curAddPosFilled)
 				pg_write_barrier();
 
 				pg_atomic_write_u64(&rewindMeta->evictPos, pg_atomic_read_u64(&rewindMeta->evictPos) + 1);
+				Assert(pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled);
 			}
 		}
 
