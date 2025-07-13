@@ -1436,8 +1436,6 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	int			i;
 	uint64		curAddPos;
 	uint64		startAddPos;
-	uint64		reserved;
-	uint64		filled;
 	uint64		cur;
 	int64		freeAddSpace;
 	bool		subxid_only = false;
@@ -1447,10 +1445,10 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 	if (rewindMeta->addToRewindQueueDisabled)
 	{
 		elog(WARNING, "Adding to rewind queue is blocked by rewind");
-		goto add_items_finished;
+		return;
 	}
 
-	nitems = nsubxids ? 2 + (nsubxids / SUBXIDS_PER_ITEM) : 1;
+	nitems = nsubxids ? 2 + ((nsubxids - 1) / SUBXIDS_PER_ITEM) : 1;
 	startAddPos = pg_atomic_fetch_add_u64(&rewindMeta->addPosReserved, nitems);
 
 	while (true)
@@ -1464,7 +1462,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 		 * for eviction in the same way. So double eviction is possible and OK
 		 * but very unlikely.
 		 */
-		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos - pg_atomic_read_u64(&rewindMeta->evictPos) + nitems);
+		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos + (uint64) nitems - pg_atomic_read_u64(&rewindMeta->evictPos));
 		elog(DEBUG3, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
 			 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
@@ -1489,7 +1487,11 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 				 rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
 		}
 
-		if (freeAddSpace >= 0)
+		/*
+		 * Compare to one, cause we expect at least one EMPTY_ITEM_TAG to be a
+		 * barrier for addPosFilledUpto.
+		 */
+		if (freeAddSpace >= 1)
 			break;
 	}
 
@@ -1520,11 +1522,9 @@ next_subxids_item:
 				nsubxids = 0;
 				pg_write_barrier();
 				subxidsItem->tag = SUBXIDS_ITEM_TAG;
-
-				goto add_items_finished;
+				break;
 			}
-
-			if (subxids_count % SUBXIDS_PER_ITEM == 0)
+			else if (subxids_count % SUBXIDS_PER_ITEM == 0)
 			{
 				curAddPos++;
 				pg_write_barrier();
@@ -1602,45 +1602,25 @@ next_subxids_item:
 									 * subxids */
 		}
 	}
-add_items_finished:
-repeat_bump_filled_pos:
 
 	/*
 	 * Bump rewindMeta->addPosFilledUpto until the first item that was
-	 * reserved by some concurrent process but not filled yet. If unlikely
-	 * in-progress queue becomes too big, wait until blocking in-progress
-	 * inserter completes insertion and eventually until the transient part of
-	 * a queue decreases under allowed threshold..
+	 * reserved by some concurrent process but not filled yet.
 	 */
-	pg_read_barrier();
-	reserved = pg_atomic_read_u64(&rewindMeta->addPosReserved);
-	filled = pg_atomic_read_u64(&rewindMeta->addPosFilledUpto);
-	cur = filled;
+	pg_write_barrier();
 
-	while (cur < reserved)
+	cur = startAddPos;
+
+	while (pg_atomic_compare_exchange_u64(&rewindMeta->addPosFilledUpto, &cur, cur + 1))
 	{
-		if ((&rewindAddBuffer[cur % rewind_circular_buffer_size])->tag != EMPTY_ITEM_TAG)
+		cur++;
+		pg_read_barrier();
+		if (rewindAddBuffer[cur % rewind_circular_buffer_size].tag == EMPTY_ITEM_TAG)
 		{
-			/*
-			 * Try to bump addPosFilledUpto. Skip to next if already bumped by
-			 * concurrent process
-			 */
-			cur++;
-			pg_atomic_compare_exchange_u64(&rewindMeta->addPosFilledUpto, &filled, cur);
-		}
-		else
-		{
-			/* Current item is not written yet */
+			/* The next item is not filled yet */
 			break;
 		}
 	}
-
-	/*
-	 * Still too many transient items in the queue, try to repeat bumping
-	 * addPosFilledUpto
-	 */
-	if (reserved - filled > 20)
-		goto repeat_bump_filled_pos;
 }
 
 /*
