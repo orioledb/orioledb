@@ -1597,6 +1597,7 @@ next_subxids_item:
 		if (rewindAddBuffer[cur % rewind_circular_buffer_size].tag == EMPTY_ITEM_TAG)
 		{
 			/* The next item is not filled yet */
+			Assert(cur >= startAddPos + nitems);
 			break;
 		}
 	}
