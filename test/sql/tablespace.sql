@@ -156,6 +156,8 @@ ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
 ALTER TABLESPACE regress_tblspace RENAME TO regress_tblspace_renamed;
 ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default;
 
+SELECT orioledb_rewind_sync();
+
 DROP TABLESPACE regress_tblspace_renamed;
 
 -- TODO: Add tablespaces support to iterate_files
