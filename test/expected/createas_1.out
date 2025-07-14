@@ -557,8 +557,15 @@ SELECT * FROM o_test_mv_select;
        2
 (2 rows)
 
+DROP MATERIALIZED VIEW o_test_mv_select;
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 11 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table o_test_create_as
 drop cascades to table o_test_create_as_less_atts
 drop cascades to table o_test_create_as_no_atts
@@ -569,7 +576,6 @@ drop cascades to table tbl_as_nodata
 drop cascades to table tbl_as_data
 drop cascades to materialized view o_test_matview
 drop cascades to table o_test_mv_select_table
-drop cascades to materialized view o_test_mv_select
 DROP SCHEMA createas CASCADE;
 NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to function query_to_text(text)
