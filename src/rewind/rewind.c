@@ -1590,9 +1590,15 @@ next_subxids_item:
 
 	cur = startAddPos;
 
-	while (pg_atomic_compare_exchange_u64(&rewindMeta->addPosFilledUpto, &cur, cur + 1))
+	while (true)
 	{
-		cur++;
+		if (pg_atomic_compare_exchange_u64(&rewindMeta->addPosFilledUpto, &cur, cur + 1))
+			cur++;
+		else if (cur >= startAddPos && cur < startAddPos + nitems)
+			continue;
+		else
+			break;
+
 		pg_read_barrier();
 		if (rewindAddBuffer[cur % rewind_circular_buffer_size].tag == EMPTY_ITEM_TAG)
 		{
