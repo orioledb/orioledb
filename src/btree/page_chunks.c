@@ -161,6 +161,7 @@ partial_load_chunk(PartialPageState *partial, Page img,
 		loc->chunkOffset = chunkOffset;
 		loc->itemOffset = 0;
 		loc->chunk = (BTreePageChunk *) ((Pointer) img + chunkBegin);
+		loc->chunkSize = chunkEnd - chunkBegin;
 	}
 	return true;
 }
@@ -1536,10 +1537,13 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 		offset = locator->itemOffset - locator->chunkItemsCount;
 		if (partial)
 		{
-			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1, NULL))
+			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1, locator))
 				return false;
 		}
-		page_chunk_fill_locator(p, locator->chunkOffset + 1, locator);
+		else
+		{
+			page_chunk_fill_locator(p, locator->chunkOffset + 1, locator);
+		}
 		locator->itemOffset = offset;
 	}
 	return true;
