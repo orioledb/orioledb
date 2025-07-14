@@ -21,6 +21,11 @@
 #include "common/relpath.h"
 #include "utils/syscache.h"
 
+/* Silent cppcheck */
+#ifndef TABLESPACE_VERSION_DIRECTORY
+#define TABLESPACE_VERSION_DIRECTORY
+#endif
+
 static OSysCache *tablespace_cache = NULL;
 
 O_SYS_CACHE_FUNCS(tablespace_cache, OTablespace, 1);
