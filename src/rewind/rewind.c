@@ -1274,7 +1274,9 @@ evict_rewind_items(uint64 curAddPosFilled)
 	{
 		Assert(rewindMeta->restorePos <= pg_atomic_read_u64(&rewindMeta->evictPos));
 
-		if (rewindMeta->restorePos == pg_atomic_read_u64(&rewindMeta->evictPos) && rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size)
+		if (rewindMeta->restorePos == pg_atomic_read_u64(&rewindMeta->evictPos) &&
+			rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size &&
+			pg_atomic_read_u64(&rewindMeta->evictPos) <= curAddPosFilled)
 		{
 			/* Fast path: move to rewindCompleteBuffer */
 			while (rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size && pg_atomic_read_u64(&rewindMeta->evictPos) < curAddPosFilled)
