@@ -43,7 +43,7 @@
   ((void)(addr), (void)(size))
 #endif
 
-#define ORIOLEDB_VERSION "OrioleDB public beta 11"
+#define ORIOLEDB_VERSION "OrioleDB public beta 12"
 #define ORIOLEDB_BINARY_VERSION 6
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"

@@ -4,7 +4,7 @@ CREATE EXTENSION orioledb;
 SELECT orioledb_version();
     orioledb_version     
 -------------------------
- OrioleDB public beta 11
+ OrioleDB public beta 12
 (1 row)
 
 SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
