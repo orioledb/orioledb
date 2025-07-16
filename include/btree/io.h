@@ -32,7 +32,7 @@ extern int	assign_io_num(OInMemoryBlkno blkno, OffsetNumber offnum);
 extern OWalkPageResult walk_page(OInMemoryBlkno blkno, bool evict);
 extern void unlock_io(int ionum);
 extern void wait_for_io_completion(int ionum);
-extern bool cleanup_btree_files(Oid datoid, Oid relnode);
+extern bool cleanup_btree_files(Oid datoid, Oid relnode, bool fsync);
 extern bool fsync_btree_files(Oid datoid, Oid relnode);
 extern int	OFileRead(File file, char *buffer, int amount, off_t offset,
 					  uint32 wait_event_info);

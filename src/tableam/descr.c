@@ -922,7 +922,7 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 }
 
 void
-cleanup_btree(Oid datoid, Oid relnode, bool files)
+cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
@@ -945,7 +945,7 @@ cleanup_btree(Oid datoid, Oid relnode, bool files)
 		pfree(shared);
 	}
 	if (files)
-		cleanup_btree_files(key.datoid, key.relnode);
+		cleanup_btree_files(key.datoid, key.relnode, fsync);
 }
 
 bool
