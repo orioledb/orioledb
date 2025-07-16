@@ -3065,16 +3065,18 @@ unlink_callback(const char *filename, uint32 segno, char *ext, void *arg)
 	 * data file.  So, we durably delete the first data file to evade
 	 * situation when partially deleted file data is visible.
 	 */
-	if (segno == 0 && ext == NULL)
+	bool		fsync = *(bool *) arg;
+
+	if (segno == 0 && ext == NULL && fsync)
 		durable_unlink(filename, ERROR);
 	else
 		unlink(filename);
 }
 
 bool
-cleanup_btree_files(Oid datoid, Oid relnode)
+cleanup_btree_files(Oid datoid, Oid relnode, bool fsync)
 {
-	return iterate_relnode_files(datoid, relnode, unlink_callback, NULL);
+	return iterate_relnode_files(datoid, relnode, unlink_callback, (void *) &fsync);
 }
 
 static void

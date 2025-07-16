@@ -1997,11 +1997,13 @@ o_truncate_table(ORelOids oids)
 	int			treeOidsNum;
 	int			i;
 	bool		invalidatedTable = false;
+	bool		is_temp;
 
 	o_tables_rel_lock(&oids, AccessExclusiveLock);
 
 	o_table = o_tables_get(oids);
 	Assert(o_table != NULL);
+	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 
 	treeOids = o_table_make_index_oids(o_table, &treeOidsNum);
 
@@ -2009,7 +2011,7 @@ o_truncate_table(ORelOids oids)
 	{
 		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, false);
 		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, true);
-		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode, true);
+		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode, true, !is_temp);
 		o_invalidate_oids(treeOids[i]);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(treeOids[i].datoid, treeOids[i].reloid,
@@ -2022,7 +2024,7 @@ o_truncate_table(ORelOids oids)
 
 	if (!invalidatedTable)
 	{
-		cleanup_btree(oids.datoid, oids.relnode, true);
+		cleanup_btree(oids.datoid, oids.relnode, true, !is_temp);
 		o_invalidate_oids(oids);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(oids.datoid, oids.reloid, oids.relnode);*/

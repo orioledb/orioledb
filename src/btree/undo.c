@@ -758,7 +758,7 @@ check_pending_truncates(void)
 								   PENDING_TRUNCATES_FILENAME)));
 
 		for (i = 0; i < numTrees; i++)
-			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode);
+			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode, true);
 	}
 
 	pending_truncates_meta->pendingTruncatesLocation = 0;
@@ -856,7 +856,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
 			if (doCleanup)
 			{
-				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
+				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles, true);
 				o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 				o_tablespace_cache_delete(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 			}
