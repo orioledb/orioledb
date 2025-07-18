@@ -812,6 +812,10 @@ class ReplicationTest(BaseTest):
 		node = self.node
 		node.append_conf('orioledb.recovery_pool_size = 1')
 		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.append_conf('autovacuum_naptime = 1s')
+		node.append_conf('autovacuum_vacuum_threshold = 0')
+		node.append_conf('autovacuum_vacuum_scale_factor = 0')
+
 		node.start()
 		with self.node as master:
 			master.safe_psql("""
@@ -893,15 +897,11 @@ class ReplicationTest(BaseTest):
 
 					master.stop(['-m', 'immediate'])
 					master.start()
-					master.stop(['-m', 'immediate'])
 
-					master.start()
-					master.stop()
-					master.start()
-					master.stop()
-					master.start()
-					master.stop()
-					master.start()
+					master.poll_query_until(
+					    "SELECT count(*) = 0 FROM pg_class WHERE relname LIKE 'o_test%%'"
+					)
+
 					self.assertEqual(
 					    master.execute("""
 											SELECT c.relname

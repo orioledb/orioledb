@@ -145,7 +145,7 @@ extern void o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id);
 extern void o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid);
 
 /* Drops all temporary tables that left after crash */
-extern void o_tables_drop_all_temporary(void);
+extern void o_tables_truncate_all_unlogged(void);
 
 /* Adds a new table to o_tables list */
 extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);

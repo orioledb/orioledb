@@ -98,7 +98,7 @@ typedef struct
 static void o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name, OTableField *field);
 static void o_tables_foreach_callback(ORelOids oids, void *arg);
 static void o_tables_drop_all_callback(ORelOids oids, void *arg);
-static void o_tables_drop_all_temporary_callback(OTable *o_table, void *arg);
+static void o_tables_truncate_unlogged_callback(OTable *o_table, void *arg);
 static void o_table_oids_array_callback(ORelOids oids, void *arg);
 static inline void o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool checkpoint);
 
@@ -1057,7 +1057,7 @@ o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id)
 }
 
 void
-o_tables_drop_all_temporary()
+o_tables_truncate_all_unlogged()
 {
 	OTablesDropAllArg arg;
 	OXid		oxid;
@@ -1068,7 +1068,7 @@ o_tables_drop_all_temporary()
 	arg.oxid = oxid;
 	arg.csn = oSnapshot.csn;
 
-	o_tables_foreach(o_tables_drop_all_temporary_callback,
+	o_tables_foreach(o_tables_truncate_unlogged_callback,
 					 &o_non_deleted_snapshot, &arg);
 }
 
@@ -1504,60 +1504,9 @@ o_tables_drop_all_callback(ORelOids oids, void *arg)
 }
 
 static void
-o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
+o_tables_truncate_unlogged_callback(OTable *o_table, void *arg)
 {
-	OTablesDropAllArg *drop_arg = (OTablesDropAllArg *) arg;
-
-	if (o_table->persistence == RELPERSISTENCE_TEMP)
-	{
-		OTableChunkKey key;
-		bool		result;
-		OAutonomousTxState state;
-
-		key.oids = o_table->oids;
-		key.chunknum = 0;
-
-		start_autonomous_transaction(&state);
-
-		o_tables_table_meta_lock(NULL);
-		PG_TRY();
-		{
-			BTreeDescr *sys_tree;
-
-			o_tables_oids_indexes(o_table, NULL, get_current_oxid(), drop_arg->csn);
-			sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
-			result = generic_toast_delete_optional_wal(&oTablesToastAPI,
-													   (Pointer) &key,
-													   get_current_oxid(),
-													   drop_arg->csn,
-													   sys_tree,
-													   false);
-			if (result)
-			{
-				ORelOids   *treeOids;
-				int			numTreeOids;
-				int			i;
-
-				treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-				for (i = 0; i < numTreeOids; i++)
-				{
-					cleanup_btree(treeOids[i].datoid, treeOids[i].relnode,
-								  true);
-				}
-				pfree(treeOids);
-			}
-		}
-		PG_CATCH();
-		{
-			o_tables_table_meta_unlock(NULL, InvalidOid);
-			abort_autonomous_transaction(&state);
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
-		o_tables_table_meta_unlock(NULL, InvalidOid);
-		finish_autonomous_transaction(&state);
-	}
-	else if (o_table->persistence == RELPERSISTENCE_UNLOGGED)
+	if (o_table->persistence == RELPERSISTENCE_UNLOGGED)
 	{
 		o_truncate_table(o_table->oids);
 		AcceptInvalidationMessages();
