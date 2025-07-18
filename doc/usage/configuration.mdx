@@ -31,7 +31,11 @@ The shared memory ring buffer size for older versions of rows and pages.
 | ----------- | --- |
 | **Default** | 3   |
 
-The number of recovery workers row-level WAL based recovery. We recommend increasing the value of this parameter for systems with a large number of CPU cores.
+The number of recovery workers for row-level WAL based recovery.
+
+Increasing the sum value of `orioledb.recovery_pool_size` and `orioledb.recovery_idx_pool_size` to 50-100% of number of
+available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more that
+this sum amount, otherwise OrioleDB will fallback to single-process index build in recovery or to single-process recovery.
 
 ### `orioledb.recovery_idx_pool_size`
 
@@ -39,7 +43,11 @@ The number of recovery workers row-level WAL based recovery. We recommend increa
 | ----------- | --- |
 | **Default** | 3   |
 
-The number of recovery index build workers. We recommend increasing the value of this parameter for the systems with a large number of CPU cores.
+The number of recovery parallel index build workers.
+
+Increasing the sum value of `orioledb.recovery_pool_size` and `orioledb.recovery_idx_pool_size` to 50-100% of number of
+available CPU cores speeds up recovery process for the cluster. You need to set `max_worker_processes` to more that
+this sum amount, otherwise OrioleDB will fallback to single-process index build in recovery or to single-process recovery.
 
 ### `orioledb.recovery_queue_size`
 
@@ -75,13 +83,36 @@ Shared memory size for metadata of block allocators for compressed tables. We re
 
 Shared memory size of table metadata. We recommend increasing the value of this parameter to work with a large number of tables.
 
-### `orioledb.undo_system_buffers`
+### `orioledb.system_undo_circular_buffer_fraction`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 0.1 |
+
+Fraction of `orioledb.undo_buffers` for older versions of rows and pages in system tables. We recommend increasing the
+value of this parameter for DDL-intensive workloads. This replaces deprecated parameter `orioledb.undo_system_buffers` which
+did the same in absolute memory size.
+
+The remaining `orioledb.undo_buffers` (except the fraction specified by sum of `orioledb.system_undo_circular_buffer_fraction` and `orioledb.regular_block_undo_circular_buffer_fraction`) are reserved for row-level undo logs for regular tables.
+
+### `orioledb.regular_block_undo_circular_buffer_fraction`
 
 |             |      |
 | ----------- | ---- |
-| **Default** | 1 MB |
+| **Default** | 0.45 |
 
-The shared memory ring buffer size for older versions of rows and pages in system tables. We recommend increasing the value of this parameter for DDL-intensive workloads.
+Fraction of `orioledb.undo_buffers` for block-level undo logs for regular tables.
+
+The remaining `orioledb.undo_buffers` (except the fraction specified by sum of `orioledb.system_undo_circular_buffer_fraction` and `orioledb.regular_block_undo_circular_buffer_fraction`) are reserved for row-level undo logs for regular tables.
+
+### `orioledb.xid_buffers`
+
+|             |     |
+| ----------- | --- |
+| **Default** | 128 |
+
+Number of OrioleDB in-memory xid buffers in blocks. Each block can acommodate 512 xid items corresponding to open
+transactions. Consider increasing this parameter if you have very big transactions rate.
 
 ### `orioledb.bgwriter_num_workers`
 
@@ -155,6 +186,16 @@ Default block-level compression level for tables' TOASTed values.
 
 Display compression column in orioledb_table_description.
 
+### `orioledb.use_sparse_files`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Try to allocate files as `sparse` at filesystem level. Saves occupied space on disk by excluding non-allocated
+regions in file from occupying disk space. It's an experimental option.
+
+
 ## Options for undo-based rewind (experimental)
 
 ### `orioledb.enable_rewind`
@@ -189,7 +230,7 @@ Maximum number of rewind transaction items that are stored for a rewind. Older r
 | ----------- | --- |
 | **Default** | 128 |
 
-Number of orioledb in-memory rewind buffers in blocks. Each block can ccommodate 68 rewind transaction items. If you have enough memory set it near a value `orioledb.rewind_max_transactions` / 68 to avoid writing rewind info to disk.
+Number of OrioleDB in-memory rewind buffers in blocks. Each block can acommodate 68 rewind transaction items. If you have enough memory set it near a value `orioledb.rewind_max_transactions` / 68 to avoid writing rewind info to disk.
 
 ## Debugging options
 
@@ -248,3 +289,13 @@ Remove temporary \*.tmp and \*.map files after checkpoint.
 | **Default** | on |
 
 Skip reading of unmodified trees during checkpointing.
+
+### `orioledb.debug_max_bridge_ctid_blkno`
+
+|             |     |
+| ----------- | --- |
+| **Default** | NA  |
+
+Sets maximum value for bridge ctid for its overflow testing.
+
+[Additional GUC's for experimental s3 mode](decoupled-storage.mdx)
