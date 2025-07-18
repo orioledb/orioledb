@@ -2073,6 +2073,9 @@ class RecoveryTest(BaseTest):
 		node = self.node
 		node.append_conf('orioledb.recovery_pool_size = 1')
 		node.append_conf('orioledb.recovery_idx_pool_size = 1')
+		node.append_conf('autovacuum_naptime = 1s')
+		node.append_conf('autovacuum_vacuum_threshold = 0')
+		node.append_conf('autovacuum_vacuum_scale_factor = 0')
 		node.start()
 
 		node.safe_psql("""
@@ -2123,14 +2126,14 @@ class RecoveryTest(BaseTest):
 		file_num = 3  # PK trees
 		file_num += 1  # Indexes
 		db_dir = f"{node.data_dir}/orioledb_data/{cur_database}"
+
 		self.assertEqual(len(sorted(os.listdir(db_dir))), file_num)
 		node.start()
-		node.stop(['-m', 'immediate'])
-		self.assertEqual(len(sorted(os.listdir(db_dir))), 0)
-		node.start()
-		node.stop(['-m', 'immediate'])
 
-		node.start()
+		node.poll_query_until(
+		    "SELECT count(*) = 0 FROM pg_class WHERE relname LIKE 'o_test_%%'")
+		self.assertEqual(len(sorted(os.listdir(db_dir))), 0)
+
 		self.assertEqual(
 		    node.execute("""
 								SELECT c.relname

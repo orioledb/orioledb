@@ -2064,7 +2064,7 @@ orioledb_snapshot_hook(Snapshot snapshot)
 	if (*was_in_recovery &&
 		!pg_atomic_exchange_u32(after_recovery_cleaned, true))
 	{
-		o_tables_drop_all_temporary();
+		o_tables_truncate_all_unlogged();
 	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
