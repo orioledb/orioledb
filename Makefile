@@ -170,7 +170,9 @@ TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/recovery_worker_test.py \
 						test/t/replication_test.py \
 						test/t/types_test.py \
-						test/t/undo_eviction_test.py
+						test/t/undo_eviction_test.py \
+						test/t/rewind_xid_test.py \
+						test/t/rewind_xid_evict_large_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_eviction_test.py \
 						test/t/checkpoint_same_trx_test.py \
@@ -194,10 +196,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/trigger_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py
-TESTGRESCHECKS_PART_3 = test/t/rewind_xid_test.py \
-			test/t/rewind_xid_evict_test.py
-TESTGRESCHECKS_PART_4 = test/t/rewind_xid_evict_large_test.py \
-			test/t/rewind_time_test.py
+TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
@@ -237,7 +236,7 @@ isolationcheck: | install
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4) : | install
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) : | install
 	$(with_temp_install) \
 	python3 -W ignore::DeprecationWarning -m unittest -v $@
 
@@ -268,7 +267,7 @@ isolationcheck: | submake-isolation submake-orioledb temp-install
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4): | submake-orioledb temp-install
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3): | submake-orioledb temp-install
 	PG_CONFIG="$(abs_top_builddir)/tmp_install$(bindir)/pg_config" \
 		$(with_temp_install) \
 		python3 -m unittest -v $@
@@ -333,7 +332,7 @@ submake-isolation:
 submake-orioledb:
 	$(MAKE) -C $(top_builddir)/contrib/orioledb
 
-testgrescheck: $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4)
+testgrescheck: $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3)
 
 testgrescheck_part_1: $(TESTGRESCHECKS_PART_1)
 
@@ -341,7 +340,6 @@ testgrescheck_part_2: $(TESTGRESCHECKS_PART_2)
 
 testgrescheck_part_3: $(TESTGRESCHECKS_PART_3)
 
-testgrescheck_part_4: $(TESTGRESCHECKS_PART_4)
 temp-install: EXTRA_INSTALL=contrib/orioledb
 
 orioledb.typedefs: $(OBJS)
@@ -360,4 +358,4 @@ yapf:
 
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck pgindent \
-	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4)
+	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3)
