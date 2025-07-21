@@ -20,6 +20,10 @@ ENV BUILD_CC_COMPILER=${BUILD_CC_COMPILER}
 ARG DEBUG_MODE=false
 ENV DEBUG_MODE=${DEBUG_MODE}
 
+# Enable build with valgrind
+ARG USE_VALGRIND=false
+ENV USE_VALGRIND=${USE_VALGRIND}
+
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
 # They are useful for building downstream extensions using the same LLVM, like PostGIS alpine https://github.com/postgis/docker-postgis
@@ -44,7 +48,7 @@ ENV LANG=en_US.utf8
 
 RUN mkdir -p /usr/src/postgresql/contrib/orioledb
 
-COPY . /usr/src/postgresql/contrib/orioledb
+COPY --chown=postgres:postgres . /usr/src/postgresql/contrib/orioledb
 
 RUN mkdir /docker-entrypoint-initdb.d /docker-default-initdb.d
 
@@ -64,6 +68,11 @@ RUN set -eux; \
 		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
 		*) : ;; \
 	esac ; \
+	if [ "$USE_VALGRIND" = "true" ] ; then \
+		VALGRIND_RUNTIME_DEPS="valgrind valgrind-dev" ; \
+	else \
+		VALGRIND_RUNTIME_DEPS="" ; \
+	fi; \
 	\
 	echo "PG_MAJOR=$PG_MAJOR" ; \
 	echo "PGTAG=$PGTAG" ; \
@@ -74,6 +83,8 @@ RUN set -eux; \
 	echo "EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES" ; \
 	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
 	echo "DEBUG_MODE=$DEBUG_MODE" ; \
+	echo "USE_VALGRIND=$USE_VALGRIND" ; \
+	echo "VALGRIND_RUNTIME_DEPS=$VALGRIND_RUNTIME_DEPS" ; \
 	\
 	# check if the custom llvm version is set, and if so, set the LLVM_CONFIG and CLANG variables
 	CUSTOM_LLVM_VERSION=$(echo "$DOCKER_PG_LLVM_DEPS" | sed -n 's/.*llvm\([0-9]*\).*/\1/p') ; \
@@ -89,6 +100,7 @@ RUN set -eux; \
 	\
 	apk add --no-cache --virtual .build-deps \
 		${DOCKER_PG_LLVM_DEPS} \
+		${VALGRIND_RUNTIME_DEPS} \
 		bison \
 		coreutils \
 		curl \
@@ -139,6 +151,9 @@ RUN set -eux; \
 	\
 	cd /usr/src/postgresql; \
 	\
+	if [ "$USE_VALGRIND" = "true" ]; then \
+		sed -i.bak 's|/[*] #define USE_VALGRIND [*]/|#define USE_VALGRIND|g' ./src/include/pg_config_manual.h; \
+	fi ; \
 	POSTGRESQL_VERSION=$(grep "PACKAGE_VERSION=" ./configure | cut -d"'" -f2) ; \
 	echo "POSTGRESQL_VERSION=$POSTGRESQL_VERSION" ; \
 	\
