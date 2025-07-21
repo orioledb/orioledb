@@ -22,7 +22,7 @@ if [ $CHECK_TYPE = "static" ] || [ $COMPILER = "gcc" ]; then
 	apt_packages="$apt_packages cppcheck"
 fi
 
-if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ] || [ $CHECK_TYPE = "valgrind_3" ]; then
+if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 	apt_packages="$apt_packages valgrind"
 fi
 
