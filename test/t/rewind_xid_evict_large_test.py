@@ -83,7 +83,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -143,7 +143,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -215,7 +215,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres',
@@ -290,7 +290,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -377,7 +377,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres',
@@ -471,7 +471,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -564,7 +564,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -660,7 +660,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -755,7 +755,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -855,7 +855,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -958,7 +958,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -1299,7 +1299,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -1417,7 +1417,7 @@ class RewindXidTest(BaseTest):
 		c, *b = (node.execute(
 		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		ev = int(c)
-		#		print(len, ev, len - ev)
+		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
