@@ -302,7 +302,7 @@ class RewindXidTest(BaseTest):
 
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp2.name, '-n', '-c', '4', '-j', '4', '-t',
-		    '2500'
+		    '1250'
 		],
 		                       stderr=sys.stderr)
 
@@ -397,7 +397,7 @@ class RewindXidTest(BaseTest):
 
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp2.name, '-n', '-c', '4', '-j', '4', '-t',
-		    '2500'
+		    '1250'
 		],
 		                       stderr=sys.stderr)
 
