@@ -49,13 +49,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test (\n"
-		               "    id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "    PRIMARY KEY (id)\n"
-		               ") USING orioledb;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "    id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "    PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
 
 		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
@@ -114,13 +114,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
@@ -166,7 +166,9 @@ class RewindXidTest(BaseTest):
 		node.start()
 
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT * FROM o_test_heap ORDER BY 1;')),
+		    str(
+		        node.execute('postgres',
+		                     'SELECT * FROM o_test_heap ORDER BY 1;')),
 		    "[(1, 'oldval!'), (2, 'oldval!'), (3, 'oldval!'), (4, 'oldval!'), (5, 'oldval!')]"
 		)
 
@@ -181,18 +183,18 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
@@ -243,7 +245,9 @@ class RewindXidTest(BaseTest):
 		    "[(1, 'oldval!'), (2, 'oldval!'), (3, 'oldval!'), (4, 'oldval!'), (5, 'oldval!')]"
 		)
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT * FROM o_test_heap ORDER BY 1;')),
+		    str(
+		        node.execute('postgres',
+		                     'SELECT * FROM o_test_heap ORDER BY 1;')),
 		    "[(1, 'oldval!'), (2, 'oldval!'), (3, 'oldval!'), (4, 'oldval!'), (5, 'oldval!')]"
 		)
 		node.stop()
@@ -257,13 +261,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp1.write("BEGIN;\n")
@@ -299,7 +303,6 @@ class RewindXidTest(BaseTest):
 		invalidoxid = 9223372036854775807
 		#		print(xid, invalidoxid)
 
-
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp2.name, '-n', '-c', '4', '-j', '4', '-t',
 		    '1250'
@@ -323,7 +326,9 @@ class RewindXidTest(BaseTest):
 
 		self.maxDiff = None
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT * FROM o_test_heap ORDER BY 1;')),
+		    str(
+		        node.execute('postgres',
+		                     'SELECT * FROM o_test_heap ORDER BY 1;')),
 		    "[(1, 'oldval!'), (2, 'oldval!'), (3, 'oldval!'), (4, 'oldval!'), (5, 'oldval!'), (6, 'oldval!'), (7, 'oldval!'), (8, 'oldval!'), (9, 'oldval!'), (10, 'oldval!'), (11, 'oldval!'), (12, 'oldval!'), (13, 'oldval!'), (14, 'oldval!'), (15, 'oldval!'), (16, 'oldval!'), (17, 'oldval!'), (18, 'oldval!'), (19, 'oldval!'), (20, 'oldval!'), (21, 'oldval!'), (22, 'oldval!'), (23, 'oldval!'), (24, 'oldval!')]"
 		)
 		node.stop()
@@ -337,18 +342,18 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp1.write("BEGIN;\n")
@@ -394,7 +399,6 @@ class RewindXidTest(BaseTest):
 		xid = int(a)
 		#		print(xid, oxid)
 
-
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp2.name, '-n', '-c', '4', '-j', '4', '-t',
 		    '1250'
@@ -419,7 +423,9 @@ class RewindXidTest(BaseTest):
 
 		self.maxDiff = None
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT * FROM o_test_heap ORDER BY 1;')),
+		    str(
+		        node.execute('postgres',
+		                     'SELECT * FROM o_test_heap ORDER BY 1;')),
 		    "[(1, 'oldval!'), (2, 'oldval!'), (3, 'oldval!'), (4, 'oldval!'), (5, 'oldval!'), (6, 'oldval!'), (7, 'oldval!'), (8, 'oldval!'), (9, 'oldval!'), (10, 'oldval!'), (11, 'oldval!'), (12, 'oldval!'), (13, 'oldval!'), (14, 'oldval!'), (15, 'oldval!'), (16, 'oldval!'), (17, 'oldval!'), (18, 'oldval!'), (19, 'oldval!'), (20, 'oldval!'), (21, 'oldval!'), (22, 'oldval!'), (23, 'oldval!'), (24, 'oldval!')]"
 		)
 		self.assertEqual(
@@ -437,13 +443,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING orioledb;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
@@ -532,11 +538,11 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test (\n"
-		               "	val text\n"
-		               ") USING orioledb;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	val text\n"
+		    ") USING orioledb;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
@@ -624,13 +630,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
@@ -717,13 +723,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
@@ -808,13 +814,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
@@ -909,13 +915,13 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
@@ -1240,18 +1246,18 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test(\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING orioledb;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test(\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
@@ -1357,18 +1363,18 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_buffers = 128\n")
 		node.start()
 
-		node.safe_psql('postgres',
-		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING heap;\n"
-		               "CREATE TABLE IF NOT EXISTS o_test (\n"
-		               "	id serial NOT NULL,\n"
-		               "	val text,\n"
-		               "	PRIMARY KEY (id)\n"
-		               ") USING orioledb;\n")
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test_heap (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING heap;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
 
 		fp = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
 		fp.write("BEGIN;\n")
