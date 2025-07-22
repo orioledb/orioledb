@@ -26,9 +26,11 @@
 #include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
+#include "workers/interrupt.h"
 
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
+#include "postmaster/interrupt.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -168,13 +170,6 @@ recovery_worker_register(int worker_id)
 	return handle;
 }
 
-static void
-handle_sigterm(SIGNAL_ARGS)
-{
-	detached = true;
-	SetLatch(MyLatch);
-}
-
 /*
  * Recovery worker main function.
  */
@@ -199,7 +194,7 @@ recovery_worker_main(Datum main_arg)
 
 		ResetLatch(MyLatch);
 
-		pqsignal(SIGTERM, handle_sigterm);
+		pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 		BackgroundWorkerUnblockSignals();
 
 		shm_mq_set_receiver(GET_WORKER_QUEUE(id), MyProc);
@@ -207,10 +202,15 @@ recovery_worker_main(Datum main_arg)
 
 		my_ptr = pg_atomic_read_u64(&worker_ptrs[id].commitPtr);
 		recovery_queue_process(recovery_worker_queue, id);
+
+		/* Exit without calling recovery_finish() in case of interrupts */
+		o_worker_handle_interrupts();
+
+		/* In case of unexpected detach exit without calling recovery_finish() */
 		if (detached)
-		{
-			elog(ERROR, "orioledb recovery worker %d finished: unexpected detach from recovery messages queue.", id);
-		}
+			ereport(ERROR,
+					(errmsg("orioledb recovery worker %d finished: unexpected detach from recovery messages queue.",
+							id)));
 
 		shm_mq_detach(recovery_worker_queue);
 		recovery_worker_queue = NULL;
@@ -246,6 +246,63 @@ recovery_worker_main(Datum main_arg)
 	PG_END_TRY();
 }
 
+ParallelRecoveryContext *
+CreateParallelRecoveryContext(int nworkers)
+{
+	ParallelRecoveryContext *context;
+
+	context = palloc0(sizeof(ParallelRecoveryContext));
+	context->nworkers = nworkers;
+	shm_toc_initialize_estimator(&context->estimator);
+
+	return context;
+}
+
+void
+InitializeParallelRecoveryDSM(ParallelRecoveryContext *context)
+{
+	Size		segsize = 0;
+
+	segsize = shm_toc_estimate(&context->estimator);
+
+	if (context->nworkers > 0)
+		context->seg = dsm_create(segsize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
+	if (context->seg != NULL)
+		context->toc = shm_toc_create(O_PARALLEL_RECOVERY_MAGIC,
+									  dsm_segment_address(context->seg),
+									  segsize);
+	else
+	{
+		context->nworkers = 0;
+		context->private_memory = MemoryContextAlloc(TopMemoryContext, segsize);
+		context->toc = shm_toc_create(O_PARALLEL_RECOVERY_MAGIC,
+									  context->private_memory,
+									  segsize);
+	}
+}
+
+void
+DestroyParallelRecoveryContext(ParallelRecoveryContext *context)
+{
+	if (context->seg != NULL)
+	{
+		dsm_detach(context->seg);
+		context->seg = NULL;
+	}
+
+	/*
+	 * If this parallel context is actually in private memory rather than
+	 * shared memory, free that memory instead.
+	 */
+	if (context->private_memory != NULL)
+	{
+		pfree(context->private_memory);
+		context->private_memory = NULL;
+	}
+
+	pfree(context);
+}
+
 static inline void
 update_worker_ptr(int worker_id, XLogRecPtr ptr)
 {
@@ -274,13 +331,18 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 	int			tuple_len;
 	Size		data_size,
 				data_pos;
+	MemoryContext recovery_context;
 	bool		finished = false;
 	OXid		oxid;
+
+	recovery_context = AllocSetContextCreate(CurrentMemoryContext,
+											 "recovery worker context",
+											 ALLOCSET_DEFAULT_SIZES);
 
 	while (!finished)
 	{
 		data = recovery_queue_read(queue, &data_size, id);
-		if (detached)
+		if (detached || ShutdownRequestPending)
 			break;
 
 		Assert(data != NULL);
@@ -309,6 +371,9 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				if (recovery_header->type & RECOVERY_MODIFY_OIDS)
 				{
+					char	   *prefix;
+					char	   *db_prefix;
+
 					memcpy(&oids, data + data_pos, sizeof(ORelOids));
 					data_pos += sizeof(ORelOids);
 					ix_type = *(data + data_pos);
@@ -331,6 +396,11 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 														 false,
 														 NULL);
 					}
+					o_get_prefixes_for_relnode(indexDescr->oids.datoid,
+											   indexDescr->oids.relnode, &prefix, &db_prefix);
+					o_verify_dir_exists_or_create(prefix, NULL, NULL);
+					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+					pfree(db_prefix);
 				}
 
 				if (type == RecoveryMsgTypeBridgeErase)
@@ -362,76 +432,117 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					data_pos += tuple_len;
 				}
 			}
-			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild ||
-					 type == RecoveryMsgTypeWorkerParallelIndexBuild)
+			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
 			{
-				RecoveryOidsMsgIdxBuild *msg = (RecoveryOidsMsgIdxBuild *) (data + data_pos);
+				RecoveryMsgLeaderIdxBuild *msg = (RecoveryMsgLeaderIdxBuild *) (data + data_pos);
 				OTable	   *o_table,
 						   *old_o_table = NULL;
+				OTableDescr *o_descr;
+				OTableDescr *old_o_descr = NULL;
+				MemoryContext prev_context;
+				char	   *prefix;
+				char	   *db_prefix;
+
+				prev_context = MemoryContextSwitchTo(recovery_context);
+
+				o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
 
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = msg->oxid;
+
 				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
+
+				o_get_prefixes_for_relnode(msg->oids.datoid, msg->oids.relnode,
+										   &prefix, &db_prefix);
+				o_verify_dir_exists_or_create(prefix, NULL, NULL);
+				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+				pfree(db_prefix);
+
 				if (msg->isrebuild)
 				{
 					Assert(ORelOidsIsValid(msg->old_oids));
+
 					old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version);
 					Assert(old_o_table);
 					Assert(old_o_table->version == msg->old_o_table_version);
 				}
 
-				if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
-				{
-					OTableDescr *o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
-					OTableDescr *old_o_descr = NULL;
+				Assert(id == index_build_leader);
+				Assert((msg->isrebuild && msg->ix_num == InvalidIndexNumber) || (!msg->isrebuild && msg->ix_num != InvalidIndexNumber));
 
-					Assert(id == index_build_leader);
-					o_fill_tmp_table_descr(o_descr, o_table);
+				o_fill_tmp_table_descr(o_descr, o_table);
 
-					Assert((msg->isrebuild && msg->ix_num == InvalidIndexNumber) || (!msg->isrebuild && msg->ix_num != InvalidIndexNumber));
-					if (msg->isrebuild)
-					{
-						old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
-						o_fill_tmp_table_descr(old_o_descr, old_o_table);
-						rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true, NULL);
-					}
-					else
-					{
-						build_secondary_index(o_table, o_descr, msg->ix_num, true, NULL);
-					}
-
-					/*
-					 * Wake up the other recovery processes that may wait to
-					 * do their modify operations on this relation or to do
-					 * oxid update
-					 */
-					SpinLockAcquire(&recovery_oidxshared->mutex);
-					recovery_oidxshared->completed_position = msg->current_position;
-					SpinLockRelease(&recovery_oidxshared->mutex);
-					ConditionVariableBroadcast(&recovery_oidxshared->recoverycv);
-					o_free_tmp_table_descr(o_descr);
-					pfree(o_descr);
-					if (msg->isrebuild)
-					{
-						o_free_tmp_table_descr(old_o_descr);
-						pfree(old_o_descr);
-					}
-				}
-				else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
-				{
-					Assert(id >= index_build_first_worker && id <= index_build_last_worker);
-					/* participate as a worker in parallel index build */
-					_o_index_parallel_build_inner(NULL, NULL, o_table, old_o_table);
-				}
-
-				data_pos += sizeof(RecoveryOidsMsgIdxBuild);
-				pfree(o_table);
 				if (msg->isrebuild)
 				{
-					pfree(old_o_table);
+					old_o_descr = (OTableDescr *) palloc0(sizeof(OTableDescr));
+					o_fill_tmp_table_descr(old_o_descr, old_o_table);
+					rebuild_indices(old_o_table, old_o_descr, o_table, o_descr, true, NULL);
 				}
+				else
+				{
+					build_secondary_index(o_table, o_descr, msg->ix_num, true, false, NULL);
+				}
+
+				/*
+				 * Wake up the other recovery processes that may wait to do
+				 * their modify operations on this relation or to do oxid
+				 * update
+				 */
+				pg_atomic_write_u64(recovery_index_completed_pos,
+									msg->current_position);
+				ConditionVariableBroadcast(recovery_index_cv);
+
+				o_free_tmp_table_descr(o_descr);
+				if (msg->isrebuild)
+					o_free_tmp_table_descr(old_o_descr);
+
+				MemoryContextReset(recovery_context);
+				MemoryContextSwitchTo(prev_context);
+
+				data_pos += sizeof(RecoveryMsgLeaderIdxBuild);
+			}
+			else if (type == RecoveryMsgTypeWorkerParallelIndexBuild)
+			{
+				RecoveryMsgWorkerIdxBuild *msg = (RecoveryMsgWorkerIdxBuild *) (data + data_pos);
+				dsm_segment *seg;
+				shm_toc    *toc;
+				MemoryContext prev_context;
+
+				prev_context = MemoryContextSwitchTo(recovery_context);
+
+				Assert(msg->seg_handle != DSM_HANDLE_INVALID);
+
+				recovery_oxid = msg->oxid;
+
+				Assert(id >= index_build_first_worker && id <= index_build_last_worker);
+
+				/*
+				 * Participate as a worker in parallel index build.
+				 */
+
+				seg = dsm_attach(msg->seg_handle);
+				if (seg == NULL)
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("could not map dynamic shared memory segment")));
+
+				toc = shm_toc_attach(O_PARALLEL_RECOVERY_MAGIC,
+									 dsm_segment_address(seg));
+				if (toc == NULL)
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("invalid magic number in dynamic shared memory segment")));
+
+				_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+
+				dsm_detach(seg);
+
+				MemoryContextReset(recovery_context);
+				MemoryContextSwitchTo(prev_context);
+
+				data_pos += sizeof(RecoveryMsgWorkerIdxBuild);
 			}
 			else if (type == RecoveryMsgTypeCommit)
 			{
@@ -510,6 +621,8 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 	}
 	if (descr)
 		table_descr_dec_refcnt(descr);
+
+	MemoryContextDelete(recovery_context);
 }
 
 /*
@@ -561,7 +674,7 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		{
 			break;
 		}
-		else if (read_result == SHM_MQ_DETACHED || detached)
+		else if (read_result == SHM_MQ_DETACHED || ShutdownRequestPending)
 		{
 			detached = true;
 			data = NULL;
@@ -599,7 +712,7 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 			update_recovery_undo_loc_flush(false, id);
 		}
 
-		if (!PostmasterIsAlive() || detached)
+		if (!PostmasterIsAlive() || ShutdownRequestPending)
 		{
 			detached = true;
 			data = NULL;
@@ -676,6 +789,8 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
+		int			attnum;
+
 		isPrimary = (i == PrimaryIndexNumber);
 		id = descr->indices[i];
 
@@ -693,6 +808,12 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		cur_tuple = isPrimary ? tuple : stuple;
 
 		o_btree_load_shmem(&id->desc);
+		for (attnum = 0; attnum < id->nonLeafTupdesc->natts; attnum++)
+		{
+			FormData_pg_attribute attr = id->nonLeafTupdesc->attrs[attnum];
+
+			o_class_cache_preload_for_column(attr.atttypid);
+		}
 
 		if (isPrimary)
 		{

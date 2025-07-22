@@ -422,10 +422,13 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 
 							ItemPointerSet(&iptr, tbmres->blockno, tbmres->offsets[i]);
 
+							bridge_bound.nkeys = 1;
 							bridge_bound.keys[0].value = PointerGetDatum(&iptr);
 							bridge_bound.keys[0].type = TIDOID;
 							bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 							bridge_bound.keys[0].comparator = NULL;
+							bridge_bound.n_row_keys = 0;
+							bridge_bound.row_keys = NULL;
 
 							o_btree_load_shmem(&bridge->desc);
 

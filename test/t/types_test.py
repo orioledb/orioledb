@@ -92,6 +92,82 @@ class TypesTest(BaseTest):
 		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 4)
 		node.stop()
 
+	def test_enum_index_recovery_rollback(self):
+		enum_amount = 0
+		enumoid_amount = 0
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TYPE o_happiness AS ENUM ('happy', 'very happy',
+											 'ecstatic');
+
+			CREATE TABLE o_holidays (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL,
+				PRIMARY KEY (happiness)
+			) USING orioledb;
+
+			ALTER TYPE o_happiness ADD VALUE 'sad' BEFORE 'very happy';
+		""")
+
+		node.safe_psql(
+		    'postgres', """
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (4, 'sad');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (6, 'very happy');
+			INSERT INTO o_holidays(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+
+		enum_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+		enumoid_amount += 4  # 'happy', 'sad', 'very happy', 'ecstatic'
+
+		con = node.connect()
+		con.execute("DROP TYPE o_happiness CASCADE;")
+		con.rollback()
+
+		node.safe_psql("""
+			CREATE TABLE o_holidays2 (
+				num_weeks integer NOT NULL,
+				happiness o_happiness NOT NULL
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_holidays2_ix1 ON o_holidays2(happiness);
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (2, 'happy');
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (8, 'ecstatic');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		# deleted records should not be removed after rollback
+		self.check_total_deleted(node, 'ENUM_CACHE', enum_amount, 0)
+		self.check_total_deleted(node, 'ENUMOID_CACHE', enumoid_amount, 0)
+		self.assertEqual(
+		    [(2, 'happy'), (8, 'ecstatic')],
+		    node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (6, 'sad');
+		""")
+		node.safe_psql("""
+			INSERT INTO o_holidays2(num_weeks, happiness)
+				VALUES (24, 'very happy');
+		""")
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		self.assertEqual(
+		    [(2, 'happy'), (6, 'sad'), (8, 'ecstatic'), (24, 'very happy')],
+		    node.execute("SELECT * FROM o_holidays2 ORDER BY num_weeks"))
+		node.stop()
+
 	def test_enum_cache_namedata_in_key(self):
 		enum_amount = 0
 		enumoid_amount = 0
@@ -636,4 +712,58 @@ class TypesTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_test_1")[0][0], 1000)
+		node.stop()
+
+	def test_tablespace_recovery(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		""")
+
+		con1 = node.connect(autocommit=True)
+		con1.execute("""
+			SET allow_in_place_tablespaces = true;
+		""")
+		con1.execute("""
+			CREATE TABLESPACE regress_tblspace LOCATION '';
+		""")
+		con1.close()
+
+		node.safe_psql("""
+			CREATE TABLE foo (
+				i int
+			) USING orioledb TABLESPACE regress_tblspace;
+			INSERT INTO foo VALUES (3), (8), (94), (15);
+		""")
+		node.safe_psql("""
+			CREATE INDEX foo_ix1 ON foo (i) TABLESPACE regress_tblspace;
+		""")
+		node.safe_psql("""
+			CREATE INDEX foo_ix2 ON foo ((i + 1)) TABLESPACE regress_tblspace;
+			CREATE INDEX foo_ix3 ON foo ((i + 2)) TABLESPACE regress_tblspace;
+		""")
+
+		con2 = node.connect()
+		con2.execute("SET enable_seqscan = off;")
+
+		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
+		                 con2.execute("SELECT * FROM foo ORDER BY i;"))
+		con2.close()
+		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
+		node.safe_psql("""
+			DROP INDEX foo_ix2;
+			DROP INDEX foo_ix3;
+		""")
+		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+		con3 = node.connect()
+		con3.execute("SET enable_seqscan = off;")
+
+		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
+		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
+		con3.close()
+		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
 		node.stop()

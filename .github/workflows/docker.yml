@@ -5,23 +5,132 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
-      tags:
+      tag:
         description: "Dockerhub tags"
         required: false
         default: ""
 
-jobs:
-  cache_layers:
-    name: Cache Docker image parts
-    uses: ./.github/workflows/docker_reusable.yml
-    with:
-      caching_layers: true
+env:
+  REGISTRY_IMAGE: orioledb/orioledb
 
-  push_to_registry:
-    needs:
-      - cache_layers
-    name: Push Docker image to Docker Hub
-    uses: ./.github/workflows/docker_reusable.yml
-    with:
-      pushing: true
-    secrets: inherit
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [amd64, arm64]
+        postgres: [16, 17]
+        distr: [alpine, ubuntu]
+
+        # Define runner and distr_version depending on cpu and distr
+        include:
+          - cpu: amd64
+            distr: alpine
+            runner: ubuntu-24.04
+            distr_version: 3.21
+          - cpu: amd64
+            distr: ubuntu
+            runner: ubuntu-24.04
+            distr_version: noble
+          - cpu: arm64
+            distr: alpine
+            runner: ubuntu-24.04-arm
+            distr_version: 3.21
+          - cpu: arm64
+            distr: ubuntu
+            runner: ubuntu-24.04-arm
+            distr_version: noble
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          flavor: |
+            latest=true
+            suffix=-pg${{ matrix.postgres }}${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
+          tags: |
+            ${{ inputs.tag && format('type=raw,value={0}', inputs.tag) || '' }}
+
+      - name: Prepare Dockerfiles
+        run: |
+          cp docker/Dockerfile        ${{ runner.temp }}/Dockerfile
+          cp docker/Dockerfile.ubuntu ${{ runner.temp }}/Dockerfile.ubuntu
+
+      # Build for one platform and push digest only
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.distr == 'ubuntu' && format('{0}/Dockerfile.ubuntu', runner.temp) || format('{0}/Dockerfile', runner.temp) }}
+          platforms: linux/${{ matrix.cpu }}
+          build-args: |
+            PG_MAJOR=${{ matrix.postgres }}
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr_version || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr_version || '' }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push=true,push-by-digest=true,name-canonical=true
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false # (как было)
+          sbom: false
+
+      # Export digest and meta
+      - name: Export digest + meta
+        run: |
+          mkdir -p ${{ runner.temp }}/out
+          echo "${{ steps.build.outputs.digest }}" \
+            > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.digest
+          echo '${{ steps.meta.outputs.json }}' \
+            > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.meta.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}
+          path: ${{ runner.temp }}/out/*
+          retention-days: 1
+
+  # Merge manifests for the digests built
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: digests
+          merge-multiple: true
+          pattern: digests-*
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Create & push multi-arch manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A TAGS
+          while IFS= read -r -d '' meta; do
+            digest_file="${meta%.meta.json}.digest"
+            digest=$(cat "$digest_file")
+            while IFS= read -r tag; do
+              TAGS["$tag"]="${TAGS[$tag]:-} $REGISTRY_IMAGE@$digest"
+            done < <(jq -r '.tags[]' "$meta")
+          done < <(find digests -type f -name '*.meta.json' -print0)
+
+          for tag in "${!TAGS[@]}"; do
+            echo "⮑  $tag ⇒ ${TAGS[$tag]}"
+            docker buildx imagetools create -t "$tag" ${TAGS[$tag]}
+          done

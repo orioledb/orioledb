@@ -227,6 +227,7 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 	bool		slow = false;	/* do we have to walk attrs? */
 	int			i;
 	OTupleReaderState reader;
+	uint32		prev_off;
 	Pointer		result = NULL;
 
 	/* ----------------
@@ -291,10 +292,14 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 	}
 
 	o_tuple_init_reader(&reader, tuple, tupleDesc, spec);
+	prev_off = reader.off;
 	for (i = 0; i <= attnum; i++)
+	{
+		prev_off = reader.off;
 		result = o_tuple_read_next_field_ptr(&reader);
-
+	}
 	Assert(result != NULL);
+	result = tp + prev_off;
 
 	return result;
 }

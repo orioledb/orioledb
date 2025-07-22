@@ -85,7 +85,8 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
  */
 static inline ReadPageResult
 try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
-			  PartialPageState *partial, CommitSeqNo *readCsn)
+			  PartialPageState *partial, bool loadHikeysChunk,
+			  CommitSeqNo *readCsn)
 {
 	UsageCountMap *ucm;
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -102,16 +103,17 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 	if (partial)
 	{
 		BTreePageHeader *header = (BTreePageHeader *) p;
-		LocationIndex hikeysEnd = header->hikeysEnd;
+		LocationIndex hikeysEnd = loadHikeysChunk ? header->hikeysEnd : offsetof(BTreePageHeader, chunkDesc);
 
 		pg_read_barrier();
 
-		if (hikeysEnd >= sizeof(BTreePageHeader) && hikeysEnd < ORIOLEDB_BLCKSZ)
+		if (!loadHikeysChunk || (hikeysEnd >= sizeof(BTreePageHeader) && hikeysEnd < ORIOLEDB_BLCKSZ))
 			memcpy(dest, p, hikeysEnd);
 		else
 			hiKeysEndOK = false;
 
 		partial->isPartial = true;
+		partial->hikeysChunkIsLoaded = loadHikeysChunk;
 		partial->src = p;
 		memset(&partial->chunkIsLoaded, 0, sizeof(bool) * BTREE_PAGE_MAX_CHUNKS);
 	}
@@ -128,7 +130,7 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 		O_PAGE_STATE_READ_IS_BLOCKED(state2))
 		return ReadPageResultFailed;
 
-	if (pageChangeCount != InvalidOPageChangeCount && O_PAGE_GET_CHANGE_COUNT(p) != pageChangeCount)
+	if (O_PAGE_GET_CHANGE_COUNT(p) != pageChangeCount)
 		return ReadPageResultWrongPageChangeCount;
 
 	Assert(hiKeysEndOK);
@@ -144,34 +146,46 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 /*
  * Copy consistent image of page with page number = blkno to dest.
  */
-static inline void
-copy_page(OInMemoryBlkno blkno, Page dest, PartialPageState *partial,
+static inline bool
+copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
+		  PartialPageState *partial, bool loadHikeysChunk,
 		  CommitSeqNo *readCsn)
 {
-	while (try_copy_page(blkno, InvalidOPageChangeCount, dest,
-						 partial, readCsn) != ReadPageResultOK)
+	while (true)
 	{
+		ReadPageResult result;
+
+		result = try_copy_page(blkno, pageChangeCount, dest,
+							   partial, loadHikeysChunk, readCsn);
+
+		if (result == ReadPageResultOK)
+			return true;
+		else if (result == ReadPageResultWrongPageChangeCount)
+			return false;
 		(void) page_wait_for_read_enable(blkno);
 	}
 }
 
 /*
  * Read in-memory page number `blkno` into `img`.  Check expected
- * `pageChangeCount` until it is InvalidOPageChangeCount.  Lookup for undo
- * page according to `csn` when `key` of `keyType`.
+ * `pageChangeCount`.  Lookup for undo page according to `csn` when `key` of
+ * `keyType`.
  */
 bool
 o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 				  uint32 pageChangeCount, Page img,
 				  CommitSeqNo csn, void *key, BTreeKeyType keyType,
 				  OFixedKey *lokey, PartialPageState *partial,
-				  UndoLocation *undoLocation, CommitSeqNo *readCsn)
+				  bool loadHikeysChunk, UndoLocation *undoLocation,
+				  CommitSeqNo *readCsn)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	CommitSeqNo headerCsn;
 	UndoLocation headerUndoLocation;
 	bool		read_undo = O_PAGE_IS(p, LEAF);
+
+	Assert(pageChangeCount != InvalidOPageChangeCount);
 
 	EA_READ_INC(blkno);
 
@@ -200,16 +214,9 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 		pg_read_barrier();
 		headerUndoLocation = header->undoLocation;
-		if (pageChangeCount != InvalidOPageChangeCount)
-		{
-			pg_read_barrier();
-			if (header->o_header.pageChangeCount != pageChangeCount)
-				return false;
-		}
-		else
-		{
-			pageChangeCount = header->o_header.pageChangeCount;
-		}
+		pg_read_barrier();
+		if (header->o_header.pageChangeCount != pageChangeCount)
+			return false;
 
 		pageUndoLoc = read_page_from_undo(desc, img, headerUndoLocation, csn,
 										  key, keyType, lokey);
@@ -224,19 +231,10 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 		return true;
 	}
 
-	copy_page(blkno, img, partial, readCsn);
-
-	/* If that is the required page according to page change count */
+	if (!copy_page(blkno, pageChangeCount, img, partial,
+				   loadHikeysChunk, readCsn))
+		return false;
 	header = (BTreePageHeader *) img;
-	if (pageChangeCount != InvalidOPageChangeCount)
-	{
-		if (header->o_header.pageChangeCount != pageChangeCount)
-			return false;
-	}
-	else
-	{
-		pageChangeCount = header->o_header.pageChangeCount;
-	}
 
 	/* Re-try reading page-level undo item due to concurrent changes */
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
@@ -268,34 +266,41 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 ReadPageResult
 o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount, Page img,
 					  CommitSeqNo csn, Pointer key, BTreeKeyType keyType,
-					  PartialPageState *partial, CommitSeqNo *readCsn)
+					  PartialPageState *partial, bool loadHikeysChunk,
+					  CommitSeqNo *readCsn)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
-	uint32		tmpPageChangeCount;
 	bool		read_undo = O_PAGE_IS(p, LEAF);
 	ReadPageResult result;
+
+	Assert(pageChangeCount != InvalidOPageChangeCount);
 
 	EA_READ_INC(blkno);
 
 	/* Check pointer to page-level undo item */
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
-		tmpPageChangeCount = header->o_header.pageChangeCount;
+		UndoLocation undoLoc;
+
 		pg_read_barrier();
-		if (pageChangeCount != InvalidOPageChangeCount && tmpPageChangeCount != pageChangeCount)
+		undoLoc = header->undoLocation;
+		pg_read_barrier();
+
+		if (header->o_header.pageChangeCount != pageChangeCount)
 			return ReadPageResultWrongPageChangeCount;
 
-		read_page_from_undo(desc, img, header->undoLocation, csn,
+		read_page_from_undo(desc, img, undoLoc, csn,
 							key, keyType, NULL);
 		header = (BTreePageHeader *) img;
-		header->o_header.pageChangeCount = tmpPageChangeCount;
+		header->o_header.pageChangeCount = pageChangeCount;
 		if (readCsn)
 			*readCsn = header->csn;
 		return ReadPageResultOK;
 	}
 
-	result = try_copy_page(blkno, pageChangeCount, img, partial, readCsn);
+	result = try_copy_page(blkno, pageChangeCount, img, partial,
+						   loadHikeysChunk, readCsn);
 	if (result != ReadPageResultOK)
 		return result;
 
@@ -303,15 +308,10 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 	header = (BTreePageHeader *) img;
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
-		tmpPageChangeCount = header->o_header.pageChangeCount;
-		pg_read_barrier();
-
-		Assert(pageChangeCount == InvalidOPageChangeCount || tmpPageChangeCount == pageChangeCount);
-
 		read_page_from_undo(desc, img, header->undoLocation, csn,
 							key, keyType, NULL);
 		header = (BTreePageHeader *) img;
-		header->o_header.pageChangeCount = tmpPageChangeCount;
+		header->o_header.pageChangeCount = pageChangeCount;
 		if (readCsn)
 			*readCsn = header->csn;
 	}

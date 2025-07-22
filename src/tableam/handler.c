@@ -17,6 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/scan.h"
 #include "btree/undo.h"
@@ -47,8 +48,10 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/storage.h"
+#include "catalog/storage_xlog.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
+#include "common/relpath.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "optimizer/optimizer.h"
@@ -188,6 +191,9 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		OBTreeKeyBound bridge_bound;
 		OTuple		bridge_tup;
 
+		bridge_bound.nkeys = 1;
+		bridge_bound.n_row_keys = 0;
+		bridge_bound.row_keys = NULL;
 		bridge_bound.keys[0].value = tupleid;
 		bridge_bound.keys[0].type = TIDOID;
 		bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
@@ -770,7 +776,8 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		new_o_table = o_table_tableam_create(new_oids, tupdesc,
 											 rel->rd_rel->relpersistence,
-											 old_o_table->fillfactor);
+											 old_o_table->fillfactor,
+											 rel->rd_rel->reltablespace);
 		o_opclass_cache_add_table(new_o_table);
 		o_table_fill_oids(new_o_table, rel, newrnode, false);
 
@@ -779,7 +786,15 @@ orioledb_relation_set_new_filenode(Relation rel,
 		o_tables_table_meta_lock(new_o_table);
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-		o_tables_drop_by_oids(old_oids, oxid, oSnapshot.csn);
+
+		/*
+		 * COMMITSEQNO_INPROGRESS because there might be already commited
+		 * concurrent truncate before function start and old_oids will be
+		 * pointing to a not existed before this transaction table and will
+		 * not be visible otherwise. There should not be concurrent access to
+		 * old table during delete below, because of held locks
+		 */
+		o_tables_drop_by_oids(old_oids, oxid, COMMITSEQNO_INPROGRESS);
 		o_tables_add(new_o_table, oxid, oSnapshot.csn);
 		o_tables_table_meta_unlock(new_o_table, old_o_table->oids.relnode);
 		o_table_free(new_o_table);
@@ -859,9 +874,18 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 }
 
 static void
-orioledb_relation_copy_data(Relation rel, const RelFileNode *newrnode)
+orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	SMgrRelation dstrel;
+
+	/*
+	 * Code from heapam_relation_copy_data just to create storage and new
+	 * relfilenode
+	 */
+	FlushRelationBuffers(rel);
+	dstrel = RelationCreateStorage(*new_relfilenode, rel->rd_rel->relpersistence, true);
+	RelationDropStorage(rel);
+	smgrclose(dstrel);
 }
 
 static void
@@ -1574,9 +1598,6 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 									   &scanEnd, NULL);
 	while (!scanEnd)
 	{
-		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
-										   &scanEnd, NULL);
-
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
 			tts_orioledb_store_tuple(slot, tuple, descr, COMMITSEQNO_INPROGRESS,
@@ -1626,6 +1647,8 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 		{
 			deadrows += 1;
 		}
+		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
+										   &scanEnd, NULL);
 	}
 	free_btree_seq_scan(scan);
 

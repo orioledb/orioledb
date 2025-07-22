@@ -43,7 +43,9 @@
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
 #include "workers/bgwriter.h"
+#include "rewind/rewind.h"
 
+#include "access/heapam.h"
 #include "access/table.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_enum.h"
@@ -90,9 +92,10 @@ Pointer		o_shared_buffers = NULL;
 OrioleDBPageDesc *page_descs = NULL;
 
 /* Custom GUC variables */
-int			main_buffers_guc;
+static int	main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
+static int	rewind_buffers_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
@@ -103,6 +106,8 @@ double		regular_block_undo_circular_buffer_fraction;
 double		system_undo_circular_buffer_fraction;
 Size		xid_circular_buffer_size;
 uint32		xid_buffers_count;
+Size		rewind_circular_buffer_size;
+uint32		rewind_buffers_count;
 bool		remove_old_checkpoint_files = true;
 bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
@@ -135,6 +140,9 @@ char	   *s3_prefix = NULL;
 char	   *s3_accesskey = NULL;
 char	   *s3_secretkey = NULL;
 char	   *s3_cainfo = NULL;
+bool		enable_rewind = false;
+int			rewind_max_time = 0;
+int			rewind_max_transactions = 0;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -190,14 +198,14 @@ static ShmemItem shmemItems[] = {
 	{btree_scan_shmem_needs, btree_scan_init_shmem},
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
-	{s3_headers_shmem_needs, s3_headers_shmem_init}
+	{s3_headers_shmem_needs, s3_headers_shmem_init},
+	{rewind_shmem_needs, rewind_init_shmem}
 };
 
 
 static Size orioledb_memsize(void);
 static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
-static void verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
 static void orioledb_get_relation_info_hook(PlannerInfo *root,
@@ -262,9 +270,9 @@ _PG_init(void)
 	if (!process_shared_preload_libraries_in_progress)
 		return;
 
-	verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
-	verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
-	verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
+	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_DATA_DIR), NULL, NULL);
+	o_verify_dir_exists_or_create(pstrdup(ORIOLEDB_UNDO_DIR), NULL, NULL);
+	o_verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
 
 	/* See InitializeMaxBackends(), InitProcGlobal() */
 	max_procs = MaxConnections + autovacuum_max_workers + 2 +
@@ -374,6 +382,19 @@ _PG_init(void)
 							NULL,
 							NULL);
 
+	DefineCustomIntVariable("orioledb.rewind_buffers",
+							"Size of orioledb engine rewind buffers.",
+							NULL,
+							&rewind_buffers_guc,
+							128,
+							6,
+							INT_MAX,
+							PGC_POSTMASTER,
+							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
 	DefineCustomBoolVariable("orioledb.enable_stopevents",
 							 "Enable stop events.",
 							 NULL,
@@ -462,25 +483,6 @@ _PG_init(void)
 							3,
 							1,
 							128,
-							PGC_POSTMASTER,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomIntVariable("orioledb.recovery_parallel_indices_rebuild_limit",
-							"Sets the maximum number of indices that could be rebuilt in parallel in recovery.",
-							NULL,
-							&recovery_parallel_indices_rebuild_limit_guc,
-#if PG_VERSION_NUM >= 140000
-							32,
-							1,
-							128,
-#else
-							0,
-							0,
-							0,
-#endif
 							PGC_POSTMASTER,
 							0,
 							NULL,
@@ -795,6 +797,42 @@ _PG_init(void)
 							   NULL,
 							   NULL);
 
+	DefineCustomBoolVariable("orioledb.enable_rewind",
+							 "Enable rewind for OrioleDB tables",
+							 NULL,
+							 &enable_rewind,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("orioledb.rewind_max_time",
+							"Sets the maximum time to hold information for OrioleDB rewind.",
+							NULL,
+							&rewind_max_time,
+							500,
+							1,
+							86400,
+							PGC_POSTMASTER,
+							GUC_UNIT_S,
+							NULL,
+							NULL,
+							NULL);
+	DefineCustomIntVariable("orioledb.rewind_max_transactions",
+							"Maximum number of xacts (Orioledb + heap) retained for orioledb rewind.",
+							NULL,
+							&rewind_max_transactions,
+							84600,
+							1,
+							INT_MAX,
+							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
 	if (orioledb_s3_mode)
 	{
 		if (!s3_host || !s3_region || !s3_accesskey || !s3_secretkey)
@@ -826,6 +864,14 @@ _PG_init(void)
 	xid_circular_buffer_size /= ORIOLEDB_BLCKSZ;
 	xid_buffers_count = (uint32) xid_circular_buffer_size;
 	xid_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(OXidMapItem);
+
+	if (enable_rewind)
+	{
+		rewind_circular_buffer_size = ((Size) rewind_buffers_guc * BLCKSZ) / 2;
+		rewind_circular_buffer_size /= ORIOLEDB_BLCKSZ;
+		rewind_buffers_count = (uint32) rewind_circular_buffer_size;
+		rewind_circular_buffer_size *= ORIOLEDB_BLCKSZ / sizeof(RewindItem);
+	}
 
 	page_descs_size = CACHELINEALIGN(mul_size(orioledb_buffers_count, sizeof(OrioleDBPageDesc)));
 
@@ -884,6 +930,9 @@ _PG_init(void)
 	/* Register background writers */
 	for (i = 0; i < bgwriter_num_workers; i++)
 		register_bgwriter();
+
+	if (enable_rewind)
+		register_rewind_worker();
 
 	if (orioledb_s3_mode)
 	{
@@ -953,6 +1002,8 @@ _PG_init(void)
 	prev_base_init_startup_hook = base_init_startup_hook;
 	base_init_startup_hook = o_base_init_startup_hook;
 	IndexAMRoutineHook = orioledb_indexam_routine_hook;
+	if (enable_rewind)
+		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
 	stopevents_make_cxt();
 }
@@ -975,20 +1026,6 @@ o_base_init_startup_hook(void)
 
 	if (prev_base_init_startup_hook)
 		prev_base_init_startup_hook();
-}
-
-void
-o_check_init_db_dir(Oid dbOid)
-{
-	static Oid	initializedOid = InvalidOid;
-
-	if (initializedOid == dbOid)
-		return;
-
-	verify_dir_exists_or_create(psprintf("%s/%u",
-										 ORIOLEDB_DATA_DIR,
-										 dbOid), NULL, NULL);
-	initializedOid = dbOid;
 }
 
 static Size
@@ -1227,8 +1264,8 @@ o_check_dir(const char *dir)
 /*
  * Verify that the given directory exists. If it does not exist, it is created.
  */
-static void
-verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
+void
+o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 {
 	const char *errstr;
 

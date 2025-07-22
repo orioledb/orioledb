@@ -35,6 +35,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_tablespace_d.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "executor/execExpr.h"
@@ -97,7 +98,7 @@ typedef struct
 static void o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name, OTableField *field);
 static void o_tables_foreach_callback(ORelOids oids, void *arg);
 static void o_tables_drop_all_callback(ORelOids oids, void *arg);
-static void o_tables_drop_all_temporary_callback(OTable *o_table, void *arg);
+static void o_tables_truncate_unlogged_callback(OTable *o_table, void *arg);
 static void o_table_oids_array_callback(ORelOids oids, void *arg);
 static inline void o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool checkpoint);
 
@@ -586,22 +587,32 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 	AttrMissing attrmiss_temp;
 	Node	   *defaultexpr;
 	AttrMissing *attrmiss = NULL;
+	bool		missingIsNull = true;
+	bool		has_domain_constraints = false;
 
 	if (field->hasdef)
 		defaultexpr = build_column_default(rel, fieldnum + 1);
 	else
 		defaultexpr = NULL;
 
-	if (!old_field->hasmissing && field->hasmissing)
+	has_domain_constraints = DomainHasConstraints(field->typid);
+	if (o_in_add_column &&
+		!field->generated &&
+		!has_domain_constraints &&
+		!contain_volatile_functions((Node *) defaultexpr))
 	{
-		bool		missingIsNull = true;
-
 		attrmiss_temp.am_value = o_eval_default(o_table, rel, defaultexpr, NULL,
 												field->byval, field->typlen,
 												&missingIsNull);
 		attrmiss_temp.am_present = true;
-		attrmiss = &attrmiss_temp;
+
+		if (!old_field->hasmissing && !missingIsNull)
+		{
+			attrmiss = &attrmiss_temp;
+			field->hasmissing = true;
+		}
 	}
+	o_in_add_column = false;
 
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
 
@@ -641,7 +652,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 
 OTable *
 o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
-					   uint8 fillfactor)
+					   uint8 fillfactor, Oid tablespace)
 {
 	OTable	   *o_table;
 	int			i;
@@ -651,6 +662,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 	o_table->fields = palloc0(o_table->nfields * sizeof(OTableField));
 	o_table->oids = oids;
+	o_table->tablespace = tablespace;
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
 	o_table->default_compress = InvalidOCompress;
 	o_table->primary_compress = InvalidOCompress;
@@ -1045,7 +1057,7 @@ o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id)
 }
 
 void
-o_tables_drop_all_temporary()
+o_tables_truncate_all_unlogged()
 {
 	OTablesDropAllArg arg;
 	OXid		oxid;
@@ -1056,7 +1068,7 @@ o_tables_drop_all_temporary()
 	arg.oxid = oxid;
 	arg.csn = oSnapshot.csn;
 
-	o_tables_foreach(o_tables_drop_all_temporary_callback,
+	o_tables_foreach(o_tables_truncate_unlogged_callback,
 					 &o_non_deleted_snapshot, &arg);
 }
 
@@ -1273,6 +1285,17 @@ o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
 }
 
 void
+o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids)
+{
+	LOCKTAG		locktag;
+
+	o_tables_rel_fill_locktag(&locktag, oids, AccessExclusiveLock, false);
+	locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
+
+	LockAcquire(&locktag, AccessExclusiveLock, false, false);
+}
+
+void
 o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 {
 	LOCKTAG		locktag;
@@ -1481,60 +1504,9 @@ o_tables_drop_all_callback(ORelOids oids, void *arg)
 }
 
 static void
-o_tables_drop_all_temporary_callback(OTable *o_table, void *arg)
+o_tables_truncate_unlogged_callback(OTable *o_table, void *arg)
 {
-	OTablesDropAllArg *drop_arg = (OTablesDropAllArg *) arg;
-
-	if (o_table->persistence == RELPERSISTENCE_TEMP)
-	{
-		OTableChunkKey key;
-		bool		result;
-		OAutonomousTxState state;
-
-		key.oids = o_table->oids;
-		key.chunknum = 0;
-
-		start_autonomous_transaction(&state);
-
-		o_tables_table_meta_lock(NULL);
-		PG_TRY();
-		{
-			BTreeDescr *sys_tree;
-
-			o_tables_oids_indexes(o_table, NULL, get_current_oxid(), drop_arg->csn);
-			sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
-			result = generic_toast_delete_optional_wal(&oTablesToastAPI,
-													   (Pointer) &key,
-													   get_current_oxid(),
-													   drop_arg->csn,
-													   sys_tree,
-													   false);
-			if (result)
-			{
-				ORelOids   *treeOids;
-				int			numTreeOids;
-				int			i;
-
-				treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-				for (i = 0; i < numTreeOids; i++)
-				{
-					cleanup_btree(treeOids[i].datoid, treeOids[i].relnode,
-								  true);
-				}
-				pfree(treeOids);
-			}
-		}
-		PG_CATCH();
-		{
-			o_tables_table_meta_unlock(NULL, InvalidOid);
-			abort_autonomous_transaction(&state);
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
-		o_tables_table_meta_unlock(NULL, InvalidOid);
-		finish_autonomous_transaction(&state);
-	}
-	else if (o_table->persistence == RELPERSISTENCE_UNLOGGED)
+	if (o_table->persistence == RELPERSISTENCE_UNLOGGED)
 	{
 		o_truncate_table(o_table->oids);
 		AcceptInvalidationMessages();
@@ -1656,6 +1628,7 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	if (o_table_index->predicate)
 		o_serialize_string(o_table_index->predicate_str, str);
 	o_serialize_node((Node *) o_table_index->expressions, str);
+	appendBinaryStringInfo(str, (Pointer) &o_table_index->tablespace, sizeof(Oid));
 }
 
 Pointer
@@ -1697,6 +1670,8 @@ serialize_o_table(OTable *o_table, int *size)
 		appendBinaryStringInfo(&str, buf_start, field_size);
 	}
 
+	appendBinaryStringInfo(&str, (Pointer) &o_table->tablespace, sizeof(Oid));
+
 	*size = str.len;
 	return str.data;
 }
@@ -1724,6 +1699,11 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 	if (o_table_index->predicate)
 		o_table_index->predicate_str = o_deserialize_string(ptr);
 	o_table_index->expressions = (List *) o_deserialize_node(ptr);
+
+	len = sizeof(Oid);
+	memcpy(&o_table_index->tablespace, *ptr, len);
+	*ptr += len;
+
 	MemoryContextSwitchTo(old_mcxt);
 }
 
@@ -1742,7 +1722,6 @@ deserialize_o_table(Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_table, ptr, len);
 	ptr += len;
-	Assert(o_table->data_version == ORIOLEDB_DATA_VERSION);
 
 	tbl_cxt = OGetTableContext(o_table);
 	oldcxt = MemoryContextSwitchTo(tbl_cxt);
@@ -1775,6 +1754,16 @@ deserialize_o_table(Pointer data, Size length)
 		miss->am_value = datumRestore(&ptr, &isnull);
 	}
 	MemoryContextSwitchTo(oldcxt);
+
+	if (o_table->data_version >= 2)
+	{
+		len = sizeof(Oid);
+		Assert((ptr - data) + len <= length);
+		memcpy(&o_table->tablespace, ptr, len);
+		ptr += len;
+	}
+	else
+		o_table->tablespace = DEFAULTTABLESPACE_OID;
 
 	Assert(ptr - data == length);
 	return o_table;
@@ -1851,6 +1840,10 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	{
 		toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
 		ORelOidsSetFromRel(oTable->toast_oids, toastRel);
+
+		o_tablespace_cache_add_relnode(oTable->toast_oids.datoid,
+									   oTable->toast_oids.relnode,
+									   oTable->tablespace);
 		table_close(toastRel, AccessShareLock);
 	}
 	else
@@ -1870,6 +1863,9 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 		{
 			indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
 			ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
+			o_tablespace_cache_add_relnode(oTable->indices[i].oids.datoid,
+										   oTable->indices[i].oids.relnode,
+										   oTable->indices[i].tablespace);
 			relation_close(indexRel, AccessShareLock);
 		}
 	}

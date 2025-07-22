@@ -16,6 +16,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
+#include "catalog/o_sys_cache.h"
 #include "s3/checksum.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
@@ -26,6 +27,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/interrupt.h"
 #include "storage/bufmgr.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
@@ -54,7 +56,6 @@ typedef struct S3WorkerCtl
 	pg_atomic_flag workersInProgress[FLEXIBLE_ARRAY_MEMBER];
 } S3WorkerCtl;
 
-static volatile sig_atomic_t shutdown_requested = false;
 static volatile S3TaskLocation *workers_locations = NULL;
 static S3FileChecksum *workers_file_checksums = NULL;
 
@@ -106,13 +107,6 @@ s3_workers_init_shmem(Pointer ptr, bool found)
 			pg_atomic_init_flag(&workers_ctl->workersInProgress[i]);
 		}
 	}
-}
-
-static void
-handle_sigterm(SIGNAL_ARGS)
-{
-	shutdown_requested = true;
-	SetLatch(MyLatch);
 }
 
 void
@@ -678,6 +672,14 @@ s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
 	S3TaskLocation location;
 	S3PartStatus status;
 	S3HeaderTag tag = {.datoid = datoid,.relnode = relnode,.checkpointNum = chkpNum,.segNum = segNum};
+	char	   *prefix;
+	char	   *db_prefix;
+
+	o_get_prefixes_for_relnode(datoid, relnode,
+							   &prefix, &db_prefix);
+	o_verify_dir_exists_or_create(prefix, NULL, NULL);
+	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+	pfree(db_prefix);
 
 	status = s3_header_mark_part_loading(tag, partNum);
 	if (status == S3PartStatusLoading)
@@ -926,7 +928,7 @@ s3worker_main(Datum main_arg)
 	SetProcessingMode(NormalProcessing);
 
 	/* catch SIGTERM signal for reason to not interupt background writing */
-	pqsignal(SIGTERM, handle_sigterm);
+	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	BackgroundWorkerUnblockSignals();
 
 	elog(LOG, "orioledb s3 worker %d started", worker_num);
@@ -958,7 +960,7 @@ s3worker_main(Datum main_arg)
 		{
 			uint64		taskLocation;
 
-			if (shutdown_requested)
+			if (ShutdownRequestPending)
 				break;
 
 			/*
@@ -969,7 +971,7 @@ s3worker_main(Datum main_arg)
 						   WAIT_EVENT_BGWRITER_MAIN);
 
 			if (rc & WL_POSTMASTER_DEATH)
-				shutdown_requested = true;
+				ShutdownRequestPending = true;
 
 			/*
 			 * Task processing loop.  It might happend that error occurs and

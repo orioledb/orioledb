@@ -8,7 +8,7 @@ else
 	export CC=gcc
 fi
 
-if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
+if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ] || [ $CHECK_TYPE = "valgrind_3" ]; then
 	sed -i.bak "s/\/\* #define USE_VALGRIND \*\//#define USE_VALGRIND/g" postgresql/src/include/pg_config_manual.h
 fi
 
@@ -43,7 +43,7 @@ if [ $CHECK_TYPE = "sanitize" ]; then
 elif [ $CHECK_TYPE = "check_page" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT -DCHECK_PAGE_STATS"
 elif [ $CHECK_TYPE != "static" ]; then
-	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage"
+	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage -fprofile-update=atomic"
 fi
 if [ $CHECK_TYPE != "static" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 install

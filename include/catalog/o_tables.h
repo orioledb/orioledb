@@ -76,6 +76,7 @@ typedef struct
 	List	   *expressions;	/* list of Expr */
 	char	   *predicate_str;
 	List	   *predicate;		/* list of Expr */
+	Oid			tablespace;
 	MemoryContext index_mctx;
 } OTableIndex;
 
@@ -102,6 +103,7 @@ typedef struct
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
+	Oid			tablespace;
 	uint32		version;		/* not serialized in serialize_o_table */
 	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
 } OTable;
@@ -118,7 +120,8 @@ extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 
 /* Creates and fills OTable. */
 extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
-									  char relpersistence, uint8 fillfactor);
+									  char relpersistence, uint8 fillfactor,
+									  Oid tablespace);
 
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,
@@ -142,7 +145,7 @@ extern void o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id);
 extern void o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid);
 
 /* Drops all temporary tables that left after crash */
-extern void o_tables_drop_all_temporary(void);
+extern void o_tables_truncate_all_unlogged(void);
 
 /* Adds a new table to o_tables list */
 extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
@@ -199,6 +202,7 @@ extern bool o_tables_rel_try_lock_extended(ORelOids *oids, int lockmode, bool *n
 extern void o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 extern void o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
 												bool checkpoint);
+extern void o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids);
 extern void o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 
 /* Deserialize OTable stored in O_TABLES sys tree */

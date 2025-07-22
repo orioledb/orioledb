@@ -43,7 +43,7 @@
   ((void)(addr), (void)(size))
 #endif
 
-#define ORIOLEDB_VERSION "OrioleDB public beta 11"
+#define ORIOLEDB_VERSION "OrioleDB public beta 12"
 #define ORIOLEDB_BINARY_VERSION 6
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
@@ -55,7 +55,7 @@
  * reading/deserialization of system tables structures without using
  * any conversion tools.
  */
-#define ORIOLEDB_DATA_VERSION	1
+#define ORIOLEDB_DATA_VERSION	2
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
@@ -310,9 +310,11 @@ extern Size orioledb_buffers_count;
 extern Size undo_circular_buffer_size;
 extern uint32 undo_buffers_count;
 extern Size xid_circular_buffer_size;
+extern Size rewind_circular_buffer_size;
 extern double regular_block_undo_circular_buffer_fraction;
 extern double system_undo_circular_buffer_fraction;
 extern uint32 xid_buffers_count;
+extern uint32 rewind_buffers_count;
 extern Pointer o_shared_buffers;
 extern ODBProcData *oProcData;
 extern int	max_procs;
@@ -347,6 +349,9 @@ extern char *s3_prefix;
 extern char *s3_accesskey;
 extern char *s3_secretkey;
 extern char *s3_cainfo;
+extern bool enable_rewind;
+extern int	rewind_max_time;
+extern int	rewind_max_transactions;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MYPROCNUMBER >= 0 && \
@@ -360,7 +365,6 @@ extern char *s3_cainfo;
 #define O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(blkno) \
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
-extern void o_check_init_db_dir(Oid dbOid);
 extern void orioledb_check_shmem(void);
 
 typedef int OCompress;
@@ -414,6 +418,7 @@ typedef enum OPagePoolType
 typedef struct OPagePool OPagePool;
 struct BTreeDescr;
 
+extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
 extern OPagePool *get_ppool(OPagePoolType type);
 extern OPagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
@@ -436,9 +441,11 @@ typedef struct OIndexDescr OIndexDescr;
 /* ddl.c */
 extern List *reindex_list;
 extern IndexBuildResult o_pkey_result;
+extern bool o_in_add_column;
 
 extern void orioledb_setup_ddl_hooks(void);
 extern void o_ddl_cleanup(void);
+extern void o_drop_table(ORelOids oids);
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;

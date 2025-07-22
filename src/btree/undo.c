@@ -21,6 +21,7 @@
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
+#include "rewind/rewind.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
@@ -757,7 +758,7 @@ check_pending_truncates(void)
 								   PENDING_TRUNCATES_FILENAME)));
 
 		for (i = 0; i < numTrees; i++)
-			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode);
+			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode, true);
 	}
 
 	pending_truncates_meta->pendingTruncatesLocation = 0;
@@ -783,7 +784,13 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 				remainRelnode;
 	int			dropNumTreeOids;
 	ORelOids   *dropTreeOids;
+	bool		doCleanup;
 	bool		cleanupFiles = true;
+
+	if (!enable_rewind || abort)
+		doCleanup = true;
+	else
+		doCleanup = is_rewind_worker();
 
 	datoid = relnode_item->datoid;
 	reloid = relnode_item->relid;
@@ -795,7 +802,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		dropTreeOids = &relnode_item->oids[0];
 		dropNumTreeOids = relnode_item->oldNumTreeOids;
 
-		if (have_backup_in_progress())
+		if (have_backup_in_progress() && doCleanup)
 		{
 			ORelOids	oids = {datoid, reloid, relnode_item->oldRelnode};
 
@@ -834,7 +841,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		int			i;
 
 		if (!recovery)
-			o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, false);
+			o_tables_rel_lock_exclusive_no_inval_no_log(&oids);
 		o_tables_rel_lock_extended_no_inval(&oids, AccessExclusiveLock, true);
 		CacheInvalidateRelcacheByDbidRelid(oids.datoid, oids.reloid);
 		o_invalidate_oids(oids);
@@ -845,10 +852,14 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		for (i = 0; i < dropNumTreeOids; i++)
 		{
 			if (!recovery)
-				o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, false);
+				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTreeOids[i]);
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
-			cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles);
-			o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+			if (doCleanup)
+			{
+				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles, true);
+				o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+				o_tablespace_cache_delete(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+			}
 			o_invalidate_oids(dropTreeOids[i]);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);
@@ -859,6 +870,14 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (OidIsValid(remainRelnode))
 	{
 		ORelOids	oids = {datoid, reloid, remainRelnode};
+		char	   *prefix;
+		char	   *db_prefix;
+
+		o_get_prefixes_for_relnode(datoid, remainRelnode,
+								   &prefix, &db_prefix);
+		o_verify_dir_exists_or_create(prefix, NULL, NULL);
+		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+		pfree(db_prefix);
 
 		o_invalidate_oids(oids);
 	}
@@ -1268,7 +1287,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				 * transactions. We delete RLL for both committed and aborted
 				 * transactions.
 				 */
-				csn = oxid_get_csn(oxid);
+				csn = oxid_get_csn(oxid, false);
 				if (COMMITSEQNO_IS_ABORTED(csn) ||
 					COMMITSEQNO_IS_NORMAL(csn) ||
 					COMMITSEQNO_IS_FROZEN(csn))

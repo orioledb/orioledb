@@ -13,6 +13,7 @@ EXTRA_CLEAN = include/utils/stopevents_defs.h \
 OBJS = src/btree/btree.o \
 	   src/btree/build.o \
 	   src/btree/check.o \
+	   src/btree/fastpath.o \
 	   src/btree/find.o \
 	   src/btree/insert.o \
 	   src/btree/io.o \
@@ -44,6 +45,7 @@ OBJS = src/btree/btree.o \
 	   src/catalog/o_sys_cache.o \
 	   src/catalog/o_tables.o \
 	   src/catalog/o_type_cache.o \
+	   src/catalog/o_tablespace_cache.o \
 	   src/catalog/sys_trees.o \
 	   src/checkpoint/checkpoint.o \
 	   src/checkpoint/control.o \
@@ -53,6 +55,7 @@ OBJS = src/btree/btree.o \
 	   src/recovery/recovery.o \
 	   src/recovery/wal.o \
 	   src/recovery/worker.o \
+	   src/rewind/rewind.o \
 	   src/s3/archive.o \
 	   src/s3/checkpoint.o \
 	   src/s3/control.o \
@@ -79,6 +82,7 @@ OBJS = src/btree/btree.o \
 	   src/tuple/slot.o \
 	   src/tuple/sort.o \
 	   src/workers/bgwriter.o \
+	   src/workers/interrupt.o \
 	   src/utils/compress.o \
 	   src/utils/o_buffers.o \
 	   src/utils/page_pool.o \
@@ -118,10 +122,12 @@ REGRESSCHECKS = btree_sys_check \
 				subquery \
 				subtransactions \
 				tableam \
+				tablespace \
 				temp \
 				toast \
 				trigger \
-				types
+				types \
+				rewind
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
 				  btree_print_backend_id \
@@ -145,6 +151,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_mix \
 				  rll_subtrans \
 				  table_lock_test \
+				  concurrent_truncate \
 				  uniq
 TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/correlation_test.py \
@@ -187,6 +194,10 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/trigger_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py
+TESTGRESCHECKS_PART_3 = test/t/rewind_xid_test.py \
+			test/t/rewind_xid_evict_test.py
+TESTGRESCHECKS_PART_4 = test/t/rewind_xid_evict_large_test.py \
+			test/t/rewind_time_test.py
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
@@ -238,7 +249,7 @@ isolationcheck: $(INSTALL_REQUIREMENT)
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): $(INSTALL_REQUIREMENT)
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4) : $(INSTALL_REQUIREMENT)
 	$(TEMP_INSTALL_COMMAND) python3 -W ignore::DeprecationWarning -m unittest -v $@
 
 ifdef IS_DEV
@@ -268,7 +279,7 @@ isolationcheck: | submake-isolation submake-orioledb temp-install
 		$(PG_ISOLATION_REGRESS_ARGS) \
 		$(ISOLATIONCHECKS)
 
-$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2): | submake-orioledb temp-install
+$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4): | submake-orioledb temp-install
 	PG_CONFIG="$(abs_top_builddir)/tmp_install$(bindir)/pg_config" \
 		$(with_temp_install) \
 		python3 -m unittest -v $@
@@ -333,12 +344,15 @@ submake-isolation:
 submake-orioledb:
 	$(MAKE) -C $(top_builddir)/contrib/orioledb
 
-testgrescheck: $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2)
+testgrescheck: $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4)
 
 testgrescheck_part_1: $(TESTGRESCHECKS_PART_1)
 
 testgrescheck_part_2: $(TESTGRESCHECKS_PART_2)
 
+testgrescheck_part_3: $(TESTGRESCHECKS_PART_3)
+
+testgrescheck_part_4: $(TESTGRESCHECKS_PART_4)
 temp-install: EXTRA_INSTALL=contrib/orioledb
 
 orioledb.typedefs: $(OBJS)
@@ -357,4 +371,4 @@ yapf:
 
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck pgindent \
-	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2)
+	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) $(TESTGRESCHECKS_PART_4)

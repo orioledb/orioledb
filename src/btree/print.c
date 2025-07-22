@@ -303,6 +303,9 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	else if (printData->options->checkpointNumPrintType == BTreePrintRelative)
 		appendStringInfo(outbuf, ", checkpointNum = %u", header->checkpointNum - printData->minCheckpointNum);
 
+	if (printData->options->printFixedFlags && O_PAGE_IS(p, HIKEYS_FIXED))
+		appendStringInfo(outbuf, ", hikeys fixed");
+
 	appendStringInfo(outbuf, "\n");
 
 	appendStringInfo(outbuf, O_PAGE_IS(p, LEFTMOST) ? "    Leftmost, " : "    ");
@@ -340,6 +343,8 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 			appendStringInfo(outbuf, ", hikey = ");
 			keyPrintFunc(desc, outbuf, hikey, printArg);
 		}
+		if (printData->options->printFixedFlags && header->chunkDesc[j].chunkKeysFixed)
+			appendStringInfo(outbuf, ", items fixed");
 		appendStringInfo(outbuf, "\n");
 		page_chunk_fill_locator(p, j, &loc);
 		for (k = 0; k < loc.chunkItemsCount; k++)

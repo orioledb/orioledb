@@ -101,10 +101,17 @@ typedef struct
 	OIndexNumber ix_num;
 	uint32		o_table_version;
 	uint32		old_o_table_version;
-	uint32		current_position;
+	uint64		current_position;
 	bool		isrebuild;
 	OXid		oxid;
-} RecoveryOidsMsgIdxBuild;
+} RecoveryMsgLeaderIdxBuild;
+
+typedef struct
+{
+	RecoveryMsgHeader header;
+	OXid		oxid;
+	dsm_handle	seg_handle;
+} RecoveryMsgWorkerIdxBuild;
 
 typedef struct
 {
@@ -142,6 +149,17 @@ typedef struct
 	SubTransactionId parentSubId;
 } RecoveryMsgRollbackToSavepoint;
 
+typedef struct ParallelRecoveryContext
+{
+	int			nworkers;		/* Number of recovery workers except a leader */
+	shm_toc_estimator estimator;
+	dsm_segment *seg;
+	void	   *private_memory;
+	shm_toc    *toc;
+} ParallelRecoveryContext;
+
+#define O_PARALLEL_RECOVERY_MAGIC 0xD42E9F13
+
 extern bool toast_consistent;
 extern pg_atomic_uint32 *worker_finish_count;
 extern pg_atomic_uint32 *idx_worker_finish_count;
@@ -155,11 +173,22 @@ extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 extern bool *was_in_recovery;
 extern pg_atomic_uint32 *after_recovery_cleaned;
 
+extern pg_atomic_uint64 *recovery_index_next_pos;
+extern pg_atomic_uint64 *recovery_index_completed_pos;
+extern ConditionVariable *recovery_index_cv;
+
 /*
  * Recovery master/workers functions.
  */
 extern BackgroundWorkerHandle *recovery_worker_register(int worker_id);
 PGDLLEXPORT void recovery_worker_main(Datum main_arg);
+
+/*
+ * Functions to work with parallel recovery contexts.
+ */
+extern ParallelRecoveryContext *CreateParallelRecoveryContext(int nworkers);
+extern void InitializeParallelRecoveryDSM(ParallelRecoveryContext *context);
+extern void DestroyParallelRecoveryContext(ParallelRecoveryContext *context);
 
 /*
  * Recovery utility.

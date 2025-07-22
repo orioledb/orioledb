@@ -1,0 +1,712 @@
+CREATE SCHEMA tablespace;
+SET SESSION search_path = 'tablespace';
+CREATE EXTENSION orioledb;
+SET allow_in_place_tablespaces = true;
+CREATE TABLESPACE regress_tblspace LOCATION '';
+CREATE DATABASE tblspace_test_db TABLESPACE regress_tblspace;
+CREATE TABLE foo_def (i int) USING orioledb TABLESPACE pg_default;
+\d+ foo_def
+                                Table "tablespace.foo_def"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           |          |         | plain   |              | 
+
+INSERT INTO foo_def VALUES (54), (12), (7);
+TABLE foo_def;
+ i  
+----
+ 54
+ 12
+  7
+(3 rows)
+
+CREATE INDEX foo_def_ix1 ON foo_def(i) TABLESPACE regress_tblspace;
+BEGIN;
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM foo_def ORDER BY i;
+                  QUERY PLAN                  
+----------------------------------------------
+ Index Only Scan using foo_def_ix1 on foo_def
+(1 row)
+
+SELECT * FROM foo_def ORDER BY i;
+ i  
+----
+  7
+ 12
+ 54
+(3 rows)
+
+COMMIT;
+CREATE TABLE foo_def_pg (i int) USING heap TABLESPACE pg_default;
+\d+ foo_def_pg
+                              Table "tablespace.foo_def_pg"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           |          |         | plain   |              | 
+
+INSERT INTO foo_def_pg VALUES (32), (73), (71);
+TABLE foo_def_pg;
+ i  
+----
+ 32
+ 73
+ 71
+(3 rows)
+
+CREATE TABLE foo (i int) USING orioledb TABLESPACE regress_tblspace;
+\d+ foo
+                                  Table "tablespace.foo"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           |          |         | plain   |              | 
+Tablespace: "regress_tblspace"
+
+INSERT INTO foo VALUES(3);
+TABLE foo;
+ i 
+---
+ 3
+(1 row)
+
+\c tblspace_test_db
+CREATE SCHEMA tblspace_test_schema;
+SET SESSION search_path = 'tblspace_test_schema';
+CREATE EXTENSION orioledb;
+CREATE TABLE foo_def (i int) USING orioledb TABLESPACE pg_default;
+\d+ foo_def
+                           Table "tblspace_test_schema.foo_def"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           |          |         | plain   |              | 
+Tablespace: "pg_default"
+
+INSERT INTO foo_def VALUES (66), (17), (35);
+TABLE foo_def;
+ i  
+----
+ 66
+ 17
+ 35
+(3 rows)
+
+CREATE TABLE foo (i int) USING orioledb;
+\d+ foo
+                             Table "tblspace_test_schema.foo"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ i      | integer |           |          |         | plain   |              | 
+
+INSERT INTO foo VALUES(3);
+TABLE foo;
+ i 
+---
+ 3
+(1 row)
+
+\c regression
+SET SESSION search_path = 'tablespace';
+CREATE TABLE atable USING orioledb AS VALUES (1), (2);
+CREATE UNIQUE INDEX anindex ON atable(column1 DESC);
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           |          |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+
+INSERT INTO atable VALUES(3);
+TABLE atable;
+ column1 
+---------
+       1
+       2
+       3
+(3 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+(3 rows)
+
+COMMIT;
+ALTER TABLE atable SET TABLESPACE pg_default;
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           |          |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+
+INSERT INTO atable VALUES(4);
+TABLE atable;
+ column1 
+---------
+       1
+       2
+       3
+       4
+(4 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+(4 rows)
+
+COMMIT;
+BEGIN;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+ALTER TABLE atable SET TABLESPACE regress_tblspace;
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           |          |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+Tablespace: "regress_tblspace"
+
+INSERT INTO atable VALUES(5);
+TABLE atable;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       5
+(5 rows)
+
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       5
+(5 rows)
+
+ROLLBACK;
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           |          |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+
+BEGIN;
+ALTER TABLE atable SET TABLESPACE regress_tblspace;
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           |          |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+Tablespace: "regress_tblspace"
+
+INSERT INTO atable VALUES(6);
+TABLE atable;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+(5 rows)
+
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+(5 rows)
+
+COMMIT;
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           |          |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+Tablespace: "regress_tblspace"
+
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+ALTER TABLE atable ADD CONSTRAINT atable_pk PRIMARY KEY (column1);
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index atable_pk                               +
+     Index type: primary, unique               +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: column1            +
+     Leaf tuple fields: column1                +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: column1            +
+     Leaf tuple fields: column1                +
+ 
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on atable
+   Forward index only scan of: atable_pk
+(2 rows)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+(5 rows)
+
+COMMIT;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index atable_pk                               +
+     Index type: primary, unique               +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: column1            +
+     Leaf tuple fields: column1                +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 1, non-leaf tuple size: 1+
+     Non-leaf tuple fields: column1            +
+     Leaf tuple fields: column1                +
+ 
+(1 row)
+
+ALTER TABLE atable DROP CONSTRAINT atable_pk;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+(5 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('atable'::regclass, 'ne');
+                               orioledb_tbl_structure                                
+-------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                        +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,2)')      +
+     Item 0: offset = 264, tuple = ('(0,1)', '1')                                   +
+   Chunk 1: offset = 1, location = 296, hikey location = 88, hikey = ('(0,3)')      +
+     Item 1: offset = 304, tuple = ('(0,2)', '2')                                   +
+   Chunk 2: offset = 2, location = 336, hikey location = 96, hikey = ('(0,4)')      +
+     Item 2: offset = 344, tuple = ('(0,3)', '3')                                   +
+   Chunk 3: offset = 3, location = 376, hikey location = 104, hikey = ('(0,5)')     +
+     Item 3: offset = 384, tuple = ('(0,4)', '4')                                   +
+   Chunk 4: offset = 4, location = 416, hikey location = 112                        +
+     Item 4: offset = 424, tuple = ('(0,5)', '6')                                   +
+                                                                                    +
+ Index anindex contents                                                             +
+ Page 0: level = 0, maxKeyLen = 10, nVacatedBytes = 0                               +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                 +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('4', '(0,4)') +
+     Item 0: offset = 264, tuple = ('6', '(0,5)')                                   +
+   Chunk 1: offset = 1, location = 296, hikey location = 96, hikey = ('3', '(0,3)') +
+     Item 1: offset = 304, tuple = ('4', '(0,4)')                                   +
+   Chunk 2: offset = 2, location = 336, hikey location = 112, hikey = ('2', '(0,2)')+
+     Item 2: offset = 344, tuple = ('3', '(0,3)')                                   +
+   Chunk 3: offset = 3, location = 376, hikey location = 128, hikey = ('1', '(0,1)')+
+     Item 3: offset = 384, tuple = ('2', '(0,2)')                                   +
+   Chunk 4: offset = 4, location = 416, hikey location = 144                        +
+     Item 4: offset = 424, tuple = ('1', '(0,1)')                                   +
+                                                                                    +
+ Index toast: not loaded                                                            +
+ 
+(1 row)
+
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+ALTER INDEX anindex SET TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+BEGIN;
+EXPLAIN (COSTS OFF) SELECT * FROM atable;
+     QUERY PLAN     
+--------------------
+ Seq Scan on atable
+(1 row)
+
+SELECT * FROM atable;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+(5 rows)
+
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+(5 rows)
+
+COMMIT;
+SELECT orioledb_tbl_structure('atable'::regclass, 'ne');
+                               orioledb_tbl_structure                                
+-------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                        +
+ Page 0: level = 0, maxKeyLen = 6, nVacatedBytes = 0                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,2)')      +
+     Item 0: offset = 264, tuple = ('(0,1)', '1')                                   +
+   Chunk 1: offset = 1, location = 296, hikey location = 88, hikey = ('(0,3)')      +
+     Item 1: offset = 304, tuple = ('(0,2)', '2')                                   +
+   Chunk 2: offset = 2, location = 336, hikey location = 96, hikey = ('(0,4)')      +
+     Item 2: offset = 344, tuple = ('(0,3)', '3')                                   +
+   Chunk 3: offset = 3, location = 376, hikey location = 104, hikey = ('(0,5)')     +
+     Item 3: offset = 384, tuple = ('(0,4)', '4')                                   +
+   Chunk 4: offset = 4, location = 416, hikey location = 112                        +
+     Item 4: offset = 424, tuple = ('(0,5)', '6')                                   +
+                                                                                    +
+ Index anindex contents                                                             +
+ Page 0: level = 0, maxKeyLen = 10, nVacatedBytes = 0                               +
+ state = free, datoid equal, relnode equal, ix_type = unique, clean                 +
+     Leftmost, Rightmost                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('4', '(0,4)') +
+     Item 0: offset = 264, tuple = ('6', '(0,5)')                                   +
+   Chunk 1: offset = 1, location = 296, hikey location = 96, hikey = ('3', '(0,3)') +
+     Item 1: offset = 304, tuple = ('4', '(0,4)')                                   +
+   Chunk 2: offset = 2, location = 336, hikey location = 112, hikey = ('2', '(0,2)')+
+     Item 2: offset = 344, tuple = ('3', '(0,3)')                                   +
+   Chunk 3: offset = 3, location = 376, hikey location = 128, hikey = ('1', '(0,1)')+
+     Item 3: offset = 384, tuple = ('2', '(0,2)')                                   +
+   Chunk 4: offset = 4, location = 416, hikey location = 144                        +
+     Item 4: offset = 424, tuple = ('1', '(0,1)')                                   +
+                                                                                    +
+ Index toast: not loaded                                                            +
+ 
+(1 row)
+
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           | not null |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC), tablespace "regress_tblspace"
+Tablespace: "regress_tblspace"
+
+INSERT INTO atable VALUES(7);
+TABLE atable;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+       7
+(6 rows)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan Backward using anindex on atable
+(1 row)
+
+SELECT * FROM atable ORDER BY column1;
+ column1 
+---------
+       1
+       2
+       3
+       4
+       6
+       7
+(6 rows)
+
+COMMIT;
+ALTER INDEX anindex SET TABLESPACE pg_default;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+CREATE INDEX atable_ix2 ON atable(column1) TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ Index atable_ix2                              +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+ALTER INDEX atable_ix2 SET TABLESPACE pg_default;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ Index atable_ix2                              +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+ALTER INDEX atable_ix2 SET TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ Index atable_ix2                              +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+DROP INDEX atable_ix2;
+SELECT orioledb_tbl_indices('atable'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 2, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, column1          +
+ Index anindex                                 +
+     Index type: secondary, unique             +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: column1, ctid      +
+     Leaf tuple fields: column1, ctid          +
+ 
+(1 row)
+
+DROP TABLE atable;
+DROP DATABASE tblspace_test_db;
+ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
+ALTER INDEX ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
+ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
+NOTICE:  no matching relations in tablespace "regress_tblspace" found
+-- Should show notice that nothing was done
+ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
+NOTICE:  no matching relations in tablespace "regress_tblspace" found
+ALTER TABLESPACE regress_tblspace RENAME TO regress_tblspace_renamed;
+ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default;
+NOTICE:  no matching relations in tablespace "regress_tblspace_renamed" found
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
+DROP TABLESPACE regress_tblspace_renamed;
+-- TODO: Add tablespaces support to iterate_files
+-- TODO: Add test for symlinked tablespaces, probably
+-- \set cwd `echo "$PWD/tblspc"`
+-- CREATE TABLESPACE regress_tblspace LOCATION :'cwd';
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table foo_def
+drop cascades to table foo
+DROP SCHEMA tablespace CASCADE;
+NOTICE:  drop cascades to table foo_def_pg
+RESET search_path;

@@ -286,6 +286,9 @@ extern JsonbValue *o_sys_cache_toast_key_to_jsonb(BTreeDescr *desc,
 												  JsonbParseState **state);
 extern void o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
 										OTuple tup, Pointer arg);
+extern void o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
+										UndoStackItem *baseItem, OXid oxid,
+										bool abort, bool changeCountsValid);
 
 #define O_SYS_CACHE_INIT_FUNC(cache_name) \
 void o_##cache_name##_init(MemoryContext mcxt, HTAB *fastcache)
@@ -472,6 +475,7 @@ typedef struct OClassArg
 
 O_SYS_CACHE_DECLS(class_cache, OClass, 1);
 extern TupleDesc o_class_cache_search_tupdesc(Oid cc_reloid);
+extern void o_class_cache_preload_for_column(Oid typoid);
 
 /* o_opclass_cache.c */
 typedef struct OOpclass
@@ -534,7 +538,6 @@ typedef struct OType
 } OType;
 
 O_SYS_CACHE_DECLS(type_cache, OType, 1);
-extern Oid	o_type_cache_get_typrelid(Oid typeoid);
 extern HeapTuple o_type_cache_search_htup(TupleDesc tupdesc, Oid typeoid);
 extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 								   char *typalign, char *typstorage,
@@ -542,6 +545,7 @@ extern void o_type_cache_fill_info(Oid typeoid, int16 *typlen, bool *typbyval,
 extern Oid	o_type_cache_default_opclass(Oid typeoid, Oid am_id);
 extern void o_type_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 								   OTuple tup, Pointer arg);
+extern bool o_type_cache_get_typtype(Oid typeoid, char *typtype);
 
 /* o_aggregate_cache.c */
 typedef struct OAggregate OAggregate;
@@ -640,5 +644,21 @@ o_set_sys_cache_search_datoid(Oid datoid)
 		}
 	}
 }
+
+/* o_tablespace_cache.c */
+
+typedef struct OTablespace
+{
+	OSysCacheKey1 key;
+	Oid			tablespace;
+} OTablespace;
+
+O_SYS_CACHE_DECLS(tablespace_cache, OTablespace, 1);
+extern void o_tablespace_cache_add_relnode(Oid datoid, Oid relnode, Oid tablespace);
+extern void o_tablespace_cache_add_datoid(Oid datoid, Oid tablespace);
+extern void o_tablespace_cache_add_table(OTable *o_table);
+extern void o_tablespace_cache_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg);
+extern void o_get_prefixes_for_relnode(Oid datoid, Oid relnode, char **prefix, char **db_prefix);
+extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace, char **prefix, char **db_prefix);
 
 #endif							/* __O_SYS_CACHE_H__ */

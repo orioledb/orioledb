@@ -19,6 +19,8 @@
 
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "catalog/storage.h"
+#include "catalog/o_sys_cache.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -30,11 +32,13 @@
 #include "utils/page_pool.h"
 #include "utils/snapshot.h"
 #include "utils/stopevent.h"
+#include "rewind/rewind.h"
 
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/lmgr.h"
+#include "storage/md.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
 
@@ -66,6 +70,11 @@ static void o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 								 UndoStackItem *baseItem,
 								 OXid oxid, bool abort,
 								 bool changeCountsValid);
+static void o_rewind_relfilenode_item_callback(UndoLogType undoType,
+											   UndoLocation location,
+											   UndoStackItem *baseItem,
+											   OXid oxid, bool abort,
+											   bool changeCountsValid);
 
 /*
  * Descriptor of undo item type.
@@ -76,6 +85,14 @@ typedef struct
 	bool		callOnCommit;	/* call the callback on commit */
 	UndoCallback callback;		/* callback to be called on transaction finish */
 } UndoItemTypeDescr;
+
+typedef struct
+{
+	OnCommitUndoStackItem header;
+	int			nCommitRels;
+	int			nAbortRels;
+	RelFileNode rels[FLEXIBLE_ARRAY_MEMBER];
+} RewindRelFileNodeUndoStackItem;
 
 UndoItemTypeDescr undoItemTypeDescrs[] = {
 	{
@@ -111,6 +128,16 @@ UndoItemTypeDescr undoItemTypeDescrs[] = {
 	{
 		.type = SubXactUndoItemType,
 		.callback = o_stub_item_callback,
+		.callOnCommit = false
+	},
+	{
+		.type = RewindRelFileNodeUndoItemType,
+		.callback = o_rewind_relfilenode_item_callback,
+		.callOnCommit = true
+	},
+	{
+		.type = SysCacheDeleteUndoItemType,
+		.callback = o_sys_cache_delete_callback,
 		.callOnCommit = false
 	}
 };
@@ -342,6 +369,9 @@ update_min_undo_locations(UndoLogType undoType,
 
 	meta->minUndoLocationsChangeCount++;
 
+	minRetainLocation = Min(pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation),
+							minRetainLocation);
+
 	Assert((meta->minUndoLocationsChangeCount & 1) == 0);
 
 	if (!have_lock)
@@ -504,7 +534,7 @@ set_my_retain_location(UndoLogType undoType)
 		 * Retry if minimal positions run higher due to concurrent
 		 * update_min_undo_locations().
 		 */
-		if (pg_atomic_read_u64(&meta->minProcRetainLocation) > retainUndoLocation)
+		if (pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation) > retainUndoLocation)
 			continue;
 
 		break;
@@ -680,6 +710,24 @@ walk_undo_range(UndoLogType undoType,
 	return location;
 }
 
+UndoLocation
+walk_undo_range_with_buf(UndoLogType undoType,
+						 UndoLocation location, UndoLocation toLoc,
+						 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+						 bool changeCountsValid)
+{
+	UndoItemBuf buf;
+
+	ASAN_UNPOISON_MEMORY_REGION(&buf, sizeof(buf));
+
+	init_undo_item_buf(&buf);
+	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, abort_val,
+							   onCommitLocation, changeCountsValid);
+	free_undo_item_buf(&buf);
+	return location;
+}
+
+
 /*
  * Apply undo branches: parts of transaction undo chain, which should be already
  * aborted.  This is used during recovery: despite some parts of chain are
@@ -707,6 +755,8 @@ apply_undo_branches(UndoLogType undoType, OXid oxid)
 	free_undo_item_buf(&buf);
 }
 
+
+
 /*
  * Walk transaction undo stack chain during (sub)transaction abort or
  * transaction commit.
@@ -716,7 +766,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 				UndoStackLocations *toLocation, bool abortTrx,
 				bool changeCountsValid)
 {
-	UndoItemBuf buf;
 	UndoLocation location,
 				newOnCommitLocation;
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
@@ -734,8 +783,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		STOPEVENT(STOPEVENT_BEFORE_APPLY_UNDO, params);
 	}
 
-	init_undo_item_buf(&buf);
-
 	if (!abortTrx)
 	{
 		/*
@@ -744,9 +791,10 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		location = walk_undo_range(undoType, location, InvalidUndoLocation,
-								   &buf, oxid, false, NULL,
-								   changeCountsValid);
+
+		location = walk_undo_range_with_buf(undoType, location, InvalidUndoLocation,
+											oxid, false, NULL,
+											changeCountsValid);
 		Assert(!UndoLocationIsValid(location));
 		newOnCommitLocation = InvalidUndoLocation;
 	}
@@ -758,10 +806,10 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		location = walk_undo_range(undoType, location,
-								   toLocation ? toLocation->location : InvalidUndoLocation,
-								   &buf, oxid, true, &newOnCommitLocation,
-								   changeCountsValid);
+		location = walk_undo_range_with_buf(undoType, location,
+											toLocation ? toLocation->location : InvalidUndoLocation,
+											oxid, true, &newOnCommitLocation,
+											changeCountsValid);
 	}
 
 	/*
@@ -790,9 +838,8 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 
 	pg_atomic_write_u64(&sharedLocations->location, location);
 	pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
-	LWLockRelease(&curProcData->undoStackLocationsFlushLock);
 
-	free_undo_item_buf(&buf);
+	LWLockRelease(&curProcData->undoStackLocationsFlushLock);
 }
 
 void
@@ -924,7 +971,7 @@ write_undo(UndoLogType undoType,
 
 	update_min_undo_locations(undoType, true, false);
 
-	retainUndoLocation = pg_atomic_read_u64(&meta->minProcRetainLocation);
+	retainUndoLocation = pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation);
 
 	if (targetUndoLocation <= retainUndoLocation ||
 		targetUndoLocation <= pg_atomic_read_u64(&meta->writtenLocation))
@@ -1308,6 +1355,30 @@ orioledb_reset_xmin_hook(void)
 		pg_atomic_write_u64(&curProcData->xmin, xmin);
 }
 
+static void
+rewind_handle_pending_deletes(void)
+{
+	RelFileNode *onCommitRels,
+			   *onAbortRels;
+	int			nOnCommitRels,
+				nOnAbortRels;
+
+	nOnCommitRels = smgrGetPendingDeletes(true, &onCommitRels);
+	nOnAbortRels = smgrGetPendingDeletes(false, &onAbortRels);
+
+	if (nOnCommitRels + nOnAbortRels > 0)
+		o_add_rewind_relfilenode_undo_item(onCommitRels,
+										   onAbortRels,
+										   nOnCommitRels,
+										   nOnAbortRels);
+
+	if (onCommitRels)
+		pfree(onCommitRels);
+	if (onAbortRels)
+		pfree(onAbortRels);
+	PostPrepare_smgr();
+}
+
 void
 undo_xact_callback(XactEvent event, void *arg)
 {
@@ -1316,7 +1387,11 @@ undo_xact_callback(XactEvent event, void *arg)
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	bool		isParallelWorker;
 	int			i;
+	TransactionId xid1 = InvalidTransactionId;
+	int			nsubxids = 0;
+	TransactionId *subxids = NULL;
 
+	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
 						MyProc->lockGroupLeader != MyProc) ||
 		IsInParallelMode();
@@ -1330,6 +1405,12 @@ undo_xact_callback(XactEvent event, void *arg)
 	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
 		seq_scans_cleanup();
 
+	if (enable_rewind && event == XACT_EVENT_PRE_COMMIT)
+	{
+		save_precommit_xid_subxids();
+		rewind_handle_pending_deletes();
+	}
+
 	if (!OXidIsValid(oxid) || isParallelWorker)
 	{
 		if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
@@ -1338,6 +1419,17 @@ undo_xact_callback(XactEvent event, void *arg)
 			orioledb_reset_xmin_hook();
 			reset_command_undo_locations();
 			oxid_needs_wal_flush = false;
+		}
+
+		if (enable_rewind && event == XACT_EVENT_COMMIT)
+		{
+			xid1 = get_precommit_xid_subxids(&nsubxids, &subxids);
+			if (TransactionIdIsValid(xid1))
+			{
+				elog(DEBUG3, "ADD_TO_REWIND_BUFFER_HEAP");
+				add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
+				reset_precommit_xid_subxids();
+			}
 		}
 	}
 	else
@@ -1377,10 +1469,21 @@ undo_xact_callback(XactEvent event, void *arg)
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-				current_oxid_commit(csn);
 
+				current_oxid_commit(csn);
+				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
+
+				if (enable_rewind)
+				{
+					elog(DEBUG3, "ADD_TO_REWIND_BUFFER_ORIOLE");
+					xid1 = get_precommit_xid_subxids(&nsubxids, &subxids);
+
+					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
+					reset_precommit_xid_subxids();
+				}
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
+
 				wal_after_commit();
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
@@ -1696,7 +1799,6 @@ start_autonomous_transaction(OAutonomousTxState *state)
 {
 	int			i;
 
-	Assert(!is_recovery_process());
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
 	state->logicalXid = get_current_logical_xid();
@@ -1704,7 +1806,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
 
-	if (!local_wal_is_empty())
+	if (!is_recovery_process() && !local_wal_is_empty())
 		flush_local_wal(false);
 
 	oxid_needs_wal_flush = false;
@@ -1721,8 +1823,9 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	{
 		int			i;
 
-		wal_rollback(oxid,
-					 get_current_logical_xid());
+		if (!is_recovery_process())
+			wal_rollback(oxid,
+						 get_current_logical_xid());
 		current_oxid_abort();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			apply_undo_stack((UndoLogType) i, oxid, NULL, true);
@@ -1753,8 +1856,9 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		CommitSeqNo csn;
 		int			i;
 
-		wal_commit(oxid,
-				   get_current_logical_xid());
+		if (!is_recovery_process())
+			wal_commit(oxid,
+					   get_current_logical_xid());
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
@@ -1960,7 +2064,7 @@ orioledb_snapshot_hook(Snapshot snapshot)
 	if (*was_in_recovery &&
 		!pg_atomic_exchange_u32(after_recovery_cleaned, true))
 	{
-		o_tables_drop_all_temporary();
+		o_tables_truncate_all_unlogged();
 	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
@@ -2099,4 +2203,48 @@ update_command_undo_location(CommandId commandId, UndoLocation undoLocation)
 		commandInfos[commandIndex].cid = commandId;
 		commandInfos[commandIndex].undoLocation = undoLocation;
 	}
+}
+
+static void
+o_rewind_relfilenode_item_callback(UndoLogType undoType,
+								   UndoLocation location,
+								   UndoStackItem *baseItem,
+								   OXid oxid, bool abort,
+								   bool changeCountsValid)
+{
+	RewindRelFileNodeUndoStackItem *item = (RewindRelFileNodeUndoStackItem *) baseItem;
+
+	if (enable_rewind && !is_rewind_worker())
+		return;
+
+	if (!abort)
+		DropRelationFiles(item->rels, item->nCommitRels, false);
+	else
+		DropRelationFiles(&item->rels[item->nCommitRels], item->nAbortRels, false);
+}
+
+void
+o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
+								   int nOnCommit, int nOnAbort)
+{
+	LocationIndex size;
+	UndoLocation location;
+	RewindRelFileNodeUndoStackItem *item;
+
+	size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (nOnCommit + nOnAbort);
+	item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
+
+	item->header.base.type = RewindRelFileNodeUndoItemType;
+	item->header.base.itemSize = size;
+	item->header.base.indexType = oIndexPrimary;
+
+	item->nCommitRels = nOnCommit;
+	item->nAbortRels = nOnAbort;
+
+	memcpy(item->rels, onCommit, sizeof(RelFileNode) * nOnCommit);
+	memcpy(&item->rels[nOnCommit], onAbort, sizeof(RelFileNode) * nOnAbort);
+
+	add_new_undo_stack_item(UndoLogSystem, location);
+
+	release_undo_size(UndoLogSystem);
 }
