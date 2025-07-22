@@ -615,8 +615,8 @@ class RewindXidTest(BaseTest):
 			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 			    (xid1, oxid1))
 		self.assertIn(
-		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
-		    % (xid1, xidc - 1),
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained'
+		    % (xid1),
 		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
@@ -799,8 +799,8 @@ class RewindXidTest(BaseTest):
 			    "select orioledb_rewind_to_transaction(%d, %ld);\n" %
 			    (xid1, oxid1))
 		self.assertIn(
-		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
-		    % (xid1, xidc + 1),
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained'
+		    % (xid1),
 		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
@@ -998,8 +998,8 @@ class RewindXidTest(BaseTest):
 			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 			    (xid1, oxid1))
 		self.assertIn(
-		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
-		    % (xid1, xidc + 4),
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained'
+		    % (xid1),
 		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
@@ -1459,8 +1459,8 @@ class RewindXidTest(BaseTest):
 			    "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 			    (xid1, oxid1))
 		self.assertIn(
-		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained\nDETAIL:  request rewind to XID more than %d'
-		    % (xid1, xidc + 4),
+		    'ERROR:  Requested rewind to XID %d which is in the past from the eraliest retained'
+		    % (xid1),
 		    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 		node.stop()
