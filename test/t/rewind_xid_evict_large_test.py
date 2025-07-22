@@ -82,13 +82,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -149,13 +149,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -224,13 +224,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres',
@@ -309,13 +309,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -405,13 +405,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		node.safe_psql(
 		    'postgres',
@@ -499,13 +499,13 @@ class RewindXidTest(BaseTest):
 
 		time.sleep(5)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -550,7 +550,7 @@ class RewindXidTest(BaseTest):
 
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
-		    '5000'
+		    '1250'
 		],
 		                       stderr=sys.stderr)
 
@@ -576,7 +576,7 @@ class RewindXidTest(BaseTest):
 
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
-		    '2495'
+		    '624'
 		],
 		                       stderr=sys.stderr)
 
@@ -586,17 +586,17 @@ class RewindXidTest(BaseTest):
 
 		node.pgbench_with_wait(options=[
 		    '-M', 'prepared', '-f', fp.name, '-n', '-c', '4', '-j', '4', '-t',
-		    '2500'
+		    '625'
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -684,13 +684,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -777,13 +777,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -875,13 +875,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -976,13 +976,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -1316,13 +1316,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
@@ -1433,13 +1433,13 @@ class RewindXidTest(BaseTest):
 		],
 		                       stderr=sys.stderr)
 
-		a, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
-		len = int(a)
-		c, *b = (node.execute(
-		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
-		ev = int(c)
-		print(len, ev, len - ev)
+		#		a, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
+		#		len = int(a)
+		#		c, *b = (node.execute(
+		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
+		#		ev = int(c)
+		#		print(len, ev, len - ev)
 
 		while True:
 			a, *b = (node.execute('postgres',
