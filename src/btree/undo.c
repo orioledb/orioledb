@@ -1255,30 +1255,24 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		bool		prevChainHasLocks = false;
 		bool		delete_record = false;
 
-		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
-			XACT_INFO_GET_OXID(xactInfo) == my_oxid)
+		if (XACT_INFO_IS_LOCK_ONLY(xactInfo))
 		{
-			/* Check if there are redundant row-level locks */
-			if (xactMode <= mode &&
-				(!UndoLocationIsValid(savepointUndoLocation) ||
-				 (UndoLocationIsValid(undoLocation) &&
-				  undoLocation >= savepointUndoLocation)))
-				*redundant_row_locks = true;
-			if (xactMode >= mode)
-				*lock_status = Max(*lock_status, BTreeModifySameOrStrongerLock);
-			else
-				*lock_status = Max(*lock_status, BTreeModifyWeakerLock);
-		}
-
-		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
-			ROW_LOCKS_CONFLICT(xactMode, mode))
-		{
-			BTreeLeafTuphdr prev_tuphdr;
 			OXid		oxid = XACT_INFO_GET_OXID(xactInfo);
 
-			Assert(UndoLocationIsValid(undoLocation));
-
-			if (oxid != my_oxid)
+			if (oxid == my_oxid)
+			{
+				/* Check if there are redundant row-level locks */
+				if (xactMode <= mode &&
+					(!UndoLocationIsValid(savepointUndoLocation) ||
+					 (UndoLocationIsValid(undoLocation) &&
+					  undoLocation >= savepointUndoLocation)))
+					*redundant_row_locks = true;
+				if (xactMode >= mode)
+					*lock_status = Max(*lock_status, BTreeModifySameOrStrongerLock);
+				else
+					*lock_status = Max(*lock_status, BTreeModifyWeakerLock);
+			}
+			else
 			{
 				CommitSeqNo csn;
 
@@ -1294,50 +1288,12 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				{
 					delete_record = true;
 				}
-				else if (!result || XACT_INFO_GET_OXID(conflictTuphdr->xactInfo) == my_oxid)
+				else if (ROW_LOCKS_CONFLICT(xactMode, mode) &&
+						 (!result || XACT_INFO_GET_OXID(conflictTuphdr->xactInfo) == my_oxid))
 				{
 					*conflictTuphdr = curTuphdr;
 					*conflictUndoLocation = curUndoLocation;
 					result = true;
-				}
-			}
-
-			if (delete_record && undoLocation >= retainedUndoLocation)
-			{
-				Assert(UNDO_REC_EXISTS(undoType, undoLocation));
-
-				prev_tuphdr = curTuphdr;
-				get_prev_leaf_header_from_undo(undoType, &prev_tuphdr, false);
-				if (!UndoLocationIsValid(curUndoLocation))
-				{
-					page_block_reads(blkno);
-					pageTuphdr->xactInfo = prev_tuphdr.xactInfo;
-					pageTuphdr->undoLocation = prev_tuphdr.undoLocation;
-					pageTuphdr->chainHasLocks = prev_tuphdr.chainHasLocks;
-				}
-				else
-				{
-					/*
-					 * Update chainHasLocks flag of the next undo records if
-					 * needed.
-					 */
-					if (XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) &&
-						!curTuphdr.chainHasLocks)
-					{
-						clean_chain_has_locks_flag(undoType,
-												   lastLockOnlyUndoLocation,
-												   pageTuphdr,
-												   blkno);
-						lastLockOnlyUndoLocation = InvalidUndoLocation;
-					}
-
-					curTuphdr.xactInfo = prev_tuphdr.xactInfo;
-					curTuphdr.undoLocation = prev_tuphdr.undoLocation;
-					curTuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
-					update_leaf_header_in_undo(undoType,
-											   &curTuphdr,
-											   curUndoLocation);
-
 				}
 			}
 		}
@@ -1357,6 +1313,47 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				*conflictTuphdr = curTuphdr;
 				*conflictUndoLocation = curUndoLocation;
 				result = true;
+			}
+		}
+
+		if (delete_record && undoLocation >= retainedUndoLocation)
+		{
+			BTreeLeafTuphdr prev_tuphdr;
+
+			Assert(UNDO_REC_EXISTS(undoType, undoLocation));
+
+			prev_tuphdr = curTuphdr;
+			get_prev_leaf_header_from_undo(undoType, &prev_tuphdr, false);
+			if (!UndoLocationIsValid(curUndoLocation))
+			{
+				page_block_reads(blkno);
+				pageTuphdr->xactInfo = prev_tuphdr.xactInfo;
+				pageTuphdr->undoLocation = prev_tuphdr.undoLocation;
+				pageTuphdr->chainHasLocks = prev_tuphdr.chainHasLocks;
+			}
+			else
+			{
+				/*
+				 * Update chainHasLocks flag of the next undo records if
+				 * needed.
+				 */
+				if (XACT_INFO_IS_LOCK_ONLY(curTuphdr.xactInfo) &&
+					!curTuphdr.chainHasLocks)
+				{
+					clean_chain_has_locks_flag(undoType,
+											   lastLockOnlyUndoLocation,
+											   pageTuphdr,
+											   blkno);
+					lastLockOnlyUndoLocation = InvalidUndoLocation;
+				}
+
+				curTuphdr.xactInfo = prev_tuphdr.xactInfo;
+				curTuphdr.undoLocation = prev_tuphdr.undoLocation;
+				curTuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
+				update_leaf_header_in_undo(undoType,
+										   &curTuphdr,
+										   curUndoLocation);
+
 			}
 		}
 
