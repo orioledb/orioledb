@@ -22,7 +22,9 @@ f.close()
 f = open('include/utils/stopevents_data.h', 'w')
 f.write('/* Generated file, see stopevents_gen.py */\n\n')
 
-for e in event_names:
+f.write('static const char *const stopeventnames[] = {')
+for i, e in enumerate(event_names):
 	f.write(f'"{e}",\n')
+f.write('};')
 
 f.close()
