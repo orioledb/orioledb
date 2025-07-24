@@ -29,6 +29,7 @@
 #include "utils/jsonpath.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/stopevents_data.h"
 
 #define QUERY_BUFFER_SIZE 1024
 
@@ -50,10 +51,6 @@ MemoryContext stopevents_cxt = NULL;
 PG_FUNCTION_INFO_V1(pg_stopevent_set);
 PG_FUNCTION_INFO_V1(pg_stopevent_reset);
 PG_FUNCTION_INFO_V1(pg_stopevents);
-
-static const char *const stopeventnames[] = {
-#include "utils/stopevents_data.h"
-};
 
 Size
 StopEventShmemSize(void)
