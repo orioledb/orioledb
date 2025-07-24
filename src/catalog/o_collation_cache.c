@@ -33,9 +33,7 @@ typedef struct OCollation
 	char	   *collcollate;
 	char	   *collctype;
 	char	   *colliculocale;
-#if PG_VERSION_NUM >= 160000
 	char	   *collicurules;
-#endif
 	char	   *collversion;
 } OCollation;
 
@@ -140,14 +138,12 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	else
 		o_collation->colliculocale = NULL;
 
-#if PG_VERSION_NUM >= 160000
 	datum = SysCacheGetAttr(COLLOID, collationtup,
 							Anum_pg_collation_collicurules, &isNull);
 	if (!isNull)
 		o_collation->collicurules = TextDatumGetCString(datum);
 	else
 		o_collation->collicurules = NULL;
-#endif
 	datum = SysCacheGetAttr(COLLOID, collationtup,
 							Anum_pg_collation_collversion, &isNull);
 	if (!isNull)
@@ -179,9 +175,7 @@ o_collation_cache_serialize_entry(Pointer entry, int *len)
 	o_serialize_string(o_collation->collcollate, &str);
 	o_serialize_string(o_collation->collctype, &str);
 	o_serialize_string(o_collation->colliculocale, &str);
-#if PG_VERSION_NUM >= 160000
 	o_serialize_string(o_collation->collicurules, &str);
-#endif
 	o_serialize_string(o_collation->collversion, &str);
 
 	*len = str.len;
@@ -206,9 +200,7 @@ o_collation_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 	o_collation->collcollate = o_deserialize_string(&ptr);
 	o_collation->collctype = o_deserialize_string(&ptr);
 	o_collation->colliculocale = o_deserialize_string(&ptr);
-#if PG_VERSION_NUM >= 160000
 	o_collation->collicurules = o_deserialize_string(&ptr);
-#endif
 	o_collation->collversion = o_deserialize_string(&ptr);
 
 	return (Pointer) o_collation;
@@ -263,13 +255,11 @@ o_collation_cache_search_htup(TupleDesc tupdesc, Oid colloid)
 		else
 			nulls[Anum_pg_collation_colliculocale - 1] = true;
 #endif
-#if PG_VERSION_NUM >= 160000
 		if (o_collation->collicurules)
 			values[Anum_pg_collation_collicurules - 1] =
 				CStringGetTextDatum(o_collation->collicurules);
 		else
 			nulls[Anum_pg_collation_collicurules - 1] = true;
-#endif
 		if (o_collation->collversion)
 			values[Anum_pg_collation_collversion - 1] =
 				CStringGetTextDatum(o_collation->collversion);

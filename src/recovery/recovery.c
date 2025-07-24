@@ -2490,7 +2490,6 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					o_tables_meta_unlock_no_wal();
 
 					Assert(is_recovery_in_progress());
-#if PG_VERSION_NUM >= 140000
 
 					/*
 					 * In main recovery worker send message to main index
@@ -2510,10 +2509,6 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					else
 						rebuild_indices(old_o_table, old_descr,
 										new_o_table, &tmp_descr, false, NULL);
-#else
-					rebuild_indices(old_o_table, old_descr,
-									new_o_table, &tmp_descr, false, NULL);
-#endif
 				}
 				else
 				{
@@ -2560,7 +2555,6 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					old_descr = o_fetch_table_descr(old_o_table->oids);
 					rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
-#if PG_VERSION_NUM >= 140000
 
 					/*
 					 * In main recovery worker send message to main index
@@ -2579,10 +2573,6 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					else
 						rebuild_indices(old_o_table, old_descr,
 										new_o_table, &tmp_descr, false, NULL);
-#else
-					rebuild_indices(old_o_table, old_descr,
-									new_o_table, &tmp_descr, false, NULL);
-#endif
 				}
 				else
 				{

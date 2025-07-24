@@ -547,11 +547,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 					  CommandId cid, Snapshot snapshot, Snapshot crosscheck,
 					  int options, TM_FailureData *tmfd,
 					  LockTupleMode *lockmode,
-#if PG_VERSION_NUM >= 160000
 					  TU_UpdateIndexes *update_indexes,
-#else
-					  bool *update_indexes,
-#endif
 					  TupleTableSlot *oldSlot)
 {
 	OTableModifyResult mres;
@@ -576,11 +572,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
-#if PG_VERSION_NUM >= 160000
 	*update_indexes = TU_All;
-#else
-	*update_indexes = true;
-#endif
 	oxid = get_current_oxid();
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &old_pkey, &hint,
@@ -2060,11 +2052,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.tuple_tid_valid = orioledb_tuple_tid_valid,
 	.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
 
-#if PG_VERSION_NUM >= 160000
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
-#else
-	.relation_set_new_filenode = orioledb_relation_set_new_filenode,
-#endif
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
 	.relation_copy_data = orioledb_relation_copy_data,
 	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,

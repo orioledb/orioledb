@@ -573,11 +573,7 @@ o_validate_function_by_oid(Oid procoid, char *hint_msg)
 static inline bool
 is_a_plan(Node *node)
 {
-#if PG_VERSION_NUM >= 160000
 	return (nodeTag(node) >= T_Result) && (nodeTag(node) <= T_Limit);
-#else
-	return (nodeTag(node) >= T_Plan) && (nodeTag(node) <= T_Limit);
-#endif
 }
 
 static bool

@@ -40,9 +40,7 @@
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_attrdef.h"
-#if PG_VERSION_NUM >= 160000
 #include "catalog/pg_authid.h"
-#endif
 #include "catalog/pg_class.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_collation.h"
@@ -51,9 +49,7 @@
 #include "catalog/pg_enum.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_inherits.h"
-#if PG_VERSION_NUM >= 160000
 #include "catalog/pg_namespace.h"
-#endif
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
@@ -272,18 +268,6 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "ALTER COLUMN ... SET";
 		case AT_DropIdentity:
 			return "ALTER COLUMN ... DROP IDENTITY";
-#if PG_VERSION_NUM < 160000
-		case AT_AddColumnRecurse:
-			return "ADD COLUMN";
-		case AT_DropColumnRecurse:
-			return "DROP COLUMN";
-		case AT_AddConstraintRecurse:
-			return "ADD CONSTRAINT";
-		case AT_ValidateConstraintRecurse:
-			return "VALIDATE CONSTRAINT";
-		case AT_DropConstraintRecurse:
-			return "DROP CONSTRAINT";
-#endif
 #if PG_VERSION_NUM >= 170000
 		case AT_SetExpression:
 			return "ALTER COLUMN ... SET EXPRESSION";
@@ -505,21 +489,15 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	bool		concurrent_warning = false;
 	bool		has_orioledb = false;
 
-#if PG_VERSION_NUM < 160000
-	AssertArg(objectName);
-#endif
 	Assert(objectKind == REINDEX_OBJECT_SCHEMA ||
 		   objectKind == REINDEX_OBJECT_SYSTEM ||
 		   objectKind == REINDEX_OBJECT_DATABASE);
-
-#if PG_VERSION_NUM >= 160000
 
 	/*
 	 * This matches the options enforced by the grammar, where the object name
 	 * is optional for DATABASE and SYSTEM.
 	 */
 	Assert(objectName || objectKind != REINDEX_OBJECT_SCHEMA);
-#endif
 
 	if (objectKind == REINDEX_OBJECT_SYSTEM)
 		ereport(ERROR,
@@ -536,11 +514,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	{
 		objectOid = get_namespace_oid(objectName, false);
 
-#if PG_VERSION_NUM >= 160000
 		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()))
-#else
-		if (!pg_namespace_ownercheck(objectOid, GetUserId()))
-#endif
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_SCHEMA,
 						   objectName);
 	}
@@ -548,23 +522,13 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	{
 		objectOid = MyDatabaseId;
 
-#if PG_VERSION_NUM >= 160000
 		if (objectName && strcmp(objectName, get_database_name(objectOid)) != 0)
-#else
-		if (strcmp(objectName, get_database_name(objectOid)) != 0)
-#endif
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("can only reindex the currently open database")));
-#if PG_VERSION_NUM >= 160000
 		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()))
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(objectOid));
-#else
-		if (!pg_database_ownercheck(objectOid, GetUserId()))
-			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
-						   objectName);
-#endif
 	}
 
 	/*
@@ -623,8 +587,6 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			!isTempNamespace(classtuple->relnamespace))
 			continue;
 
-#if PG_VERSION_NUM >= 160000
-
 		/*
 		 * Check user/system classification.  SYSTEM processes all the
 		 * catalogs, and DATABASE processes everything that's not a catalog.
@@ -647,24 +609,6 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 		if (classtuple->relisshared &&
 			object_ownercheck(RelationRelationId, relid, GetUserId()))
 			continue;
-#else
-		/* Check user/system classification, and optionally skip */
-		if (objectKind == REINDEX_OBJECT_SYSTEM &&
-			!IsSystemClass(relid, classtuple))
-			continue;
-
-		/*
-		 * The table can be reindexed if the user is superuser, the table
-		 * owner, or the database/schema owner (but in the latter case, only
-		 * if it's not a shared relation).  pg_class_ownercheck includes the
-		 * superuser case, and depending on objectKind we already know that
-		 * the user has permission to run REINDEX on this database or schema
-		 * per the permission checks at the beginning of this routine.
-		 */
-		if (classtuple->relisshared &&
-			!pg_class_ownercheck(relid, GetUserId()))
-			continue;
-#endif
 
 		/*
 		 * Skip system tables, since index_create() would reject indexing them

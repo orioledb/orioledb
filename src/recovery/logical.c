@@ -495,11 +495,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			 */
 			if (!ReorderBufferXidHasBaseSnapshot(ctx->reorder, logicalXid))
 			{
-#if PG_VERSION_NUM >= 160000
 				Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
-#else
-				Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder, InvalidTransactionId);
-#endif
 
 				ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
 											 changeXLogPtr,
@@ -520,15 +516,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_INSERT;
-#if PG_VERSION_NUM >= 160000
 					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
-#else
-					change->data.tp.relnode.spcNode = DEFAULTTABLESPACE_OID;
-					change->data.tp.relnode.dbNode = cur_oids.datoid;
-					change->data.tp.relnode.relNode = cur_oids.relnode;
-#endif
 
 					/* Decode TOAST chunks */
 					if (ix_type == oIndexToast)
@@ -646,15 +636,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_UPDATE;
 					change->data.tp.clear_toast_afterwards = true;
-#if PG_VERSION_NUM >= 160000
 					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
-#else
-					change->data.tp.relnode.spcNode = DEFAULTTABLESPACE_OID;
-					change->data.tp.relnode.dbNode = cur_oids.datoid;
-					change->data.tp.relnode.relNode = cur_oids.relnode;
-#endif
 
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
@@ -691,15 +675,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				{
 					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_DELETE;
-#if PG_VERSION_NUM >= 160000
 					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
-#else
-					change->data.tp.relnode.spcNode = DEFAULTTABLESPACE_OID;
-					change->data.tp.relnode.dbNode = cur_oids.datoid;
-					change->data.tp.relnode.relNode = cur_oids.relnode;
-#endif
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 					if (ix_type == oIndexToast)
 					{
