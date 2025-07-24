@@ -324,11 +324,7 @@ assign_subtransaction_logical_xid(void)
 	{
 		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-#if PG_VERSION_NUM >= 160000
 		prevLogicalXids = lappend_xid(prevLogicalXids, logicalXid);
-#else
-		prevLogicalXids = lappend_oid(prevLogicalXids, (Oid) logicalXid);
-#endif
 		MemoryContextSwitchTo(mcxt);
 	}
 
@@ -747,13 +743,8 @@ oxid_notify_all(void)
 	uint32		proclock_hashcode;
 	List	   *procs = NIL;
 	ListCell   *lc;
-#if PG_VERSION_NUM >= 160000
 	dclist_head *waitQueue;
 	dlist_iter	iter;
-#else
-	PROC_QUEUE *waitQueue;
-	int			i;
-#endif
 
 	vxid.localTransactionId = MyProc->LXID;
 	vxid.BACKENDID = MyBackendId;
@@ -798,17 +789,9 @@ oxid_notify_all(void)
 
 	waitQueue = &lock->waitProcs;
 
-#if PG_VERSION_NUM >= 160000
 	dclist_foreach(iter, waitQueue)
 	{
 		proc = dlist_container(PGPROC, links, iter.cur);
-#else
-	Assert(waitQueue->size >= 0);
-
-	proc = (PGPROC *) waitQueue->links.next;
-	for (i = 0; i < waitQueue->size; i++)
-	{
-#endif
 		if (
 			proc->waitStatus == PROC_WAIT_STATUS_WAITING &&
 			proc->waitLock->tag.locktag_field1 == tag.locktag_field1 &&
@@ -821,10 +804,6 @@ oxid_notify_all(void)
 		{
 			procs = lappend(procs, proc);
 		}
-
-#if PG_VERSION_NUM < 160000
-		proc = (PGPROC *) proc->links.next;
-#endif
 	}
 
 	foreach(lc, procs)
@@ -1220,11 +1199,7 @@ release_assigned_logical_xids(void)
 		{
 			TransactionId xid;
 
-#if PG_VERSION_NUM >= 160000
 			xid = lfirst_xid(lc);
-#else
-			xid = lfirst_oid(lc);
-#endif
 			release_logical_xid(xid);
 		}
 		list_free(prevLogicalXids);

@@ -18,11 +18,7 @@
 #include "s3/requests.h"
 #include "s3/worker.h"
 
-#if PG_VERSION_NUM >= 160000
 #include "archive/archive_module.h"
-#else
-#include "postmaster/pgarch.h"
-#endif
 #include "common/hashfn.h"
 
 typedef struct
@@ -79,7 +75,6 @@ make_preload_hash(void)
 					HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);
 }
 
-#if PG_VERSION_NUM >= 160000
 static bool s3_archive_configured(ArchiveModuleState *state);
 static void s3_archive_preload_file(ArchiveModuleState *state,
 									const char *file, const char *path);
@@ -105,40 +100,12 @@ _PG_archive_module_init(void)
 
 	return &s3_archive_callbacks;
 }
-#else
-static bool s3_archive_configured(void);
-static void s3_archive_preload_file(const char *file, const char *path);
-static bool s3_archive_file(const char *file, const char *path);
-
-extern void _PG_archive_module_init(ArchiveModuleCallbacks *callbacks);
-
-/*
- * _PG_archive_module_init
- *
- * Returns the module's archiving callbacks.
- */
-void
-_PG_archive_module_init(ArchiveModuleCallbacks *callbacks)
-{
-	if (!preloadHash)
-		make_preload_hash();
-
-	callbacks->check_configured_cb = s3_archive_configured;
-	callbacks->archive_preload_file_cb = s3_archive_preload_file;
-	callbacks->archive_file_cb = s3_archive_file;
-
-}
-#endif
 
 /*
  * We only allow S3 archiving if we're in S3 mode.
  */
 static bool
-#if PG_VERSION_NUM >= 160000
 s3_archive_configured(ArchiveModuleState *state)
-#else
-s3_archive_configured(void)
-#endif
 {
 	return orioledb_s3_mode;
 }
@@ -149,12 +116,8 @@ s3_archive_configured(void)
  * So, no point to schedule this for S3 worker.  Make the S3 request right-away.
  */
 static void
-#if PG_VERSION_NUM >= 160000
 s3_archive_preload_file(ArchiveModuleState *state,
 						const char *file, const char *path)
-#else
-s3_archive_preload_file(const char *file, const char *path)
-#endif
 {
 	bool		found;
 	PreloadHashItem *item;
@@ -181,12 +144,8 @@ s3_archive_preload_file(const char *file, const char *path)
  * So, no point to schedule this for S3 worker.  Make the S3 request right-away.
  */
 static bool
-#if PG_VERSION_NUM >= 160000
 s3_archive_file(ArchiveModuleState *state,
 				const char *file, const char *path)
-#else
-s3_archive_file(const char *file, const char *path)
-#endif
 {
 	S3TaskLocation location;
 	bool		found;
