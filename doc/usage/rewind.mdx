@@ -86,4 +86,5 @@ As mentioned above, rewind mode is currently experimental. The major limitations
 1. Undo-based rewind is limited to a cluster uptime. Rewind buffer is not persistent and you can not rewind past cluster start time. At cluster start time all transactions that were reserved to rewind are permanently fixed (completed).
 2. Starting database cluster after rewind could not be done by the backend that invokes rewind. So database will be shut down after rewind and then the user should start it.
 3. Undo-based rewind automatically supports `heap` tables in the cluster. Significant writes to `heap` tables will retain old versions of tuples reserved for rewind and cause bloat to heap tables. This bloat can not be removed by vacuum until the transaction is past the rewind retain boundary. It's recommended to use rewind for clusters with most of the writes in the `orioledb` tables, and only occasional writes to `heap`.
-
+4. There are yet no safeguards against interruption of rewind when it's already started.  This interruption can leave the database in an inconsistent, partially rewound state.
+5. Rewind is not yet compatible with replication, as rewind buffer state is not fixed into WAL, so any transactions rewound on the source will still look as committed on the replica.
