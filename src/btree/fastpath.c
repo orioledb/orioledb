@@ -597,6 +597,7 @@ float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 
 	for (i = *lower; i < *upper; i++)
 	{
+		/* cppcheck-suppress invalidPointerCast */
 		float4		value = *((float4 *) p);
 
 		if (value == key && !lowerSet)
@@ -629,6 +630,7 @@ float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 
 	for (i = *lower; i < *upper; i++)
 	{
+		/* cppcheck-suppress invalidPointerCast */
 		float8		value = *((float8 *) p);
 
 		if (value == key && !lowerSet)

@@ -1516,6 +1516,7 @@ o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
 		attnum = get_attnum(RelationGetRelid(rel), cmd->name);
 		alter_type_exprs =
 			lappend(alter_type_exprs,
+		/* cppcheck-suppress unknownEvaluationOrder */
 					list_make2(makeInteger(attnum), cooked_default));
 	}
 }
@@ -1757,6 +1758,7 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	if (expr != NULL)
 	{
 		if (append_transform)
+			/* cppcheck-suppress unknownEvaluationOrder */
 			alter_type_exprs = lappend(alter_type_exprs, list_make2(makeInteger(subId), expr));
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
@@ -2785,6 +2787,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							foundDep->deptype == DEPENDENCY_PARTITION_SEC)
 						{
 							partition_drop_index_list = list_append_unique(partition_drop_index_list,
+							/* cppcheck-suppress unknownEvaluationOrder */
 																		   list_make2_oid(rel->rd_rel->oid,
 																						  rel->rd_index->indrelid));
 							break;

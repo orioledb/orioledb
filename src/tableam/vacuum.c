@@ -1087,6 +1087,7 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 			{
 				Assert(tupHdr->deleted == BTreeLeafTupleDeleted);
 
+				/* cppcheck-suppress unknownEvaluationOrder */
 				iptr = DatumGetItemPointer(o_fastgetattr(tup, 1, bridge->leafTupdesc, &bridge->leafSpec, &isnull));
 				add_dead_item(vacrel, iptr);
 				vacrel->lpdead_items++;

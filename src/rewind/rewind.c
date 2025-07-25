@@ -807,6 +807,7 @@ cleanup_rewind_files(OBuffersDesc *desc, uint32 tag)
 	while (true)
 	{
 		pg_snprintf(curFileName, MAXPGPATH,
+		/* cppcheck-suppress arrayIndexOutOfBoundsCond */
 					desc->filenameTemplate[tag],
 					(uint32) (fileNum >> 32),
 					(uint32) fileNum);

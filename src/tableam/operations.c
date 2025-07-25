@@ -1063,6 +1063,8 @@ o_update_secondary_index(OIndexDescr *id,
 	BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 	slot_getallattrs(oldSlot);
+
+	memset(&res, 0, sizeof(res));
 	res.success = true;
 	res.oldTuple = oldSlot;
 
@@ -1134,6 +1136,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		.arg = arg
 	};
 
+	memset(&result, 0, sizeof(result));
 	result.success = true;
 	result.oldTuple = NULL;
 
@@ -1212,6 +1215,7 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 		.arg = newSlot
 	};
 
+	memset(&result, 0, sizeof(result));
 	result.success = true;
 	result.oldTuple = NULL;
 
@@ -1299,6 +1303,7 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 						 oxid, csn, RowLockUpdate,
 						 NULL, &callbackInfo);
 
+	memset(&result, 0, sizeof(result));
 	result.success = (res == OBTreeModifyResultDeleted) || marg.deleted;
 	if (!result.success)
 	{
@@ -1326,6 +1331,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 		.arg = arg
 	};
 
+	memset(&result, 0, sizeof(result));
 	result.oldTuple = NULL;
 
 	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
@@ -1855,6 +1861,7 @@ o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 					(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 					 errmsg("could not obtain lock on row in relation \"%s\"",
 							RelationGetRelationName(o_arg->rel))));
+			/* cppcheck-suppress missingReturn */
 			break;
 		default:
 			elog(ERROR, "Unknown wait policy: %u", o_arg->waitPolicy);

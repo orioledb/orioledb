@@ -435,6 +435,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 			if (so->numArrayKeys < 0)
 			{
 				O_TUPLE_SET_NULL(tup);
+				/* cppcheck-suppress uninitvar */
 				return tup;
 			}
 

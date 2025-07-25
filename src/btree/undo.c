@@ -687,15 +687,10 @@ void
 check_pending_truncates(void)
 {
 	uint64		offset;
-	uint64		length;
 	uint64		maxOffset;
-	ORelOids	relOids;
-	int			numTrees;
 	ORelOids   *relNodes = NULL;
 	int			relNodesAllocated = 0;
 	File		pendingTruncatesFile;
-
-	ORelOidsSetInvalid(relOids);
 
 	if (have_backup_in_progress() || pending_truncates_meta->pendingTruncatesLocation == 0)
 		return;
@@ -721,7 +716,9 @@ check_pending_truncates(void)
 	maxOffset = pending_truncates_meta->pendingTruncatesLocation;
 	while (offset < maxOffset)
 	{
-		int			i;
+		uint64		length;
+		int			numTrees;
+		ORelOids	relOids;
 
 		length = sizeof(relOids);
 		if (FileRead(pendingTruncatesFile, (Pointer) &relOids, length, offset,
@@ -757,7 +754,7 @@ check_pending_truncates(void)
 							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
-		for (i = 0; i < numTrees; i++)
+		for (int i = 0; i < numTrees; i++)
 			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode, true);
 	}
 

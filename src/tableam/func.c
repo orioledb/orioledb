@@ -237,7 +237,6 @@ print_unloaded_tree(StringInfoData *buf, BTreeDescr *td, const char *treeName,
 		appendStringInfo(buf, "datoid = %d, relnode = %d, ",
 						 td->oids.datoid, td->oids.relnode);
 		if (DiskDownlinkIsValid(file_header.rootDownlink))
-			/* cppcheck-suppress unknownMacro */
 			appendStringInfo(buf, "rootOffset = " UINT64_FORMAT ", %u",
 							 DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 							 DOWNLINK_GET_DISK_LEN(file_header.rootDownlink));
@@ -928,7 +927,7 @@ log_btree(BTreeDescr *desc)
 
 		for (i = 0; i < opaque.keyDesc->natts; i++)
 		{
-			Oid			output;
+			Oid			output = InvalidOid;
 			bool		varlena;
 
 			for (j = 0; j < sizeof(typeoids) / sizeof(typeoids[0]); j++)
@@ -1525,6 +1524,8 @@ fetch_index_descr_by_oid(Oid relid)
 	OTableDescr *descr;
 	OIndexNumber ixnum;
 	bool		index = false;
+
+	ORelOidsSetInvalid(idxOids);
 
 	rel = relation_open(relid, AccessShareLock);
 	if (rel->rd_rel->relkind == RELKIND_INDEX)

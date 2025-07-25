@@ -243,10 +243,15 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 	OXid		oxid;
 	int			oldTreeOidsNum,
 				newTreeOidsNum;
-	ORelOids	oldOids = old_o_table->oids,
+	ORelOids	oldOids,
 			   *oldTreeOids,
-				newOids = o_table->oids,
+				newOids,
 			   *newTreeOids;
+
+	Assert(old_o_table != NULL && o_table != NULL);
+
+	oldOids = old_o_table->oids;
+	newOids = o_table->oids;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
@@ -399,10 +404,14 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
 
+	Assert(index == NULL || !(OidIsValid(indoid)));
+
 	if (OidIsValid(indoid))
 		index = index_open(indoid, AccessShareLock);
 
 	ORelOidsSetFromRel(oids, heap);
+
+	Assert(index != NULL);
 
 	options = (OBTOptions *) index->rd_options;
 
@@ -2022,6 +2031,8 @@ o_find_ix_num_by_name(OTableDescr *descr, char *ix_name)
 {
 	OIndexNumber result = InvalidIndexNumber;
 	int			i;
+
+	Assert(descr != NULL);
 
 	for (i = 0; i < descr->nIndices; i++)
 	{

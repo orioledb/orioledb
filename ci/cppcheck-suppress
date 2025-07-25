@@ -1,0 +1,5 @@
+redundantAssignment:*
+uselessAssignmentPtrArg:*
+incorrectStringBooleanError:*
+nullPointerRedundantCheck:*
+integerOverflowCond:*/atomics/generic.h
