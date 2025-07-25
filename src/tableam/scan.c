@@ -485,6 +485,7 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 
 		custom_scan->custom_exprs = NIL;
 		custom_scan->custom_private =
+		/* cppcheck-suppress unknownEvaluationOrder */
 			list_make4(makeInteger(O_IndexPlan),
 					   makeInteger(ix_path->ix_num),
 					   makeInteger(ix_path->scandir),
@@ -501,6 +502,7 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 
 		Assert(primary->nFields == 1);
 		custom_scan->custom_private =
+		/* cppcheck-suppress unknownEvaluationOrder */
 			list_make2(makeInteger(O_BitmapHeapPlan),
 					   makeInteger(primary->fields[0].inputtype));
 	}

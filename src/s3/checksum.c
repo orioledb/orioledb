@@ -102,7 +102,7 @@ initHashTable(S3ChecksumState *state, const char *filename)
 	{
 		S3FileChecksum fileEntry;
 
-		if (sscanf(buf.data, "FILE: %1023[^,], CHECKSUM: %64[^,], CHECKPOINT: %d",
+		if (sscanf(buf.data, "FILE: %1023[^,], CHECKSUM: %64[^,], CHECKPOINT: %u",
 				   fileEntry.filename, fileEntry.checksum, &fileEntry.checkpointNumber) == 3)
 		{
 			char		key[MAXPGPATH];

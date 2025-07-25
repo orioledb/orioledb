@@ -2079,6 +2079,8 @@ static const TableAmRoutine orioledb_am_methods = {
 bool
 is_orioledb_rel(Relation rel)
 {
+	Assert(rel != NULL);
+
 	return (rel->rd_tableam == (TableAmRoutine *) &orioledb_am_methods);
 }
 
@@ -2107,6 +2109,8 @@ relation_get_descr(Relation rel)
 {
 	OTableDescr *result;
 	ORelOids	oids;
+
+	Assert(rel != NULL);
 
 	ORelOidsSetFromRel(oids, rel);
 	if (!is_orioledb_rel(rel))

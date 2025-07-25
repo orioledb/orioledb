@@ -428,6 +428,7 @@ o_process_functions_in_node(Node *node,
 				{
 					functionId = get_opcode(lfirst_oid(opid));
 					inputcollid = lfirst_oid(collid);
+					/* cppcheck-suppress unknownEvaluationOrder */
 					args = list_make2(lfirst(larg),
 									  lfirst(rarg));
 

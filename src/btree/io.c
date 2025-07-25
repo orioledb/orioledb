@@ -1415,7 +1415,6 @@ load_page(OBTreeFindPageContext *context)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
 
 		ereport(ERROR, (errcode_for_file_access(),
-		/* cppcheck-suppress unknownMacro */
 						errmsg("could not read page with file offset " UINT64_FORMAT " from %s: %m",
 							   DOWNLINK_GET_DISK_OFF(downlink),
 							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));

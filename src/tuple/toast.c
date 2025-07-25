@@ -147,8 +147,11 @@ o_toast_cmp(BTreeDescr *desc,
 	{
 		bool		null;
 
+		/* cppcheck-suppress unknownEvaluationOrder */
 		attnum1 = DatumGetInt16(o_fastgetattr(pk1, pkAttnum + ATTN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
+
+		/* cppcheck-suppress unknownEvaluationOrder */
 		chunknum1 = DatumGetInt32(o_fastgetattr(pk1, pkAttnum + CHUNKN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
 	}
@@ -162,8 +165,11 @@ o_toast_cmp(BTreeDescr *desc,
 	{
 		bool		null;
 
+		/* cppcheck-suppress unknownEvaluationOrder */
 		attnum2 = DatumGetInt16(o_fastgetattr(pk2, pkAttnum + ATTN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
+
+		/* cppcheck-suppress unknownEvaluationOrder */
 		chunknum2 = DatumGetInt32(o_fastgetattr(pk2, pkAttnum + CHUNKN_POS, toastd->nonLeafTupdesc, &toastd->nonLeafSpec, &null));
 		Assert(!null);
 	}

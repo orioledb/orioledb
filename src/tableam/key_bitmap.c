@@ -55,9 +55,13 @@ o_keybitmap_insert(RBTree *rbtree, uint64 value)
 	OKeyBitmapRBTNode node;
 	bool		is_new;
 
+	/*
+	 * For the moment, fill only the fields of node that will be looked at by
+	 * bm_rbt_combiner or bt_rbt_comparator.
+	 */
 	node.key = value;
 	node.bitmap = NULL;
-	(void) rbt_insert(rbtree, &node.rbtnode, &is_new);
+	(void) rbt_insert(rbtree, (RBTNode *) &node, &is_new);
 }
 
 bool
@@ -66,9 +70,13 @@ o_keybitmap_test(RBTree *rbtree, uint64 value)
 	OKeyBitmapRBTNode node;
 	OKeyBitmapRBTNode *found;
 
+	/*
+	 * For the moment, fill only the fields of node that will be looked at by
+	 * bt_rbt_comparator.
+	 */
 	node.key = value;
 	node.bitmap = NULL;
-	found = (OKeyBitmapRBTNode *) rbt_find(rbtree, &node.rbtnode);
+	found = (OKeyBitmapRBTNode *) rbt_find(rbtree, (RBTNode *) &node);
 	if (!found)
 		return false;
 
@@ -104,11 +112,15 @@ o_keybitmap_range_is_valid(RBTree *rbtree, uint64 low, uint64 high)
 	{
 		bool		skip_step = false;
 
+		/*
+		 * For the moment, fill only the fields of node that will be looked at
+		 * by bt_rbt_comparator.
+		 */
 		lowNode.key = low;
 		lowNode.bitmap = NULL;
 
 		node = (OKeyBitmapRBTNode *) rbt_find_great(rbtree,
-													&lowNode.rbtnode,
+													(RBTNode *) &lowNode,
 													true);
 		if (!node)
 			break;
@@ -204,10 +216,14 @@ o_keybitmap_get_next(RBTree *rbtree, uint64 prev, bool *found)
 	OKeyBitmapRBTNode *node;
 	RBTreeIterator iter;
 
+	/*
+	 * For the moment, fill only the fields of node that will be looked at by
+	 * bt_rbt_comparator.
+	 */
 	lowNode.key = prev;
 	lowNode.bitmap = NULL;
 	node = (OKeyBitmapRBTNode *) rbt_find_great(rbtree,
-												&lowNode.rbtnode,
+												(RBTNode *) &lowNode,
 												true);
 	if (!node)
 	{

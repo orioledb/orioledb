@@ -88,7 +88,7 @@ my_locked_page_del(OInMemoryBlkno blkno)
 	int			i = get_my_locked_page_index(blkno);
 	uint32		state;
 
-	Assert(i >= 0);
+	Assert(i >= 0 && i < MAX_PAGES_PER_PROCESS);
 	state = myLockedPages[i].state;
 	myLockedPages[i] = myLockedPages[--numberOfMyLockedPages];
 
@@ -100,7 +100,7 @@ my_locked_page_get_state(OInMemoryBlkno blkno)
 {
 	int			i = get_my_locked_page_index(blkno);
 
-	Assert(i >= 0);
+	Assert(i >= 0 && i < MAX_PAGES_PER_PROCESS);
 	return myLockedPages[i].state;
 }
 

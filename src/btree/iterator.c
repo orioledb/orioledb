@@ -182,6 +182,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 				else
 				{
 					O_TUPLE_SET_NULL(result);
+					/* cppcheck-suppress uninitvar */
 					return result;
 				}
 			}

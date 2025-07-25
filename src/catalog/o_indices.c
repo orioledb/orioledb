@@ -308,6 +308,7 @@ make_primary_o_index(OTable *table)
 				result->nIncludedFields--;
 
 			/* (fieldnum, original fieldnum) */
+			/* cppcheck-suppress unknownEvaluationOrder */
 			duplicate = list_make2_int(nadded, found_attnum);
 			result->duplicates = lappend(result->duplicates, duplicate);
 			continue;
@@ -353,8 +354,9 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 					else
 						index->nIncludedFields--;
 
-					Assert(CurrentMemoryContext == OGetIndexContext(index));
+					Assert(CurrentMemoryContext == index->index_mctx);
 					/* (fieldnum, original fieldnum) */
+					/* cppcheck-suppress unknownEvaluationOrder */
 					duplicate = list_make2_int(*nadded, found_attnum);
 					index->duplicates = lappend(index->duplicates, duplicate);
 				}
@@ -558,6 +560,8 @@ make_bridge_o_index(OTable *table)
 void
 free_o_index(OIndex *o_index)
 {
+	Assert(o_index != NULL);
+
 	pfree(o_index->leafTableFields);
 	pfree(o_index->leafFields);
 	if (o_index->index_mctx)
@@ -863,6 +867,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	ListCell   *lc;
 	MemoryContext mcxt,
 				old_mcxt;
+
+	Assert(oIndex != NULL);
 
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;

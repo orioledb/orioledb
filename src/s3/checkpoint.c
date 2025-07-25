@@ -329,6 +329,8 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 	const char *lastDir = NULL; /* Split last dir from parent path. */
 	bool		isDbDir = false;	/* Does this directory contain relations? */
 
+	Assert(path != NULL);
+
 	/*
 	 * Determine if the current path is a database directory that can contain
 	 * relations.
@@ -343,7 +345,6 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		strspn(lastDir + 1, "0123456789") == strlen(lastDir + 1))
 	{
 		/* Part of path that contains the parent directory. */
-		/* cppcheck-suppress uninitvar */
 		int			parentPathLen = lastDir - path;
 
 		/*

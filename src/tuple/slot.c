@@ -1867,22 +1867,26 @@ tts_orioledb_modified(TupleTableSlot *oldSlot,
 	while ((attnum = bms_next_member(attrs, attnum)) >= 0)
 	{
 		int			i = attnum + FirstLowInvalidHeapAttributeNumber - 1;
-		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
-		Datum		val1 = oldSlot->tts_values[i],
-					val2 = newSlot->tts_values[i];
-		bool		isnull1 = oldSlot->tts_isnull[i],
-					isnull2 = newSlot->tts_isnull[i];
 
-		Assert(i >= 0);
-
-		if (isnull1 || isnull2)
+		if (unlikely(i < 0))
+			elog(ERROR, "invalid attribute number %d", i);
+		else
 		{
-			if (isnull1 != isnull2)
+			Form_pg_attribute att = TupleDescAttr(tupdesc, i);
+			Datum		val1 = oldSlot->tts_values[i],
+						val2 = newSlot->tts_values[i];
+			bool		isnull1 = oldSlot->tts_isnull[i],
+						isnull2 = newSlot->tts_isnull[i];
+
+			if (isnull1 || isnull2)
+			{
+				if (isnull1 != isnull2)
+					return true;
+			}
+
+			if (!datumIsEqual(val1, val2, att->attbyval, att->attlen))
 				return true;
 		}
-
-		if (!datumIsEqual(val1, val2, att->attbyval, att->attlen))
-			return true;
 	}
 	return false;
 }

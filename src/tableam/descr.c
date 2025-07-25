@@ -1228,14 +1228,16 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 static OComparator *
 o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 {
-	OComparatorKey key = {
-		.opfamily = opclass->opfamily,
-		.lefttype = opclass->inputtype,
-		.righttype = opclass->inputtype,
-		.collation = collation
-	};
+	OComparatorKey key;
 	OComparator *result;
 	OComparator comparator;
+
+	Assert(opclass != NULL);
+
+	key.opfamily = opclass->opfamily,
+		key.lefttype = opclass->inputtype,
+		key.righttype = opclass->inputtype,
+		key.collation = collation;
 
 	/*
 	 * At first, try to find existing comparator in cache.
