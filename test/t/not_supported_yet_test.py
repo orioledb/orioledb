@@ -123,47 +123,6 @@ class NotSupportedYetTest(BaseTest):
 
 		node.stop()
 
-	def test_cluster(self):
-		node = self.node
-		node.start()
-		node.safe_psql("""
-			CREATE EXTENSION orioledb;
-
-			CREATE TABLE o_test_1(
-				val_1 int,
-				val_2 int
-			)USING orioledb;
-
-			CREATE TABLE pg_test_1 (
-				val_1 int,
-				val_2 int
-			) USING heap;
-
-			INSERT INTO o_test_1
-				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
-			INSERT INTO pg_test_1
-				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
-
-			CREATE INDEX o_ind_1 ON o_test_1 (val_1);
-			CREATE INDEX pg_ind_1 ON pg_test_1 (val_1);
-		""")
-
-		# We doesn't break CLUSTER for postgres tables
-		_, _, err = node.psql("""
-			CLUSTER VERBOSE pg_test_1 USING pg_ind_1;
-		""")
-		self.assertTrue(err.decode("utf-8").split("\n")[0].find("pg_test_1"))
-
-		# Error for orioledb tables
-		_, _, err = node.psql("""
-			CLUSTER VERBOSE o_test_1 USING o_ind_1;
-		""")
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb tables does not support CLUSTER")
-
-		node.stop()
-
 	def test_vacuum_full(self):
 		node = self.node
 		node.start()
