@@ -35,7 +35,7 @@ init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation ind
 {
 	IndexScanDesc scan;
 
-	ExecIndexBuildScanKeys(NULL, index, ostate->indexQuals, false, scanKeys,
+	ExecIndexBuildScanKeys(o_plan_state->plan_state, index, ostate->indexQuals, false, scanKeys,
 						   numScanKeys, runtimeKeys, numRuntimeKeys, NULL,
 						   NULL);
 
