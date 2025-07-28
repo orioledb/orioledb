@@ -600,10 +600,10 @@ o_create_custom_scan_state(CustomScan *cscan)
 void
 o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 {
-	Relation	rel = node->ss.ss_currentRelation;
-	OTableDescr *descr = relation_get_descr(rel);
+	OTableDescr *descr = relation_get_descr(node->ss.ss_currentRelation);
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 
+	ocstate->o_plan_state->plan_state = &node->ss.ps;
 	ocstate->useEaCounters = is_explain_analyze(&node->ss.ps);
 
 	if (ocstate->useEaCounters)

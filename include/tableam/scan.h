@@ -29,6 +29,7 @@ typedef enum OPlanTag
 typedef struct OPlanState
 {
 	OPlanTag	type;
+	PlanState  *plan_state;
 } OPlanState;
 
 extern set_rel_pathlist_hook_type old_set_rel_pathlist_hook;

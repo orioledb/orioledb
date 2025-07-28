@@ -150,6 +150,34 @@ WITH o_test_subquery_all AS (
     ORDER BY val2
 ) SELECT o_test_subquery_all.val2 FROM o_test_subquery_all LIMIT 10;
 
+CREATE TABLE t (
+    i1 SMALLINT NOT NULL,
+    i2 SMALLINT NOT NULL,
+    i3 SMALLINT NOT NULL,
+    PRIMARY KEY (i1, i2, i3)
+)
+USING orioledb;
+
+INSERT INTO t (i1, i2, i3) VALUES
+  (1, 1, 1001), (1, 1, 1002), (1, 2, 1001), (1, 2, 1002), (2, 1, 1001), (2, 2, 1001);
+
+WITH t_delete AS (
+    DELETE
+    FROM t as del_t
+    USING UNNEST(ARRAY[1,2]) AS i2_values
+    WHERE i2 = i2_values
+    AND i1 = 1
+    AND del_t.i3 = (
+        select min(select_t.i3)
+        from t as select_t
+        where i2 = i2_values
+        and i1 = 1
+    )
+    RETURNING del_t.i3, del_t.i2
+)
+SELECT array_agg(i3), array_agg(i2)
+    FROM t_delete order by 1,2;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA subquery CASCADE;
 RESET search_path;
