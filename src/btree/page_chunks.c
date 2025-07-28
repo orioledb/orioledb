@@ -1108,16 +1108,14 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	OffsetNumber chunkOffsets[BTREE_PAGE_MAX_CHUNKS + 1];
 	LocationIndex itemsArray[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	int			i,
-				j,
-				chunkItemsCount;
+				j;
 	LocationIndex hikeysFreeSpace,
 				hikeysFreeSpaceLeft;
 	LocationIndex dataFreeSpace,
 				dataFreeSpaceLeft,
 				hikeysEnd;
 	bool		isRightmost = O_PAGE_IS(p, RIGHTMOST);
-	LocationIndex chunkDataSize,
-				targetDataSize;
+	LocationIndex chunkDataSize;
 	LocationIndex maxKeyLen;
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
@@ -1131,8 +1129,6 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 	hikeysFreeSpaceLeft = hikeysFreeSpace = hikeysEnd - (MAXALIGN(sizeof(BTreePageHeader)) + MAXALIGN(hikeySize));
 	dataFreeSpaceLeft = dataFreeSpace = (ORIOLEDB_BLCKSZ - hikeysEnd) - totalDataSize - MAXALIGN(sizeof(LocationIndex) * count);
-	targetDataSize = totalDataSize + MAXALIGN(sizeof(LocationIndex) * count);
-	targetDataSize = Max(targetDataSize, (ORIOLEDB_BLCKSZ - hikeysEnd) * 3 / 4);
 
 	/*
 	 * Calculate the chunks count to fit both chunks area and data area.
@@ -1143,11 +1139,9 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	chunkOffsets[0] = 0;
 	j = 1;
 	chunkDataSize = 0;
-	chunkItemsCount = 0;
 	if (count >= 1)
 	{
 		chunkDataSize += items[0].size;
-		chunkItemsCount = 1;
 		if (O_PAGE_IS(p, LEAF) && !(items[0].flags & O_TUPLE_FLAGS_FIXED_FORMAT))
 			fixedKeys = false;
 	}
@@ -1177,10 +1171,9 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			continue;
 		}
 
-		dataSizeRatio = (float4) (chunkDataSize + MAXALIGN(sizeof(LocationIndex) * chunkItemsCount)) / (float4) targetDataSize;
+		dataSizeRatio = (float4) chunkDataSize / (float4) totalDataSize;
 		if (dataSizeRatio >= (float4) (nextKeySize + sizeof(BTreePageChunkDesc)) / (float4) hikeysFreeSpace &&
-			(float4) chunkDataSize / (float4) totalDataSize >=
-			(float4) dataSpaceDiff / (float4) dataFreeSpace)
+			dataSizeRatio >= (float4) dataSpaceDiff / (float4) dataFreeSpace)
 		{
 			hikeysFreeSpaceLeft -= hikeySizeDiff;
 			dataFreeSpaceLeft -= dataSpaceDiff;
@@ -1188,7 +1181,6 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			chunkFixedKeys[j - 1] = fixedKeys;
 			fixedKeys = true;
 			chunkDataSize = 0;
-			chunkItemsCount = 0;
 			j++;
 		}
 
@@ -1222,7 +1214,6 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 	header->maxKeyLen = maxKeyLen;
 	header->dataSize = ptr - (Pointer) p;
-	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
 	header->chunksCount = chunksCount;
 
 	/*
