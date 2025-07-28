@@ -174,6 +174,8 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	double		nTuples = 0;
 	OEACallsCounters *prev_ea_counters = ea_counters;
 
+	bitmap_state->o_plan_state.plan_state = &node->ss.ps;
+
 	index = index_open(bitmap_ix_scan->indexid, AccessShareLock);
 	table = table_open(index->rd_index->indrelid, AccessShareLock);
 	descr = relation_get_descr(table);

@@ -76,7 +76,6 @@ typedef struct OBitmapHeapPath
 typedef struct OCustomScanState
 {
 	CustomScanState css;
-	bool		useEaCounters;
 	OEACallsCounters eaCounters;
 	OPlanState *o_plan_state;
 } OCustomScanState;
@@ -604,9 +603,8 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 
 	ocstate->o_plan_state->plan_state = &node->ss.ps;
-	ocstate->useEaCounters = is_explain_analyze(&node->ss.ps);
 
-	if (ocstate->useEaCounters)
+	if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 		eanalyze_counters_init(&ocstate->eaCounters, descr);
 
 	if (ocstate->o_plan_state->type == O_IndexPlan)
@@ -649,7 +647,7 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 		bitmap_state->bitmapqualplanstate =
 			ExecInitNode(bitmap_state->bitmapqualplan, estate, eflags);
 
-		if (ocstate->useEaCounters)
+		if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 		{
 			int			i;
 
@@ -678,7 +676,7 @@ o_exec_custom_scan(CustomScanState *node)
 	EPQState   *epqstate;
 	TupleTableSlot *slot = NULL;
 
-	if (ocstate->useEaCounters)
+	if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 		ea_counters = &ocstate->eaCounters;
 	else
 		ea_counters = NULL;
@@ -822,7 +820,7 @@ o_rescan_custom_scan(CustomScanState *node)
 		if (bitmap_state->scan)
 			o_free_bitmap_scan(bitmap_state->scan);
 
-		if (ocstate->useEaCounters)
+		if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 			pfree(bitmap_state->eaCounters);
 		bitmap_state->scan = NULL;
 	}
@@ -858,7 +856,7 @@ o_end_custom_scan(CustomScanState *node)
 			ExecEndNode(bitmap_state->bitmapqualplanstate);
 		if (bitmap_state->scan)
 			o_free_bitmap_scan(bitmap_state->scan);
-		if (ocstate->useEaCounters)
+		if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 			pfree(bitmap_state->eaCounters);
 		MemoryContextDelete(bitmap_state->cxt);
 		bitmap_state->cxt = NULL;
@@ -953,7 +951,7 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 						ec->es->indent++;
 						break;
 				}
-				if (ocstate->useEaCounters)
+				if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 				{
 					OIndexNumber ix_num;
 					BitmapIndexScan *bm_scan;
@@ -1107,6 +1105,6 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 			ExplainCloseGroup("Plans", "Plans", false, es);
 		}
 	}
-	if (ocstate->useEaCounters)
+	if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 		eanalyze_counters_explain(descr, &ocstate->eaCounters, es);
 }
