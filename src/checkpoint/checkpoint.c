@@ -5324,9 +5324,12 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		SeqBufDescShared *shareds[3] = {&meta_page->nextChkp[chkp_index],
 			&meta_page->tmpBuf[chkp_index],
 		&meta_page->freeBuf};
-		int			i;
+		int			i = 0;
 
-		for (i = 0; i < (is_compressed ? 2 : 3); i++)
+		if (desc->storageType == BTreeStorageTemporary)
+			i = 1;
+
+		for (; i < (is_compressed ? 2 : 3); i++)
 			init_seq_buf_pages(desc, shareds[i]);
 	}
 
