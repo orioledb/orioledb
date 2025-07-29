@@ -2191,14 +2191,29 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 	int			chkp_index;
 	bool		is_compressed = OCompressIsValid(desc->compress);
 
-	chkp_index = SEQ_BUF_SHARED_EXIST(desc->nextChkp[0].shared) ? 0 : 1;
+	Assert(desc->storageType == BTreeStorageTemporary ||
+		   desc->storageType == BTreeStoragePersistence);
 
-	/* we must do not evict BTree under checkpoint */
-	Assert(!SEQ_BUF_SHARED_EXIST(desc->nextChkp[1 - chkp_index].shared));
-	Assert(!SEQ_BUF_SHARED_EXIST(desc->tmpBuf[1 - chkp_index].shared));
-	Assert(is_compressed || SEQ_BUF_SHARED_EXIST(desc->freeBuf.shared));
-	Assert(SEQ_BUF_SHARED_EXIST(desc->nextChkp[chkp_index].shared));
-	Assert(SEQ_BUF_SHARED_EXIST(desc->tmpBuf[chkp_index].shared));
+	/* we must not evict BTree under checkpoint */
+
+	if (desc->storageType == BTreeStoragePersistence)
+	{
+		chkp_index = SEQ_BUF_SHARED_EXIST(desc->nextChkp[0].shared) ? 0 : 1;
+
+		Assert(!SEQ_BUF_SHARED_EXIST(desc->nextChkp[1 - chkp_index].shared));
+		Assert(!SEQ_BUF_SHARED_EXIST(desc->tmpBuf[1 - chkp_index].shared));
+		Assert(is_compressed || SEQ_BUF_SHARED_EXIST(desc->freeBuf.shared));
+		Assert(SEQ_BUF_SHARED_EXIST(desc->nextChkp[chkp_index].shared));
+		Assert(SEQ_BUF_SHARED_EXIST(desc->tmpBuf[chkp_index].shared));
+	}
+	else
+	{
+		chkp_index = SEQ_BUF_SHARED_EXIST(desc->tmpBuf[0].shared) ? 0 : 1;
+
+		Assert(!SEQ_BUF_SHARED_EXIST(desc->tmpBuf[1 - chkp_index].shared));
+		Assert(is_compressed || SEQ_BUF_SHARED_EXIST(desc->freeBuf.shared));
+		Assert(SEQ_BUF_SHARED_EXIST(desc->tmpBuf[chkp_index].shared));
+	}
 
 	if (is_compressed)
 	{
@@ -2213,21 +2228,32 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 		FREE_PAGE_IF_VALID(desc->ppool, desc->freeBuf.shared->pages[1]);
 	}
 
-	evicted_data->nextChkp.tag = desc->nextChkp[chkp_index].shared->tag;
-	if (notModified)
-		seq_buf_close_file(&desc->nextChkp[chkp_index]);
-	else
-		evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
-	FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[0]);
-	FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[1]);
+	if (desc->storageType == BTreeStoragePersistence)
+	{
+		evicted_data->nextChkp.tag = desc->nextChkp[chkp_index].shared->tag;
+		if (notModified)
+			seq_buf_close_file(&desc->nextChkp[chkp_index]);
+		else
+			evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
+		FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[0]);
+		FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[1]);
 
-	evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
-	if (notModified)
-		seq_buf_close_file(&desc->nextChkp[chkp_index]);
+		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
+		if (notModified)
+			seq_buf_close_file(&desc->nextChkp[chkp_index]);
+		else
+			evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
+		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
+	}
 	else
-		evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
-	FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
-	FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
+	{
+		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
+		if (!notModified)
+			evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
+		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
+	}
 }
 
 /*

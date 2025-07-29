@@ -508,3 +508,86 @@ class EvictionTest(BaseTest):
 		self.assertTrue(
 		    node.execute("SELECT orioledb_tbl_check('o_evicted'::regclass)")[0]
 		    [0])
+
+	def test_evict_temp_table(self):
+		INDEX_NOT_LOADED = "Index o_evicted_pkey: not loaded"
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n"
+		    "checkpoint_timeout = 86400\n"
+		    "max_wal_size = 1GB\n"
+		    "orioledb.debug_disable_bgwriter = true\n")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test (
+				key SERIAL NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (key)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_test_ix2 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix3 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix4 ON o_test (key);
+		""")
+		con1 = node.connect()
+		con1.execute("""
+			CREATE TEMP TABLE o_evicted (
+				key SERIAL NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (key)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_evicted_ix2 ON o_evicted (key);
+		""")
+		con1.execute(
+		    "INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1001, 1500, 1) val;\n"
+		)
+
+		self.assertEqual(
+		    con1.execute("SELECT count(*) FROM o_evicted;")[0][0], 500)
+
+		n = 250000
+		step = 1000
+		for i in range(1, n, step):
+			con1.execute(
+			    "INSERT INTO o_test (val)\n"
+			    " (SELECT val FROM generate_series(%d, %d, 1) val);\n" %
+			    (i, i + step - 1))
+			con1.commit()
+		con1.execute(
+		    "SELECT COUNT(*) FROM (SELECT * FROM o_test ORDER BY key) x;")
+		con1.execute(
+		    "SELECT COUNT(*) FROM (SELECT * FROM o_test ORDER BY key) x;")
+
+		try:
+			self.assertEqual(
+			    con1.execute(
+			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+			    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+
+			self.assertEqual(
+			    con1.execute("SELECT count(*) FROM o_evicted;")[0][0], 500)
+			con1.commit()
+
+			self.assertNotEqual(
+			    con1.execute(
+			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+			    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+
+			con1.execute(
+			    "INSERT INTO o_test (val)\n"
+			    " (SELECT val FROM generate_series(%d, %d, 1) val);\n" %
+			    (1, n))
+			con1.commit()
+			con1.execute(
+			    "SELECT COUNT(*) FROM (SELECT * FROM o_test ORDER BY key) x;")
+			con1.execute(
+			    "SELECT COUNT(*) FROM (SELECT * FROM o_test ORDER BY key) x;")
+
+			self.assertEqual(
+			    con1.execute(
+			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+			    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+		finally:
+			con1.close()
