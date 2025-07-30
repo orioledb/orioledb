@@ -948,6 +948,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_EnableReplicaRule:
 						case AT_DisableRule:
 						case AT_SetTableSpace:
+						case AT_SetStorage:
 							break;
 						default:
 							ereport(ERROR,
@@ -3146,7 +3147,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					OSnapshot	oSnapshot;
 					OXid		oxid;
 					int			ix_num;
-					bool		changed;
+					bool		changed_ty;
 
 					old_field = o_table->fields[subId - 1];
 					CommandCounterIncrement();
@@ -3155,10 +3156,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					orioledb_attr_to_field(field, attr);
 
 					/* TODO: Probably use CheckIndexCompatible here */
-					changed = old_field.typid != field->typid ||
+					changed_ty = old_field.typid != field->typid ||
 						old_field.collation != field->collation;
 
-					if (changed)
+					if (changed_ty)
 					{
 						if (ATColumnChangeRequiresRewrite(&old_field, field,
 														  subId))
@@ -3198,7 +3199,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 															   index->oids,
 															   O_INVALIDATE_OIDS_ON_ABORT);
 								}
-								if (changed && has_field)
+								if (changed_ty && has_field)
 								{
 									String	   *ix_name;
 
