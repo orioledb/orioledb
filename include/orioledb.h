@@ -44,18 +44,31 @@
 #endif
 
 #define ORIOLEDB_VERSION "OrioleDB public beta 12"
+/*
+ * Clusters with different ORIOLEDB_BINARY_VERSION are completely incompatible.
+ * Within the same ORIOLEDB_BINARY_VERSION clusters either fully compatible
+ * or could be converted on the fly. See comment for ORIOLEDB_DATA_VERSION,
+ * ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION below.
+ */
 #define ORIOLEDB_BINARY_VERSION 6
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
-/* A sub-version in the same ORIOLEDB_BINARY_VERSION. Same
- * ORIOLEDB_DATA_VERSION clusters are compatible without conversion.
+/*
+ * Sub-versions in the same ORIOLEDB_BINARY_VERSION.
+ *
+ * Same ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and
+ * ORIOLEDB_COMPRESS_VERSION clusters are compatible without conversion.
  * For different ORIOLEDB_DATA_VERSION conversion is done at the
  * reading/deserialization of system tables structures without using
  * any conversion tools.
+ * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
+ * conversion is done at first reading of disk page on the fly.
  */
-#define ORIOLEDB_DATA_VERSION	2
+#define ORIOLEDB_DATA_VERSION	2	/* Version of system catalog */
+#define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
+#define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for compressed pages) */
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
@@ -279,6 +292,14 @@ typedef struct
 	uint32		pageChangeCount;
 } OrioleDBPageHeader;
 
+typedef struct
+{
+	OCompressHeader	compress_header; /* Reserved for compressed pages. Empty for non-compressed */
+	uint16			page_version;
+	uint16			reserved;
+} OrioleDBOndiskPageHeader;
+
+
 #define O_PAGE_HEADER_SIZE		sizeof(OrioleDBPageHeader)
 #define O_PAGE_HEADER(page)	((OrioleDBPageHeader *)(page))
 
@@ -370,7 +391,7 @@ typedef struct OCompressHeader
 {
 	uint32		chkpNum;
 	uint16		page_size;
-	uint16		reserved;		/* for possible future use */
+	uint16		compress_version;
 } OCompressHeader;
 typedef struct ORelOptions
 {
