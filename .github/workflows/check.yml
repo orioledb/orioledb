@@ -5,16 +5,59 @@ on:
   pull_request:
 
 jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        shell: python # run script directly using the Python interpreter
+        run: |
+          import os, json, itertools
+
+          # Get event type and branch name
+          event = os.environ["GITHUB_EVENT_NAME"]
+          ref   = os.environ.get("GITHUB_REF_NAME", "")
+
+          # Full matrix: used for main branch or pull requests
+          full = dict(
+              cpu        = ["amd64", "arm64"],
+              pg_version = [16, 17],
+              compiler   = ["clang", "gcc"],
+              check_type = [
+                  "normal", "debug", "sanitize", "check_page",
+                  "valgrind_1", "valgrind_2", "pg_tests",
+              ],
+          )
+
+          # Reduced matrix: used for all other push events
+          combos = [
+              ("amd64", 16, "gcc"),
+              ("amd64", 17, "clang"),
+              ("arm64", 16, "clang"),
+              ("arm64", 17, "gcc"),
+          ]
+          reduced = {
+              "include": [
+                  {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
+                  for (c, pg, comp), ct in itertools.product(combos, full["check_type"])
+              ]
+          }
+
+          matrix = full if event == "pull_request" or ref == "main" else reduced
+
+          # Export as job output
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+
   check:
-    runs-on:
-      - ubuntu-24.04
+    needs: matrix
     strategy:
       fail-fast: false
-      matrix:
-        pg_version: [16, 17]
-        compiler: [clang, gcc]
-        check_type:
-          [normal, debug, sanitize, check_page, valgrind_1, valgrind_2, pg_tests]
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+
+    # Select runner based on CPU architecture
+    runs-on: ${{ matrix.cpu == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
@@ -57,7 +100,7 @@ jobs:
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
           path: ./orioledb/coverage.info
           retention-days: 1
 
@@ -86,4 +129,4 @@ jobs:
       - name: remove artifacts
         uses: geekyeggo/delete-artifact@v5
         with:
-            name: '*coverage.info'
+          name: "*coverage.info"
