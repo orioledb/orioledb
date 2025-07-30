@@ -565,28 +565,36 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	if (index_descr->leafTupdesc->natts != rel->rd_att->natts)
+	if (index_descr->duplicates != NIL)
 	{
-		/* Remove duplicates like we do in orioledb tables */
-		int			skipped = 0;
+		ListCell   *lc = NULL;
+		List	   *duplicate = NIL;
+		int			cur_attr;
+		int			i;
 
-		for (int copy_from = 0; copy_from < rel->rd_att->natts; copy_from++)
+		/* Remove duplicate column values to store in our index */
+
+		if (index_descr->duplicates != NIL)
+			lc = list_head(index_descr->duplicates);
+		if (lc != NULL)
+			duplicate = (List *) lfirst(lc);
+
+		cur_attr = 0;
+		for (i = 0; i < rel->rd_att->natts; i++)
 		{
-			Form_pg_attribute orig_attr = &rel->rd_att->attrs[copy_from];
-			Form_pg_attribute idx_attr;
-
-			if (copy_from - skipped >= index_descr->leafTupdesc->natts)
-				break;
-
-			idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
-
-			if (strncmp(orig_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+			if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
 			{
-				if (skipped > 0)
-					values[copy_from - skipped] = values[copy_from];
+				lc = lnext(index_descr->duplicates, lc);
+				if (lc != NULL)
+					duplicate = (List *) lfirst(lc);
+				else
+					duplicate = NIL;
 			}
 			else
-				skipped++;
+			{
+				values[cur_attr] = values[i];
+				cur_attr++;
+			}
 		}
 	}
 	append_rowid_values(index_descr,
@@ -1510,6 +1518,42 @@ fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 }
 
+/* Search all duplicates with same original attrnum */
+static inline void
+search_next_dup_range(List *duplicates, int dup_range_lc_id, int *dup_range_start, int *dup_range_end)
+{
+	List	   *duplicate = NIL;
+	ListCell   *dup_range_lc = NULL;
+	int			dup_range_src_attnum = -1;
+
+	*dup_range_start = -1;
+	*dup_range_end = -1;
+	do
+	{
+		if (dup_range_lc_id >= 0)
+			dup_range_lc = list_nth_cell(duplicates, dup_range_lc_id);
+		else
+			dup_range_lc = NULL;
+
+		if (dup_range_lc != NULL)
+		{
+			duplicate = (List *) lfirst(dup_range_lc);
+			if (*dup_range_end < 0)
+			{
+				*dup_range_end = dup_range_lc_id;
+				dup_range_src_attnum = linitial_int(duplicate);
+			}
+			else if (linitial_int(duplicate) != dup_range_src_attnum)
+			{
+				*dup_range_start = dup_range_lc_id + 1;
+			}
+		} else {
+			*dup_range_start = dup_range_lc_id + 1;
+		}
+		dup_range_lc_id--;
+	} while (*dup_range_start < 0);
+}
+
 /* TODO: Rewrite */
 static void
 fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
@@ -1533,27 +1577,63 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	 * moving values from duplicate field places that will be filled during
 	 * index_form_tuple
 	 */
-	if (index_descr->itupdesc->natts > index_descr->leafTupdesc->natts)
+	if (index_descr->duplicates != NIL)
 	{
-		int			skipped = index_descr->itupdesc->natts - index_descr->leafTupdesc->natts;
+		int			lc_id = 0;
+		ListCell   *lc = NULL;
+		List	   *duplicate = NIL;
+		int			i;
+		int			cur_attr;
+		int			ctid_off = index_descr->primaryIsCtid ? 1 : 0;
+		int			dup_range_start = -1;
+		int			dup_range_end = -1;
+		int			dup_range_diff = -1;
 
-		for (int copy_to = index_descr->itupdesc->natts - 1; copy_to >= 0; copy_to--)
+		lc_id = list_length(index_descr->duplicates) - 1;
+
+		search_next_dup_range(index_descr->duplicates, lc_id, &dup_range_start, &dup_range_end);
+		lc = list_nth_cell(index_descr->duplicates, dup_range_end);
+		Assert(lc != NULL);
+		duplicate = (List *) lfirst(lc);
+		dup_range_diff = dup_range_end - dup_range_start + 1;
+
+		lc = list_nth_cell(index_descr->duplicates, lc_id);
+		Assert(lc != NULL);
+		duplicate = (List *) lfirst(lc);
+
+		cur_attr = index_descr->leafTupdesc->natts - 1 - ctid_off;
+		for (i = index_descr->itupdesc->natts - 1; i >= 0; i--)
 		{
-			Form_pg_attribute idx_attr = &index_descr->itupdesc->attrs[copy_to];
-			Form_pg_attribute slot_attr = &index_descr->leafTupdesc->attrs[copy_to - skipped];
-
-			if (strncmp(slot_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+			if (duplicate != NIL &&
+				i >= linitial_int(duplicate) + dup_range_start &&
+				i <= linitial_int(duplicate) + dup_range_start - 1 + dup_range_diff)
 			{
-				if (skipped == 0)
-					break;
-				slot->tts_values[copy_to] = slot->tts_values[copy_to - skipped];
-				slot->tts_isnull[copy_to] = slot->tts_isnull[copy_to - skipped];
+				slot->tts_values[i] = 0;
+				slot->tts_isnull[i] = true;
 			}
 			else
 			{
-				slot->tts_values[copy_to] = 0;
-				slot->tts_isnull[copy_to] = true;
-				skipped--;
+				if (duplicate != NIL && i == linitial_int(duplicate) + dup_range_start - 1)
+				{
+					lc_id = dup_range_start - 1;
+
+					if (lc_id >= 0)
+					{
+						search_next_dup_range(index_descr->duplicates, lc_id, &dup_range_start, &dup_range_end);
+						lc = list_nth_cell(index_descr->duplicates, dup_range_end);
+						Assert(lc != NULL);
+						duplicate = (List *) lfirst(lc);
+						dup_range_diff = dup_range_end - dup_range_start + 1;
+					}
+					else
+					{
+						lc = NULL;
+						duplicate = NIL;
+					}
+				}
+				slot->tts_values[i] = slot->tts_values[cur_attr];
+				slot->tts_isnull[i] = slot->tts_isnull[cur_attr];
+				cur_attr--;
 			}
 		}
 	}

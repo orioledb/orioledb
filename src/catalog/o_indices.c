@@ -836,7 +836,7 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 	cur_attr = 0;
 	for (i = 0; i < nfields; i++)
 	{
-		if (duplicate != NIL && linitial_int(duplicate) == i)
+		if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
 		{
 			int			src_attnum = lsecond_int(duplicate);
 
@@ -1031,6 +1031,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	descr->predicate = list_copy_deep(oIndex->predicate);
+	descr->duplicates = list_copy_deep(oIndex->duplicates);
 	if (descr->predicate)
 		descr->predicate_str = pstrdup(oIndex->predicate_str);
 	descr->expressions = list_copy_deep(oIndex->expressions);
