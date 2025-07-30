@@ -44,18 +44,32 @@
 #endif
 
 #define ORIOLEDB_VERSION "OrioleDB public beta 12"
-#define ORIOLEDB_BINARY_VERSION 6
+/*
+ * Clusters with different ORIOLEDB_BINARY_VERSION are completely incompatible.
+ * Within the same ORIOLEDB_BINARY_VERSION clusters either fully compatible
+ * or could be converted on the fly. See comment for ORIOLEDB_DATA_VERSION,
+ * ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION below.
+ */
+#define ORIOLEDB_BINARY_VERSION 7
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
 #define ORIOLEDB_XLOG_CONTAINER (0x00)
-/* A sub-version in the same ORIOLEDB_BINARY_VERSION. Same
- * ORIOLEDB_DATA_VERSION clusters are compatible without conversion.
+/*
+ * Sub-versions in the same ORIOLEDB_BINARY_VERSION.
+ *
+ * Same ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and
+ * ORIOLEDB_COMPRESS_VERSION clusters are compatible without conversion.
  * For different ORIOLEDB_DATA_VERSION conversion is done at the
  * reading/deserialization of system tables structures without using
  * any conversion tools.
+ * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
+ * conversion is done at first reading of disk page on the fly.
  */
-#define ORIOLEDB_DATA_VERSION	2
+#define ORIOLEDB_DATA_VERSION	2	/* Version of system catalog */
+#define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
+#define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for
+									 * compressed pages) */
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
@@ -243,34 +257,12 @@ typedef struct
 				off:48;
 } FileExtent;
 
-#define S3_OFFSET_MASK		(0x00FFFFFFFF)
-#define S3_CHKP_NUM_MASK	(0xFF00000000)
-#define S3_CHKP_NUM_SHIFT	(32)
-#define S3_GET_CHKP_NUM(offset) (((offset) & S3_CHKP_NUM_MASK) >> S3_CHKP_NUM_SHIFT)
-
-#define InvalidFileExtentLen (0)
-#define InvalidFileExtentOff (UINT64CONST(0xFFFFFFFFFFFF))
-#define FileExtentLenIsValid(len) ((len) != InvalidFileExtentLen)
-#define FileExtentOffIsValid(off) ((off) < InvalidFileExtentOff)
-#define FileExtentIsValid(extent) (FileExtentLenIsValid((extent).len) && FileExtentOffIsValid((extent).off))
-#define CompressedSize(page_size) ((page_size) == ORIOLEDB_BLCKSZ \
-										? ORIOLEDB_BLCKSZ \
-										: ((page_size) + sizeof(OCompressHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
-#define FileExtentLen(page_size) (CompressedSize(page_size) / ORIOLEDB_COMP_BLCKSZ)
-
-typedef struct
-{
-	ORelOids	oids;
-	int			ionum;
-	FileExtent	fileExtent;
-	uint32		flags:4,
-				type:28;
-	proclist_head waitersList;
-} OrioleDBPageDesc;
-
 /*
- * Should be used as beginning of header in all orioledb shared pages:
+ * Should be used as a beginning of header in all orioledb shared in-memory pages:
  * BTree pages, Meta-pages, SeqBuf pages, etc.
+ *
+ * Isn't written to disk pages. See OrioleDBOndiskPageHeader. Both structs are
+ * of equal size.
  */
 typedef struct
 {
@@ -278,6 +270,35 @@ typedef struct
 	pg_atomic_uint32 usageCount;
 	uint32		pageChangeCount;
 } OrioleDBPageHeader;
+
+/*
+ * Should be used as a beginning of header in all orioledb disk pages. At reading
+ * pages from disk all these contents are overwritten by OrioleDBPageHeader. Necessary
+ * information related to compression is extracted before this overwrite.
+ */
+typedef struct
+{
+	/*
+	 * We save number of chunks inside downlinks instead of size of compressed
+	 * data because it helps us to avoid too often setup dirty flag for parent
+	 * if page is changed.
+	 *
+	 * The header of compressed data contains compressed data length.
+	 */
+	uint32		compress_chkpNum;	/* Reserved for compressed pages. Empty
+									 * for non-compressed */
+	uint16		compress_page_size; /* Reserved for compressed pages. Empty
+									 * for non-compressed */
+	uint8		compress_version;	/* Reserved for compressed pages. Empty
+									 * for non-compressed */
+
+	/*
+	 * Version of binary page format for possible conversion. For compressed
+	 * pages it should be used for conversion of uncompressed images
+	 */
+	uint8		page_version;
+	uint32		reserved;
+} OrioleDBOndiskPageHeader;
 
 #define O_PAGE_HEADER_SIZE		sizeof(OrioleDBPageHeader)
 #define O_PAGE_HEADER(page)	((OrioleDBPageHeader *)(page))
@@ -290,6 +311,31 @@ typedef struct
 	else \
 		O_PAGE_HEADER(page)->pageChangeCount++;
 #define O_PAGE_GET_CHANGE_COUNT(p) (O_PAGE_HEADER(p)->pageChangeCount)
+
+#define S3_OFFSET_MASK		(0x00FFFFFFFF)
+#define S3_CHKP_NUM_MASK	(0xFF00000000)
+#define S3_CHKP_NUM_SHIFT	(32)
+#define S3_GET_CHKP_NUM(offset) (((offset) & S3_CHKP_NUM_MASK) >> S3_CHKP_NUM_SHIFT)
+
+#define InvalidFileExtentLen (0)
+#define InvalidFileExtentOff (UINT64CONST(0xFFFFFFFFFFFF))
+#define FileExtentLenIsValid(len) ((len) != InvalidFileExtentLen)
+#define FileExtentOffIsValid(off) ((off) < InvalidFileExtentOff)
+#define FileExtentIsValid(extent) (FileExtentLenIsValid((extent).len) && FileExtentOffIsValid((extent).off))
+#define CompressedSize(page_size) ((page_size) == ORIOLEDB_BLCKSZ \
+										? ORIOLEDB_BLCKSZ \
+										: ((page_size) + sizeof(OrioleDBOndiskPageHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
+#define FileExtentLen(page_size) (CompressedSize(page_size) / ORIOLEDB_COMP_BLCKSZ)
+
+typedef struct
+{
+	ORelOids	oids;
+	int			ionum;
+	FileExtent	fileExtent;
+	uint32		flags:4,
+				type:28;
+	proclist_head waitersList;
+} OrioleDBPageDesc;
 
 /* orioledb.c */
 extern Size orioledb_buffers_size;
@@ -360,19 +406,6 @@ typedef int OCompress;
 #define InvalidOCompress (-1)
 #define OCompressIsValid(compress) ((compress) != InvalidOCompress)
 
-/*
- * We save number of chunks inside downlinks instead of size of compressed data
- * because it helps us to avoid too often setup dirty flag for parent if page
- * is changed.
- *
- * The header of compressed data contains compressed data length.
- */
-typedef struct OCompressHeader
-{
-	uint32		chkpNum;
-	uint16		page_size;
-	uint16		reserved;		/* for possible future use */
-} OCompressHeader;
 typedef struct ORelOptions
 {
 	StdRdOptions std_options;
