@@ -1158,6 +1158,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	uint32		chkpNum = 0;
 	uint16		len = DOWNLINK_GET_DISK_LEN(downlink);
 	bool		err = false;
+	OrioleDBOndiskPageHeader header;
 
 	Assert(FileExtentOffIsValid(offset));
 	Assert(FileExtentLenIsValid(len));
@@ -1182,6 +1183,18 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		read_size = ORIOLEDB_BLCKSZ;
 
 		err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
+		if (!err)
+		{
+			memcpy(&header, img, sizeof(OrioleDBOndiskPageHeader));
+			if(header.page_version != ORIOLEDB_PAGE_VERSION)
+			{
+				/* Now we have only one page version (1). When we have different versions we'll need to bump
+				 * ORIOLEDB_PAGE_VERSION and add on-the-fly conversion function from all previous
+				 * page versions here
+				 */
+				elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", (header->page_version, ORIOLEDB_PAGE_VERSION);
+			}
+		}
 	}
 	else
 	{
@@ -1206,10 +1219,27 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 
 			if (!err)
 			{
-				OCompressHeader header;
+				memcpy(&header, buf, sizeof(OrioleDBOndiskPageHeader));
 
-				memcpy(&header, buf, sizeof(OCompressHeader));
-				o_decompress_page(buf + sizeof(OCompressHeader), header.page_size, img);
+				if(header.page_version != ORIOLEDB_PAGE_VERSION)
+				{
+					/* Now we have only one page version (1). When we have different versions we'll need to bump
+					 * ORIOLEDB_PAGE_VERSION and add on-the-fly conversion function from all previous
+					 * page versions after decompression.
+					 */
+					elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", (header->page_version, ORIOLEDB_PAGE_VERSION);
+				}
+
+				if(header.compress.compress_version != ORIOLEDB_COMPRESS_VERSION)
+				{
+					/* Now we have only one compress version (1). When we have different versions we'll need to bump
+					 * ORIOLEDB_COMPRESS_VERSION and add on-the-fly conversion function from all previous
+					 * compress versions before/during decompression.
+					 */
+					elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", (header->page_version, ORIOLEDB_PAGE_VERSION);
+				}
+
+				o_decompress_page(buf + sizeof(OrioleDBOndiskPageHeader), header.compress_header.page_size, img);
 			}
 		}
 		else
@@ -1217,7 +1247,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			OCompressHeader header;
 
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
-			read_size = sizeof(OCompressHeader);
+			read_size = sizeof(OrioleDBOndiskPageHeader);
 
 			/* details about writed image parts are in write_page_to_disk */
 			err = btree_smgr_read(desc, (Pointer) &header, chkpNum, read_size, byte_offset) != read_size;
@@ -1232,6 +1262,17 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 				read_size = ORIOLEDB_BLCKSZ - skipped;
 				err = btree_smgr_read(desc, img + skipped, chkpNum, read_size, byte_offset) != read_size;
 
+				if (!err)
+				{
+					if(header.page_version != ORIOLEDB_PAGE_VERSION)
+					{
+						/* Now we have only one page version (1). When we have different versions we'll need to bump
+						 * ORIOLEDB_PAGE_VERSION and add on-the-fly conversion function from all previous
+						 * page versions here
+						 */
+						elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", (header->page_version, ORIOLEDB_PAGE_VERSION);
+					}
+				}
 				page_header = (BTreePageHeader *) img;
 				page_header->checkpointNum = header.chkpNum;
 			}
