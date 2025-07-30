@@ -256,30 +256,24 @@ typedef struct
 				off:48;
 } FileExtent;
 
-#define S3_OFFSET_MASK		(0x00FFFFFFFF)
-#define S3_CHKP_NUM_MASK	(0xFF00000000)
-#define S3_CHKP_NUM_SHIFT	(32)
-#define S3_GET_CHKP_NUM(offset) (((offset) & S3_CHKP_NUM_MASK) >> S3_CHKP_NUM_SHIFT)
+typedef int OCompress;
+#define O_COMPRESS_DEFAULT (10)
+#define InvalidOCompress (-1)
+#define OCompressIsValid(compress) ((compress) != InvalidOCompress)
 
-#define InvalidFileExtentLen (0)
-#define InvalidFileExtentOff (UINT64CONST(0xFFFFFFFFFFFF))
-#define FileExtentLenIsValid(len) ((len) != InvalidFileExtentLen)
-#define FileExtentOffIsValid(off) ((off) < InvalidFileExtentOff)
-#define FileExtentIsValid(extent) (FileExtentLenIsValid((extent).len) && FileExtentOffIsValid((extent).off))
-#define CompressedSize(page_size) ((page_size) == ORIOLEDB_BLCKSZ \
-										? ORIOLEDB_BLCKSZ \
-										: ((page_size) + sizeof(OrioleDBOndiskPageHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
-#define FileExtentLen(page_size) (CompressedSize(page_size) / ORIOLEDB_COMP_BLCKSZ)
-
-typedef struct
+/*
+ * We save number of chunks inside downlinks instead of size of compressed data
+ * because it helps us to avoid too often setup dirty flag for parent if page
+ * is changed.
+ *
+ * The header of compressed data contains compressed data length.
+ */
+typedef struct OCompressHeader
 {
-	ORelOids	oids;
-	int			ionum;
-	FileExtent	fileExtent;
-	uint32		flags:4,
-				type:28;
-	proclist_head waitersList;
-} OrioleDBPageDesc;
+	uint32		chkpNum;
+	uint16		page_size;
+	uint16		compress_version;
+} OCompressHeader;
 
 /*
  * Should be used as beginning of header in all orioledb shared pages:
@@ -311,6 +305,31 @@ typedef struct
 	else \
 		O_PAGE_HEADER(page)->pageChangeCount++;
 #define O_PAGE_GET_CHANGE_COUNT(p) (O_PAGE_HEADER(p)->pageChangeCount)
+
+#define S3_OFFSET_MASK		(0x00FFFFFFFF)
+#define S3_CHKP_NUM_MASK	(0xFF00000000)
+#define S3_CHKP_NUM_SHIFT	(32)
+#define S3_GET_CHKP_NUM(offset) (((offset) & S3_CHKP_NUM_MASK) >> S3_CHKP_NUM_SHIFT)
+
+#define InvalidFileExtentLen (0)
+#define InvalidFileExtentOff (UINT64CONST(0xFFFFFFFFFFFF))
+#define FileExtentLenIsValid(len) ((len) != InvalidFileExtentLen)
+#define FileExtentOffIsValid(off) ((off) < InvalidFileExtentOff)
+#define FileExtentIsValid(extent) (FileExtentLenIsValid((extent).len) && FileExtentOffIsValid((extent).off))
+#define CompressedSize(page_size) ((page_size) == ORIOLEDB_BLCKSZ \
+										? ORIOLEDB_BLCKSZ \
+										: ((page_size) + sizeof(OrioleDBOndiskPageHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
+#define FileExtentLen(page_size) (CompressedSize(page_size) / ORIOLEDB_COMP_BLCKSZ)
+
+typedef struct
+{
+	ORelOids	oids;
+	int			ionum;
+	FileExtent	fileExtent;
+	uint32		flags:4,
+				type:28;
+	proclist_head waitersList;
+} OrioleDBPageDesc;
 
 /* orioledb.c */
 extern Size orioledb_buffers_size;
@@ -375,24 +394,6 @@ extern int	rewind_max_transactions;
 
 extern void orioledb_check_shmem(void);
 
-typedef int OCompress;
-#define O_COMPRESS_DEFAULT (10)
-#define InvalidOCompress (-1)
-#define OCompressIsValid(compress) ((compress) != InvalidOCompress)
-
-/*
- * We save number of chunks inside downlinks instead of size of compressed data
- * because it helps us to avoid too often setup dirty flag for parent if page
- * is changed.
- *
- * The header of compressed data contains compressed data length.
- */
-typedef struct OCompressHeader
-{
-	uint32		chkpNum;
-	uint16		page_size;
-	uint16		compress_version;
-} OCompressHeader;
 typedef struct ORelOptions
 {
 	StdRdOptions std_options;
