@@ -174,6 +174,8 @@ struct OIndexDescr
 	TupleTableSlot *index_slot;
 	TupleTableSlot *old_leaf_slot;
 	TupleTableSlot *new_leaf_slot;
+	/* Copy of duplicates from OIndex */
+	List	   *duplicates;
 };
 
 /*
