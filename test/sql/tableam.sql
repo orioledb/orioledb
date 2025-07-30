@@ -919,6 +919,31 @@ DELETE FROM o_test_cursor_snapshot;
 FETCH ALL FROM c;
 COMMIT;
 
+CREATE OR REPLACE FUNCTION exhaust_logical_xids(
+	p_reps int
+) RETURNS void LANGUAGE plpgsql STRICT AS
+$$
+DECLARE
+	i int;
+BEGIN
+	FOR i IN 1..p_reps LOOP
+		BEGIN
+			INSERT INTO heap_test VALUES (0);
+		EXCEPTION
+			WHEN unique_violation THEN  -- expected PK clash
+				NULL;  -- continue silently
+		END;
+	END LOOP;
+END;
+$$;
+
+-- Create heap test table with PK:
+CREATE TABLE heap_test(id int PRIMARY KEY, value int) using heap;
+INSERT INTO heap_test VALUES (0, 0);
+
+-- Run test function:
+SELECT exhaust_logical_xids(40000);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

@@ -38,6 +38,7 @@
 #include "transam/undo.h"
 #include "tuple/toast.h"
 #include "utils/compress.h"
+#include "utils/guc.h"
 #include "utils/memdebug.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
@@ -143,6 +144,7 @@ char	   *s3_cainfo = NULL;
 bool		enable_rewind = false;
 int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
+int			logical_xids_shmem_size_guc = 64;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -485,6 +487,19 @@ _PG_init(void)
 							128,
 							PGC_POSTMASTER,
 							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("orioledb.logical_xids_shmem",
+							"Sets the number of recovery index build workers.",
+							NULL,
+							&logical_xids_shmem_size_guc,
+							64,
+							1,
+							1024,
+							PGC_POSTMASTER,
+							GUC_UNIT_BLOCKS,
 							NULL,
 							NULL,
 							NULL);

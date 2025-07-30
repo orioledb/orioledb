@@ -4723,6 +4723,33 @@ FETCH ALL FROM c;
 (3 rows)
 
 COMMIT;
+CREATE OR REPLACE FUNCTION exhaust_logical_xids(
+	p_reps int
+) RETURNS void LANGUAGE plpgsql STRICT AS
+$$
+DECLARE
+	i int;
+BEGIN
+	FOR i IN 1..p_reps LOOP
+		BEGIN
+			INSERT INTO heap_test VALUES (0);
+		EXCEPTION
+			WHEN unique_violation THEN  -- expected PK clash
+				NULL;  -- continue silently
+		END;
+	END LOOP;
+END;
+$$;
+-- Create heap test table with PK:
+CREATE TABLE heap_test(id int PRIMARY KEY, value int) using heap;
+INSERT INTO heap_test VALUES (0, 0);
+-- Run test function:
+SELECT exhaust_logical_xids(40000);
+ exhaust_logical_xids 
+----------------------
+ 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to table o_tableam6
@@ -4742,11 +4769,13 @@ drop cascades to table o_test_cursor_snapshot
 drop cascades to view db_o_tables
 drop cascades to view db_o_indices
 DROP SCHEMA tableam CASCADE;
-NOTICE:  drop cascades to 6 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to function plpgsql_func_test(bigint)
 drop cascades to function boolfunc_test(bigint)
 drop cascades to function smart_explain(text)
 drop cascades to function query_to_text(text)
 drop cascades to function pseudo_random(bigint,bigint)
 drop cascades to sequence o_test_j_seq
+drop cascades to function exhaust_logical_xids(integer)
+drop cascades to table heap_test
 RESET search_path;

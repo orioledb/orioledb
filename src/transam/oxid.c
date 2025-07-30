@@ -17,6 +17,7 @@
 
 #include "recovery/recovery.h"
 #include "transam/oxid.h"
+#include "utils/dsa.h"
 #include "utils/o_buffers.h"
 
 #include "access/transam.h"
@@ -97,7 +98,8 @@ oxid_shmem_needs(void)
 	size = add_size(size, mul_size(xid_circular_buffer_size,
 								   sizeof(OXidMapItem)));
 	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
-	size = add_size(size, mul_size(max_procs, sizeof(pg_atomic_uint32)));
+	size = add_size(size, mul_size(logical_xids_shmem_size_guc,
+								   ORIOLEDB_BLCKSZ));
 
 	return size;
 }
@@ -222,7 +224,7 @@ oxid_init_shmem(Pointer ptr, bool found)
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
 						 xid_meta->xidMapTrancheId);
 
-		for (i = 0; i < max_procs; i++)
+		for (i = 0; i < logical_xids_shmem_size_guc * (BLCKSZ / sizeof(pg_atomic_uint32)); i++)
 			pg_atomic_init_u32(&logicalXidsShmemMap[i], 0);
 
 		/* Undo positions are initialized in checkpoint_shmem_init() */
@@ -233,15 +235,18 @@ oxid_init_shmem(Pointer ptr, bool found)
 	init_lock_hashes();
 }
 
+#define	MAX_N_TRIES (16)
+
 static TransactionId
 acquire_logical_xid(void)
 {
-	int			i = MYPROCNUMBER,
+	TransactionId result,
+				sub;
+	int			itemsCount = logical_xids_shmem_size_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
+	uint32		divider = itemsCount * 32;
+	int			i = MYPROCNUMBER % itemsCount,
 				mynum = 0;
 	int			nloops = 0;
-	TransactionId result;
-	uint32		divider = max_procs * 32;
-	uint32		sub;
 
 	Assert(i >= 0 && i < max_procs);
 
@@ -256,11 +261,11 @@ acquire_logical_xid(void)
 		if (bit == 0)
 		{
 			i++;
-			if (i >= max_procs)
+			if (i >= itemsCount)
 			{
 				i = 0;
 				nloops++;
-				if (nloops > 16)
+				if (nloops > MAX_N_TRIES)
 					elog(ERROR, "not enough logical xids");
 			}
 			continue;
@@ -289,7 +294,7 @@ acquire_logical_xid(void)
 	}
 	else
 	{
-		result = MaxTransactionId - MaxTransactionId % (max_procs * 32);
+		result = MaxTransactionId - MaxTransactionId % divider;
 		result -= (divider - mynum);
 	}
 
@@ -301,8 +306,8 @@ acquire_logical_xid(void)
 static void
 release_logical_xid(TransactionId xid)
 {
-	uint32		divider = max_procs * 32;
-	uint32		mynum = xid % divider;
+	uint32		itemsCount = logical_xids_shmem_size_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
+	uint32		mynum = xid % (itemsCount * 32);
 	uint32		value PG_USED_FOR_ASSERTS_ONLY;
 
 	Assert(TransactionIdIsNormal(xid));

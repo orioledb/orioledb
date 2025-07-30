@@ -232,6 +232,14 @@ Maximum number of rewind transaction items that are stored for a rewind. Older r
 
 Number of OrioleDB in-memory rewind buffers in blocks. Each block can acommodate 68 rewind transaction items. If you have enough memory set it near a value `orioledb.rewind_max_transactions` / 68 to avoid writing rewind info to disk.
 
+### `orioledb.logical_xids_shmem_size`
+
+|             |       |
+| ----------- | ----- |
+| **Default** | 512KB |
+
+The amount of shared memory for logical transaction IDs to be assigned to running subtransactions.  Multiplication by 8 results in the maximum number of running subtransactions (default is about 4 million).
+
 ## Debugging options
 
 ### `orioledb.debug_disable_pools_limit`
