@@ -1,0 +1,19 @@
+Parsed test spec with 2 sessions
+
+starting permutation: begin_s1 begin_s2 update1_s1 update_s2 commit_s2 update2_s1 commit_s1
+step begin_s1: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step begin_s2: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step update1_s1: UPDATE o_test_2 SET val_2 = 'a2', val_3 = 1 WHERE val_1 = 1;
+step update_s2: UPDATE o_test_1 SET val_3 = 'b' WHERE val_1 = 1;
+step commit_s2: COMMIT;
+step update2_s1: UPDATE o_test_2 SET val_2 = 'a3', val_3 = 1 WHERE val_1 = 1;
+step commit_s1: COMMIT;
+
+starting permutation: begin_s1 update1_s1 begin_s2 update_s2 commit_s2 update2_s1 commit_s1
+step begin_s1: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step update1_s1: UPDATE o_test_2 SET val_2 = 'a2', val_3 = 1 WHERE val_1 = 1;
+step begin_s2: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step update_s2: UPDATE o_test_1 SET val_3 = 'b' WHERE val_1 = 1;
+step commit_s2: COMMIT;
+step update2_s1: UPDATE o_test_2 SET val_2 = 'a3', val_3 = 1 WHERE val_1 = 1;
+step commit_s1: COMMIT;

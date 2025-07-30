@@ -163,7 +163,8 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 			tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc);
 			xactInfo = tupHdr->xactInfo;
 
-			if (XACT_INFO_OXID_IS_CURRENT(xactInfo))
+			if (!XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
+				XACT_INFO_OXID_IS_CURRENT(xactInfo))
 			{
 				if (out_csn)
 					*out_csn = COMMITSEQNO_INPROGRESS;
@@ -306,7 +307,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				 * changes made by current command unless we're dealing with
 				 * system tree.
 				 */
-				if (XACT_INFO_GET_OXID(xactInfo) == get_current_oxid_if_any() &&
+				if (!XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
+					XACT_INFO_OXID_IS_CURRENT(xactInfo) &&
 					oSnapshot->csn != COMMITSEQNO_MAX_NORMAL)
 				{
 					if (IS_SYS_TREE_OIDS(desc->oids))

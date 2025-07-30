@@ -141,6 +141,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  isol_rc \
 				  isol_rr \
 				  isol_rr_bscan \
+				  isol_rr_fk \
 				  isol_rr_seqscan \
 				  load_refind_page \
 				  merge \
