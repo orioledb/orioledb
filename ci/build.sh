@@ -39,7 +39,7 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
 
 cd orioledb
 if [ $CHECK_TYPE = "sanitize" ]; then
-	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fsanitize=alignment -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-sanitize=nonnull-attribute -fstack-protector" LDFLAGS_SL="-lubsan -fsanitize=address -fsanitize=undefined -lasan"
+	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fno-omit-frame-pointer -fsanitize=alignment -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-sanitize=nonnull-attribute -fstack-protector" LDFLAGS_SL="-lubsan -fsanitize=address -fsanitize=undefined -lasan"
 elif [ $CHECK_TYPE = "check_page" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT -DCHECK_PAGE_STATS"
 elif [ $CHECK_TYPE != "static" ]; then

@@ -1818,6 +1818,8 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
 	Assert(HeapTupleIsValid(tuple));
 	ReleaseSysCache(tuple);
 
+	ASAN_UNPOISON_MEMORY_REGION(&arg, sizeof(arg));
+
 	arg.oxid = oxid;
 	arg.csn = csn;
 	arg.type_oid = type_oid;
