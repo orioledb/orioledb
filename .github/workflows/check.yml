@@ -6,15 +6,28 @@ on:
 
 jobs:
   check:
-    runs-on:
-      - ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        cpu: [amd64, arm64]
         pg_version: [16, 17]
         compiler: [clang, gcc]
         check_type:
-          [normal, debug, sanitize, check_page, valgrind_1, valgrind_2, pg_tests]
+          [
+            normal,
+            debug,
+            sanitize,
+            check_page,
+            valgrind_1,
+            valgrind_2,
+            pg_tests,
+          ]
+        include:
+          - cpu: amd64
+            runner: ubuntu-24.04
+          - cpu: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
@@ -57,7 +70,7 @@ jobs:
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
           path: ./orioledb/coverage.info
           retention-days: 1
 
@@ -86,4 +99,4 @@ jobs:
       - name: remove artifacts
         uses: geekyeggo/delete-artifact@v5
         with:
-            name: '*coverage.info'
+          name: "*coverage.info"
