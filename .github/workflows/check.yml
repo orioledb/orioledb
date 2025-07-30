@@ -5,29 +5,59 @@ on:
   pull_request:
 
 jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        shell: python # run script directly using the Python interpreter
+        run: |
+          import os, json, itertools
+
+          # Get event type and branch name
+          event = os.environ["GITHUB_EVENT_NAME"]
+          ref   = os.environ.get("GITHUB_REF_NAME", "")
+
+          # Full matrix: used for main branch or pull requests
+          full = dict(
+              cpu        = ["amd64", "arm64"],
+              pg_version = [16, 17],
+              compiler   = ["clang", "gcc"],
+              check_type = [
+                  "normal", "debug", "sanitize", "check_page",
+                  "valgrind_1", "valgrind_2", "pg_tests",
+              ],
+          )
+
+          # Reduced matrix: used for all other push events
+          combos = [
+              ("amd64", 16, "gcc"),
+              ("amd64", 17, "clang"),
+              ("arm64", 16, "clang"),
+              ("arm64", 17, "gcc"),
+          ]
+          reduced = {
+              "include": [
+                  {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
+                  for (c, pg, comp), ct in itertools.product(combos, full["check_type"])
+              ]
+          }
+
+          matrix = full if event == "pull_request" or ref == "main" else reduced
+
+          # Export as job output
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+
   check:
+    needs: matrix
     strategy:
       fail-fast: false
-      matrix:
-        cpu: [amd64, arm64]
-        pg_version: [16, 17]
-        compiler: [clang, gcc]
-        check_type:
-          [
-            normal,
-            debug,
-            sanitize,
-            check_page,
-            valgrind_1,
-            valgrind_2,
-            pg_tests,
-          ]
-        include:
-          - cpu: amd64
-            runner: ubuntu-24.04
-          - cpu: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+
+    # Select runner based on CPU architecture
+    runs-on: ${{ matrix.cpu == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
