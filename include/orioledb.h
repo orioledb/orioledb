@@ -268,7 +268,7 @@ typedef struct
 #define FileExtentIsValid(extent) (FileExtentLenIsValid((extent).len) && FileExtentOffIsValid((extent).off))
 #define CompressedSize(page_size) ((page_size) == ORIOLEDB_BLCKSZ \
 										? ORIOLEDB_BLCKSZ \
-										: ((page_size) + sizeof(OCompressHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
+										: ((page_size) + sizeof(OrioleDBOndiskPageHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
 #define FileExtentLen(page_size) (CompressedSize(page_size) / ORIOLEDB_COMP_BLCKSZ)
 
 typedef struct

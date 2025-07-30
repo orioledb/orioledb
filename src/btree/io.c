@@ -1255,6 +1255,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 	uint32		chkpNum = 0;
 	char		buf[ORIOLEDB_BLCKSZ];
 
+	Assert(sizeof(OrioleDBOndiskPageHeader) == O_PAGE_HEADER_SIZE);
 	Assert(FileExtentOffIsValid(extent->off));
 	if (!OCompressIsValid(desc->compress))
 	{
@@ -1276,8 +1277,6 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 			byte_offset *= (off_t) ORIOLEDB_BLCKSZ;
 		write_size = ORIOLEDB_BLCKSZ;
 
-		/* For non-compressed case we add OrioleDBOndiskPageHeader in the start of the page */
-		Assert(sizeof(OrioleDBPageHeader) == sizeof(OrioleDBOndiskPageHeader);
 		memset(buf, 0, sizeof(OrioleDBPageHeader));
 		(OrioleDBOndiskPageHeader *) buf->page_version = ORIOLEDB_PAGE_VERSION;
 		memcpy(buf[sizeof(OrioleDBPageHeader)], page + sizeof(OrioleDBPageHeader), ORIOLEDB_BLCKSZ - sizeof(OrioleDBPageHeader));
@@ -1286,7 +1285,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 	}
 	else
 	{
-		OCompressHeader compress_header = {0};
+		OrioleDBOndiskPageHeader header={0};
 
 		byte_offset = (off_t) extent->off;
 		if (orioledb_s3_mode)
@@ -1303,36 +1302,26 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 		Assert(ORIOLEDB_BLCKSZ < UINT16_MAX);
 
 		/* we need to write header first */
-		compress_header.page_size = page_size;
-		compress_header.chkpNum = curChkpNum;
-		compress_header.compress_version = ORIOLEDB_COMPRESS_VERSION;
+		header.compress_header.page_size = page_size;
+		header.compress_header.chkpNum = curChkpNum;
+		header.compress_header.compress_version = ORIOLEDB_COMPRESS_VERSION;
+		header.page_version  = ORIOLEDB_PAGE_VERSION;
+
+		write_size = sizeof(OrioleDBOndiskPageHeader);
+		err = btree_smgr_write(desc, (char *) &header, chkpNum, write_size, byte_offset) != write_size;
+		byte_offset += write_size;
 
 		if (err)
 			return false;
 
 		if (page_size != ORIOLEDB_BLCKSZ)
 		{
-			/* Compressed page case. OrioleDBOndiskPageHeader is already inside compressed page */
-
-			write_size = sizeof(OCompressHeader);
-			err = btree_smgr_write(desc, (char *) &compress_header, chkpNum, write_size, byte_offset) != write_size;
-			byte_offset += write_size;
-
 			write_size = extent->len * ORIOLEDB_COMP_BLCKSZ - sizeof(OCompressHeader);
 			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 		}
 		else
 		{
 			size_t		skipped = offsetof(BTreePageHeader, undoLocation);
-			OrioleDBOndiskPageHeader ondisk_header;
-
-			Assert(sizeof(OrioleDBOndiskPageHeader) <= O_PAGE_HEADER_SIZE);
-
-			ondisk_header.compress_header = compress_header;
-			ondisk_header.page_version  = ORIOLEDB_PAGE_VERSION;
-			write_size = sizeof(OrioleDBOndiskPageHeader);
-			err = btree_smgr_write(desc, (char *) &header, chkpNum, write_size, byte_offset) != write_size;
-			byte_offset += write_size;
 
 			/*
 			 * Skipping checkpointNum because it is present in OCompressHeader
@@ -1342,7 +1331,6 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 			page += skipped;
 			write_size = ORIOLEDB_BLCKSZ - skipped;
 			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
-
 		}
 	}
 
@@ -1564,9 +1552,6 @@ load_page(OBTreeFindPageContext *context)
 
 /*
  * Returns pointer to writable image. It compresses page if needed.
- * Page version is added before compressing for compressed case only.
- * For non-compressed case page version will be introduced later
- * in write_page_to_disk() avoid extra palloc.
  */
 static inline Pointer
 get_write_img(BTreeDescr *desc, Page page, size_t *size)
@@ -1575,13 +1560,6 @@ get_write_img(BTreeDescr *desc, Page page, size_t *size)
 
 	if (OCompressIsValid(desc->compress))
 	{
-		char buf[ORIOLEDB_BLCKSZ];
-
-		Assert(sizeof(OrioleDBPageHeader) == sizeof(OrioleDBOndiskPageHeader);
-		memset(buf, 0, sizeof(OrioleDBPageHeader));
-		(OrioleDBOndiskPageHeader *) buf->page_version = ORIOLEDB_PAGE_VERSION;
-		memcpy(buf[sizeof(OrioleDBPageHeader)], page + sizeof(OrioleDBPageHeader), ORIOLEDB_BLCKSZ - sizeof(OrioleDBPageHeader));
-
 		result = o_compress_page(page, size, desc->compress);
 		if (*size > (ORIOLEDB_BLCKSZ - ORIOLEDB_COMP_BLCKSZ - sizeof(OCompressHeader)))
 		{
