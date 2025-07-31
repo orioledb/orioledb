@@ -478,7 +478,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		}
 
 		snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, de->d_name);
-		VALGRIND_CHECK_MEM_IS_DEFINED(pathbuf, strlen(pathbuf) + 1);
+		VALGRIND_MAKE_MEM_DEFINED(pathbuf, sizeof(pathbuf));
 
 		/* Skip pg_control here to back up it last */
 		if (strcmp(pathbuf, "./global/pg_control") == 0)
