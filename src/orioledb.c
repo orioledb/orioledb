@@ -144,7 +144,7 @@ char	   *s3_cainfo = NULL;
 bool		enable_rewind = false;
 int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
-int			logical_xids_shmem_size_guc = 64;
+int			logical_xid_buffers_guc = 64;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -491,10 +491,10 @@ _PG_init(void)
 							NULL,
 							NULL);
 
-	DefineCustomIntVariable("orioledb.logical_xids_shmem",
-							"Sets the number of recovery index build workers.",
+	DefineCustomIntVariable("orioledb.logical_xid_buffers",
+							"Size of shared memory buffers for subtransaction logical XIDs.",
 							NULL,
-							&logical_xids_shmem_size_guc,
+							&logical_xid_buffers_guc,
 							64,
 							1,
 							1024,

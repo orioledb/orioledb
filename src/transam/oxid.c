@@ -98,7 +98,7 @@ oxid_shmem_needs(void)
 	size = add_size(size, mul_size(xid_circular_buffer_size,
 								   sizeof(OXidMapItem)));
 	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
-	size = add_size(size, mul_size(logical_xids_shmem_size_guc,
+	size = add_size(size, mul_size(logical_xid_buffers_guc,
 								   ORIOLEDB_BLCKSZ));
 
 	return size;
@@ -224,7 +224,7 @@ oxid_init_shmem(Pointer ptr, bool found)
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
 						 xid_meta->xidMapTrancheId);
 
-		for (i = 0; i < logical_xids_shmem_size_guc * (BLCKSZ / sizeof(pg_atomic_uint32)); i++)
+		for (i = 0; i < logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32)); i++)
 			pg_atomic_init_u32(&logicalXidsShmemMap[i], 0);
 
 		/* Undo positions are initialized in checkpoint_shmem_init() */
@@ -242,7 +242,7 @@ acquire_logical_xid(void)
 {
 	TransactionId result,
 				sub;
-	int			itemsCount = logical_xids_shmem_size_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
+	int			itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
 	uint32		divider = itemsCount * 32;
 	int			i = MYPROCNUMBER % itemsCount,
 				mynum = 0;
@@ -306,7 +306,7 @@ acquire_logical_xid(void)
 static void
 release_logical_xid(TransactionId xid)
 {
-	uint32		itemsCount = logical_xids_shmem_size_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
+	uint32		itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
 	uint32		mynum = xid % (itemsCount * 32);
 	uint32		value PG_USED_FOR_ASSERTS_ONLY;
 

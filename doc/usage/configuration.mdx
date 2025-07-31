@@ -109,9 +109,9 @@ The remaining `orioledb.undo_buffers` (except the fraction specified by sum of `
 
 |             |     |
 | ----------- | --- |
-| **Default** | 128 |
+| **Default** | 1MB |
 
-Number of OrioleDB in-memory xid buffers in blocks. Each block can acommodate 512 xid items corresponding to open
+Size of OrioleDB in-memory xid buffers. Each MB can acommodate 65 thousands of xid items corresponding to open
 transactions. Consider increasing this parameter if you have very big transactions rate.
 
 ### `orioledb.bgwriter_num_workers`
@@ -228,17 +228,19 @@ Maximum number of rewind transaction items that are stored for a rewind. Older r
 
 |             |     |
 | ----------- | --- |
-| **Default** | 128 |
+| **Default** | 1MB |
 
-Number of OrioleDB in-memory rewind buffers in blocks. Each block can acommodate 68 rewind transaction items. If you have enough memory set it near a value `orioledb.rewind_max_transactions` / 68 to avoid writing rewind info to disk.
+Size of OrioleDB in-memory rewind buffers. Each MB can acommodate around 8000 rewind transaction items. If you have
+enough memory set it near a value (`orioledb.rewind_max_transactions` / 8000) MB to avoid writing rewind info to disk.
 
-### `orioledb.logical_xids_shmem_size`
+### `orioledb.logical_xid_buffers`
 
 |             |       |
 | ----------- | ----- |
 | **Default** | 512KB |
 
-The amount of shared memory for logical transaction IDs to be assigned to running subtransactions.  Multiplication by 8 results in the maximum number of running subtransactions (default is about 4 million).
+Size of OrioleDB in-memory buffers for logical transaction IDs to be assigned to running subtransactions. Each MB
+can accommodate 8 million of running subtransactions. So default value corresponds to 4 million subtransactions.
 
 ## Debugging options
 
