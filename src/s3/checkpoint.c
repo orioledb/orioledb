@@ -55,6 +55,7 @@
 #include "storage/reinit.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
+#include "utils/memdebug.h"
 #include "utils/ps_status.h"
 #include "utils/relcache.h"
 #include "utils/resowner.h"
@@ -477,6 +478,7 @@ s3_backup_scan_dir(S3BackupState *state, const char *path,
 		}
 
 		snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, de->d_name);
+		VALGRIND_CHECK_MEM_IS_DEFINED(pathbuf, strlen(pathbuf) + 1);
 
 		/* Skip pg_control here to back up it last */
 		if (strcmp(pathbuf, "./global/pg_control") == 0)
