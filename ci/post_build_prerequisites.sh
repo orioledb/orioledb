@@ -8,11 +8,11 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PAT
 
 # psycopg2 depends on existing postgres installation
 if [ $GITHUB_JOB = "run-benchmark" ]; then
-	pip_packages="psycopg2-binary six testgres python-telegram-bot matplotlib"
+	pip_packages="psycopg2-binary six testgres==1.10.5 python-telegram-bot matplotlib"
 elif [ $GITHUB_JOB = "pgindent" ]; then
-	pip_packages="psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL yapf"
+	pip_packages="psycopg2 six testgres==1.10.5 moto[s3] flask flask_cors boto3 pyOpenSSL yapf"
 else
-	pip_packages="psycopg2 six testgres moto[s3] flask flask_cors boto3 pyOpenSSL"
+	pip_packages="psycopg2 six testgres==1.10.5 moto[s3] flask flask_cors boto3 pyOpenSSL"
 fi
 
 # install required packages
