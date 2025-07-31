@@ -468,6 +468,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	OSnapshot	oSnapshot;
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
+	ASAN_UNPOISON_MEMORY_REGION(&mres, sizeof(mres));
 
 	if (snapshot)
 		O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
