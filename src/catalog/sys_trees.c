@@ -698,6 +698,12 @@ sys_tree_init_if_needed(int i)
 			ppool_reserve_pages(pool, PPOOL_RESERVE_META, 8);
 			LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[0],
 						  LW_EXCLUSIVE);
+			if (OInMemoryBlknoIsValid(header->rootInfo.rootPageBlkno))
+			{
+				/* might be concurrently initialized */
+				sys_tree_init(i, false);
+				continue;
+			}
 			Assert(!OInMemoryBlknoIsValid(header->rootInfo.metaPageBlkno));
 			sys_tree_init(i, true);
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[0]);
