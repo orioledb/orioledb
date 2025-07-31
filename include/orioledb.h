@@ -50,7 +50,7 @@
  * or could be converted on the fly. See comment for ORIOLEDB_DATA_VERSION,
  * ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION below.
  */
-#define ORIOLEDB_BINARY_VERSION 6
+#define ORIOLEDB_BINARY_VERSION 7
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
