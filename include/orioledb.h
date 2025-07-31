@@ -68,7 +68,8 @@
  */
 #define ORIOLEDB_DATA_VERSION	2	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
-#define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for compressed pages) */
+#define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for
+									 * compressed pages) */
 
 /*
  * perform_page_split() removes a key data from first right page downlink.
@@ -256,28 +257,12 @@ typedef struct
 				off:48;
 } FileExtent;
 
-typedef int OCompress;
-#define O_COMPRESS_DEFAULT (10)
-#define InvalidOCompress (-1)
-#define OCompressIsValid(compress) ((compress) != InvalidOCompress)
-
 /*
- * We save number of chunks inside downlinks instead of size of compressed data
- * because it helps us to avoid too often setup dirty flag for parent if page
- * is changed.
- *
- * The header of compressed data contains compressed data length.
- */
-typedef struct OCompressHeader
-{
-	uint32		chkpNum;
-	uint16		page_size;
-	uint16		compress_version;
-} OCompressHeader;
-
-/*
- * Should be used as beginning of header in all orioledb shared pages:
+ * Should be used as a beginning of header in all orioledb shared in-memory pages:
  * BTree pages, Meta-pages, SeqBuf pages, etc.
+ *
+ * Isn't written to disk pages. See OrioleDBOndiskPageHeader. Both structs are
+ * of equal size.
  */
 typedef struct
 {
@@ -286,13 +271,34 @@ typedef struct
 	uint32		pageChangeCount;
 } OrioleDBPageHeader;
 
+/*
+ * Should be used as a beginning of header in all orioledb disk pages. At reading
+ * pages from disk all these contents are overwritten by OrioleDBPageHeader. Necessary
+ * information related to compression is extracted before this overwrite.
+ */
 typedef struct
 {
-	OCompressHeader	compress_header; /* Reserved for compressed pages. Empty for non-compressed */
-	uint16			page_version;
-	uint16			reserved;
-} OrioleDBOndiskPageHeader;
+	/*
+	 * We save number of chunks inside downlinks instead of size of compressed
+	 * data because it helps us to avoid too often setup dirty flag for parent
+	 * if page is changed.
+	 *
+	 * The header of compressed data contains compressed data length.
+	 */
+	uint32		compress_chkpNum;	/* Reserved for compressed pages. Empty
+									 * for non-compressed */
+	uint16		compress_page_size; /* Reserved for compressed pages. Empty
+									 * for non-compressed */
+	uint8		compress_version;	/* Reserved for compressed pages. Empty
+									 * for non-compressed */
 
+	/*
+	 * Version of binary page format for possible conversion. For compressed
+	 * pages it should be used for conversion of uncompressed images
+	 */
+	uint8		page_version;
+	uint32		reserved;
+}			OrioleDBOndiskPageHeader;
 
 #define O_PAGE_HEADER_SIZE		sizeof(OrioleDBPageHeader)
 #define O_PAGE_HEADER(page)	((OrioleDBPageHeader *)(page))
@@ -393,6 +399,11 @@ extern int	rewind_max_transactions;
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
 extern void orioledb_check_shmem(void);
+
+typedef int OCompress;
+#define O_COMPRESS_DEFAULT (10)
+#define InvalidOCompress (-1)
+#define OCompressIsValid(compress) ((compress) != InvalidOCompress)
 
 typedef struct ORelOptions
 {
