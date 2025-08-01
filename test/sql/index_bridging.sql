@@ -671,6 +671,15 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 COMMIT;
 
+create table size_test(i1 int, i2 int, t text) using orioledb;
+INSERT INTO size_test (SELECT id, id, generate_string(id, 3000) FROM generate_series(1, 1000) id);
+create index size_test_i2_brin_idx on size_test using brin (i2);
+select pg_size_pretty(pg_relation_size('size_test'::regclass));
+select pg_size_pretty(pg_table_size('size_test'::regclass));
+select pg_size_pretty(pg_indexes_size('size_test'::regclass));
+select pg_size_pretty(pg_total_relation_size('size_test'::regclass));
+select pg_size_pretty(pg_table_size('size_test_i2_brin_idx'::regclass));
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

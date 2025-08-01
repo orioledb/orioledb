@@ -121,7 +121,6 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 (1 row)
 
 CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_ix_ams'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -979,7 +978,6 @@ SELECT * FROM o_test_ix_ams ORDER BY j;
 
 COMMIT;
 CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (orioledb_index = off, deduplicate_items = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                           orioledb_tbl_indices                          
@@ -1666,7 +1664,6 @@ CREATE TABLE o_test_bridging_with_regular_no_pkey (
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
 	o_test_bridging_with_regular_no_pkey using btree (j) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
 	o_test_bridging_with_regular_no_pkey using btree (j);
@@ -1812,7 +1809,6 @@ CREATE TABLE o_test_bridging_with_regular_pkey (
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
 	o_test_bridging_with_regular_pkey using btree (j) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
 	o_test_bridging_with_regular_pkey using btree (k);
@@ -1932,7 +1928,6 @@ CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
 CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
 CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
 CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -2039,7 +2034,6 @@ Indexes:
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
@@ -2445,7 +2439,6 @@ SELECT * FROM o_test_non_index_bridging_options;
 (10 rows)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
@@ -2640,7 +2633,6 @@ Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_non_index_bridging_options'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -3251,7 +3243,6 @@ SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne
 (1 row)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_non_index_bridging_options'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -3362,7 +3353,6 @@ CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix2
 	ON o_test_bridged_hash_btree_bitmap_scans USING hash (v);
 CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix3
 	ON o_test_bridged_hash_btree_bitmap_scans USING btree (v) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_bridged_hash_btree_bitmap_scans'::regclass, true);
                  orioledb_tbl_indices                 
@@ -3515,12 +3505,10 @@ SELECT orioledb_tbl_indices('o_test_bridged_index_only_scan'::regclass, true);
 (1 row)
 
 CREATE INDEX o_test_bridged_index_only_scan_ix1 ON o_test_bridged_index_only_scan USING btree (t) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_bridged_index_only_scan'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
 CREATE INDEX o_test_bridged_index_only_scan_ix2 ON o_test_bridged_index_only_scan USING btree (id2) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_bridged_index_only_scan'::regclass, true);
                   orioledb_tbl_indices                  
@@ -3638,7 +3626,6 @@ SELECT orioledb_tbl_indices('o_test_toast_with_bridged'::regclass, true);
 (1 row)
 
 CREATE INDEX o_test_toast_with_bridged_ix1 ON o_test_toast_with_bridged USING btree (id) WITH (orioledb_index = off);
-WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_toast_with_bridged'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -3792,9 +3779,44 @@ SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 (2 rows)
 
 COMMIT;
+create table size_test(i1 int, i2 int, t text) using orioledb;
+INSERT INTO size_test (SELECT id, id, generate_string(id, 3000) FROM generate_series(1, 1000) id);
+create index size_test_i2_brin_idx on size_test using brin (i2);
+NOTICE:  index bridging is enabled for orioledb table 'size_test'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+select pg_size_pretty(pg_relation_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 72 kB
+(1 row)
+
+select pg_size_pretty(pg_table_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 4072 kB
+(1 row)
+
+select pg_size_pretty(pg_indexes_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 0 bytes
+(1 row)
+
+select pg_size_pretty(pg_total_relation_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 4072 kB
+(1 row)
+
+select pg_size_pretty(pg_table_size('size_test_i2_brin_idx'::regclass));
+ pg_size_pretty 
+----------------
+ 48 kB
+(1 row)
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 10 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -3805,6 +3827,7 @@ drop cascades to table o_test_toastable_offset
 drop cascades to table o_test_bridged_hash_btree_bitmap_scans
 drop cascades to table o_test_bridged_index_only_scan
 drop cascades to table o_test_toast_with_bridged
+drop cascades to table size_test
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function btree_index_content(name)

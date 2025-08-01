@@ -1477,30 +1477,25 @@ orioledb_tbl_indices(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(result);
 }
 
+/*
+ * Includes table (primary index), TOAST and secondary indices
+ * Deprecated. Use pg_total_relation_size() instead
+ */
 Datum
 orioledb_relation_size(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	Relation	rel;
-	int			i;
-	int64		result = 0;
-	BTreeDescr *td;
-	OTableDescr *descr;
+	int64		result;
 
 	orioledb_check_shmem();
 
 	rel = relation_open(relid, AccessShareLock);
-	descr = relation_get_descr(rel);;
-
-	for (i = 0; i < descr->nIndices + 1; i++)
-	{
-		td = i != descr->nIndices ? &descr->indices[i]->desc : &descr->toast->desc;
-		o_btree_load_shmem(td);
-
-		result += (int64) TREE_NUM_LEAF_PAGES(td) * (int64) ORIOLEDB_BLCKSZ;
-	}
-
+	result = orioledb_calculate_relation_size(rel, MAIN_FORKNUM, TOTAL_SIZE);
 	relation_close(rel, AccessShareLock);
+
+	elog(WARNING, "orioledb_relation_size is deprecated, use pg_total_relation_size() instead");
+
 	PG_RETURN_INT64(result);
 }
 
