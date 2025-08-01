@@ -683,6 +683,14 @@ CREATE TABLE IF NOT EXISTS one_time_tokens (
 -- now create a hash index with bridge index
 CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
 	ON one_time_tokens USING hash (token_hash);
+create table size_test(i1 int, i2 int, t text) using orioledb;
+INSERT INTO size_test (SELECT id, id, generate_string(id, 3000) FROM generate_series(1, 1000) id);
+create index size_test_i2_brin_idx on size_test using brin (i2);
+select pg_size_pretty(pg_relation_size('size_test'::regclass));
+select pg_size_pretty(pg_table_size('size_test'::regclass));
+select pg_size_pretty(pg_indexes_size('size_test'::regclass));
+select pg_size_pretty(pg_total_relation_size('size_test'::regclass));
+select pg_size_pretty(pg_table_size('size_test_i2_brin_idx'::regclass));
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
