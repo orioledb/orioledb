@@ -140,6 +140,7 @@ extern Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc
 extern Size orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan);
 extern void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
 
+extern int64 orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method);
 
 typedef enum
 {

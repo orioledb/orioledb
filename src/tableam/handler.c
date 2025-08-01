@@ -1070,23 +1070,153 @@ orioledb_index_validate_scan(Relation heapRelation,
  * ------------------------------------------------------------------------
  */
 
-static uint64
-orioledb_relation_size(Relation rel, ForkNumber forkNumber)
+/*
+ * Calculate size of table according to a requested method if Orioledb table is provided.
+ * Calculate size of index disregarding method.
+ *
+ * Methods:
+ * TOTAL_SIZE - table (primary index), TOAST and secondary indices
+ * INDEXES_SIZE - only secondary indices
+ * TABLE_SIZE - table (primary index) and TOAST
+ * TOAST_TABLE_SIZE - only TOAST (implemented but unused for now)
+ * DEFAULT_SIZE and RELATION_SIZE - only main table (primary index tree). There is no difference betweem DEFAULT_SIZE and RELATION_SIZE
+ * for OrioleDB tables. Though other table AM that don't support different methods should return -1 at any method except DEFAULT_SIZE.
+ *
+ * ForkNumber is disregarded for OrioleDB relations.
+ */
+int64
+orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method)
 {
-	OTableDescr *descr;
+	BTreeDescr *td;
+	int64		result = 0;
 
-	descr = relation_get_descr(rel);
-
-	if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+	if (forkNumber != MAIN_FORKNUM)
 	{
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-		return (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
-			ORIOLEDB_BLCKSZ;
-	}
-	else
-	{
+		elog(DEBUG3, "Uunexpected fork number");
 		return 0;
 	}
+
+	if (rel->rd_rel->relkind != RELKIND_INDEX)
+	{
+		OTableDescr *descr;
+		int			i;
+
+		if (!is_orioledb_rel(rel))
+			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+							errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+		descr = relation_get_descr(rel);
+
+		if (method == TOTAL_SIZE)
+		{
+			for (i = 0; i < descr->nIndices + 1; i++)
+			{
+				td = i != descr->nIndices ? &descr->indices[i]->desc : &descr->toast->desc;
+				o_btree_load_shmem(td);
+				result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
+			}
+		}
+		else if (method == INDEXES_SIZE)
+		{
+			/*
+			 * TODO: Bridged indexes are not counted here if referenced by
+			 * table relation. This would need exposing static function
+			 * calculate_relation_size() in a patchset and call it from here.
+			 * Though now they are counted if referenced as index relations
+			 * (see below).
+			 */
+			for (i = 0; i < descr->nIndices; i++)
+			{
+				if (i == PrimaryIndexNumber)
+					continue;
+
+				td = &descr->indices[i]->desc;
+
+				o_btree_load_shmem(td);
+				result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
+			}
+		}
+		else if (method == TABLE_SIZE)
+		{
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			{
+				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+				result += (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
+					ORIOLEDB_BLCKSZ;
+
+				o_btree_load_shmem(&descr->toast->desc);
+				result += (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
+					ORIOLEDB_BLCKSZ;
+			}
+		}
+		else if (method == TOAST_TABLE_SIZE)
+		{
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			{
+				o_btree_load_shmem(&descr->toast->desc);
+				result = (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
+					ORIOLEDB_BLCKSZ;
+			}
+		}
+		else if (method == RELATION_SIZE || method == DEFAULT_SIZE)
+		{
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			{
+				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
+					ORIOLEDB_BLCKSZ;
+			}
+		}
+		else
+			elog(ERROR, "Unknown size counting method");
+	}
+	else if (rel->rd_rel->relkind == RELKIND_INDEX)
+	{
+		/*
+		 * If index relation provided, specifying different methods doesn't
+		 * matter, counting method is always similar to RELATION_SIZE for
+		 * table, but we need to load parent relation for this index first.
+		 */
+		Relation	tbl;
+		ORelOids	tblOids;
+		ORelOids	idxOids;
+		OTableDescr *table_desc;
+		OIndexNumber ixnum;
+
+		idxOids.datoid = MyDatabaseId;
+		idxOids.reloid = rel->rd_rel->oid;
+		idxOids.relnode = rel->rd_rel->relfilenode;
+
+		tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
+
+		if (!is_orioledb_rel(tbl))
+		{
+			relation_close(tbl, AccessShareLock);
+			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+							errmsg("index \"%s\" is not on orioledb table \"%s\" ", NameStr(rel->rd_rel->relname), NameStr(tbl->rd_rel->relname))));
+		}
+
+		tblOids.datoid = MyDatabaseId;
+		tblOids.reloid = tbl->rd_rel->oid;
+		tblOids.relnode = tbl->rd_rel->relfilenode;
+
+		table_desc = o_fetch_table_descr(tblOids);
+		ixnum = find_tree_in_descr(table_desc, idxOids);
+		if (ixnum == InvalidIndexNumber)
+		{
+			/*
+			 * Bridged index is an index of a table, but it's not OrioleDB
+			 * index and its size should be determined by PG internal routine
+			 */
+			relation_close(tbl, AccessShareLock);
+			return -1;
+		}
+		td = &table_desc->indices[ixnum]->desc;
+		o_btree_load_shmem(td);
+		result = (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
+		relation_close(tbl, AccessShareLock);
+	}
+
+	return (int64) result;
 }
 
 static bool
@@ -2066,7 +2196,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.index_build_range_scan = orioledb_index_build_range_scan,
 	.index_validate_scan = orioledb_index_validate_scan,
 
-	.relation_size = orioledb_relation_size,
+	.relation_size = orioledb_calculate_relation_size,
 	.relation_needs_toast_table = orioledb_relation_needs_toast_table,
 	.relation_toast_am = orioledb_relation_toast_am,
 

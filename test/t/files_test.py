@@ -124,14 +124,14 @@ class FilesTest(BaseTest):
 			    [0])
 
 		old_size = node.execute(
-		    "SELECT orioledb_relation_size('o_test'::regclass)")[0][0]
+		    "SELECT pg_total_relation_size('o_test'::regclass)")[0][0]
 		for i in range(10):
 			node.safe_psql(
 			    'postgres',
 			    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
 			node.safe_psql('postgres', "CHECKPOINT;")
 		new_size = node.execute(
-		    "SELECT orioledb_relation_size('o_test'::regclass)")[0][0]
+		    "SELECT pg_total_relation_size('o_test'::regclass)")[0][0]
 
 		self.assertLessEqual(new_size, old_size)
 		con1.close()

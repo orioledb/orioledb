@@ -941,6 +941,25 @@ $$;
 CREATE TABLE heap_test(id int PRIMARY KEY, value int) using heap;
 INSERT INTO heap_test VALUES (0, 0);
 
+-- Table size tests
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+	AS $$
+	SELECT substr(string_agg(
+			substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+			''), 1, length)
+	FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+
+create table size_test(i1 int, i2 int, t text, PRIMARY KEY (i1)) using orioledb;
+INSERT INTO size_test (SELECT id, id, generate_string(id, 3000) FROM generate_series(1, 1000) id);
+create index on size_test(i2);
+select pg_size_pretty(pg_relation_size('size_test'::regclass));
+select pg_size_pretty(pg_table_size('size_test'::regclass));
+select pg_size_pretty(pg_indexes_size('size_test'::regclass));
+select pg_size_pretty(pg_total_relation_size('size_test'::regclass));
+select pg_size_pretty(orioledb_relation_size('size_test'::regclass));
+select pg_size_pretty(pg_table_size('size_test_i2_idx'::regclass));
+
 -- Run test function:
 SELECT exhaust_logical_xids(40000);
 
