@@ -1068,22 +1068,51 @@ orioledb_index_validate_scan(Relation heapRelation,
  */
 
 static uint64
-orioledb_relation_size(Relation rel, ForkNumber forkNumber)
+orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method)
 {
 	OTableDescr *descr;
+	int                     i;
+	BTreeDescr *td;
+	int64       result = 0;
 
+	elog(WARNING, "CALLED ORIOLEDB_RELATION_SIZE");
 	descr = relation_get_descr(rel);
 
-	if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+	if(method & TOTAL_SIZE)
 	{
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-		return (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
-			ORIOLEDB_BLCKSZ;
+		/* Includes table (primary index) TOAST and secondary indices */
+		for (i = 0; i < descr->nIndices + 1; i++)
+		{
+			td = i != descr->nIndices ? &descr->indices[i]->desc : &descr->toast->desc;
+			o_btree_load_shmem(td);
+			result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
+		}
 	}
-	else
+	else if (method & TABLE_SIZE)
 	{
-		return 0;
+		/* Includes table (primary index) and TOAST */
+		if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+		{
+			o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+			result += (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
+				ORIOLEDB_BLCKSZ;
+
+			o_btree_load_shmem(&descr->toast->desc);
+			result += (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
+                                ORIOLEDB_BLCKSZ;
+
+		}
 	}
+	else if (method & RELATION_SIZE)
+	{
+		/* Includes only table (primary index) */
+		if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+		{
+			o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+			result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
+				ORIOLEDB_BLCKSZ;
+		}
+	return result;
 }
 
 static bool
