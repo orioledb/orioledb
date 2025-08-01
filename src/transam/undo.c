@@ -1653,6 +1653,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
 				oxid_needs_wal_flush = false;
+				/* TODO: Find a better place or add a hook at the end of heap_truncate_one_rel */
+				in_nontransactional_truncate = false;
 				break;
 			case XACT_EVENT_ABORT:
 				if (!RecoveryInProgress())
@@ -1665,6 +1667,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				current_oxid_abort();
 				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 				oxid_needs_wal_flush = false;
+				/* TODO: Find a better place or add a hook at the end of heap_truncate_one_rel */
+				in_nontransactional_truncate = false;
 
 				/*
 				 * Remove registered snapshot one-by-one, so that we can avoid
