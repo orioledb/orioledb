@@ -23,6 +23,7 @@
 #include "tableam/key_range.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/dsa.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
@@ -166,6 +167,104 @@ lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 	return state;
 }
 
+typedef struct
+{
+	char		img[8192];
+	PartialPageState partial;
+	bool		load;
+} PageImg;
+
+typedef enum
+{
+	LockPageResultLocked = 1,
+	LockPageResultQueued = 2,
+	LockPageResultSplitDetected = 3
+} LockPageResult;
+
+static LockPageResult
+lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
+								   uint32 *pageChangeCount, uint32 pgprocnum,
+								   PageImg *img, OTuple tuple, uint32 *prevState)
+{
+	Page		p = O_GET_IN_MEMORY_PAGE(*blkno);
+	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
+	OrioleDBPageHeader *imgHeader = (OrioleDBPageHeader *) img->img;
+	uint32		state;
+	LockerShmemState *lockerState = &lockerStates[pgprocnum];
+
+	Assert(pgprocnum < max_procs);
+
+	state = pg_atomic_read_u32(&header->state);
+	while (true)
+	{
+		uint32		newState;
+
+		if (!img->load ||
+			(state & PAGE_STATE_CHANGE_COUNT_MASK) != (pg_atomic_read_u32(&imgHeader->state) & PAGE_STATE_CHANGE_COUNT_MASK))
+		{
+			if (!o_btree_read_page(desc, *blkno, *pageChangeCount, img->img,
+								   COMMITSEQNO_INPROGRESS, NULL, BTreeKeyNone, NULL,
+								   &img->partial, true, NULL, NULL))
+			{
+				return LockPageResultSplitDetected;
+			}
+
+			if (!O_PAGE_IS(img->img, RIGHTMOST))
+			{
+				OTuple	hikey;
+
+				BTREE_PAGE_GET_HIKEY(hikey, img->img);
+
+				if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple,
+								&hikey, BTreeKeyNonLeafKey) >= 0)
+				{
+					uint64		rightlink = BTREE_PAGE_GET_RIGHTLINK(img->img);
+
+					if (OInMemoryBlknoIsValid(RIGHTLINK_GET_BLKNO(rightlink)))
+					{
+						lockerState->blkno = *blkno = RIGHTLINK_GET_BLKNO(rightlink);
+						lockerState->pageChangeCount = *pageChangeCount = RIGHTLINK_GET_CHANGECOUNT(rightlink);
+						p = O_GET_IN_MEMORY_PAGE(*blkno);
+						header = (OrioleDBPageHeader *) p;
+						Assert(get_my_locked_page_index(*blkno) < 0);
+						state = pg_atomic_read_u32(&header->state);
+						continue;
+					}
+					else
+					{
+						return LockPageResultSplitDetected;
+					}
+				}
+			}
+		}
+
+
+		if (!O_PAGE_STATE_IS_LOCKED(state))
+		{
+			newState = O_PAGE_STATE_LOCK(state);
+		}
+		else
+		{
+			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
+			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
+			lockerState->waitExclusive = true;
+			lockerState->pageWaiting = true;
+			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
+			newState |= pgprocnum;
+		}
+
+		if (pg_atomic_compare_exchange_u32(&header->state, &state, newState))
+			break;
+	}
+
+	*prevState = state;
+
+	if (!O_PAGE_STATE_IS_LOCKED(state))
+		return LockPageResultLocked;
+	else
+		return LockPageResultQueued;
+}
+
 /*
  * This function finishes when page is enable to read or we managed to lock
  * the page list.
@@ -307,15 +406,20 @@ lock_page_with_tuple(BTreeDescr *desc,
 	int			extraWaits = 0;
 	LockerShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	bool		keySerialized = false;
-	char		img[8192];
-	PartialPageState partial;
+	PageImg		img;
 
+
+	img.load = false;
 	Assert(get_my_locked_page_index(*blkno) < 0);
 
 	while (true)
 	{
+		LockPageResult lockResult;
+
 		lockerState->blkno = *blkno;
 		lockerState->pageChangeCount = *pageChangeCount;
+		lockerState->split = false;
+		lockerState->inserted = false;
 
 		if (!keySerialized)
 		{
@@ -347,7 +451,21 @@ lock_page_with_tuple(BTreeDescr *desc,
 			keySerialized = true;
 		}
 
-		prevState = lock_page_or_queue(*blkno, MYPROCNUMBER);
+		lockResult = lock_page_or_queue_or_split_detect(desc, blkno,
+														pageChangeCount,
+														MYPROCNUMBER,
+														&img, tuple, &prevState);
+
+		if (lockResult == LockPageResultLocked)
+		{
+			break;
+		}
+		else if (lockResult == LockPageResultSplitDetected)
+		{
+			*upwards = true;
+			return false;
+		}
+		Assert(lockResult == LockPageResultQueued);
 
 		if (!O_PAGE_STATE_IS_LOCKED(prevState))
 			break;
@@ -382,41 +500,8 @@ lock_page_with_tuple(BTreeDescr *desc,
 		if (!lockerState->split)
 			continue;
 
-
-		lockerState->blkno = OInvalidInMemoryBlkno;
-		lockerState->split = false;
-		(void) o_btree_read_page(desc, *blkno, *pageChangeCount, img,
-								 COMMITSEQNO_INPROGRESS, NULL, BTreeKeyNone, NULL,
-								 &partial, true, NULL, NULL);
-
-		if (!O_PAGE_IS(img, RIGHTMOST))
-		{
-			OTuple	hikey;
-
-			BTREE_PAGE_GET_HIKEY(hikey, img);
-
-			if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple,
-							&hikey, BTreeKeyNonLeafKey) >= 0)
-			{
-				uint64		rightlink = BTREE_PAGE_GET_RIGHTLINK(img);
-
-				if (OInMemoryBlknoIsValid(RIGHTLINK_GET_BLKNO(rightlink)))
-				{
-					lockerState->blkno = *blkno = RIGHTLINK_GET_BLKNO(rightlink);
-					lockerState->pageChangeCount = *pageChangeCount = RIGHTLINK_GET_CHANGECOUNT(rightlink);
-					p = O_GET_IN_MEMORY_PAGE(*blkno);
-					header = (OrioleDBPageHeader *) p;
-					Assert(get_my_locked_page_index(*blkno) < 0);
-				}
-				else
-				{
-					*upwards = true;
-					while (extraWaits-- > 0)
-						PGSemaphoreUnlock(MyProc->sem);
-					return false;
-				}
-			}
-		}
+		while (extraWaits-- > 0)
+			PGSemaphoreUnlock(MyProc->sem);
 	}
 
 	if (keySerialized)
