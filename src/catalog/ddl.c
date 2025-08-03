@@ -102,7 +102,6 @@
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
-static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
@@ -110,6 +109,7 @@ Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
+static bool in_refresh_mat_view = false;
 List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
@@ -868,16 +868,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 {
 	bool		call_next = true;
 
-#ifdef USE_ASSERT_CHECKING
-	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
-#endif
-
 	/* copied from standard_ProcessUtility */
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
 
 	in_rewrite = false;
-	o_saved_relrewrite = InvalidOid;
+	if (!in_refresh_mat_view && OidIsValid(o_saved_relrewrite))
+		o_saved_relrewrite = InvalidOid;
 	o_saved_reltablespace = InvalidOid;
 	savedDataQuery = NULL;
 	in_nontransactional_truncate = false;
@@ -1275,9 +1272,15 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (matviewRel->rd_rel->relkind == RELKIND_MATVIEW &&
 			is_orioledb_rel(matviewRel))
 		{
+			if (stmt->concurrent)
+			{
+				elog(WARNING, "Concurrent REFRESH MATERIALIZED VIEW not implemented for orioledb materialized vies yet, using simple one");
+				stmt->concurrent = false;
+			}
 			if (!stmt->skipData)
 				savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
 			stmt->skipData = true;
+			in_refresh_mat_view = true;
 		}
 		table_close(matviewRel, AccessShareLock);
 	}
@@ -1436,6 +1439,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(alter_type_exprs);
 			alter_type_exprs = NIL;
 		}
+	}
+	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
+	{
+		in_refresh_mat_view = false;
 	}
 }
 
@@ -3885,7 +3892,9 @@ o_ddl_cleanup(void)
 		reindex_list = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
-	o_saved_relrewrite = InvalidOid;
+	if (!in_refresh_mat_view)
+		o_saved_relrewrite = InvalidOid;
+	in_refresh_mat_view = false;
 	in_rewrite = false;
 	o_in_add_column = false;
 }
