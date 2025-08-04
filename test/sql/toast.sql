@@ -495,6 +495,31 @@ SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
 COMMIT;
 
 ----
+-- Test copying of TOAST values
+----
+
+-- Copy from orioledb table
+CREATE TABLE o_test1
+(
+	id integer PRIMARY KEY,
+	val text
+) USING orioledb;
+INSERT INTO o_test1 VALUES (1, generate_string(1, 3000));
+
+CREATE TABLE o_test2
+(
+	id integer PRIMARY KEY,
+	val text
+) USING orioledb;
+INSERT INTO o_test2 (SELECT * FROM o_test1);
+
+SELECT id, length(val), substr(val, 1, 20) FROM o_test2;
+SELECT orioledb_tbl_structure('o_test2'::regclass, 'nue');
+
+DROP TABLE o_test1;
+DROP TABLE o_test2;
+
+----
 -- TOAST logical decoding
 ----
 DROP TABLE if exists o_logical;
