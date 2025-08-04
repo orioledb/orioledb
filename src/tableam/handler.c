@@ -1071,7 +1071,7 @@ int64
 orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method)
 {
 	BTreeDescr *td;
-	int64       result = 0;
+	int64		result = 0;
 
 	elog(WARNING, "CALLED ORIOLEDB_RELATION_SIZE");
 
@@ -1081,15 +1081,15 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 	if (rel->rd_rel->relkind != RELKIND_INDEX)
 	{
 		OTableDescr *descr;
-		int                     i;
-	
+		int			i;
+
 		if (!is_orioledb_rel(rel))
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
+							errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
 		elog(WARNING, "RELKIND TABLE");
 		descr = relation_get_descr(rel);
 
-		if(method & TOTAL_SIZE)
+		if (method & TOTAL_SIZE)
 		{
 			/* Includes table (primary index) TOAST and secondary indices */
 			for (i = 0; i < descr->nIndices + 1; i++)
@@ -1124,7 +1124,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 				o_btree_load_shmem(&descr->toast->desc);
 				result += (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
-	                                ORIOLEDB_BLCKSZ;
+					ORIOLEDB_BLCKSZ;
 			}
 		}
 		else if (method & TOAST_TABLE_SIZE)
@@ -1141,22 +1141,22 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		{
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
-			/* If OrioleDB table provided count only table (primary index) */
-			o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-			result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
-				ORIOLEDB_BLCKSZ;
+				/* If OrioleDB table provided count only table (primary index) */
+				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
+					ORIOLEDB_BLCKSZ;
 			}
 		}
 	}
-	
+
 	else if (rel->rd_rel->relkind == RELKIND_INDEX)
 	{
 		/* If index provided count its size */
-		Relation        tbl;
-		ORelOids        tblOids;
-		ORelOids        idxOids;
-		OTableDescr 	*table_desc;
-		OIndexNumber	ixnum;
+		Relation	tbl;
+		ORelOids	tblOids;
+		ORelOids	idxOids;
+		OTableDescr *table_desc;
+		OIndexNumber ixnum;
 
 		elog(WARNING, "RELKIND INDEX");
 		idxOids.datoid = MyDatabaseId;
@@ -1167,7 +1167,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 		if (!is_orioledb_rel(tbl))
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				errmsg("index \"%s\" is not on orioledb table \"%s\" ", NameStr(rel->rd_rel->relname), NameStr(tbl->rd_rel->relname))));
+							errmsg("index \"%s\" is not on orioledb table \"%s\" ", NameStr(rel->rd_rel->relname), NameStr(tbl->rd_rel->relname))));
 
 		tblOids.datoid = MyDatabaseId;
 		tblOids.reloid = tbl->rd_rel->oid;
@@ -1177,7 +1177,10 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		ixnum = find_tree_in_descr(table_desc, idxOids);
 		if (ixnum == InvalidIndexNumber)
 		{
-			/* Bridged index is an index of a table, but it's not OrioleDB index and its size should be determined by PG internal routine */
+			/*
+			 * Bridged index is an index of a table, but it's not OrioleDB
+			 * index and its size should be determined by PG internal routine
+			 */
 			relation_close(tbl, AccessShareLock);
 			return -1;
 		}

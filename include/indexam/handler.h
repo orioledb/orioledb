@@ -19,4 +19,5 @@ extern IndexAmRoutine *orioledb_indexam_routine_hook(Oid tamoid,
 													 Oid amhandler);
 
 extern Relation o_current_index;
+
 #endif
