@@ -1242,6 +1242,52 @@ SELECT orioledb_tbl_structure('o_test_toast_rewrite'::regclass, 'nue');
 
 COMMIT;
 ----
+-- Test copying of TOAST values
+----
+-- Copy from orioledb table
+CREATE TABLE o_test1
+(
+	id integer PRIMARY KEY,
+	val text
+) USING orioledb;
+INSERT INTO o_test1 VALUES (1, generate_string(1, 3000));
+CREATE TABLE o_test2
+(
+	id integer PRIMARY KEY,
+	val text
+) USING orioledb;
+INSERT INTO o_test2 (SELECT * FROM o_test1);
+SELECT id, length(val), substr(val, 1, 20) FROM o_test2;
+ id | length |        substr        
+----+--------+----------------------
+  1 |   3000 | 551e8b15be547418fbf5
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test2'::regclass, 'nue');
+                                         orioledb_tbl_structure                                         
+--------------------------------------------------------------------------------------------------------
+ Index o_test2_pkey contents                                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                   +
+     Leftmost, Rightmost                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                            +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                      +
+                                                                                                       +
+ Index toast contents                                                                                  +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                  +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                     +
+     Leftmost, Rightmost                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 2, chunknum 1) +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                 +
+   Chunk 1: offset = 1, location = 2968, hikey location = 80                                           +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 347)                 +
+                                                                                                       +
+ 
+(1 row)
+
+DROP TABLE o_test1;
+DROP TABLE o_test2;
+----
 -- TOAST logical decoding
 ----
 DROP TABLE if exists o_logical;

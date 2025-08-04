@@ -1432,24 +1432,6 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 				 iptr, bridge_data_arg, 0,
 				 slot->tts_values, slot->tts_isnull, oslot->to_toast);
 
-	if (TTS_SHOULDFREE(slot) && !O_TUPLE_IS_NULL(oslot->tuple))
-	{
-		slot->tts_nvalid = 0;
-		pfree(oslot->tuple.data);
-
-		if (oslot->vfree)
-		{
-			int			natts = slot->tts_tupleDescriptor->natts;
-			int			i;
-
-			for (i = 0; i < natts; i++)
-			{
-				if (oslot->vfree[i])
-					pfree(DatumGetPointer(slot->tts_values[i]));
-			}
-			memset(oslot->vfree, 0, natts * sizeof(bool));
-		}
-	}
 	oslot->tuple = tuple;
 	oslot->descr = descr;
 	oslot->ixnum = PrimaryIndexNumber;
