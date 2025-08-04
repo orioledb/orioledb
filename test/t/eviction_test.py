@@ -511,6 +511,7 @@ class EvictionTest(BaseTest):
 
 	def test_evict_temp_table(self):
 		INDEX_NOT_LOADED = "Index o_evicted_pkey: not loaded"
+		INDEX_EMPTY_NOT_LOADED = "Index o_evicted_empty_pkey: not loaded"
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
@@ -540,12 +541,22 @@ class EvictionTest(BaseTest):
 			) USING orioledb;
 			CREATE UNIQUE INDEX o_evicted_ix2 ON o_evicted (key);
 		""")
+		con1.execute("""
+			CREATE TEMP TABLE o_evicted_empty (
+				key SERIAL NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (key)
+			) USING orioledb;
+		""")
 		con1.execute(
 		    "INSERT INTO o_evicted (val) SELECT val id FROM generate_series(1001, 1500, 1) val;\n"
 		)
+		con1.commit()
 
 		self.assertEqual(
 		    con1.execute("SELECT count(*) FROM o_evicted;")[0][0], 500)
+		self.assertEqual(
+		    con1.execute("SELECT count(*) FROM o_evicted_empty;")[0][0], 0)
 
 		n = 250000
 		step = 1000
@@ -565,15 +576,25 @@ class EvictionTest(BaseTest):
 			    con1.execute(
 			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
 			    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+			self.assertEqual(
+			    con1.execute(
+			        "SELECT orioledb_tbl_structure('o_evicted_empty'::regclass, 'e');"
+			    )[0][0].split('\n')[0], INDEX_EMPTY_NOT_LOADED)
 
 			self.assertEqual(
 			    con1.execute("SELECT count(*) FROM o_evicted;")[0][0], 500)
+			self.assertEqual(
+			    con1.execute("SELECT count(*) FROM o_evicted_empty;")[0][0], 0)
 			con1.commit()
 
 			self.assertNotEqual(
 			    con1.execute(
 			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
 			    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+			self.assertNotEqual(
+			    con1.execute(
+			        "SELECT orioledb_tbl_structure('o_evicted_empty'::regclass, 'e');"
+			    )[0][0].split('\n')[0], INDEX_EMPTY_NOT_LOADED)
 
 			con1.execute(
 			    "INSERT INTO o_test (val)\n"
@@ -589,5 +610,9 @@ class EvictionTest(BaseTest):
 			    con1.execute(
 			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
 			    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+			self.assertEqual(
+			    con1.execute(
+			        "SELECT orioledb_tbl_structure('o_evicted_empty'::regclass, 'e');"
+			    )[0][0].split('\n')[0], INDEX_EMPTY_NOT_LOADED)
 		finally:
 			con1.close()
