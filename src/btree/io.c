@@ -2287,7 +2287,12 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	}
 
 	was_dirty = IS_DIRTY(root_blkno);
-	if (was_dirty)
+
+	/*
+	 * Checking FileExtentIsValid() is essential for just created temporary
+	 * trees which aren't dirty, but don't have fileExtent initialized.
+	 */
+	if (was_dirty || !FileExtentIsValid(root_desc->fileExtent))
 	{
 		bool		not_used;
 
