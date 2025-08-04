@@ -6930,6 +6930,12 @@ SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
  
 (1 row)
 
+SELECT regexp_replace(orioledb_zstd_version(), '[0-9]+\.[0-9]+\.[0-9]+', 'x.y.z');
+ regexp_replace 
+----------------
+ x.y.z
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table o_test1
 DROP SCHEMA btree_compression CASCADE;

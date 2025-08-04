@@ -79,6 +79,8 @@ SELECT regexp_replace
 
 SELECT orioledb_tbl_structure('o_test1'::regclass, 'nue');
 
+SELECT regexp_replace(orioledb_zstd_version(), '[0-9]+\.[0-9]+\.[0-9]+', 'x.y.z');
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_compression CASCADE;
 RESET search_path;

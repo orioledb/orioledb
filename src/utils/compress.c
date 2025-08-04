@@ -21,6 +21,8 @@
 
 #include <zstd.h>
 
+PG_FUNCTION_INFO_V1(orioledb_zstd_version);
+
 static ZSTD_CCtx *zstd_cctx = NULL;
 static ZSTD_DCtx *zstd_dctx = NULL;
 static size_t zstd_dst_size;
@@ -97,6 +99,16 @@ o_compress_max_lvl()
 {
 	return ZSTD_maxCLevel();
 }
+
+/*
+ * Returns zstd versionString.
+ */
+Datum
+orioledb_zstd_version(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TEXT_P(cstring_to_text(ZSTD_versionString()));
+}
+
 
 void
 validate_compress(OCompress compress, char *prefix)

@@ -18,5 +18,6 @@ extern Pointer o_compress_page(Pointer page, size_t *size, OCompress lvl);
 extern void o_decompress_page(Pointer src, size_t size, Pointer page);
 extern OCompress o_compress_max_lvl(void);
 extern void validate_compress(OCompress compress, char *prefix);
+extern Datum orioledb_zstd_version(PG_FUNCTION_ARGS);
 
 #endif							/* __COMPRESS_H__ */
