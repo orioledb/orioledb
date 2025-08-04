@@ -51,8 +51,6 @@ PG_FUNCTION_INFO_V1(orioledb_compression_max_level);
 PG_FUNCTION_INFO_V1(orioledb_tbl_compression_check);
 PG_FUNCTION_INFO_V1(orioledb_tbl_indices);
 PG_FUNCTION_INFO_V1(orioledb_relation_size);
-PG_FUNCTION_INFO_V1(orioledb_table_size);
-PG_FUNCTION_INFO_V1(orioledb_total_relation_size);
 PG_FUNCTION_INFO_V1(orioledb_tbl_are_indices_equal);
 PG_FUNCTION_INFO_V1(orioledb_table_pages);
 PG_FUNCTION_INFO_V1(orioledb_tree_stat);
@@ -1479,7 +1477,10 @@ orioledb_tbl_indices(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(result);
 }
 
-/* Includes only table (primary index) */
+/*
+ * Includes table (primary index) TOAST and secondary indices
+ * Deprecated. Use pg_total_relation_size() instead
+ */
 Datum
 orioledb_relation_size(PG_FUNCTION_ARGS)
 {
@@ -1490,42 +1491,10 @@ orioledb_relation_size(PG_FUNCTION_ARGS)
 	orioledb_check_shmem();
 
 	rel = relation_open(relid, AccessShareLock);
-	result = orioledb_calculate_relation_size(rel, InvalidForkNumber, RELATION_SIZE);
+	result = orioledb_calculate_relation_size(rel, MAIN_FORKNUM, TOTAL_SIZE);
 	relation_close(rel, AccessShareLock);
 
-	PG_RETURN_INT64(result);
-}
-
-/* Includes table (primary index) and TOAST */
-Datum
-orioledb_table_size(PG_FUNCTION_ARGS)
-{
-	Oid			relid = PG_GETARG_OID(0);
-	Relation	rel;
-	int64		result;
-
-	orioledb_check_shmem();
-
-	rel = relation_open(relid, AccessShareLock);
-	result = orioledb_calculate_relation_size(rel, InvalidForkNumber, TABLE_SIZE);
-	relation_close(rel, AccessShareLock);
-
-	PG_RETURN_INT64(result);
-}
-
-/* Includes table (primary index) TOAST and secondary indices */
-Datum
-orioledb_total_relation_size(PG_FUNCTION_ARGS)
-{
-	Oid			relid = PG_GETARG_OID(0);
-	Relation	rel;
-	int64		result;
-
-	orioledb_check_shmem();
-
-	rel = relation_open(relid, AccessShareLock);
-	result = orioledb_calculate_relation_size(rel, InvalidForkNumber, TOTAL_SIZE);
-	relation_close(rel, AccessShareLock);
+	elog(WARNING, "orioledb_relation_size is deprecated, use pg_total_relation_size() instead");
 
 	PG_RETURN_INT64(result);
 }
