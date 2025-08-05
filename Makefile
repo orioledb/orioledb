@@ -94,6 +94,7 @@ OBJS = src/btree/btree.o \
 
 REGRESSCHECKS = btree_sys_check \
 				alter_type \
+				alter_storage \
 				bitmap_scan \
 				btree_compression \
 				btree_print \
