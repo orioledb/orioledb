@@ -700,6 +700,31 @@ INSERT INTO o_test_call_cmp_func_in_abort SELECT generate_series(1,10);
 
 ROLLBACK;
 
+CREATE OPERATOR CLASS nrccit_opclass FOR TYPE int
+	USING btree
+	AS FUNCTION 1 btint4cmp(int, int);
+
+CREATE TABLE not_remove_cached_comparator_in_trx (
+	int_val int,
+	text_val text
+) USING orioledb;
+
+BEGIN;
+
+CREATE INDEX not_remove_cached_comparator_in_trx_ix1 ON
+	not_remove_cached_comparator_in_trx(int_val nrccit_opclass);
+
+INSERT INTO not_remove_cached_comparator_in_trx VALUES (1, 'MABB');
+
+DROP INDEX not_remove_cached_comparator_in_trx_ix1;
+
+DROP OPERATOR CLASS nrccit_opclass USING btree;
+
+CREATE INDEX not_remove_cached_comparator_in_trx_ix2 ON
+	not_remove_cached_comparator_in_trx(text_val, int_val);
+
+ROLLBACK;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA opclass CASCADE;
 RESET search_path;
