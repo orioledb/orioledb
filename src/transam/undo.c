@@ -139,7 +139,12 @@ UndoItemTypeDescr undoItemTypeDescrs[] = {
 		.type = SysCacheDeleteUndoItemType,
 		.callback = o_sys_cache_delete_callback,
 		.callOnCommit = false
-	}
+	},
+	{
+		.type = InvalidateComparatorUndoItemType,
+		.callback = o_invalidate_comparator_callback,
+		.callOnCommit = true
+	},
 };
 
 

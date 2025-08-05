@@ -45,6 +45,14 @@
 #include "utils/syscache.h"
 #include "pgstat.h"
 
+typedef struct
+{
+	OnCommitUndoStackItem header;
+	Oid			opfamily;
+	Oid			lefttype;
+	Oid			righttype;
+} InvalidateComparatorUndoStackItem;
+
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table);
@@ -1234,10 +1242,10 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 
 	Assert(opclass != NULL);
 
-	key.opfamily = opclass->opfamily,
-		key.lefttype = opclass->inputtype,
-		key.righttype = opclass->inputtype,
-		key.collation = collation;
+	key.opfamily = opclass->opfamily;
+	key.lefttype = opclass->inputtype;
+	key.righttype = opclass->inputtype;
+	key.collation = collation;
 
 	/*
 	 * At first, try to find existing comparator in cache.
@@ -1362,6 +1370,40 @@ o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 			(void) hash_search(comparatorCache, &key, HASH_REMOVE, NULL);
 		}
 	}
+}
+
+void
+o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation location,
+								 UndoStackItem *baseItem,
+								 OXid oxid, bool abort, bool changeCountsValid)
+{
+	InvalidateComparatorUndoStackItem *invalidateItem = (InvalidateComparatorUndoStackItem *) baseItem;
+
+	o_invalidate_comparator_cache(invalidateItem->opfamily,
+								  invalidateItem->lefttype,
+								  invalidateItem->righttype);
+}
+
+void
+o_add_invalidate_comparator_undo_item(Oid opfamily, Oid lefttype, Oid righttype)
+{
+	UndoLocation location;
+	InvalidateComparatorUndoStackItem *item;
+	LocationIndex size;
+
+	size = sizeof(InvalidateComparatorUndoStackItem);
+	item = (InvalidateComparatorUndoStackItem *) get_undo_record_unreserved(UndoLogSystem,
+																			&location,
+																			MAXALIGN(size));
+	item->opfamily = opfamily;
+	item->lefttype = lefttype;
+	item->righttype = righttype;
+	item->header.base.type = InvalidateComparatorUndoItemType;
+	item->header.base.indexType = oIndexPrimary;
+	item->header.base.itemSize = size;
+
+	add_new_undo_stack_item(UndoLogSystem, location);
+	release_undo_size(UndoLogSystem);
 }
 
 int

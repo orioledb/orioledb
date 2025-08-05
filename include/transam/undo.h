@@ -80,7 +80,8 @@ typedef enum
 	BranchUndoItemType,
 	SubXactUndoItemType,
 	RewindRelFileNodeUndoItemType,
-	SysCacheDeleteUndoItemType
+	SysCacheDeleteUndoItemType,
+	InvalidateComparatorUndoItemType,
 } UndoItemType;
 
 struct UndoStackItem

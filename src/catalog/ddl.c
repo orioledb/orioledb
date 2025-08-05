@@ -3619,9 +3619,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		OOpclass   *o_opclass = o_opclass_get(objectId);
 
 		if (o_opclass)
-			o_invalidate_comparator_cache(o_opclass->opfamily,
-										  o_opclass->inputtype,
-										  o_opclass->inputtype);
+			o_add_invalidate_comparator_undo_item(o_opclass->opfamily,
+												  o_opclass->inputtype,
+												  o_opclass->inputtype);
 	}
 	else if (access == OAT_DROP && classId == TableSpaceRelationId)
 	{
