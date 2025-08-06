@@ -298,7 +298,7 @@ typedef struct
 	 */
 	uint8		page_version;
 	uint32		reserved;
-}			OrioleDBOndiskPageHeader;
+} OrioleDBOndiskPageHeader;
 
 #define O_PAGE_HEADER_SIZE		sizeof(OrioleDBPageHeader)
 #define O_PAGE_HEADER(page)	((OrioleDBPageHeader *)(page))
