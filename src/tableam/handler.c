@@ -1073,7 +1073,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 	BTreeDescr *td;
 	int64		result = 0;
 
-	elog(DEBUG3, "CALLED ORIOLEDB_RELATION_SIZE");
+	elog(WARNING, "CALLED ORIOLEDB_RELATION_SIZE");
 
 	if (forkNumber != MAIN_FORKNUM)
 	{
@@ -1089,11 +1089,12 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		if (!is_orioledb_rel(rel))
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 							errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
-		elog(DEBUG3, "RELKIND TABLE");
+		elog(WARNING, "RELKIND TABLE");
 		descr = relation_get_descr(rel);
 
 		if (method & TOTAL_SIZE)
 		{
+			elog(WARNING, "TOTAL_SIZE");
 			/* Includes table (primary index) TOAST and secondary indices */
 			for (i = 0; i < descr->nIndices + 1; i++)
 			{
@@ -1104,6 +1105,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method & INDEXES_SIZE)
 		{
+			elog(WARNING, "INDEXES_SIZE");
 			/* Only secondary indices */
 			for (i = 0; i < descr->nIndices; i++)
 			{
@@ -1118,6 +1120,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method & TABLE_SIZE)
 		{
+			elog(WARNING, "TABLE_SIZE");
 			/* Includes table (primary index) and TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
@@ -1132,6 +1135,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method & TOAST_TABLE_SIZE)
 		{
+			elog(WARNING, "TOAST_SIZE");
 			/* Only TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
@@ -1142,6 +1146,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method & RELATION_SIZE)
 		{
+			elog(WARNING, "RELATION_SIZE");
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				/* If OrioleDB table provided count only table (primary index) */
@@ -1162,7 +1167,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		OTableDescr *table_desc;
 		OIndexNumber ixnum;
 
-		elog(DEBUG3, "RELKIND INDEX");
+		elog(WARNING, "RELKIND INDEX");
 		idxOids.datoid = MyDatabaseId;
 		idxOids.reloid = rel->rd_rel->oid;
 		idxOids.relnode = rel->rd_rel->relfilenode;
@@ -1170,8 +1175,11 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
 
 		if (!is_orioledb_rel(tbl))
+		{
+			relation_close(tbl, AccessShareLock);
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 							errmsg("index \"%s\" is not on orioledb table \"%s\" ", NameStr(rel->rd_rel->relname), NameStr(tbl->rd_rel->relname))));
+		}
 
 		tblOids.datoid = MyDatabaseId;
 		tblOids.reloid = tbl->rd_rel->oid;
