@@ -1490,6 +1490,7 @@ orioledb_relation_size(PG_FUNCTION_ARGS)
 
 	orioledb_check_shmem();
 
+	elog(DEBUG3, "CALLED ORIOLEDB_RELATION_SIZE");
 	rel = relation_open(relid, AccessShareLock);
 	result = orioledb_calculate_relation_size(rel, MAIN_FORKNUM, TOTAL_SIZE);
 	relation_close(rel, AccessShareLock);

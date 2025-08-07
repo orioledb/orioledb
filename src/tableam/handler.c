@@ -1073,13 +1073,15 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 	BTreeDescr *td;
 	int64		result = 0;
 
-	elog(WARNING, "CALLED ORIOLEDB_RELATION_SIZE");
+	elog(DEBUG3, "CALLED ORIOLEDB_CALCULATE_RELATION_SIZE");
 
 	if (forkNumber != MAIN_FORKNUM)
 	{
 		elog(DEBUG3, "UNEXPECTED FORK");
 		return 0;
 	}
+
+	elog(DEBUG3, "METHOD: %u", method);
 
 	if (rel->rd_rel->relkind != RELKIND_INDEX)
 	{
@@ -1089,12 +1091,12 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		if (!is_orioledb_rel(rel))
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 							errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
-		elog(WARNING, "RELKIND TABLE");
+		elog(DEBUG3, "RELKIND TABLE");
 		descr = relation_get_descr(rel);
 
-		if (method & TOTAL_SIZE)
+		if (method == TOTAL_SIZE)
 		{
-			elog(WARNING, "TOTAL_SIZE");
+			elog(DEBUG3, "TOTAL_SIZE");
 			/* Includes table (primary index) TOAST and secondary indices */
 			for (i = 0; i < descr->nIndices + 1; i++)
 			{
@@ -1103,9 +1105,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 				result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
 			}
 		}
-		else if (method & INDEXES_SIZE)
+		else if (method == INDEXES_SIZE)
 		{
-			elog(WARNING, "INDEXES_SIZE");
+			elog(DEBUG3, "INDEXES_SIZE");
 			/* Only secondary indices */
 			for (i = 0; i < descr->nIndices; i++)
 			{
@@ -1118,9 +1120,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 				result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
 			}
 		}
-		else if (method & TABLE_SIZE)
+		else if (method == TABLE_SIZE)
 		{
-			elog(WARNING, "TABLE_SIZE");
+			elog(DEBUG3, "TABLE_SIZE");
 			/* Includes table (primary index) and TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
@@ -1133,9 +1135,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 					ORIOLEDB_BLCKSZ;
 			}
 		}
-		else if (method & TOAST_TABLE_SIZE)
+		else if (method == TOAST_TABLE_SIZE)
 		{
-			elog(WARNING, "TOAST_SIZE");
+			elog(DEBUG3, "TOAST_SIZE");
 			/* Only TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
@@ -1144,9 +1146,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 					ORIOLEDB_BLCKSZ;
 			}
 		}
-		else if (method & RELATION_SIZE)
+		else if (method == RELATION_SIZE)
 		{
-			elog(WARNING, "RELATION_SIZE");
+			elog(DEBUG3, "RELATION_SIZE");
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				/* If OrioleDB table provided count only table (primary index) */
@@ -1155,9 +1157,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 					ORIOLEDB_BLCKSZ;
 			}
 		}
+		else
+			elog(DEBUG3, "UNKNOWN SIZE!!!");
 	}
-
-//	else if (false)
 	else if (rel->rd_rel->relkind == RELKIND_INDEX)
 	{
 		/* If index provided count its size */
@@ -1167,7 +1169,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		OTableDescr *table_desc;
 		OIndexNumber ixnum;
 
-		elog(WARNING, "RELKIND INDEX");
+		elog(DEBUG3, "RELKIND INDEX");
 		idxOids.datoid = MyDatabaseId;
 		idxOids.reloid = rel->rd_rel->oid;
 		idxOids.relnode = rel->rd_rel->relfilenode;
