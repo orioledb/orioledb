@@ -1115,8 +1115,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		else if (method == INDEXES_SIZE)
 		{
 			/*
-			 * TODO: Bridged indexes are not counted here is references by table relation as they are not
-			 * attached to it. Though they are counted if referenced as index relations (see below).
+			 * TODO: Bridged indexes are not counted here is references by
+			 * table relation as they are not attached to it. Though they are
+			 * counted if referenced as index relations (see below).
 			 */
 			for (i = 0; i < descr->nIndices; i++)
 			{
@@ -1166,9 +1167,9 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 	else if (rel->rd_rel->relkind == RELKIND_INDEX)
 	{
 		/*
-		 * If index relation provided, specifying different methods doesn't matter,
-		 * counting method is always similar to RELATION_SIZE for table, but we need
-		 * to load parent relation for this index first.
+		 * If index relation provided, specifying different methods doesn't
+		 * matter, counting method is always similar to RELATION_SIZE for
+		 * table, but we need to load parent relation for this index first.
 		 */
 		Relation	tbl;
 		ORelOids	tblOids;
