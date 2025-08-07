@@ -1115,9 +1115,10 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		else if (method == INDEXES_SIZE)
 		{
 			/*
-			 * TODO: Bridged indexes are not counted here is references by
-			 * table relation as they are not attached to it. Though they are
-			 * counted if referenced as index relations (see below).
+			 * TODO: Bridged indexes are not counted here if referenced by
+			 * table relation as they are not attached to table descriptor.
+			 * Though they are counted if referenced as index relations (see
+			 * below).
 			 */
 			for (i = 0; i < descr->nIndices; i++)
 			{
