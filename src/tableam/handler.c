@@ -1073,15 +1073,11 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 	BTreeDescr *td;
 	int64		result = 0;
 
-	elog(DEBUG3, "CALLED ORIOLEDB_CALCULATE_RELATION_SIZE");
-
 	if (forkNumber != MAIN_FORKNUM)
 	{
-		elog(DEBUG3, "UNEXPECTED FORK");
+		elog(DEBUG3, "Uunexpected fork number");
 		return 0;
 	}
-
-	elog(DEBUG3, "METHOD: %u", method);
 
 	if (rel->rd_rel->relkind != RELKIND_INDEX)
 	{
@@ -1091,12 +1087,10 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		if (!is_orioledb_rel(rel))
 			ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 							errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
-		elog(DEBUG3, "RELKIND TABLE");
 		descr = relation_get_descr(rel);
 
 		if (method == TOTAL_SIZE)
 		{
-			elog(DEBUG3, "TOTAL_SIZE");
 			/* Includes table (primary index) TOAST and secondary indices */
 			for (i = 0; i < descr->nIndices + 1; i++)
 			{
@@ -1107,7 +1101,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == INDEXES_SIZE)
 		{
-			elog(DEBUG3, "INDEXES_SIZE");
 			/* Only secondary indices */
 			for (i = 0; i < descr->nIndices; i++)
 			{
@@ -1122,7 +1115,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TABLE_SIZE)
 		{
-			elog(DEBUG3, "TABLE_SIZE");
 			/* Includes table (primary index) and TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
@@ -1137,7 +1129,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TOAST_TABLE_SIZE)
 		{
-			elog(DEBUG3, "TOAST_SIZE");
 			/* Only TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
@@ -1148,7 +1139,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == RELATION_SIZE)
 		{
-			elog(DEBUG3, "RELATION_SIZE");
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				/* If OrioleDB table provided count only table (primary index) */
@@ -1158,18 +1148,21 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 			}
 		}
 		else
-			elog(DEBUG3, "UNKNOWN SIZE!!!");
+			elog(ERROR, "Unknown size counting method");
 	}
 	else if (rel->rd_rel->relkind == RELKIND_INDEX)
 	{
-		/* If index provided count its size */
+		/*
+		 * If index relation provided, specifying different methods doesn't matter,
+		 * counting method is always similar to RELATION_SIZE for table, but we need
+		 * to load parent relation for this index first.
+		 */
 		Relation	tbl;
 		ORelOids	tblOids;
 		ORelOids	idxOids;
 		OTableDescr *table_desc;
 		OIndexNumber ixnum;
 
-		elog(DEBUG3, "RELKIND INDEX");
 		idxOids.datoid = MyDatabaseId;
 		idxOids.reloid = rel->rd_rel->oid;
 		idxOids.relnode = rel->rd_rel->relfilenode;

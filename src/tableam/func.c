@@ -1478,7 +1478,7 @@ orioledb_tbl_indices(PG_FUNCTION_ARGS)
 }
 
 /*
- * Includes table (primary index) TOAST and secondary indices
+ * Includes table (primary index), TOAST and secondary indices
  * Deprecated. Use pg_total_relation_size() instead
  */
 Datum
@@ -1490,7 +1490,6 @@ orioledb_relation_size(PG_FUNCTION_ARGS)
 
 	orioledb_check_shmem();
 
-	elog(DEBUG3, "CALLED ORIOLEDB_RELATION_SIZE");
 	rel = relation_open(relid, AccessShareLock);
 	result = orioledb_calculate_relation_size(rel, MAIN_FORKNUM, TOTAL_SIZE);
 	relation_close(rel, AccessShareLock);
