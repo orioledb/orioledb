@@ -1067,6 +1067,20 @@ orioledb_index_validate_scan(Relation heapRelation,
  * ------------------------------------------------------------------------
  */
 
+/*
+ * Calculate size of table according to a requested method if Orioledb table is provided.
+ * Calculate size of index disregarding method.
+ *
+ * Methods:
+ * TOTAL_SIZE - table (primary index), TOAST and secondary indices
+ * INDEXES_SIZE - only secondary indices
+ * TABLE_SIZE - table (primary index) and TOAST
+ * TOAST_TABLE_SIZE - only TOAST (implemented but unused for now)
+ * DEFAULT_SIZE and RELATION_SIZE - only main table (primary index tree). There is no difference betweem DEFAULT_SIZE and RELATION_SIZE
+ * for OrioleDB tables. Though other table AM that don't support different methods should return -1 at any method except DEFAULT_SIZE.
+ *
+ * ForkNumber is disregarded for OrioleDB relations.
+ */
 int64
 orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method)
 {
@@ -1091,7 +1105,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 		if (method == TOTAL_SIZE)
 		{
-			/* Includes table (primary index) TOAST and secondary indices */
 			for (i = 0; i < descr->nIndices + 1; i++)
 			{
 				td = i != descr->nIndices ? &descr->indices[i]->desc : &descr->toast->desc;
@@ -1101,7 +1114,10 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == INDEXES_SIZE)
 		{
-			/* Only secondary indices */
+			/*
+			 * TODO: Bridged indexes are not counted here is references by table relation as they are not
+			 * attached to it. Though they are counted if referenced as index relations (see below).
+			 */
 			for (i = 0; i < descr->nIndices; i++)
 			{
 				if (i == PrimaryIndexNumber)
@@ -1115,7 +1131,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TABLE_SIZE)
 		{
-			/* Includes table (primary index) and TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
@@ -1129,7 +1144,6 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TOAST_TABLE_SIZE)
 		{
-			/* Only TOAST */
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				o_btree_load_shmem(&descr->toast->desc);
@@ -1137,11 +1151,10 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 					ORIOLEDB_BLCKSZ;
 			}
 		}
-		else if (method == RELATION_SIZE)
+		else if (method == RELATION_SIZE || method == DEFAULT_SIZE)
 		{
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
-				/* If OrioleDB table provided count only table (primary index) */
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
 					ORIOLEDB_BLCKSZ;

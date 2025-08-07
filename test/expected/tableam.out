@@ -4743,6 +4743,54 @@ $$;
 -- Create heap test table with PK:
 CREATE TABLE heap_test(id int PRIMARY KEY, value int) using heap;
 INSERT INTO heap_test VALUES (0, 0);
+-- Table size tests
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+	AS $$
+	SELECT substr(string_agg(
+			substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+			''), 1, length)
+	FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+create table size_test(i1 int, i2 int, t text, PRIMARY KEY (i1)) using orioledb;
+INSERT INTO size_test (SELECT id, id, generate_string(id, 3000) FROM generate_series(1, 1000) id);
+create index on size_test(i2);
+select pg_size_pretty(pg_relation_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 56 kB
+(1 row)
+
+select pg_size_pretty(pg_table_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 4056 kB
+(1 row)
+
+select pg_size_pretty(pg_indexes_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 32 kB
+(1 row)
+
+select pg_size_pretty(pg_total_relation_size('size_test'::regclass));
+ pg_size_pretty 
+----------------
+ 4088 kB
+(1 row)
+
+select pg_size_pretty(orioledb_relation_size('size_test'::regclass));
+WARNING:  orioledb_relation_size is deprecated, use pg_total_relation_size() instead
+ pg_size_pretty 
+----------------
+ 4088 kB
+(1 row)
+
+select pg_size_pretty(pg_table_size('size_test_i2_idx'::regclass));
+ pg_size_pretty 
+----------------
+ 32 kB
+(1 row)
+
 -- Run test function:
 SELECT exhaust_logical_xids(40000);
  exhaust_logical_xids 
@@ -4751,7 +4799,7 @@ SELECT exhaust_logical_xids(40000);
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 16 other objects
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table o_tableam6
 drop cascades to table o_tableam_join1
 drop cascades to table o_tableam_cte_base
@@ -4766,10 +4814,11 @@ drop cascades to table o_tableam_snapshot_check
 drop cascades to table o_ctid_test
 drop cascades to table o_test_split_rightmost
 drop cascades to table o_test_cursor_snapshot
+drop cascades to table size_test
 drop cascades to view db_o_tables
 drop cascades to view db_o_indices
 DROP SCHEMA tableam CASCADE;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to function plpgsql_func_test(bigint)
 drop cascades to function boolfunc_test(bigint)
 drop cascades to function smart_explain(text)
@@ -4778,4 +4827,5 @@ drop cascades to function pseudo_random(bigint,bigint)
 drop cascades to sequence o_test_j_seq
 drop cascades to function exhaust_logical_xids(integer)
 drop cascades to table heap_test
+drop cascades to function generate_string(integer,integer)
 RESET search_path;
