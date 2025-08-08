@@ -1249,7 +1249,8 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 	{
 		att = TupleDescAttr(tupdesc, i);
 		if (att->attlen <= 0 && !slot->tts_isnull[i]
-			&& VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[i]))
+			&& (VARATT_IS_EXTERNAL_ONDISK(slot->tts_values[i]) ||
+				VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[i])))
 			has_toasted = true;
 	}
 
@@ -1293,7 +1294,8 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		if (slot->tts_isnull[toast_attn])
 			continue;
 
-		if (VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[toast_attn]))
+		if (VARATT_IS_EXTERNAL_ONDISK(slot->tts_values[toast_attn]) ||
+			VARATT_IS_EXTERNAL_ORIOLEDB(slot->tts_values[toast_attn]))
 		{
 			oslot->to_toast[toast_attn] = ORIOLEDB_TO_TOAST_ON;
 			to_toastn++;
