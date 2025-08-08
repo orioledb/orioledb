@@ -519,6 +519,27 @@ SELECT orioledb_tbl_structure('o_test2'::regclass, 'nue');
 DROP TABLE o_test1;
 DROP TABLE o_test2;
 
+-- Copy from heap table
+CREATE TABLE h_test1
+(
+	id integer PRIMARY KEY,
+	val text
+) USING heap;
+INSERT INTO h_test1 VALUES (1, generate_string(1, 4000));
+
+CREATE TABLE o_test2
+(
+	id integer PRIMARY KEY,
+	val text
+) USING orioledb;
+INSERT INTO o_test2 (SELECT * FROM h_test1);
+
+SELECT id, length(val), substr(val, 1, 20) FROM o_test2;
+SELECT orioledb_tbl_structure('o_test2'::regclass, 'nue');
+
+DROP TABLE h_test1;
+DROP TABLE o_test2;
+
 ----
 -- TOAST logical decoding
 ----

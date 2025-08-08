@@ -205,6 +205,8 @@ o_get_src_size(Datum value)
 		memcpy(&ote, VARDATA_EXTERNAL(DatumGetPointer(value)), O_TOAST_EXTERNAL_SZ);
 		return ote.toasted_size;
 	}
+	else if (VARATT_IS_EXTERNAL_ONDISK(value))
+		return toast_datum_size(value) + VARHDRSZ;
 	else if (VARATT_IS_EXTERNAL(value))
 		return toast_datum_size(value);
 	else
