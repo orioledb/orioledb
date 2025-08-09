@@ -395,19 +395,23 @@ extern bool page_fits_hikey(Page p, LocationIndex newHikeySize);
 extern void page_resize_hikey(Page p, LocationIndex newHikeySize);
 extern void btree_page_update_max_key_len(BTreeDescr *desc, Page p);
 
+typedef enum
+{
+	OPageWaitExclusive,
+	OPageWaitNonExclusive,
+	OPageWaitInsert,
+	OPageWaitWakeUp
+} OPageWaiterStatus;
 
 /* This should be in page_state.h but depends on O_BTREE_MAX_KEY_SIZE */
 typedef struct
 {
 	ORelOids	reloids;
-	OInMemoryBlkno blkno;
+	OPageWaiterStatus status;
 	uint32		pageChangeCount;
 	LocalTransactionId localXid;
 	uint8		tupleFlags;
 	bool		inserted;
-	bool		pageWaiting;
-	bool		waitExclusive;
-	bool		split;
 	Size		reservedUndoSize;
 	uint32		next;
 	union
@@ -415,8 +419,8 @@ typedef struct
 		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];
 		Datum		datum;		/* keep here for alignment */
 	}			tupleData;
-} LockerShmemState;
+} OPageWaiterShmemState;
 
-extern LockerShmemState *lockerStates;
+extern OPageWaiterShmemState *lockerStates;
 
 #endif							/* __BTREE_PAGE_CONTENTS_H__ */

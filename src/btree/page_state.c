@@ -56,7 +56,7 @@ static OInMemoryBlkno myInProgressSplitPages[ORIOLEDB_MAX_DEPTH * 2];
 static int	numberOfMyLockedPages = 0;
 static int	numberOfMyInProgressSplitPages = 0;
 
-LockerShmemState *lockerStates = NULL;
+OPageWaiterShmemState *lockerStates = NULL;
 
 #ifdef CHECK_PAGE_STATS
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
@@ -65,7 +65,7 @@ static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 Size
 page_state_shmem_needs(void)
 {
-	return CACHELINEALIGN(sizeof(LockerShmemState) * max_procs);
+	return CACHELINEALIGN(sizeof(OPageWaiterShmemState) * max_procs);
 }
 
 void
@@ -73,19 +73,7 @@ page_state_shmem_init(Pointer buf, bool found)
 {
 	Pointer		ptr = buf;
 
-	lockerStates = (LockerShmemState *) ptr;
-	if (!found)
-	{
-		int			i;
-
-		for (i = 0; i < max_procs; i++)
-		{
-			lockerStates[i].blkno = OInvalidInMemoryBlkno;
-			lockerStates[i].inserted = false;
-			lockerStates[i].pageWaiting = false;
-			lockerStates[i].split = false;
-		}
-	}
+	lockerStates = (OPageWaiterShmemState *) ptr;
 }
 
 static int
@@ -139,7 +127,7 @@ lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	uint64		state;
-	LockerShmemState *lockerState = &lockerStates[pgprocnum];
+	OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 	bool		ucmUpdateTried = false;
 
 	Assert(pgprocnum < max_procs);
@@ -156,10 +144,8 @@ lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 		else
 		{
 			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
-			lockerState->blkno = OInvalidInMemoryBlkno;
+			lockerState->status = OPageWaitExclusive;
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
-			lockerState->waitExclusive = true;
-			lockerState->pageWaiting = true;
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
 		}
@@ -206,7 +192,7 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	OrioleDBPageHeader *imgHeader = (OrioleDBPageHeader *) img->img;
 	uint64		state;
-	LockerShmemState *lockerState = &lockerStates[pgprocnum];
+	OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 	bool		ucmUpdateTried = false;
 
 	Assert(pgprocnum < max_procs);
@@ -293,13 +279,10 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 			}
 
 			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
-			lockerState->blkno = *blkno;
+			lockerState->status = OPageWaitInsert;
 			lockerState->pageChangeCount = *pageChangeCount;
-			lockerState->split = false;
 			Assert(!lockerState->inserted);
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
-			lockerState->waitExclusive = true;
-			lockerState->pageWaiting = true;
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
 		}
@@ -335,7 +318,7 @@ read_enabled_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	uint64		state;
-	LockerShmemState *lockerState = &lockerStates[pgprocnum];
+	OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 
 	state = pg_atomic_read_u64(&header->state);
 	while (true)
@@ -349,10 +332,8 @@ read_enabled_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 		else
 		{
 			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
-			lockerState->blkno = OInvalidInMemoryBlkno;
+			lockerState->status = OPageWaitNonExclusive;
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
-			lockerState->waitExclusive = false;
-			lockerState->pageWaiting = true;
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
 		}
@@ -372,7 +353,7 @@ state_changed_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum,
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	uint64		state;
-	LockerShmemState *lockerState = &lockerStates[pgprocnum];
+	OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 	bool		ucmUpdateTried = false;
 
 	state = pg_atomic_read_u64(&header->state);
@@ -388,10 +369,8 @@ state_changed_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum,
 		else
 		{
 			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
-			lockerState->blkno = OInvalidInMemoryBlkno;
+			lockerState->status = OPageWaitNonExclusive;
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
-			lockerState->waitExclusive = false;
-			lockerState->pageWaiting = true;
 			newState = state & (~PAGE_STATE_LIST_TAIL_MASK);
 			newState |= pgprocnum;
 		}
@@ -420,7 +399,7 @@ state_changed_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum,
 void
 lock_page(OInMemoryBlkno blkno)
 {
-	LockerShmemState *lockerState = &lockerStates[MYPROCNUMBER];
+	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	uint64		prevState;
 	int			extraWaits = 0;
 
@@ -440,7 +419,7 @@ lock_page(OInMemoryBlkno blkno)
 		for (;;)
 		{
 			PGSemaphoreLock(MyProc->sem);
-			if (!lockerState->pageWaiting)
+			if (lockerState->status == OPageWaitWakeUp)
 				break;
 			extraWaits++;
 		}
@@ -468,7 +447,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 {
 	uint64		prevState;
 	int			extraWaits = 0;
-	LockerShmemState *lockerState = &lockerStates[MYPROCNUMBER];
+	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	bool		keySerialized = false;
 	PageImg		img;
 
@@ -493,7 +472,6 @@ lock_page_with_tuple(BTreeDescr *desc,
 		}
 		else if (lockResult == LockPageResultSplitDetected)
 		{
-			lockerState->blkno = OInvalidInMemoryBlkno;
 			return OLockPageWithTupleResultRefindNeeded;
 		}
 		Assert(lockResult == LockPageResultQueued);
@@ -503,7 +481,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 		for (;;)
 		{
 			PGSemaphoreLock(MyProc->sem);
-			if (!lockerState->pageWaiting)
+			if (lockerState->status == OPageWaitWakeUp)
 				break;
 			extraWaits++;
 		}
@@ -518,7 +496,6 @@ lock_page_with_tuple(BTreeDescr *desc,
 		if (lockerState->inserted)
 		{
 			Assert(keySerialized);
-			lockerState->blkno = OInvalidInMemoryBlkno;
 			lockerState->inserted = false;
 			if (desc->undoType != UndoLogNone)
 				giveup_reserved_undo_size(desc->undoType);
@@ -526,7 +503,6 @@ lock_page_with_tuple(BTreeDescr *desc,
 			return OLockPageWithTupleResultInserted;
 		}
 	}
-	lockerState->blkno = OInvalidInMemoryBlkno;
 
 	EA_LOCK_INC(*blkno);
 
@@ -540,7 +516,7 @@ page_wait_for_read_enable(OInMemoryBlkno blkno)
 {
 	uint32		prevState;
 	int			extraWaits = 0;
-	LockerShmemState *lockerState = &lockerStates[MYPROCNUMBER];
+	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 
 	while (true)
 	{
@@ -554,7 +530,7 @@ page_wait_for_read_enable(OInMemoryBlkno blkno)
 		for (;;)
 		{
 			PGSemaphoreLock(MyProc->sem);
-			if (!lockerState->pageWaiting)
+			if (lockerState->status == OPageWaitWakeUp)
 				break;
 			extraWaits++;
 		}
@@ -578,7 +554,7 @@ page_wait_for_changecount(OInMemoryBlkno blkno, uint32 state)
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	uint64		curState;
 	int			extraWaits = 0;
-	LockerShmemState *lockerState = &lockerStates[MYPROCNUMBER];
+	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 
 	while (true)
 	{
@@ -596,7 +572,7 @@ page_wait_for_changecount(OInMemoryBlkno blkno, uint32 state)
 		for (;;)
 		{
 			PGSemaphoreLock(MyProc->sem);
-			if (!lockerState->pageWaiting)
+			if (lockerState->status == OPageWaitWakeUp)
 			{
 				curState = pg_atomic_read_u64(&header->state);
 				if ((curState & PAGE_STATE_CHANGE_COUNT_MASK) !=
@@ -716,10 +692,9 @@ get_waiters_with_tuples(BTreeDescr *desc,
 
 	while (pgprocnum != PAGE_STATE_INVALID_PROCNO)
 	{
-		LockerShmemState *lockerState = &lockerStates[pgprocnum];
+		OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 
-		if (lockerState->waitExclusive &&
-			lockerState->blkno == blkno &&
+		if (lockerState->status == OPageWaitInsert &&
 			lockerState->pageChangeCount == O_PAGE_HEADER(p)->pageChangeCount &&
 			ORelOidsIsEqual(desc->oids, lockerState->reloids))
 		{
@@ -881,20 +856,16 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		while (cur != prevTail) /* stop before the node we patched during the
 								 * previous (failed) iteration */
 		{
-			LockerShmemState *lock = &lockerStates[cur];
+			OPageWaiterShmemState *lock = &lockerStates[cur];
 
 			bool		shouldWake =
 				lock->inserted ||
-				!lock->waitExclusive ||
-				(split && BlockNumberIsValid(lock->blkno));
+				lock->status == OPageWaitNonExclusive ||
+				(split && lock->status == OPageWaitInsert);
 
 			if (shouldWake)
 			{
 				uint32		next = lock->next;
-
-				/* Mark that the locker must repeat the operation after split */
-				if (!lock->inserted && split && BlockNumberIsValid(lock->blkno))
-					lock->split = true;
 
 				/* Unlink waiter from shared waiter list */
 				if (prev == PAGE_STATE_INVALID_PROCNO)
@@ -926,7 +897,7 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		 * ----------------------------------------------------------------*/
 		if (exclusive != PAGE_STATE_INVALID_PROCNO && !exclusiveAlreadyWoken)
 		{
-			LockerShmemState *lock = &lockerStates[exclusive];
+			OPageWaiterShmemState *lock = &lockerStates[exclusive];
 
 			exclusiveAlreadyWoken = true;
 
@@ -995,12 +966,12 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 	for (uint32 procno = wakeListHead;
 		 procno != PAGE_STATE_INVALID_PROCNO;)
 	{
-		LockerShmemState *lockState = &lockerStates[procno];
+		OPageWaiterShmemState *lockState = &lockerStates[procno];
 		uint32		next;
 		PGPROC	   *proc = GetPGProcByNumber(procno);
 
 		next = lockState->next;
-		lockState->pageWaiting = false;
+		lockState->status = OPageWaitWakeUp;
 
 		/*
 		 * Ensure memory access ordering.  The effect of statements above must

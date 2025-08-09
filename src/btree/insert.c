@@ -446,7 +446,7 @@ get_tuple_waiter_infos(BTreeDescr *desc,
 
 	for (i = 0; i < tupleWaitersCount; i++)
 	{
-		LockerShmemState *lockerState = &lockerStates[tupleWaiterProcnums[i]];
+		OPageWaiterShmemState *lockerState = &lockerStates[tupleWaiterProcnums[i]];
 		TupleWaiterInfo *tupleWaiterInfo = &tupleWaiterInfos[i];
 		OTuple		tuple;
 
@@ -815,15 +815,321 @@ o_btree_insert_needs_page_undo(BTreeDescr *desc, Page p)
 	return needsUndo;
 }
 
+static bool
+o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
+								 int reserve_kind,
+								 int tupleWaiterProcnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
+								 int tupleWaitersCount)
+{
+	BTreeDescr *desc = insert_item->context->desc;
+	OBTreeFindPageContext *curContext = insert_item->context;
+	BTreeSplitItems items;
+	BTreeSplitItems newItems;
+	int			i,
+				waitersWakeupCount = 0;
+	CommitSeqNo csn;
+	bool		needsUndo;
+	OffsetNumber offset;
+	bool		split;
+	OInMemoryBlkno blkno;
+	BTreePageItemLocator loc;
+	TupleWaiterInfo tupleWaiterInfos[BTREE_PAGE_MAX_SPLIT_ITEMS];
+	Page		p;
+
+	(void) get_tuple_waiter_infos(desc,
+								  tupleWaiterProcnums,
+								  tupleWaiterInfos,
+								  tupleWaitersCount);
+
+	qsort_arg(tupleWaiterInfos,
+			  tupleWaitersCount,
+			  sizeof(TupleWaiterInfo),
+			  waiter_info_cmp,
+			  desc);
+
+	blkno = curContext->items[curContext->index].blkno;
+	Assert(OInMemoryBlknoIsValid(blkno));
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+
+	tuple_waiters_check_hikey(desc, p,
+							  tupleWaiterInfos,
+							  &tupleWaitersCount);
+
+	loc = curContext->items[curContext->index].locator;
+	offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
+
+	needsUndo = o_btree_insert_needs_page_undo(desc, p);
+
+	/* Get CSN for undo item if needed */
+	if (needsUndo)
+		csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+	else
+		csn = COMMITSEQNO_INPROGRESS;
+
+	make_split_items(desc, p, &items, &offset,
+					 insert_item->tupheader,
+					 insert_item->tuple,
+					 insert_item->tuplen,
+					 insert_item->replace,
+					 csn);
+
+	split = merge_waited_tuples(desc, p, &newItems, &items,
+								tupleWaiterInfos,
+								tupleWaitersCount);
+
+	for (i = 0; i < tupleWaitersCount; i++)
+	{
+		if (tupleWaiterInfos[i].inserted)
+		{
+			OPageWaiterShmemState *lockerState = &lockerStates[tupleWaiterInfos[i].pgprocno];
+
+			tupleWaiterProcnums[waitersWakeupCount++] = tupleWaiterInfos[i].pgprocno;
+
+			if (desc->undoType != UndoLogNone)
+			{
+				steal_reserved_undo_size(desc->undoType,
+										 lockerState->reservedUndoSize);
+				make_waiter_undo_record(desc, blkno,
+										tupleWaiterInfos[i].pgprocno,
+										lockerState);
+			}
+		}
+	}
+
+	Assert(items.itemsCount + waitersWakeupCount == newItems.itemsCount);
+
+	if (!split)
+	{
+		START_CRIT_SECTION();
+		perform_page_compaction(desc, blkno, &newItems, needsUndo, csn);
+		MARK_DIRTY(desc, blkno);
+
+		if (waitersWakeupCount > 0)
+			mark_waiter_tuples_inserted(tupleWaiterProcnums,
+										waitersWakeupCount);
+
+		unlock_page(blkno);
+		o_btree_insert_mark_split_finished_if_needed(insert_item);
+		END_CRIT_SECTION();
+		return true;
+	}
+	else
+	{
+		return o_btree_insert_split(insert_item, &newItems, offset, csn,
+									needsUndo, reserve_kind,
+									tupleWaiterProcnums,
+									waitersWakeupCount);
+	}
+}
+
+static bool
+o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
+							   int reserve_kind)
+{
+	BTreeDescr *desc = insert_item->context->desc;
+	OBTreeFindPageContext *curContext = insert_item->context;
+	OInMemoryBlkno blkno;
+	LocationIndex tupheaderlen;
+	LocationIndex newItemSize;
+	BTreePageItemLocator loc;
+	Page		p;
+	BTreeItemPageFitType fit = BTreeItemPageFitAsIs;
+
+	blkno = curContext->items[curContext->index].blkno;
+	loc = curContext->items[curContext->index].locator;
+	tupheaderlen = (insert_item->level > 0) ?
+		BTreeNonLeafTuphdrSize : BTreeLeafTuphdrSize;
+
+	Assert(OInMemoryBlknoIsValid(blkno));
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+	newItemSize = MAXALIGN(insert_item->tuplen) + tupheaderlen;
+
+	/*
+	 * Pass the current value of nextCommitSeqNo to page_locator_fits_item().
+	 * The result coult be somewhat pessimistic: it might happend that we
+	 * could actually compact more due to advance of nextCommitSeqNo.
+	 */
+	fit = page_locator_fits_item(desc,
+								 p,
+								 &loc,
+								 newItemSize,
+								 insert_item->replace,
+								 pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo));
+
+	if (fit != BTreeItemPageFitSplitRequired)
+	{
+		BTreePageHeader *header = (BTreePageHeader *) p;
+		BTreeLeafTuphdr prev = {0, 0};
+		int			prevItemSize;
+		BTreeSplitItems items;
+		OffsetNumber offset;
+
+		if (insert_item->replace)
+			prev = *((BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc));
+
+		if (fit == BTreeItemPageFitCompactRequired)
+		{
+			LocationIndex newItemLen;
+			CommitSeqNo csn;
+			bool		needsUndo;
+
+			/*
+			 * No compaction should occur for bridge index: we need to keep
+			 * the entries for VACUUM.
+			 */
+			Assert(desc->type != oIndexBridge);
+
+			/*
+			 * Compact page might insert new item or resize existing item for
+			 * us.
+			 */
+			newItemLen = BTreeLeafTuphdrSize + MAXALIGN(insert_item->tuplen);
+			if (insert_item->replace)
+				newItemLen = Max(newItemLen, BTREE_PAGE_GET_ITEM_SIZE(p, &loc));
+
+			offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
+
+			/* Get CSN for undo item if needed */
+			needsUndo = o_btree_insert_needs_page_undo(desc, p);
+			if (needsUndo)
+				csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+			else
+				csn = COMMITSEQNO_INPROGRESS;
+
+			make_split_items(desc, p, &items, &offset,
+							 insert_item->tupheader,
+							 insert_item->tuple,
+							 insert_item->tuplen,
+							 insert_item->replace,
+							 csn);
+			perform_page_compaction(desc, blkno, &items, needsUndo, csn);
+			header->prevInsertOffset = offset;
+		}
+
+		START_CRIT_SECTION();
+		page_block_reads(blkno);
+
+		if (fit != BTreeItemPageFitCompactRequired)
+		{
+			Pointer		ptr;
+
+			if (!insert_item->replace)
+			{
+				LocationIndex keyLen;
+
+				if (fit != BTreeItemPageFitCompactRequired)
+					page_locator_insert_item(p, &loc, newItemSize);
+				header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
+
+				if (O_PAGE_IS(p, LEAF))
+					keyLen = MAXALIGN(o_btree_len(desc, insert_item->tuple, OTupleKeyLengthNoVersion));
+				else
+					keyLen = MAXALIGN(insert_item->tuplen);
+				header->maxKeyLen = Max(header->maxKeyLen, keyLen);
+			}
+			else
+			{
+				prevItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
+				Assert(O_PAGE_IS(p, LEAF));
+
+				if (!prev.deleted)
+				{
+					OTuple		tuple;
+
+					BTREE_PAGE_READ_TUPLE(tuple, p, &loc);
+					PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength)));
+				}
+
+				/*
+				 * If new tuple is less then previous one, don't resize page
+				 * item immediately.  We want to be able to rollback this
+				 * action without page splits.
+				 *
+				 * Page compaction will re-use unoccupied page space when
+				 * needed.
+				 */
+				if (newItemSize > prevItemSize)
+				{
+					page_locator_resize_item(p, &loc, newItemSize);
+					PAGE_SUB_N_VACATED(p, prevItemSize);
+					header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
+				}
+				else
+				{
+					OTuple		tuple pg_attribute_unused();
+
+					BTREE_PAGE_READ_TUPLE(tuple, p, &loc);
+					PAGE_SUB_N_VACATED(p, BTreeLeafTuphdrSize +
+									   MAXALIGN(insert_item->tuplen));
+					header->prevInsertOffset = MaxOffsetNumber;
+				}
+
+				/*
+				 * We replace tuples only in leafs.  Only inserts go to the
+				 * non-leaf pages.
+				 */
+				Assert(insert_item->level == 0);
+			}
+
+			/* Copy new tuple and header */
+			ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+			memcpy(ptr, insert_item->tupheader, tupheaderlen);
+			ptr += tupheaderlen;
+			memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
+			BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
+
+			if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+				header->chunkDesc[loc.chunkOffset].chunkKeysFixed = 0;
+		}
+
+		if (fit != BTreeItemPageFitCompactRequired)
+			page_split_chunk_if_needed(desc, p, &loc);
+
+		MARK_DIRTY(desc, blkno);
+		unlock_page(blkno);
+
+		o_btree_insert_mark_split_finished_if_needed(insert_item);
+		END_CRIT_SECTION();
+
+		return true;
+	}
+	else
+	{
+		/*
+		 * No way to fit into the current page.  We have to split the page.
+		 */
+		OffsetNumber offset;
+		BTreeSplitItems items;
+		CommitSeqNo csn;
+		bool		needsUndo;
+
+		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
+
+		/* Get CSN for undo item if needed */
+		needsUndo = o_btree_insert_needs_page_undo(desc, p);
+		if (needsUndo)
+			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+		else
+			csn = COMMITSEQNO_INPROGRESS;
+
+		make_split_items(desc, p, &items, &offset,
+						 insert_item->tupheader,
+						 insert_item->tuple,
+						 insert_item->tuplen,
+						 insert_item->replace,
+						 csn);
+
+		return o_btree_insert_split(insert_item, &items, offset, csn,
+									needsUndo, reserve_kind, NULL, 0);
+	}
+}
+
 static void
 o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 {
 	BTreeKeyType kind;
 	BTreeDescr *desc = insert_item->context->desc;
-	Page		p;
 	OInMemoryBlkno blkno = OInvalidInMemoryBlkno;
-	Pointer		ptr;
-	BTreePageItemLocator loc;
 
 	Assert(insert_item != NULL);
 
@@ -844,14 +1150,10 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 	while (insert_item != NULL)
 	{
-		BTreeItemPageFitType fit = BTreeItemPageFitAsIs;
-		LocationIndex newItemSize;
-		LocationIndex tupheaderlen;
 		OBTreeFindPageContext *curContext = insert_item->context;
-		int			tupleWaiterProcnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
-		TupleWaiterInfo tupleWaiterInfos[BTREE_PAGE_MAX_SPLIT_ITEMS];
-		int			tupleWaitersCount;
 		bool		next = false;
+		int			tupleWaiterProcnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
+		int			tupleWaitersCount;
 
 		Assert(desc->ppool->numPagesReserved[reserve_kind] >= 2);
 
@@ -929,11 +1231,6 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 		}
 
 		Assert(OInMemoryBlknoIsValid(blkno));
-		p = O_GET_IN_MEMORY_PAGE(blkno);
-
-		loc = curContext->items[curContext->index].locator;
-		tupheaderlen = (insert_item->level > 0) ?
-			BTreeNonLeafTuphdrSize : BTreeLeafTuphdrSize;
 
 		if (insert_item->level > 0 &&
 			page_is_under_checkpoint(desc, blkno, false))
@@ -945,299 +1242,27 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			backend_set_autonomous_level(checkpoint_state, insert_item->level);
 		}
 
-		newItemSize = MAXALIGN(insert_item->tuplen) + tupheaderlen;
-
-		if (insert_item->level == 0)
+		if (insert_item->level == 0 && !insert_item->replace)
 		{
 			tupleWaitersCount = get_waiters_with_tuples(desc, blkno, tupleWaiterProcnums);
-			(void) get_tuple_waiter_infos(desc,
-										  tupleWaiterProcnums,
-										  tupleWaiterInfos,
-										  tupleWaitersCount);
-
-			qsort_arg(tupleWaiterInfos,
-					  tupleWaitersCount,
-					  sizeof(TupleWaiterInfo),
-					  waiter_info_cmp,
-					  desc);
-
-			tuple_waiters_check_hikey(desc, p,
-									  tupleWaiterInfos,
-									  &tupleWaitersCount);
 		}
 		else
 			tupleWaitersCount = 0;
 
 		if (tupleWaitersCount > 0)
-		{
-			BTreeSplitItems items;
-			BTreeSplitItems newItems;
-			int			i,
-						waitersWakeupCount = 0;
-			CommitSeqNo csn;
-			bool		needsCompaction;
-			bool		needsUndo;
-			OffsetNumber offset;
-			bool		split;
-
-			offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
-
-			needsCompaction = false;
-			needsUndo = needsCompaction && o_btree_insert_needs_page_undo(desc, p);
-
-			/* Get CSN for undo item if needed */
-			if (!needsCompaction)
-				csn = COMMITSEQNO_FROZEN;
-			else if (needsUndo)
-				csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
-			else
-				csn = COMMITSEQNO_INPROGRESS;
-
-			make_split_items(desc, p, &items, &offset,
-							 insert_item->tupheader,
-							 insert_item->tuple,
-							 insert_item->tuplen,
-							 insert_item->replace,
-							 csn);
-
-			split = merge_waited_tuples(desc, p, &newItems, &items,
-										tupleWaiterInfos,
-										tupleWaitersCount);
-
-			for (i = 0; i < tupleWaitersCount; i++)
-			{
-				if (tupleWaiterInfos[i].inserted)
-				{
-					LockerShmemState *lockerState = &lockerStates[tupleWaiterInfos[i].pgprocno];
-
-					tupleWaiterProcnums[waitersWakeupCount++] = tupleWaiterInfos[i].pgprocno;
-
-					if (desc->undoType != UndoLogNone)
-					{
-						steal_reserved_undo_size(desc->undoType,
-												 lockerState->reservedUndoSize);
-						make_waiter_undo_record(desc,
-												tupleWaiterInfos[i].pgprocno,
-												lockerState);
-					}
-				}
-			}
-
-			Assert(items.itemsCount + waitersWakeupCount == newItems.itemsCount);
-
-			if (!split)
-			{
-				START_CRIT_SECTION();
-				perform_page_compaction(desc, blkno, &newItems, needsUndo, csn);
-				MARK_DIRTY(desc, blkno);
-
-				if (waitersWakeupCount > 0)
-					mark_waiter_tuples_inserted(tupleWaiterProcnums,
-												waitersWakeupCount);
-
-				unlock_page(blkno);
-				o_btree_insert_mark_split_finished_if_needed(insert_item);
-				END_CRIT_SECTION();
-				next = true;
-			}
-			else
-			{
-				next = o_btree_insert_split(insert_item, &newItems, offset, csn,
-											needsUndo, reserve_kind,
-											tupleWaiterProcnums,
-											waitersWakeupCount);
-			}
-		}
+			next = o_btree_insert_item_with_waiters(insert_item,
+													reserve_kind,
+													tupleWaiterProcnums,
+													tupleWaitersCount);
 		else
-		{
-			/*
-			 * Pass the current value of nextCommitSeqNo to
-			 * page_locator_fits_item().  The result coult be somewhat
-			 * pessimistic: it might happend that we could actually compact
-			 * more due to advance of nextCommitSeqNo.
-			 */
-			fit = page_locator_fits_item(desc,
-										 p,
-										 &loc,
-										 newItemSize,
-										 insert_item->replace,
-										 pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo));
-		}
-
-		if (tupleWaitersCount <= 0 &&
-			fit != BTreeItemPageFitSplitRequired)
-		{
-			BTreePageHeader *header = (BTreePageHeader *) p;
-			BTreeLeafTuphdr prev = {0, 0};
-			int			prevItemSize;
-			BTreeSplitItems items;
-			OffsetNumber offset;
-
-			if (insert_item->replace)
-				prev = *((BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc));
-
-			if (fit == BTreeItemPageFitCompactRequired)
-			{
-				LocationIndex newItemLen;
-				CommitSeqNo csn;
-				bool		needsUndo;
-
-				/*
-				 * No compaction should occur for bridge index: we need to
-				 * keep the entries for VACUUM.
-				 */
-				Assert(desc->type != oIndexBridge);
-
-				/*
-				 * Compact page might insert new item or resize existing item
-				 * for us.
-				 */
-				newItemLen = BTreeLeafTuphdrSize + MAXALIGN(insert_item->tuplen);
-				if (insert_item->replace)
-					newItemLen = Max(newItemLen, BTREE_PAGE_GET_ITEM_SIZE(p, &loc));
-
-				offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
-
-				/* Get CSN for undo item if needed */
-				needsUndo = o_btree_insert_needs_page_undo(desc, p);
-				if (needsUndo)
-					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-				else
-					csn = COMMITSEQNO_INPROGRESS;
-
-				make_split_items(desc, p, &items, &offset,
-								 insert_item->tupheader,
-								 insert_item->tuple,
-								 insert_item->tuplen,
-								 insert_item->replace,
-								 csn);
-				perform_page_compaction(desc, blkno, &items, needsUndo, csn);
-				header->prevInsertOffset = offset;
-			}
-
-			START_CRIT_SECTION();
-			page_block_reads(blkno);
-
-			if (fit != BTreeItemPageFitCompactRequired)
-			{
-				if (!insert_item->replace)
-				{
-					LocationIndex keyLen;
-
-					if (fit != BTreeItemPageFitCompactRequired)
-						page_locator_insert_item(p, &loc, newItemSize);
-					header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
-
-					if (O_PAGE_IS(p, LEAF))
-						keyLen = MAXALIGN(o_btree_len(desc, insert_item->tuple, OTupleKeyLengthNoVersion));
-					else
-						keyLen = MAXALIGN(insert_item->tuplen);
-					header->maxKeyLen = Max(header->maxKeyLen, keyLen);
-				}
-				else
-				{
-					prevItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-					Assert(O_PAGE_IS(p, LEAF));
-
-					if (!prev.deleted)
-					{
-						OTuple		tuple;
-
-						BTREE_PAGE_READ_TUPLE(tuple, p, &loc);
-						PAGE_ADD_N_VACATED(p, BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength)));
-					}
-
-					/*
-					 * If new tuple is less then previous one, don't resize
-					 * page item immediately.  We want to be able to rollback
-					 * this action without page splits.
-					 *
-					 * Page compaction will re-use unoccupied page space when
-					 * needed.
-					 */
-					if (newItemSize > prevItemSize)
-					{
-						page_locator_resize_item(p, &loc, newItemSize);
-						PAGE_SUB_N_VACATED(p, prevItemSize);
-						header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
-					}
-					else
-					{
-						OTuple		tuple pg_attribute_unused();
-
-						BTREE_PAGE_READ_TUPLE(tuple, p, &loc);
-						PAGE_SUB_N_VACATED(p, BTreeLeafTuphdrSize +
-										   MAXALIGN(insert_item->tuplen));
-						header->prevInsertOffset = MaxOffsetNumber;
-					}
-
-					/*
-					 * We replace tuples only in leafs.  Only inserts go to
-					 * the non-leaf pages.
-					 */
-					Assert(insert_item->level == 0);
-				}
-
-				/* Copy new tuple and header */
-				ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-				memcpy(ptr, insert_item->tupheader, tupheaderlen);
-				ptr += tupheaderlen;
-				memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
-				BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
-
-				if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
-					header->chunkDesc[loc.chunkOffset].chunkKeysFixed = 0;
-			}
-
-			if (fit != BTreeItemPageFitCompactRequired)
-				page_split_chunk_if_needed(desc, p, &loc);
-
-			MARK_DIRTY(desc, blkno);
-			unlock_page(blkno);
-
-			o_btree_insert_mark_split_finished_if_needed(insert_item);
-			END_CRIT_SECTION();
-
-			next = true;
-		}
-		else if (tupleWaitersCount <= 0)
-		{
-			/*
-			 * No way to fit into the current page.  We have to split the
-			 * page.
-			 */
-			OffsetNumber offset;
-			BTreeSplitItems items;
-			CommitSeqNo csn;
-			bool		needsUndo;
-
-			offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
-
-			/* Get CSN for undo item if needed */
-			needsUndo = o_btree_insert_needs_page_undo(desc, p);
-			if (needsUndo)
-				csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-			else
-				csn = COMMITSEQNO_INPROGRESS;
-
-			make_split_items(desc, p, &items, &offset,
-							 insert_item->tupheader,
-							 insert_item->tuple,
-							 insert_item->tuplen,
-							 insert_item->replace,
-							 csn);
-
-			next = o_btree_insert_split(insert_item, &items, offset, csn,
-										needsUndo, reserve_kind, NULL, 0);
-		}
+			next = o_btree_insert_item_no_waiters(insert_item,
+												  reserve_kind);
 
 		if (next)
 			insert_item = insert_item->next;
 
 		if (insert_item != NULL)
-		{
 			ppool_reserve_pages(desc->ppool, reserve_kind, 2);
-		}
 	}
 	ppool_release_reserved(desc->ppool, PPOOL_KIND_GET_MASK(reserve_kind));
 }

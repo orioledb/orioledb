@@ -359,8 +359,8 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 }
 
 void
-make_waiter_undo_record(BTreeDescr *desc, int pgprocno,
-						LockerShmemState *lockerState)
+make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
+						OPageWaiterShmemState *lockerState)
 {
 	LocationIndex tuplelen;
 	UndoLocation undoLocation;
@@ -383,7 +383,7 @@ make_waiter_undo_record(BTreeDescr *desc, int pgprocno,
 	item->header.type = ModifyUndoItemType;
 	item->header.indexType = desc->type;
 	item->action = BTreeOperationInsert;
-	item->blkno = lockerState->blkno;
+	item->blkno = blkno;
 	item->pageChangeCount = lockerState->pageChangeCount;
 	item->oids = desc->oids;
 
