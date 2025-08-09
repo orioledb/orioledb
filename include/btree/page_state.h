@@ -65,9 +65,8 @@ extern bool have_locked_pages(void);
 extern int	get_waiters_with_tuples(BTreeDescr *desc,
 									OInMemoryBlkno blkno,
 									int result[BTREE_PAGE_MAX_SPLIT_ITEMS]);
-extern void wakeup_waiters_with_tuples(OInMemoryBlkno blkno,
-									   int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
-									   int count);
+extern void mark_waiter_tuples_inserted(int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
+										int count);
 extern void lock_page(OInMemoryBlkno blkno);
 extern OLockPageWithTupleResult lock_page_with_tuple(BTreeDescr *desc,
 													 OInMemoryBlkno *blkno,
@@ -80,9 +79,7 @@ extern void delare_page_as_locked(OInMemoryBlkno blkno);
 extern bool page_is_locked(OInMemoryBlkno blkno);
 extern void page_block_reads(OInMemoryBlkno blkno);
 extern void unlock_page(OInMemoryBlkno blkno);
-extern void unlock_page_after_split(BTreeDescr *desc, OInMemoryBlkno blkno,
-									OInMemoryBlkno rightBlkno,
-									int *procnums, int procnumsCount);
+extern void unlock_page_after_split(OInMemoryBlkno blkno);
 extern void release_all_page_locks(void);
 extern void page_wait_for_read_enable(OInMemoryBlkno blkno);
 extern void btree_register_inprogress_split(OInMemoryBlkno rightBlkno);

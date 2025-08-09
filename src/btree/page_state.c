@@ -738,9 +738,8 @@ get_waiters_with_tuples(BTreeDescr *desc,
 }
 
 void
-wakeup_waiters_with_tuples(OInMemoryBlkno blkno,
-						   int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
-						   int count)
+mark_waiter_tuples_inserted(int procnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
+							int count)
 {
 	int			i;
 
@@ -750,122 +749,6 @@ wakeup_waiters_with_tuples(OInMemoryBlkno blkno,
 		lockerStates[procnums[i]].inserted = true;
 
 }
-
-#ifdef UNUSED
-static void
-wakeup_waiters_after_split(BTreeDescr *desc,
-						   OInMemoryBlkno blkno, OInMemoryBlkno rightBlkno,
-						   int *procnums, int procnumsCount)
-{
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	proclist_head wakeup,
-				moveToRight;
-	int			moveToRightCount = 0;
-	proclist_mutable_iter iter;
-	bool		wokeup_exclusive = false;
-	uint32		mask;
-	int			i;
-
-	proclist_init(&wakeup);
-	proclist_init(&moveToRight);
-
-	for (i = 0; i < procnumsCount; i++)
-	{
-		LockerShmemState *lockerState = &lockerStates[procnums[i]];
-
-		if (lockerState->blkno == blkno &&
-			ORelOidsIsEqual(desc->oids, lockerState->reloids))
-		{
-			proclist_delete(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList, procnums[i], lwWaitLink);
-			proclist_push_tail(&moveToRight, procnums[i], lwWaitLink);
-			moveToRightCount++;
-		}
-	}
-
-	proclist_foreach_modify(iter, &O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList, lwWaitLink)
-	{
-		PGPROC	   *waiter = GetPGProcByNumber(iter.cur);
-
-		if (waiter->lwWaitMode == LW_EXCLUSIVE && wokeup_exclusive)
-			continue;
-
-		proclist_delete(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList, iter.cur, lwWaitLink);
-		proclist_push_tail(&wakeup, iter.cur, lwWaitLink);
-
-		if (waiter->lwWaitMode == LW_EXCLUSIVE)
-			wokeup_exclusive = true;
-	}
-
-	mask = ~PAGE_STATE_LIST_LOCKED_FLAG;
-	if (proclist_is_empty(&O_GET_IN_MEMORY_PAGEDESC(blkno)->waitersList))
-		mask &= ~PAGE_STATE_HAS_WAITERS_FLAG;
-	pg_atomic_fetch_and_u32(&(O_PAGE_HEADER(p)->state), mask);
-
-	/* Awaken any waiters I removed from the queue. */
-	proclist_foreach_modify(iter, &wakeup, lwWaitLink)
-	{
-		PGPROC	   *waiter = GetPGProcByNumber(iter.cur);
-
-		proclist_delete(&wakeup, iter.cur, lwWaitLink);
-
-		/*
-		 * Guarantee that lwWaiting being unset only becomes visible once the
-		 * unlink from the link has completed. Otherwise the target backend
-		 * could be woken up for other reason and enqueue for a new lock - if
-		 * that happens before the list unlink happens, the list would end up
-		 * being corrupted.
-		 *
-		 * The barrier pairs with the LWLockWaitListLock() when enqueuing for
-		 * another lock.
-		 */
-		pg_write_barrier();
-		waiter->lwWaiting = false;
-		PGSemaphoreUnlock(waiter->sem);
-	}
-
-	wokeup_exclusive = false;
-	if (!proclist_is_empty(&moveToRight))
-	{
-		OrioleDBPageHeader *rightHeader = (OrioleDBPageHeader *) O_GET_IN_MEMORY_PAGE(rightBlkno);
-
-		if (moveToRightCount > 1)
-		{
-			(void) lock_page_list(rightBlkno);
-			(void) pg_atomic_fetch_or_u32(&rightHeader->state,
-										  PAGE_STATE_HAS_WAITERS_FLAG);
-		}
-
-		proclist_foreach_modify(iter, &moveToRight, lwWaitLink)
-		{
-			PGPROC	   *waiter = GetPGProcByNumber(iter.cur);
-			LockerShmemState *lockerState = &lockerStates[waiter->pgprocno];
-
-			proclist_delete(&moveToRight, iter.cur, lwWaitLink);
-
-			lockerState->blkno = rightBlkno;
-			lockerState->pageChangeCount = rightHeader->pageChangeCount;
-
-			if (!wokeup_exclusive)
-			{
-				pg_write_barrier();
-				waiter->lwWaiting = false;
-				PGSemaphoreUnlock(waiter->sem);
-				wokeup_exclusive = true;
-			}
-			else
-			{
-				proclist_push_tail(&O_GET_IN_MEMORY_PAGEDESC(rightBlkno)->waitersList,
-								   iter.cur,
-								   lwWaitLink);
-			}
-		}
-
-		if (moveToRightCount > 1)
-			pg_atomic_fetch_and_u32(&rightHeader->state,
-									~PAGE_STATE_LIST_LOCKED_FLAG);
-	}
-}
-#endif
 
 /*
  * Check page before unlocking.
@@ -1142,18 +1025,9 @@ unlock_page(OInMemoryBlkno blkno)
  * Unlock the page after page split.  Page should be locked before.
  */
 void
-unlock_page_after_split(BTreeDescr *desc,
-						OInMemoryBlkno blkno, OInMemoryBlkno rightBlkno,
-						int *procnums, int procnumsCount)
+unlock_page_after_split(OInMemoryBlkno blkno)
 {
 	unlock_page_internal(blkno, true);
-#ifdef NOT_USED
-	uint32		state = unlock_page_internal(blkno);
-
-	if (state & PAGE_STATE_HAS_WAITERS_FLAG)
-		wakeup_waiters_after_split(desc, blkno, rightBlkno,
-								   procnums, procnumsCount);
-#endif
 }
 
 /*
