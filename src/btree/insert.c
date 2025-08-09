@@ -459,7 +459,6 @@ get_tuple_waiter_infos(BTreeDescr *desc,
 			MAXALIGN(o_btree_len(desc,
 								 tuple,
 								 OTupleLength));
-		tupleWaiterInfo->item.newItem = false;
 		tupleWaiterInfo->pgprocno = tupleWaiterProcnums[i];
 		tupleWaiterInfo->index = i;
 		tupleWaiterInfo->inserted = false;

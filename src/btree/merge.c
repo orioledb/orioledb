@@ -609,7 +609,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			items[i].flags = tup.formatFlags;
 			items[i].size = finished ? (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
 				BTREE_PAGE_GET_ITEM_SIZE(left, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -620,7 +619,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(left, &loc);
 			items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(left, &loc);
 			items[i].size = BTREE_PAGE_GET_ITEM_SIZE(left, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -645,7 +643,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			items[i].flags = tup.formatFlags;
 			items[i].size = finished ? (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
 				BTREE_PAGE_GET_ITEM_SIZE(right, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -666,14 +663,12 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 				items[i].data = newItem;
 				items[i].flags = leftHikey.formatFlags;
 				items[i].size = MAXALIGN(BTreeNonLeafTuphdrSize + leftHikeySize);
-				items[i].newItem = false;
 				i++;
 				continue;
 			}
 			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(right, &loc);
 			items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(right, &loc);
 			items[i].size = BTREE_PAGE_GET_ITEM_SIZE(right, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -682,7 +677,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 
 	left_header->flags = left_header->flags | right_header->flags;
 
-	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey, NULL);
+	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey);
 
 	o_btree_page_calculate_statistics(desc, left);
 

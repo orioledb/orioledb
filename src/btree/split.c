@@ -55,7 +55,6 @@ make_split_items(BTreeDescr *desc, Page page,
 			items->items[i].data = newItem;
 			items->items[i].flags = tuple.formatFlags;
 			items->items[i].size = tuple_header_size + MAXALIGN(tuplesize);
-			items->items[i].newItem = false;
 			newKeyLen = o_btree_len(desc, tuple, leaf ? OTupleKeyLengthNoVersion : OKeyLength);
 			maxKeyLen = Max(maxKeyLen, newKeyLen);
 			i++;
@@ -96,14 +95,12 @@ make_split_items(BTreeDescr *desc, Page page,
 			items->items[i].size = finished ?
 				(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
 				BTREE_PAGE_GET_ITEM_SIZE(page, &loc);
-			items->items[i].newItem = false;
 		}
 		else
 		{
 			items->items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(page, &loc);
 			items->items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(page, &loc);
 			items->items[i].size = BTREE_PAGE_GET_ITEM_SIZE(page, &loc);
-			items->items[i].newItem = false;
 		}
 
 		i++;
@@ -172,7 +169,7 @@ perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
 	}
 
 	btree_page_reorg(desc, p, items->items,
-					 items->itemsCount, hikeySize, hikey.tuple, NULL);
+					 items->itemsCount, hikeySize, hikey.tuple);
 	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
 	o_btree_page_calculate_statistics(desc, p);
 
@@ -394,7 +391,7 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	btree_page_reorg(desc, right_page, &items->items[left_count],
 					 items->itemsCount - left_count,
-					 hikeySize, hikey, NULL);
+					 hikeySize, hikey);
 
 	/*
 	 * Start page modification.  It contains the required memory barrier
@@ -423,7 +420,7 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
 	O_GET_IN_MEMORY_PAGEDESC(new_blkno)->leftBlkno = blkno;
 
 	btree_page_reorg(desc, left_page, &items->items[0], left_count,
-					 splitkey_len, splitkey, NULL);
+					 splitkey_len, splitkey);
 
 	o_btree_page_calculate_statistics(desc, left_page);
 	o_btree_page_calculate_statistics(desc, right_page);

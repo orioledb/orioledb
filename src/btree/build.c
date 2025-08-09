@@ -127,7 +127,7 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	}
 
 	btree_page_reorg(desc, img, &items.items[0], left_count,
-					 rightbound_key_size, rightbound_key, NULL);
+					 rightbound_key_size, rightbound_key);
 
 	if (key_palloc)
 		pfree(rightbound_key.data);
