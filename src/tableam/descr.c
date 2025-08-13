@@ -504,22 +504,36 @@ index_descr_free(OIndexDescr *tree)
 {
 	if (tree->old_leaf_slot)
 		ExecDropSingleTupleTableSlot(tree->old_leaf_slot);
+	tree->old_leaf_slot = NULL;
+
 	if (tree->new_leaf_slot)
 		ExecDropSingleTupleTableSlot(tree->new_leaf_slot);
+	tree->new_leaf_slot = NULL;
+
 	if (tree->index_slot)
 		ExecDropSingleTupleTableSlot(tree->index_slot);
+	tree->index_slot = NULL;
+
 	if (tree->leafTupdesc)
 		FreeTupleDesc(tree->leafTupdesc);
+	tree->leafTupdesc = NULL;
+
 	if (tree->nonLeafTupdesc)
 		FreeTupleDesc(tree->nonLeafTupdesc);
+	tree->nonLeafTupdesc = NULL;
+
 	if (tree->itupdesc)
 		FreeTupleDesc(tree->itupdesc);
+	tree->itupdesc = NULL;
+
 	if (tree->econtext)
 		FreeExprContext(tree->econtext, false);
+	tree->econtext = NULL;
+
 	if (tree->index_mctx)
-	{
 		MemoryContextDelete(tree->index_mctx);
-	}
+	tree->index_mctx = NULL;
+
 	checkpointable_tree_free(&tree->desc);
 }
 
