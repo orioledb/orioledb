@@ -1525,6 +1525,9 @@ o_invalidate_oids(ORelOids oids)
 	msg.usr.arg2 = oids.reloid;
 	msg.usr.arg3 = oids.relnode;
 
+	elog(WARNING, "o_invalidate_oids: oids (%d, %d, %d)",
+		 oids.datoid, oids.reloid, oids.relnode);
+
 	/* check AddCatcacheInvalidationMessage() for an explanation */
 	VALGRIND_MAKE_MEM_DEFINED(&msg, sizeof(msg));
 

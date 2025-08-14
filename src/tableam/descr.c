@@ -502,6 +502,51 @@ o_tree_init_free_extents(BTreeDescr *desc)
 static void
 index_descr_free(OIndexDescr *tree)
 {
+	elog(WARNING, "index_descr_free: oids (%d, %d, %d)",
+		 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode);
+
+	if (tree->leafTupdesc && tree->leafTupdesc->constr && tree->leafTupdesc->constr->missing)
+	{
+		TupleDesc	tupdesc = tree->leafTupdesc;
+		AttrMissing *attrmiss = tupdesc->constr->missing;
+
+		for (int i = tupdesc->natts - 1; i >= 0; i--)
+		{
+			if (attrmiss[i].am_present
+				&& !TupleDescAttr(tupdesc, i)->attbyval)
+				elog(WARNING, "index_descr_free leafTupdesc: i %d, am_value %p",
+					 i, DatumGetPointer(attrmiss[i].am_value));
+		}
+	}
+
+	if (tree->nonLeafTupdesc && tree->nonLeafTupdesc->constr && tree->nonLeafTupdesc->constr->missing)
+	{
+		TupleDesc	tupdesc = tree->nonLeafTupdesc;
+		AttrMissing *attrmiss = tupdesc->constr->missing;
+
+		for (int i = tupdesc->natts - 1; i >= 0; i--)
+		{
+			if (attrmiss[i].am_present
+				&& !TupleDescAttr(tupdesc, i)->attbyval)
+				elog(WARNING, "index_descr_free nonLeafTupdesc: i %d, am_value %p",
+					 i, DatumGetPointer(attrmiss[i].am_value));
+		}
+	}
+
+	if (tree->itupdesc && tree->itupdesc->constr && tree->itupdesc->constr->missing)
+	{
+		TupleDesc	tupdesc = tree->itupdesc;
+		AttrMissing *attrmiss = tupdesc->constr->missing;
+
+		for (int i = tupdesc->natts - 1; i >= 0; i--)
+		{
+			if (attrmiss[i].am_present
+				&& !TupleDescAttr(tupdesc, i)->attbyval)
+				elog(WARNING, "index_descr_free itupdesc: i %d, am_value %p",
+					 i, DatumGetPointer(attrmiss[i].am_value));
+		}
+	}
+
 	if (tree->old_leaf_slot)
 		ExecDropSingleTupleTableSlot(tree->old_leaf_slot);
 	tree->old_leaf_slot = NULL;
@@ -851,6 +896,9 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 	OTableDescr *tableDescr;
 	OIndexDescr *indexDescr;
 
+	elog(WARNING, "o_invalidate_descrs: oids (%d, %d, %d)",
+		 datoid, reloid, relfilenode);
+
 	if (!OidIsValid(datoid) || !OidIsValid(reloid) || !OidIsValid(relfilenode))
 	{
 		Assert(!OidIsValid(datoid) && !OidIsValid(reloid) && !OidIsValid(relfilenode));
@@ -1021,6 +1069,9 @@ recreate_index_descr(OIndexDescr *descr)
 	OIndex	   *oIndex;
 	int			refcnt;
 	MemoryContext mcxt;
+
+	elog(WARNING, "recreate_index_descr: oids (%d, %d, %d)",
+		 descr->oids.datoid, descr->oids.reloid, descr->oids.relnode);
 
 	oIndex = o_indices_get(descr->oids, descr->desc.type);
 	if (!oIndex)
