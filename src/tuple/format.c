@@ -229,6 +229,7 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 	OTupleReaderState reader;
 	uint32		prev_off;
 	Pointer		result = NULL;
+	Form_pg_attribute att;
 
 	/* ----------------
 	 *	 Three cases:
@@ -278,15 +279,14 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 		tp = (char *) (tuple.data + SizeOfOTupleHeader);
 	}
 
+	att = TupleDescAttr(tupleDesc, attnum);
+
 	if (!slow)
 	{
-		Form_pg_attribute att;
-
 		/*
 		 * If we get here, there are no nulls up to and including the target
 		 * attribute.  If we have a cached offset, we can use it.
 		 */
-		att = TupleDescAttr(tupleDesc, attnum);
 		if (att->attcacheoff >= 0)
 			return tp + att->attcacheoff;
 	}
@@ -299,6 +299,8 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 		result = o_tuple_read_next_field_ptr(&reader);
 	}
 	Assert(result != NULL);
+	prev_off = att_align_pointer(prev_off, att->attalign, -1,
+								 tp + prev_off);
 	result = tp + prev_off;
 
 	return result;
