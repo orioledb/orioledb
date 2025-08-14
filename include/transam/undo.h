@@ -56,6 +56,7 @@ typedef struct
 	pg_atomic_uint64 cleanedCheckpointEndLocation;
 	slock_t		minUndoLocationsMutex;
 	uint32		minUndoLocationsChangeCount;
+	uint32		writeInProgressChangeCount;
 	int			undoWriteTrancheId;
 	LWLock		undoWriteLock;
 	int			undoStackLocationsFlushLockTrancheId;
@@ -166,11 +167,12 @@ extern void undo_shmem_init(Pointer buf, bool found);
 extern UndoMeta *get_undo_meta_by_type(UndoLogType undoType);
 
 extern void update_min_undo_locations(UndoLogType undoType,
-									  bool have_lock, bool do_cleanup);
-extern void write_undo(UndoLogType undoType,
-					   UndoLocation targetUndoLocation,
-					   UndoLocation minProcReservedLocation,
-					   bool attempt);
+									  bool have_lock,
+									  bool do_cleanup);
+extern void evict_undo_to_disk(UndoLogType undoType,
+							   UndoLocation targetUndoLocation,
+							   UndoLocation minProcReservedLocation,
+							   bool attempt);
 extern bool reserve_undo_size_extended(UndoLogType type, Size size,
 									   bool waitForUndoLocation);
 extern void steal_reserved_undo_size(UndoLogType type, Size size);

@@ -175,8 +175,8 @@ bgwriter_main(Datum main_arg)
 					UndoLocation targetLocation = lastUsedLocation - (19 * undo_circular_buffer_size) / 20;
 
 					if (targetLocation < minProcReservedLocation)
-						write_undo((UndoLogType) j, targetLocation,
-								   minProcReservedLocation, true);
+						evict_undo_to_disk((UndoLogType) j, targetLocation,
+										   minProcReservedLocation, true);
 				}
 			}
 

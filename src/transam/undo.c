@@ -358,8 +358,6 @@ update_min_undo_locations(UndoLogType undoType,
 	/*
 	 * Make sure none of calculated variables goes backwards.
 	 */
-	minReservedLocation = Max(pg_atomic_read_u64(&meta->minProcReservedLocation),
-							  minReservedLocation);
 	minRetainLocation = Max(pg_atomic_read_u64(&meta->minProcRetainLocation),
 							minRetainLocation);
 	minTransactionRetainLocation = Max(pg_atomic_read_u64(&meta->minProcTransactionRetainLocation),
@@ -469,12 +467,29 @@ update_min_undo_locations(UndoLogType undoType,
  * Guarantees that concurrent update_min_undo_locations() finishes.
  */
 static void
-wait_for_even_changecount(UndoMeta *meta)
+wait_for_even_min_undo_locations_changecount(UndoMeta *meta)
 {
 	SpinDelayStatus status;
 
 	init_local_spin_delay(&status);
 	while (meta->minUndoLocationsChangeCount & 1)
+	{
+		perform_spin_delay(&status);
+		pg_read_barrier();
+	}
+	finish_spin_delay(&status);
+}
+
+/*
+ * Guarantees that concurrent update_min_undo_locations() finishes.
+ */
+static void
+wait_for_even_write_in_progress_changecount(UndoMeta *meta)
+{
+	SpinDelayStatus status;
+
+	init_local_spin_delay(&status);
+	while (meta->writeInProgressChangeCount & 1)
 	{
 		perform_spin_delay(&status);
 		pg_read_barrier();
@@ -497,7 +512,7 @@ set_my_reserved_location(UndoLogType undoType)
 		if (!UndoLocationIsValid(pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation)))
 			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, lastUsedLocation);
 
-		wait_for_even_changecount(meta);
+		wait_for_even_min_undo_locations_changecount(meta);
 
 		/*
 		 * Retry if minimal positions run higher due to concurrent
@@ -533,13 +548,13 @@ set_my_retain_location(UndoLogType undoType)
 
 		pg_memory_barrier();
 
-		wait_for_even_changecount(meta);
+		wait_for_even_min_undo_locations_changecount(meta);
 
 		/*
 		 * Retry if minimal positions run higher due to concurrent
 		 * update_min_undo_locations().
 		 */
-		if (pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation) > retainUndoLocation)
+		if (pg_atomic_read_u64(&meta->minProcRetainLocation) > retainUndoLocation)
 			continue;
 
 		break;
@@ -895,6 +910,7 @@ free_retained_undo_location(UndoLogType undoType)
 	curRetainUndoLocations[undoType] = InvalidUndoLocation;
 
 }
+
 static bool
 check_reserved_undo_location(UndoLogType undoType, UndoLocation location,
 							 uint64 *minProcReservedLocation,
@@ -937,14 +953,18 @@ read_undo_range(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 	o_buffers_read(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
 }
 
+/*
+ * Evict some part of undo to the disk.
+ */
 void
-write_undo(UndoLogType undoType,
-		   UndoLocation targetUndoLocation,
-		   UndoLocation minProcReservedLocation,
-		   bool attempt)
+evict_undo_to_disk(UndoLogType undoType,
+				   UndoLocation targetUndoLocation,
+				   UndoLocation minProcReservedLocation,
+				   bool attempt)
 {
 	UndoLocation retainUndoLocation,
-				writtenLocation;
+				writtenLocation,
+				tmpLocation;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 	Pointer		circularBuffer = o_undo_buffers[(int) undoType];
 	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
@@ -963,7 +983,15 @@ write_undo(UndoLogType undoType,
 
 	SpinLockAcquire(&meta->minUndoLocationsMutex);
 
+	Assert((meta->writeInProgressChangeCount & 1) == 0);
+	meta->writeInProgressChangeCount++;
+
+	pg_write_barrier();
+
 	update_min_undo_locations(undoType, true, false);
+
+	(void) check_reserved_undo_location(undoType, minProcReservedLocation,
+										&tmpLocation, true);
 
 	retainUndoLocation = pg_atomic_read_u64(enable_rewind ? &meta->minRewindRetainLocation : &meta->minProcRetainLocation);
 
@@ -976,6 +1004,12 @@ write_undo(UndoLogType undoType,
 			pg_atomic_write_u64(&meta->writeInProgressLocation, retainUndoLocation);
 			pg_atomic_write_u64(&meta->writtenLocation, retainUndoLocation);
 		}
+
+		pg_write_barrier();
+
+		meta->writeInProgressChangeCount++;
+		Assert((meta->writeInProgressChangeCount & 1) == 0);
+
 		SpinLockRelease(&meta->minUndoLocationsMutex);
 		LWLockRelease(&meta->undoWriteLock);
 		return;
@@ -989,6 +1023,11 @@ write_undo(UndoLogType undoType,
 
 	Assert(targetUndoLocation >= pg_atomic_read_u64(&meta->writeInProgressLocation));
 	pg_atomic_write_u64(&meta->writeInProgressLocation, targetUndoLocation);
+
+	pg_write_barrier();
+
+	meta->writeInProgressChangeCount++;
+	Assert((meta->writeInProgressChangeCount & 1) == 0);
 
 	SpinLockRelease(&meta->minUndoLocationsMutex);
 
@@ -1102,8 +1141,8 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		return true;
 	}
 
-	write_undo(undoType, location + size - circularBufferSize,
-			   minProcReservedLocation, false);
+	evict_undo_to_disk(undoType, location + size - circularBufferSize,
+					   minProcReservedLocation, false);
 	Assert(location + size <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize);
 
 	return true;
@@ -1166,7 +1205,7 @@ fsync_undo_range(UndoLogType undoType,
 	}
 	else
 	{
-		write_undo(undoType, toLoc, minProcReservedLocation, false);
+		evict_undo_to_disk(undoType, toLoc, minProcReservedLocation, false);
 	}
 
 	o_buffers_sync(&undoBuffersDesc, (uint32) undoType,
@@ -1961,12 +2000,15 @@ void
 undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 {
 	UndoLocation writeInProgressLocation,
-				prevReservedUndoLocation,
 				memoryUndoLocation;
-	bool		undoLocationIsReserved = false;
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoRetainSharedLocations *sharedLocations = &curProcData->undoRetainLocations[(int) undoType];
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+
+	Assert(location >= pg_atomic_read_u64(&sharedLocations->snapshotRetainUndoLocation) ||
+		   location >= pg_atomic_read_u64(&sharedLocations->transactionUndoRetainLocation) ||
+		   (location >= pg_atomic_read_u64(&meta->checkpointRetainStartLocation) &&
+			location < pg_atomic_read_u64(&meta->checkpointRetainEndLocation)));
 
 	while (true)
 	{
@@ -1980,44 +2022,39 @@ undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 
 		/* Reserve the location we're going to write into */
 		memoryUndoLocation = Max(location, writeInProgressLocation);
-		prevReservedUndoLocation = pg_atomic_read_u64(&sharedLocations->reservedUndoLocation);
-		if (!UndoLocationIsValid(prevReservedUndoLocation) || prevReservedUndoLocation > memoryUndoLocation)
-		{
-			pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, memoryUndoLocation);
-			undoLocationIsReserved = true;
-		}
+		Assert(pg_atomic_read_u64(&sharedLocations->reservedUndoLocation) == InvalidUndoLocation);
+		pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, memoryUndoLocation);
 
 		pg_memory_barrier();
 
-		/* Recheck is writeInProgressLocation was advanced concurrently */
+		/*
+		 * This ensures there is no concurrent process updating
+		 * writeInProgressLocation.  After this point, anybody trying to
+		 * update writeInProgressLocation will notice our
+		 * reservedUndoLocation.
+		 */
+		wait_for_even_write_in_progress_changecount(meta);
+
+		/* Recheck if writeInProgressLocation was advanced concurrently */
 		writeInProgressLocation = pg_atomic_read_u64(&meta->writeInProgressLocation);
 		if (writeInProgressLocation > memoryUndoLocation)
 		{
-			if (undoLocationIsReserved)
-			{
-				pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, prevReservedUndoLocation);
-				undoLocationIsReserved = false;
-			}
+			pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, InvalidUndoLocation);
 			continue;
 		}
 
 		/*
 		 * At this point we should either detect concurrent writing of undo
 		 * log. Or concurrent writing of undo log should wait for our reserved
-		 * location. So, it should be safe to write to the memory.
+		 * location.  So, it should be safe to write to the memory.
 		 */
-
 		memcpy(GET_UNDO_REC(undoType, memoryUndoLocation),
 			   buf + (memoryUndoLocation - location),
 			   size - (memoryUndoLocation - location));
 		break;
 	}
 
-	if (undoLocationIsReserved)
-	{
-		pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, prevReservedUndoLocation);
-		undoLocationIsReserved = false;
-	}
+	pg_atomic_write_u64(&sharedLocations->reservedUndoLocation, InvalidUndoLocation);
 
 	if (memoryUndoLocation == location)
 	{
