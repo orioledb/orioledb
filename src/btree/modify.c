@@ -739,30 +739,25 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 	{
 		/* Make undo item and connect it with page tuple */
 		OTuple		curTuple;
-		BTreeLeafTuphdr *prevTuphdr;
 		BTreeLeafTuphdr *tuphdr;
 
 		BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
 
-		prevTuphdr = make_undo_record(desc, curTuple, true,
-									  BTreeOperationUpdate, blkno,
-									  O_PAGE_GET_CHANGE_COUNT(page),
-									  &undoLocation);
+		undoLocation = make_undo_record(desc, curTuple, true,
+										BTreeOperationUpdate, blkno,
+										O_PAGE_GET_CHANGE_COUNT(page),
+										tuphdr);
 		leafTuphdr->undoLocation = undoLocation;
 		leafTuphdr->chainHasLocks = tuphdr->chainHasLocks ||
 			XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo);
-		prevTuphdr->xactInfo = tuphdr->xactInfo;
-		prevTuphdr->undoLocation = tuphdr->undoLocation;
-		prevTuphdr->deleted = tuphdr->deleted;
-		prevTuphdr->chainHasLocks = tuphdr->chainHasLocks;
 	}
 	else
 	{
 		/* Still need the undo item to deal with transaction rollback */
-		(void) make_undo_record(desc, context->tuple, true,
-								BTreeOperationInsert, blkno,
-								O_PAGE_GET_CHANGE_COUNT(page),
-								&undoLocation);
+		undoLocation = make_undo_record(desc, context->tuple, true,
+										BTreeOperationInsert, blkno,
+										O_PAGE_GET_CHANGE_COUNT(page),
+										NULL);
 		if (desc->undoType == UndoLogRegular)
 			leafTuphdr->undoLocation = InvalidUndoLocation;
 		if (desc->undoType == UndoLogRegular)
@@ -775,7 +770,6 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 {
 	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
 	BTreeDescr *desc = pageFindContext->desc;
-	BTreeLeafTuphdr *prev_tuphdr;
 	uint32		pageChangeCount;
 	UndoLocation undoLocation;
 	OInMemoryBlkno blkno;
@@ -837,13 +831,9 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		}
 
 		pageChangeCount = O_PAGE_GET_CHANGE_COUNT(page);
-		prev_tuphdr = make_undo_record(desc, key, key_is_tuple,
-									   BTreeOperationDelete, blkno, pageChangeCount,
-									   &undoLocation);
-		prev_tuphdr->xactInfo = tuphdr->xactInfo;
-		prev_tuphdr->undoLocation = tuphdr->undoLocation;
-		prev_tuphdr->deleted = tuphdr->deleted;
-		prev_tuphdr->chainHasLocks = tuphdr->chainHasLocks;
+		undoLocation = make_undo_record(desc, key, key_is_tuple,
+										BTreeOperationDelete, blkno,
+										pageChangeCount, tuphdr);
 	}
 	else
 	{
@@ -891,7 +881,6 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
 	BTreeDescr *desc = pageFindContext->desc;
 	UndoLocation undoLocation;
-	BTreeLeafTuphdr *prev_tuphdr;
 	uint32		pageChangeCount;
 	OTuple		key;
 	bool		key_is_tuple;
@@ -929,13 +918,9 @@ o_btree_modify_lock(BTreeModifyInternalContext *context)
 	}
 
 	pageChangeCount = O_PAGE_GET_CHANGE_COUNT(page);
-	prev_tuphdr = make_undo_record(desc, key, key_is_tuple,
-								   BTreeOperationLock, blkno, pageChangeCount,
-								   &undoLocation);
-	prev_tuphdr->xactInfo = tuphdr->xactInfo;
-	prev_tuphdr->undoLocation = tuphdr->undoLocation;
-	prev_tuphdr->deleted = tuphdr->deleted;
-	prev_tuphdr->chainHasLocks = tuphdr->chainHasLocks;
+	undoLocation = make_undo_record(desc, key, key_is_tuple,
+									BTreeOperationLock, blkno,
+									pageChangeCount, tuphdr);
 
 	START_CRIT_SECTION();
 	page_block_reads(blkno);

@@ -661,6 +661,7 @@ o_add_branch_undo_item(UndoLogType undoType, UndoLocation newLocation)
 	item->header.itemSize = size;
 	item->header.prev = newLocation;
 
+	release_reserved_undo_location(undoType);
 	release_undo_size(undoType);
 
 	return location;
@@ -897,7 +898,6 @@ free_retained_undo_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
-	Assert(reserved_undo_sizes[(int) undoType] == 0);
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation, InvalidUndoLocation);
 	curRetainUndoLocations[undoType] = InvalidUndoLocation;
@@ -1047,10 +1047,12 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 	uint64		minProcReservedLocation;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
+	ODBProcData *curProcData PG_USED_FOR_ASSERTS_ONLY = GET_CUR_PROCDATA();
 
 	Assert(!waitForUndoLocation || !have_locked_pages());
 	Assert(undoType != UndoLogNone);
 	Assert(size > 0);
+	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 
 	if (reserved_undo_sizes[(int) undoType] >= size)
 		return true;
@@ -1243,18 +1245,17 @@ get_undo_record_unreserved(UndoLogType type, UndoLocation *undoLocation, Size si
 void
 release_undo_size(UndoLogType undoType)
 {
-	ODBProcData *curProcData = GET_CUR_PROCDATA();
+	ODBProcData *curProcData PG_USED_FOR_ASSERTS_ONLY = GET_CUR_PROCDATA();
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 
 	Assert(undoType != UndoLogNone);
+	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 
 	if (reserved_undo_sizes[(int) undoType] != 0)
 	{
 		pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, reserved_undo_sizes[(int) undoType]);
 		reserved_undo_sizes[(int) undoType] = 0;
 	}
-	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation,
-						InvalidUndoLocation);
 }
 
 Size
@@ -1263,6 +1264,15 @@ get_reserved_undo_size(UndoLogType undoType)
 	Assert(undoType != UndoLogNone);
 
 	return reserved_undo_sizes[(int) undoType];
+}
+
+void
+release_reserved_undo_location(UndoLogType undoType)
+{
+	ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation,
+						InvalidUndoLocation);
 }
 
 void
@@ -1282,6 +1292,8 @@ add_new_undo_stack_item(UndoLogType undoType, UndoLocation location)
 		fItem->onCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 		pg_atomic_write_u64(&sharedLocations->onCommitLocation, location);
 	}
+
+	release_reserved_undo_location(undoType);
 }
 
 void
@@ -1298,6 +1310,8 @@ add_new_undo_stack_item_to_process(UndoLogType undoType,
 	sharedLocations = &oProcData[pgprocno].undoStackLocations[localXid % PROC_XID_ARRAY_SIZE][undoType];
 	item->prev = pg_atomic_read_u64(&sharedLocations->location);
 	pg_atomic_write_u64(&sharedLocations->location, location);
+
+	release_reserved_undo_location(undoType);
 }
 
 UndoLocation
@@ -2221,6 +2235,7 @@ current_command_get_undo_location(void)
 		UndoLocation loc;
 
 		(void) get_undo_record(UndoLogRegular, &loc, MAXIMUM_ALIGNOF);
+		release_reserved_undo_location(UndoLogRegular);
 		update_command_undo_location(cid, loc);
 	}
 

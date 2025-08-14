@@ -186,6 +186,7 @@ extern Pointer get_undo_record_unreserved(UndoLogType type,
 										  Size size);
 extern Size get_reserved_undo_size(UndoLogType undoType);
 extern void release_undo_size(UndoLogType undoType);
+extern void release_reserved_undo_location(UndoLogType undoType);
 extern void add_new_undo_stack_item(UndoLogType undoType,
 									UndoLocation location);
 extern UndoLocation get_subxact_undo_location(UndoLogType undoType);

@@ -292,29 +292,18 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	 * The caller might have the undo location reserved.  We need to carefully
 	 * put the undo location back.
 	 */
-	if (haveRetainRegularLoc)
-	{
-		if (undoRegularSize > 0)
-			reserve_undo_size(UndoLogRegularPageLevel, undoRegularSize);
-	}
+	if (undoRegularSize > 0)
+		reserve_undo_size(UndoLogRegularPageLevel, undoRegularSize);
 	else
-	{
 		release_undo_size(UndoLogRegularPageLevel);
-		free_retained_undo_location(UndoLogRegularPageLevel);
-		if (undoRegularSize > 0)
-			reserve_undo_size(UndoLogRegularPageLevel, undoRegularSize);
-	}
 
-	if (haveRetainSystemLoc)
-	{
-		if (undoSystemSize > 0)
-			reserve_undo_size(UndoLogSystem, undoSystemSize);
-	}
+	if (undoSystemSize > 0)
+		reserve_undo_size(UndoLogSystem, undoSystemSize);
 	else
-	{
 		release_undo_size(UndoLogSystem);
+
+	if (!haveRetainRegularLoc)
+		free_retained_undo_location(UndoLogRegularPageLevel);
+	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
-		if (undoSystemSize > 0)
-			reserve_undo_size(UndoLogSystem, undoSystemSize);
-	}
 }

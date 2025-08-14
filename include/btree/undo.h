@@ -92,14 +92,15 @@ typedef struct
 extern bool page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 							   bool loop, BTreeLeafTuphdr *non_lock_tuphdr_ptr,
 							   UndoLocation nonLockUndoLocation);
-extern BTreeLeafTuphdr *make_undo_record(BTreeDescr *desc, OTuple tuple,
-										 bool is_tuple, BTreeOperationType action,
-										 OInMemoryBlkno blkno, uint32 pageChangeCount,
-										 UndoLocation *undoLocation);
+extern UndoLocation make_undo_record(BTreeDescr *desc, OTuple tuple,
+									 bool is_tuple,
+									 BTreeOperationType action,
+									 OInMemoryBlkno blkno,
+									 uint32 pageChangeCount,
+									 BTreeLeafTuphdr *curTupHdr);
 extern void make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno,
 									int pgprocno,
 									OPageWaiterShmemState *lockerState);
-
 extern void get_page_from_undo(BTreeDescr *desc, UndoLocation undo_loc, Pointer key,
 							   BTreeKeyType kind, Pointer dest,
 							   bool *is_left, bool *is_right, OFixedKey *lokey,

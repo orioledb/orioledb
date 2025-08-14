@@ -82,6 +82,8 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 		memcpy(ptr, splitKey->data, splitKeyLen);
 	}
 
+	release_reserved_undo_location(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+
 	return undoLocation;
 }
 
@@ -289,16 +291,17 @@ undo_record_key_stopevent_params(BTreeOperationType action,
 /*
  * Make undo record associated with give tuple and operation.
  */
-BTreeLeafTuphdr *
+UndoLocation
 make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 				 BTreeOperationType action, OInMemoryBlkno blkno,
 				 uint32 pageChangeCount,
-				 UndoLocation *undoLocation)
+				 BTreeLeafTuphdr *curTupHdr)
 {
 	LocationIndex tuplelen;
 	BTreeModifyUndoStackItem *item;
 	LocationIndex size;
 	CommandId	commandId;
+	UndoLocation undoLocation;
 
 	if (action == BTreeOperationUpdate)
 	{
@@ -312,7 +315,7 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 
 	size = sizeof(BTreeModifyUndoStackItem) + tuplelen;
 	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
-														undoLocation,
+														&undoLocation,
 														MAXALIGN(size));
 	item->header.itemSize = size;
 	if (action == BTreeOperationLock)
@@ -345,17 +348,25 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 		Assert(!key_palloc);
 	}
 
-	add_new_undo_stack_item(desc->undoType, *undoLocation);
+	if (curTupHdr)
+	{
+		item->tuphdr.xactInfo = curTupHdr->xactInfo;
+		item->tuphdr.undoLocation = curTupHdr->undoLocation;
+		item->tuphdr.deleted = curTupHdr->deleted;
+		item->tuphdr.chainHasLocks = curTupHdr->chainHasLocks;
+	}
 
-	*undoLocation += offsetof(BTreeModifyUndoStackItem, tuphdr);
+	add_new_undo_stack_item(desc->undoType, undoLocation);
+
+	undoLocation += offsetof(BTreeModifyUndoStackItem, tuphdr);
 
 	commandId = GetCurrentCommandId(false);
 	if (desc->undoType == UndoLogRegular &&
 		commandId != InvalidCommandId &&
 		!is_recovery_process())
-		update_command_undo_location(commandId, *undoLocation);
+		update_command_undo_location(commandId, undoLocation);
 
-	return &item->tuphdr;
+	return undoLocation;
 }
 
 void
@@ -1183,6 +1194,8 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 
 	memcpy(undo_rec, left, ORIOLEDB_BLCKSZ);
 	memcpy(undo_rec + ORIOLEDB_BLCKSZ, right, ORIOLEDB_BLCKSZ);
+
+	release_reserved_undo_location(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 
 	return undoLocation;
 }
