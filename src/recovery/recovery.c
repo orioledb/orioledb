@@ -52,6 +52,7 @@
 #include "storage/ipc.h"
 #include "storage/shm_mq.h"
 #include "storage/standby.h"
+#include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 
@@ -112,6 +113,8 @@ typedef struct
 
 	/* is any system tree modified by oxid */
 	bool		systree_modified;
+	/* is typecache invalidation needed after this transaction */
+	bool		invalidate_typcache;
 	/* is oTablesMetaLock held by transaction */
 	bool		o_tables_meta_locked;
 	/* is provided by checkpoint xids file */
@@ -499,6 +502,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				pairingheap_add(xmin_queue, &state->xmin_ph_node);
 
 			state->systree_modified = false;
+			state->invalidate_typcache = false;
 			state->o_tables_meta_locked = false;
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
@@ -1163,6 +1167,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			if (worker_id < 0)
 				pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
 			cur_state->systree_modified = false;
+			cur_state->invalidate_typcache = false;
 			cur_state->o_tables_meta_locked = false;
 			cur_state->checkpoint_xid = false;
 			if (worker_id < 0 && !*recovery_single_process)
@@ -2601,6 +2606,23 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 	cur_state->o_tables_meta_locked = false;
 }
 
+static void
+invalidate_typcache(void)
+{
+	SharedInvalidationMessage msg;
+
+	msg.cc.id = TYPEOID;
+	msg.cc.dbId = InvalidOid;
+	msg.cc.hashValue = 0;
+
+	/*
+	 * check AddCatcacheInvalidationMessage() for an explanation
+	 */
+	VALGRIND_MAKE_MEM_DEFINED(&msg, sizeof(msg));
+
+	SendSharedInvalidMessages(&msg, 1);
+}
+
 /*
  * Replays a single orioledb WAL container.
  */
@@ -2666,12 +2688,17 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				{
 					sync = true;
 					workers_synchronize(xlogPtr, false);
+					if (cur_state->invalidate_typcache)
+						invalidate_typcache();
 				}
 			}
 			else
 			{
 				sync = true;
 				pg_atomic_write_u64(recovery_ptr, xlogPtr);
+				if (cur_state->invalidate_typcache)
+					invalidate_typcache();
+
 			}
 
 			recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
@@ -2876,6 +2903,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				recovery_switch_to_oxid(oxid, -1);
 
 				cur_state->systree_modified = true;
+				if (IS_TYPCACHE_SYSTREE(sys_tree_num))
+					cur_state->invalidate_typcache = true;
 				if (sys_tree_num == SYS_TREES_O_TABLES)
 					Assert(cur_state->o_tables_meta_locked);
 
@@ -2974,12 +3003,16 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 			{
 				sync = true;
 				workers_synchronize(lsn, false);
+				if (cur_state->invalidate_typcache)
+					invalidate_typcache();
 			}
 		}
 		else
 		{
 			sync = true;
 			pg_atomic_write_u64(recovery_ptr, lsn);
+			if (cur_state->invalidate_typcache)
+				invalidate_typcache();
 		}
 
 		dlist_delete(miter.cur);

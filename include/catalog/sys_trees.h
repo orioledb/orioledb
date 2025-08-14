@@ -53,6 +53,12 @@
 	 (oids).reloid == (systree) && \
 	 (oids).relnode == (systree))
 
+#define IS_TYPCACHE_SYSTREE(systree) \
+	((systree) == SYS_TREES_ENUM_CACHE || \
+	 (systree) == SYS_TREES_ENUMOID_CACHE || \
+	 (systree) == SYS_TREES_TYPE_CACHE || \
+	 (systree) == SYS_TREES_MULTIRANGE_CACHE)
+
 #define O_OPCLASS_PROSRC_MAXLEN 512
 
 typedef struct
