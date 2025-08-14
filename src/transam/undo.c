@@ -180,7 +180,7 @@ static OBuffersDesc undoBuffersDesc =
 	.bufferCtlTrancheName = "undoBuffersCtlTranche"
 };
 
-static bool wait_for_reserved_location(UndoLogType undoType,
+static void wait_for_reserved_location(UndoLogType undoType,
 									   UndoLocation undoLocationToWait);
 
 /*
@@ -547,19 +547,13 @@ set_my_retain_location(UndoLogType undoType)
 	return retainUndoLocation;
 }
 
-static bool
+static void
 wait_for_reserved_location(UndoLogType undoType,
 						   UndoLocation undoLocationToWait)
 {
 	SpinDelayStatus delay;
-	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	bool		delay_inited;
 	int			i;
-
-	if (undoLocationToWait > pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].reservedUndoLocation) + o_undo_circular_sizes[(int) undoType])
-	{
-		return false;
-	}
 
 	for (i = 0; i < max_procs; i++)
 	{
@@ -580,8 +574,6 @@ wait_for_reserved_location(UndoLogType undoType,
 		if (delay_inited)
 			finish_spin_delay(&delay);
 	}
-
-	return true;
 }
 
 #define UNDO_ITEM_BUF_SIZE	2048
@@ -913,13 +905,10 @@ check_reserved_undo_location(UndoLogType undoType, UndoLocation location,
 	*minProcReservedLocation = pg_atomic_read_u64(&meta->minProcReservedLocation);
 	while (location > *minProcReservedLocation + o_undo_circular_sizes[(int) undoType])
 	{
-		bool		failed = true;
-
-		if (waitForUndoLocation)
-			failed = !wait_for_reserved_location(undoType, location);
-
-		if (failed)
+		if (!waitForUndoLocation)
 			return false;
+
+		wait_for_reserved_location(undoType, location);
 
 		*minProcReservedLocation = pg_atomic_read_u64(&meta->minProcReservedLocation);
 		if (location <= *minProcReservedLocation + o_undo_circular_sizes[(int) undoType])
@@ -1005,7 +994,7 @@ write_undo(UndoLogType undoType,
 
 	minProcReservedLocation = pg_atomic_read_u64(&meta->minProcReservedLocation);
 	if (minProcReservedLocation < targetUndoLocation)
-		(void) wait_for_reserved_location(undoType, targetUndoLocation + circularBufferSize);
+		wait_for_reserved_location(undoType, targetUndoLocation + circularBufferSize);
 
 
 	if (retainUndoLocation % circularBufferSize <
@@ -1041,7 +1030,7 @@ write_undo(UndoLogType undoType,
 
 bool
 reserve_undo_size_extended(UndoLogType undoType, Size size,
-						   bool waitForUndoLocation, bool reportError)
+						   bool waitForUndoLocation)
 {
 	UndoLocation location;
 	uint64		minProcReservedLocation;
@@ -1078,10 +1067,7 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		 */
 		pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, size);
 		reserved_undo_sizes[(int) undoType] -= size;
-		if (reportError)
-			report_undo_overflow();
-		else
-			return false;
+		return false;
 	}
 
 	/* Recheck if the required location was already written */
@@ -1096,10 +1082,7 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		 */
 		pg_atomic_fetch_sub_u64(&meta->advanceReservedLocation, size);
 		reserved_undo_sizes[(int) undoType] -= size;
-		if (reportError)
-			report_undo_overflow();
-		else
-			return false;
+		return false;
 	}
 
 	if (location + size <=
@@ -1822,15 +1805,6 @@ have_current_undo(UndoLogType undoType)
 
 		return (!UndoLocationIsValid(location.location));
 	}
-}
-
-void
-report_undo_overflow(void)
-{
-	Assert(false);
-	ereport(ERROR,
-			(errcode(ERRCODE_INTERNAL_ERROR),
-			 errmsg("failed to add an undo record: undo size is exceeded")));
 }
 
 Datum

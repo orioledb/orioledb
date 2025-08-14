@@ -227,7 +227,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 */
 	if (needsUndo && !reserve_undo_size_extended(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
 												 2 * O_MERGE_UNDO_IMAGE_SIZE,
-												 false, false))
+												 false))
 	{
 		/* unable to reserve undo location, no opportunity to resume */
 		unlock_page(blkno);

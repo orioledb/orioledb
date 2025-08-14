@@ -172,8 +172,7 @@ extern void write_undo(UndoLogType undoType,
 					   UndoLocation minProcReservedLocation,
 					   bool attempt);
 extern bool reserve_undo_size_extended(UndoLogType type, Size size,
-									   bool waitForUndoLocation,
-									   bool reportError);
+									   bool waitForUndoLocation);
 extern void steal_reserved_undo_size(UndoLogType type, Size size);
 extern void giveup_reserved_undo_size(UndoLogType type);
 extern void fsync_undo_range(UndoLogType undoType,
@@ -204,7 +203,6 @@ extern void undo_xact_callback(XactEvent event, void *arg);
 extern void undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 								  SubTransactionId parentSubid, void *arg);
 extern bool have_current_undo(UndoLogType undoType);
-extern void report_undo_overflow(void);
 extern void apply_undo_branches(UndoLogType undoType, OXid oxid);
 extern void apply_undo_stack(UndoLogType undoType, OXid oxid,
 							 UndoStackLocations *toLocation,
@@ -238,7 +236,7 @@ extern void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
 static inline void
 reserve_undo_size(UndoLogType type, Size size)
 {
-	(void) reserve_undo_size_extended(type, size, true, true);
+	(void) reserve_undo_size_extended(type, size, true);
 }
 
 extern void reset_command_undo_locations(void);
