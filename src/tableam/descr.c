@@ -514,8 +514,8 @@ index_descr_free(OIndexDescr *tree)
 		{
 			if (attrmiss[i].am_present
 				&& !TupleDescAttr(tupdesc, i)->attbyval)
-				elog(WARNING, "index_descr_free leafTupdesc: i %d, am_value %p",
-					 i, DatumGetPointer(attrmiss[i].am_value));
+				elog(WARNING, "index_descr_free leafTupdesc: i %d, am_value %p, natts %d",
+					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts);
 		}
 	}
 
@@ -528,8 +528,8 @@ index_descr_free(OIndexDescr *tree)
 		{
 			if (attrmiss[i].am_present
 				&& !TupleDescAttr(tupdesc, i)->attbyval)
-				elog(WARNING, "index_descr_free nonLeafTupdesc: i %d, am_value %p",
-					 i, DatumGetPointer(attrmiss[i].am_value));
+				elog(WARNING, "index_descr_free nonLeafTupdesc: i %d, am_value %p, natts %d",
+					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts);
 		}
 	}
 
@@ -542,8 +542,8 @@ index_descr_free(OIndexDescr *tree)
 		{
 			if (attrmiss[i].am_present
 				&& !TupleDescAttr(tupdesc, i)->attbyval)
-				elog(WARNING, "index_descr_free itupdesc: i %d, am_value %p",
-					 i, DatumGetPointer(attrmiss[i].am_value));
+				elog(WARNING, "index_descr_free itupdesc: i %d, am_value %p, natts %d",
+					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts);
 		}
 	}
 
