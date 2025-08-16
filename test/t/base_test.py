@@ -135,7 +135,8 @@ class BaseTest(unittest.TestCase):
 		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
-		    "orioledb.use_sparse_files = true\n")
+		    "orioledb.use_sparse_files = true\n"
+		    "restart_after_crash = false\n")
 		return node
 
 	@property
