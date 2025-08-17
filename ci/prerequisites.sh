@@ -8,6 +8,22 @@ TIMESTAMP=$(date +%s)
 echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
 echo "TIMESTAMP=$TIMESTAMP"
 
+# Disable background apt tasks
+sudo systemctl stop --now apt-daily{,-upgrade}.service apt-daily{,-upgrade}.timer || true
+sudo systemctl disable apt-daily{,-upgrade}.timer || true
+sudo systemctl mask apt-daily{,-upgrade}.service || true
+sudo systemctl stop --now unattended-upgrades || true
+
+# Wait for locks to be released
+while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+	echo "apt is busy, waiting..."
+	sleep 3
+done
+while sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
+	echo "dpkg is busy, waiting..."
+	sleep 3
+done
+
 sudo apt-get -y install -qq wget ca-certificates
 
 sudo apt-get update -qq
