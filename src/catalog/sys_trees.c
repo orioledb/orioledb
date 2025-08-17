@@ -700,6 +700,7 @@ sys_tree_init_if_needed(int i)
 						  LW_EXCLUSIVE);
 			if (OInMemoryBlknoIsValid(header->rootInfo.rootPageBlkno))
 			{
+				LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[0]);
 				/* might be concurrently initialized */
 				sys_tree_init(i, false);
 				continue;
