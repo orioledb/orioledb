@@ -34,6 +34,7 @@
 typedef struct
 {
 	BTreeRootInfo rootInfo;
+	bool		initialized;
 } SysTreeShmemHeader;
 
 typedef struct
@@ -456,6 +457,7 @@ sys_trees_shmem_init(Pointer ptr, bool found)
 			header->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 			header->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 			header->rootInfo.rootPageChangeCount = 0;
+			header->initialized = false;
 		}
 	}
 	memset(sysTreesDescrs, 0, sizeof(sysTreesDescrs));
@@ -691,14 +693,14 @@ sys_tree_init_if_needed(int i)
 
 		header = &sysTreesShmemHeaders[i];
 
-		if (!OInMemoryBlknoIsValid(header->rootInfo.rootPageBlkno))
+		if (!header->initialized)
 		{
 			OPagePool  *pool = get_ppool(sysTreesMeta[i].poolType);
 
 			ppool_reserve_pages(pool, PPOOL_RESERVE_META, 8);
 			LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[0],
 						  LW_EXCLUSIVE);
-			if (OInMemoryBlknoIsValid(header->rootInfo.rootPageBlkno))
+			if (header->initialized)
 			{
 				/* might be concurrently initialized */
 				sys_tree_init(i, false);
@@ -706,6 +708,8 @@ sys_tree_init_if_needed(int i)
 			}
 			Assert(!OInMemoryBlknoIsValid(header->rootInfo.metaPageBlkno));
 			sys_tree_init(i, true);
+			pg_write_barrier();
+			header->initialized = true;
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[0]);
 			ppool_release_reserved(pool, PPOOL_RESERVE_META);
 		}

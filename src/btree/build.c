@@ -70,62 +70,22 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	Pointer		tuple_ptr;
 	OTuple		rightbound_key;
 	bool		leaf = O_PAGE_IS(img, LEAF);
-	int			i;
 	BTreePageItemLocator loc,
 				newLoc;
-	BTreePageItem items[BTREE_PAGE_MAX_CHUNK_ITEMS];
+	BTreeSplitItems items;
 	OffsetNumber offset;
 
 	btree_page_update_max_key_len(desc, img);
 	offset = BTREE_PAGE_LOCATOR_GET_OFFSET(img, &stack[level].loc);
-	left_count = btree_page_split_location(desc, img, offset,
-										   tuplesize, tuple, false, offset,
-										   0.9, NULL, COMMITSEQNO_INPROGRESS);
 
+	make_split_items(desc, img, &items, &offset,
+					 tupleheader, tuple, tuplesize, false,
+					 COMMITSEQNO_INPROGRESS);
+
+	left_count = btree_page_split_location(desc, &items, offset, 0.9, NULL);
 
 	/* Distribute the tuples according the the split location */
-	i = 0;
-	BTREE_PAGE_LOCATOR_FIRST(img, &loc);
-	while (i < left_count)
-	{
-		Assert(BTREE_PAGE_LOCATOR_IS_VALID(img, &loc));
-
-		/*
-		 * In leaf pages, get rid of tuples deleted by finished transactions.
-		 * Also, resize tuples to minimal size.  In non-leaf pages, copy
-		 * tuples as-is.
-		 */
-		if (leaf)
-		{
-			BTreeLeafTuphdr *tupHdr;
-			OTuple		tup;
-			bool		finished;
-
-			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, img, &loc);
-			finished = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
-			if (finished && tupHdr->deleted != BTreeLeafTupleNonDeleted)
-			{
-				left_count--;
-				continue;
-			}
-			items[i].data = (Pointer) tupHdr;
-			items[i].flags = tup.formatFlags;
-			items[i].size = finished ?
-				(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
-				BTREE_PAGE_GET_ITEM_SIZE(img, &loc);
-			items[i].newItem = false;
-		}
-		else
-		{
-			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc);
-			items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(img, &loc);
-			items[i].size = BTREE_PAGE_GET_ITEM_SIZE(img, &loc);
-		}
-		items[i].newItem = false;
-		i++;
-		BTREE_PAGE_LOCATOR_NEXT(img, &loc);
-	}
-
+	BTREE_PAGE_OFFSET_GET_LOCATOR(img, left_count, &loc);
 	BTREE_PAGE_LOCATOR_FIRST(new_page, &newLoc);
 	while (BTREE_PAGE_LOCATOR_IS_VALID(img, &loc))
 	{
@@ -166,8 +126,8 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 			header_size;
 	}
 
-	btree_page_reorg(desc, img, items, left_count,
-					 rightbound_key_size, rightbound_key, NULL);
+	btree_page_reorg(desc, img, &items.items[0], left_count,
+					 rightbound_key_size, rightbound_key);
 
 	if (key_palloc)
 		pfree(rightbound_key.data);
@@ -221,7 +181,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		new_page_header->rightLink = InvalidRightLink;
 		new_page_header->csn = COMMITSEQNO_FROZEN;
 		new_page_header->undoLocation = InvalidUndoLocation;
-		new_page_header->checkpointNum = 0;
+		new_page_header->o_header.checkpointNum = 0;
 		new_page_header->prevInsertOffset = MaxOffsetNumber;
 
 		new_page_header->flags = O_BTREE_FLAG_RIGHTMOST;
@@ -236,7 +196,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		header->rightLink = InvalidRightLink;
 		header->csn = COMMITSEQNO_FROZEN;
 		header->undoLocation = InvalidUndoLocation;
-		header->checkpointNum = 0;
+		header->o_header.checkpointNum = 0;
 		header->prevInsertOffset = MaxOffsetNumber;
 
 		header->flags &= ~O_BTREE_FLAG_RIGHTMOST;
@@ -409,7 +369,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	root_page_header->rightLink = InvalidRightLink;
 	root_page_header->csn = COMMITSEQNO_FROZEN;
 	root_page_header->undoLocation = InvalidUndoLocation;
-	root_page_header->checkpointNum = 0;
+	root_page_header->o_header.checkpointNum = 0;
 	root_page_header->prevInsertOffset = MaxOffsetNumber;
 
 	if (!O_PAGE_IS(root_page, LEAF))

@@ -90,11 +90,11 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 {
 	UsageCountMap *ucm;
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	uint32		state1,
+	uint64		state1,
 				state2;
 	bool		hiKeysEndOK PG_USED_FOR_ASSERTS_ONLY = true;
 
-	state1 = pg_atomic_read_u32(&(O_PAGE_HEADER(p)->state));
+	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state1))
 		return ReadPageResultFailed;
 
@@ -124,7 +124,7 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 		*readCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 
 	pg_read_barrier();
-	state2 = pg_atomic_read_u32(&(O_PAGE_HEADER(p)->state));
+	state2 = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
 
 	if ((state1 & PAGE_STATE_CHANGE_COUNT_MASK) != (state2 & PAGE_STATE_CHANGE_COUNT_MASK) ||
 		O_PAGE_STATE_READ_IS_BLOCKED(state2))
@@ -136,9 +136,7 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 	Assert(hiKeysEndOK);
 
 	ucm = &(get_ppool_by_blkno(blkno)->ucm);
-	page_inc_usage_count(ucm, blkno,
-						 pg_atomic_read_u32(&((OrioleDBPageHeader *) dest)->usageCount),
-						 false);
+	page_inc_usage_count(ucm, blkno);
 
 	return ReadPageResultOK;
 }
@@ -351,7 +349,7 @@ init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint16 flags,
 	header->rightLink = InvalidRightLink;
 	header->csn = COMMITSEQNO_FROZEN;
 	header->undoLocation = InvalidUndoLocation;
-	header->checkpointNum = 0;
+	header->o_header.checkpointNum = 0;
 	header->itemsCount = 0;
 	header->prevInsertOffset = MaxOffsetNumber;
 	header->maxKeyLen = 0;

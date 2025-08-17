@@ -283,15 +283,18 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 		if (!page_is_locked(parent_blkno))
 		{
+			OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+
 			/* refind parent page if needed */
 			if (!O_TUPLE_IS_NULL(key.tuple))
-				refind_page(&find_context, &key.tuple, BTreeKeyPageHiKey, level + 1,
-							parent_blkno,
-							parent_change_count);
+				result = refind_page(&find_context, &key.tuple,
+									 BTreeKeyPageHiKey, level + 1,
+									 parent_blkno, parent_change_count);
 			else
-				refind_page(&find_context, NULL, BTreeKeyRightmost, level + 1,
-							parent_blkno,
-							parent_change_count);
+				result = refind_page(&find_context, NULL, BTreeKeyRightmost,
+									 level + 1,
+									 parent_blkno, parent_change_count);
+			Assert(result == OFindPageResultSuccess);
 		}
 
 		/* Step 3: do all the checks with parent and target */
@@ -430,7 +433,20 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 				Assert(DOWNLINK_IS_IN_MEMORY(left_tuph->downlink));
 				left_blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(left_tuph->downlink);
-				lock_page(left_blkno);
+
+				/*
+				 * Lock order right => left is dangerous for deadlocks.  So,
+				 * we don't wait here, but just optimistically try to lock.
+				 * Other lock waiters would need some time to wake-up and grab
+				 * the lock.  So, give up and give them a chance.
+				 */
+				if (!try_lock_page(left_blkno))
+				{
+					unlock_page(parent_blkno);
+					unlock_page(target_blkno);
+					target_blkno = OInvalidInMemoryBlkno;
+					break;
+				}
 				left = O_GET_IN_MEMORY_PAGE(left_blkno);
 
 				io_num = O_GET_IN_MEMORY_PAGEDESC(target_blkno)->ionum;
@@ -593,7 +609,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			items[i].flags = tup.formatFlags;
 			items[i].size = finished ? (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
 				BTREE_PAGE_GET_ITEM_SIZE(left, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -604,7 +619,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(left, &loc);
 			items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(left, &loc);
 			items[i].size = BTREE_PAGE_GET_ITEM_SIZE(left, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -629,7 +643,6 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 			items[i].flags = tup.formatFlags;
 			items[i].size = finished ? (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
 				BTREE_PAGE_GET_ITEM_SIZE(right, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -650,14 +663,12 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 				items[i].data = newItem;
 				items[i].flags = leftHikey.formatFlags;
 				items[i].size = MAXALIGN(BTreeNonLeafTuphdrSize + leftHikeySize);
-				items[i].newItem = false;
 				i++;
 				continue;
 			}
 			items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(right, &loc);
 			items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(right, &loc);
 			items[i].size = BTREE_PAGE_GET_ITEM_SIZE(right, &loc);
-			items[i].newItem = false;
 			i++;
 		}
 	}
@@ -666,7 +677,7 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 
 	left_header->flags = left_header->flags | right_header->flags;
 
-	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey, NULL);
+	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey);
 
 	o_btree_page_calculate_statistics(desc, left);
 

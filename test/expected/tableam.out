@@ -4460,17 +4460,16 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
  Index o_test_split_rightmost_pkey contents   +
  Page 0:                                      +
  BTreePageHeader(64)                          +
-     o_header: OrioleDBPageHeader(12)         +
-         state: pg_atomic_uint32(4)           +
+     o_header: OrioleDBPageHeader(16)         +
+         state: pg_atomic_uint64(8)           +
          usageCount: pg_atomic_uint32(4)      +
-         pageChangeCount: uint32(4)           +
+         checkpointNum: uint32(4)             +
      flags: 6 bit                             +
      field1: 11 bit                           +
      field2: 15 bit                           +
      undoLocation: UndoLocation(8)            +
      csn: CommitSeqNo(8)                      +
      rightLink: uint64(8)                     +
-     checkpointNum: uint32(4)                 +
      maxKeyLen: LocationIndex(2)              +
      prevInsertOffset: OffsetNumber(2)        +
      chunksCount: OffsetNumber(2)             +
@@ -4495,17 +4494,16 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
          ITEM DATA: ARRAY                     +
  Page 1:                                      +
  BTreePageHeader(64)                          +
-     o_header: OrioleDBPageHeader(12)         +
-         state: pg_atomic_uint32(4)           +
+     o_header: OrioleDBPageHeader(16)         +
+         state: pg_atomic_uint64(8)           +
          usageCount: pg_atomic_uint32(4)      +
-         pageChangeCount: uint32(4)           +
+         checkpointNum: uint32(4)             +
      flags: 6 bit                             +
      field1: 11 bit                           +
      field2: 15 bit                           +
      undoLocation: UndoLocation(8)            +
      csn: CommitSeqNo(8)                      +
      rightLink: uint64(8)                     +
-     checkpointNum: uint32(4)                 +
      maxKeyLen: LocationIndex(2)              +
      prevInsertOffset: OffsetNumber(2)        +
      chunksCount: OffsetNumber(2)             +
@@ -4627,17 +4625,16 @@ SELECT orioledb_tbl_bin_structure('o_test_split_rightmost'::regclass);
                          LONG DATA            +
  Page 2:                                      +
  BTreePageHeader(64)                          +
-     o_header: OrioleDBPageHeader(12)         +
-         state: pg_atomic_uint32(4)           +
+     o_header: OrioleDBPageHeader(16)         +
+         state: pg_atomic_uint64(8)           +
          usageCount: pg_atomic_uint32(4)      +
-         pageChangeCount: uint32(4)           +
+         checkpointNum: uint32(4)             +
      flags: 6 bit                             +
      field1: 11 bit                           +
      field2: 15 bit                           +
      undoLocation: UndoLocation(8)            +
      csn: CommitSeqNo(8)                      +
      rightLink: uint64(8)                     +
-     checkpointNum: uint32(4)                 +
      maxKeyLen: LocationIndex(2)              +
      prevInsertOffset: OffsetNumber(2)        +
      chunksCount: OffsetNumber(2)             +

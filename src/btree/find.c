@@ -35,6 +35,7 @@ typedef struct
 	uint32		pageChangeCount;
 	PartialPageState *partial;
 	bool		haveLock;
+	bool		inserted;
 } OBTreeFindPageInternalContext;
 
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
@@ -76,6 +77,7 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->imgEntry = NULL;
 	context->parentImg = NULL;
 	context->parentImgEntry = NULL;
+	O_TUPLE_SET_NULL(context->insertTuple);
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
 
@@ -122,6 +124,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (follow_rightlink(intCxt))
 		{
+			if (intCxt->inserted)
+				return OBTreeFastPathFindFailure;
 			Assert(context->index > 0);
 			Assert(!intCxt->haveLock);
 			step_upward_level(intCxt);
@@ -360,7 +364,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
  * memcpy() a leaf page to the context.image. It holds lokey
  * if BTREE_PAGE_FIND_KEEP_LOKEY is set.
  */
-bool
+OFindPageResult
 find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		  uint16 targetLevel)
 {
@@ -373,7 +377,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				imageFlag = BTREE_PAGE_FIND_IS(context, IMAGE),
 				tryFlag = BTREE_PAGE_FIND_IS(context, TRY_LOCK),
 				fixLeafFlag = BTREE_PAGE_FIND_IS(context, FIX_LEAF_SPLIT),
-				noFixFlag = BTREE_PAGE_FIND_IS(context, NO_FIX_SPLIT),
+				noFixFlag PG_USED_FOR_ASSERTS_ONLY = BTREE_PAGE_FIND_IS(context, NO_FIX_SPLIT),
 				keepLokeyFlag = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY),
 				downlinkLocationFlag = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	bool		shmemIsReloaded = false;
@@ -386,6 +390,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.key = key;
 	intCxt.keyType = keyType;
 	intCxt.targetLevel = targetLevel;
+	intCxt.inserted = false;
 
 
 	ASAN_UNPOISON_MEMORY_REGION(&fastpathMeta, sizeof(fastpathMeta));
@@ -446,18 +451,45 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			if (tryFlag)
 			{
 				if (!try_lock_page(intCxt.blkno))
-					return false;
+					return OFindPageResultFailure;
 				intCxt.pagePtr = p;
 				intCxt.haveLock = true;
 				needLock = false;
 			}
+			else if (!O_TUPLE_IS_NULL(context->insertTuple))
+			{
+				OLockPageWithTupleResult result;
+
+				result = lock_page_with_tuple(desc,
+											  &intCxt.blkno,
+											  &intCxt.pageChangeCount,
+											  context->insertXactInfo,
+											  context->insertTuple);
+
+				if (result == OLockPageWithTupleResultLocked)
+				{
+					p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
+					intCxt.pagePtr = p;
+					intCxt.haveLock = true;
+					needLock = false;
+				}
+				else if (result == OLockPageWithTupleResultInserted)
+				{
+					return OFindPageResultInserted;
+				}
+				else
+				{
+					Assert(result == OLockPageWithTupleResultRefindNeeded);
+					wrongChangeCount = true;
+				}
+			}
 			else
 			{
 				lock_page(intCxt.blkno);
+				intCxt.pagePtr = p;
+				intCxt.haveLock = true;
+				needLock = false;
 			}
-			intCxt.pagePtr = p;
-			intCxt.haveLock = true;
-			needLock = false;
 		}
 		else
 		{
@@ -513,7 +545,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 				else if (result == ReadPageResultFailed)
 				{
-					return false;
+					return OFindPageResultFailure;
 				}
 			}
 			else
@@ -574,7 +606,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			 * flag.
 			 */
 			if (tryFlag && shmemIsReloaded)
-				return false;
+				return OFindPageResultFailure;
 
 			/* Reload root information from the shared memory */
 			desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
@@ -583,7 +615,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			if (tryFlag)
 			{
 				if (!o_btree_try_use_shmem(desc))
-					return false;
+					return OFindPageResultFailure;
 			}
 			else
 			{
@@ -608,32 +640,6 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			continue;
 		}
 
-		/*
-		 * Fix broken rootPageBlkno split if needed.
-		 */
-		if (context->index == 0 &&
-			O_PAGE_IS(intCxt.pagePtr, BROKEN_SPLIT) &&
-			!noFixFlag)
-		{
-			Page		rootPageBlkno;
-
-			Assert(intCxt.blkno == desc->rootInfo.rootPageBlkno);
-
-			if (!intCxt.haveLock)
-			{
-				lock_page(desc->rootInfo.rootPageBlkno);
-				intCxt.haveLock = true;
-			}
-
-			rootPageBlkno = O_GET_IN_MEMORY_PAGE(desc->rootInfo.rootPageBlkno);
-			if (O_PAGE_IS(rootPageBlkno, BROKEN_SPLIT))
-			{
-				o_btree_split_fix_and_unlock(desc, desc->rootInfo.rootPageBlkno);
-				intCxt.haveLock = false;
-				continue;
-			}
-		}
-
 		if (level > targetLevel || downlinkLocationFlag)
 		{
 			OBTreeFastPathFindResult result;
@@ -644,7 +650,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			Assert(result != OBTreeFastPathFindSlowpath);
 
 			if (result == OBTreeFastPathFindFailure)
-				return false;
+				return OFindPageResultFailure;
 			else if (result == OBTreeFastPathFindRetry)
 				continue;
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
@@ -657,9 +663,13 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 									fastpath, &loc, &nonLeafHdr);
 
 			if (result == OBTreeFastPathFindFailure)
-				return false;
+				return OFindPageResultFailure;
 			else if (result == OBTreeFastPathFindRetry)
+			{
+				if (intCxt.inserted)
+					return OFindPageResultInserted;
 				continue;
+			}
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
 
@@ -693,7 +703,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				unlock_page(intCxt.blkno);
 				intCxt.haveLock = false;
 			}
-			return false;
+			return OFindPageResultFailure;
 		}
 
 		if (level == targetLevel || (imageFlag && level <= targetLevel))
@@ -713,9 +723,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 					Assert(!noFixFlag);
 					Assert(modifyFlag);
 
-					if (o_btree_split_is_incomplete(intCxt.blkno, &relocked))
+					if (O_PAGE_IS(p, BROKEN_SPLIT))
 					{
-						o_btree_split_fix_and_unlock(desc, intCxt.blkno);
+						o_btree_split_fix_for_right_page_and_unlock(desc, intCxt.blkno);
 						intCxt.haveLock = false;
 						step_upward_level(&intCxt);
 						continue;
@@ -728,7 +738,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				}
 			}
 
-			return true;
+			O_TUPLE_SET_NULL(context->insertTuple);
+			return OFindPageResultSuccess;
 		}
 		else if (!nonLeafHdr)
 		{
@@ -743,7 +754,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				 */
 				if (intCxt.haveLock)
 					unlock_page(intCxt.blkno);
-				return false;
+				return OFindPageResultFailure;
 			}
 
 			if (intCxt.haveLock)
@@ -867,7 +878,33 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 
 		if (intCxt->haveLock)
 		{
-			lock_page(intCxt->blkno);
+			if (!O_TUPLE_IS_NULL(context->insertTuple))
+			{
+				OLockPageWithTupleResult result;
+
+				result = lock_page_with_tuple(desc,
+											  &intCxt->blkno,
+											  &intCxt->pageChangeCount,
+											  context->insertXactInfo,
+											  context->insertTuple);
+
+				if (result == OLockPageWithTupleResultInserted)
+				{
+					intCxt->haveLock = false;
+					intCxt->inserted = true;
+					return true;
+				}
+				else if (result == OLockPageWithTupleResultRefindNeeded)
+				{
+					intCxt->haveLock = false;
+					return true;
+				}
+				Assert(result == OLockPageWithTupleResultLocked);
+			}
+			else
+			{
+				lock_page(intCxt->blkno);
+			}
 			intCxt->pagePtr = O_GET_IN_MEMORY_PAGE(intCxt->blkno);
 			intCxt->pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt->pagePtr);
 			if (intCxt->pageChangeCount !=
@@ -924,7 +961,7 @@ step_upward_level(OBTreeFindPageInternalContext *intCxt)
  * Re-find the location of previously found key.  If search for modification,
  * assume lock was relesed (otherwise, no point to refind).
  */
-bool
+OFindPageResult
 refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			uint16 level, OInMemoryBlkno _blkno, uint32 _pageChangeCount)
 {
@@ -932,7 +969,6 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	OBTreeFindPageInternalContext intCxt;
 	BTreePageItemLocator loc;
 	bool		item_found = true;
-	Pointer		p;
 
 	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
 	intCxt.context = context;
@@ -942,21 +978,42 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.targetLevel = level;
 	intCxt.pageChangeCount = _pageChangeCount;
 	intCxt.partial = NULL;
+	intCxt.inserted = false;
 
 retry:
 
-	p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 	if (BTREE_PAGE_FIND_IS(context, MODIFY))
 	{
+		Pointer		p;
+
 		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
 			return find_page(context, key, keyType, level);
 
-		lock_page(intCxt.blkno);
+		if (!O_TUPLE_IS_NULL(context->insertTuple))
+		{
+			OLockPageWithTupleResult result;
+
+			result = lock_page_with_tuple(desc,
+										  &intCxt.blkno,
+										  &intCxt.pageChangeCount,
+										  context->insertXactInfo,
+										  context->insertTuple);
+
+			if (result == OLockPageWithTupleResultInserted)
+				return OFindPageResultInserted;
+			else if (result == OLockPageWithTupleResultRefindNeeded)
+				return find_page(context, key, keyType, level);
+			Assert(result == OLockPageWithTupleResultLocked);
+		}
+		else
+		{
+			lock_page(intCxt.blkno);
+		}
+		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		intCxt.haveLock = true;
 		intCxt.pagePtr = p;
 		if (PAGE_GET_LEVEL(p) != level ||
-			O_PAGE_GET_CHANGE_COUNT(p) != intCxt.pageChangeCount ||
-			(O_PAGE_IS(p, BROKEN_SPLIT) && intCxt.blkno == desc->rootInfo.rootPageBlkno))
+			O_PAGE_GET_CHANGE_COUNT(p) != intCxt.pageChangeCount)
 		{
 			unlock_page(intCxt.blkno);
 			return find_page(context, key, keyType, level);
@@ -966,20 +1023,14 @@ retry:
 		{
 			/* called from o_btree_normal_modify() */
 			/* try to fix incomplete split for leafs here */
-			bool		relocked = false;
 
 			Assert(!BTREE_PAGE_FIND_IS(context, NO_FIX_SPLIT));
 
-			if (o_btree_split_is_incomplete(intCxt.blkno, &relocked))
+			if (O_PAGE_IS(p, BROKEN_SPLIT))
 			{
+				o_btree_split_fix_for_right_page_and_unlock(desc, intCxt.blkno);
 				intCxt.haveLock = false;
 				o_btree_split_fix_and_unlock(desc, intCxt.blkno);
-				goto retry;
-			}
-			else if (relocked)
-			{
-				intCxt.haveLock = false;
-				unlock_page(intCxt.blkno);
 				goto retry;
 			}
 		}
@@ -1007,8 +1058,7 @@ retry:
 		intCxt.haveLock = false;
 		intCxt.pagePtr = img;
 		if (!success ||
-			PAGE_GET_LEVEL(img) != level ||
-			(O_PAGE_IS(img, BROKEN_SPLIT) && intCxt.blkno == desc->rootInfo.rootPageBlkno))
+			PAGE_GET_LEVEL(img) != level)
 		{
 			return find_page(context, key, keyType, level);
 		}
@@ -1027,6 +1077,8 @@ retry:
 	{
 		if (follow_rightlink(&intCxt))
 		{
+			if (intCxt.inserted)
+				return OFindPageResultInserted;
 			Assert(!intCxt.haveLock);
 			return find_page(context, key, keyType, level);
 		}
@@ -1080,7 +1132,7 @@ retry:
 	context->items[context->index].locator = loc;
 	context->items[context->index].blkno = intCxt.blkno;
 	context->items[context->index].pageChangeCount = intCxt.pageChangeCount;
-	return true;
+	return OFindPageResultSuccess;
 }
 
 /*

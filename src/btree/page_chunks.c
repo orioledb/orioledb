@@ -29,18 +29,13 @@
 #include "miscadmin.h"
 #include "utils/memdebug.h"
 
-static void reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
-							   BTreePageItemLocator *location,
-							   OTuple tuple, LocationIndex tuplesize,
-							   bool replace);
-
 /*
  * Load chunk to the partial page.
  */
 bool
 partial_load_hikeys_chunk(PartialPageState *partial, Page img)
 {
-	uint32		imgState,
+	uint64		imgState,
 				srcState;
 	Page		src = partial->src;
 	LocationIndex chunkBegin,
@@ -62,8 +57,8 @@ partial_load_hikeys_chunk(PartialPageState *partial, Page img)
 
 	pg_read_barrier();
 
-	imgState = pg_atomic_read_u32(&(O_PAGE_HEADER(img)->state));
-	srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+	imgState = pg_atomic_read_u64(&(O_PAGE_HEADER(img)->state));
+	srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
 	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
 		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
 		return false;
@@ -82,7 +77,7 @@ bool
 partial_load_chunk(PartialPageState *partial, Page img,
 				   OffsetNumber chunkOffset, BTreePageItemLocator *loc)
 {
-	uint32		imgState = pg_atomic_read_u32(&(O_PAGE_HEADER(img)->state)),
+	uint64		imgState = pg_atomic_read_u64(&(O_PAGE_HEADER(img)->state)),
 				srcState;
 	Page		src = partial->src;
 	LocationIndex chunkBegin,
@@ -132,7 +127,7 @@ partial_load_chunk(PartialPageState *partial, Page img,
 
 		pg_read_barrier();
 
-		srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+		srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
 		if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
 			O_PAGE_STATE_READ_IS_BLOCKED(srcState))
 			return false;
@@ -147,7 +142,7 @@ partial_load_chunk(PartialPageState *partial, Page img,
 
 	pg_read_barrier();
 
-	srcState = pg_atomic_read_u32(&(O_PAGE_HEADER(src)->state));
+	srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
 	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
 		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
 		return false;
@@ -247,151 +242,6 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	{
 		return BTreeItemPageFitSplitRequired;
 	}
-}
-
-void
-perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
-						BTreePageItemLocator *loc, OTuple tuple,
-						LocationIndex tuplesize, bool replace)
-{
-	CommitSeqNo csn;
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageHeader *header = (BTreePageHeader *) p;
-	UndoLocation undoLocation;
-
-	START_CRIT_SECTION();
-
-	Assert(O_PAGE_IS(p, LEAF));
-
-	/* Make a page-level undo item if needed */
-	if (desc->undoType != UndoLogNone)
-	{
-		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-		undoLocation = page_add_image_to_undo(desc, p, csn, NULL, 0);
-
-		/*
-		 * Start page modification.  It contains the required memory barrier
-		 * between making undo image and setting the undo location.
-		 */
-		page_block_reads(blkno);
-
-		/* Update the old page meta-data */
-
-		header->undoLocation = undoLocation;
-		header->prevInsertOffset = MaxOffsetNumber;
-
-		/*
-		 * Memory barrier between write undo location and csn.  See comment in
-		 * the o_btree_read_page() for details.
-		 */
-		pg_write_barrier();
-
-		header->csn = csn;
-	}
-	else
-	{
-		csn = COMMITSEQNO_INPROGRESS;
-	}
-
-	reclaim_page_space(desc, p, csn, loc, tuple, tuplesize, replace);
-	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
-
-	END_CRIT_SECTION();
-}
-
-/*
- * Reclaim page space occupied by deleted and/or resized items.
- */
-static void
-reclaim_page_space(BTreeDescr *desc, Pointer p, CommitSeqNo csn,
-				   BTreePageItemLocator *location,
-				   OTuple tuple, LocationIndex tuplesize,
-				   bool replace)
-{
-	BTreePageItemLocator loc;
-	BTreePageItem items[BTREE_PAGE_MAX_CHUNK_ITEMS];
-	int			i = 0;
-	OFixedKey	hikey;
-	LocationIndex hikeySize,
-				nVacated = 0;
-	bool		addedNewItem = false;
-
-	Assert(O_PAGE_IS(p, LEAF));
-
-	/*
-	 * Iterate page items and check if they can be erased or truncated.
-	 */
-	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
-	{
-		BTreeLeafTuphdr *tupHdr;
-		OTuple		tup;
-		bool		finished;
-
-		if (!addedNewItem &&
-			((loc.chunkOffset == location->chunkOffset &&
-			  loc.itemOffset == location->itemOffset) || loc.chunkOffset > location->chunkOffset))
-		{
-			items[i].data = tuple.data;
-			items[i].flags = tuple.formatFlags;
-			items[i].size = tuplesize;
-			Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
-			items[i].newItem = true;
-			i++;
-			addedNewItem = true;
-			if (replace)
-			{
-				Assert(loc.chunkOffset == location->chunkOffset && loc.itemOffset == location->itemOffset);
-				continue;
-			}
-		}
-
-		BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tup, p, &loc);
-		finished = XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo);
-		if (finished && tupHdr->deleted &&
-			(COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn))
-		{
-			continue;
-		}
-
-		items[i].data = (Pointer) tupHdr;
-		items[i].flags = tup.formatFlags;
-		items[i].size = finished ?
-			(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength))) :
-			BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-		Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
-		items[i].newItem = false;
-
-		if (tupHdr->deleted)
-			nVacated += BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-		else if (!finished)
-			nVacated += BTREE_PAGE_GET_ITEM_SIZE(p, &loc) -
-				(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tup, OTupleLength)));
-
-		i++;
-	}
-
-	if (!addedNewItem)
-	{
-		items[i].data = tuple.data;
-		items[i].flags = tuple.formatFlags;
-		items[i].size = tuplesize;
-		Assert(items[i].size <= BTreeLeafTuphdrSize + O_BTREE_MAX_TUPLE_SIZE);
-		items[i].newItem = true;
-		i++;
-	}
-
-	if (O_PAGE_IS(p, RIGHTMOST))
-	{
-		O_TUPLE_SET_NULL(hikey.tuple);
-		hikeySize = 0;
-	}
-	else
-	{
-		copy_fixed_hikey(desc, &hikey, p);
-		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
-	}
-	btree_page_reorg(desc, p, items, i, hikeySize, hikey.tuple, location);
-	PAGE_SET_N_VACATED(p, nVacated);
 }
 
 void
@@ -1225,13 +1075,12 @@ item_get_key_size(BTreeDescr *desc, bool leaf, BTreePageItem *item)
 
 	if (leaf)
 	{
-		tuple.data = item->data + (item->newItem ? 0 : BTreeLeafTuphdrSize);
+		tuple.data = item->data + BTreeLeafTuphdrSize;
 		tuple.formatFlags = item->flags;
 		return MAXALIGN(o_btree_len(desc, tuple, OTupleKeyLengthNoVersion));
 	}
 	else
 	{
-		Assert(!item->newItem);
 		tuple.data = item->data + BTreeNonLeafTuphdrSize;
 		tuple.formatFlags = item->flags;
 		return MAXALIGN(o_btree_len(desc, tuple, OKeyLength));
@@ -1243,8 +1092,7 @@ item_get_key_size(BTreeDescr *desc, bool leaf, BTreePageItem *item)
  */
 void
 btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
-				 OffsetNumber count, LocationIndex hikeySize, OTuple hikey,
-				 BTreePageItemLocator *newLoc)
+				 OffsetNumber count, LocationIndex hikeySize, OTuple hikey)
 {
 	int			chunksCount;
 	LocationIndex totalDataSize,
@@ -1381,7 +1229,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			ptr -= items[i].size;
 
 			if (items[i].data >= p && items[i].data < p + ORIOLEDB_BLCKSZ &&
-				ptr > items[i].data && !items[i].newItem)
+				ptr > items[i].data)
 				memmove(ptr, items[i].data, items[i].size);
 		}
 
@@ -1395,7 +1243,6 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	for (j = 0; j < chunksCount; j++)
 	{
 		OffsetNumber chunkItemsCount;
-		bool		fillNewLoc = false;
 
 		chunkItemsCount = chunkOffsets[j + 1] - chunkOffsets[j];
 		i = chunkOffsets[j];
@@ -1408,41 +1255,19 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 		for (i = chunkOffsets[j]; i < chunkOffsets[j + 1]; i++)
 		{
-			if (!items[i].newItem)
-			{
-				if (!(items[i].data >= p && items[i].data < p + ORIOLEDB_BLCKSZ) ||
-					ptr < items[i].data)
-					memmove(ptr, items[i].data, items[i].size);
-			}
-			else
-			{
-				newLoc->chunk = chunk;
-				newLoc->chunkOffset = j;
-				newLoc->itemOffset = i - chunkOffsets[j];
-				newLoc->chunkItemsCount = chunkItemsCount;
-				fillNewLoc = true;
-			}
+			if (!(items[i].data >= p && items[i].data < p + ORIOLEDB_BLCKSZ) ||
+				ptr < items[i].data)
+				memmove(ptr, items[i].data, items[i].size);
 			ptr += items[i].size;
 		}
-
-		if (fillNewLoc)
-			newLoc->chunkSize = ptr - (Pointer) chunk;
 
 		if (j > 0)
 		{
 			OTuple		chunkHikeyTuple;
 			LocationIndex chunkHikeySize;
 
-			if (!items[chunkOffsets[j]].newItem)
-			{
-				chunkHikeyTuple.formatFlags = ITEM_GET_FLAGS(chunk->items[0]);
-				chunkHikeyTuple.data = (Pointer) chunk + ITEM_GET_OFFSET(chunk->items[0]) + itemHeaderSize;
-			}
-			else
-			{
-				chunkHikeyTuple.formatFlags = items[chunkOffsets[j]].flags;
-				chunkHikeyTuple.data = items[chunkOffsets[j]].data;
-			}
+			chunkHikeyTuple.formatFlags = ITEM_GET_FLAGS(chunk->items[0]);
+			chunkHikeyTuple.data = (Pointer) chunk + ITEM_GET_OFFSET(chunk->items[0]) + itemHeaderSize;
 			if (O_PAGE_IS(p, LEAF))
 			{
 				bool		shouldFree;
@@ -1504,7 +1329,6 @@ split_page_by_chunks(BTreeDescr *desc, Page p)
 		items[i].data = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
 		items[i].flags = BTREE_PAGE_GET_ITEM_FLAGS(p, &loc);
 		items[i].size = BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
-		items[i].newItem = false;
 		i++;
 	}
 
@@ -1519,7 +1343,7 @@ split_page_by_chunks(BTreeDescr *desc, Page p)
 		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
 	}
 
-	btree_page_reorg(desc, p, items, i, hikeySize, hikey.tuple, NULL);
+	btree_page_reorg(desc, p, items, i, hikeySize, hikey.tuple);
 }
 
 bool

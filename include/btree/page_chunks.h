@@ -27,7 +27,6 @@ typedef struct
 	Pointer		data;
 	LocationIndex size;
 	uint8		flags;
-	bool		newItem;
 } BTreePageItem;
 
 extern bool partial_load_hikeys_chunk(PartialPageState *partial, Page img);
@@ -40,9 +39,6 @@ extern BTreeItemPageFitType page_locator_fits_item(BTreeDescr *desc,
 												   LocationIndex size,
 												   bool replace,
 												   CommitSeqNo csn);
-extern void perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
-									BTreePageItemLocator *loc,
-									OTuple tuple, LocationIndex tuplesize, bool replace);
 extern void o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p);
 extern void init_page_first_chunk(BTreeDescr *desc, Page p,
 								  LocationIndex hikeySize);
@@ -67,7 +63,7 @@ extern void page_split_chunk_if_needed(BTreeDescr *desc, Page p,
 									   BTreePageItemLocator *locator);
 extern void btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 							 OffsetNumber count, LocationIndex hikeySize,
-							 OTuple hikey, BTreePageItemLocator *newLoc);
+							 OTuple hikey);
 extern void split_page_by_chunks(BTreeDescr *desc, Page p);
 extern bool page_locator_find_real_item(Page p, PartialPageState *partial,
 										BTreePageItemLocator *locator);

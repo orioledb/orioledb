@@ -116,9 +116,12 @@ get_extent(BTreeDescr *desc, uint16 len)
 	/* try to find a free extent */
 	while (!found && !end)
 	{
+		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
 		tmpTup.data = (Pointer) &tup;
 		tmpTup.formatFlags = 0;
-		(void) find_page(&context, (Pointer) &tmpTup, BTreeKeyLeafTuple, 0);
+		findResult = find_page(&context, (Pointer) &tmpTup, BTreeKeyLeafTuple, 0);
+		Assert(findResult == OFindPageResultSuccess);
 		p = O_GET_IN_MEMORY_PAGE(context.items[context.index].blkno);
 		loc = &context.items[context.index].locator;
 

@@ -1233,7 +1233,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 				err = btree_smgr_read(desc, img + skipped, chkpNum, read_size, byte_offset) != read_size;
 
 				page_header = (BTreePageHeader *) img;
-				page_header->checkpointNum = header.chkpNum;
+				page_header->o_header.checkpointNum = header.chkpNum;
 			}
 		}
 	}
@@ -1487,18 +1487,23 @@ load_page(OBTreeFindPageContext *context)
 
 	if (O_PAGE_IS(page, RIGHTMOST))
 	{
+		OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+
 		if (!O_TUPLE_IS_NULL(target_hikey.tuple))
 			ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 							errmsg("error reading downlink %X/%X in relfile (%u, %u)",
 								   (uint32) (downlink >> 32), (uint32) (downlink),
 								   desc->oids.datoid, desc->oids.relnode),
 							errdetail("Hikeys don't match.")));
-		refind_page(context, NULL, BTreeKeyRightmost, PAGE_GET_LEVEL(page) + 1,
-					parent_blkno, parent_change_count);
+		result = refind_page(context, NULL, BTreeKeyRightmost,
+							 PAGE_GET_LEVEL(page) + 1,
+							 parent_blkno, parent_change_count);
+		Assert(result == OFindPageResultSuccess);
 	}
 	else
 	{
 		OTuple		hikey;
+		OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
 
 		BTREE_PAGE_GET_HIKEY(hikey, page);
 
@@ -1509,8 +1514,10 @@ load_page(OBTreeFindPageContext *context)
 								   (uint32) (downlink >> 32), (uint32) (downlink),
 								   desc->oids.datoid, desc->oids.relnode),
 							errdetail("Hikeys don't match.")));
-		refind_page(context, &hikey, BTreeKeyPageHiKey,
-					PAGE_GET_LEVEL(page) + 1, parent_blkno, parent_change_count);
+		result = refind_page(context, &hikey, BTreeKeyPageHiKey,
+							 PAGE_GET_LEVEL(page) + 1, parent_blkno,
+							 parent_change_count);
+		Assert(result == OFindPageResultSuccess);
 	}
 
 	/* restore context state */
@@ -1612,7 +1619,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	EA_WRITE_INC(blkno);
 
-	less_num = header->checkpointNum < checkpoint_number;
+	less_num = header->o_header.checkpointNum < checkpoint_number;
 	if (less_num)
 	{
 		/*
@@ -1625,14 +1632,14 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 			 * we need to update the written checkpoint number for the img too
 			 */
 			header = (BTreePageHeader *) img;
-			header->checkpointNum = checkpoint_number;
+			header->o_header.checkpointNum = checkpoint_number;
 			header = (BTreePageHeader *) page;
 		}
-		header->checkpointNum = checkpoint_number;
+		header->o_header.checkpointNum = checkpoint_number;
 	}
 	else
 	{
-		Assert(header->checkpointNum == checkpoint_number);
+		Assert(header->o_header.checkpointNum == checkpoint_number);
 	}
 
 	write_img = get_write_img(desc, img, &write_size);
@@ -2120,22 +2127,27 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 
 		if (!is_root)
 		{
+			OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+
 			/* Refind parent */
 			BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
 			if (O_PAGE_IS(p, RIGHTMOST))
 			{
-				refind_page(context, NULL, BTreeKeyRightmost,
-							PAGE_GET_LEVEL(p) + 1,
-							parent_blkno, parent_change_count);
+				result = refind_page(context, NULL, BTreeKeyRightmost,
+									 PAGE_GET_LEVEL(p) + 1,
+									 parent_blkno, parent_change_count);
 			}
 			else
 			{
 				OTuple		hikey;
 
 				BTREE_PAGE_GET_HIKEY(hikey, p);
-				refind_page(context, &hikey, BTreeKeyPageHiKey, PAGE_GET_LEVEL(p) + 1,
-							parent_blkno, parent_change_count);
+				result = refind_page(context, &hikey, BTreeKeyPageHiKey,
+									 PAGE_GET_LEVEL(p) + 1,
+									 parent_blkno, parent_change_count);
 			}
+			Assert(result == OFindPageResultSuccess);
+
 			BTREE_PAGE_FIND_UNSET(context, DOWNLINK_LOCATION);
 
 			context_index = context->index;
@@ -2277,7 +2289,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	bool		hasMetaLock = LWLockHeldByMe(&checkpoint_state->oTablesMetaLock);
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
-		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u32(&(O_PAGE_HEADER(rootPageBlkno)->state))));
+		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))));
 
 	/* we check it before */
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
@@ -2424,8 +2436,8 @@ walk_page(OInMemoryBlkno blkno, bool evict)
 	BTreeNonLeafTuphdr *int_hdr;
 	uint32		checkpoint_number;
 	bool		copy_blkno,
-				found,
 				merge_tried = false;
+	OFindPageResult findResult;
 	int			ionum;
 	char		img[ORIOLEDB_BLCKSZ];
 	bool		is_root;
@@ -2558,18 +2570,19 @@ retry:
 							   | BTREE_PAGE_FIND_NO_FIX_SPLIT);
 		if (O_PAGE_IS(p, RIGHTMOST))
 		{
-			found = find_page(&context, NULL, BTreeKeyRightmost, PAGE_GET_LEVEL(p) + 1);
+			findResult = find_page(&context, NULL, BTreeKeyRightmost, PAGE_GET_LEVEL(p) + 1);
 		}
 		else
 		{
 			OTuple		hikey;
 
 			BTREE_PAGE_GET_HIKEY(hikey, p);
-			found = find_page(&context, &hikey, BTreeKeyPageHiKey, PAGE_GET_LEVEL(p) + 1);
+			findResult = find_page(&context, &hikey, BTreeKeyPageHiKey, PAGE_GET_LEVEL(p) + 1);
 		}
 
-		if (!found)
+		if (findResult != OFindPageResultSuccess)
 		{
+			Assert(findResult == OFindPageResultFailure);
 			unlock_page(blkno);
 			Assert(!have_locked_pages());
 			return OWalkPageSkipped;

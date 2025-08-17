@@ -224,10 +224,10 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	appendStringInfo(outbuf, "\n");
 
 	if (printData->options->printStateValue)
-		appendStringInfo(outbuf, "state = %u", pg_atomic_read_u32(&(O_PAGE_HEADER(p)->state)));
+		appendStringInfo(outbuf, "state = " UINT64_FORMAT, pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)));
 	else
 	{
-		uint32		state = pg_atomic_read_u32(&(O_PAGE_HEADER(p)->state));
+		uint64		state = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
 
 		if (O_PAGE_STATE_READ_IS_BLOCKED(state))
 			appendStringInfo(outbuf, "state = modify");
@@ -299,12 +299,15 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 	}
 
 	if (printData->options->checkpointNumPrintType == BTreePrintAbsolute)
-		appendStringInfo(outbuf, ", checkpointNum = %u", header->checkpointNum);
+		appendStringInfo(outbuf, ", checkpointNum = %u", header->o_header.checkpointNum);
 	else if (printData->options->checkpointNumPrintType == BTreePrintRelative)
-		appendStringInfo(outbuf, ", checkpointNum = %u", header->checkpointNum - printData->minCheckpointNum);
+		appendStringInfo(outbuf, ", checkpointNum = %u", header->o_header.checkpointNum - printData->minCheckpointNum);
 
 	if (printData->options->printFixedFlags && O_PAGE_IS(p, HIKEYS_FIXED))
 		appendStringInfo(outbuf, ", hikeys fixed");
+
+	if (O_PAGE_IS(p, BROKEN_SPLIT))
+		appendStringInfo(outbuf, ", broken split");
 
 	appendStringInfo(outbuf, "\n");
 
@@ -558,7 +561,7 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 	}
 
 	printData->minCheckpointNum = Min(printData->minCheckpointNum,
-									  header->checkpointNum);
+									  header->o_header.checkpointNum);
 	printData->undosList[(int) pageUndoType] = ladd_unique_undo(printData->undosList[(int) pageUndoType],
 																pageUndoType,
 																header->undoLocation);

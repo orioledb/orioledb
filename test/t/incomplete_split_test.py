@@ -269,10 +269,11 @@ class SplitTest(BaseTest):
 		self.checkSplitTable(100, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
-		self.insertToSplitTable(con2, 1480, 1480, 1)
 
 		# fixes all splits
-		self.checkSplitTable(101, True)
+		self.insertToSplitTable(con2, 1480, 1500, 20)
+
+		self.checkSplitTable(102, True)
 
 	def test_incomplete_split_sequence2(self):
 		node = self.node

@@ -96,6 +96,9 @@ extern BTreeLeafTuphdr *make_undo_record(BTreeDescr *desc, OTuple tuple,
 										 bool is_tuple, BTreeOperationType action,
 										 OInMemoryBlkno blkno, uint32 pageChangeCount,
 										 UndoLocation *undoLocation);
+extern void make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno,
+									int pgprocno,
+									OPageWaiterShmemState *lockerState);
 
 extern void get_page_from_undo(BTreeDescr *desc, UndoLocation undo_loc, Pointer key,
 							   BTreeKeyType kind, Pointer dest,
