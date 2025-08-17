@@ -812,7 +812,10 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 
 			if (!have_page)
 			{
-				(void) find_page(&context, &bound, BTreeKeyBound, 0);
+				OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
+				findResult = find_page(&context, &bound, BTreeKeyBound, 0);
+				Assert(findResult == OFindPageResultSuccess);
 				have_page = true;
 				item = &context.items[context.index];
 				p = O_GET_IN_MEMORY_PAGE(item->blkno);
@@ -850,6 +853,8 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 				}
 				else
 				{
+					OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
 					if (have_page)
 					{
 						int			j;
@@ -862,7 +867,9 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 						unlock_page(context.items[context.index].blkno);
 					}
 
-					(void) find_page(&context, &bound, BTreeKeyBound, 0);
+					findResult = find_page(&context, &bound, BTreeKeyBound, 0);
+					Assert(findResult == OFindPageResultSuccess);
+
 					have_page = true;
 					item = &context.items[context.index];
 					p = O_GET_IN_MEMORY_PAGE(item->blkno);
@@ -1040,6 +1047,7 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 	OFixedKey	hikey;
 	BTreePageItemLocator loc;
 	int64		blocksScanned = 0;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	Assert(bridge != NULL);
 
@@ -1052,7 +1060,8 @@ lazy_scan_bridge_index(LVRelState *vacrel)
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_IMAGE);
 
-	(void) find_page(&context, NULL, BTreeKeyNone, 0);
+	findResult = find_page(&context, NULL, BTreeKeyNone, 0);
+	Assert(findResult == OFindPageResultSuccess);
 
 	do
 	{

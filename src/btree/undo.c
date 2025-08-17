@@ -358,6 +358,46 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	return &item->tuphdr;
 }
 
+void
+make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
+						OPageWaiterShmemState *lockerState)
+{
+	LocationIndex tuplelen;
+	UndoLocation undoLocation;
+	BTreeModifyUndoStackItem *item;
+	LocationIndex size;
+	OTuple		tuple;
+	bool		key_palloc = false;
+	OTuple		key;
+
+	tuple.formatFlags = lockerState->tupleFlags;
+	tuple.data = &lockerState->tupleData.fixedData[BTreeLeafTuphdrSize];
+
+	tuplelen = o_btree_len(desc, tuple, OTupleKeyLength);
+
+	size = sizeof(BTreeModifyUndoStackItem) + tuplelen;
+	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
+														&undoLocation,
+														MAXALIGN(size));
+	item->header.itemSize = size;
+	item->header.type = ModifyUndoItemType;
+	item->header.indexType = desc->type;
+	item->action = BTreeOperationInsert;
+	item->blkno = blkno;
+	item->pageChangeCount = lockerState->pageChangeCount;
+	item->oids = desc->oids;
+
+	memset((Pointer) item + sizeof(BTreeModifyUndoStackItem), 0, tuplelen);
+	key = o_btree_tuple_make_key(desc, tuple,
+								 (Pointer) item + sizeof(BTreeModifyUndoStackItem),
+								 true, &key_palloc);
+	item->tuphdr.formatFlags = key.formatFlags;
+	Assert(!key_palloc);
+
+	add_new_undo_stack_item_to_process(desc->undoType, undoLocation, pgprocno,
+									   lockerState->localXid);
+}
+
 static BTreeDescr *
 get_tree_descr(ORelOids oids, OIndexType type)
 {
@@ -395,7 +435,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	UndoLocation nonLockUndoLocation;
 	OBTreeFindPageContext context;
 	BTreeKeyType keyType = item->action == BTreeOperationUpdate ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
-	bool		found;
+	OFindPageResult findResult;
 
 	Assert(abort);
 
@@ -423,10 +463,10 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		item->pageChangeCount = InvalidOPageChangeCount;
 
 	o_set_syscache_hooks();
-	found = refind_page(&context, (Pointer) &tuple, keyType, 0, item->blkno,
-						item->pageChangeCount);
+	findResult = refind_page(&context, (Pointer) &tuple, keyType,
+							 0, item->blkno, item->pageChangeCount);
 	o_unset_syscache_hooks();
-	if (!found)
+	if (findResult == OFindPageResultFailure)
 	{
 		/*
 		 * BTree can be already deleted and cleaned by
@@ -434,6 +474,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		 */
 		return;
 	}
+	Assert(findResult == OFindPageResultSuccess);
 
 	blkno = context.items[context.index].blkno;
 	p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -515,6 +556,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 	OBTreeFindPageContext context;
 	UndoLocation tuphdrUndoLocation,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
+	OFindPageResult findResult;
 
 	Assert(abort);
 
@@ -537,7 +579,11 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (!changeCountsValid)
 		item->pageChangeCount = InvalidOPageChangeCount;
 
-	if (!refind_page(&context, (Pointer) &key, BTreeKeyNonLeafKey, 0, item->blkno, item->pageChangeCount))
+	findResult = refind_page(&context, (Pointer) &key,
+							 BTreeKeyNonLeafKey, 0, item->blkno,
+							 item->pageChangeCount);
+
+	if (findResult == OFindPageResultFailure)
 	{
 		/*
 		 * BTree can be already deleted and cleaned by
@@ -545,6 +591,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 		 */
 		return;
 	}
+	Assert(findResult == OFindPageResultSuccess);
 
 	blkno = context.items[context.index].blkno;
 	p = O_GET_IN_MEMORY_PAGE(blkno);

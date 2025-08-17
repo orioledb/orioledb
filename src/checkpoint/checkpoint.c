@@ -2842,7 +2842,7 @@ checkpointer_update_autonomous(BTreeDescr *desc, CheckpointState *state)
 			page_desc = O_GET_IN_MEMORY_PAGEDESC(state->stack[i].blkno);
 			header = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(state->stack[i].blkno);
 
-			header->checkpointNum = 0;
+			header->o_header.checkpointNum = 0;
 			if (FileExtentIsValid(page_desc->fileExtent))
 			{
 				/* the offset will not be used in current checkpoint */
@@ -3125,7 +3125,9 @@ checkpoint_fix_split_and_lock_page(BTreeDescr *descr, CheckpointState *state,
 
 		Assert(level >= 0 && level < ORIOLEDB_MAX_DEPTH);
 
-		if (o_btree_split_is_incomplete(*blkno, &relocked))
+		if (o_btree_split_is_incomplete(*blkno,
+										page_chage_count,
+										&relocked))
 		{
 			o_btree_split_fix_and_unlock(descr, *blkno);
 			checkpoint_reserve_undo(descr->undoType, false);
@@ -3423,7 +3425,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 
 				page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 
-				header->checkpointNum = 0;
+				header->o_header.checkpointNum = 0;
 				if (FileExtentIsValid(page_desc->fileExtent))
 				{
 					if (orioledb_s3_mode)
@@ -3771,7 +3773,7 @@ autonomous_image_write(BTreeDescr *descr, CheckpointState *state,
 
 	/* prepare the image header */
 	img_header = (BTreePageHeader *) img;
-	img_header->checkpointNum = chkpNum;
+	img_header->o_header.checkpointNum = chkpNum;
 	img_header->undoLocation = InvalidUndoLocation;
 	img_header->csn = COMMITSEQNO_FROZEN;
 	img_header->rightLink = InvalidRightLink;
@@ -4567,7 +4569,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		img_header = (BTreePageHeader *) img;
 		img_header->undoLocation = page_header->undoLocation;
 		img_header->csn = page_header->csn;
-		img_header->checkpointNum = page_header->checkpointNum;
+		img_header->o_header.checkpointNum = page_header->o_header.checkpointNum;
 		img_header->flags = page_header->flags;
 		img_header->rightLink = InvalidRightLink;
 		PAGE_SET_N_ONDISK(img, BTREE_PAGE_ITEMS_COUNT(img));

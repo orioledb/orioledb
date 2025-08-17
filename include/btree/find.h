@@ -48,6 +48,8 @@ typedef struct
 	UndoLocation imgUndoLoc;
 	int			index;
 	OBtreePageFindItem items[ORIOLEDB_MAX_DEPTH];
+	OTupleXactInfo insertXactInfo;
+	OTuple		insertTuple;
 
 	/*
 	 * When BTREE_PAGE_FIND_LOKEY_SIBLING is not set, then lokey contains
@@ -84,6 +86,13 @@ typedef struct
 #define BTREE_PAGE_FIND_UNSET(context, flag) ((context)->flags &= ~(BTREE_PAGE_FIND_##flag))
 #define BTREE_PAGE_FIND_IS(context, flag) (((context)->flags & BTREE_PAGE_FIND_##flag)? true : false)
 
+typedef enum
+{
+	OFindPageResultSuccess,
+	OFindPageResultFailure,
+	OFindPageResultInserted
+} OFindPageResult;
+
 extern bool btree_page_search(BTreeDescr *desc, Page p, Pointer key,
 							  BTreeKeyType keyType, PartialPageState *partial,
 							  BTreePageItemLocator *locator);
@@ -91,11 +100,11 @@ extern void init_page_find_context(OBTreeFindPageContext *context,
 								   BTreeDescr *desc,
 								   CommitSeqNo csn, uint16 flags);
 
-extern bool find_page(OBTreeFindPageContext *context, void *key,
-					  BTreeKeyType keyType, uint16 targetLevel);
-extern bool refind_page(OBTreeFindPageContext *context, void *key,
-						BTreeKeyType keyType, uint16 level,
-						OInMemoryBlkno blkno, uint32 pageChangeCount);
+extern OFindPageResult find_page(OBTreeFindPageContext *context, void *key,
+								 BTreeKeyType keyType, uint16 targetLevel);
+extern OFindPageResult refind_page(OBTreeFindPageContext *context, void *key,
+								   BTreeKeyType keyType, uint16 level,
+								   OInMemoryBlkno blkno, uint32 pageChangeCount);
 
 extern bool find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey);
 extern bool find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey);

@@ -125,6 +125,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	BTreePageHeader *header;
 	bool		combinedResult = false;
 	OTuple		result;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	if (COMMITSEQNO_IS_NORMAL(read_o_snapshot->csn))
 		combinedResult = !have_current_undo(desc->undoType);
@@ -135,9 +136,11 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 
 	/* Use page location hint if provided */
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
-		refind_page(&context, key, kind, 0, hint->blkno, hint->pageChangeCount);
+		findResult = refind_page(&context, key, kind, 0, hint->blkno, hint->pageChangeCount);
 	else
-		(void) find_page(&context, key, kind, 0);
+		findResult = find_page(&context, key, kind, 0);
+
+	Assert(findResult == OFindPageResultSuccess);
 
 	loc = context.items[context.index].locator;
 	img = context.img;
@@ -421,6 +424,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 {
 	BTreeIterator *it;
 	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
 	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
@@ -450,7 +454,8 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 			kind = BTreeKeyRightmost;
 	}
 
-	find_page(&it->context, key, kind, 0);
+	findResult = find_page(&it->context, key, kind, 0);
+	Assert(findResult == OFindPageResultSuccess);
 
 	if (key != NULL && IT_IS_BACKWARD(it))
 	{

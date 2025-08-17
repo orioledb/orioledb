@@ -79,10 +79,6 @@ typedef struct
 	LocationIndex items[1];
 } BTreePageChunk;
 
-#define BTREE_PAGE_MAX_CHUNK_ITEMS \
-	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
-		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
-
 #define BTREE_PAGE_MAX_ITEMS \
 	((ORIOLEDB_BLCKSZ - sizeof(BTreePageHeader)) / \
 		(MAXIMUM_ALIGNOF + sizeof(LocationIndex)))
@@ -104,7 +100,6 @@ struct BTreePageItemLocator
 typedef struct
 {
 	OrioleDBPageHeader o_header;
-	uint32		checkpointNum;
 
 	/* Link to the page-level undo item and corresponding CSN */
 	UndoLocation undoLocation;
@@ -399,5 +394,33 @@ extern void page_set_hikey_flags(Page p, uint8 flags);
 extern bool page_fits_hikey(Page p, LocationIndex newHikeySize);
 extern void page_resize_hikey(Page p, LocationIndex newHikeySize);
 extern void btree_page_update_max_key_len(BTreeDescr *desc, Page p);
+
+typedef enum
+{
+	OPageWaitExclusive,
+	OPageWaitNonExclusive,
+	OPageWaitInsert,
+	OPageWaitWakeUp
+} OPageWaiterStatus;
+
+/* This should be in page_state.h but depends on O_BTREE_MAX_KEY_SIZE */
+typedef struct
+{
+	ORelOids	reloids;
+	OPageWaiterStatus status;
+	uint32		pageChangeCount;
+	LocalTransactionId localXid;
+	uint8		tupleFlags;
+	bool		inserted;
+	Size		reservedUndoSize;
+	uint32		next;
+	union
+	{
+		char		fixedData[BTreeLeafTuphdrSize + O_BTREE_MAX_KEY_SIZE];
+		Datum		datum;		/* keep here for alignment */
+	}			tupleData;
+} OPageWaiterShmemState;
+
+extern OPageWaiterShmemState *lockerStates;
 
 #endif							/* __BTREE_PAGE_CONTENTS_H__ */

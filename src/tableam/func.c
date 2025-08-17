@@ -487,9 +487,9 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 					 sizeof(OrioleDBPageHeader));
 	level++;					/* o_header BEGIN */
 
-	APPEND_FIELD("state", pg_atomic_uint32);
+	APPEND_FIELD("state", pg_atomic_uint64);
 	APPEND_FIELD("usageCount", pg_atomic_uint32);
-	APPEND_FIELD("pageChangeCount", uint32);
+	APPEND_FIELD("checkpointNum", uint32);
 
 	level--;					/* o_header END */
 
@@ -502,7 +502,6 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	APPEND_FIELD("undoLocation", UndoLocation);
 	APPEND_FIELD("csn", CommitSeqNo);
 	APPEND_FIELD("rightLink", uint64);
-	APPEND_FIELD("checkpointNum", uint32);
 	APPEND_FIELD("maxKeyLen", LocationIndex);
 	APPEND_FIELD("prevInsertOffset", OffsetNumber);
 	APPEND_FIELD("chunksCount", OffsetNumber);
@@ -1589,8 +1588,11 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 
 	for (level = 0; level < ORIOLEDB_MAX_DEPTH; level++)
 	{
-		(void) find_page(&context, NULL, BTreeKeyNone, level);
-		if (PAGE_GET_LEVEL(context.img) != level)
+		OFindPageResult findResult;
+
+		findResult = find_page(&context, NULL, BTreeKeyNone, level);
+		if (findResult != OFindPageResultSuccess ||
+			PAGE_GET_LEVEL(context.img) != level)
 			break;
 
 		add_page_stat(desc, context.img, stat);
@@ -1619,7 +1621,8 @@ tree_stat_walker(BTreeDescr *desc, ORelationStat *stat)
 							&key.tuple, BTreeKeyNonLeafKey,
 							&stat->levels[level].hikey.tuple, BTreeKeyNonLeafKey) >= 0)
 			{
-				if (find_page(&context, &key.tuple, BTreeKeyNonLeafKey, level))
+				if (find_page(&context, &key.tuple,
+							  BTreeKeyNonLeafKey, level) == OFindPageResultSuccess)
 					add_page_stat(desc, context.img, stat);
 				else
 					break;

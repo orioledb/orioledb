@@ -245,14 +245,17 @@ retry:
 			{
 				if (context.lockMode > prev_lock_mode)
 				{
+					OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
+
 					unlock_page(blkno);
 
-					refind_page(pageFindContext,
-								key,
-								keyType,
-								0,
-								pageFindContext->items[pageFindContext->index].blkno,
-								pageFindContext->items[pageFindContext->index].pageChangeCount);
+					result = refind_page(pageFindContext,
+										 key,
+										 keyType,
+										 0,
+										 pageFindContext->items[pageFindContext->index].blkno,
+										 pageFindContext->items[pageFindContext->index].pageChangeCount);
+					Assert(result == OFindPageResultSuccess);
 					goto retry;
 				}
 
@@ -533,6 +536,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * provided, ask it what to do.  Just wait otherwise.
 				 */
 				OBTreeWaitCallbackAction cbAction = OBTreeCallbackActionXidWait;
+				OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
 
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
 
@@ -567,12 +571,13 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 					Assert(cbAction == OBTreeCallbackActionXidNoWait);
 				}
 
-				refind_page(pageFindContext,
-							context->key,
-							context->keyType,
-							0,
-							pageFindContext->items[pageFindContext->index].blkno,
-							pageFindContext->items[pageFindContext->index].pageChangeCount);
+				result = refind_page(pageFindContext,
+									 context->key,
+									 context->keyType,
+									 0,
+									 pageFindContext->items[pageFindContext->index].blkno,
+									 pageFindContext->items[pageFindContext->index].pageChangeCount);
+				Assert(result == OFindPageResultSuccess);
 				return ConflictResolutionRetry;
 			}
 
@@ -995,6 +1000,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	OBTreeFindPageContext pageFindContext;
 	int			pageReserveKind;
 	Jsonb	   *params = NULL;
+	OFindPageResult findResult;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1020,10 +1026,36 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
 
+	if (action == BTreeOperationInsert && tupleType == BTreeKeyLeafTuple)
+	{
+		pageFindContext.insertTuple = tuple;
+		if (OXidIsValid(opOxid))
+			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(opOxid, lockMode, false);
+		else
+			pageFindContext.insertXactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, lockMode, false);
+	}
+
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
-		refind_page(&pageFindContext, key, keyType, 0, hint->blkno, hint->pageChangeCount);
+		findResult = refind_page(&pageFindContext, key, keyType, 0, hint->blkno, hint->pageChangeCount);
 	else
-		(void) find_page(&pageFindContext, key, keyType, 0);
+		findResult = find_page(&pageFindContext, key, keyType, 0);
+
+	if (findResult == OFindPageResultInserted)
+	{
+		Assert(action == BTreeOperationInsert);
+		Assert(tupleType == BTreeKeyLeafTuple);
+
+		if (desc->undoType != UndoLogNone)
+		{
+			release_undo_size(desc->undoType);
+			if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
+				release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+		}
+		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
+		Assert(!have_locked_pages());
+		return OBTreeModifyResultInserted;
+	}
+	Assert(findResult == OFindPageResultSuccess);
 
 	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
 								   key, keyType, opOxid, opCsn,
@@ -1129,6 +1161,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	LWLock	   *uniqueLock;
 	OBTreeModifyResult result;
 	Jsonb	   *params = NULL;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1151,10 +1184,14 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 						   BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
 
 	if (hint && OInMemoryBlknoIsValid(hint->blkno))
-		refind_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0,
-					hint->blkno, hint->pageChangeCount);
+		findResult = refind_page(&pageFindContext, key,
+								 BTreeKeyUniqueLowerBound, 0,
+								 hint->blkno, hint->pageChangeCount);
 	else
-		(void) find_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0);
+		findResult = find_page(&pageFindContext, key,
+							   BTreeKeyUniqueLowerBound, 0);
+
+	Assert(findResult == OFindPageResultSuccess);
 
 retry:
 
@@ -1249,8 +1286,10 @@ retry:
 				}
 				unlock_page(blkno);
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
-				refind_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0,
-							blkno, pageChangeCount);
+				findResult = refind_page(&pageFindContext, key,
+										 BTreeKeyUniqueLowerBound, 0,
+										 blkno, pageChangeCount);
+				Assert(findResult == OFindPageResultSuccess);
 				goto retry;
 			}
 		}
@@ -1324,15 +1363,18 @@ retry:
 				}
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
-				refind_page(&pageFindContext, key, BTreeKeyUniqueLowerBound, 0,
-							blkno, pageChangeCount);
+				findResult = refind_page(&pageFindContext, key,
+										 BTreeKeyUniqueLowerBound, 0,
+										 blkno, pageChangeCount);
+				Assert(findResult == OFindPageResultSuccess);
 				goto retry;
 			}
 		}
 		else
 		{
 			BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
-			(void) find_page(&pageFindContext, key, BTreeKeyBound, 0);
+			findResult = find_page(&pageFindContext, key, BTreeKeyBound, 0);
+			Assert(findResult == OFindPageResultSuccess);
 		}
 	}
 

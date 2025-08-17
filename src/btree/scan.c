@@ -278,14 +278,16 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 						OffsetNumber *startOffset)
 {
 	bool		has_next = false;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	elog(DEBUG3, "load_next_internal_page");
 	scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
 
 	if (!O_TUPLE_IS_NULL(prevHikey))
-		find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
+		findResult = find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
 	else
-		find_page(&scan->context, NULL, BTreeKeyNone, 1);
+		findResult = find_page(&scan->context, NULL, BTreeKeyNone, 1);
+	Assert(findResult == OFindPageResultSuccess);
 
 	/* In case of parallel scan copy page image into shared state */
 	if (page)
