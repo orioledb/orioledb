@@ -288,9 +288,32 @@ WHERE attrelid = 'o_storage_default_test'::regclass
  text_col | x
 (1 row)
 
+----
+-- Test 9: Plain varlena
+----
+CREATE TABLE o_plain_varlena (
+    b bytea NOT NULL,
+    c numeric(5,0) NOT NULL,
+    d bytea NOT NULL
+) using orioledb;
+ALTER TABLE ONLY o_plain_varlena ALTER COLUMN b SET STORAGE PLAIN;
+ALTER TABLE ONLY o_plain_varlena ALTER COLUMN d SET STORAGE PLAIN;
+CREATE UNIQUE INDEX plain_varlena_idx ON o_plain_varlena USING btree (b, c, d);
+INSERT INTO o_plain_varlena VALUES (
+    decode('DEADBEEF', 'hex'),
+    1,
+    decode('00112233445566778899AABBCCDDEEFF', 'hex')
+);
+SELECT * from o_plain_varlena;
+     b      | c |                 d                  
+------------+---+------------------------------------
+ \xdeadbeef | 1 | \x00112233445566778899aabbccddeeff
+(1 row)
+
 -- Cleanup
 DROP TABLE o_storage_default_test;
 DROP TABLE o_storage_index_test;
 DROP TABLE o_storage_test;
+DROP TABLE o_plain_varlena;
 DROP SCHEMA alter_storage CASCADE;
 RESET search_path;

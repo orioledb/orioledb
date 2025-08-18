@@ -171,6 +171,7 @@ o_tuple_read_next_field_ptr(OTupleReaderState *state)
 
 	if (state->hasnulls && att_isnull(state->attnum, state->bp))
 	{
+		state->slow = true;
 		state->attnum++;
 		return NULL;
 	}
@@ -227,8 +228,8 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 	bool		slow = false;	/* do we have to walk attrs? */
 	int			i;
 	OTupleReaderState reader;
-	uint32		prev_off;
 	Pointer		result = NULL;
+	Form_pg_attribute att;
 
 	/* ----------------
 	 *	 Three cases:
@@ -278,28 +279,22 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 		tp = (char *) (tuple.data + SizeOfOTupleHeader);
 	}
 
+	att = TupleDescAttr(tupleDesc, attnum);
+
 	if (!slow)
 	{
-		Form_pg_attribute att;
-
 		/*
 		 * If we get here, there are no nulls up to and including the target
 		 * attribute.  If we have a cached offset, we can use it.
 		 */
-		att = TupleDescAttr(tupleDesc, attnum);
 		if (att->attcacheoff >= 0)
 			return tp + att->attcacheoff;
 	}
 
 	o_tuple_init_reader(&reader, tuple, tupleDesc, spec);
-	prev_off = reader.off;
 	for (i = 0; i <= attnum; i++)
-	{
-		prev_off = reader.off;
 		result = o_tuple_read_next_field_ptr(&reader);
-	}
 	Assert(result != NULL);
-	result = tp + prev_off;
 
 	return result;
 }
