@@ -502,8 +502,8 @@ o_tree_init_free_extents(BTreeDescr *desc)
 static void
 index_descr_free(OIndexDescr *tree)
 {
-	elog(WARNING, "index_descr_free: oids (%d, %d, %d)",
-		 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode);
+	elog(WARNING, "index_descr_free: oids (%d, %d, %d), index_mctx %p",
+		 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode, tree->index_mctx);
 
 	if (tree->leafTupdesc && tree->leafTupdesc->constr && tree->leafTupdesc->constr->missing)
 	{
@@ -514,8 +514,8 @@ index_descr_free(OIndexDescr *tree)
 		{
 			if (attrmiss[i].am_present
 				&& !TupleDescAttr(tupdesc, i)->attbyval)
-				elog(WARNING, "index_descr_free leafTupdesc: i %d, am_value %p, natts %d",
-					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts);
+				elog(WARNING, "index_descr_free leafTupdesc: i %d, am_value %p, natts %d, attrmiss %p",
+					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts, attrmiss);
 		}
 	}
 
@@ -528,8 +528,8 @@ index_descr_free(OIndexDescr *tree)
 		{
 			if (attrmiss[i].am_present
 				&& !TupleDescAttr(tupdesc, i)->attbyval)
-				elog(WARNING, "index_descr_free nonLeafTupdesc: i %d, am_value %p, natts %d",
-					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts);
+				elog(WARNING, "index_descr_free nonLeafTupdesc: i %d, am_value %p, natts %d, attrmiss %p",
+					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts, attrmiss);
 		}
 	}
 
@@ -542,8 +542,8 @@ index_descr_free(OIndexDescr *tree)
 		{
 			if (attrmiss[i].am_present
 				&& !TupleDescAttr(tupdesc, i)->attbyval)
-				elog(WARNING, "index_descr_free itupdesc: i %d, am_value %p, natts %d",
-					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts);
+				elog(WARNING, "index_descr_free itupdesc: i %d, am_value %p, natts %d, attrmiss %p",
+					 i, DatumGetPointer(attrmiss[i].am_value), tupdesc->natts, attrmiss);
 		}
 	}
 

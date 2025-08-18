@@ -756,8 +756,9 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));
 	tupdesc->constr->missing = (AttrMissing *) palloc0((allfields + ctid_off) * sizeof(AttrMissing));
 
-	elog(WARNING, "o_tupdesc_load_constr: oids (%d, %d, %d) missing length %d, natts %d",
-		 descr->oids.datoid, descr->oids.reloid, descr->oids.relnode, (allfields + ctid_off), tupdesc->natts);
+	elog(WARNING, "o_tupdesc_load_constr: oids (%d, %d, %d) missing length %d, index_mctx %p, natts %d, missing %p",
+		 descr->oids.datoid, descr->oids.reloid, descr->oids.relnode, (allfields + ctid_off),
+		 idx_cxt, tupdesc->natts, tupdesc->constr->missing);
 
 	if (!o_table->has_primary)
 		tupdesc->constr->missing[0].am_present = false;
@@ -775,8 +776,8 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 				datumCopy(o_table->missing[i].am_value, field->byval,
 						  field->typlen);
 
-			elog(WARNING, "o_tupdesc_load_constr: i %d, natts %d",
-				 i, tupdesc->natts);
+			elog(WARNING, "o_tupdesc_load_constr: i %d, natts %d, am_value %p",
+				 i, tupdesc->natts, DatumGetPointer(tupdesc_miss->am_value));
 		}
 	}
 
