@@ -2530,6 +2530,71 @@ cleanup_tablespace_dir(char *tablespace_path)
 	closedir(dir);
 }
 
+/*
+ * get_collation		- fetch qualified name of a collation
+ *
+ * If collation is InvalidOid or is the default for the given actual_datatype,
+ * then the return value is NIL.
+ */
+static List *
+get_collation(Oid collation, Oid actual_datatype)
+{
+	List	   *result;
+	HeapTuple	ht_coll;
+	Form_pg_collation coll_rec;
+	char	   *nsp_name;
+	char	   *coll_name;
+
+	if (!OidIsValid(collation))
+		return NIL;				/* easy case */
+	if (collation == get_typcollation(actual_datatype))
+		return NIL;				/* just let it default */
+
+	ht_coll = SearchSysCache1(COLLOID, ObjectIdGetDatum(collation));
+	if (!HeapTupleIsValid(ht_coll))
+		elog(ERROR, "cache lookup failed for collation %u", collation);
+	coll_rec = (Form_pg_collation) GETSTRUCT(ht_coll);
+
+	/* For simplicity, we always schema-qualify the name */
+	nsp_name = get_namespace_name(coll_rec->collnamespace);
+	coll_name = pstrdup(NameStr(coll_rec->collname));
+	result = list_make2(makeString(nsp_name), makeString(coll_name));
+
+	ReleaseSysCache(ht_coll);
+	return result;
+}
+
+/*
+ * get_opclass			- fetch qualified name of an index operator class
+ *
+ * If the opclass is the default for the given actual_datatype, then
+ * the return value is NIL.
+ */
+static List *
+get_opclass(Oid opclass, Oid actual_datatype)
+{
+	List	   *result = NIL;
+	HeapTuple	ht_opc;
+	Form_pg_opclass opc_rec;
+
+	ht_opc = SearchSysCache1(CLAOID, ObjectIdGetDatum(opclass));
+	if (!HeapTupleIsValid(ht_opc))
+		elog(ERROR, "cache lookup failed for opclass %u", opclass);
+	opc_rec = (Form_pg_opclass) GETSTRUCT(ht_opc);
+
+	if (GetDefaultOpClass(actual_datatype, opc_rec->opcmethod) != opclass)
+	{
+		/* For simplicity, we always schema-qualify the name */
+		char	   *nsp_name = get_namespace_name(opc_rec->opcnamespace);
+		char	   *opc_name = pstrdup(NameStr(opc_rec->opcname));
+
+		result = list_make2(makeString(nsp_name), makeString(opc_name));
+	}
+
+	ReleaseSysCache(ht_opc);
+	return result;
+}
+
 static void
 orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
@@ -3083,6 +3148,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				/* TODO: Probably use CheckIndexCompatible here */
 				changed = old_field.typid != field->typid ||
+					old_field.typmod != field->typmod ||
 					old_field.collation != field->collation;
 
 				if (changed)
@@ -3157,6 +3223,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					/* TODO: Probably use CheckIndexCompatible here */
 					changed_ty = old_field.typid != field->typid ||
+						old_field.typmod != field->typmod ||
 						old_field.collation != field->collation;
 
 					if (changed_ty)
@@ -3175,36 +3242,59 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
+							bool		compatible = false;
 							int			field_num;
 							int			ctid_idx_off;
-							OTableIndex *index;
+							OTableIndex *o_table_index;
+							List	   *attributeList = NIL;
 
 							ctid_idx_off = o_table->has_primary ? 0 : 1;
-							index = &o_table->indices[ix_num];
+							o_table_index = &o_table->indices[ix_num];
 
-							for (field_num = 0; field_num < index->nkeyfields;
+							for (field_num = 0; field_num < o_table_index->nkeyfields; field_num++)
+							{
+								IndexElem  *iparam;
+								OTableIndexField *iField = &o_table_index->fields[field_num];
+								int			attnum = iField->attnum;
+								OTableField *table_field;
+
+								table_field = &o_table->fields[attnum];
+								iparam = makeNode(IndexElem);
+
+								iparam->name = table_field->name.data;
+								iparam->expr = NULL;
+								iparam->collation = get_collation(table_field->collation, table_field->typid);
+								iparam->opclass = get_opclass(iField->opclass, table_field->typid);
+								iparam->ordering = iField->ordering;
+								iparam->nulls_ordering = iField->nullsOrdering;
+
+								attributeList = lappend(attributeList, iparam);
+							}
+
+							compatible = CheckIndexCompatible(o_table_index->oids.reloid, "btree", attributeList, NIL);
+
+							for (field_num = 0; field_num < o_table_index->nkeyfields;
 								 field_num++)
 							{
 								bool		has_field;
 
-								has_field = index->fields[field_num].attnum ==
+								has_field = o_table_index->fields[field_num].attnum ==
 									subId - 1;
-								if (index->type == oIndexPrimary || has_field)
+								if (o_table_index->type == oIndexPrimary || has_field)
 								{
 									o_indices_update(o_table,
 													 ix_num + ctid_idx_off,
 													 oxid, oSnapshot.csn);
-									o_invalidate_oids(index->oids);
-									o_add_invalidate_undo_item(
-															   index->oids,
+									o_invalidate_oids(o_table_index->oids);
+									o_add_invalidate_undo_item(o_table_index->oids,
 															   O_INVALIDATE_OIDS_ON_ABORT);
 								}
-								if (changed_ty && has_field)
+								if (changed_ty && has_field && (o_table_index->type == oIndexPrimary || !compatible))
 								{
 									String	   *ix_name;
 
 									ix_name =
-										makeString(pstrdup(index->name.data));
+										makeString(pstrdup(o_table_index->name.data));
 									drop_index_list =
 										list_append_unique(drop_index_list,
 														   ix_name);
