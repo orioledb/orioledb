@@ -1066,8 +1066,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 		}
 		pg_qsort(descr->pk_tbl_field_map, descr->nFields, sizeof(AttrNumberMap), attrnumber_cmp);
 	}
-	MemoryContextSwitchTo(old_mcxt);
 	descr->econtext = CreateStandaloneExprContext();
+	MemoryContextSwitchTo(old_mcxt);
 
 	descr->maxTableAttnum = maxTableAttnum;
 

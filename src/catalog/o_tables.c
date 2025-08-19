@@ -743,18 +743,20 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	MemoryContext oldcxt;
 	MemoryContext idx_cxt;
 	int			i;
-	int			ctid_off;
-	int			allfields = o_table->nfields;
+	int			fields_start;
+	int			all_attrs = o_table->nfields;
 
 	idx_cxt = OGetIndexContext(descr);
 	oldcxt = MemoryContextSwitchTo(idx_cxt);
-	ctid_off = o_table->has_primary ? 0 : 1;
+	fields_start = o_table->has_primary ? 0 : 1;
 
 	if (o_table->index_bridging)
-		allfields++;
+		fields_start++;
+
+	all_attrs += fields_start;
 
 	tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));
-	tupdesc->constr->missing = (AttrMissing *) palloc0((allfields + ctid_off) * sizeof(AttrMissing));
+	tupdesc->constr->missing = (AttrMissing *) palloc0(all_attrs * sizeof(AttrMissing));
 
 	if (!o_table->has_primary)
 		tupdesc->constr->missing[0].am_present = false;
@@ -762,7 +764,7 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	for (i = 0; i < o_table->nfields; i++)
 	{
 		OTableField *field = &o_table->fields[i];
-		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[i + ctid_off];
+		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[i + fields_start];
 
 		tupdesc_miss->am_present = o_table->missing[i].am_present;
 
@@ -776,7 +778,7 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 
 	if (o_table->index_bridging)
 	{
-		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[o_table->nfields + ctid_off];
+		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[fields_start - 1];
 
 		tupdesc_miss->am_present = false;
 		tupdesc_miss->am_value = 0;
