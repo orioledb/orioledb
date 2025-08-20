@@ -40,25 +40,181 @@ typedef struct
 	 * [checkpointRetainStartLocation; checkpointRetainEndLocation) -- range of
 	 * undo locations required for recovery from the checkpoint.
 	 */
+
+	/*-----
+	 * lastUsedLocation is a position within a RAM undo log buffer,
+	 * representing a boundary between two areas in  the undo log buffer:
+	 * (1) reserved area - location range in undo log buffer, already
+	 * reserved by (granted to) some backends for writing; backends are
+	 * writing their data to this location range at the moment.
+	 * (2) ready-for-reservation area is a pre-reserved, free location range
+	 * in undo log buffer, ready to be reserved (occupied) by any backend.
+	 *
+	 * lastUsedLocation is the first position in the RAM undo log buffer
+	 * from which the ready-for-reservation area begins.
+	 *
+	 * RAM undo log buffer visualization:
+	 * <- -----------------|------------------------------ ->
+	 *	   <reserved area> | <ready-for-reservation area>
+	 *					   \
+	 *				lastUsedLocation
+	 *
+	 * lastUsedLocation gets increased in the get_undo_record() method only.
+	 *
+	 * Basic algorithm used by each backend for obtaining afree undo log
+	 * location for an undo record:
+	 * - call get_undo_record()
+	 *	   - call set_my_reserved_location()
+	 *		   - read current lastUsedLocation - the first location available
+	 *			 for the reservation at the moment,
+	 *		   - setup the per-process undo locations: reservedUndoLocation
+	 *			 and transactionUndoRetainLocation, from read lastUsedLocation,
+	 *	   - advance shared meta->lastUsedLocation by the value of the
+	 *		 reservation size.
+	 */
 	pg_atomic_uint64 lastUsedLocation;
+
+	/*
+	 * advanceReservedLocation is used for preliminary reservation of RAM undo
+	 * log buffer' free locations, ready to be obtained by backends.
+	 * advanceReservedLocation is the top value of all monotonically
+	 * increasing undo log buffer locations. advanceReservedLocation gets
+	 * increased in reserve_undo_size_extended() method only.
+	 *
+	 * Pre-reservation must be performed well in advance before the actual
+	 * obtaining (reserving) of undo log locations, because of eviction
+	 * overhead in a case of undo log buffer overflow.
+	 *
+	 * reserve_undo_size_extended() method may trigger an eviction process in
+	 * a case of undo log buffer overflow and waitForUndoLocation == true,
+	 * otherwise if waitForUndoLocation == false and there is no place in a
+	 * buffer - revert modifications on advanceReservedLocation and return
+	 * failure.
+	 */
 	pg_atomic_uint64 advanceReservedLocation;
+
+	/*-----
+	 * Eviction of undo log from the RAM buffer to the file range on disk is
+	 * performed by:
+	 *  - background writer,
+	 *  - any process during reserve_undo_size_extended().
+	 *
+	 * Eviction metadata is presented by an interval: (writtenLocation,
+	 * writeInProgressLocation].  writtenLocation is the last location has
+	 * already been successfully evicted to the file.  writeInProgressLocation
+	 * is the last location where eviction is still in-progress.  The location
+	 * range between writtenLocation and writeInProgressLocation means the
+	 * area which is currently being evicted to files, i.e., write-to-file
+	 * operation for this area is still in-progress.  When writtenLocation
+	 * equals to writeInProgressLocation`, then there is no in-progress
+	 * eviction process at the moment.
+	 */
 	pg_atomic_uint64 writeInProgressLocation;
 	pg_atomic_uint64 writtenLocation;
+
+	/*
+	 * lastUsedUndoLocationWhenUpdatedMinLocation is modified by the
+	 * update_min_undo_locations() method only and represents the last actual
+	 * lastUsedLocation that has been seen during update_min_undo_locations().
+	 * lastUsedUndoLocationWhenUpdatedMinLocation is used by
+	 * orioledb_snapshot_hook() for determining if there is necessary to call
+	 * update_min_undo_locations() method to actualize shared meta' locations.
+	 * NOTE: The update_min_undo_locations() method is called each time after
+	 * 1/10 of the undo log is passed. NOTE: location values in shared meta
+	 * may lag behind each process's data' actual undoRetainLocations.
+	 */
 	pg_atomic_uint64 lastUsedUndoLocationWhenUpdatedMinLocation;
+
+	/*
+	 * minProcTransactionRetainLocation is used for transaction rollback. It
+	 * is a minimum (among all transactions) location that is needed for
+	 * rollback.
+	 *
+	 * minProcRetainLocation - is a minimum (among all snapshots) location
+	 * that is needed for any of the active snapshots.
+	 *
+	 * minRewindRetainLocation is used for the rewind mechanism. The rewind
+	 * mechanism allows rolling back all recent transactions, i.e., allows
+	 * moving a database to a previous time point. In the case of rewind, the
+	 * undo log is retained for a longer period of time to provide recovery
+	 * for more remote timepoints.
+	 */
 	pg_atomic_uint64 minProcTransactionRetainLocation;
 	pg_atomic_uint64 minProcRetainLocation;
 	pg_atomic_uint64 minRewindRetainLocation;
+
+	/*
+	 * minProcReservedLocation is a minimum location (among all backends)
+	 * within the RAM undo log buffer that is actually reserved (obtained) by
+	 * a backend for writing its undo log record to a RAM undo log buffer. The
+	 * process must retain its reservedUndoLocation only while performing a
+	 * write operation to a RAM undo log buffer. When the process finishes the
+	 * write operation for an undo log record to the RAM buffer, it must
+	 * release its reservedUndoLocation as soon as possible.
+	 */
 	pg_atomic_uint64 minProcReservedLocation;
+
+	/*
+	 * [checkpointRetainStartLocation; checkpointRetainEndLocation) represents
+	 * the undo range retained for the checkpoint.  This range allows the
+	 * rollback of any transaction that was in-progress during checkpointing.
+	 */
 	pg_atomic_uint64 checkpointRetainStartLocation;
 	pg_atomic_uint64 checkpointRetainEndLocation;
+
+	/*
+	 * cleanedLocation - the value of minRetainLocation at the moment of last
+	 * cleanup.
+	 *
+	 * Range [cleanedCheckpointStartLocation, cleanedCheckpointEndLocation]
+	 * means an undo log range, which has been retained during the last
+	 * cleanup, i.e., the last undo log range that is persisted on disk after
+	 * the last cleanup.
+	 *
+	 * cleanedCheckpointStartLocation - the value of
+	 * checkpointRetainStartLocation during the last cleanup.
+	 * cleanedCheckpointEndLocation - value of checkpointRetainEndLocation
+	 * during the last cleanup.
+	 */
 	pg_atomic_uint64 cleanedLocation;
 	pg_atomic_uint64 cleanedCheckpointStartLocation;
 	pg_atomic_uint64 cleanedCheckpointEndLocation;
+
+	/*
+	 * minUndoLocationsMutex is primarily used by update_min_undo_locations()
+	 * method, also is used by evict_undo_to_disk() method to protect shared
+	 * meta' fields, but is released for eviction writes; also is used in some
+	 * cases to protect shared meta' retain* locations and write/written
+	 * locations.
+	 */
 	slock_t		minUndoLocationsMutex;
+
+	/*
+	 * minUndoLocationsChangeCount gets increased by
+	 * update_min_undo_locations() method. minUndoLocationsChangeCount is used
+	 * together with wait_for_even_min_undo_locations_changecount() method to
+	 * fix concurrency between update_min_undo_locations() method and
+	 * set_my_reserved_location() & set_my_retain_location() methods.
+	 */
 	uint32		minUndoLocationsChangeCount;
+
+	/*
+	 * writeInProgressChangeCount is used together with a
+	 * wait_for_even_write_in_progress_changecount() method to fix concurrency
+	 * between undo_write() and evict_undo_to_disk() methods (protects shared
+	 * meta' write/written locations).
+	 */
 	uint32		writeInProgressChangeCount;
-	int			undoWriteTrancheId;
+
+	int			undoWriteTrancheId; /* tranche-group ID of the LWLock */
+
+	/*
+	 * undoWriteLock is an LWLock that is used for protecting disk writes
+	 * (during the eviction process, evict_undo_to_disk()) or for await
+	 * process on in-progress writes.
+	 */
 	LWLock		undoWriteLock;
+
 	int			undoStackLocationsFlushLockTrancheId;
 } UndoMeta;
 
