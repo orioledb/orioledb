@@ -671,6 +671,17 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 COMMIT;
 
+CREATE TABLE tbl_with_pkey_bridged_toast(i1 int, i2 int, t text, PRIMARY KEY(i1)) USING orioledb;
+
+INSERT INTO tbl_with_pkey_bridged_toast
+	(SELECT id, id, generate_string(id, 3000) FROM generate_series(1, 20) id);
+CREATE INDEX tbl_i2_brin_idx ON tbl_with_pkey_bridged_toast USING brin (i2);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM tbl_with_pkey_bridged_toast WHERE i2 BETWEEN 0 AND 10 ORDER BY i2;
+SELECT * FROM tbl_with_pkey_bridged_toast WHERE i2 BETWEEN 0 AND 10 ORDER BY i2;
+COMMIT;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
