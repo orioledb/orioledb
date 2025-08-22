@@ -3792,6 +3792,18 @@ SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 (2 rows)
 
 COMMIT;
+-- Test bug https://github.com/orioledb/orioledb/issues/524
+-- add a column to existing table
+CREATE TABLE IF NOT EXISTS refresh_tokens();
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS parent text;
+-- create a separate table with default value
+CREATE TABLE IF NOT EXISTS one_time_tokens (
+  token_hash text,
+  created_at timestamp without time zone NOT NULL DEFAULT now()
+);
+-- now create a hash index with bridge index
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
+	ON one_time_tokens USING hash (token_hash);
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 10 other objects
@@ -3806,9 +3818,11 @@ drop cascades to table o_test_bridged_hash_btree_bitmap_scans
 drop cascades to table o_test_bridged_index_only_scan
 drop cascades to table o_test_toast_with_bridged
 DROP SCHEMA index_bridging CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to function btree_index_content(name)
 drop cascades to function hash_index_content(name)
 drop cascades to function gist_index_content(name)
 drop cascades to function generate_string(integer,integer)
+drop cascades to table refresh_tokens
+drop cascades to table one_time_tokens
 RESET search_path;

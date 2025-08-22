@@ -671,6 +671,19 @@ EXPLAIN (COSTS OFF) SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 SELECT * FROM o_test_toast_with_bridged ORDER BY id;
 COMMIT;
 
+-- Test bug https://github.com/orioledb/orioledb/issues/524
+-- add a column to existing table
+CREATE TABLE IF NOT EXISTS refresh_tokens();
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS parent text;
+-- create a separate table with default value
+CREATE TABLE IF NOT EXISTS one_time_tokens (
+  token_hash text,
+  created_at timestamp without time zone NOT NULL DEFAULT now()
+);
+-- now create a hash index with bridge index
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
+	ON one_time_tokens USING hash (token_hash);
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

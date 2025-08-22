@@ -3295,6 +3295,18 @@ SELECT * FROM o_test_non_index_bridging_options ORDER BY i;
 (25 rows)
 
 COMMIT;
+-- Test bug https://github.com/orioledb/orioledb/issues/524
+-- add a column to existing table
+CREATE TABLE IF NOT EXISTS refresh_tokens();
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS parent text;
+-- create a separate table with default value
+CREATE TABLE IF NOT EXISTS one_time_tokens (
+  token_hash text,
+  created_at timestamp without time zone NOT NULL DEFAULT now()
+);
+-- now create a hash index with bridge index
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
+	ON one_time_tokens USING hash (token_hash);
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 6 other objects
@@ -3305,4 +3317,7 @@ drop cascades to table o_test_bitmap_scans
 drop cascades to table o_test_index_bridging_options
 drop cascades to table o_test_non_index_bridging_options
 DROP SCHEMA index_bridging CASCADE;
+NOTICE:  drop cascades to 2 other objects
+drop cascades to table refresh_tokens
+drop cascades to table one_time_tokens
 RESET search_path;
