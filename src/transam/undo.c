@@ -424,6 +424,8 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (do_cleanup)
 	{
+		int64		persistStartNum,
+					persistEndNum;
 		int64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
 					newCleanedNum = minRetainLocation / UNDO_FILE_SIZE,
 					oldCheckpointStartNum = oldCheckpointStartLocation / UNDO_FILE_SIZE,
@@ -436,31 +438,94 @@ update_min_undo_locations(UndoLogType undoType,
 		if (newCheckpointEndLocation % UNDO_FILE_SIZE == 0)
 			newCheckpointEndNum--;
 
-		o_buffers_unlink_files_range(&undoBuffersDesc,
-									 (uint32) undoType,
-									 oldCheckpointStartNum,
-									 Min(oldCheckpointEndNum,
-										 Min(newCheckpointStartNum - 1,
-											 newCleanedNum - 1)));
+		/*---
+		 * Ranges
+		 *
+		 * remove:
+		 * - [oldCheckpointStartNum, oldCheckpointEndNum] - old
+		 * - [oldCleanedNum, *)
+		 *
+		 * persist:
+		 * - [newCheckpointStartNum, newCheckpointEndNum] - new
+		 * - [newCleanedNum, *)
+		 */
 
-		o_buffers_unlink_files_range(&undoBuffersDesc,
-									 (uint32) undoType,
-									 Max(oldCheckpointStartNum,
-										 newCheckpointEndNum + 1),
-									 Min(oldCheckpointEndNum,
-										 newCleanedNum - 1));
+		Assert(oldCheckpointStartNum <= oldCheckpointEndNum);	/* remove */
+		Assert(newCheckpointStartNum <= newCheckpointEndNum);	/* persist */
 
-		o_buffers_unlink_files_range(&undoBuffersDesc,
-									 (uint32) undoType,
-									 oldCleanedNum,
-									 Min(newCheckpointStartNum - 1,
-										 newCleanedNum - 1));
+		Assert(oldCheckpointStartNum <= newCheckpointStartNum);
+		Assert(oldCheckpointStartNum <= newCheckpointEndNum);
+		Assert(oldCleanedNum <= newCleanedNum);
 
-		o_buffers_unlink_files_range(&undoBuffersDesc,
-									 (uint32) undoType,
-									 Max(oldCleanedNum,
-										 newCheckpointEndNum + 1),
-									 newCleanedNum - 1);
+		/*
+		 * Persist Ranges mutual arrangement:
+		 *
+		 * 1) Interleaved: start      end |---------|      |--------------->
+		 * new          newCleanedNum
+		 *
+		 * 2) Overlapped: start          end |-------------| new
+		 * |---------------> newCleanedNum
+		 *
+		 * 3) Overlapped: start      end |---------| new |--------------->
+		 * newCleanedNum
+		 */
+		persistStartNum = Min(newCheckpointStartNum, newCleanedNum);
+
+		/*
+		 * Clear start segment
+		 *
+		 * oldCleanedNum |--------------------------------->
+		 * XXXXXXXXXXXXXXX|------------------> persistStartNum
+		 */
+		if (oldCleanedNum < persistStartNum)
+		{
+			o_buffers_unlink_files_range(
+										 &undoBuffersDesc, (uint32) undoType,
+										 oldCleanedNum, persistStartNum - 1);
+		}
+
+		/*
+		 * Clear start segment
+		 *
+		 * start          end |-------------| old
+		 * XXXXXXXXXXXX|------------------> persistStartNum
+		 */
+		if (oldCheckpointStartNum < persistStartNum)
+		{
+			o_buffers_unlink_files_range(
+										 &undoBuffersDesc, (uint32) undoType,
+										 oldCheckpointStartNum, Min(persistStartNum - 1, oldCheckpointEndNum));
+		}
+
+		/*
+		 * Clear interval segment
+		 *
+		 * start            end |---------------|XXXXXXXXXXX|--------------->
+		 * new                  newCleanedNum
+		 * |-------------------------------------------> oldCleanedNum
+		 */
+		persistEndNum = Max(oldCleanedNum, newCheckpointEndNum + 1);
+		if (persistEndNum < newCleanedNum)
+		{
+			o_buffers_unlink_files_range(
+										 &undoBuffersDesc, (uint32) undoType,
+										 persistEndNum, newCleanedNum - 1);
+		}
+
+		/*
+		 * Clear interval segment
+		 *
+		 * start            end |---------------|XXXXXXXXXXX|--------------->
+		 * new                  newCleanedNum start end
+		 * |------------------------------| old
+		 */
+		persistEndNum = Max(oldCheckpointStartNum, newCheckpointEndNum + 1);
+		if (persistEndNum < newCleanedNum)
+		{
+			o_buffers_unlink_files_range(
+										 &undoBuffersDesc, (uint32) undoType,
+										 persistEndNum, Min(newCleanedNum - 1, oldCheckpointEndNum));
+		}
 	}
 }
 
