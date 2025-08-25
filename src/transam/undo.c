@@ -450,11 +450,10 @@ update_min_undo_locations(UndoLogType undoType,
 		 * - [newCleanedNum, *)
 		 */
 
-		Assert(oldCheckpointStartNum <= oldCheckpointEndNum);	/* remove */
-		Assert(newCheckpointStartNum <= newCheckpointEndNum);	/* persist */
-
-		Assert(oldCheckpointStartNum <= newCheckpointStartNum);
-		Assert(oldCheckpointStartNum <= newCheckpointEndNum);
+		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation);
+		Assert(oldCheckpointEndLocation <= newCheckpointEndLocation);
+		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
+		Assert(newCheckpointStartLocation <= newCheckpointEndLocation);
 		Assert(oldCleanedNum <= newCleanedNum);
 
 		/*
