@@ -423,8 +423,8 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (do_cleanup)
 	{
-		uint64 persistStartNum, persistEndNum;
-		uint64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
+		int64 persistStartNum, persistEndNum;
+		int64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
 					newCleanedNum = minRetainLocation / UNDO_FILE_SIZE,
 					oldCheckpointStartNum = oldCheckpointStartLocation / UNDO_FILE_SIZE,
 					oldCheckpointEndNum = oldCheckpointEndLocation / UNDO_FILE_SIZE,
@@ -435,6 +435,9 @@ update_min_undo_locations(UndoLogType undoType,
 			oldCheckpointEndNum--;
 		if (newCheckpointEndLocation % UNDO_FILE_SIZE == 0)
 			newCheckpointEndNum--;
+
+		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
+		Assert(newCheckpointStartLocation <= newCheckpointEndLocation);
 
 		/*
 		 * Ranges
@@ -448,11 +451,8 @@ update_min_undo_locations(UndoLogType undoType,
 		 *     - [newCleanedNum, *)
 		 */
 
-		Assert(oldCheckpointStartNum <= oldCheckpointEndNum); // remove
-		Assert(newCheckpointStartNum <= newCheckpointEndNum); // persist
-
-		Assert(oldCheckpointStartNum <= newCheckpointStartNum);
-		Assert(oldCheckpointStartNum <= newCheckpointEndNum);
+		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation);
+		Assert(oldCheckpointStartLocation <= newCheckpointEndLocation);
 		Assert(oldCleanedNum <= newCleanedNum);
 
 		/*
