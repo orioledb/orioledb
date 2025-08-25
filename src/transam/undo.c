@@ -423,6 +423,7 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (do_cleanup)
 	{
+		int64 persistStartNum, persistEndNum;
 		int64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
 					newCleanedNum = minRetainLocation / UNDO_FILE_SIZE,
 					oldCheckpointStartNum = oldCheckpointStartLocation / UNDO_FILE_SIZE,
@@ -435,7 +436,114 @@ update_min_undo_locations(UndoLogType undoType,
 		if (newCheckpointEndLocation % UNDO_FILE_SIZE == 0)
 			newCheckpointEndNum--;
 
-		o_buffers_unlink_files_range(&undoBuffersDesc,
+		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
+		Assert(newCheckpointStartLocation <= newCheckpointEndLocation);
+
+		/*
+		 * Ranges
+		 *
+		 * remove:
+		 *     - [oldCheckpointStartNum, oldCheckpointEndNum] - old
+		 *     - [oldCleanedNum, *)
+		 *
+		 * persist:
+		 *     - [newCheckpointStartNum, newCheckpointEndNum] - new
+		 *     - [newCleanedNum, *)
+		 */
+
+		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation);
+		Assert(oldCheckpointStartLocation <= newCheckpointEndLocation);
+		Assert(oldCleanedNum <= newCleanedNum);
+
+		/*
+		 * Persist Ranges mutual arrangement:
+		 *
+		 * 1) Interleaved:
+		 *   start      end
+		 *     |---------|      |--------------->
+		 *         new          newCleanedNum
+		 *
+		 * 2) Overlapped:
+		 *   start          end
+		 *     |-------------|
+		 *           new
+		 *                |--------------->
+		 *                newCleanedNum
+		 *
+		 * 3) Overlapped:
+		 *       start      end
+		 *         |---------|
+		 *             new
+		 *     |--------------->
+		 *     newCleanedNum
+		 */
+		persistStartNum = Min(newCheckpointStartNum, newCleanedNum);
+
+		/*
+		 * Clear start segment
+		 *
+		 *     oldCleanedNum
+		 *     |--------------------------------->
+		 *     XXXXXXXXXXXXXXX|------------------>
+		 *                    persistStartNum
+		 */
+		if (oldCleanedNum < persistStartNum)
+		{
+			o_buffers_unlink_files_range(
+				&undoBuffersDesc, (uint32) undoType,
+				oldCleanedNum, persistStartNum - 1);
+		}
+
+		/*
+		 * Clear start segment
+		 *
+		 *   start          end
+		 *     |-------------|
+		 *           old
+		 *     XXXXXXXXXXXX|------------------>
+		 *                 persistStartNum
+		 */
+		if (oldCheckpointStartNum < persistStartNum)
+		{
+			o_buffers_unlink_files_range(
+				&undoBuffersDesc, (uint32) undoType,
+				oldCheckpointStartNum, Min(persistStartNum - 1, oldCheckpointEndNum));
+		}
+
+		/*
+		 * Clear interval segment
+		 *
+		 *   start            end
+		 *     |---------------|XXXXXXXXXXX|--------------->
+		 *            new                  newCleanedNum
+		 *     |------------------------------------------->
+		 *     oldCleanedNum
+		 */
+		persistEndNum = Max(oldCleanedNum, newCheckpointEndNum + 1);
+		if (persistEndNum < newCleanedNum) {
+			o_buffers_unlink_files_range(
+				&undoBuffersDesc, (uint32) undoType,
+				persistEndNum, newCleanedNum - 1);
+		}
+
+		/*
+		 * Clear interval segment
+		 *
+		 *   start            end
+		 *     |---------------|XXXXXXXXXXX|--------------->
+		 *            new                  newCleanedNum
+		 *   start                           end
+		 *     |------------------------------|
+		 *                    old
+		 */
+		persistEndNum = Max(oldCheckpointStartNum, newCheckpointEndNum + 1);
+		if (persistEndNum < newCleanedNum) {
+			o_buffers_unlink_files_range(
+				&undoBuffersDesc, (uint32) undoType,
+				persistEndNum, Min(newCleanedNum - 1, oldCheckpointEndNum));
+		}
+
+		/*o_buffers_unlink_files_range(&undoBuffersDesc,
 									 (uint32) undoType,
 									 oldCheckpointStartNum,
 									 Min(oldCheckpointEndNum,
@@ -459,7 +567,7 @@ update_min_undo_locations(UndoLogType undoType,
 									 (uint32) undoType,
 									 Max(oldCleanedNum,
 										 newCheckpointEndNum + 1),
-									 newCleanedNum - 1);
+									 newCleanedNum - 1);*/
 	}
 }
 
@@ -502,21 +610,33 @@ set_my_reserved_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoLocation lastUsedLocation;
+	bool overwriteXundoLoc;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	UndoRetainSharedLocations *shared = &curProcData->undoRetainLocations[undoType];
+
+	Assert(!UndoLocationIsValid(pg_atomic_read_u64(&shared->reservedUndoLocation)));
+
+	/*
+	 * If transactionUndoRetainLocation is invalid on start - overwrite it on continue,
+	 * else if transactionUndoRetainLocation is valid on start - do not modify.
+	 */
+	overwriteXundoLoc = !UndoLocationIsValid(pg_atomic_read_u64(&shared->transactionUndoRetainLocation));
 
 	while (true)
 	{
 		lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
-		if (!UndoLocationIsValid(pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].reservedUndoLocation)))
-			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].reservedUndoLocation, lastUsedLocation);
-		if (!UndoLocationIsValid(pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation)))
-			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, lastUsedLocation);
+
+		pg_atomic_write_u64(&shared->reservedUndoLocation, lastUsedLocation);
+
+		if (overwriteXundoLoc)
+			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
 
 		wait_for_even_min_undo_locations_changecount(meta);
 
 		/*
 		 * Retry if minimal positions run higher due to concurrent
 		 * update_min_undo_locations().
+		 * Protection for write operation: prevent starting write op on busy locations.
 		 */
 		if (pg_atomic_read_u64(&meta->minProcReservedLocation) > lastUsedLocation)
 			continue;
@@ -1135,7 +1255,7 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
 		LWLockRelease(&meta->undoWriteLock);
 
-		SpinLockAcquire(&meta->minUndoLocationsMutex);
+		SpinLockAcquire(&meta->minUndoLocationsMutex); // @TODO no lock if asserts disabled!
 		Assert(location + size <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize);
 		SpinLockRelease(&meta->minUndoLocationsMutex);
 		return true;
@@ -1199,7 +1319,7 @@ fsync_undo_range(UndoLogType undoType,
 		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
 		LWLockRelease(&meta->undoWriteLock);
 
-		SpinLockAcquire(&meta->minUndoLocationsMutex);
+		SpinLockAcquire(&meta->minUndoLocationsMutex); // @TODO no lock if asserts disabled!
 		Assert(toLoc <= pg_atomic_read_u64(&meta->writtenLocation));
 		SpinLockRelease(&meta->minUndoLocationsMutex);
 	}
