@@ -85,7 +85,7 @@ typedef OScanDescData *OScanDesc;
  * Operation with indices. It does not update TOAST BTree. Implementations
  * are in tableam_handler.c.
  */
-static void get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
+static void get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 								BTreeLocationHint *hint, CommitSeqNo *csn,
 								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
@@ -135,7 +135,6 @@ orioledb_index_fetch_begin(Relation rel)
 
 		o_scan->bridged_tuple = (o_current_index->rd_rel->relam != BTREE_AM_OID) ||
 			(options && !options->orioledb_index);
-		o_current_index = NULL;
 	}
 
 	o_scan->xs_base.rel = rel;
@@ -178,7 +177,8 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	Assert(slot->tts_ops == &TTSOpsOrioleDB);
 
 	*call_again = false;
-	*all_dead = false;
+	if (all_dead)
+		*all_dead = false;
 
 	descr = relation_get_descr(scan->rel);
 	Assert(descr != NULL);
@@ -440,6 +440,15 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 		slot->tts_tid = btree_ctid_get_and_inc(&id->desc);
 	}
 
+	if (descr->bridge)
+	{
+		OSnapshot	oSnapshot;
+		OXid		oxid;
+
+		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+		o_apply_new_bridge_index_ctid(descr, rel, slot, oSnapshot.csn);
+	}
+
 	tts_orioledb_toast(slot, descr);
 
 	tup = tts_orioledb_form_tuple(slot, descr);
@@ -448,7 +457,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 								false);
 
 	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes, cid,
-									 lockmode, lockedSlot);
+									 lockmode, lockedSlot, estate, rinfo);
 
 	return slot;
 }
@@ -1025,7 +1034,10 @@ orioledb_index_build_range_scan(Relation heapRelation,
 			if (predicate != NULL)
 			{
 				if (!ExecQual(predicate, econtext))
+				{
+					ExecClearTuple(primarySlot);
 					continue;
+				}
 			}
 
 			/*
@@ -1048,6 +1060,9 @@ orioledb_index_build_range_scan(Relation heapRelation,
 		FreeExecutorState(estate);
 		free_btree_seq_scan(seq_scan);
 
+		/* These may have been pointing to the now-gone estate */
+		indexInfo->ii_ExpressionsState = NIL;
+		indexInfo->ii_PredicateState = NULL;
 		return heap_tuples;
 	}
 	return 0.0;
@@ -1515,7 +1530,7 @@ orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
-	elog(ERROR, "Not implemented");
+	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
 void
@@ -2131,16 +2146,16 @@ relation_get_descr(Relation rel)
 }
 
 static void
-get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
+get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 					BTreeLocationHint *hint, CommitSeqNo *csn, uint32 *version,
 					ItemPointer *bridge_ctid)
 {
 	bytea	   *rowid;
 	Pointer		p;
 
-	key->nkeys = id->nonLeafTupdesc->natts;
+	key->nkeys = primary->nonLeafTupdesc->natts;
 
-	if (!id->primaryIsCtid)
+	if (!primary->primaryIsCtid)
 	{
 		OTuple		tuple;
 		ORowIdAddendumNonCtid *add;
@@ -2153,7 +2168,7 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		if (csn)
 			*csn = add->csn;
 
-		if (id->bridging)
+		if (primary->bridging)
 		{
 			if (bridge_ctid)
 				*bridge_ctid = (ItemPointer) p;
@@ -2164,7 +2179,7 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		tuple.formatFlags = add->flags;
 		if (version)
 			*version = o_tuple_get_version(tuple);
-		o_fill_key_bound(id, tuple, BTreeKeyNonLeafKey, key);
+		o_fill_key_bound(primary, tuple, BTreeKeyNonLeafKey, key);
 	}
 	else
 	{
@@ -2185,7 +2200,7 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		key->keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		key->keys[0].comparator = NULL;
 
-		if (id->bridging)
+		if (primary->bridging)
 		{
 			p += MAXALIGN(sizeof(ItemPointerData));
 			if (bridge_ctid)
