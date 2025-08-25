@@ -423,8 +423,8 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (do_cleanup)
 	{
-		int64 persistStartNum, persistEndNum;
-		int64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
+		uint64 persistStartNum, persistEndNum;
+		uint64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
 					newCleanedNum = minRetainLocation / UNDO_FILE_SIZE,
 					oldCheckpointStartNum = oldCheckpointStartLocation / UNDO_FILE_SIZE,
 					oldCheckpointEndNum = oldCheckpointEndLocation / UNDO_FILE_SIZE,
