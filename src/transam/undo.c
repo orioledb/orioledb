@@ -503,21 +503,34 @@ set_my_reserved_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoLocation lastUsedLocation;
+	bool		overwriteTransactionRetainUndoLoc;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	UndoRetainSharedLocations *shared = &curProcData->undoRetainLocations[undoType];
+
+	Assert(!UndoLocationIsValid(pg_atomic_read_u64(&shared->reservedUndoLocation)));
+
+	/*
+	 * If transactionUndoRetainLocation is invalid on start - overwrite it on
+	 * continue, else if transactionUndoRetainLocation is valid on start - do
+	 * not modify.
+	 */
+	overwriteTransactionRetainUndoLoc = !UndoLocationIsValid(pg_atomic_read_u64(&shared->transactionUndoRetainLocation));
 
 	while (true)
 	{
 		lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
-		if (!UndoLocationIsValid(pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].reservedUndoLocation)))
-			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].reservedUndoLocation, lastUsedLocation);
-		if (!UndoLocationIsValid(pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation)))
-			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, lastUsedLocation);
+
+		pg_atomic_write_u64(&shared->reservedUndoLocation, lastUsedLocation);
+
+		if (overwriteTransactionRetainUndoLoc)
+			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
 
 		wait_for_even_min_undo_locations_changecount(meta);
 
 		/*
 		 * Retry if minimal positions run higher due to concurrent
-		 * update_min_undo_locations().
+		 * update_min_undo_locations(). Protection for write operation:
+		 * prevent starting write op on busy locations.
 		 */
 		if (pg_atomic_read_u64(&meta->minProcReservedLocation) > lastUsedLocation)
 			continue;
@@ -1136,6 +1149,7 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
 		LWLockRelease(&meta->undoWriteLock);
 
+		/* TODO: consider removing lock if assers are disabled */
 		SpinLockAcquire(&meta->minUndoLocationsMutex);
 		Assert(location + size <= pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize);
 		SpinLockRelease(&meta->minUndoLocationsMutex);
@@ -1200,6 +1214,7 @@ fsync_undo_range(UndoLogType undoType,
 		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
 		LWLockRelease(&meta->undoWriteLock);
 
+		/* TODO: consider removing lock if assers are disabled */
 		SpinLockAcquire(&meta->minUndoLocationsMutex);
 		Assert(toLoc <= pg_atomic_read_u64(&meta->writtenLocation));
 		SpinLockRelease(&meta->minUndoLocationsMutex);
