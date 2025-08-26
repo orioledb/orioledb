@@ -4747,9 +4747,10 @@ SELECT exhaust_logical_xids(40000);
  
 (1 row)
 
--- Test if cursors can go backwards in orioledb
+-- Test if cursors can go backwards using index and sequential scan
 CREATE TABLE o_test_1(val_1 int) USING orioledb;
 INSERT INTO o_test_1 SELECT a FROM generate_series(1,10) g(a);
+-- SCROLL option with seqscan
 BEGIN;
 SET LOCAL enable_indexscan = 'off';
 SET LOCAL enable_indexonlyscan = 'off';
@@ -4768,6 +4769,7 @@ FETCH NEXT FROM c;
 (1 row)
 
 COMMIT;
+-- NO SCROLL option with seqscan
 BEGIN;
 SET LOCAL enable_indexscan = 'off';
 SET LOCAL enable_indexonlyscan = 'off';
@@ -4776,6 +4778,38 @@ FETCH NEXT FROM c;
  val_1 
 -------
      1
+(1 row)
+
+MOVE BACKWARD 1 FROM c;
+ERROR:  cursor can only scan forward
+HINT:  Declare it with SCROLL option to enable backward scan.
+COMMIT;
+-- SCROLL option with index scan
+BEGIN;
+SET LOCAL enable_seqscan = 'off';
+DECLARE c SCROLL CURSOR FOR SELECT * FROM o_test_1 WHERE val_1 > 1 AND val_1 < 5;
+FETCH NEXT FROM c;
+ val_1 
+-------
+     2
+(1 row)
+
+MOVE BACKWARD 1 FROM c;
+FETCH NEXT FROM c;
+ val_1 
+-------
+     2
+(1 row)
+
+COMMIT;
+-- NO SCROLL option with index scan
+BEGIN;
+SET LOCAL enable_seqscan = 'off';
+DECLARE c NO SCROLL CURSOR FOR SELECT * FROM o_test_1 WHERE val_1 > 1 AND val_1 < 5;
+FETCH NEXT FROM c;
+ val_1 
+-------
+     2
 (1 row)
 
 MOVE BACKWARD 1 FROM c;
