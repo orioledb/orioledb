@@ -759,6 +759,7 @@ lazy_vacuum_bridge_index(LVRelState *vacrel)
 	bound.keys[0].type = TIDOID;
 	bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 	bound.keys[0].comparator = bridge->fields[0].comparator;
+	bound.keys[0].exclusion_fn = NULL;
 
 	Assert(vacrel->do_index_vacuuming);
 	Assert(vacrel->do_index_cleanup);

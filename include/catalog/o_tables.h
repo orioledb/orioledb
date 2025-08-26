@@ -56,6 +56,7 @@ typedef struct
 	Oid			opclass;
 	SortByDir	ordering;
 	SortByNulls nullsOrdering;
+	Oid			exclop;
 } OTableIndexField;
 
 /*
@@ -79,6 +80,8 @@ typedef struct
 	char	   *predicate_str;
 	List	   *predicate;		/* list of Expr */
 	Oid			tablespace;
+	Oid		   *exclops;
+	bool		immediate;
 	MemoryContext index_mctx;
 } OTableIndex;
 

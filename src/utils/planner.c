@@ -867,6 +867,33 @@ o_collect_function_by_oid(Oid procoid, Oid inputcollid)
 	ReleaseSysCache(procedureTuple);
 }
 
+void
+o_collect_op_by_oid(Oid opoid)
+{
+	OpExpr	   *op_expr;
+	HeapTuple	opTuple;
+	Form_pg_operator opStruct;
+
+	opTuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opoid));
+	if (!HeapTupleIsValid(opTuple))
+		elog(ERROR, "cache lookup failed for operator %u", opoid);
+	opStruct = (Form_pg_operator) GETSTRUCT(opTuple);
+
+	op_expr = makeNode(OpExpr);
+	op_expr->opno = opStruct->oid;
+	op_expr->opfuncid = opStruct->oprcode;
+	op_expr->opresulttype = opStruct->oprresult;
+	op_expr->opretset = get_func_retset(opStruct->oprcode);
+	op_expr->opcollid = InvalidOid;
+	op_expr->inputcollid = InvalidOid;
+	op_expr->args = NIL;		/* TODO: Add normal arg processing when needed */
+	op_expr->location = -1;
+	expression_tree_walker(o_wrap_top_funcexpr((Node *) op_expr),
+						   o_collect_function, NULL);
+
+	ReleaseSysCache(opTuple);
+}
+
 static bool
 plan_tree_walker(Plan *plan, WalkerFunc walker, void *context)
 {

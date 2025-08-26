@@ -100,7 +100,9 @@ extern TupleTableSlot *o_tbl_insert_with_arbiter(Relation rel,
 												 List *arbiterIndexes,
 												 CommandId cid,
 												 LockTupleMode lockmode,
-												 TupleTableSlot *lockedSlot);
+												 TupleTableSlot *lockedSlot,
+												 EState *estate,
+												 ResultRelInfo *resultRelInfo);
 extern OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
 											 OIndexDescr *id,
 											 OTuple *own_tup,
@@ -149,5 +151,7 @@ extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   TupleTableSlot *slot,
 										   ExprContext *econtext);
 extern void o_truncate_table(ORelOids oids, bool missingOK);
+extern void o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlot *slot, CommitSeqNo csn);
+extern int o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
 
 #endif
