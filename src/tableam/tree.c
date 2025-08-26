@@ -139,10 +139,14 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 	bool		isnull[INDEX_MAX_KEYS] = {false};
 	int			i,
 				len;
+	int			ctid_off = 0;
+
+	if (id->bridging && id->desc.type == oIndexPrimary && !id->primaryIsCtid)
+		ctid_off = 1;
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] : i + 1;
+		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] + ctid_off : i + 1;
 
 		Assert(attnum > 0);
 		values[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);

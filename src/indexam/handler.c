@@ -506,6 +506,8 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
+	o_current_index = NULL;
+
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
@@ -532,6 +534,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 			tupleid = PointerGetDatum(p);
 		}
 
+		o_current_index = rel;
 		return btinsert(rel, values, isnull, tupleid, heapRel,
 						checkUnique, indexUnchanged, indexInfo);
 	}
@@ -1553,6 +1556,88 @@ search_next_dup_range(List *duplicates, int dup_range_lc_id, int *dup_range_star
 	} while (*dup_range_start < 0);
 }
 
+bytea *
+o_new_rowid(OIndexDescr *primary, TupleTableSlot *slot,
+			Datum *rowid_values, bool *rowid_isnull,
+			CommitSeqNo tupleCsn, BTreeLocationHint *hint)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+	Pointer		ptr;
+	int			result_size,
+				tuple_size = 0;
+	bytea	   *rowid;
+
+	if (primary->primaryIsCtid)
+	{
+		ORowIdAddendumCtid addCtid;
+
+		addCtid.hint = *hint;
+		addCtid.csn = tupleCsn;
+		addCtid.version = oslot->version;
+
+		/* Ctid primary key: give hint + tid as rowid */
+		result_size = MAXALIGN(VARHDRSZ) +
+			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
+			MAXALIGN(sizeof(ItemPointerData));
+		if (primary->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
+		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+		SET_VARSIZE(rowid, result_size);
+		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
+		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
+		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
+		if (primary->bridging)
+		{
+			ptr += MAXALIGN(sizeof(ItemPointerData));
+			memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
+		}
+	}
+	else
+	{
+		ORowIdAddendumNonCtid addNonCtid;
+		OTuple		temp_tuple = {0};
+		TupleDesc	pk_tupdesc = NULL;
+		OTupleFixedFormatSpec *pk_spec = NULL;
+
+		/*
+		 * General-case primary key: prepend tuple with maxaligned hint.
+		 */
+
+		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (primary->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
+
+		pk_tupdesc = primary->nonLeafTupdesc;
+		pk_spec = &primary->nonLeafSpec;
+
+		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, oslot->version,
+									  rowid_values, rowid_isnull, NULL);
+		result_size += MAXALIGN(tuple_size);
+
+		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+		SET_VARSIZE(rowid, result_size);
+		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		if (primary->bridging)
+			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
+
+		temp_tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (primary->bridging)
+			temp_tuple.data += MAXALIGN(sizeof(ItemPointerData));
+		o_tuple_fill(pk_tupdesc, pk_spec,
+					 &temp_tuple, tuple_size, NULL, NULL, oslot->version, rowid_values, rowid_isnull, NULL);
+
+		addNonCtid.hint = *hint;
+		addNonCtid.flags = temp_tuple.formatFlags;
+		addNonCtid.csn = tupleCsn;
+
+		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
+	}
+
+	return rowid;
+}
+
+
 /* TODO: Rewrite */
 static void
 fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
@@ -1562,11 +1647,10 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	TupleTableSlot *slot;
 	bytea	   *rowid;
 	OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
-	TupleDesc	pk_tupdesc;
-	OTupleFixedFormatSpec *pk_spec;
-	int			result_size,
-				tuple_size = 0;
-	Pointer		ptr;
+	Datum	   *rowid_values = NULL;
+	bool	   *rowid_isnull = NULL;
+	Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
+	bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
 
 	slot = index_descr->index_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, false, hint);
@@ -1637,55 +1721,9 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		}
 	}
 
-	if (o_scan->ixNum == PrimaryIndexNumber)
+	if (!index_descr->primaryIsCtid)
 	{
-		OIndexDescr *primary = descr->indices[o_scan->ixNum];
-
-		pk_tupdesc = primary->nonLeafTupdesc;
-		pk_spec = &primary->nonLeafSpec;
-	}
-	else
-	{
-		pk_tupdesc = GET_PRIMARY(descr)->nonLeafTupdesc;
-		pk_spec = &GET_PRIMARY(descr)->nonLeafSpec;
-	}
-
-	if (index_descr->primaryIsCtid)
-	{
-		OTableSlot *oslot = (OTableSlot *) slot;
-		ORowIdAddendumCtid addCtid;
-
-		addCtid.hint = *hint;
-		addCtid.csn = tupleCsn;
-		addCtid.version = oslot->version;
-
-		/* Ctid primary key: give hint + tid as rowid */
-		result_size = MAXALIGN(VARHDRSZ) +
-			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-			MAXALIGN(sizeof(ItemPointerData));
-		if (index_descr->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
-		rowid = (bytea *) palloc(result_size);
-		SET_VARSIZE(rowid, result_size);
-		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
-		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
-		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
-		if (index_descr->bridging)
-		{
-			ptr += MAXALIGN(sizeof(ItemPointerData));
-			memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
-		}
-	}
-	else
-	{
-		ORowIdAddendumNonCtid addNonCtid;
-		Datum	   *rowid_values;
-		bool	   *rowid_isnull;
-		Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
-		bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
 		int			i;
-		OTableSlot *oslot = (OTableSlot *) slot;
 
 		/*
 		 * Amount of index fields checked in o_define_index_validate
@@ -1708,36 +1746,10 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			rowid_values = temp_rowid_values;
 			rowid_isnull = temp_rowid_isnull;
 		}
-
-		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (index_descr->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
-		else
-		{
-			tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, 0, rowid_values, rowid_isnull, NULL);
-			result_size += MAXALIGN(tuple_size);
-		}
-		rowid = (bytea *) palloc(result_size);
-		SET_VARSIZE(rowid, result_size);
-		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		if (index_descr->bridging)
-		{
-			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
-			addNonCtid.flags = 0;
-		}
-		else
-		{
-			tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-			o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL, NULL,
-						 0, rowid_values, rowid_isnull, NULL);
-			addNonCtid.flags = tuple.formatFlags;
-		}
-
-		addNonCtid.hint = *hint;
-		addNonCtid.csn = tupleCsn;
-
-		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
 	}
+
+	rowid = o_new_rowid(GET_PRIMARY(descr), slot,
+						rowid_values, rowid_isnull, tupleCsn, hint);
 
 	if (!scan->xs_rowid.isnull)
 	{
@@ -1937,6 +1949,8 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	bytea	   *rowid;
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
+
+	o_current_index = rel;
 
 	ORelOidsSetFromRel(oids, heapRel);
 
