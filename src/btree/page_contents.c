@@ -482,12 +482,13 @@ void
 put_page_image(OInMemoryBlkno blkno, Page img)
 {
 	Page		page = O_GET_IN_MEMORY_PAGE(blkno);
+	int			skipSize = offsetof(OrioleDBPageHeader, checkpointNum);
 
 	pg_write_barrier();
 
-	memcpy(page + O_PAGE_HEADER_SIZE,
-		   (char *) img + O_PAGE_HEADER_SIZE,
-		   ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
+	memcpy(page + skipSize,
+		   (char *) img + skipSize,
+		   ORIOLEDB_BLCKSZ - skipSize);
 }
 
 /*
