@@ -944,6 +944,33 @@ INSERT INTO heap_test VALUES (0, 0);
 -- Run test function:
 SELECT exhaust_logical_xids(40000);
 
+-- Test if cursors can go backwards in orioledb
+CREATE TABLE o_test_1(val_1 int) USING orioledb;
+INSERT INTO o_test_1 SELECT a FROM generate_series(1,10) g(a);
+
+BEGIN;
+SET LOCAL enable_indexscan = 'off';
+SET LOCAL enable_indexonlyscan = 'off';
+
+DECLARE c SCROLL CURSOR FOR SELECT * FROM o_test_1;
+
+FETCH NEXT FROM c;
+MOVE BACKWARD 1 FROM c;
+FETCH NEXT FROM c;
+COMMIT;
+
+BEGIN;
+SET LOCAL enable_indexscan = 'off';
+SET LOCAL enable_indexonlyscan = 'off';
+
+DECLARE c NO SCROLL CURSOR FOR SELECT * FROM o_test_1;
+
+FETCH NEXT FROM c;
+MOVE BACKWARD 1 FROM c;
+COMMIT;
+
+DROP TABLE o_test_1;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

@@ -2022,6 +2022,7 @@ orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
 
 static const TableAmRoutine orioledb_am_methods = {
 	.type = T_TableAmRoutine,
+	.amcanbackward = false,
 	.slot_callbacks = orioledb_slot_callbacks,
 	.get_row_ref_type = orioledb_get_row_ref_type,
 	.free_rd_amcache = orioledb_free_rd_amcache,
