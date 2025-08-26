@@ -87,7 +87,7 @@ typedef OScanDescData *OScanDesc;
  * Operation with indices. It does not update TOAST BTree. Implementations
  * are in tableam_handler.c.
  */
-static void get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
+static void get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 								BTreeLocationHint *hint, CommitSeqNo *csn,
 								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
@@ -137,7 +137,6 @@ orioledb_index_fetch_begin(Relation rel)
 
 		o_scan->bridged_tuple = (o_current_index->rd_rel->relam != BTREE_AM_OID) ||
 			(options && !options->orioledb_index);
-		o_current_index = NULL;
 	}
 
 	o_scan->xs_base.rel = rel;
@@ -180,7 +179,8 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	Assert(slot->tts_ops == &TTSOpsOrioleDB);
 
 	*call_again = false;
-	*all_dead = false;
+	if (all_dead)
+		*all_dead = false;
 
 	descr = relation_get_descr(scan->rel);
 	Assert(descr != NULL);
@@ -200,6 +200,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.keys[0].type = TIDOID;
 		bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		bridge_bound.keys[0].comparator = NULL;
+		bridge_bound.keys[0].exclusion_fn = NULL;
 		csn = COMMITSEQNO_INPROGRESS;
 
 		o_btree_load_shmem(&descr->bridge->desc);
@@ -392,6 +393,32 @@ orioledb_get_row_ref_type(Relation rel)
 	return ROW_REF_ROWID;
 }
 
+static inline bool
+is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
+{
+	return (o_idx_cmp(desc,
+					  (Pointer) k1, BTreeKeyBound,
+					  (Pointer) k2, BTreeKeyBound) == 0);
+}
+
+static bool
+orioledb_row_ref_equals(Relation rel, Datum tupleidDatum1, Datum tupleidDatum2)
+{
+	OTableDescr *descr;
+	OBTreeKeyBound rowid1;
+	OBTreeKeyBound rowid2;
+
+	descr = relation_get_descr(rel);
+	Assert(descr);
+
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleidDatum1, &rowid1, NULL,
+						NULL, NULL, NULL);
+	get_keys_from_rowid(GET_PRIMARY(descr), tupleidDatum2, &rowid2, NULL,
+						NULL, NULL, NULL);
+
+	return is_keys_eq(&GET_PRIMARY(descr)->desc, &rowid1, &rowid2);
+}
+
 static TupleTableSlot *
 orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 					  CommandId cid, int options, BulkInsertState bistate)
@@ -444,6 +471,15 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 		slot->tts_tid = btree_ctid_get_and_inc(&id->desc);
 	}
 
+	if (descr->bridge)
+	{
+		OSnapshot	oSnapshot;
+		OXid		oxid;
+
+		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+		o_apply_new_bridge_index_ctid(descr, rel, slot, oSnapshot.csn);
+	}
+
 	tts_orioledb_toast(slot, descr);
 
 	tup = tts_orioledb_form_tuple(slot, descr);
@@ -454,7 +490,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 	o_set_current_command(cid);
 
 	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes, cid,
-									 lockmode, lockedSlot);
+									 lockmode, lockedSlot, estate, rinfo);
 
 	return slot;
 }
@@ -1080,7 +1116,10 @@ orioledb_index_build_range_scan(Relation heapRelation,
 			if (predicate != NULL)
 			{
 				if (!ExecQual(predicate, econtext))
+				{
+					ExecClearTuple(primarySlot);
 					continue;
+				}
 			}
 
 			/*
@@ -1103,6 +1142,9 @@ orioledb_index_build_range_scan(Relation heapRelation,
 		FreeExecutorState(estate);
 		free_btree_seq_scan(seq_scan);
 
+		/* These may have been pointing to the now-gone estate */
+		indexInfo->ii_ExpressionsState = NIL;
+		indexInfo->ii_PredicateState = NULL;
 		return heap_tuples;
 	}
 	return 0.0;
@@ -1719,7 +1761,7 @@ orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
-	elog(ERROR, "Not implemented");
+	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
 void
@@ -2236,6 +2278,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.amcanbackward = false,
 	.slot_callbacks = orioledb_slot_callbacks,
 	.get_row_ref_type = orioledb_get_row_ref_type,
+	.row_ref_equals = orioledb_row_ref_equals,
 	.free_rd_amcache = orioledb_free_rd_amcache,
 
 	.scan_begin = orioledb_beginscan,
@@ -2343,16 +2386,16 @@ relation_get_descr(Relation rel)
 }
 
 static void
-get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
+get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 					BTreeLocationHint *hint, CommitSeqNo *csn, uint32 *version,
 					ItemPointer *bridge_ctid)
 {
 	bytea	   *rowid;
 	Pointer		p;
 
-	key->nkeys = id->nonLeafTupdesc->natts;
+	key->nkeys = primary->nonLeafTupdesc->natts;
 
-	if (!id->primaryIsCtid)
+	if (!primary->primaryIsCtid)
 	{
 		OTuple		tuple;
 		ORowIdAddendumNonCtid *add;
@@ -2361,11 +2404,12 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumNonCtid *) p;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		*hint = add->hint;
+		if (hint)
+			*hint = add->hint;
 		if (csn)
 			*csn = add->csn;
 
-		if (id->bridging)
+		if (primary->bridging)
 		{
 			if (bridge_ctid)
 				*bridge_ctid = (ItemPointer) p;
@@ -2376,7 +2420,7 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		tuple.formatFlags = add->flags;
 		if (version)
 			*version = o_tuple_get_version(tuple);
-		o_fill_key_bound(id, tuple, BTreeKeyNonLeafKey, key);
+		o_fill_key_bound(primary, tuple, BTreeKeyNonLeafKey, key);
 	}
 	else
 	{
@@ -2385,7 +2429,8 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		rowid = DatumGetByteaP(pkDatum);
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		add = (ORowIdAddendumCtid *) p;
-		*hint = add->hint;
+		if (hint)
+			*hint = add->hint;
 		if (csn)
 			*csn = add->csn;
 		if (version)
@@ -2396,8 +2441,9 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 		key->keys[0].type = TIDOID;
 		key->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		key->keys[0].comparator = NULL;
+		key->keys[0].exclusion_fn = NULL;
 
-		if (id->bridging)
+		if (primary->bridging)
 		{
 			p += MAXALIGN(sizeof(ItemPointerData));
 			if (bridge_ctid)

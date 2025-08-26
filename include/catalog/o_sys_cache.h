@@ -565,6 +565,7 @@ O_SYS_CACHE_DECLS(operator_cache, OOperator, 1);
 extern HeapTuple o_operator_cache_search_htup(TupleDesc tupdesc, Oid operoid);
 extern void o_operator_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									   OTuple tup, Pointer arg);
+extern Oid	o_operator_cache_get_oprcode(Oid operoid);
 
 /* o_amop_cache.c */
 typedef struct OAmOp

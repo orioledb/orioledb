@@ -272,9 +272,6 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	int			nattrs;
 	OIndexType	ix_type;
 
-	if (index->rd_index->indisexclusion)
-		elog(ERROR, "exclusion indices are not supported.");
-
 	if (o_table == NULL)
 	{
 		o_table = o_tables_get(oids);
@@ -424,6 +421,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		ix_type = oIndexPrimary;
 	else if (index->rd_index->indisunique)
 		ix_type = oIndexUnique;
+	else if (index->rd_index->indisexclusion)
+		ix_type = oIndexExclusion;
 	else
 		ix_type = oIndexRegular;
 
@@ -553,6 +552,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
 	table_index->tablespace = tablespace;
+	table_index->immediate = index->rd_index->indimmediate;
 
 	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);

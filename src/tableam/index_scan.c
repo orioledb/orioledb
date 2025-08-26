@@ -182,11 +182,15 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 				int			cmp;
 
 				if (o_bound_is_coercible(bound, field))
+				{
 					cmp = o_call_comparator(field->comparator,
 											value, arrayKey->elem_values[j]);
+				}
 				else
+				{
 					cmp = o_call_comparator(bound->comparator,
 											value, arrayKey->elem_values[j]);
+				}
 				if (cmp == 0)
 				{
 					found = true;
@@ -454,7 +458,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	{
 		tup = o_iterate_index(id, ostate, tupleCsn, tupleCxt,
 							  ostate->ixNum == PrimaryIndexNumber ? hint : NULL);
-
 		if (!scan_primary || O_TUPLE_IS_NULL(tup))
 			break;
 

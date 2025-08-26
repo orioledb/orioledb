@@ -40,6 +40,7 @@ typedef struct
 	 * So if types don't match, we do cache the comaparator.
 	 */
 	OComparator *comparator;
+	OExclusionFn *exclusion_fn;
 } OBTreeValueBound;
 
 typedef struct OBtreeRowKeyBound
