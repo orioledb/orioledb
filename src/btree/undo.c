@@ -136,9 +136,13 @@ retry:
 
 		get_prev_leaf_header_from_undo(desc->undoType, tuphdr, true);
 		BTREE_PAGE_READ_TUPLE(prev_tuple, p, locator);
-		PAGE_SUB_N_VACATED(p,
-						   BTreeLeafTuphdrSize +
-						   MAXALIGN(o_btree_len(desc, prev_tuple, OTupleLength)));
+		/* Bridge index deleted tuples not treated as vacated */
+		if (desc->type != oIndexBridge)
+		{
+			PAGE_SUB_N_VACATED(p,
+							   BTreeLeafTuphdrSize +
+							   MAXALIGN(o_btree_len(desc, prev_tuple, OTupleLength)));
+		}
 		tuphdr->formatFlags = 0;
 
 		if (!UndoLocationIsValid(nonLockUndoLocation))
