@@ -471,15 +471,10 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 	{
 		Datum		values[2 * INDEX_MAX_KEYS];
 		bool		isnulls[2 * INDEX_MAX_KEYS];
-		int			result_size,
-					tuple_size;
 		bytea	   *result;
 		OTableDescr *descr = oslot->descr;
 		OIndexDescr *primary;
 		int			ctid_off;
-		OTuple		tuple;
-		ORowIdAddendumNonCtid addNonCtid;
-		Pointer		ptr;
 
 		if (oslot->rowid)
 		{
@@ -496,66 +491,13 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		primary = GET_PRIMARY(descr);
 		ctid_off = primary->primaryIsCtid ? 1 : 0;
 
-		if (primary->primaryIsCtid)
+		if (!primary->primaryIsCtid)
 		{
-			ORowIdAddendumCtid addCtid;
-
-			addCtid.hint = oslot->hint;
-			addCtid.csn = oslot->csn;
-			addCtid.version = oslot->version;
-
-			/* Ctid primary key: give hint + tid as rowid */
-			result_size = MAXALIGN(VARHDRSZ) +
-				MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-				MAXALIGN(sizeof(ItemPointerData));
-			if (primary->bridging)
-				result_size += MAXALIGN(sizeof(ItemPointerData));
-			result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
-			SET_VARSIZE(result, result_size);
-			ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
-			memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
-			ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
-			memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
-			if (primary->bridging)
-			{
-				ptr += MAXALIGN(sizeof(ItemPointerData));
-				memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
-			}
-			*isnull = false;
-			oslot->rowid = result;
-			return datumCopy(PointerGetDatum(result), false, -1);
+			tts_orioledb_getsomeattrs(slot, primary->maxTableAttnum - ctid_off);
+			tts_orioledb_get_index_values(slot, primary, values, isnulls, false);
 		}
-
-		/*
-		 * General-case primary key: prepend tuple with maxaligned hint.
-		 */
-		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (primary->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
-		tts_orioledb_getsomeattrs(slot, primary->maxTableAttnum - ctid_off);
-		tts_orioledb_get_index_values(slot, primary, values, isnulls, false);
-		tuple_size = o_new_tuple_size(primary->nonLeafTupdesc,
-									  &primary->nonLeafSpec,
-									  NULL, NULL, oslot->version,
-									  values, isnulls, NULL);
-		result_size += MAXALIGN(tuple_size);
-		result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
-		SET_VARSIZE(result, result_size);
-		ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
-		if (primary->bridging)
-			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
-
-		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (primary->bridging)
-			tuple.data += MAXALIGN(sizeof(ItemPointerData));
-		o_tuple_fill(primary->nonLeafTupdesc, &primary->nonLeafSpec,
-					 &tuple, tuple_size, NULL, NULL, oslot->version, values, isnulls, NULL);
-
-		addNonCtid.csn = oslot->csn;
-		addNonCtid.flags = tuple.formatFlags;
-		addNonCtid.hint = oslot->hint;
-
-		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
+		result = o_new_rowid(primary, slot, values, isnulls,
+							 oslot->csn, &oslot->hint);
 
 		*isnull = false;
 		oslot->rowid = result;

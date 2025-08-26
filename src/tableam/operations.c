@@ -19,6 +19,7 @@
 #include "btree/iterator.h"
 #include "btree/modify.h"
 #include "btree/undo.h"
+#include "indexam/handler.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "storage/itemptr.h"
@@ -155,9 +156,9 @@ update_arg_get_slot(OModifyCallbackArg *arg)
 		return arg->tmpSlot;
 }
 
-static void
-apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
-							TupleTableSlot *slot, CommitSeqNo csn)
+void
+o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
+							  TupleTableSlot *slot, CommitSeqNo csn)
 {
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	OTableSlot *oslot = (OTableSlot *) slot;
@@ -265,6 +266,81 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 							   tss_orioledb_print_idx_key(bridge_slot, descr->bridge))));
 }
 
+// TODO: Merge with o_apply_new_bridge_index_ctid
+static void
+reinsert_bridge_ctid_on_pkey_changed(OTableDescr *descr, Relation relation,
+									 TupleTableSlot *slot, CommitSeqNo csn)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	OTableSlot *oslot = (OTableSlot *) slot;
+	bool		success;
+	BTreeModifyCallbackInfo callbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyDeletedCallback = o_insert_callback,
+		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = true
+	};
+	OSnapshot	o_snapshot;
+	OXid		oxid;
+	TupleTableSlot *bridge_slot;
+	uint32		version = 0;
+	OTuple		tuple;
+	Datum		values[INDEX_MAX_KEYS + 1];
+	bool		isnull[INDEX_MAX_KEYS + 1];
+	bool		overflow = false;
+
+	slot_getallattrs(slot);
+
+	o_btree_load_shmem(&primary->desc);
+	if (descr->bridge->primaryIsCtid)
+	{
+		values[1] = PointerGetDatum(&slot->tts_tid);
+		isnull[1] = false;
+	}
+	else
+	{
+		int			i;
+
+		for (i = 0; i < GET_PRIMARY(descr)->nKeyFields; i++)
+		{
+			AttrNumber	attnum = GET_PRIMARY(descr)->tableAttnums[i] - 1;
+
+			values[i + 1] = slot->tts_values[attnum];
+			isnull[i + 1] = slot->tts_isnull[attnum];
+		}
+	}
+
+	do
+	{
+		values[0] = PointerGetDatum(&oslot->bridge_ctid);
+		isnull[0] = false;
+
+		tuple = o_form_tuple(descr->bridge->leafTupdesc, &descr->bridge->leafSpec, version,
+							 values, isnull, NULL);
+		bridge_slot = descr->bridge->new_leaf_slot;
+		tts_orioledb_store_tuple(bridge_slot, tuple, descr, csn, BridgeIndexNumber, false, NULL);
+		callbackInfo.arg = bridge_slot;
+
+		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+
+		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
+									  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+
+		if (!success && !overflow)
+			o_report_duplicate(relation, descr->bridge, bridge_slot);
+	} while (!success);
+
+	if (primary->desc.storageType == BTreeStoragePersistence)
+	{
+		o_wal_insert(&descr->bridge->desc, tuple);
+		flush_local_wal(false);
+	}
+
+	if (tuple.data)
+		pfree(tuple.data);
+}
+
 TupleTableSlot *
 o_tbl_insert(OTableDescr *descr, Relation relation,
 			 TupleTableSlot *slot, OXid oxid, CommitSeqNo csn)
@@ -297,7 +373,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	}
 
 	if (descr->bridge)
-		apply_new_bridge_index_ctid(descr, relation, slot, csn);
+		o_apply_new_bridge_index_ctid(descr, relation, slot, csn);
 
 	tts_orioledb_toast(slot, descr);
 
@@ -430,6 +506,376 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 	}
 }
 
+static void
+bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTreeKeyBound *pkey)
+{
+	if (primary->primaryIsCtid)
+	{
+		Datum		value;
+
+		pkey->nkeys = 1;
+		value = PointerGetDatum(&slot->tts_tid);
+
+		pkey->keys[0].value = value;
+		pkey->keys[0].type = TIDOID;
+		pkey->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+		pkey->keys[0].comparator = primary->fields[0].comparator;
+	}
+	else
+	{
+		int			i;
+
+		pkey->nkeys = primary->nKeyFields;
+		for (i = 0; i < primary->nKeyFields; i++)
+		{
+			int		attnum = primary->tableAttnums[i];
+
+			pkey->keys[i].value = slot->tts_values[attnum - 1];
+			pkey->keys[i].type = primary->leafTupdesc->attrs[attnum - 1].atttypid;
+			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
+			if (slot->tts_isnull[attnum - 1])
+				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
+			pkey->keys[i].comparator = primary->fields[attnum - 1].comparator;
+		}
+	}
+}
+
+static bool
+OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
+						   EState *estate, Datum *conflictTid,
+						   List *arbiterIndexes)
+{
+	int			i;
+	int			numIndices;
+	RelationPtr relationDescs;
+	Relation	heapRelation;
+	IndexInfo **indexInfoArray;
+	ExprContext *econtext;
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+	ItemPointerData invalidItemPtr;
+	Datum		invalidItemPtrDatum;
+	bool		checkedIndex = false;
+
+	ItemPointerSetInvalid(&invalidItemPtr);
+	invalidItemPtrDatum = ItemPointerGetDatum(&invalidItemPtr);
+
+	/*
+	 * Get information from the result relation info structure.
+	 */
+	numIndices = resultRelInfo->ri_NumIndices;
+	relationDescs = resultRelInfo->ri_IndexRelationDescs;
+	indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
+	heapRelation = resultRelInfo->ri_RelationDesc;
+
+	/*
+	 * We will use the EState's per-tuple context for evaluating predicates
+	 * and index expressions (creating it if it's not already there).
+	 */
+	econtext = GetPerTupleExprContext(estate);
+
+	/* Arrange for econtext's scan tuple to be the tuple under test */
+	econtext->ecxt_scantuple = slot;
+
+	/*
+	 * For each index, form index tuple and check if it satisfies the
+	 * constraint.
+	 */
+	for (i = 0; i < numIndices; i++)
+	{
+		Relation	indexRelation = relationDescs[i];
+		IndexInfo  *indexInfo;
+		bool		satisfiesConstraint;
+		OBTOptions *options;
+
+		if (indexRelation == NULL)
+			continue;
+
+		options = (OBTOptions *) indexRelation->rd_options;
+
+		if (indexRelation->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
+			continue;
+
+		indexInfo = indexInfoArray[i];
+
+		if (!indexInfo->ii_Unique && !indexInfo->ii_ExclusionOps)
+			continue;
+
+		/* If the index is marked as read-only, ignore it */
+		if (!indexInfo->ii_ReadyForInserts)
+			continue;
+
+		/* When specific arbiter indexes requested, only examine them */
+		if (arbiterIndexes != NIL &&
+			!list_member_oid(arbiterIndexes,
+							 indexRelation->rd_index->indexrelid))
+			continue;
+
+		if (!indexRelation->rd_index->indimmediate)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
+					 errtableconstraint(heapRelation,
+										RelationGetRelationName(indexRelation))));
+
+		checkedIndex = true;
+
+		/* Check for partial index */
+		if (indexInfo->ii_Predicate != NIL)
+		{
+			ExprState  *predicate;
+
+			/*
+			 * If predicate state not set up yet, create it (in the estate's
+			 * per-query context)
+			 */
+			predicate = indexInfo->ii_PredicateState;
+			if (predicate == NULL)
+			{
+				predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+				indexInfo->ii_PredicateState = predicate;
+			}
+
+			/* Skip this index-update if the predicate isn't satisfied */
+			if (!ExecQual(predicate, econtext))
+				continue;
+		}
+
+		/*
+		 * FormIndexDatum fills in its values and isnull parameters with the
+		 * appropriate values for the column(s) of the index.
+		 */
+		FormIndexDatum(indexInfo,
+					   slot,
+					   estate,
+					   values,
+					   isnull);
+
+		satisfiesConstraint =
+			check_exclusion_or_unique_constraint(heapRelation, indexRelation,
+												 indexInfo, invalidItemPtrDatum,
+												 values, isnull, estate, false,
+												 CEOUC_WAIT, true,
+												 conflictTid);
+		if (!satisfiesConstraint)
+			return false;
+	}
+
+	if (arbiterIndexes != NIL && !checkedIndex)
+		elog(ERROR, "unexpected failure to find arbiter index");
+
+	return true;
+}
+
+static List *
+OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
+					  TupleTableSlot *slot,
+					  EState *estate,
+					  bool *specConflict,
+					  List *arbiterIndexes)
+{
+	List	   *result = NIL;
+	int			i;
+	int			numIndices;
+	RelationPtr relationDescs;
+	Relation	heapRelation;
+	IndexInfo **indexInfoArray;
+	ExprContext *econtext;
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+	Datum		tupleidDatum;
+
+	/*
+	 * Get information from the result relation info structure.
+	 */
+	numIndices = resultRelInfo->ri_NumIndices;
+	relationDescs = resultRelInfo->ri_IndexRelationDescs;
+	indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
+	heapRelation = resultRelInfo->ri_RelationDesc;
+
+	/* Sanity check: slot must belong to the same rel as the resultRelInfo. */
+	Assert(slot->tts_tableOid == RelationGetRelid(heapRelation));
+
+	if (table_get_row_ref_type(heapRelation) == ROW_REF_ROWID)
+	{
+		bool	isnull;
+		tupleidDatum = slot_getsysattr(slot, RowIdAttributeNumber, &isnull);
+		Assert(!isnull);
+	}
+	else
+	{
+		Assert(ItemPointerIsValid(&slot->tts_tid));
+		tupleidDatum = ItemPointerGetDatum(&slot->tts_tid);
+	}
+
+	/*
+	 * We will use the EState's per-tuple context for evaluating predicates
+	 * and index expressions (creating it if it's not already there).
+	 */
+	econtext = GetPerTupleExprContext(estate);
+
+	/* Arrange for econtext's scan tuple to be the tuple under test */
+	econtext->ecxt_scantuple = slot;
+
+	/*
+	 * for each index, form and insert the index tuple
+	 */
+	for (i = 0; i < numIndices; i++)
+	{
+		Relation	indexRelation = relationDescs[i];
+		IndexInfo  *indexInfo;
+		bool		applyNoDupErr;
+		IndexUniqueCheck checkUnique;
+		bool		satisfiesConstraint;
+		OBTOptions *options;
+
+		if (indexRelation == NULL)
+			continue;
+
+		options = (OBTOptions *) indexRelation->rd_options;
+
+		if (indexRelation->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
+			continue;
+
+		indexInfo = indexInfoArray[i];
+
+		/* If the index is marked as read-only, ignore it */
+		if (!indexInfo->ii_ReadyForInserts)
+			continue;
+
+		/* Check for partial index */
+		if (indexInfo->ii_Predicate != NIL)
+		{
+			ExprState  *predicate;
+
+			/*
+			 * If predicate state not set up yet, create it (in the estate's
+			 * per-query context)
+			 */
+			predicate = indexInfo->ii_PredicateState;
+			if (predicate == NULL)
+			{
+				predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+				indexInfo->ii_PredicateState = predicate;
+			}
+
+			/* Skip this index-update if the predicate isn't satisfied */
+			if (!ExecQual(predicate, econtext))
+				continue;
+		}
+
+		/*
+		 * FormIndexDatum fills in its values and isnull parameters with the
+		 * appropriate values for the column(s) of the index.
+		 */
+		FormIndexDatum(indexInfo,
+					   slot,
+					   estate,
+					   values,
+					   isnull);
+
+		/* Check whether to apply noDupErr to this index */
+		applyNoDupErr =
+			(arbiterIndexes == NIL ||
+			 list_member_oid(arbiterIndexes,
+							 indexRelation->rd_index->indexrelid));
+
+		/*
+		 * The index AM does the actual insertion, plus uniqueness checking.
+		 *
+		 * For an immediate-mode unique index, we just tell the index AM to
+		 * throw error if not unique.
+		 *
+		 * For a deferrable unique index, we tell the index AM to just detect
+		 * possible non-uniqueness, and we add the index OID to the result
+		 * list if further checking is needed.
+		 *
+		 * For a speculative insertion (used by INSERT ... ON CONFLICT), do
+		 * the same as for a deferrable unique index.
+		 */
+		if (!indexRelation->rd_index->indisunique)
+			checkUnique = UNIQUE_CHECK_NO;
+		else if (applyNoDupErr)
+			checkUnique = UNIQUE_CHECK_PARTIAL;
+		else if (indexRelation->rd_index->indimmediate)
+			checkUnique = UNIQUE_CHECK_YES;
+		else
+			checkUnique = UNIQUE_CHECK_PARTIAL;
+
+		o_current_index = indexRelation;
+		satisfiesConstraint =
+			index_insert(indexRelation, /* index relation */
+						 values,	/* array of index Datums */
+						 isnull,	/* null flags */
+						 tupleidDatum,	/* tid of heap tuple */
+						 heapRelation,	/* heap relation */
+						 checkUnique,	/* type of uniqueness check to do */
+						 false,	/* UPDATE without logical change? */
+						 indexInfo);	/* index AM may need this */
+		o_current_index = NULL;
+
+		/*
+		 * If the index has an associated exclusion constraint, check that.
+		 * This is simpler than the process for uniqueness checks since we
+		 * always insert first and then check.  If the constraint is deferred,
+		 * we check now anyway, but don't throw error on violation or wait for
+		 * a conclusive outcome from a concurrent insertion; instead we'll
+		 * queue a recheck event.  Similarly, noDupErr callers (speculative
+		 * inserters) will recheck later, and wait for a conclusive outcome
+		 * then.
+		 *
+		 * An index for an exclusion constraint can't also be UNIQUE (not an
+		 * essential property, we just don't allow it in the grammar), so no
+		 * need to preserve the prior state of satisfiesConstraint.
+		 */
+		if (indexInfo->ii_ExclusionOps != NULL)
+		{
+			bool		violationOK;
+			CEOUC_WAIT_MODE waitMode;
+
+			if (applyNoDupErr)
+			{
+				violationOK = true;
+				waitMode = CEOUC_LIVELOCK_PREVENTING_WAIT;
+			}
+			else if (!indexRelation->rd_index->indimmediate)
+			{
+				violationOK = true;
+				waitMode = CEOUC_NOWAIT;
+			}
+			else
+			{
+				violationOK = false;
+				waitMode = CEOUC_WAIT;
+			}
+
+			satisfiesConstraint =
+				check_exclusion_or_unique_constraint(heapRelation,
+													 indexRelation, indexInfo,
+													 tupleidDatum, values, isnull,
+													 estate, false,
+													 waitMode, violationOK, NULL);
+		}
+
+		if ((checkUnique == UNIQUE_CHECK_PARTIAL ||
+			 indexInfo->ii_ExclusionOps != NULL) &&
+			!satisfiesConstraint)
+		{
+			/*
+			 * The tuple potentially violates the uniqueness or exclusion
+			 * constraint, so make a note of the index so that we can re-check
+			 * it later.  Speculative inserters are told if there was a
+			 * speculative conflict, since that always requires a restart.
+			 */
+			result = lappend_oid(result, RelationGetRelid(indexRelation));
+			if (indexRelation->rd_index->indimmediate && specConflict)
+				*specConflict = true;
+		}
+	}
+
+	return result;
+}
+
 TupleTableSlot *
 o_tbl_insert_with_arbiter(Relation rel,
 						  OTableDescr *descr,
@@ -437,7 +883,9 @@ o_tbl_insert_with_arbiter(Relation rel,
 						  List *arbiterIndexes,
 						  CommandId cid,
 						  LockTupleMode lockmode,
-						  TupleTableSlot *lockedSlot)
+						  TupleTableSlot *lockedSlot,
+						  EState *estate,
+						  ResultRelInfo *resultRelInfo)
 {
 	InsertOnConflictCallbackArg ioc_arg;
 	UndoStackLocations undoStackLocations;
@@ -445,6 +893,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 	OSnapshot	oSnapshot;
 	CommitSeqNo csn;
 	OXid		oxid;
+	bool		specConflict;
+	Datum		conflictTid;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
@@ -496,6 +946,62 @@ o_tbl_insert_with_arbiter(Relation rel,
 			}
 		}
 
+		if (descr->bridge)
+		{
+			OExecCheckIndexConstraints(resultRelInfo, slot, estate, &conflictTid,
+									   arbiterIndexes);
+			OExecInsertIndexTuples(resultRelInfo, slot,
+								   estate, &specConflict,
+								   arbiterIndexes);
+
+			if (specConflict)
+			{
+				if (lockedSlot)
+				{
+					bytea	   *rowid;
+					Pointer		p;
+					OIndexDescr *primary = GET_PRIMARY(descr);
+					int			i;
+
+					ExecCopySlot(lockedSlot, slot);
+
+					rowid = DatumGetByteaP(conflictTid);
+					p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+
+					if (!GET_PRIMARY(descr)->primaryIsCtid)
+					{
+						ORowIdAddendumNonCtid *add;
+						OTuple		tuple;
+
+						add = (ORowIdAddendumNonCtid *) p;
+						p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+						tuple.data = p;
+						tuple.formatFlags = add->flags;
+
+						for (i = 0; i < primary->nKeyFields; i++)
+						{
+							int			attnum;
+
+							attnum = primary->tableAttnums[i];
+
+							lockedSlot->tts_values[attnum - 1] = o_fastgetattr(tuple, attnum,
+																			   primary->leafTupdesc,
+																			   &primary->leafSpec,
+																			   &lockedSlot->tts_isnull[i]);
+						}
+					}
+					else
+					{
+						p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+						lockedSlot->tts_tid = *(ItemPointer) p;
+					}
+				}
+
+				success = false;
+			}
+		}
+
 		ioc_arg.copyPrimaryOxid = true;
 		for (i = 0; (i < descr->nIndices) && success; i++)
 		{
@@ -530,7 +1036,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		}
 
 		/* Conflict on non-arbiter index case */
-		if (!success && !OXidIsValid(ioc_arg.conflictOxid) &&
+		if (!success && !specConflict && !OXidIsValid(ioc_arg.conflictOxid) &&
 			arbiterIndexes != NIL &&
 			!list_member_oid(arbiterIndexes, descr->indices[failedIndexNumber]->oids.reloid))
 		{
@@ -538,7 +1044,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		}
 
 		/* Successful lock case */
-		if (ioc_arg.conflictIxNum == PrimaryIndexNumber)
+		if (!specConflict && ioc_arg.conflictIxNum == PrimaryIndexNumber)
 		{
 			Assert(failedIndexNumber == PrimaryIndexNumber);
 			if (lockedSlot)
@@ -589,20 +1095,25 @@ o_tbl_insert_with_arbiter(Relation rel,
 			OBTreeModifyResult lockResult;
 			TupleDesc	saved_td;
 
-			Assert(failedIndexNumber >= 0);
+			Assert(failedIndexNumber >= 0 || specConflict);
 			Assert(!TTS_EMPTY(lockedSlot));
 
 			STOPEVENT(STOPEVENT_IOC_BEFORE_UPDATE, NULL);
 
-			/*
-			 * HACK: we save index tuple to slot during
-			 * o_insert_with_arbiter_modify_callback, but lockedSlot is for
-			 * table tuple here
-			 */
-			saved_td = lockedSlot->tts_tupleDescriptor;
-			lockedSlot->tts_tupleDescriptor = conflict_td->leafTupdesc;
-			fill_pkey_bound(lockedSlot, conflict_td, &key);
-			lockedSlot->tts_tupleDescriptor = saved_td;
+			if (!specConflict)
+			{
+				/*
+				 * HACK: we save index tuple to slot during
+				 * o_insert_with_arbiter_modify_callback, but lockedSlot is for
+				 * table tuple here
+				 */
+				saved_td = lockedSlot->tts_tupleDescriptor;
+				lockedSlot->tts_tupleDescriptor = conflict_td->leafTupdesc;
+				fill_pkey_bound(lockedSlot, conflict_td, &key);
+				lockedSlot->tts_tupleDescriptor = saved_td;
+			}
+			else
+				bridged_index_fill_pkey_bound(lockedSlot, primary_td, &key);
 			o_btree_load_shmem(&primary_td->desc);
 
 			larg.rel = rel;
@@ -635,25 +1146,29 @@ o_tbl_insert_with_arbiter(Relation rel,
 				csn = save_csn;
 				continue;
 			}
-			Assert(!TTS_EMPTY(lockedSlot));
 
-			tts_orioledb_fill_key_bound(slot,
-										conflict_td,
-										&key);
-			tts_orioledb_fill_key_bound(lockedSlot,
-										conflict_td,
-										&key2);
-
-			if (o_idx_cmp(&conflict_td->desc,
-						  (Pointer) &key, BTreeKeyUniqueLowerBound,
-						  (Pointer) &key2, BTreeKeyUniqueLowerBound) != 0)
+			if (!specConflict)
 			{
-				/* secondary key on primary tuple has been updated */
-				release_undo_size(UndoLogRegular);
-				apply_undo_stack(UndoLogRegular, oxid, &undoStackLocations, true);
-				oxid_notify_all();
-				csn = save_csn;
-				continue;
+				Assert(!TTS_EMPTY(lockedSlot));
+
+				tts_orioledb_fill_key_bound(slot,
+											conflict_td,
+											&key);
+				tts_orioledb_fill_key_bound(lockedSlot,
+											conflict_td,
+											&key2);
+
+				if (o_idx_cmp(&conflict_td->desc,
+							  (Pointer) &key, BTreeKeyUniqueLowerBound,
+							  (Pointer) &key2, BTreeKeyUniqueLowerBound) != 0)
+				{
+					/* secondary key on primary tuple has been updated */
+					release_undo_size(UndoLogRegular);
+					apply_undo_stack(UndoLogRegular, oxid, &undoStackLocations, true);
+					oxid_notify_all();
+					csn = save_csn;
+					continue;
+				}
 			}
 		}
 		return NULL;
@@ -743,15 +1258,15 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		{
 			Oid			indexOid = lfirst_oid(indexId);
 			Relation	index_rel = index_open(indexOid, AccessExclusiveLock);
-			bool		intresting = index_rel->rd_rel->relam != BTREE_AM_OID;
+			bool		interesting = index_rel->rd_rel->relam != BTREE_AM_OID;
 
-			if (!intresting)
+			if (!interesting)
 			{
 				OBTOptions *options = (OBTOptions *) index_rel->rd_options;
 
-				intresting = options && !options->orioledb_index;
+				interesting = options && !options->orioledb_index;
 			}
-			if (intresting)
+			if (interesting)
 			{
 				for (attnum = 0; attnum < index_rel->rd_index->indnatts; attnum++)
 				{
@@ -803,7 +1318,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	tts_orioledb_toast(slot, descr);
 	tts_orioledb_fill_key_bound(slot, GET_PRIMARY(descr), &newPkey);
 	if (touched_indices)
-		apply_new_bridge_index_ctid(descr, rel, slot, csn);
+		o_apply_new_bridge_index_ctid(descr, rel, slot, csn);
 
 	newTup = tts_orioledb_form_tuple(slot, descr);
 	o_btree_check_size_of_tuple(o_tuple_size(newTup, &primary->leafSpec),
@@ -875,6 +1390,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTableSlot *oslot = (OTableSlot *) oldSlot;
 
 				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
+				reinsert_bridge_ctid_on_pkey_changed(descr, rel, slot, csn);
 			}
 			/* reinsert TOAST value */
 			mres.failedIxNum = TOASTIndexNumber;
