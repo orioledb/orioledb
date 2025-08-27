@@ -302,3 +302,17 @@
    Memcheck:Cond
    fun:icu_language_tag
 }
+
+# wrapper_handler()
+
+{
+   wrapper_handler_cond
+   Memcheck:Cond
+   fun:wrapper_handler
+}
+
+{
+   wrapper_handler_value8
+   Memcheck:Value8
+   fun:wrapper_handler
+}
