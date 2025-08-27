@@ -1101,10 +1101,7 @@ btree_split_mark_finished(OInMemoryBlkno rightBlkno, bool use_lock, bool success
 			lock_page(leftBlkno);
 
 			if (rightPageDesc->leftBlkno == leftBlkno)
-			{
-				page_block_reads(leftBlkno);
 				break;
-			}
 
 			unlock_page(leftBlkno);
 			leftBlkno = rightPageDesc->leftBlkno;
@@ -1113,6 +1110,9 @@ btree_split_mark_finished(OInMemoryBlkno rightBlkno, bool use_lock, bool success
 	}
 
 	lock_page(rightBlkno);
+
+	if (use_lock)
+		page_block_reads(leftBlkno);
 	page_block_reads(rightBlkno);
 
 	START_CRIT_SECTION();
