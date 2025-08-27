@@ -1,11 +1,35 @@
 # This is modified Dockerfile from 16/bookworm in
 # https://github.com/docker-library/postgres
 
-# Set UBUNTU_VERSION = [ devel 25.04 24.10 24.04 22.04 ]
-#                   or [ devel plucky oracular noble jammy ]
+# Set BASE_IMAGE = [ ubuntu, debian ] ( according to the docker official images )
+#   For Ubuntu, BASE_VERSION = [ devel 25.10 25.04 24.10 24.04 22.04 20.04 ]
+#                           or [ devel questing plucky oracular noble jammy focal ]
+#   For Debian, BASE_VERSION = [ trixie, trixie-backports, trixie-slim,
+#                                bookworm, bookworm-backports, bookworm-slim,
+#                                bullseye, bullseye-backports, bullseye-slim,
+#                                testing, unstable, experimental ]
 
-ARG UBUNTU_VERSION=noble
-FROM ubuntu:${UBUNTU_VERSION}
+# Base image configuration
+# New recommended way:
+#   docker build --build-arg BASE_IMAGE=ubuntu --build-arg BASE_VERSION=noble    -f ./docker/Dockerfile.ubuntu -t orioletest:ubuntu-noble .
+#   docker build --build-arg BASE_IMAGE=debian --build-arg BASE_VERSION=bookworm -f ./docker/Dockerfile.ubuntu -t orioletest:debian-bookworm .
+ARG BASE_IMAGE=ubuntu
+ARG BASE_VERSION=noble
+#
+# Legacy support (deprecated, will be removed):
+#   docker build --build-arg UBUNTU_VERSION=noble -f ./docker/Dockerfile.ubuntu -t orioletest:ubuntu-noble .
+#
+ARG UBUNTU_VERSION
+# If UBUNTU_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
+ARG BASE_IMAGE=${UBUNTU_VERSION:+ubuntu}
+ARG BASE_VERSION=${UBUNTU_VERSION:+${UBUNTU_VERSION}}
+ARG BASE_OS=${BASE_IMAGE:-ubuntu}:${BASE_VERSION:-noble}
+
+FROM ${BASE_OS}
+# Re-declare ARGs after FROM for use in subsequent instructions
+ARG BASE_OS
+# Record build information
+ENV BASE_OS="${BASE_OS}"
 
 ARG UBUNTU_VERSION
 
@@ -25,6 +49,7 @@ ENV DEBUG_MODE=${DEBUG_MODE}
 # Define build dependencies for LLVM [ llvm-dev clang ]
 # These include the specific versions of 'llvm-dev' and 'clang' suitable for the current version of PostgreSQL.
 # Reference: https://github.com/docker-library/postgres/pull/1077
+# NOW it is working for the default values in the Dockerfile.ubuntu
 ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
 ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
 
@@ -109,14 +134,15 @@ RUN set -eux; \
 	echo "DEBUG_MODE=$DEBUG_MODE" ;	\
 	\
 	LLVM_RUNTIME_DEPS=$(echo "$DOCKER_PG_LLVM_DEPS" | grep -o 'llvm[0-9]*') ; \
-	echo "LLVM_RUNTIME_DEPS=$LLVM_RUNTIME_DEPS" ; \
-	\
 	apt-get update; \
+	EXTRA_ICU_PACKAGES="$(apt-cache depends libicu-dev | grep 'Depends:.*libicu[0-9]' | awk '{print $2}')" ; \
+	echo "LLVM_RUNTIME_DEPS=$LLVM_RUNTIME_DEPS | EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES |" ; \
 	DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-		build-essential \
-		${LLVM_RUNTIME_DEPS} \
 		${DOCKER_PG_LLVM_DEPS} \
+		${EXTRA_ICU_PACKAGES} \
+		${LLVM_RUNTIME_DEPS} \
 		bison \
+		build-essential \
 		curl \
 		flex \
 		gdb \
@@ -129,15 +155,15 @@ RUN set -eux; \
 		liblz4-1 \
 		liblz4-dev \
 		libperl-dev \
-		libssl-dev \
 		libreadline-dev \
+		libssl-dev \
 		libuuid1 \
 		libxml2 \
 		libxml2-dev \
-		libxslt1.1 \
 		libxslt1-dev \
-		libzstd1 \
+		libxslt1.1 \
 		libzstd-dev \
+		libzstd1 \
 		make \
 		pkg-config \
 		python3 \
@@ -150,10 +176,18 @@ RUN set -eux; \
 		wget \
 	; \
 	\
+	# Mark essential LLVM runtime as manual: prefer versioned if available, else fallback.
+	LLVM_CONFIG_VERSION="$(llvm-config --version 2>/dev/null | cut -d'.' -f1 || true)"; \
+	RUNTIME_PKG="llvm-runtime"; \
+	if [ -n "$LLVM_CONFIG_VERSION" ] && apt-cache show "llvm-${LLVM_CONFIG_VERSION}-runtime" >/dev/null 2>&1; then \
+		RUNTIME_PKG="llvm-${LLVM_CONFIG_VERSION}-runtime"; \
+	fi; \
+	apt-mark manual "$RUNTIME_PKG" ${EXTRA_ICU_PACKAGES} libcurl4 libzstd1 || true; \
+	\
 	curl -o postgresql.tar.gz \
-			--header "Accept: application/vnd.github.v3.raw" \
-			--remote-name \
-			--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
+		--header "Accept: application/vnd.github.v3.raw" \
+		--remote-name \
+		--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
 	mkdir -p /usr/src/postgresql; \
 	tar \
 		--extract \
@@ -179,19 +213,19 @@ RUN set -eux; \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
 #		--enable-nls \
 		--enable-integer-datetimes \
-		--enable-thread-safety \
+#		--enable-thread-safety \     unrecognized options
 		--enable-tap-tests \
 # skip debugging info -- we want tiny size instead
 #		--enable-debug \
 		--disable-rpath \
 		--with-uuid=e2fs \
-		--with-gnu-ld \
+#		--with-gnu-ld \    unrecognized options
 		--with-pgport=5432 \
 		--with-system-tzdata=/usr/share/zoneinfo \
 		--prefix=/usr/local \
 		--with-includes=/usr/local/include \
 		--with-libraries=/usr/local/lib \
-		--with-krb5 \
+#		--with-krb5 \    unrecognized options
 		--with-gssapi \
 		--with-ldap \
 		--with-tcl \
@@ -207,8 +241,8 @@ RUN set -eux; \
 		--with-zstd \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
-	|| cat config.log ); \
+        --with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BASE_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+            || cat config.log ); \
 	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
 	# install postgresql
 	make -j "$(nproc)"; \
@@ -222,16 +256,20 @@ RUN set -eux; \
 	\
 	# Clean up only if not in debug mode
 	if [ "$DEBUG_MODE" != "true" ]; then \
-		apt-get -y remove \
+		\
+		apt-get -y autoremove; \
+		apt-get -y --auto-remove --purge remove \
 			${DOCKER_PG_LLVM_DEPS} \
 			bison \
 			build-essential \
 			curl \
+			dpkg-dev \
 			flex \
 			gdb \
 			git \
 			libicu-dev \
 			libipc-run-perl \
+			libkrb5-dev \
 			liblz4-dev \
 			libreadline-dev \
 			libxml2-dev \
@@ -245,13 +283,16 @@ RUN set -eux; \
 			wget \
 		; \
 		apt-get -y autoremove; \
-		rm -rf /var/cache/apt/archives /var/lib/apt/lists/*; \
 		apt-get clean; \
 		rm -rf \
-			/usr/src/postgresql \
-			/usr/local/share/doc \
-			/usr/local/share/man \
 			/tmp/* \
+			/usr/local/share/doc \
+			/usr/share/man/* \
+			/usr/src/postgresql \
+			/var/cache/apt/archives/* \
+			/var/lib/apt/lists/* \
+			/var/log/*.log \
+			/var/log/*/*.log \
 		; \
 	fi ; \
 	\
