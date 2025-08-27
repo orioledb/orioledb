@@ -715,6 +715,8 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 					   left_count, split_key, split_key_len,
 					   csn, undoLocation);
 
+	o_btree_insert_mark_split_finished_if_needed(insert_item);
+
 	unlock_page(right_blkno);
 
 	if (waitersWakeupCount > 0)
@@ -729,7 +731,6 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	{
 		Assert(curContext->index == 0);
 
-		o_btree_insert_mark_split_finished_if_needed(insert_item);
 		insert_item->rightBlkno = right_blkno;
 
 		blkno = o_btree_finish_root_split_internal(desc,
@@ -751,7 +752,6 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 		curContext->index--;
 		insert_item->refind = true;
 		next = false;
-		o_btree_insert_mark_split_finished_if_needed(insert_item);
 		END_CRIT_SECTION();
 		insert_item->rightBlkno = right_blkno;
 
@@ -1006,8 +1006,8 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 			mark_waiter_tuples_inserted(tupleWaiterProcnums,
 										waitersWakeupCount);
 
-		unlock_page(blkno);
 		o_btree_insert_mark_split_finished_if_needed(insert_item);
+		unlock_page(blkno);
 		END_CRIT_SECTION();
 		return true;
 	}
@@ -1136,9 +1136,10 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		page_split_chunk_if_needed(desc, p, &loc);
 
 		MARK_DIRTY(desc, blkno);
-		unlock_page(blkno);
 
 		o_btree_insert_mark_split_finished_if_needed(insert_item);
+		unlock_page(blkno);
+
 		END_CRIT_SECTION();
 
 		return true;
@@ -1186,9 +1187,9 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		header->prevInsertOffset = offset;
 
 		MARK_DIRTY(desc, blkno);
+		o_btree_insert_mark_split_finished_if_needed(insert_item);
 		unlock_page(blkno);
 
-		o_btree_insert_mark_split_finished_if_needed(insert_item);
 		END_CRIT_SECTION();
 
 		return true;
