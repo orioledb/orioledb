@@ -2558,6 +2558,7 @@ get_collation(Oid collation, Oid actual_datatype)
 	/* For simplicity, we always schema-qualify the name */
 	nsp_name = get_namespace_name(coll_rec->collnamespace);
 	coll_name = pstrdup(NameStr(coll_rec->collname));
+	/* cppcheck-suppress unknownEvaluationOrder */
 	result = list_make2(makeString(nsp_name), makeString(coll_name));
 
 	ReleaseSysCache(ht_coll);
@@ -2588,6 +2589,7 @@ get_opclass(Oid opclass, Oid actual_datatype)
 		char	   *nsp_name = get_namespace_name(opc_rec->opcnamespace);
 		char	   *opc_name = pstrdup(NameStr(opc_rec->opcname));
 
+		/* cppcheck-suppress unknownEvaluationOrder */
 		result = list_make2(makeString(nsp_name), makeString(opc_name));
 	}
 
