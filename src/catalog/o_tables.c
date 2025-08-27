@@ -1018,21 +1018,32 @@ OTable *
 o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 {
 	OTableChunkKey key;
-	OTable	   *table;
-	bool		result;
-	BTreeDescr *sys_tree;
+	OTable		*table = NULL;
+	bool		result = false,
+				any_wal = false;
+	BTreeDescr	*sys_tree = NULL;
 
 	key.oids = oids;
 	key.chunknum = 0;
 
 	systrees_modify_start();
 	table = o_tables_get(oids);
-	o_tables_oids_indexes(table, NULL, oxid, csn);
-	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
-	result = generic_toast_delete_optional_wal(&oTablesToastAPI,
-											   (Pointer) &key, oxid, csn,
-											   sys_tree, table->persistence != RELPERSISTENCE_TEMP);
-	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
+	Assert(table);
+	if (table)
+	{
+		o_tables_oids_indexes(table, NULL, oxid, csn);
+		sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+		any_wal = table->persistence != RELPERSISTENCE_TEMP;
+		result = generic_toast_delete_optional_wal(
+			&oTablesToastAPI,
+			(Pointer) &key, oxid, csn,
+			sys_tree, any_wal);
+	}
+	else
+	{
+		ereport(LOG, errmsg("[ERROR SUPPRESSED] [%s] NULL table", __func__));
+	}
+	systrees_modify_end(any_wal);
 
 	if (result)
 	{
@@ -1040,7 +1051,8 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	}
 	else
 	{
-		o_table_free(table);
+		if (table)
+			o_table_free(table);
 		return NULL;
 	}
 }
