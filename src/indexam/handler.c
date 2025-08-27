@@ -88,8 +88,6 @@ static void orioledb_amrescan(IndexScanDesc scan, ScanKey scankey,
 static bool orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir);
 static int64 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
 static void orioledb_amendscan(IndexScanDesc scan);
-static void orioledb_ammarkpos(IndexScanDesc scan);
-static void orioledb_amrestrpos(IndexScanDesc scan);
 #if PG_VERSION_NUM >= 170000
 static Size orioledb_amestimateparallelscan(int nkeys, int norderbys);
 #else
@@ -165,8 +163,8 @@ orioledb_btree_handler(void)
 	amroutine->amgettuple = orioledb_amgettuple;
 	amroutine->amgetbitmap = orioledb_amgetbitmap;
 	amroutine->amendscan = orioledb_amendscan;
-	amroutine->ammarkpos = orioledb_ammarkpos;
-	amroutine->amrestrpos = orioledb_amrestrpos;
+	amroutine->ammarkpos = NULL;
+	amroutine->amrestrpos = NULL;
 	amroutine->amestimateparallelscan = orioledb_amestimateparallelscan;
 	amroutine->aminitparallelscan = orioledb_aminitparallelscan;
 	amroutine->amparallelrescan = orioledb_amparallelrescan;
@@ -1772,24 +1770,6 @@ orioledb_amendscan(IndexScanDesc scan)
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
 	MemoryContextDelete(o_scan->cxt);
-}
-
-void
-orioledb_ammarkpos(IndexScanDesc scan)
-{
-	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
-
-	if (options && !options->orioledb_index)
-		return btmarkpos(scan);
-}
-
-void
-orioledb_amrestrpos(IndexScanDesc scan)
-{
-	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
-
-	if (options && !options->orioledb_index)
-		return btrestrpos(scan);
 }
 
 Size
