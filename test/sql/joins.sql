@@ -135,6 +135,45 @@ RESET enable_hashjoin;
 
 DROP TABLE o_joins2;
 DROP TABLE o_joins1;
+
+-- Test Mark/Restore with Merge Join
+CREATE TABLE o_joins1
+(
+	id1 int4 NOT NULL
+) USING orioledb;
+CREATE INDEX o_joins1_idx ON o_joins1 (id1);
+
+INSERT INTO o_joins1
+	SELECT a % 3
+	FROM generate_series(1, 9) a;
+
+CREATE TABLE o_joins2
+(
+	id1 int4 NOT NULL
+) USING orioledb;
+CREATE INDEX o_joins2_idx ON o_joins2 (id1);
+
+INSERT INTO o_joins2
+	SELECT a % 3
+	FROM generate_series(1, 9) a;
+
+SET enable_hashjoin = off;
+SET enable_nestloop = off;
+SET enable_material = off;
+SET enable_seqscan = off;
+
+-- Should use Materialize node
+EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1);
+SELECT * FROM o_joins2 JOIN o_joins1 USING(id1);
+
+RESET enable_hashjoin;
+RESET enable_nestloop;
+RESET enable_material;
+RESET enable_seqscan;
+
+DROP TABLE o_joins2;
+DROP TABLE o_joins1;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA joins CASCADE;
 RESET search_path;
