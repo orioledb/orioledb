@@ -1163,8 +1163,38 @@ SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 (5 rows)
 
 ROLLBACK;
+CREATE TABLE o_test_alter_type_reuse_index (
+	id int,
+	phone varchar(15) NULL UNIQUE DEFAULT NULL
+) USING orioledb;
+ALTER TABLE o_test_alter_type_reuse_index ALTER COLUMN phone TYPE text;
+SELECT * FROM o_test_alter_type_reuse_index;
+ id | phone 
+----+-------
+(0 rows)
+
+CREATE TABLE o_test_alter_type_not_reuse_index (
+	id int,
+	phone varchar(15) NULL UNIQUE DEFAULT NULL
+) USING orioledb;
+ALTER TABLE o_test_alter_type_not_reuse_index ALTER COLUMN phone TYPE text COLLATE "POSIX";
+SELECT * FROM o_test_alter_type_not_reuse_index;
+ id | phone 
+----+-------
+(0 rows)
+
+CREATE TABLE o_test_alter_type_typmod_changed (
+	id int,
+	phone varchar(15) NULL UNIQUE DEFAULT NULL
+) USING orioledb;
+ALTER TABLE o_test_alter_type_typmod_changed ALTER COLUMN phone TYPE varchar(5);
+SELECT * FROM o_test_alter_type_typmod_changed;
+ id | phone 
+----+-------
+(0 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 9 other objects
+NOTICE:  drop cascades to 12 other objects
 DETAIL:  drop cascades to table o_ddl_check
 drop cascades to table o_test_alter_change_byval
 drop cascades to table o_test_pkey_alter_type
@@ -1174,5 +1204,8 @@ drop cascades to table o_test_inherits_alter_type
 drop cascades to table o_test_inherits_alter_type_child
 drop cascades to table o_test_inherits_alter_type_int8
 drop cascades to table o_test_inherits_alter_type_int8_child
+drop cascades to table o_test_alter_type_reuse_index
+drop cascades to table o_test_alter_type_not_reuse_index
+drop cascades to table o_test_alter_type_typmod_changed
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;
