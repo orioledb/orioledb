@@ -1,11 +1,29 @@
 # This is slightly adjusted Dockerfile from
 # https://github.com/docker-library/postgres
 
-# set ALPINE_VERSION= [ edge 3.21 3.20 3.19 3.18 ]
-ARG ALPINE_VERSION=3.21
-FROM alpine:${ALPINE_VERSION}
+# Base image configuration ( according to the docker official images )
+# BASE_IMAGE=alpine
+# BASE_VERSION= [ edge 3.22 3.21 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13 3.12]
+# New recommended way:
+#   docker build --build-arg BASE_IMAGE=alpine --build-arg BASE_VERSION=3.22 -t orioletest:alpine-3.22 -f ./docker/Dockerfile .
+ARG BASE_IMAGE=alpine
+ARG BASE_VERSION=3.22
 
+# Legacy support (deprecated, will be removed):
+#   docker build --build-arg ALPINE_VERSION=3.22 -f ./docker/Dockerfile -t orioletest:alpine-3.22 .
+#
 ARG ALPINE_VERSION
+# If ALPINE_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
+ARG BASE_IMAGE=${ALPINE_VERSION:+alpine}
+ARG BASE_VERSION=${ALPINE_VERSION:+${ALPINE_VERSION}}
+ARG BASE_OS=${BASE_IMAGE:-alpine}:${BASE_VERSION:-3.22}
+
+FROM ${BASE_OS}
+
+# Re-declare ARGs after FROM for use in subsequent instructions
+ARG BASE_OS
+# Record build information
+ENV BASE_OS="${BASE_OS}"
 
 # Set PG_MAJOR = [ 17 16 ]
 ARG PG_MAJOR=17
@@ -51,6 +69,9 @@ RUN mkdir /docker-entrypoint-initdb.d /docker-default-initdb.d
 RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
 
 RUN set -eux; \
+	# We intentionally upgrade base packages here. Although Docker best practices advise against it,
+	# Alpine base images (stable releases and edge) can be stale for months; we need latest fixes and toolchain for reliable builds.
+	apk upgrade --no-cache --available; \
 	\
 	PGTAG=$(grep "^$PG_MAJOR: " /usr/src/postgresql/contrib/orioledb/.pgtags | cut -d' ' -f2-) ; \
 	ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2) ; \
@@ -60,9 +81,8 @@ RUN set -eux; \
 	# To get support for all locales: IF >=Alpine3.16 THEN install icu-data-full
 	# https://wiki.alpinelinux.org/wiki/Release_Notes_for_Alpine_3.16.0#ICU_data_split
 	# https://github.com/docker-library/postgres/issues/327#issuecomment-1201582069
-	case "$ALPINE_VERSION" in 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
-		3.16 | 3.17 | 3.18 | 3.19 | 3.20 | 3.21* )  EXTRA_ICU_PACKAGES=icu-data-full ;; \
-		*) : ;; \
+	case "$ALPINE_VERSION" in 3.12 | 3.13 | 3.14 | 3.15 )  EXTRA_ICU_PACKAGES='' ;; \
+		* ) EXTRA_ICU_PACKAGES=icu-data-full ;; \
 	esac ; \
 	\
 	echo "PG_MAJOR=$PG_MAJOR" ; \
@@ -110,8 +130,8 @@ RUN set -eux; \
 # configure: error: prove not found
 		perl-utils \
 # configure: error: Perl module IPC::Run is required to run TAP tests
-		perl-ipc-run \
 		perl-dev \
+		perl-ipc-run \
 		python3 \
 		python3-dev \
 		tcl-dev \
@@ -123,6 +143,23 @@ RUN set -eux; \
 # https://www.postgresql.org/docs/14/release-14.html#id-1.11.6.5.5.3.7
 		lz4-dev \
 	; \
+	# Ensure a single, deterministic llvm-config is on PATH based on DOCKER_PG_LLVM_DEPS
+	if command -v llvm-config >/dev/null 2>&1; then \
+		LLVM_CONFIG_BIN="$(command -v llvm-config)"; \
+		echo "Using existing llvm-config on PATH: ${LLVM_CONFIG_BIN}"; \
+	else \
+		v="$(printf '%s' "${DOCKER_PG_LLVM_DEPS}" | grep -oE 'llvm[0-9]+-dev' | sed -E 's/llvm([0-9]+)-dev/\1/' || true)"; \
+		if [ -n "${v}" ]; then \
+		  LLVM_CONFIG_BIN="/usr/lib/llvm${v}/bin/llvm-config"; \
+		else \
+		  LLVM_CONFIG_BIN="$(ls -1d /usr/lib/llvm*/bin/llvm-config 2>/dev/null | sort -V | tail -n1 || true)"; \
+		fi; \
+		[ -x "${LLVM_CONFIG_BIN}" ] || { echo "llvm-config not found" >&2; exit 1; }; \
+		install -d /usr/local/bin; \
+		ln -sf "${LLVM_CONFIG_BIN}" /usr/local/bin/llvm-config; \
+		echo "Using llvm-config (symlinked): ${LLVM_CONFIG_BIN}"; \
+	fi; \
+	llvm-config --version; \
 	\
 	curl -o postgresql.tar.gz \
 			--header "Accept: application/vnd.github.v3.raw" \
@@ -158,18 +195,16 @@ RUN set -eux; \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
 #		--enable-nls \
 		--enable-integer-datetimes \
-		--enable-thread-safety \
+#       --enable-thread-safety \   # unrecognized options in alpine
 		--enable-tap-tests \
 # skip debugging info -- we want tiny size instead
 #		--enable-debug \
 		--disable-rpath \
 		--with-uuid=e2fs \
-		--with-gnu-ld \
+#		--with-gnu-ld \         # not supported on Alpine
 		--with-pgport=5432 \
 		--with-system-tzdata=/usr/share/zoneinfo \
 		--prefix=/usr/local \
-		--with-includes=/usr/local/include \
-		--with-libraries=/usr/local/lib \
 		--with-gssapi \
 		--with-ldap \
 		--with-tcl \
@@ -212,12 +247,12 @@ RUN set -eux; \
 		apk add --no-cache --virtual .postgresql-rundeps \
 			$runDeps \
 		; \
-		apk del --no-network .build-deps; \
+		apk del .build-deps; \
 		rm -rf \
-			/usr/src/postgresql \
+			/tmp/* \
 			/usr/local/share/doc \
 			/usr/local/share/man \
-			/tmp/* \
+			/usr/src/postgresql \
 		; \
 	fi ; \
 	\
