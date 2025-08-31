@@ -265,6 +265,23 @@ load_next_historical_page(BTreeSeqScan *scan)
 	BTREE_PAGE_LOCATOR_FIRST(scan->histImg, &scan->histLoc);
 }
 
+static Jsonb *
+btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	btree_desc_stopevent_params_internal(desc, &state);
+	jsonb_push_key(&state, "lokey");
+	(void) o_btree_key_to_jsonb(desc, lokey, &state);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
 /*
  * Loads next internal page and. Outputs page, start locator and offset.
  *.
@@ -284,9 +301,15 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
 
 	if (!O_TUPLE_IS_NULL(prevHikey))
+	{
+		STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
+				  btree_lokey_stopevent_params(scan->desc, prevHikey));
 		findResult = find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
+	}
 	else
+	{
 		findResult = find_page(&scan->context, NULL, BTreeKeyNone, 1);
+	}
 	Assert(findResult == OFindPageResultSuccess);
 
 	/* In case of parallel scan copy page image into shared state */
@@ -319,7 +342,8 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 			else
 				intTup = scan->context.lokey.tuple;
 
-			if (o_btree_cmp(scan->desc,
+			if (O_TUPLE_IS_NULL(intTup) ||
+				o_btree_cmp(scan->desc,
 							&prevHikey, BTreeKeyNonLeafKey,
 							&intTup, BTreeKeyNonLeafKey) != 0)
 			{

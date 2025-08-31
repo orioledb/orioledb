@@ -1,0 +1,27 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_setup s2_setup s1_scan s2_delete1 s2_checkpoint s2_delete2 s2_checkpoint s2_reset
+step s1_setup: SET orioledb.enable_stopevents = true;
+step s2_setup: SELECT pg_stopevent_set('seq_scan_load_internal_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_scan: SELECT COUNT(*) FROM o_btree_scan; <waiting ...>
+step s2_delete1: DELETE FROM o_btree_scan WHERE id < '0500';
+step s2_checkpoint: CHECKPOINT;
+step s2_delete2: DELETE FROM o_btree_scan WHERE id < '0550';
+step s2_checkpoint: CHECKPOINT;
+step s2_reset: SELECT pg_stopevent_reset('seq_scan_load_internal_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan: <... completed>
+count
+-----
+ 1000
+(1 row)
+
