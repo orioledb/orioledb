@@ -4,6 +4,7 @@
  *		Declarations for sequential scan of OrioleDB B-tree.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/scan.h

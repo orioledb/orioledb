@@ -3,7 +3,8 @@
  * control.h
  *		Declarations for S3 control and lock files.
  *
- * Copyright (c) 2025-2025, Oriole DB Inc.
+ * Copyright (c) 2024-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/s3/control.h

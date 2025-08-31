@@ -4,6 +4,7 @@
  * 		Routines for orioledb relnode/datoid to tablespace map tree.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_tablespace_cache.c

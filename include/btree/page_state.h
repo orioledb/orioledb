@@ -4,6 +4,7 @@
  *		Declarations of OrioleDB B-tree page state.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/page_state.h

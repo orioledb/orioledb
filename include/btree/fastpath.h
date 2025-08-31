@@ -4,6 +4,7 @@
  *		Declarations for fastpath intra-page navigation in B-tree.
  *
  * Copyright (c) 2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/fastpath.h

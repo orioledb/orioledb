@@ -3,7 +3,8 @@
  * worker.h
  *		Declarations for S3 worker process.
  *
- * Copyright (c) 2025-2025, Oriole DB Inc.
+ * Copyright (c) 2024-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/s3/worker.h

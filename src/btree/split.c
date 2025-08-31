@@ -4,6 +4,7 @@
  *		Routines for implementation of splitting B-tree page.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/btree/split.c

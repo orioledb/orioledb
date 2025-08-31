@@ -4,6 +4,7 @@
  *		SQL functions implementation for orioledb module.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/tableam/func.c

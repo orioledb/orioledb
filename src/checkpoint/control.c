@@ -3,7 +3,8 @@
  * control.c
  *		Routines to work with control file.
  *
- * Copyright (c) 2025-2025, Oriole DB Inc.
+ * Copyright (c) 2024-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/checkpoint/control.c

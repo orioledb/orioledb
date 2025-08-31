@@ -6,6 +6,7 @@
  * class_cache is tree that contains cached range metadata from pg_type.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_class_cache.c

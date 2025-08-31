@@ -4,6 +4,7 @@
  *		Declarations of B-tree undo records and routines dealing with them.
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.
+ * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/undo.h
