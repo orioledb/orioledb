@@ -103,6 +103,7 @@ jobs:
           name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
           path: ./orioledb/coverage.info
           retention-days: 1
+          overwrite: true
 
   finish:
     needs: check
@@ -123,7 +124,6 @@ jobs:
 
   cleanup:
     needs: finish
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: remove artifacts
