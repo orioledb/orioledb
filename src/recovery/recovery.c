@@ -2273,7 +2273,7 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 		return;
 
 	path[0] = '\0';
-	strncat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
+	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
 	cleanup_tablespace_old_files(path, chkp_num, before_recovery);
 
 	dir = opendir(PG_TBLSPC);
@@ -2300,7 +2300,7 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 
 		if (!S_ISLNK(st.st_mode))
 		{
-			strncat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
 			cleanup_tablespace_old_files(path, chkp_num, before_recovery);
 		}
 		else
