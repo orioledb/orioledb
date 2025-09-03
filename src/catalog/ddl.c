@@ -3657,7 +3657,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 			if (!S_ISLNK(st.st_mode))
 			{
-				strncat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+				strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
 				cleanup_tablespace_dir(path);
 			}
 			else
