@@ -954,9 +954,9 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 	size = offsetof(RelnodeUndoStackItem, oids) + sizeof(ORelOids) * (oldNumTreeOids + newNumTreeOids);
 	item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
-	item->header.base.type = RelnodeUndoItemType;
-	item->header.base.itemSize = size;
-	item->header.base.indexType = oIndexPrimary;
+	item->header.type = RelnodeUndoItemType;
+	item->header.itemSize = size;
+	item->header.indexType = oIndexPrimary;
 	Assert(ORelOidsIsValid(oldOids) || ORelOidsIsValid(newOids));
 	if (ORelOidsIsValid(oldOids))
 	{

@@ -46,14 +46,6 @@
 #include "utils/syscache.h"
 #include "pgstat.h"
 
-typedef struct
-{
-	OnCommitUndoStackItem header;
-	Oid			opfamily;
-	Oid			lefttype;
-	Oid			righttype;
-} InvalidateComparatorUndoStackItem;
-
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table);
@@ -1399,9 +1391,9 @@ o_add_invalidate_comparator_undo_item(Oid opfamily, Oid lefttype, Oid righttype)
 	item->opfamily = opfamily;
 	item->lefttype = lefttype;
 	item->righttype = righttype;
-	item->header.base.type = InvalidateComparatorUndoItemType;
-	item->header.base.indexType = oIndexPrimary;
-	item->header.base.itemSize = size;
+	item->header.type = InvalidateComparatorUndoItemType;
+	item->header.indexType = oIndexPrimary;
+	item->header.itemSize = size;
 
 	add_new_undo_stack_item(UndoLogSystem, location);
 	release_undo_size(UndoLogSystem);
@@ -1708,9 +1700,9 @@ o_add_invalidate_undo_item(ORelOids oids, uint32 flags)
 																  MAXALIGN(size));
 	item->oids = oids;
 	item->flags = flags;
-	item->header.base.type = InvalidateUndoItemType;
-	item->header.base.indexType = oIndexPrimary;
-	item->header.base.itemSize = size;
+	item->header.type = InvalidateUndoItemType;
+	item->header.indexType = oIndexPrimary;
+	item->header.itemSize = size;
 
 	add_new_undo_stack_item(UndoLogSystem, location);
 	release_undo_size(UndoLogSystem);

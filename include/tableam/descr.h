@@ -256,13 +256,6 @@ typedef struct
 #define O_INVALIDATE_OIDS_ON_COMMIT	1
 #define O_INVALIDATE_OIDS_ON_ABORT	2
 
-typedef struct
-{
-	OnCommitUndoStackItem header;
-	ORelOids	oids;
-	uint32		flags;
-} InvalidateUndoStackItem;
-
 #define GET_PRIMARY(descr) ((descr)->indices[PrimaryIndexNumber])
 
 /*

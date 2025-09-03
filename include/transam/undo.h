@@ -252,7 +252,7 @@ struct UndoStackItem
 
 typedef struct
 {
-	UndoStackItem base;
+	UndoStackItem header;
 	UndoLocation onCommitLocation;
 } OnCommitUndoStackItem;
 
@@ -272,6 +272,26 @@ typedef struct
 	OXid		oxid;
 	TransactionId logicalXid;
 } OAutonomousTxState;
+
+typedef struct
+{
+	UndoStackItem header;
+	Oid			datoid;
+	Oid			relid;
+	Oid			oldRelnode;
+	int			oldNumTreeOids;
+	Oid			newRelnode;
+	int			newNumTreeOids;
+	bool		fsync;
+	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
+} RelnodeUndoStackItem;
+
+typedef struct
+{
+	UndoStackItem header;
+	ORelOids	oids;
+	uint32		flags;
+} InvalidateUndoStackItem;
 
 /*
  * Branch undo record: when we apply part of undo (for instance, when we do
@@ -294,6 +314,23 @@ typedef struct
 	UndoLocation prevSubLocation;
 	SubTransactionId parentSubid;
 } SubXactUndoStackItem;
+
+/* Rewind RelFileNode undo record */
+typedef struct
+{
+	UndoStackItem header;
+	int			nCommitRels;
+	int			nAbortRels;
+	RelFileNode rels[FLEXIBLE_ARRAY_MEMBER];
+} RewindRelFileNodeUndoStackItem;
+
+typedef struct
+{
+	UndoStackItem header;
+	Oid			opfamily;
+	Oid			lefttype;
+	Oid			righttype;
+} InvalidateComparatorUndoStackItem;
 
 typedef enum
 {

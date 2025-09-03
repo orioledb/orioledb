@@ -87,14 +87,6 @@ typedef struct
 	UndoCallback callback;		/* callback to be called on transaction finish */
 } UndoItemTypeDescr;
 
-typedef struct
-{
-	OnCommitUndoStackItem header;
-	int			nCommitRels;
-	int			nAbortRels;
-	RelFileNode rels[FLEXIBLE_ARRAY_MEMBER];
-} RewindRelFileNodeUndoStackItem;
-
 UndoItemTypeDescr undoItemTypeDescrs[] = {
 	{
 		.type = ModifyUndoItemType,
@@ -2310,9 +2302,9 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 	size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (nOnCommit + nOnAbort);
 	item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
-	item->header.base.type = RewindRelFileNodeUndoItemType;
-	item->header.base.itemSize = size;
-	item->header.base.indexType = oIndexPrimary;
+	item->header.type = RewindRelFileNodeUndoItemType;
+	item->header.itemSize = size;
+	item->header.indexType = oIndexPrimary;
 
 	item->nCommitRels = nOnCommit;
 	item->nAbortRels = nOnAbort;

@@ -51,7 +51,7 @@ typedef enum
 	BTreeModifySameOrStrongerLock = 3
 } BTreeModifyLockStatus;
 
-/* Undo records */
+/* Undo record */
 typedef struct
 {
 	UndoStackItem header;
@@ -61,19 +61,6 @@ typedef struct
 	uint32		pageChangeCount;
 	BTreeLeafTuphdr tuphdr;
 } BTreeModifyUndoStackItem;
-
-typedef struct
-{
-	OnCommitUndoStackItem header;
-	Oid			datoid;
-	Oid			relid;
-	Oid			oldRelnode;
-	int			oldNumTreeOids;
-	Oid			newRelnode;
-	int			newNumTreeOids;
-	bool		fsync;
-	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
-} RelnodeUndoStackItem;
 
 /* size of image in undo log produced by page compaction  */
 #define O_COMPACT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ)
