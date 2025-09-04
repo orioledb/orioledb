@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * slot.c
+ * sort.c
  * 		Implementation of orioledb tuple sorting
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.

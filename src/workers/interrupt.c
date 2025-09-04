@@ -7,7 +7,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/worker/interrupt.c
+ *	  contrib/orioledb/src/workers/interrupt.c
  *
  *-------------------------------------------------------------------------
  */

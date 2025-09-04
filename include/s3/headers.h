@@ -7,7 +7,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/include/utils/headers.h
+ *	  contrib/orioledb/include/s3/headers.h
  *
  *-------------------------------------------------------------------------
  */

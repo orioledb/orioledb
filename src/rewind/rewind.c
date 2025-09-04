@@ -7,7 +7,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/workers/rewind.c
+ *	  contrib/orioledb/src/rewind/rewind.c
  *
  *-------------------------------------------------------------------------
  */

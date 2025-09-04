@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * o_opclass.c
+ * o_opclass_cache.c
  *		Routines for orioledb operator classes sys cache.
  *
  * Operator class B-tree stores data used by comparator and field initialization
@@ -10,7 +10,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/catalog/o_opclass.c
+ *	  contrib/orioledb/src/catalog/o_opclass_cache.c
  *
  *-------------------------------------------------------------------------
  */
