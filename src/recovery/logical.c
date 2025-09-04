@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * recovery.c
+ * logical.c
  *		Support for logical decoding of OrioleDB tables.
  *
  * Copyright (c) 2024-2025, Oriole DB Inc.

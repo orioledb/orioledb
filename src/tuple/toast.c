@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * toast.h
+ * toast.c
  * 		Routines for orioledb TOAST implementation
  *
  * Copyright (c) 2021-2025, Oriole DB Inc.

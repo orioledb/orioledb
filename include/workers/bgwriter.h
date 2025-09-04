@@ -7,7 +7,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/include/utils/bgwriter.h
+ *	  contrib/orioledb/include/workers/bgwriter.h
  *
  *-------------------------------------------------------------------------
  */

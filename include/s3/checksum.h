@@ -7,7 +7,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/include/utils/checksum.h
+ *	  contrib/orioledb/include/s3/checksum.h
  *
  *-------------------------------------------------------------------------
  */

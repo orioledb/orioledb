@@ -7,7 +7,7 @@
  * Copyright (c) 2025, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/catalog/o_indices.c
+ *	  contrib/orioledb/src/utils/o_buffers.c
  *
  *-------------------------------------------------------------------------
  */
