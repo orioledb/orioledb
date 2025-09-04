@@ -1,4 +1,4 @@
-/* contrib/orioledb/sql/orioledb--1.0.sql */
+/* contrib/orioledb/sql/orioledb--1.0_dev.sql */
 
 CREATE FUNCTION orioledb_parallel_debug_start()
 RETURNS void
