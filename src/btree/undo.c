@@ -1005,14 +1005,14 @@ void
 add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
 						  int oldNumTreeOids,
 						  ORelOids newOids, ORelOids *newTreeOids,
-						  int newNumTreeOids)
+						  int newNumTreeOids, bool fsync)
 {
 	Assert(ORelOidsIsValid(oldOids) && ORelOidsIsValid(newOids));
 	Assert(oldOids.datoid == newOids.datoid);
 	Assert(oldOids.reloid == newOids.reloid);
 
 	add_undo_relnode(oldOids, oldTreeOids, oldNumTreeOids,
-					 newOids, newTreeOids, newNumTreeOids, true);
+					 newOids, newTreeOids, newNumTreeOids, fsync);
 }
 
 void
@@ -1025,12 +1025,12 @@ add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids, int numTreeOids)
 }
 
 void
-add_undo_create_relnode(ORelOids oids, ORelOids *treeOids, int numTreeOids)
+add_undo_create_relnode(ORelOids oids, ORelOids *treeOids, int numTreeOids, bool fsync)
 {
 	ORelOids	invalid = {InvalidOid, InvalidOid, InvalidOid};
 
 	Assert(ORelOidsIsValid(oids));
-	add_undo_relnode(invalid, NULL, 0, oids, treeOids, numTreeOids, true);
+	add_undo_relnode(invalid, NULL, 0, oids, treeOids, numTreeOids, fsync);
 }
 
 static void

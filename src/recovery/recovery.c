@@ -2932,7 +2932,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					{
 						treeOids = o_indices_get_oids(ptr, &tmp_oids);
 						if (treeOids)
-							add_undo_create_relnode(tmp_oids, treeOids, 1);
+							add_undo_create_relnode(tmp_oids, treeOids, 1, true);
 					}
 				}
 				else if (sys_tree_num == SYS_TREES_TABLESPACE_CACHE && success)
