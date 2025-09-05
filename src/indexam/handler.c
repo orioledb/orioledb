@@ -564,7 +564,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	if (index_descr->leafTupdesc->natts != rel->rd_att->natts)
+	if (index_descr->leafTupdesc->natts <= rel->rd_att->natts)
 	{
 		/* Remove duplicates like we do in orioledb tables */
 		int			skipped = 0;
