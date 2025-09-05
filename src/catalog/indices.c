@@ -248,6 +248,7 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 			   *oldTreeOids,
 				newOids,
 			   *newTreeOids;
+	bool		is_temp;
 
 	Assert(old_o_table != NULL && o_table != NULL);
 
@@ -262,8 +263,9 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 	o_tables_drop_by_oids(old_o_table->oids, oxid, oSnapshot.csn);
 	o_tables_add(o_table, oxid, oSnapshot.csn);
 
+	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 	add_undo_truncate_relnode(oldOids, oldTreeOids, oldTreeOidsNum,
-							  newOids, newTreeOids, newTreeOidsNum);
+							  newOids, newTreeOids, newTreeOidsNum, !is_temp);
 	pfree(oldTreeOids);
 	pfree(newTreeOids);
 }
@@ -583,11 +585,12 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	{
 		OSnapshot	oSnapshot;
 		OXid		oxid;
+		bool		is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 		o_tables_update(o_table, oxid, oSnapshot.csn);
 		if (!reuse_relnode)
-			add_undo_create_relnode(o_table->oids, &table_index->oids, 1);
+			add_undo_create_relnode(o_table->oids, &table_index->oids, 1, !is_temp);
 		recreate_table_descr_by_oids(oids);
 	}
 

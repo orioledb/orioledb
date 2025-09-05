@@ -1763,6 +1763,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OXid		oxid = InvalidOXid;
 	OSnapshot	oSnapshot;
+	bool		is_temp;
 
 	Assert(RelIsInMyDatabase(rel));
 	ORelOidsSetFromRel(oids, rel);
@@ -1859,7 +1860,8 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	o_tables_after_update(o_table, oxid, oSnapshot.csn);
 
 	treeOids = o_table_make_index_oids(o_table, &numTreeOids);
-	add_undo_create_relnode(oids, treeOids, numTreeOids);
+	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
+	add_undo_create_relnode(oids, treeOids, numTreeOids, !is_temp);
 	o_tables_rel_meta_unlock(rel, InvalidOid);
 	pfree(treeOids);
 	o_table_free(o_table);

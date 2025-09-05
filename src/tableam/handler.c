@@ -758,6 +758,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 				   *oldTreeOids,
 					new_oids,
 				   *newTreeOids;
+		bool		is_temp;
 
 		ORelOidsSetFromRel(old_oids, rel);
 		old_o_table = o_tables_get(old_oids);
@@ -796,8 +797,9 @@ orioledb_relation_set_new_filenode(Relation rel,
 		orioledb_free_rd_amcache(rel);
 
 		Assert(o_fetch_table_descr(new_oids) != NULL);
+		is_temp = rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP;
 		add_undo_truncate_relnode(old_oids, oldTreeOids, oldTreeOidsNum,
-								  new_oids, newTreeOids, newTreeOidsNum);
+								  new_oids, newTreeOids, newTreeOidsNum, !is_temp);
 		pfree(oldTreeOids);
 		pfree(newTreeOids);
 	}

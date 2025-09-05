@@ -161,11 +161,12 @@ extern void update_leaf_header_in_undo(UndoLogType undoType,
 extern void add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
 									  int oldNumTreeOids,
 									  ORelOids newOids, ORelOids *newTreeOids,
-									  int newNumTreeOids);
+									  int newNumTreeOids,
+									  bool fsync);
 extern void add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids,
 								  int numTreeOids);
 extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
-									int numTreeOids);
+									int numTreeOids, bool fsync);
 extern void check_pending_truncates(void);
 extern UndoLocation walk_undo_range_with_buf(UndoLogType undoType, UndoLocation location,
 											 UndoLocation toLoc,
